@@ -4,7 +4,7 @@ import { TabBar } from "../editor/TabBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
-const TEST_FILE_PATH = "/Users/nakiym/development/tools/mark-draft/test-files/test.md";
+const TEST_FILE_PATH = "test-files/test.md";
 
 export function AppLayout() {
 	const [content, setContent] = useState("");
@@ -33,7 +33,7 @@ export function AppLayout() {
 						<button
 							type="button"
 							onClick={handleSave}
-							className="rounded bg-accent-primary px-3 py-1 text-sm text-white"
+							className="rounded bg-text-secondary px-3 py-1 text-sm text-bg-primary"
 						>
 							Save
 						</button>
@@ -42,7 +42,7 @@ export function AppLayout() {
 					<textarea
 						value={content}
 						onChange={(e) => setContent(e.target.value)}
-						className="flex-1 resize-none rounded border border-border-primary bg-bg-secondary p-3 font-mono text-sm text-text-primary focus:border-accent-primary focus:outline-none"
+						className="flex-1 resize-none rounded border border-border bg-bg-secondary p-3 font-mono text-sm text-text-primary focus:border-text-secondary focus:outline-none"
 					/>
 				</main>
 			</div>

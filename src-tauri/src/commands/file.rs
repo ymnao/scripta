@@ -1,13 +1,28 @@
 use std::fs;
+use std::path::{Path, PathBuf};
+
+fn resolve_path(path: &str) -> PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    }
+}
 
 #[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| e.to_string())
+    let resolved = resolve_path(&path);
+    fs::read_to_string(&resolved).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn write_file(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, &content).map_err(|e| e.to_string())
+    let resolved = resolve_path(&path);
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&resolved, &content).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
