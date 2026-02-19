@@ -1,24 +1,26 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn resolve_path(path: &str) -> PathBuf {
+fn resolve_path(path: &str) -> Result<PathBuf, String> {
     let p = Path::new(path);
     if p.is_absolute() {
-        p.to_path_buf()
+        Ok(p.to_path_buf())
     } else {
-        std::env::current_dir().unwrap_or_default().join(p)
+        std::env::current_dir()
+            .map(|cwd| cwd.join(p))
+            .map_err(|e| e.to_string())
     }
 }
 
 #[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
-    let resolved = resolve_path(&path);
+    let resolved = resolve_path(&path)?;
     fs::read_to_string(&resolved).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn write_file(path: String, content: String) -> Result<(), String> {
-    let resolved = resolve_path(&path);
+    let resolved = resolve_path(&path)?;
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -41,7 +43,14 @@ mod tests {
 
     #[test]
     fn test_read_file_not_found() {
-        let result = read_file("/nonexistent/path.md".to_string());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+
+        let result = read_file(path);
         assert!(result.is_err());
     }
 }

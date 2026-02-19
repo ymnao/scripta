@@ -43,6 +43,7 @@ export function AppLayout() {
 						value={content}
 						onChange={(e) => setContent(e.target.value)}
 						className="flex-1 resize-none rounded border border-border bg-bg-secondary p-3 font-mono text-sm text-text-primary focus:border-text-secondary focus:outline-none"
+						aria-label={`Content editor for ${TEST_FILE_PATH}`}
 					/>
 				</main>
 			</div>
