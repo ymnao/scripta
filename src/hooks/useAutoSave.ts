@@ -8,6 +8,7 @@ interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;
 	saveNow: () => Promise<boolean>;
 	markSaved: (content: string) => void;
+	waitForPending: () => Promise<void>;
 }
 
 export function useAutoSave(filePath: string, content: string): UseAutoSaveReturn {
@@ -137,5 +138,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		setSaveStatus("saved");
 	}, []);
 
-	return { saveStatus, saveNow, markSaved };
+	const waitForPending = useCallback((): Promise<void> => {
+		return inflightRef.current;
+	}, []);
+
+	return { saveStatus, saveNow, markSaved, waitForPending };
 }

@@ -18,10 +18,10 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 		<div
 			className={`flex h-7 shrink-0 border-b border-border bg-bg-primary ${isMac ? "pl-20" : ""}`}
 		>
-			<div className="flex items-center overflow-x-auto">
+			<div className="flex items-center overflow-x-auto" role="tablist" aria-label="Editor tabs">
 				{tabs.map((tab) => {
 					const isActive = tab.path === activeTabPath;
-					const fileName = tab.path.split("/").pop() ?? tab.path;
+					const fileName = tab.path.split(/[\\/]/).pop() ?? tab.path;
 
 					return (
 						<div

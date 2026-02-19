@@ -15,6 +15,11 @@ describe("TabBar", () => {
 		});
 	});
 
+	it("renders tablist with aria-label", () => {
+		render(<TabBar onCloseTab={onCloseTab} />);
+		expect(screen.getByRole("tablist", { name: "Editor tabs" })).toBeInTheDocument();
+	});
+
 	it("renders empty when no tabs", () => {
 		render(<TabBar onCloseTab={onCloseTab} />);
 		expect(screen.queryByRole("tab")).not.toBeInTheDocument();

@@ -19,7 +19,10 @@ export function AppLayout() {
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
 
 	const [content, setContent] = useState("");
-	const { saveStatus, saveNow, markSaved } = useAutoSave(activeTabPath ?? "", content);
+	const { saveStatus, saveNow, markSaved, waitForPending } = useAutoSave(
+		activeTabPath ?? "",
+		content,
+	);
 
 	const tabCacheRef = useRef(new Map<string, TabCache>());
 	const prevTabPathRef = useRef<string | null>(null);
@@ -33,14 +36,15 @@ export function AppLayout() {
 	useEffect(() => {
 		const prevPath = prevTabPathRef.current;
 
-		// Clear cache on workspace change
-		if (prevWorkspacePathRef.current !== workspacePath) {
+		// Clear cache on workspace change (skip saving old tab — it belongs to the old workspace)
+		const workspaceChanged = prevWorkspacePathRef.current !== workspacePath;
+		if (workspaceChanged) {
 			prevWorkspacePathRef.current = workspacePath;
 			tabCacheRef.current.clear();
 		}
 
 		// Save previous tab to cache (only if content was actually loaded for it)
-		if (prevPath && contentLoadedForPathRef.current === prevPath) {
+		if (!workspaceChanged && prevPath && contentLoadedForPathRef.current === prevPath) {
 			const currentCache = tabCacheRef.current.get(prevPath);
 			tabCacheRef.current.set(prevPath, {
 				content: contentRef.current,
@@ -91,9 +95,15 @@ export function AppLayout() {
 		};
 	}, [activeTabPath, workspacePath, markSaved]);
 
-	// Keep savedContent in cache and ref in sync when save completes
+	// Keep savedContent in cache and ref in sync when save completes.
+	// Guard with contentLoadedForPathRef to avoid misattributing a flush save
+	// (for the previous file) as a save for the current activeTabPath.
 	useEffect(() => {
-		if (activeTabPath && saveStatus === "saved") {
+		if (
+			activeTabPath &&
+			saveStatus === "saved" &&
+			contentLoadedForPathRef.current === activeTabPath
+		) {
 			savedContentRef.current = contentRef.current;
 			const cached = tabCacheRef.current.get(activeTabPath);
 			if (cached) {
@@ -121,9 +131,14 @@ export function AppLayout() {
 				return;
 			}
 
-			// Non-active tab: save from cache if dirty, then close
+			// Non-active tab: wait for any in-flight writes, then save from cache if dirty
+			await waitForPending();
 			const cached = tabCacheRef.current.get(path);
-			if (cached && cached.content !== cached.savedContent) {
+			if (!cached) {
+				// Cache missing — abort close to avoid potential data loss
+				return;
+			}
+			if (cached.content !== cached.savedContent) {
 				try {
 					await writeFile(path, cached.content);
 				} catch (err) {
@@ -134,7 +149,7 @@ export function AppLayout() {
 			tabCacheRef.current.delete(path);
 			closeTab(path);
 		},
-		[activeTabPath, saveNow, closeTab],
+		[activeTabPath, saveNow, closeTab, waitForPending],
 	);
 
 	// Cmd+W / Ctrl+W to close active tab
