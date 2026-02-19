@@ -114,3 +114,8 @@ cd src-tauri && cargo test
 
 - フロントエンドのユニットテストは Vitest を使用
 - Rust 側のテストは `cargo test`
+
+## Issue・PR
+
+- PR は `.github/pull_request_template.md` のテンプレートに従って作成する
+- Issue も既存テンプレートがあればそれに従う
