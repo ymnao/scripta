@@ -10,7 +10,7 @@ export function StatusBar() {
 				type="button"
 				onClick={toggleTheme}
 				aria-label="Toggle theme"
-				className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+				className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
 			>
 				{theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
 			</button>
