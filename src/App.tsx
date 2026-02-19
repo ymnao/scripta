@@ -10,7 +10,11 @@ function App() {
 	const [name, setName] = useState("");
 
 	async function greet() {
-		setGreetMsg(await invoke<string>("greet", { name }));
+		try {
+			setGreetMsg(await invoke<string>("greet", { name }));
+		} catch (e) {
+			setGreetMsg(`Error: ${e}`);
+		}
 	}
 
 	return (
