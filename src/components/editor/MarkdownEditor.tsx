@@ -1,7 +1,6 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { keymap } from "@codemirror/view";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
 
@@ -73,6 +72,7 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 			extensions={extensions}
 			height="100%"
 			theme="none"
+			aria-label="Markdown editor"
 			basicSetup={{
 				lineNumbers: true,
 				foldGutter: true,

@@ -10,7 +10,7 @@ const TEST_FILE_PATH = "../test-files/test.md";
 export function AppLayout() {
 	const [content, setContent] = useState("");
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-	const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+	const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
 		readFile(TEST_FILE_PATH)

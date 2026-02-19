@@ -12,11 +12,11 @@ export function StatusBar({ saveStatus = "idle" }: StatusBarProps) {
 
 	return (
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary px-2 text-text-secondary">
-			<div className="text-xs">
+			<output className="text-xs">
 				{saveStatus === "saving" && "Saving..."}
 				{saveStatus === "saved" && "Saved"}
 				{saveStatus === "error" && "Save failed"}
-			</div>
+			</output>
 			<button
 				type="button"
 				onClick={toggleTheme}
