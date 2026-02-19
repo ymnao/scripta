@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readFile, writeFile } from "../../lib/commands";
+import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
 import { Sidebar } from "./Sidebar";
-import { StatusBar } from "./StatusBar";
+import { type SaveStatus, StatusBar } from "./StatusBar";
 
 const TEST_FILE_PATH = "../test-files/test.md";
 
 export function AppLayout() {
 	const [content, setContent] = useState("");
-	const [status, setStatus] = useState("");
+	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+	const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
 	useEffect(() => {
 		readFile(TEST_FILE_PATH)
@@ -16,45 +18,36 @@ export function AppLayout() {
 			.catch((err) => {
 				console.error("Failed to read file:", err);
 				setContent("");
-				setStatus("File not found — a new file will be created on save");
 			});
 	}, []);
 
-	const handleSave = () => {
+	const handleSave = useCallback(() => {
+		setSaveStatus("saving");
+		if (savedTimerRef.current) {
+			clearTimeout(savedTimerRef.current);
+		}
 		writeFile(TEST_FILE_PATH, content)
-			.then(() => setStatus("Saved"))
+			.then(() => {
+				setSaveStatus("saved");
+				savedTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2000);
+			})
 			.catch((err) => {
 				console.error("Failed to save file:", err);
-				setStatus("Failed to save");
+				setSaveStatus("error");
+				savedTimerRef.current = setTimeout(() => setSaveStatus("idle"), 3000);
 			});
-	};
+	}, [content]);
 
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
 			<TabBar />
 			<div className="flex flex-1 overflow-hidden">
 				<Sidebar />
-				<main className="flex flex-1 flex-col p-4">
-					<div className="mb-2 flex items-center gap-2">
-						<span className="text-text-secondary text-sm">{TEST_FILE_PATH}</span>
-						<button
-							type="button"
-							onClick={handleSave}
-							className="rounded bg-text-secondary px-3 py-1 text-sm text-bg-primary"
-						>
-							Save
-						</button>
-						{status && <span className="text-text-secondary text-sm">{status}</span>}
-					</div>
-					<textarea
-						value={content}
-						onChange={(e) => setContent(e.target.value)}
-						className="flex-1 resize-none rounded border border-border bg-bg-secondary p-3 font-mono text-sm text-text-primary focus:border-text-secondary focus:outline-none"
-						aria-label={`Content editor for ${TEST_FILE_PATH}`}
-					/>
+				<main className="flex-1 overflow-hidden">
+					<MarkdownEditor value={content} onChange={setContent} onSave={handleSave} />
 				</main>
 			</div>
-			<StatusBar />
+			<StatusBar saveStatus={saveStatus} />
 		</div>
 	);
 }
