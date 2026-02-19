@@ -37,6 +37,8 @@ jobs:
   rust-test:
     name: Rust (test)
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: 0
     steps:
       - uses: actions/checkout@v4
 
@@ -45,14 +47,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: taiki-e/install-action@cargo-nextest
 
       - name: Test
         working-directory: src-tauri
-        run: cargo test --no-default-features --lib
+        run: cargo nextest run --no-default-features --lib --locked
 
   rust-check:
     name: Rust (check)
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v4
 
@@ -63,10 +70,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check
         working-directory: src-tauri
-        run: cargo check
+        run: cargo check --locked
