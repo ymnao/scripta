@@ -80,4 +80,13 @@ mod tests {
         let content = read_file(path).unwrap();
         assert_eq!(content, "nested");
     }
+
+    #[test]
+    fn test_resolve_path_with_parent_traversal() {
+        let result = resolve_path("../some/dir/../file.txt").unwrap();
+        assert_eq!(
+            result.file_name().unwrap(),
+            std::ffi::OsStr::new("file.txt")
+        );
+    }
 }

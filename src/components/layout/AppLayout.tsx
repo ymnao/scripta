@@ -13,7 +13,8 @@ export function AppLayout() {
 	useEffect(() => {
 		readFile(TEST_FILE_PATH)
 			.then(setContent)
-			.catch(() => {
+			.catch((err) => {
+				console.error("Failed to read file:", err);
 				setContent("");
 				setStatus("File not found — a new file will be created on save");
 			});
@@ -22,7 +23,10 @@ export function AppLayout() {
 	const handleSave = () => {
 		writeFile(TEST_FILE_PATH, content)
 			.then(() => setStatus("Saved"))
-			.catch(() => setStatus("Failed to save"));
+			.catch((err) => {
+				console.error("Failed to save file:", err);
+				setStatus("Failed to save");
+			});
 	};
 
 	return (
