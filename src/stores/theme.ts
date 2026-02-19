@@ -8,12 +8,19 @@ interface ThemeState {
 }
 
 function applyTheme(theme: Theme) {
-	document.documentElement.classList.toggle("dark", theme === "dark");
+	if (typeof document !== "undefined") {
+		document.documentElement.classList.toggle("dark", theme === "dark");
+	}
 }
 
-const initialTheme: Theme = window.matchMedia("(prefers-color-scheme: dark)").matches
-	? "dark"
-	: "light";
+function detectInitialTheme(): Theme {
+	if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+		return "dark";
+	}
+	return "light";
+}
+
+const initialTheme = detectInitialTheme();
 applyTheme(initialTheme);
 
 export const useThemeStore = create<ThemeState>()((set) => ({
