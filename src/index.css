@@ -13,14 +13,6 @@
 
 	/* Border */
 	--color-border: #e8e8e8;
-
-	/* Sidebar */
-	--color-sidebar-bg: #f2f2f2;
-	--color-sidebar-text: #333333;
-
-	/* Status bar */
-	--color-statusbar-bg: #f2f2f2;
-	--color-statusbar-text: #999999;
 }
 
 @layer base {
@@ -44,9 +36,5 @@
 		--color-text-primary: #d4d4d4;
 		--color-text-secondary: #777777;
 		--color-border: #333333;
-		--color-sidebar-bg: #1f1f1f;
-		--color-sidebar-text: #d4d4d4;
-		--color-statusbar-bg: #1f1f1f;
-		--color-statusbar-text: #777777;
 	}
 }

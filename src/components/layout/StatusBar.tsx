@@ -5,7 +5,7 @@ export function StatusBar() {
 	const { theme, toggleTheme } = useThemeStore();
 
 	return (
-		<div className="flex h-6 items-center justify-end bg-statusbar-bg px-2 text-statusbar-text">
+		<div className="flex h-6 items-center justify-end border-t border-border bg-bg-primary px-2 text-text-secondary">
 			<button
 				type="button"
 				onClick={toggleTheme}

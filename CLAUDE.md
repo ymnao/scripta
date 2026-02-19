@@ -53,8 +53,8 @@ cd src-tauri && cargo test
 - `useRef` には必ず引数を渡す（`useRef<HTMLDivElement>(null)`）
 - ref コールバックで暗黙的な return をしない（ブロック構文 `ref={node => { ... }}` を使用）
 - コンポーネントは機能ごとのディレクトリに配置:
-  - `src/components/layout/` — TitleBar, Sidebar, StatusBar, AppLayout
-  - `src/components/editor/` — MarkdownEditor, TabBar, extensions, themes
+  - `src/components/layout/` — Sidebar, StatusBar, AppLayout
+  - `src/components/editor/` — MarkdownEditor, TabBar（タイトルバー兼用・ドラッグ領域）, extensions, themes
   - `src/components/editor/live-preview/` — 各デコレーション（headings, emphasis, links 等）
   - `src/components/filetree/` — FileTree, ContextMenu
   - `src/components/search/` — SearchPanel, CommandPalette
