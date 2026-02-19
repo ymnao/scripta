@@ -82,6 +82,15 @@ describe("FileTree", () => {
 		expect(screen.getByText("readme.md")).toBeInTheDocument();
 	});
 
+	it("shows loading state before entries are fetched", () => {
+		mockedListDirectory.mockReturnValue(new Promise(() => {}));
+
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+
+		expect(screen.getByText("Loading...")).toBeInTheDocument();
+		expect(screen.queryByText("Empty folder")).not.toBeInTheDocument();
+	});
+
 	it("shows empty folder message", async () => {
 		mockedListDirectory.mockResolvedValue([]);
 

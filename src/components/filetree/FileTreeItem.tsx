@@ -14,12 +14,14 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 	const [expanded, setExpanded] = useState(false);
 	const [children, setChildren] = useState<FileEntry[]>([]);
 	const [loaded, setLoaded] = useState(false);
+	const [loading, setLoading] = useState(false);
 
 	const isSelected = entry.path === selectedPath;
 
 	const handleClick = useCallback(() => {
 		if (entry.isDirectory) {
-			if (!loaded) {
+			if (!loaded && !loading) {
+				setLoading(true);
 				listDirectory(entry.path)
 					.then((entries) => {
 						setChildren(entries);
@@ -28,17 +30,20 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 					})
 					.catch((err) => {
 						console.error("Failed to list directory:", err);
+					})
+					.finally(() => {
+						setLoading(false);
 					});
-			} else {
+			} else if (loaded) {
 				setExpanded((prev) => !prev);
 			}
 		} else {
 			onFileSelect(entry.path);
 		}
-	}, [entry.isDirectory, entry.path, loaded, onFileSelect]);
+	}, [entry.isDirectory, entry.path, loaded, loading, onFileSelect]);
 
 	return (
-		<li role="treeitem" aria-expanded={entry.isDirectory ? expanded : undefined}>
+		<li aria-expanded={entry.isDirectory ? expanded : undefined}>
 			<button
 				type="button"
 				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""}`}

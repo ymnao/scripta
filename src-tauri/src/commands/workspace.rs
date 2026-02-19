@@ -29,11 +29,7 @@ pub fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
         })
         .collect();
 
-    entries.sort_by(|a, b| {
-        b.is_directory
-            .cmp(&a.is_directory)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));
 
     Ok(entries)
 }
