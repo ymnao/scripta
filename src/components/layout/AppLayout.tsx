@@ -13,15 +13,21 @@ export function AppLayout() {
 	const { saveStatus, saveNow, markSaved } = useAutoSave(TEST_FILE_PATH, content);
 
 	useEffect(() => {
+		let ignore = false;
 		readFile(TEST_FILE_PATH)
 			.then((loaded) => {
+				if (ignore) return;
 				setContent(loaded);
 				markSaved(loaded);
 			})
 			.catch((err) => {
+				if (ignore) return;
 				console.error("Failed to read file:", err);
 				setContent("");
 			});
+		return () => {
+			ignore = true;
+		};
 	}, [markSaved]);
 
 	return (

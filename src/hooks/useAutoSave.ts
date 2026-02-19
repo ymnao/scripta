@@ -12,6 +12,8 @@ interface UseAutoSaveReturn {
 
 export function useAutoSave(filePath: string, content: string): UseAutoSaveReturn {
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+	const contentRef = useRef(content);
+	contentRef.current = content;
 	const lastSavedContentRef = useRef(content);
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
@@ -75,8 +77,8 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			clearTimeout(debounceTimerRef.current);
 			debounceTimerRef.current = null;
 		}
-		save(content);
-	}, [content, save]);
+		save(contentRef.current);
+	}, [save]);
 
 	const markSaved = useCallback((savedContent: string) => {
 		lastSavedContentRef.current = savedContent;
