@@ -12,8 +12,8 @@ function App() {
 	async function greet() {
 		try {
 			setGreetMsg(await invoke<string>("greet", { name }));
-		} catch (e) {
-			setGreetMsg(`Error: ${e}`);
+		} catch (e: unknown) {
+			setGreetMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
