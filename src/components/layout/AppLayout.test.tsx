@@ -34,6 +34,7 @@ describe("AppLayout", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockedReadFile.mockResolvedValue("# Hello");
+		mockedWriteFile.mockResolvedValue(undefined);
 	});
 
 	afterEach(() => {
@@ -49,59 +50,75 @@ describe("AppLayout", () => {
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("# Hello");
 	});
 
-	it('shows "Saving..." then "Saved" on successful save', async () => {
-		let resolveWrite!: () => void;
-		mockedWriteFile.mockReturnValue(
-			new Promise<void>((resolve) => {
-				resolveWrite = resolve;
-			}),
-		);
+	it('shows "Saved" after loading file', async () => {
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		expect(screen.getByText("Saved")).toBeInTheDocument();
+	});
 
+	it('shows "Unsaved" when content changes', async () => {
 		await act(async () => {
 			render(<AppLayout />);
 		});
 
 		await act(async () => {
-			screen.getByTestId("editor-save").click();
+			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Saving...")).toBeInTheDocument();
+		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+	});
+
+	it("auto-saves after debounce period", async () => {
+		await act(async () => {
+			render(<AppLayout />);
+		});
 
 		await act(async () => {
-			resolveWrite();
+			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.getByText("Unsaved")).toBeInTheDocument();
 
-		act(() => {
+		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
-		expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("../test-files/test.md", "new content");
+		expect(screen.getByText("Saved")).toBeInTheDocument();
+	});
+
+	it("saves immediately on Cmd+S (saveNow)", async () => {
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+
+		await act(async () => {
+			screen.getByTestId("editor-save").click();
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("../test-files/test.md", "new content");
+		expect(screen.getByText("Saved")).toBeInTheDocument();
 	});
 
 	it('shows "Save failed" on save error', async () => {
-		let rejectWrite!: (reason: Error) => void;
-		mockedWriteFile.mockReturnValue(
-			new Promise<void>((_resolve, reject) => {
-				rejectWrite = reject;
-			}),
-		);
+		mockedWriteFile.mockRejectedValue(new Error("write error"));
 
 		await act(async () => {
 			render(<AppLayout />);
 		});
 
 		await act(async () => {
-			screen.getByTestId("editor-save").click();
+			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Saving...")).toBeInTheDocument();
 
 		await act(async () => {
-			rejectWrite(new Error("write error"));
+			vi.advanceTimersByTime(2000);
 		});
-		expect(screen.getByText("Save failed")).toBeInTheDocument();
 
-		act(() => {
-			vi.advanceTimersByTime(3000);
-		});
-		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
+		expect(screen.getByText("Save failed")).toBeInTheDocument();
 	});
 });

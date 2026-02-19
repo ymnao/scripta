@@ -3,11 +3,9 @@ import { describe, expect, it } from "vitest";
 import { StatusBar } from "./StatusBar";
 
 describe("StatusBar", () => {
-	it("shows nothing when saveStatus is idle", () => {
-		render(<StatusBar saveStatus="idle" />);
-		expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
-		expect(screen.queryByText("Saved")).not.toBeInTheDocument();
-		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
+	it('shows "Unsaved" when saveStatus is unsaved', () => {
+		render(<StatusBar saveStatus="unsaved" />);
+		expect(screen.getByText("Unsaved")).toBeInTheDocument();
 	});
 
 	it('shows "Saving..." when saveStatus is saving', () => {
@@ -25,10 +23,8 @@ describe("StatusBar", () => {
 		expect(screen.getByText("Save failed")).toBeInTheDocument();
 	});
 
-	it("shows nothing when saveStatus is not provided", () => {
+	it('shows "Saved" when saveStatus is not provided', () => {
 		render(<StatusBar />);
-		expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
-		expect(screen.queryByText("Saved")).not.toBeInTheDocument();
-		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
+		expect(screen.getByText("Saved")).toBeInTheDocument();
 	});
 });

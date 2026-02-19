@@ -1,18 +1,19 @@
 import { Moon, Sun } from "lucide-react";
 import { useThemeStore } from "../../stores/theme";
 
-export type SaveStatus = "idle" | "saving" | "saved" | "error";
+export type SaveStatus = "saved" | "unsaved" | "saving" | "error";
 
 interface StatusBarProps {
 	saveStatus?: SaveStatus;
 }
 
-export function StatusBar({ saveStatus = "idle" }: StatusBarProps) {
+export function StatusBar({ saveStatus = "saved" }: StatusBarProps) {
 	const { theme, toggleTheme } = useThemeStore();
 
 	return (
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary px-2 text-text-secondary">
 			<output className="text-xs">
+				{saveStatus === "unsaved" && "Unsaved"}
 				{saveStatus === "saving" && "Saving..."}
 				{saveStatus === "saved" && "Saved"}
 				{saveStatus === "error" && "Save failed"}

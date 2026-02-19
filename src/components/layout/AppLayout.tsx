@@ -1,47 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { readFile, writeFile } from "../../lib/commands";
+import { useEffect, useState } from "react";
+import { useAutoSave } from "../../hooks/useAutoSave";
+import { readFile } from "../../lib/commands";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
 import { Sidebar } from "./Sidebar";
-import { type SaveStatus, StatusBar } from "./StatusBar";
+import { StatusBar } from "./StatusBar";
 
 const TEST_FILE_PATH = "../test-files/test.md";
 
 export function AppLayout() {
 	const [content, setContent] = useState("");
-	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-	const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const { saveStatus, saveNow, markSaved } = useAutoSave(TEST_FILE_PATH, content);
 
 	useEffect(() => {
+		let ignore = false;
 		readFile(TEST_FILE_PATH)
-			.then(setContent)
+			.then((loaded) => {
+				if (ignore) return;
+				setContent(loaded);
+				markSaved(loaded);
+			})
 			.catch((err) => {
+				if (ignore) return;
 				console.error("Failed to read file:", err);
 				setContent("");
 			});
 		return () => {
-			if (savedTimerRef.current) {
-				clearTimeout(savedTimerRef.current);
-			}
+			ignore = true;
 		};
-	}, []);
-
-	const handleSave = useCallback(() => {
-		setSaveStatus("saving");
-		if (savedTimerRef.current) {
-			clearTimeout(savedTimerRef.current);
-		}
-		writeFile(TEST_FILE_PATH, content)
-			.then(() => {
-				setSaveStatus("saved");
-				savedTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2000);
-			})
-			.catch((err) => {
-				console.error("Failed to save file:", err);
-				setSaveStatus("error");
-				savedTimerRef.current = setTimeout(() => setSaveStatus("idle"), 3000);
-			});
-	}, [content]);
+	}, [markSaved]);
 
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
@@ -49,7 +36,7 @@ export function AppLayout() {
 			<div className="flex flex-1 overflow-hidden">
 				<Sidebar />
 				<main className="flex-1 overflow-hidden">
-					<MarkdownEditor value={content} onChange={setContent} onSave={handleSave} />
+					<MarkdownEditor value={content} onChange={setContent} onSave={saveNow} />
 				</main>
 			</div>
 			<StatusBar saveStatus={saveStatus} />
