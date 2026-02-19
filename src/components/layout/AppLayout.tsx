@@ -19,6 +19,11 @@ export function AppLayout() {
 				console.error("Failed to read file:", err);
 				setContent("");
 			});
+		return () => {
+			if (savedTimerRef.current) {
+				clearTimeout(savedTimerRef.current);
+			}
+		};
 	}, []);
 
 	const handleSave = useCallback(() => {
