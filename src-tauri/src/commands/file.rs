@@ -53,4 +53,31 @@ mod tests {
         let result = read_file(path);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_resolve_path_absolute() {
+        let result = resolve_path("/tmp/test.md").unwrap();
+        assert_eq!(result, PathBuf::from("/tmp/test.md"));
+    }
+
+    #[test]
+    fn test_resolve_path_relative() {
+        let result = resolve_path("test.md").unwrap();
+        let expected = std::env::current_dir().unwrap().join("test.md");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_write_file_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("a/b/c/deep.md")
+            .to_string_lossy()
+            .to_string();
+
+        write_file(path.clone(), "nested".to_string()).unwrap();
+        let content = read_file(path).unwrap();
+        assert_eq!(content, "nested");
+    }
 }

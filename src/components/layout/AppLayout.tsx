@@ -13,13 +13,16 @@ export function AppLayout() {
 	useEffect(() => {
 		readFile(TEST_FILE_PATH)
 			.then(setContent)
-			.catch(() => setContent(""));
+			.catch(() => {
+				setContent("");
+				setStatus("File not found — a new file will be created on save");
+			});
 	}, []);
 
 	const handleSave = () => {
 		writeFile(TEST_FILE_PATH, content)
 			.then(() => setStatus("Saved"))
-			.catch((err) => setStatus(`Error: ${err}`));
+			.catch(() => setStatus("Failed to save"));
 	};
 
 	return (
