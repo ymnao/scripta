@@ -28,6 +28,9 @@ src-tauri/WixTools/
 # Rust
 *.rs.bk
 
+# Test files
+test-files/
+
 # Logs
 *.log
 npm-debug.log*
