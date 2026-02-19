@@ -4,7 +4,7 @@ import { TabBar } from "../editor/TabBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
-const TEST_FILE_PATH = "test-files/test.md";
+const TEST_FILE_PATH = "../test-files/test.md";
 
 export function AppLayout() {
 	const [content, setContent] = useState("");
