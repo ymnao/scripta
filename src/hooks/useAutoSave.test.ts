@@ -334,4 +334,111 @@ describe("useAutoSave", () => {
 		});
 		expect(result.current.saveStatus).toBe("saved");
 	});
+
+	it("saveNow returns true on successful save", async () => {
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		let saved!: boolean;
+		await act(async () => {
+			saved = await result.current.saveNow();
+		});
+
+		expect(saved).toBe(true);
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("saveNow returns false on save failure", async () => {
+		mockedWriteFile.mockRejectedValue(new Error("write error"));
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		let saved!: boolean;
+		await act(async () => {
+			saved = await result.current.saveNow();
+		});
+
+		expect(saved).toBe(false);
+		expect(result.current.saveStatus).toBe("error");
+	});
+
+	it("saveNow returns true when content is already saved (no-op)", async () => {
+		mockedWriteFile.mockClear();
+
+		const { result } = renderHook(() => useAutoSave("test.md", "initial"));
+
+		result.current.markSaved("initial");
+
+		let saved!: boolean;
+		await act(async () => {
+			saved = await result.current.saveNow();
+		});
+
+		expect(saved).toBe(true);
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("serializes writes so saveNow always writes after in-flight auto-save", async () => {
+		const writeOrder: string[] = [];
+		let resolveAutoSave!: () => void;
+
+		// First call (auto-save): slow, manually resolved
+		mockedWriteFile.mockImplementationOnce(
+			(_path: string, content: string) =>
+				new Promise<void>((resolve) => {
+					writeOrder.push(content);
+					resolveAutoSave = resolve;
+				}),
+		);
+		// Second call (saveNow): resolves immediately
+		mockedWriteFile.mockImplementationOnce((_path: string, content: string) => {
+			writeOrder.push(content);
+			return Promise.resolve();
+		});
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// Trigger auto-save with "v1"
+		rerender({ content: "v1" });
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		// Auto-save writeFile("v1") is now in-flight (pending)
+		expect(writeOrder).toEqual(["v1"]);
+
+		// User edits to "v2" and calls saveNow (chains on inflightRef)
+		rerender({ content: "v2" });
+		act(() => {
+			result.current.saveNow().catch(() => {});
+		});
+
+		// writeFile for "v2" should NOT have been called yet (blocked by in-flight auto-save)
+		expect(writeOrder).toEqual(["v1"]);
+
+		// Resolve the auto-save — unblocks saveNow's chained write
+		await act(async () => {
+			resolveAutoSave();
+		});
+
+		// "v2" should have been written AFTER "v1" — guaranteed last-write-wins
+		expect(writeOrder).toEqual(["v1", "v2"]);
+		expect(result.current.saveStatus).toBe("saved");
+	});
 });

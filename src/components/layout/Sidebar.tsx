@@ -7,8 +7,8 @@ import { FileTree } from "../filetree/FileTree";
 export function Sidebar() {
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
-	const openFilePath = useWorkspaceStore((s) => s.openFilePath);
-	const setOpenFilePath = useWorkspaceStore((s) => s.setOpenFilePath);
+	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
+	const openTab = useWorkspaceStore((s) => s.openTab);
 
 	const handleOpenFolder = useCallback(async () => {
 		const selected = await open({ directory: true });
@@ -34,8 +34,8 @@ export function Sidebar() {
 				{workspacePath ? (
 					<FileTree
 						workspacePath={workspacePath}
-						selectedPath={openFilePath}
-						onFileSelect={setOpenFilePath}
+						selectedPath={activeTabPath}
+						onFileSelect={openTab}
 					/>
 				) : (
 					<p className="px-3 py-2 text-xs text-text-secondary">Open a folder to get started</p>

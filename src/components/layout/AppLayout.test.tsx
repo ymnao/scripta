@@ -36,8 +36,12 @@ const { AppLayout } = await import("./AppLayout");
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
 
-function setWorkspaceState(workspacePath: string | null, openFilePath: string | null) {
-	useWorkspaceStore.setState({ workspacePath, openFilePath });
+function openFileInStore(workspacePath: string, filePath: string) {
+	useWorkspaceStore.setState({
+		workspacePath,
+		tabs: [{ path: filePath, dirty: false }],
+		activeTabPath: filePath,
+	});
 }
 
 describe("AppLayout", () => {
@@ -45,7 +49,11 @@ describe("AppLayout", () => {
 		vi.useFakeTimers();
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
-		useWorkspaceStore.setState({ workspacePath: null, openFilePath: null });
+		useWorkspaceStore.setState({
+			workspacePath: null,
+			tabs: [],
+			activeTabPath: null,
+		});
 	});
 
 	afterEach(() => {
@@ -61,8 +69,8 @@ describe("AppLayout", () => {
 		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
 
-	it("loads file content when openFilePath is set", async () => {
-		setWorkspaceState("/workspace", "/workspace/test.md");
+	it("loads file content when activeTabPath is set", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
 		});
@@ -71,7 +79,7 @@ describe("AppLayout", () => {
 	});
 
 	it('shows "Saved" after loading file', async () => {
-		setWorkspaceState("/workspace", "/workspace/test.md");
+		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
 		});
@@ -79,7 +87,7 @@ describe("AppLayout", () => {
 	});
 
 	it('shows "Unsaved" when content changes', async () => {
-		setWorkspaceState("/workspace", "/workspace/test.md");
+		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
 		});
@@ -91,7 +99,7 @@ describe("AppLayout", () => {
 	});
 
 	it("auto-saves after debounce period", async () => {
-		setWorkspaceState("/workspace", "/workspace/test.md");
+		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
 		});
@@ -110,7 +118,7 @@ describe("AppLayout", () => {
 	});
 
 	it("saves immediately on Cmd+S (saveNow)", async () => {
-		setWorkspaceState("/workspace", "/workspace/test.md");
+		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
 		});
@@ -128,8 +136,8 @@ describe("AppLayout", () => {
 		expect(screen.getByText("Saved")).toBeInTheDocument();
 	});
 
-	it("saves previous file to correct path when switching files", async () => {
-		setWorkspaceState("/workspace", "/workspace/a.md");
+	it("saves previous file to correct path when switching tabs", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
 		mockedReadFile.mockResolvedValue("content A");
 
 		const { unmount } = await act(async () => {
@@ -143,10 +151,16 @@ describe("AppLayout", () => {
 		});
 		expect(screen.getByText("Unsaved")).toBeInTheDocument();
 
-		// Switch to file B
+		// Switch to file B by adding tab and activating it
 		mockedReadFile.mockResolvedValue("content B");
 		await act(async () => {
-			useWorkspaceStore.setState({ openFilePath: "/workspace/b.md" });
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
 		});
 
 		// Should have saved "new content" to a.md (NOT b.md)
@@ -160,20 +174,18 @@ describe("AppLayout", () => {
 	});
 
 	it("does not auto-save empty content when readFile fails", async () => {
-		setWorkspaceState("/workspace", "/workspace/broken.md");
+		openFileInStore("/workspace", "/workspace/broken.md");
 		mockedReadFile.mockRejectedValue(new Error("file not found"));
 
 		await act(async () => {
 			render(<AppLayout />);
 		});
 
-		// Content is empty, status should be saved (markSaved("") called)
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("");
 		expect(screen.getByText("Saved")).toBeInTheDocument();
 
 		mockedWriteFile.mockClear();
 
-		// Advance past debounce — should NOT attempt to write empty content
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
@@ -181,7 +193,7 @@ describe("AppLayout", () => {
 	});
 
 	it('shows "Save failed" on save error', async () => {
-		setWorkspaceState("/workspace", "/workspace/test.md");
+		openFileInStore("/workspace", "/workspace/test.md");
 		mockedWriteFile.mockRejectedValue(new Error("write error"));
 
 		await act(async () => {
@@ -197,5 +209,167 @@ describe("AppLayout", () => {
 		});
 
 		expect(screen.getByText("Save failed")).toBeInTheDocument();
+	});
+
+	it("restores cached content when switching back to a tab", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		mockedReadFile.mockResolvedValue("content A");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		expect(screen.getByTestId("editor-value")).toHaveTextContent("content A");
+
+		// Edit file A
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Switch to file B
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
+		});
+		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
+
+		// Switch back to A — should restore edited content from cache
+		mockedReadFile.mockClear();
+		await act(async () => {
+			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md" });
+		});
+		expect(screen.getByTestId("editor-value")).toHaveTextContent("new content");
+		// Should NOT re-read from disk
+		expect(mockedReadFile).not.toHaveBeenCalled();
+	});
+
+	it("syncs dirty flag to store", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		expect(useWorkspaceStore.getState().tabs[0].dirty).toBe(false);
+
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		expect(useWorkspaceStore.getState().tabs[0].dirty).toBe(true);
+	});
+
+	it("does not close active tab when save on close fails", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Edit file
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+
+		// Make writeFile fail
+		mockedWriteFile.mockRejectedValue(new Error("disk full"));
+
+		// Try to close via Cmd+W
+		await act(async () => {
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "w", metaKey: true, bubbles: true }),
+			);
+		});
+
+		// Tab should still be open
+		expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/test.md");
+		// Editor content should be preserved
+		expect(screen.getByTestId("editor-value")).toHaveTextContent("new content");
+	});
+
+	it("does not close non-active tab when save on close fails", async () => {
+		// Open two tabs: a.md (active) and b.md
+		useWorkspaceStore.setState({
+			workspacePath: "/workspace",
+			tabs: [
+				{ path: "/workspace/a.md", dirty: false },
+				{ path: "/workspace/b.md", dirty: true },
+			],
+			activeTabPath: "/workspace/a.md",
+		});
+		mockedReadFile.mockResolvedValue("content A");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Switch to b.md so it gets cached, then switch back to a.md
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({ activeTabPath: "/workspace/b.md" });
+		});
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		mockedReadFile.mockResolvedValue("content A");
+		await act(async () => {
+			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md" });
+		});
+
+		// Now b.md has dirty content in cache. Make writeFile fail.
+		mockedWriteFile.mockRejectedValue(new Error("disk full"));
+
+		// Try to close b.md (non-active tab) via the close button
+		const closeButton = screen.getByLabelText("Close b.md");
+		await act(async () => {
+			closeButton.click();
+		});
+
+		// b.md should still be in the tab list
+		expect(useWorkspaceStore.getState().tabs).toHaveLength(2);
+		expect(useWorkspaceStore.getState().tabs.map((t) => t.path)).toEqual([
+			"/workspace/a.md",
+			"/workspace/b.md",
+		]);
+	});
+
+	it("saves unsaved content when Cmd+W fires immediately after edit", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Edit and immediately Cmd+W in the same act — saveStatus has not yet
+		// flipped to "unsaved", but contentRef !== savedContentRef detects the diff.
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "w", metaKey: true, bubbles: true }),
+			);
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content");
+		expect(useWorkspaceStore.getState().tabs).toEqual([]);
+	});
+
+	it("closes active tab on Cmd+W", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "w", metaKey: true, bubbles: true }),
+			);
+		});
+
+		expect(useWorkspaceStore.getState().tabs).toEqual([]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBeNull();
 	});
 });

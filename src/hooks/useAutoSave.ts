@@ -6,7 +6,7 @@ const DEBOUNCE_MS = 2000;
 
 interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;
-	saveNow: () => void;
+	saveNow: () => Promise<boolean>;
 	markSaved: (content: string) => void;
 }
 
@@ -20,28 +20,33 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	const saveIdRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
 	const awaitingNewFileRef = useRef(false);
+	const inflightRef = useRef<Promise<void>>(Promise.resolve());
 
 	const save = useCallback(
-		(contentToSave: string) => {
+		(contentToSave: string): Promise<void> => {
 			if (contentToSave === lastSavedContentRef.current) {
-				return;
+				return Promise.resolve();
 			}
 			saveIdRef.current += 1;
 			const currentSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			writeFile(filePath, contentToSave)
-				.then(() => {
+			const writePromise = inflightRef.current.then(() => writeFile(filePath, contentToSave));
+			inflightRef.current = writePromise.catch(() => {});
+			return writePromise.then(
+				() => {
 					if (!isMountedRef.current) return;
 					if (currentSaveId !== saveIdRef.current) return;
 					lastSavedContentRef.current = contentToSave;
 					setSaveStatus("saved");
-				})
-				.catch((err) => {
-					if (!isMountedRef.current) return;
-					if (currentSaveId !== saveIdRef.current) return;
-					console.error("Failed to save file:", err);
-					setSaveStatus("error");
-				});
+				},
+				(err) => {
+					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
+						console.error("Failed to save file:", err);
+						setSaveStatus("error");
+					}
+					throw err;
+				},
+			);
 		},
 		[filePath],
 	);
@@ -67,7 +72,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			saveIdRef.current += 1;
 			const flushSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			writeFile(prevPath, currentContent)
+			const flushPromise = inflightRef.current.then(() => writeFile(prevPath, currentContent));
+			inflightRef.current = flushPromise.catch(() => {});
+			flushPromise
 				.then(() => {
 					if (!isMountedRef.current) return;
 					if (flushSaveId !== saveIdRef.current) return;
@@ -94,7 +101,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			clearTimeout(debounceTimerRef.current);
 		}
 		debounceTimerRef.current = setTimeout(() => {
-			save(content);
+			save(content).catch(() => {});
 		}, DEBOUNCE_MS);
 		return () => {
 			if (debounceTimerRef.current) {
@@ -113,12 +120,15 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		};
 	}, []);
 
-	const saveNow = useCallback(() => {
+	const saveNow = useCallback((): Promise<boolean> => {
 		if (debounceTimerRef.current) {
 			clearTimeout(debounceTimerRef.current);
 			debounceTimerRef.current = null;
 		}
-		save(contentRef.current);
+		return save(contentRef.current).then(
+			() => true,
+			() => false,
+		);
 	}, [save]);
 
 	const markSaved = useCallback((savedContent: string) => {
