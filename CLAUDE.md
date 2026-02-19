@@ -3,28 +3,35 @@
 ## プロジェクト概要
 
 ローカルファイルベースの軽量 Markdown メモアプリケーション。
-Tauri v2 + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite。
+Tauri v2 + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite + Biome + Vitest。
+パッケージマネージャは pnpm を使用。
 
 ## 開発コマンド
 
 ```bash
 # 開発サーバー起動（Tauri + Vite HMR）
-npm run tauri dev
+pnpm tauri dev
 
 # プロダクションビルド
-npm run tauri build
+pnpm tauri build
 
 # フロントエンドのみ起動（Tauri なし、UI 確認用）
-npm run dev
+pnpm dev
 
 # lint
-npm run lint
+pnpm lint
+
+# lint（自動修正）
+pnpm lint:fix
 
 # フォーマット
-npm run format
+pnpm format
 
 # 型チェック
-npx tsc --noEmit
+pnpm typecheck
+
+# テスト
+pnpm test
 
 # Rust テスト
 cd src-tauri && cargo test
@@ -34,7 +41,7 @@ cd src-tauri && cargo test
 
 ### TypeScript
 
-- **`any` 型の使用は禁止** — `unknown` + 型ガード、ジェネリクス、適切な型定義で対応する
+- **`any` 型の使用は禁止** — Biome の `noExplicitAny` ルールで強制。`unknown` + 型ガード、ジェネリクス、適切な型定義で対応する
 - 型定義は `src/types/` に集約
 - Tauri コマンドのラッパーは `src/lib/commands.ts` に配置
 - `invoke` の戻り値には必ず型引数を指定する（`invoke<string>('read_file', { path })`）
