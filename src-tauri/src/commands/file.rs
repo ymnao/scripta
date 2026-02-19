@@ -12,13 +12,13 @@ pub(super) fn resolve_path(path: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-app", tauri::command)]
 pub fn read_file(path: String) -> Result<String, String> {
     let resolved = resolve_path(&path)?;
     fs::read_to_string(&resolved).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-app", tauri::command)]
 pub fn write_file(path: String, content: String) -> Result<(), String> {
     let resolved = resolve_path(&path)?;
     if let Some(parent) = resolved.parent() {

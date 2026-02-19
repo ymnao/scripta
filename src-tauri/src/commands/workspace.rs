@@ -10,7 +10,7 @@ pub struct FileEntry {
     pub is_directory: bool,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-app", tauri::command)]
 pub fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
     let resolved = resolve_path(&path)?;
     let dir = fs::read_dir(&resolved).map_err(|e| e.to_string())?;
