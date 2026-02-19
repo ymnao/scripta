@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn resolve_path(path: &str) -> Result<PathBuf, String> {
+pub(super) fn resolve_path(path: &str) -> Result<PathBuf, String> {
     let p = Path::new(path);
     if p.is_absolute() {
         Ok(p.to_path_buf())

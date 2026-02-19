@@ -1,3 +1,4 @@
+use super::file::resolve_path;
 use serde::Serialize;
 use std::fs;
 
@@ -11,7 +12,8 @@ pub struct FileEntry {
 
 #[tauri::command]
 pub fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
-    let dir = fs::read_dir(&path).map_err(|e| e.to_string())?;
+    let resolved = resolve_path(&path)?;
+    let dir = fs::read_dir(&resolved).map_err(|e| e.to_string())?;
 
     let mut entries: Vec<FileEntry> = dir
         .filter_map(|entry| {

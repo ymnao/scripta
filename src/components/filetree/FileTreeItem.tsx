@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, File, Folder } from "lucide-react";
 import { useCallback, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import type { FileEntry } from "../../types/workspace";
@@ -15,13 +15,15 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 	const [children, setChildren] = useState<FileEntry[]>([]);
 	const [loaded, setLoaded] = useState(false);
 	const [loading, setLoading] = useState(false);
+	const [loadError, setLoadError] = useState(false);
 
 	const isSelected = entry.path === selectedPath;
 
 	const handleClick = useCallback(() => {
 		if (entry.isDirectory) {
-			if (!loaded && !loading) {
+			if ((!loaded || loadError) && !loading) {
 				setLoading(true);
+				setLoadError(false);
 				listDirectory(entry.path)
 					.then((entries) => {
 						setChildren(entries);
@@ -30,6 +32,7 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 					})
 					.catch((err) => {
 						console.error("Failed to list directory:", err);
+						setLoadError(true);
 					})
 					.finally(() => {
 						setLoading(false);
@@ -40,12 +43,13 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 		} else {
 			onFileSelect(entry.path);
 		}
-	}, [entry.isDirectory, entry.path, loaded, loading, onFileSelect]);
+	}, [entry.isDirectory, entry.path, loaded, loadError, loading, onFileSelect]);
 
 	return (
 		<li aria-expanded={entry.isDirectory ? expanded : undefined}>
 			<button
 				type="button"
+				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}
 				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""}`}
 				style={{ paddingLeft: `${depth * 16 + 4}px` }}
 				onClick={handleClick}
@@ -66,6 +70,9 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 					</>
 				)}
 				<span className="truncate">{entry.name}</span>
+				{loadError && (
+					<AlertTriangle size={12} className="shrink-0 text-red-500" aria-label="Failed to load" />
+				)}
 			</button>
 			{entry.isDirectory && expanded && children.length > 0 && (
 				<ul>
