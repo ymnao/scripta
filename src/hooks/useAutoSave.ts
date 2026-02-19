@@ -18,6 +18,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
+	const prevFilePathRef = useRef(filePath);
 
 	const save = useCallback(
 		(contentToSave: string) => {
@@ -43,6 +44,40 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		},
 		[filePath],
 	);
+
+	// Flush pending changes to the OLD path when filePath changes
+	useEffect(() => {
+		if (filePath === prevFilePathRef.current) return;
+
+		if (debounceTimerRef.current) {
+			clearTimeout(debounceTimerRef.current);
+			debounceTimerRef.current = null;
+		}
+
+		const prevPath = prevFilePathRef.current;
+		const currentContent = contentRef.current;
+		const hadUnsavedChanges = prevPath && currentContent !== lastSavedContentRef.current;
+		prevFilePathRef.current = filePath;
+		lastSavedContentRef.current = currentContent;
+
+		if (hadUnsavedChanges) {
+			saveIdRef.current += 1;
+			const flushSaveId = saveIdRef.current;
+			setSaveStatus("saving");
+			writeFile(prevPath, currentContent)
+				.then(() => {
+					if (!isMountedRef.current) return;
+					if (flushSaveId !== saveIdRef.current) return;
+					setSaveStatus("saved");
+				})
+				.catch((err) => {
+					if (!isMountedRef.current) return;
+					if (flushSaveId !== saveIdRef.current) return;
+					console.error("Failed to save previous file:", err);
+					setSaveStatus("error");
+				});
+		}
+	}, [filePath]);
 
 	useEffect(() => {
 		if (content === lastSavedContentRef.current) {
