@@ -15,21 +15,20 @@ pub fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
     let resolved = resolve_path(&path)?;
     let dir = fs::read_dir(&resolved).map_err(|e| e.to_string())?;
 
-    let mut entries: Vec<FileEntry> = dir
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                return None;
-            }
-            let file_type = entry.file_type().ok()?;
-            Some(FileEntry {
-                name,
-                path: entry.path().to_string_lossy().to_string(),
-                is_directory: file_type.is_dir(),
-            })
-        })
-        .collect();
+    let mut entries: Vec<FileEntry> = Vec::new();
+    for entry_result in dir {
+        let entry = entry_result.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        entries.push(FileEntry {
+            name,
+            path: entry.path().to_string_lossy().to_string(),
+            is_directory: file_type.is_dir(),
+        });
+    }
 
     entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));
 
@@ -92,7 +91,9 @@ mod tests {
 
     #[test]
     fn test_list_directory_invalid_path() {
-        let result = list_directory("/nonexistent/path/that/does/not/exist".to_string());
+        let dir = tempdir().unwrap();
+        let nonexistent = dir.path().join("nonexistent_subdir");
+        let result = list_directory(nonexistent.to_string_lossy().to_string());
         assert!(result.is_err());
     }
 }

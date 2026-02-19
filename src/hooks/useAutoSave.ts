@@ -19,6 +19,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
+	const awaitingNewFileRef = useRef(false);
 
 	const save = useCallback(
 		(contentToSave: string) => {
@@ -58,7 +59,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		const currentContent = contentRef.current;
 		const hadUnsavedChanges = prevPath && currentContent !== lastSavedContentRef.current;
 		prevFilePathRef.current = filePath;
-		lastSavedContentRef.current = currentContent;
+		// Suppress content effect until markSaved is called with the new file's content.
+		// This prevents saving stale content from the old file to the new path.
+		awaitingNewFileRef.current = true;
 
 		if (hadUnsavedChanges) {
 			saveIdRef.current += 1;
@@ -80,6 +83,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	}, [filePath]);
 
 	useEffect(() => {
+		if (awaitingNewFileRef.current) {
+			return;
+		}
 		if (content === lastSavedContentRef.current) {
 			return;
 		}
@@ -117,6 +123,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 
 	const markSaved = useCallback((savedContent: string) => {
 		lastSavedContentRef.current = savedContent;
+		awaitingNewFileRef.current = false;
 		setSaveStatus("saved");
 	}, []);
 

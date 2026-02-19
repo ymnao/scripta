@@ -46,10 +46,12 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 	}, [entry.isDirectory, entry.path, loaded, loadError, loading, onFileSelect]);
 
 	return (
-		<li aria-expanded={entry.isDirectory ? expanded : undefined}>
+		<li>
 			<button
 				type="button"
 				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}
+				aria-expanded={entry.isDirectory ? expanded : undefined}
+				aria-selected={isSelected || undefined}
 				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""}`}
 				style={{ paddingLeft: `${depth * 16 + 4}px` }}
 				onClick={handleClick}
