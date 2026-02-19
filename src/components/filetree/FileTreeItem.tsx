@@ -1,5 +1,5 @@
 import { AlertTriangle, ChevronDown, ChevronRight, File, Folder } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import type { FileEntry } from "../../types/workspace";
 
@@ -16,6 +16,13 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 	const [loaded, setLoaded] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [loadError, setLoadError] = useState(false);
+	const isMountedRef = useRef(true);
+
+	useEffect(() => {
+		return () => {
+			isMountedRef.current = false;
+		};
+	}, []);
 
 	const isSelected = entry.path === selectedPath;
 
@@ -26,15 +33,18 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 				setLoadError(false);
 				listDirectory(entry.path)
 					.then((entries) => {
+						if (!isMountedRef.current) return;
 						setChildren(entries);
 						setLoaded(true);
 						setExpanded(true);
 					})
 					.catch((err) => {
+						if (!isMountedRef.current) return;
 						console.error("Failed to list directory:", err);
 						setLoadError(true);
 					})
 					.finally(() => {
+						if (!isMountedRef.current) return;
 						setLoading(false);
 					});
 			} else if (loaded) {

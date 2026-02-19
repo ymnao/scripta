@@ -51,7 +51,7 @@ export function FileTree({ workspacePath, selectedPath, onFileSelect }: FileTree
 	}
 
 	return (
-		<ul role="tree" className="select-none overflow-y-auto px-1 py-1">
+		<ul className="select-none overflow-y-auto px-1 py-1">
 			{entries.map((entry) => (
 				<FileTreeItem
 					key={entry.path}
