@@ -181,6 +181,108 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "edit2");
 	});
 
+	it("flushes pending changes to old path when filePath changes", async () => {
+		const { result, rerender } = renderHook(
+			({ filePath, content }) => useAutoSave(filePath, content),
+			{ initialProps: { filePath: "a.md", content: "initial" } },
+		);
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// Edit content for file A
+		rerender({ filePath: "a.md", content: "edited A" });
+		expect(result.current.saveStatus).toBe("unsaved");
+
+		// Switch to file B — should flush "edited A" to "a.md"
+		await act(async () => {
+			rerender({ filePath: "b.md", content: "edited A" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A");
+		expect(mockedWriteFile).not.toHaveBeenCalledWith("b.md", expect.anything());
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("shows error when flush save fails on file switch", async () => {
+		const { result, rerender } = renderHook(
+			({ filePath, content }) => useAutoSave(filePath, content),
+			{ initialProps: { filePath: "a.md", content: "initial" } },
+		);
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// Edit content for file A
+		rerender({ filePath: "a.md", content: "edited A" });
+
+		// Make flush save fail
+		mockedWriteFile.mockRejectedValueOnce(new Error("disk full"));
+
+		// Switch to file B — flush should fail
+		await act(async () => {
+			rerender({ filePath: "b.md", content: "edited A" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A");
+		expect(result.current.saveStatus).toBe("error");
+	});
+
+	it("does not save to old path when content is unchanged on switch", async () => {
+		const { result, rerender } = renderHook(
+			({ filePath, content }) => useAutoSave(filePath, content),
+			{ initialProps: { filePath: "a.md", content: "initial" } },
+		);
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		mockedWriteFile.mockClear();
+
+		// Switch without editing — no save should occur
+		await act(async () => {
+			rerender({ filePath: "b.md", content: "initial" });
+		});
+
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("cancels pending debounce on filePath change", async () => {
+		const { result, rerender } = renderHook(
+			({ filePath, content }) => useAutoSave(filePath, content),
+			{ initialProps: { filePath: "a.md", content: "initial" } },
+		);
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// Edit to start debounce timer
+		rerender({ filePath: "a.md", content: "edited" });
+		expect(result.current.saveStatus).toBe("unsaved");
+
+		mockedWriteFile.mockClear();
+
+		// Switch file — flush happens immediately, debounce cancelled
+		await act(async () => {
+			rerender({ filePath: "b.md", content: "edited" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited");
+
+		mockedWriteFile.mockClear();
+
+		// Advance past debounce — should NOT fire a save to "b.md"
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
 	it("ignores stale save completion when a newer save is in flight", async () => {
 		let resolveA!: () => void;
 		let resolveB!: () => void;

@@ -23,8 +23,11 @@ describe("StatusBar", () => {
 		expect(screen.getByText("Save failed")).toBeInTheDocument();
 	});
 
-	it('shows "Saved" when saveStatus is not provided', () => {
+	it("shows no status text when saveStatus is not provided", () => {
 		render(<StatusBar />);
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+		expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
+		expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
+		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
 	});
 });
