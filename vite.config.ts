@@ -11,6 +11,6 @@ export default defineConfig({
 		strictPort: true,
 	},
 
-	// Tauri environment variables
-	envPrefix: ["VITE_", "TAURI_"],
+	// Expose TAURI_ENV_* (platform, debug) but not TAURI_SIGNING_* etc.
+	envPrefix: ["VITE_", "TAURI_ENV_"],
 });

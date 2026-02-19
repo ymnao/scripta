@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.10.1
+        version: 2.10.1
       react:
         specifier: ^19.2.0
         version: 19.2.4
@@ -21,6 +24,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.10.0
         version: 2.10.0
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.14
@@ -29,16 +35,16 @@ importers:
         version: 19.2.3(@types/react@19.2.14)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.1.4(vite@7.3.1)
+        version: 5.1.4(vite@7.3.1(@types/node@25.3.0))
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
       vite:
         specifier: ^7.3.1
-        version: 7.3.1
+        version: 7.3.1(@types/node@25.3.0)
       vitest:
         specifier: ^4.0.18
-        version: 4.0.18
+        version: 4.0.18(@types/node@25.3.0)
 
 packages:
 
@@ -498,6 +504,9 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  '@tauri-apps/api@2.10.1':
+    resolution: {integrity: sha512-hKL/jWf293UDSUN09rR69hrToyIXBb8CjGaWC7gfinvnQrBVvnLr08FeFi38gxtugAVyVcTa5/FD/Xnkb1siBw==}
+
   '@tauri-apps/cli-darwin-arm64@2.10.0':
     resolution: {integrity: sha512-avqHD4HRjrMamE/7R/kzJPcAJnZs0IIS+1nkDP5b+TNBn3py7N2aIo9LIpy+VQq0AkN8G5dDpZtOOBkmWt/zjA==}
     engines: {node: '>= 10'}
@@ -594,6 +603,9 @@ packages:
 
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
+
+  '@types/node@25.3.0':
+    resolution: {integrity: sha512-4K3bqJpXpqfg2XKGK9bpDTc6xO/xoUP/RBWS7AtRMug6zZFaRekiLzjVtAoZMquxoAbzBvy5nxQ7veS5eYzf8A==}
 
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
@@ -817,6 +829,9 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
   update-browserslist-db@1.2.3:
     resolution: {integrity: sha512-Js0m9cx+qOgDxo0eMiFGEueWztz+d4+M3rGlmKPT+T4IS/jP4ylw3Nwpu6cpTTP8R1MAC1kF4VbdLt3ARf209w==}
@@ -1231,6 +1246,8 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@tauri-apps/api@2.10.1': {}
+
   '@tauri-apps/cli-darwin-arm64@2.10.0':
     optional: true
 
@@ -1308,6 +1325,10 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
+  '@types/node@25.3.0':
+    dependencies:
+      undici-types: 7.18.2
+
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
       '@types/react': 19.2.14
@@ -1316,7 +1337,7 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
-  '@vitejs/plugin-react@5.1.4(vite@7.3.1)':
+  '@vitejs/plugin-react@5.1.4(vite@7.3.1(@types/node@25.3.0))':
     dependencies:
       '@babel/core': 7.29.0
       '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.29.0)
@@ -1324,7 +1345,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 7.3.1
+      vite: 7.3.1(@types/node@25.3.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -1337,13 +1358,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.18(vite@7.3.1)':
+  '@vitest/mocker@4.0.18(vite@7.3.1(@types/node@25.3.0))':
     dependencies:
       '@vitest/spy': 4.0.18
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.1
+      vite: 7.3.1(@types/node@25.3.0)
 
   '@vitest/pretty-format@4.0.18':
     dependencies:
@@ -1540,13 +1561,15 @@ snapshots:
 
   typescript@5.9.3: {}
 
+  undici-types@7.18.2: {}
+
   update-browserslist-db@1.2.3(browserslist@4.28.1):
     dependencies:
       browserslist: 4.28.1
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  vite@7.3.1:
+  vite@7.3.1(@types/node@25.3.0):
     dependencies:
       esbuild: 0.27.3
       fdir: 6.5.0(picomatch@4.0.3)
@@ -1555,12 +1578,13 @@ snapshots:
       rollup: 4.57.1
       tinyglobby: 0.2.15
     optionalDependencies:
+      '@types/node': 25.3.0
       fsevents: 2.3.3
 
-  vitest@4.0.18:
+  vitest@4.0.18(@types/node@25.3.0):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(vite@7.3.1)
+      '@vitest/mocker': 4.0.18(vite@7.3.1(@types/node@25.3.0))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18
@@ -1577,8 +1601,10 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 7.3.1
+      vite: 7.3.1(@types/node@25.3.0)
       why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 25.3.0
     transitivePeerDependencies:
       - jiti
       - less

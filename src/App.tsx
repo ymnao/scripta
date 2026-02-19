@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import viteLogo from "/vite.svg";
 import reactLogo from "./assets/react.svg";
@@ -5,6 +6,12 @@ import "./App.css";
 
 function App() {
 	const [count, setCount] = useState(0);
+	const [greetMsg, setGreetMsg] = useState("");
+	const [name, setName] = useState("");
+
+	async function greet() {
+		setGreetMsg(await invoke<string>("greet", { name }));
+	}
 
 	return (
 		<>
@@ -25,6 +32,17 @@ function App() {
 					Edit <code>src/App.tsx</code> and save to test HMR
 				</p>
 			</div>
+			<form
+				className="card"
+				onSubmit={(e) => {
+					e.preventDefault();
+					greet();
+				}}
+			>
+				<input onChange={(e) => setName(e.currentTarget.value)} placeholder="Enter a name..." />
+				<button type="submit">Greet</button>
+			</form>
+			<p>{greetMsg}</p>
 			<p className="read-the-docs">Click on the Vite and React logos to learn more</p>
 		</>
 	);
