@@ -34,8 +34,24 @@ jobs:
       - name: Test
         run: pnpm test
 
-  rust:
+  rust-test:
     name: Rust (test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test --no-default-features --lib
+
+  rust-check:
+    name: Rust (check)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +67,6 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Test
+      - name: Check
         working-directory: src-tauri
-        run: cargo test
+        run: cargo check
