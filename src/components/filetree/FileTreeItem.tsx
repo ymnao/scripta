@@ -74,19 +74,29 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 					<AlertTriangle size={12} className="shrink-0 text-red-500" aria-label="Failed to load" />
 				)}
 			</button>
-			{entry.isDirectory && expanded && children.length > 0 && (
-				<ul>
-					{children.map((child) => (
-						<FileTreeItem
-							key={child.path}
-							entry={child}
-							depth={depth + 1}
-							selectedPath={selectedPath}
-							onFileSelect={onFileSelect}
-						/>
-					))}
-				</ul>
-			)}
+			{entry.isDirectory &&
+				expanded &&
+				loaded &&
+				(children.length > 0 ? (
+					<ul>
+						{children.map((child) => (
+							<FileTreeItem
+								key={child.path}
+								entry={child}
+								depth={depth + 1}
+								selectedPath={selectedPath}
+								onFileSelect={onFileSelect}
+							/>
+						))}
+					</ul>
+				) : (
+					<p
+						className="py-0.5 text-xs text-text-secondary"
+						style={{ paddingLeft: `${(depth + 1) * 16 + 4}px` }}
+					>
+						Empty folder
+					</p>
+				))}
 		</li>
 	);
 }

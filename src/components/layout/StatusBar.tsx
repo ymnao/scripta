@@ -7,7 +7,7 @@ interface StatusBarProps {
 	saveStatus?: SaveStatus;
 }
 
-export function StatusBar({ saveStatus = "saved" }: StatusBarProps) {
+export function StatusBar({ saveStatus }: StatusBarProps) {
 	const { theme, toggleTheme } = useThemeStore();
 
 	return (
