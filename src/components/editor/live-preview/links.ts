@@ -33,12 +33,18 @@ class LinkWidget extends WidgetType {
 		const anchor = document.createElement("a");
 		anchor.className = "cm-link-widget";
 		anchor.textContent = this.text;
-		anchor.title = this.url;
 		if (isSafeUrl(this.url)) {
+			anchor.title = this.url;
 			anchor.addEventListener("click", (e) => {
 				e.preventDefault();
-				open(this.url);
+				open(this.url).catch((error) => {
+					console.error("Failed to open external URL:", this.url, error);
+				});
 			});
+		} else {
+			anchor.title = `${this.url} (opens only http/https)`;
+			anchor.style.textDecoration = "none";
+			anchor.style.cursor = "default";
 		}
 		return anchor;
 	}
@@ -134,6 +140,8 @@ class LinkDecorationPlugin implements PluginValue {
 
 export const linkDecoration = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
+	// Register click handler so CM6 forwards click events to widgets
+	// instead of handling them as editor interactions
 	eventHandlers: {
 		click: () => {},
 	},

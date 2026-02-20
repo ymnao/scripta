@@ -15,22 +15,37 @@ import { useWorkspaceStore } from "../../../stores/workspace";
 export function parentDir(filePath: string): string {
 	const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
 	if (lastSep === -1) return "";
+	if (lastSep === 0) return filePath[0];
 	return filePath.substring(0, lastSep);
 }
 
-function resolveImageSrc(rawUrl: string): string {
+function detectSeparator(filePath: string): string {
+	const lastSlash = filePath.lastIndexOf("/");
+	const lastBackslash = filePath.lastIndexOf("\\");
+	if (lastSlash === -1 && lastBackslash === -1) return "/";
+	return lastBackslash > lastSlash ? "\\" : "/";
+}
+
+export function resolveImageSrc(
+	rawUrl: string,
+	activeTabPath: string | null = useWorkspaceStore.getState().activeTabPath,
+): string {
 	if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
 		return rawUrl;
 	}
 	if (rawUrl.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawUrl)) {
 		return convertFileSrc(rawUrl);
 	}
-	const activeTabPath = useWorkspaceStore.getState().activeTabPath;
 	if (!activeTabPath) return rawUrl;
 	const dir = parentDir(activeTabPath);
 	if (!dir) return rawUrl;
-	const sep = activeTabPath.includes("\\") ? "\\" : "/";
-	const resolved = `${dir}${sep}${rawUrl}`;
+	let normalized = rawUrl;
+	if (normalized.startsWith("./") || normalized.startsWith(".\\")) {
+		normalized = normalized.slice(2);
+	}
+	const sep = detectSeparator(activeTabPath);
+	const needsSep = !dir.endsWith("/") && !dir.endsWith("\\");
+	const resolved = needsSep ? `${dir}${sep}${normalized}` : `${dir}${normalized}`;
 	return convertFileSrc(resolved);
 }
 
@@ -53,13 +68,17 @@ class ImageWidget extends WidgetType {
 		const img = document.createElement("img");
 		img.src = resolveImageSrc(this.src);
 		img.alt = this.alt;
-		img.addEventListener("error", () => {
-			wrapper.textContent = "";
-			const fallback = document.createElement("span");
-			fallback.className = "cm-image-fallback";
-			fallback.textContent = `[Image: ${this.alt}]`;
-			wrapper.appendChild(fallback);
-		});
+		img.addEventListener(
+			"error",
+			() => {
+				wrapper.textContent = "";
+				const fallback = document.createElement("span");
+				fallback.className = "cm-image-fallback";
+				fallback.textContent = `[Image: ${this.alt}]`;
+				wrapper.appendChild(fallback);
+			},
+			{ once: true },
+		);
 
 		wrapper.appendChild(img);
 		return wrapper;
