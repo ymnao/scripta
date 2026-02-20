@@ -55,7 +55,7 @@ class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		return event.type !== "click";
+		return event.type === "click";
 	}
 }
 

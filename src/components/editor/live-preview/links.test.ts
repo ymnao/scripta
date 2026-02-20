@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isSafeUrl } from "./links";
+
+vi.mock("@tauri-apps/plugin-shell", () => ({}));
 
 describe("isSafeUrl", () => {
 	it("allows http URLs", () => {
