@@ -30,6 +30,14 @@
 		}
 	},
 	"files": {
-		"ignore": ["node_modules", "dist", "src-tauri/target", "src-tauri/gen", ".claude"]
+		"ignore": [
+			"node_modules",
+			"dist",
+			"src-tauri/target",
+			"src-tauri/gen",
+			".claude",
+			"test-results",
+			"playwright-report"
+		]
 	}
 }

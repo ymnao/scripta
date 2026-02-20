@@ -13,7 +13,9 @@
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run --passWithNoTests"
+		"test": "vitest run --passWithNoTests",
+		"test:e2e": "playwright test",
+		"test:e2e:ui": "playwright test --ui"
 	},
 	"dependencies": {
 		"@codemirror/lang-markdown": "^6.5.0",
@@ -34,6 +36,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",
+		"@playwright/test": "^1.58.2",
 		"@tauri-apps/cli": "^2.10.0",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.3.2",
