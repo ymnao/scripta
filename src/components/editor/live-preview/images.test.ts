@@ -1,4 +1,4 @@
-import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parentDir, resolveImageSrc } from "./images";
 
 vi.mock("@tauri-apps/api/core", () => ({
