@@ -41,31 +41,30 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 				// Skip the entire blockquote if cursor is on any of its lines
 				for (let l = startLine.number; l <= endLine.number; l++) {
-					if (cursorLines.has(l)) return false;
+					if (cursorLines.has(l)) return;
 				}
 
-				// Add line decoration to all lines
+				// Add line decoration and hide QuoteMarks per line
 				for (let l = startLine.number; l <= endLine.number; l++) {
 					const line = state.doc.line(l);
 					ranges.push(blockquoteLineDecoration.range(line.from, line.from));
-				}
 
-				// Hide all QuoteMarks (and trailing space) within this blockquote
-				tree.iterate({
-					from: node.from,
-					to: node.to,
-					enter(child) {
-						if (child.name !== "QuoteMark") return;
-						let replaceEnd = child.to;
-						if (
-							replaceEnd < state.doc.length &&
-							state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
-						) {
-							replaceEnd += 1;
-						}
-						ranges.push(replaceDecoration.range(child.from, replaceEnd));
-					},
-				});
+					tree.iterate({
+						from: line.from,
+						to: line.to,
+						enter(child) {
+							if (child.name !== "QuoteMark") return;
+							let replaceEnd = child.to;
+							if (
+								replaceEnd < state.doc.length &&
+								state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
+							) {
+								replaceEnd += 1;
+							}
+							ranges.push(replaceDecoration.range(child.from, replaceEnd));
+						},
+					});
+				}
 
 				// Prevent processing nested Blockquote nodes again
 				return false;

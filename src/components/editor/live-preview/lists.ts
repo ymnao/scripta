@@ -146,6 +146,7 @@ export const listDecoration = ViewPlugin.fromClass(ListDecorationPlugin, {
 
 			event.preventDefault();
 			const pos = Number(target.dataset.pos);
+			if (Number.isNaN(pos) || pos < 0 || pos + 3 > view.state.doc.length) return;
 			const current = view.state.doc.sliceString(pos, pos + 3);
 			const newText = current === "[x]" || current === "[X]" ? "[ ]" : "[x]";
 			view.dispatch({ changes: { from: pos, to: pos + 3, insert: newText } });
