@@ -46,22 +46,15 @@ export function InlineInput({
 		onCancel();
 	};
 
+	const IconComponent = icon === "folder" ? Folder : File;
+
 	return (
 		<li
 			className="flex items-center gap-1 px-1 py-0.5"
 			style={{ paddingLeft: `${depth * 16 + 4}px` }}
 		>
-			{icon === "folder" ? (
-				<>
-					<span className="inline-block w-3.5 shrink-0" />
-					<Folder size={14} className="shrink-0 text-text-secondary" />
-				</>
-			) : (
-				<>
-					<span className="inline-block w-3.5 shrink-0" />
-					<File size={14} className="shrink-0 text-text-secondary" />
-				</>
-			)}
+			<span className="inline-block w-3.5 shrink-0" />
+			<IconComponent size={14} className="shrink-0 text-text-secondary" />
 			<input
 				ref={inputRef}
 				type="text"
