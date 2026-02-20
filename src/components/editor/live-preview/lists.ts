@@ -140,8 +140,7 @@ class ListDecorationPlugin implements PluginValue {
 export const listDecoration = ViewPlugin.fromClass(ListDecorationPlugin, {
 	decorations: (v) => v.decorations,
 	eventHandlers: {
-		mousedown(event: MouseEvent, view: EditorView) {
-			if (event.button !== 0) return;
+		click(event: MouseEvent, view: EditorView) {
 			const target = event.target;
 			if (!(target instanceof HTMLInputElement)) return;
 			if (!target.classList.contains("cm-task-checkbox")) return;

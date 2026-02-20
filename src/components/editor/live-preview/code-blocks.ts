@@ -43,8 +43,15 @@ export function buildDecorations(view: EditorView): DecorationSet {
 					if (cursorLines.has(l)) return;
 				}
 
-				// Add background line decoration to all lines (including fence lines)
-				for (let l = startLine.number; l <= endLine.number; l++) {
+				// Clamp decoration target lines to the current visible range
+				const visibleStartLine = state.doc.lineAt(from);
+				const visibleEndLine = state.doc.lineAt(to);
+				const fromLineNumber = Math.max(startLine.number, visibleStartLine.number);
+				const toLineNumber = Math.min(endLine.number, visibleEndLine.number);
+				if (fromLineNumber > toLineNumber) return;
+
+				// Add background line decoration only to the visible intersection
+				for (let l = fromLineNumber; l <= toLineNumber; l++) {
 					const line = state.doc.line(l);
 					ranges.push(codeBlockLineDecoration.range(line.from, line.from));
 				}
