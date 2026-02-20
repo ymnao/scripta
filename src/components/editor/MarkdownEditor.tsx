@@ -44,7 +44,6 @@ const editorTheme = EditorView.theme({
 });
 
 const markdownExtension = markdown({ codeLanguages: languages });
-
 interface MarkdownEditorProps {
 	value: string;
 	onChange: (value: string) => void;
@@ -74,22 +73,27 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 	);
 
 	return (
-		<CodeMirror
-			value={value}
-			onChange={onChange}
-			extensions={extensions}
-			height="100%"
-			theme="none"
-			aria-label="Markdown editor"
-			basicSetup={{
-				lineNumbers: true,
-				foldGutter: true,
-				highlightActiveLine: true,
-				highlightActiveLineGutter: true,
-				bracketMatching: true,
-				closeBrackets: true,
-				indentOnInput: true,
-			}}
-		/>
+		<div className="relative min-h-0 min-w-0 flex-1">
+			<div className="absolute inset-0">
+				<CodeMirror
+					className="h-full"
+					value={value}
+					onChange={onChange}
+					extensions={extensions}
+					height="100%"
+					theme="none"
+					aria-label="Markdown editor"
+					basicSetup={{
+						lineNumbers: true,
+						foldGutter: true,
+						highlightActiveLine: true,
+						highlightActiveLineGutter: true,
+						bracketMatching: true,
+						closeBrackets: true,
+						indentOnInput: true,
+					}}
+				/>
+			</div>
+		</div>
 	);
 }

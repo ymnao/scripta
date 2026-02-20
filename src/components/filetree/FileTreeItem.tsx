@@ -19,6 +19,7 @@ export function FileTreeItem({ entry, depth, selectedPath, onFileSelect }: FileT
 	const isMountedRef = useRef(true);
 
 	useEffect(() => {
+		isMountedRef.current = true;
 		return () => {
 			isMountedRef.current = false;
 		};
