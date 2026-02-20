@@ -1,0 +1,1 @@
+export { headingDecoration } from "./headings";
