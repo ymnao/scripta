@@ -138,7 +138,7 @@ describe("TabBar", () => {
 		expect(tabs[1]).toHaveAttribute("tabindex", "0");
 	});
 
-	it("moves focus with arrow keys", () => {
+	it("moves focus and activates tab with arrow keys", () => {
 		useWorkspaceStore.setState({
 			tabs: [
 				{ path: "/workspace/a.md", dirty: false },
@@ -154,19 +154,23 @@ describe("TabBar", () => {
 
 		fireEvent.keyDown(tabs[0], { key: "ArrowRight" });
 		expect(document.activeElement).toBe(tabs[1]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/b.md");
 
 		fireEvent.keyDown(tabs[1], { key: "ArrowRight" });
 		expect(document.activeElement).toBe(tabs[2]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/c.md");
 
 		// Wraps around
 		fireEvent.keyDown(tabs[2], { key: "ArrowRight" });
 		expect(document.activeElement).toBe(tabs[0]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/a.md");
 
 		fireEvent.keyDown(tabs[0], { key: "ArrowLeft" });
 		expect(document.activeElement).toBe(tabs[2]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/c.md");
 	});
 
-	it("moves focus with Home/End keys", () => {
+	it("moves focus and activates tab with Home/End keys", () => {
 		useWorkspaceStore.setState({
 			tabs: [
 				{ path: "/workspace/a.md", dirty: false },
@@ -182,8 +186,10 @@ describe("TabBar", () => {
 
 		fireEvent.keyDown(tabs[1], { key: "End" });
 		expect(document.activeElement).toBe(tabs[2]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/c.md");
 
 		fireEvent.keyDown(tabs[2], { key: "Home" });
 		expect(document.activeElement).toBe(tabs[0]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/workspace/a.md");
 	});
 });

@@ -121,51 +121,60 @@ export function AppLayout() {
 		}
 	}, [activeTabPath, saveStatus, setTabDirty]);
 
+	const closingTabsRef = useRef<Set<string>>(new Set());
+
 	const handleCloseTab = useCallback(
 		async (path: string) => {
-			if (path === activeTabPath) {
-				if (contentRef.current !== savedContentRef.current) {
-					const saved = await saveNow();
-					if (!saved) return;
-				}
-				tabCacheRef.current.delete(path);
-				closeTab(path);
-				return;
-			}
+			if (closingTabsRef.current.has(path)) return;
+			closingTabsRef.current.add(path);
 
-			// Non-active tab: wait for any in-flight writes, then save from cache if dirty
-			await waitForPending();
-
-			// Re-check: tab may have become active during waitForPending
-			if (path === useWorkspaceStore.getState().activeTabPath) {
-				if (contentRef.current !== savedContentRef.current) {
-					const saved = await saveNow();
-					if (!saved) return;
-				}
-				tabCacheRef.current.delete(path);
-				closeTab(path);
-				return;
-			}
-
-			const cached = tabCacheRef.current.get(path);
-			if (!cached) {
-				// Cache missing (e.g. tab opened but readFile not yet completed).
-				// Check store dirty flag to decide if it's safe to close.
-				const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
-				if (tab?.dirty) return;
-				closeTab(path);
-				return;
-			}
-			if (cached.content !== cached.savedContent) {
-				try {
-					await writeFile(path, cached.content);
-				} catch (err) {
-					console.error("Failed to save file on close:", err);
+			try {
+				if (path === activeTabPath) {
+					if (contentRef.current !== savedContentRef.current) {
+						const saved = await saveNow();
+						if (!saved) return;
+					}
+					tabCacheRef.current.delete(path);
+					closeTab(path);
 					return;
 				}
+
+				// Non-active tab: wait for any in-flight writes, then save from cache if dirty
+				await waitForPending();
+
+				// Re-check: tab may have become active during waitForPending
+				if (path === useWorkspaceStore.getState().activeTabPath) {
+					if (contentRef.current !== savedContentRef.current) {
+						const saved = await saveNow();
+						if (!saved) return;
+					}
+					tabCacheRef.current.delete(path);
+					closeTab(path);
+					return;
+				}
+
+				const cached = tabCacheRef.current.get(path);
+				if (!cached) {
+					// Cache missing (e.g. tab opened but readFile not yet completed).
+					// Check store dirty flag to decide if it's safe to close.
+					const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
+					if (tab?.dirty) return;
+					closeTab(path);
+					return;
+				}
+				if (cached.content !== cached.savedContent) {
+					try {
+						await writeFile(path, cached.content);
+					} catch (err) {
+						console.error("Failed to save file on close:", err);
+						return;
+					}
+				}
+				tabCacheRef.current.delete(path);
+				closeTab(path);
+			} finally {
+				closingTabsRef.current.delete(path);
 			}
-			tabCacheRef.current.delete(path);
-			closeTab(path);
 		},
 		[activeTabPath, saveNow, closeTab, waitForPending],
 	);

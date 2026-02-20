@@ -27,6 +27,7 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 						<div
 							key={tab.path}
 							title={tab.path}
+							data-path={tab.path}
 							role="tab"
 							tabIndex={isActive ? 0 : -1}
 							aria-selected={isActive}
@@ -53,19 +54,28 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 										e.key === "ArrowRight"
 											? (currentIndex + 1) % tabElements.length
 											: (currentIndex - 1 + tabElements.length) % tabElements.length;
-									tabElements[nextIndex].focus();
+									const next = tabElements[nextIndex];
+									next.focus();
+									if (next.dataset.path) setActiveTab(next.dataset.path);
 								}
 								if (e.key === "Home") {
 									e.preventDefault();
 									const first =
 										e.currentTarget.parentElement?.querySelector<HTMLElement>('[role="tab"]');
-									first?.focus();
+									if (first) {
+										first.focus();
+										if (first.dataset.path) setActiveTab(first.dataset.path);
+									}
 								}
 								if (e.key === "End") {
 									e.preventDefault();
 									const all =
 										e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]');
-									if (all?.length) all[all.length - 1].focus();
+									if (all?.length) {
+										const last = all[all.length - 1];
+										last.focus();
+										if (last.dataset.path) setActiveTab(last.dataset.path);
+									}
 								}
 							}}
 							className={`group flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs ${
