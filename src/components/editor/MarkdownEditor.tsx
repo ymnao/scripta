@@ -3,7 +3,12 @@ import { languages } from "@codemirror/language-data";
 import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
-import { emphasisDecoration, headingDecoration } from "./live-preview";
+import {
+	emphasisDecoration,
+	headingDecoration,
+	imageDecoration,
+	linkDecoration,
+} from "./live-preview";
 
 const editorTheme = EditorView.theme({
 	"&": {
@@ -43,6 +48,26 @@ const editorTheme = EditorView.theme({
 	".cm-heading-6": { fontSize: "0.9em", fontWeight: "600", lineHeight: "1.3" },
 	".cm-strong": { fontWeight: "700" },
 	".cm-emphasis": { fontStyle: "italic" },
+	".cm-link-widget": {
+		color: "var(--color-text-link)",
+		textDecoration: "underline",
+		cursor: "pointer",
+	},
+	".cm-image-widget img": {
+		maxWidth: "100%",
+		maxHeight: "400px",
+		display: "block",
+		borderRadius: "4px",
+		margin: "4px 0",
+	},
+	".cm-image-fallback": {
+		display: "inline-block",
+		padding: "2px 6px",
+		borderRadius: "3px",
+		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 15%, transparent)",
+		color: "var(--color-text-secondary)",
+		fontSize: "0.85em",
+	},
 });
 
 const markdownExtension = markdown({ codeLanguages: languages });
@@ -62,6 +87,8 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 			markdownExtension,
 			headingDecoration,
 			emphasisDecoration,
+			linkDecoration,
+			imageDecoration,
 			keymap.of([
 				{
 					key: "Mod-s",
