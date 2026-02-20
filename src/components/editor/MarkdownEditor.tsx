@@ -3,7 +3,7 @@ import { languages } from "@codemirror/language-data";
 import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
-import { headingDecoration } from "./live-preview";
+import { emphasisDecoration, headingDecoration } from "./live-preview";
 
 const editorTheme = EditorView.theme({
 	"&": {
@@ -41,6 +41,8 @@ const editorTheme = EditorView.theme({
 	".cm-heading-4": { fontSize: "1.1em", fontWeight: "600", lineHeight: "1.3" },
 	".cm-heading-5": { fontSize: "1em", fontWeight: "600", lineHeight: "1.3" },
 	".cm-heading-6": { fontSize: "0.9em", fontWeight: "600", lineHeight: "1.3" },
+	".cm-strong": { fontWeight: "700" },
+	".cm-emphasis": { fontStyle: "italic" },
 });
 
 const markdownExtension = markdown({ codeLanguages: languages });
@@ -59,6 +61,7 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 			editorTheme,
 			markdownExtension,
 			headingDecoration,
+			emphasisDecoration,
 			keymap.of([
 				{
 					key: "Mod-s",
