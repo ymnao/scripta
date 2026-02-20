@@ -48,6 +48,8 @@ class LinkWidget extends WidgetType {
 		} else {
 			anchor.className = "cm-link-widget cm-link-widget-disabled";
 			anchor.title = `${this.url} (opens only http/https)`;
+			anchor.tabIndex = -1;
+			anchor.setAttribute("aria-disabled", "true");
 		}
 		return anchor;
 	}
