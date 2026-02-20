@@ -21,7 +21,7 @@ required-features = ["tauri-app"]
 
 [features]
 default = ["tauri-app"]
-tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-log", "dep:tauri-build"]
+tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-log", "dep:tauri-plugin-shell", "dep:tauri-build"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [], optional = true }
@@ -33,6 +33,7 @@ log = "0.4"
 tauri = { version = "2.10.0", features = [], optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-log = { version = "2", optional = true }
+tauri-plugin-shell = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
