@@ -33,7 +33,7 @@ importers:
         specifier: ^2.6.0
         version: 2.6.0
       '@tauri-apps/plugin-shell':
-        specifier: ~2.3.5
+        specifier: ^2.3.5
         version: 2.3.5
       '@uiw/react-codemirror':
         specifier: ^4.25.4
