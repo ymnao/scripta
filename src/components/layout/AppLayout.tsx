@@ -187,13 +187,18 @@ export function AppLayout() {
 			if (isDirectory) {
 				const prefix = addTrailingSep(oldPath);
 				const cache = tabCacheRef.current;
+				const updates: { oldKey: string; newKey: string; value: TabCache }[] = [];
+
 				for (const [key, value] of cache) {
 					if (key.startsWith(prefix)) {
-						const updated = replacePrefix(key, oldPath, newPath);
-						cache.delete(key);
-						cache.set(updated, value);
-						renameTab(key, updated);
+						updates.push({ oldKey: key, newKey: replacePrefix(key, oldPath, newPath), value });
 					}
+				}
+
+				for (const { oldKey, newKey, value } of updates) {
+					cache.delete(oldKey);
+					cache.set(newKey, value);
+					renameTab(oldKey, newKey);
 				}
 			} else {
 				const cached = tabCacheRef.current.get(oldPath);

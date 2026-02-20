@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	createDirectory,
 	createFile,
@@ -48,16 +48,24 @@ export function FileTree({
 	const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
 
+	const loadIdRef = useRef(0);
+
 	const loadEntries = useCallback(() => {
+		const id = ++loadIdRef.current;
 		setError(null);
 		setLoading(true);
 		listDirectory(workspacePath)
-			.then(setEntries)
+			.then((result) => {
+				if (loadIdRef.current !== id) return;
+				setEntries(result);
+			})
 			.catch((err) => {
+				if (loadIdRef.current !== id) return;
 				console.error("Failed to load workspace:", err);
 				setError("Failed to load folder");
 			})
 			.finally(() => {
+				if (loadIdRef.current !== id) return;
 				setLoading(false);
 			});
 	}, [workspacePath]);
@@ -231,7 +239,7 @@ export function FileTree({
 					/>
 				))}
 				{entries.length === 0 && !showRootCreating && (
-					<p className="px-3 py-2 text-xs text-text-secondary">Empty folder</p>
+					<li className="px-3 py-2 text-xs text-text-secondary">Empty folder</li>
 				)}
 			</ul>
 

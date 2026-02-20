@@ -143,15 +143,13 @@ export function FileTreeItem({
 
 	if (isRenaming) {
 		return (
-			<li>
-				<InlineInput
-					depth={depth}
-					defaultValue={entry.name}
-					icon={entry.isDirectory ? "folder" : "file"}
-					onConfirm={onRenameConfirm}
-					onCancel={onRenameCancel}
-				/>
-			</li>
+			<InlineInput
+				depth={depth}
+				defaultValue={entry.name}
+				icon={entry.isDirectory ? "folder" : "file"}
+				onConfirm={onRenameConfirm}
+				onCancel={onRenameCancel}
+			/>
 		);
 	}
 
