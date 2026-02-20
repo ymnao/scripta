@@ -30,11 +30,16 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 							role="tab"
 							tabIndex={0}
 							aria-selected={isActive}
+							aria-label={tab.dirty ? `${fileName}, unsaved changes` : undefined}
 							onClick={() => setActiveTab(tab.path)}
 							onKeyDown={(e) => {
 								if (e.key === "Enter" || e.key === " ") {
 									e.preventDefault();
 									setActiveTab(tab.path);
+								}
+								if (e.key === "Delete" || e.key === "Backspace") {
+									e.preventDefault();
+									onCloseTab(tab.path);
 								}
 							}}
 							className={`group flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs ${
@@ -45,7 +50,10 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 						>
 							<span className="flex items-center gap-1.5">
 								{tab.dirty && (
-									<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-secondary" />
+									<span
+										className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-secondary"
+										aria-hidden="true"
+									/>
 								)}
 								{fileName}
 							</span>

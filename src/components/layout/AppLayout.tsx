@@ -133,6 +133,18 @@ export function AppLayout() {
 
 			// Non-active tab: wait for any in-flight writes, then save from cache if dirty
 			await waitForPending();
+
+			// Re-check: tab may have become active during waitForPending
+			if (path === useWorkspaceStore.getState().activeTabPath) {
+				if (contentRef.current !== savedContentRef.current) {
+					const saved = await saveNow();
+					if (!saved) return;
+				}
+				tabCacheRef.current.delete(path);
+				closeTab(path);
+				return;
+			}
+
 			const cached = tabCacheRef.current.get(path);
 			if (!cached) {
 				// Cache missing — abort close to avoid potential data loss

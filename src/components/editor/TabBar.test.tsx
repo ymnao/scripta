@@ -94,4 +94,32 @@ describe("TabBar", () => {
 		const dots = container.querySelectorAll(".rounded-full");
 		expect(dots).toHaveLength(1);
 	});
+
+	it("announces unsaved changes via aria-label on dirty tab", () => {
+		useWorkspaceStore.setState({
+			tabs: [
+				{ path: "/workspace/a.md", dirty: true },
+				{ path: "/workspace/b.md", dirty: false },
+			],
+			activeTabPath: "/workspace/a.md",
+		});
+
+		render(<TabBar onCloseTab={onCloseTab} />);
+		const tabs = screen.getAllByRole("tab");
+		expect(tabs[0]).toHaveAttribute("aria-label", "a.md, unsaved changes");
+		expect(tabs[1]).not.toHaveAttribute("aria-label");
+	});
+
+	it("calls onCloseTab when Delete key is pressed on focused tab", () => {
+		useWorkspaceStore.setState({
+			tabs: [{ path: "/workspace/a.md", dirty: false }],
+			activeTabPath: "/workspace/a.md",
+		});
+
+		render(<TabBar onCloseTab={onCloseTab} />);
+		const tab = screen.getByRole("tab");
+		fireEvent.keyDown(tab, { key: "Delete" });
+
+		expect(onCloseTab).toHaveBeenCalledWith("/workspace/a.md");
+	});
 });
