@@ -112,9 +112,11 @@ export function AppLayout() {
 		}
 	}, [activeTabPath, saveStatus]);
 
-	// Sync dirty flag to store
+	// Sync dirty flag to store.
+	// Guard with contentLoadedForPathRef to avoid misattributing a stale saveStatus
+	// (from the previous file's flush) to the newly active tab.
 	useEffect(() => {
-		if (activeTabPath) {
+		if (activeTabPath && contentLoadedForPathRef.current === activeTabPath) {
 			setTabDirty(activeTabPath, saveStatus !== "saved");
 		}
 	}, [activeTabPath, saveStatus, setTabDirty]);
@@ -147,7 +149,11 @@ export function AppLayout() {
 
 			const cached = tabCacheRef.current.get(path);
 			if (!cached) {
-				// Cache missing — abort close to avoid potential data loss
+				// Cache missing (e.g. tab opened but readFile not yet completed).
+				// Check store dirty flag to decide if it's safe to close.
+				const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
+				if (tab?.dirty) return;
+				closeTab(path);
 				return;
 			}
 			if (cached.content !== cached.savedContent) {

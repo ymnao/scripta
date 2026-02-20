@@ -122,4 +122,68 @@ describe("TabBar", () => {
 
 		expect(onCloseTab).toHaveBeenCalledWith("/workspace/a.md");
 	});
+
+	it("uses roving tabindex (active=0, others=-1)", () => {
+		useWorkspaceStore.setState({
+			tabs: [
+				{ path: "/workspace/a.md", dirty: false },
+				{ path: "/workspace/b.md", dirty: false },
+			],
+			activeTabPath: "/workspace/b.md",
+		});
+
+		render(<TabBar onCloseTab={onCloseTab} />);
+		const tabs = screen.getAllByRole("tab");
+		expect(tabs[0]).toHaveAttribute("tabindex", "-1");
+		expect(tabs[1]).toHaveAttribute("tabindex", "0");
+	});
+
+	it("moves focus with arrow keys", () => {
+		useWorkspaceStore.setState({
+			tabs: [
+				{ path: "/workspace/a.md", dirty: false },
+				{ path: "/workspace/b.md", dirty: false },
+				{ path: "/workspace/c.md", dirty: false },
+			],
+			activeTabPath: "/workspace/a.md",
+		});
+
+		render(<TabBar onCloseTab={onCloseTab} />);
+		const tabs = screen.getAllByRole("tab");
+		tabs[0].focus();
+
+		fireEvent.keyDown(tabs[0], { key: "ArrowRight" });
+		expect(document.activeElement).toBe(tabs[1]);
+
+		fireEvent.keyDown(tabs[1], { key: "ArrowRight" });
+		expect(document.activeElement).toBe(tabs[2]);
+
+		// Wraps around
+		fireEvent.keyDown(tabs[2], { key: "ArrowRight" });
+		expect(document.activeElement).toBe(tabs[0]);
+
+		fireEvent.keyDown(tabs[0], { key: "ArrowLeft" });
+		expect(document.activeElement).toBe(tabs[2]);
+	});
+
+	it("moves focus with Home/End keys", () => {
+		useWorkspaceStore.setState({
+			tabs: [
+				{ path: "/workspace/a.md", dirty: false },
+				{ path: "/workspace/b.md", dirty: false },
+				{ path: "/workspace/c.md", dirty: false },
+			],
+			activeTabPath: "/workspace/b.md",
+		});
+
+		render(<TabBar onCloseTab={onCloseTab} />);
+		const tabs = screen.getAllByRole("tab");
+		tabs[1].focus();
+
+		fireEvent.keyDown(tabs[1], { key: "End" });
+		expect(document.activeElement).toBe(tabs[2]);
+
+		fireEvent.keyDown(tabs[2], { key: "Home" });
+		expect(document.activeElement).toBe(tabs[0]);
+	});
 });

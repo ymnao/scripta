@@ -28,7 +28,7 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 							key={tab.path}
 							title={tab.path}
 							role="tab"
-							tabIndex={0}
+							tabIndex={isActive ? 0 : -1}
 							aria-selected={isActive}
 							aria-label={tab.dirty ? `${fileName}, unsaved changes` : undefined}
 							onClick={() => setActiveTab(tab.path)}
@@ -40,6 +40,32 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 								if (e.key === "Delete" || e.key === "Backspace") {
 									e.preventDefault();
 									onCloseTab(tab.path);
+								}
+								if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+									e.preventDefault();
+									const tabElements =
+										e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]');
+									if (!tabElements) return;
+									const currentIndex = Array.from(tabElements).indexOf(
+										e.currentTarget as HTMLElement,
+									);
+									const nextIndex =
+										e.key === "ArrowRight"
+											? (currentIndex + 1) % tabElements.length
+											: (currentIndex - 1 + tabElements.length) % tabElements.length;
+									tabElements[nextIndex].focus();
+								}
+								if (e.key === "Home") {
+									e.preventDefault();
+									const first =
+										e.currentTarget.parentElement?.querySelector<HTMLElement>('[role="tab"]');
+									first?.focus();
+								}
+								if (e.key === "End") {
+									e.preventDefault();
+									const all =
+										e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]');
+									if (all?.length) all[all.length - 1].focus();
 								}
 							}}
 							className={`group flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs ${
@@ -59,13 +85,12 @@ export function TabBar({ onCloseTab }: TabBarProps) {
 							</span>
 							<button
 								type="button"
-								tabIndex={-1}
 								aria-label={`Close ${fileName}`}
 								onClick={(e) => {
 									e.stopPropagation();
 									onCloseTab(tab.path);
 								}}
-								className="rounded p-0.5 opacity-0 hover:bg-black/10 group-hover:opacity-100 dark:hover:bg-white/10"
+								className="rounded p-0.5 opacity-0 hover:bg-black/10 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-white/10"
 							>
 								<X size={12} />
 							</button>
