@@ -18,18 +18,16 @@ const headingLineDecorations = {
 	6: Decoration.line({ attributes: { class: "cm-heading-6" } }),
 } as const;
 
-const headingNodeNames = new Set([
-	"ATXHeading1",
-	"ATXHeading2",
-	"ATXHeading3",
-	"ATXHeading4",
-	"ATXHeading5",
-	"ATXHeading6",
-]);
+type HeadingLevel = keyof typeof headingLineDecorations;
 
-function getHeadingLevel(name: string): number {
-	return Number(name.charAt(name.length - 1));
-}
+const headingNodeNames: ReadonlyMap<string, HeadingLevel> = new Map([
+	["ATXHeading1", 1],
+	["ATXHeading2", 2],
+	["ATXHeading3", 3],
+	["ATXHeading4", 4],
+	["ATXHeading5", 5],
+	["ATXHeading6", 6],
+]);
 
 const replaceDecoration = Decoration.replace({});
 
@@ -40,7 +38,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 	const cursorLines = new Set<number>();
 	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.head).number;
+		const fromLine = state.doc.lineAt(range.from).number;
 		const toLine = state.doc.lineAt(range.to).number;
 		for (let l = fromLine; l <= toLine; l++) {
 			cursorLines.add(l);
@@ -52,18 +50,13 @@ function buildDecorations(view: EditorView): DecorationSet {
 			from,
 			to,
 			enter(node) {
-				if (!headingNodeNames.has(node.name)) return;
-
-				const level = getHeadingLevel(node.name);
+				const level = headingNodeNames.get(node.name);
+				if (level === undefined) return;
 				const line = state.doc.lineAt(node.from);
 
 				if (cursorLines.has(line.number)) return;
 
-				builder.add(
-					line.from,
-					line.from,
-					headingLineDecorations[level as keyof typeof headingLineDecorations],
-				);
+				builder.add(line.from, line.from, headingLineDecorations[level]);
 
 				// Find HeaderMark and replace it along with the trailing space
 				const cursor = node.node.cursor();
