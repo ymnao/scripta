@@ -194,9 +194,9 @@ export function AppLayout() {
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
 			<TabBar onCloseTab={handleCloseTab} />
-			<div className="flex flex-1 overflow-hidden">
+			<div className="min-h-0 flex flex-1">
 				<Sidebar />
-				<main className="flex-1 overflow-hidden">
+				<main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
 					{activeTabPath ? (
 						<MarkdownEditor value={content} onChange={setContent} onSave={() => void saveNow()} />
 					) : (
