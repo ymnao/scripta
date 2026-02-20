@@ -73,10 +73,7 @@ export function Dialog({
 		<div
 			role="presentation"
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-			onClick={onCancel}
-			onKeyDown={(e) => {
-				if (e.key === "Escape") onCancel();
-			}}
+			onMouseDown={onCancel}
 		>
 			<dialog
 				ref={dialogRef}
@@ -85,8 +82,7 @@ export function Dialog({
 				aria-labelledby={titleId}
 				aria-describedby={descId}
 				className="mx-4 w-full max-w-sm rounded-lg border border-border bg-bg-primary p-5 shadow-lg"
-				onClick={(e) => e.stopPropagation()}
-				onKeyDown={(e) => e.stopPropagation()}
+				onMouseDown={(e) => e.stopPropagation()}
 			>
 				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
 					{title}
