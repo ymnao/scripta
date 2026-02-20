@@ -10,7 +10,10 @@ export function dirname(path: string): string {
 	const lastIndex = path.lastIndexOf(sep);
 	if (lastIndex === -1) return ".";
 	if (lastIndex === 0) return sep;
-	return path.slice(0, lastIndex);
+	const parent = path.slice(0, lastIndex);
+	// Preserve drive root (e.g. "C:" → "C:\")
+	if (parent.endsWith(":")) return parent + sep;
+	return parent;
 }
 
 export function joinPath(base: string, name: string): string {

@@ -18,7 +18,7 @@ export function InlineInput({
 }: InlineInputProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [value, setValue] = useState(defaultValue);
-	const confirmedRef = useRef(false);
+	const settledRef = useRef(false);
 
 	useEffect(() => {
 		const el = inputRef.current;
@@ -29,14 +29,21 @@ export function InlineInput({
 	}, []);
 
 	const handleConfirm = () => {
-		if (confirmedRef.current) return;
+		if (settledRef.current) return;
 		const trimmed = value.trim();
 		if (trimmed) {
-			confirmedRef.current = true;
+			settledRef.current = true;
 			onConfirm(trimmed);
 		} else {
+			settledRef.current = true;
 			onCancel();
 		}
+	};
+
+	const handleCancel = () => {
+		if (settledRef.current) return;
+		settledRef.current = true;
+		onCancel();
 	};
 
 	return (
@@ -66,7 +73,7 @@ export function InlineInput({
 						handleConfirm();
 					} else if (e.key === "Escape") {
 						e.preventDefault();
-						onCancel();
+						handleCancel();
 					}
 				}}
 				onBlur={handleConfirm}

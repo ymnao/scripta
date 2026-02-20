@@ -21,6 +21,14 @@ describe("dirname", () => {
 	it("handles backslash separators", () => {
 		expect(dirname("C:\\Users\\docs\\file.md")).toBe("C:\\Users\\docs");
 	});
+
+	it("returns drive root for file at drive root", () => {
+		expect(dirname("C:\\file.md")).toBe("C:\\");
+	});
+
+	it("returns drive root for single directory at root", () => {
+		expect(dirname("C:\\Users")).toBe("C:\\");
+	});
 });
 
 describe("joinPath", () => {

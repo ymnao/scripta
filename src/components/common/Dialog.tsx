@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 interface DialogProps {
@@ -23,6 +23,8 @@ export function Dialog({
 	onCancel,
 }: DialogProps) {
 	const confirmRef = useRef<HTMLButtonElement>(null);
+	const titleId = useId();
+	const descId = useId();
 
 	useEffect(() => {
 		if (open) {
@@ -56,12 +58,18 @@ export function Dialog({
 			<dialog
 				open
 				aria-modal="true"
+				aria-labelledby={titleId}
+				aria-describedby={descId}
 				className="mx-4 w-full max-w-sm rounded-lg border border-border bg-bg-primary p-5 shadow-lg"
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={(e) => e.stopPropagation()}
 			>
-				<h2 className="text-sm font-semibold text-text-primary">{title}</h2>
-				<p className="mt-2 text-sm text-text-secondary">{description}</p>
+				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
+					{title}
+				</h2>
+				<p id={descId} className="mt-2 text-sm text-text-secondary">
+					{description}
+				</p>
 				<div className="mt-4 flex justify-end gap-2">
 					<button
 						type="button"

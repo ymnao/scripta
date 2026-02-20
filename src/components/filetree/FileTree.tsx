@@ -31,6 +31,14 @@ interface CreatingState {
 	type: "file" | "folder";
 }
 
+const SEP_RE = /[/\\]/;
+
+function validateName(name: string): string | null {
+	if (SEP_RE.test(name)) return "File name cannot contain path separators";
+	if (name === "." || name === "..") return "File name cannot be '.' or '..'";
+	return null;
+}
+
 export function FileTree({
 	workspacePath,
 	selectedPath,
@@ -99,10 +107,12 @@ export function FileTree({
 
 		const items: ContextMenuItem[] = [
 			{
+				id: "new-file",
 				label: "New File",
 				onClick: () => setCreating({ parentPath, type: "file" }),
 			},
 			{
+				id: "new-folder",
 				label: "New Folder",
 				onClick: () => setCreating({ parentPath, type: "folder" }),
 			},
@@ -110,15 +120,18 @@ export function FileTree({
 
 		if (entry) {
 			items.push({
+				id: "separator",
 				label: "---",
 				separator: true,
 				onClick: () => {},
 			});
 			items.push({
+				id: "rename",
 				label: "Rename",
 				onClick: () => setRenamingEntry(entry),
 			});
 			items.push({
+				id: "delete",
 				label: "Delete",
 				danger: true,
 				onClick: () => setDeleteTarget(entry),
@@ -131,8 +144,9 @@ export function FileTree({
 	const handleCreateConfirm = useCallback(
 		async (name: string) => {
 			if (!creating) return;
-			if (/[/\\]/.test(name)) {
-				setOperationError("File name cannot contain path separators");
+			const nameError = validateName(name);
+			if (nameError) {
+				setOperationError(nameError);
 				setCreating(null);
 				return;
 			}
@@ -161,8 +175,9 @@ export function FileTree({
 	const handleRenameConfirm = useCallback(
 		async (newName: string) => {
 			if (!renamingEntry) return;
-			if (/[/\\]/.test(newName)) {
-				setOperationError("File name cannot contain path separators");
+			const nameError = validateName(newName);
+			if (nameError) {
+				setOperationError(nameError);
 				setRenamingEntry(null);
 				return;
 			}

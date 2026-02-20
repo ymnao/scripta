@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export interface ContextMenuItem {
+	id: string;
 	label: string;
 	onClick: () => void;
 	danger?: boolean;
@@ -59,13 +60,10 @@ export function ContextMenu({ position, items, onClose }: ContextMenuProps) {
 		>
 			{items.map((item) =>
 				item.separator ? (
-					<div
-						key={`sep-after-${items[items.indexOf(item) - 1]?.label ?? "start"}`}
-						className="my-1 border-t border-border"
-					/>
+					<div key={item.id} className="my-1 border-t border-border" />
 				) : (
 					<button
-						key={item.label}
+						key={item.id}
 						type="button"
 						className={`w-full px-3 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${
 							item.danger ? "text-red-500" : "text-text-primary"
