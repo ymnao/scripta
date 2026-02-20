@@ -33,7 +33,7 @@ export function resolveImageSrc(
 	if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
 		return rawUrl;
 	}
-	if (rawUrl.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawUrl)) {
+	if (rawUrl.startsWith("/") || rawUrl.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(rawUrl)) {
 		return convertFileSrc(rawUrl);
 	}
 	if (!activeTabPath) return rawUrl;
@@ -71,7 +71,7 @@ class ImageWidget extends WidgetType {
 		img.addEventListener(
 			"error",
 			() => {
-				wrapper.textContent = "";
+				img.remove();
 				const fallback = document.createElement("span");
 				fallback.className = "cm-image-fallback";
 				fallback.textContent = `[Image: ${this.alt}]`;

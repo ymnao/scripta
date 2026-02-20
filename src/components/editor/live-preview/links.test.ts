@@ -46,4 +46,14 @@ describe("isSafeUrl", () => {
 		expect(isSafeUrl("mailto:user@example.com")).toBe(false);
 		expect(isSafeUrl("tel:+1234567890")).toBe(false);
 	});
+
+	it("rejects data: URLs", () => {
+		expect(isSafeUrl("data:image/png;base64,iVBORw0KGgo")).toBe(false);
+		expect(isSafeUrl("data:text/html,<script>alert(1)</script>")).toBe(false);
+	});
+
+	it("rejects URLs with whitespace", () => {
+		expect(isSafeUrl("http://example.com/path name")).toBe(false);
+		expect(isSafeUrl("https://example.com\nmalicious")).toBe(false);
+	});
 });

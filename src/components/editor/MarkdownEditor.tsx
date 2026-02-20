@@ -53,6 +53,10 @@ const editorTheme = EditorView.theme({
 		textDecoration: "underline",
 		cursor: "pointer",
 	},
+	".cm-link-widget-disabled": {
+		textDecoration: "none",
+		cursor: "default",
+	},
 	".cm-image-widget img": {
 		maxWidth: "100%",
 		maxHeight: "400px",

@@ -11,9 +11,12 @@ import {
 } from "@codemirror/view";
 import { open } from "@tauri-apps/plugin-shell";
 
-const SAFE_URL_RE = /^https?:\/\//i;
+// Only allow http/https URLs without whitespace characters.
+// data: URLs are explicitly blocked as defense-in-depth.
+const SAFE_URL_RE = /^https?:\/\/[^\s]+$/i;
 
 export function isSafeUrl(url: string): boolean {
+	if (/^data:/i.test(url)) return false;
 	return SAFE_URL_RE.test(url);
 }
 
@@ -42,9 +45,8 @@ class LinkWidget extends WidgetType {
 				});
 			});
 		} else {
+			anchor.className = "cm-link-widget cm-link-widget-disabled";
 			anchor.title = `${this.url} (opens only http/https)`;
-			anchor.style.textDecoration = "none";
-			anchor.style.cursor = "default";
 		}
 		return anchor;
 	}
@@ -106,10 +108,11 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 				if (!url || textFrom === -1 || textTo === -1) return;
 
-				const text = state.doc.sliceString(textFrom, textTo);
+				const rawText = state.doc.sliceString(textFrom, textTo);
+				const displayText = rawText.trim().length > 0 ? rawText : url;
 				ranges.push(
 					Decoration.replace({
-						widget: new LinkWidget(text, url),
+						widget: new LinkWidget(displayText, url),
 					}).range(node.from, node.to),
 				);
 			},
