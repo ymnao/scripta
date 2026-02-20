@@ -47,6 +47,7 @@ export function FileTree({
 	const [creating, setCreating] = useState<CreatingState | null>(null);
 	const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+	const [operationError, setOperationError] = useState<string | null>(null);
 
 	const loadIdRef = useRef(0);
 
@@ -130,6 +131,11 @@ export function FileTree({
 	const handleCreateConfirm = useCallback(
 		async (name: string) => {
 			if (!creating) return;
+			if (/[/\\]/.test(name)) {
+				setOperationError("File name cannot contain path separators");
+				setCreating(null);
+				return;
+			}
 			const path = joinPath(creating.parentPath, name);
 			try {
 				if (creating.type === "file") {
@@ -142,6 +148,8 @@ export function FileTree({
 				}
 			} catch (err) {
 				console.error("Failed to create:", err);
+				const msg = err instanceof Error ? err.message : String(err);
+				setOperationError(`Failed to create ${creating.type}: ${msg}`);
 			}
 			setCreating(null);
 		},
@@ -153,6 +161,11 @@ export function FileTree({
 	const handleRenameConfirm = useCallback(
 		async (newName: string) => {
 			if (!renamingEntry) return;
+			if (/[/\\]/.test(newName)) {
+				setOperationError("File name cannot contain path separators");
+				setRenamingEntry(null);
+				return;
+			}
 			const oldPath = renamingEntry.path;
 			const newPath = replaceName(oldPath, newName);
 
@@ -167,6 +180,8 @@ export function FileTree({
 				refresh();
 			} catch (err) {
 				console.error("Failed to rename:", err);
+				const msg = err instanceof Error ? err.message : String(err);
+				setOperationError(`Failed to rename: ${msg}`);
 			}
 			setRenamingEntry(null);
 		},
@@ -183,6 +198,8 @@ export function FileTree({
 			refresh();
 		} catch (err) {
 			console.error("Failed to delete:", err);
+			const msg = err instanceof Error ? err.message : String(err);
+			setOperationError(`Failed to delete: ${msg}`);
 		}
 		setDeleteTarget(null);
 	}, [deleteTarget, onFileDeleted, refresh]);
@@ -195,6 +212,13 @@ export function FileTree({
 		},
 		[handleContextMenu],
 	);
+
+	// Auto-dismiss operation error after 5 seconds
+	useEffect(() => {
+		if (!operationError) return;
+		const timer = setTimeout(() => setOperationError(null), 5000);
+		return () => clearTimeout(timer);
+	}, [operationError]);
 
 	if (error) {
 		return <p className="px-3 py-2 text-xs text-text-secondary">{error}</p>;
@@ -209,6 +233,11 @@ export function FileTree({
 
 	return (
 		<>
+			{operationError && (
+				<p className="bg-red-50 px-3 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
+					{operationError}
+				</p>
+			)}
 			<ul
 				className="min-h-full select-none overflow-y-auto px-1 py-1"
 				onContextMenu={handleRootContextMenu}

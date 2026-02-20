@@ -46,6 +46,7 @@ export function Dialog({
 
 	return createPortal(
 		<div
+			role="presentation"
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
 			onClick={onCancel}
 			onKeyDown={(e) => {

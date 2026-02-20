@@ -31,6 +31,7 @@ export function addTrailingSep(path: string): string {
 }
 
 export function replacePrefix(path: string, oldPrefix: string, newPrefix: string): string {
+	if (path === oldPrefix) return newPrefix;
 	const oldWithSep = addTrailingSep(oldPrefix);
 	if (!path.startsWith(oldWithSep)) return path;
 	const newWithSep = addTrailingSep(newPrefix);

@@ -184,6 +184,17 @@ export function AppLayout() {
 
 	const handleFileRenamed = useCallback(
 		(oldPath: string, newPath: string, isDirectory: boolean) => {
+			// Helper: update tracking refs so the tab-switch effect doesn't
+			// re-create a stale cache entry under the old path.
+			const updateRefs = (oldKey: string, newKey: string) => {
+				if (prevTabPathRef.current === oldKey) {
+					prevTabPathRef.current = newKey;
+				}
+				if (contentLoadedForPathRef.current === oldKey) {
+					contentLoadedForPathRef.current = newKey;
+				}
+			};
+
 			if (isDirectory) {
 				const prefix = addTrailingSep(oldPath);
 				const cache = tabCacheRef.current;
@@ -198,6 +209,7 @@ export function AppLayout() {
 				for (const { oldKey, newKey, value } of updates) {
 					cache.delete(oldKey);
 					cache.set(newKey, value);
+					updateRefs(oldKey, newKey);
 					renameTab(oldKey, newKey);
 				}
 			} else {
@@ -206,6 +218,7 @@ export function AppLayout() {
 					tabCacheRef.current.delete(oldPath);
 					tabCacheRef.current.set(newPath, cached);
 				}
+				updateRefs(oldPath, newPath);
 				renameTab(oldPath, newPath);
 			}
 		},

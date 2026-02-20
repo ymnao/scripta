@@ -59,7 +59,10 @@ export function ContextMenu({ position, items, onClose }: ContextMenuProps) {
 		>
 			{items.map((item) =>
 				item.separator ? (
-					<div key={item.label} className="my-1 border-t border-border" />
+					<div
+						key={`sep-after-${items[items.indexOf(item) - 1]?.label ?? "start"}`}
+						className="my-1 border-t border-border"
+					/>
 				) : (
 					<button
 						key={item.label}
