@@ -55,16 +55,18 @@ export function ContextMenu({ position, items, onClose }: ContextMenuProps) {
 	return createPortal(
 		<div
 			ref={menuRef}
+			role="menu"
 			className="fixed z-50 min-w-36 rounded-md border border-border bg-bg-primary py-1 shadow-lg"
 			style={{ left: adjustedPos.x, top: adjustedPos.y }}
 		>
 			{items.map((item) =>
 				item.separator ? (
-					<div key={item.id} className="my-1 border-t border-border" />
+					<hr key={item.id} className="my-1 border-t border-border" />
 				) : (
 					<button
 						key={item.id}
 						type="button"
+						role="menuitem"
 						className={`w-full px-3 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${
 							item.danger ? "text-red-500" : "text-text-primary"
 						}`}

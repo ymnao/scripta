@@ -1,4 +1,4 @@
-const SEP_RE = /[\\/]/;
+export const SEP_RE = /[\\/]/;
 
 function getSep(path: string): string {
 	const match = path.match(SEP_RE);
@@ -17,6 +17,7 @@ export function dirname(path: string): string {
 }
 
 export function joinPath(base: string, name: string): string {
+	if (base === "") return name;
 	const sep = getSep(base);
 	return base.endsWith(sep) ? `${base}${name}` : `${base}${sep}${name}`;
 }

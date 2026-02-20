@@ -6,7 +6,7 @@ import {
 	listDirectory,
 	renameEntry,
 } from "../../lib/commands";
-import { dirname, joinPath, replaceName } from "../../lib/path";
+import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
 import type { FileEntry } from "../../types/workspace";
 import { Dialog } from "../common/Dialog";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -30,8 +30,6 @@ interface CreatingState {
 	parentPath: string;
 	type: "file" | "folder";
 }
-
-const SEP_RE = /[/\\]/;
 
 function validateName(name: string): string | null {
 	if (SEP_RE.test(name)) return "File name cannot contain path separators";
@@ -191,8 +189,8 @@ export function FileTree({
 
 			try {
 				await renameEntry(oldPath, newPath);
-				onFileRenamed?.(oldPath, newPath, renamingEntry.isDirectory);
 				refresh();
+				onFileRenamed?.(oldPath, newPath, renamingEntry.isDirectory);
 			} catch (err) {
 				console.error("Failed to rename:", err);
 				const msg = err instanceof Error ? err.message : String(err);
@@ -209,8 +207,8 @@ export function FileTree({
 		if (!deleteTarget) return;
 		try {
 			await deleteEntry(deleteTarget.path);
-			onFileDeleted?.(deleteTarget.path, deleteTarget.isDirectory);
 			refresh();
+			onFileDeleted?.(deleteTarget.path, deleteTarget.isDirectory);
 		} catch (err) {
 			console.error("Failed to delete:", err);
 			const msg = err instanceof Error ? err.message : String(err);

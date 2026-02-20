@@ -32,6 +32,10 @@ describe("dirname", () => {
 });
 
 describe("joinPath", () => {
+	it("returns name when base is empty", () => {
+		expect(joinPath("", "file.md")).toBe("file.md");
+	});
+
 	it("joins base and name with separator", () => {
 		expect(joinPath("/workspace", "file.md")).toBe("/workspace/file.md");
 	});

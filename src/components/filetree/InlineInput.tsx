@@ -58,6 +58,7 @@ export function InlineInput({
 			<input
 				ref={inputRef}
 				type="text"
+				aria-label={defaultValue ? "Rename" : `New ${icon} name`}
 				value={value}
 				onChange={(e) => setValue(e.target.value)}
 				onKeyDown={(e) => {
