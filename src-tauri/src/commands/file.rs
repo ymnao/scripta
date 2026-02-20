@@ -27,6 +27,50 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
     fs::write(&resolved, &content).map_err(|e| e.to_string())
 }
 
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn create_file(path: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if resolved.exists() {
+        return Err(format!("Already exists: {}", resolved.display()));
+    }
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::File::create(&resolved).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn create_directory(path: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if resolved.exists() {
+        return Err(format!("Already exists: {}", resolved.display()));
+    }
+    fs::create_dir_all(&resolved).map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn rename_entry(old_path: String, new_path: String) -> Result<(), String> {
+    let old = resolve_path(&old_path)?;
+    let new = resolve_path(&new_path)?;
+    if !old.exists() {
+        return Err(format!("Source not found: {}", old.display()));
+    }
+    if new.exists() {
+        return Err(format!("Target already exists: {}", new.display()));
+    }
+    fs::rename(&old, &new).map_err(|e| e.to_string())
+}
+
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn delete_entry(path: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if !resolved.exists() {
+        return Err(format!("Not found: {}", resolved.display()));
+    }
+    trash::delete(&resolved).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +132,118 @@ mod tests {
             result.file_name().unwrap(),
             std::ffi::OsStr::new("file.txt")
         );
+    }
+
+    #[test]
+    fn test_create_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.md").to_string_lossy().to_string();
+
+        create_file(path.clone()).unwrap();
+        assert!(Path::new(&path).exists());
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn test_create_file_with_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("a/b/new.md")
+            .to_string_lossy()
+            .to_string();
+
+        create_file(path.clone()).unwrap();
+        assert!(Path::new(&path).exists());
+    }
+
+    #[test]
+    fn test_create_file_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exists.md").to_string_lossy().to_string();
+
+        fs::write(&path, "content").unwrap();
+        let result = create_file(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Already exists"));
+    }
+
+    #[test]
+    fn test_create_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("newdir").to_string_lossy().to_string();
+
+        create_directory(path.clone()).unwrap();
+        assert!(Path::new(&path).is_dir());
+    }
+
+    #[test]
+    fn test_create_directory_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("existdir").to_string_lossy().to_string();
+
+        fs::create_dir(&path).unwrap();
+        let result = create_directory(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Already exists"));
+    }
+
+    #[test]
+    fn test_rename_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old.md").to_string_lossy().to_string();
+        let new = dir.path().join("new.md").to_string_lossy().to_string();
+
+        fs::write(&old, "content").unwrap();
+        rename_entry(old.clone(), new.clone()).unwrap();
+
+        assert!(!Path::new(&old).exists());
+        assert!(Path::new(&new).exists());
+        assert_eq!(fs::read_to_string(&new).unwrap(), "content");
+    }
+
+    #[test]
+    fn test_rename_entry_source_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+        let new = dir.path().join("new.md").to_string_lossy().to_string();
+
+        let result = rename_entry(old, new);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Source not found"));
+    }
+
+    #[test]
+    fn test_rename_entry_target_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old.md").to_string_lossy().to_string();
+        let new = dir.path().join("new.md").to_string_lossy().to_string();
+
+        fs::write(&old, "old").unwrap();
+        fs::write(&new, "new").unwrap();
+
+        let result = rename_entry(old, new);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Target already exists"));
+    }
+
+    #[test]
+    fn test_delete_entry_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+
+        let result = delete_entry(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Not found"));
     }
 }

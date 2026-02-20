@@ -15,6 +15,8 @@ interface WorkspaceState {
 	closeTab: (path: string) => void;
 	setActiveTab: (path: string) => void;
 	setTabDirty: (path: string, dirty: boolean) => void;
+	renameTab: (oldPath: string, newPath: string) => void;
+	closeTabsByPrefix: (prefix: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
@@ -65,4 +67,33 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 		set((state) => ({
 			tabs: state.tabs.map((t) => (t.path === path ? { ...t, dirty } : t)),
 		})),
+
+	renameTab: (oldPath, newPath) =>
+		set((state) => ({
+			tabs: state.tabs.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)),
+			activeTabPath: state.activeTabPath === oldPath ? newPath : state.activeTabPath,
+		})),
+
+	closeTabsByPrefix: (prefix) =>
+		set((state) => {
+			const activeIndex =
+				state.activeTabPath != null
+					? state.tabs.findIndex((t) => t.path === state.activeTabPath)
+					: -1;
+			const newTabs = state.tabs.filter((t) => !t.path.startsWith(prefix));
+			if (newTabs.length === state.tabs.length) return state;
+
+			let newActive = state.activeTabPath;
+			if (newActive?.startsWith(prefix)) {
+				if (newTabs.length > 0) {
+					const newIndex =
+						activeIndex >= 0 ? Math.min(activeIndex, newTabs.length - 1) : newTabs.length - 1;
+					newActive = newTabs[newIndex].path;
+				} else {
+					newActive = null;
+				}
+			}
+
+			return { tabs: newTabs, activeTabPath: newActive };
+		}),
 }));

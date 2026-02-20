@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { readFile, writeFile } from "../../lib/commands";
+import { addTrailingSep, replacePrefix } from "../../lib/path";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
@@ -17,6 +18,8 @@ export function AppLayout() {
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const closeTab = useWorkspaceStore((s) => s.closeTab);
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
+	const renameTab = useWorkspaceStore((s) => s.renameTab);
+	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
 
 	const [content, setContent] = useState("");
 	const { saveStatus, saveNow, markSaved, waitForPending } = useAutoSave(
@@ -179,6 +182,67 @@ export function AppLayout() {
 		[activeTabPath, saveNow, closeTab, waitForPending],
 	);
 
+	const handleFileRenamed = useCallback(
+		(oldPath: string, newPath: string, isDirectory: boolean) => {
+			// Helper: update tracking refs so the tab-switch effect doesn't
+			// re-create a stale cache entry under the old path.
+			const updateRefs = (oldKey: string, newKey: string) => {
+				if (prevTabPathRef.current === oldKey) {
+					prevTabPathRef.current = newKey;
+				}
+				if (contentLoadedForPathRef.current === oldKey) {
+					contentLoadedForPathRef.current = newKey;
+				}
+			};
+
+			if (isDirectory) {
+				const prefix = addTrailingSep(oldPath);
+				const cache = tabCacheRef.current;
+				const updates: { oldKey: string; newKey: string; value: TabCache }[] = [];
+
+				for (const [key, value] of cache) {
+					if (key.startsWith(prefix)) {
+						updates.push({ oldKey: key, newKey: replacePrefix(key, oldPath, newPath), value });
+					}
+				}
+
+				for (const { oldKey, newKey, value } of updates) {
+					cache.delete(oldKey);
+					cache.set(newKey, value);
+					updateRefs(oldKey, newKey);
+					renameTab(oldKey, newKey);
+				}
+			} else {
+				const cached = tabCacheRef.current.get(oldPath);
+				if (cached) {
+					tabCacheRef.current.delete(oldPath);
+					tabCacheRef.current.set(newPath, cached);
+				}
+				updateRefs(oldPath, newPath);
+				renameTab(oldPath, newPath);
+			}
+		},
+		[renameTab],
+	);
+
+	const handleFileDeleted = useCallback(
+		(path: string, isDirectory: boolean) => {
+			if (isDirectory) {
+				const prefix = addTrailingSep(path);
+				for (const key of tabCacheRef.current.keys()) {
+					if (key.startsWith(prefix)) {
+						tabCacheRef.current.delete(key);
+					}
+				}
+				closeTabsByPrefix(prefix);
+			} else {
+				tabCacheRef.current.delete(path);
+				closeTab(path);
+			}
+		},
+		[closeTab, closeTabsByPrefix],
+	);
+
 	// Cmd+W / Ctrl+W to close active tab
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -195,7 +259,7 @@ export function AppLayout() {
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
 			<TabBar onCloseTab={handleCloseTab} />
 			<div className="min-h-0 flex flex-1">
-				<Sidebar />
+				<Sidebar onFileRenamed={handleFileRenamed} onFileDeleted={handleFileDeleted} />
 				<main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
 					{activeTabPath ? (
 						<MarkdownEditor value={content} onChange={setContent} onSave={() => void saveNow()} />

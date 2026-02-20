@@ -1,15 +1,29 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { listDirectory } from "../../lib/commands";
+import {
+	createDirectory,
+	createFile,
+	deleteEntry,
+	listDirectory,
+	renameEntry,
+} from "../../lib/commands";
 
 vi.mock("../../lib/commands", () => ({
 	listDirectory: vi.fn(),
+	createFile: vi.fn(),
+	createDirectory: vi.fn(),
+	renameEntry: vi.fn(),
+	deleteEntry: vi.fn(),
 }));
 
 const { FileTree } = await import("./FileTree");
 
 const mockedListDirectory = listDirectory as Mock;
+const mockedCreateFile = createFile as Mock;
+const mockedCreateDirectory = createDirectory as Mock;
+const mockedRenameEntry = renameEntry as Mock;
+const mockedDeleteEntry = deleteEntry as Mock;
 
 const mockEntries = [
 	{ name: "docs", path: "/workspace/docs", isDirectory: true },
@@ -20,6 +34,10 @@ const mockEntries = [
 describe("FileTree", () => {
 	beforeEach(() => {
 		mockedListDirectory.mockResolvedValue(mockEntries);
+		mockedCreateFile.mockResolvedValue(undefined);
+		mockedCreateDirectory.mockResolvedValue(undefined);
+		mockedRenameEntry.mockResolvedValue(undefined);
+		mockedDeleteEntry.mockResolvedValue(undefined);
 	});
 
 	afterEach(() => {
@@ -109,5 +127,120 @@ describe("FileTree", () => {
 		});
 
 		expect(screen.getByText("Failed to load folder")).toBeInTheDocument();
+	});
+
+	it("creates a file via context menu and calls onFileSelect", async () => {
+		const onFileSelect = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
+			);
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(fileButton);
+		});
+
+		await userEvent.click(screen.getByText("New File"));
+
+		const input = screen.getByRole("textbox");
+		await userEvent.type(input, "new.md");
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter" });
+		});
+
+		expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/new.md");
+		expect(onFileSelect).toHaveBeenCalledWith("/workspace/new.md");
+	});
+
+	it("creates a folder via context menu", async () => {
+		mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce([]);
+
+		await act(async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		});
+
+		const folderButton = screen.getByText("docs").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(folderButton);
+		});
+
+		await act(async () => {
+			await userEvent.click(screen.getByText("New Folder"));
+		});
+
+		const input = screen.getByRole("textbox");
+		await userEvent.type(input, "subfolder");
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter" });
+		});
+
+		expect(mockedCreateDirectory).toHaveBeenCalledWith("/workspace/docs/subfolder");
+	});
+
+	it("renames a file via context menu and calls onFileRenamed", async () => {
+		const onFileRenamed = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath={null}
+					onFileSelect={() => {}}
+					onFileRenamed={onFileRenamed}
+				/>,
+			);
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(fileButton);
+		});
+
+		await userEvent.click(screen.getByText("Rename"));
+
+		const input = screen.getByRole("textbox");
+		await userEvent.clear(input);
+		await userEvent.type(input, "renamed.md");
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter" });
+		});
+
+		expect(mockedRenameEntry).toHaveBeenCalledWith("/workspace/hello.md", "/workspace/renamed.md");
+		expect(onFileRenamed).toHaveBeenCalledWith(
+			"/workspace/hello.md",
+			"/workspace/renamed.md",
+			false,
+		);
+	});
+
+	it("deletes a file via context menu and calls onFileDeleted", async () => {
+		const onFileDeleted = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath={null}
+					onFileSelect={() => {}}
+					onFileDeleted={onFileDeleted}
+				/>,
+			);
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(fileButton);
+		});
+
+		await userEvent.click(screen.getByText("Delete"));
+
+		expect(screen.getByText(/Are you sure you want to delete "hello.md"/)).toBeInTheDocument();
+
+		await act(async () => {
+			await userEvent.click(screen.getByText("Delete", { selector: "button" }));
+		});
+
+		expect(mockedDeleteEntry).toHaveBeenCalledWith("/workspace/hello.md");
+		expect(onFileDeleted).toHaveBeenCalledWith("/workspace/hello.md", false);
 	});
 });
