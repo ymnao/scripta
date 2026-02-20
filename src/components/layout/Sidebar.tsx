@@ -4,7 +4,12 @@ import { useCallback } from "react";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { FileTree } from "../filetree/FileTree";
 
-export function Sidebar() {
+interface SidebarProps {
+	onFileRenamed?: (oldPath: string, newPath: string, isDirectory: boolean) => void;
+	onFileDeleted?: (path: string, isDirectory: boolean) => void;
+}
+
+export function Sidebar({ onFileRenamed, onFileDeleted }: SidebarProps) {
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
@@ -36,6 +41,8 @@ export function Sidebar() {
 						workspacePath={workspacePath}
 						selectedPath={activeTabPath}
 						onFileSelect={openTab}
+						onFileRenamed={onFileRenamed}
+						onFileDeleted={onFileDeleted}
 					/>
 				) : (
 					<p className="px-3 py-2 text-xs text-text-secondary">Open a folder to get started</p>

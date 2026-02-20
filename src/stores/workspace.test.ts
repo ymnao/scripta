@@ -142,6 +142,75 @@ describe("useWorkspaceStore", () => {
 		});
 	});
 
+	describe("renameTab", () => {
+		it("renames a tab path", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+
+			useWorkspaceStore.getState().renameTab("/a.md", "/renamed.md");
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs.map((t) => t.path)).toEqual(["/renamed.md", "/b.md"]);
+		});
+
+		it("updates activeTabPath when renaming the active tab", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+
+			useWorkspaceStore.getState().renameTab("/a.md", "/renamed.md");
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/renamed.md");
+		});
+
+		it("does not change activeTabPath when renaming a non-active tab", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+
+			useWorkspaceStore.getState().renameTab("/a.md", "/renamed.md");
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/b.md");
+		});
+	});
+
+	describe("closeTabsByPrefix", () => {
+		it("closes all tabs matching the prefix", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/dir/a.md");
+			openTab("/dir/b.md");
+			openTab("/other.md");
+
+			useWorkspaceStore.getState().closeTabsByPrefix("/dir/");
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs.map((t) => t.path)).toEqual(["/other.md"]);
+		});
+
+		it("updates activeTabPath when active tab is closed", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/other.md");
+			openTab("/dir/a.md");
+
+			useWorkspaceStore.getState().closeTabsByPrefix("/dir/");
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/other.md");
+		});
+
+		it("sets activeTabPath to null when all tabs are closed", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/dir/a.md");
+			openTab("/dir/b.md");
+
+			useWorkspaceStore.getState().closeTabsByPrefix("/dir/");
+			expect(useWorkspaceStore.getState().activeTabPath).toBeNull();
+		});
+
+		it("does nothing when no tabs match", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+
+			useWorkspaceStore.getState().closeTabsByPrefix("/nonexistent/");
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs).toHaveLength(1);
+		});
+	});
+
 	describe("setWorkspacePath", () => {
 		it("resets tabs and activeTabPath", () => {
 			const { openTab, setWorkspacePath } = useWorkspaceStore.getState();

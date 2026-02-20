@@ -19,6 +19,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::file::read_file,
             commands::file::write_file,
+            commands::file::create_file,
+            commands::file::create_directory,
+            commands::file::rename_entry,
+            commands::file::delete_entry,
             commands::workspace::list_directory,
         ])
         .run(tauri::generate_context!())
