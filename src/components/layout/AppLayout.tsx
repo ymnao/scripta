@@ -175,7 +175,7 @@ export function AppLayout() {
 		const handler = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
 				e.preventDefault();
-				if (activeTabPath) handleCloseTab(activeTabPath);
+				if (activeTabPath) void handleCloseTab(activeTabPath);
 			}
 		};
 		document.addEventListener("keydown", handler);
@@ -189,7 +189,7 @@ export function AppLayout() {
 				<Sidebar />
 				<main className="flex-1 overflow-hidden">
 					{activeTabPath ? (
-						<MarkdownEditor value={content} onChange={setContent} onSave={saveNow} />
+						<MarkdownEditor value={content} onChange={setContent} onSave={() => void saveNow()} />
 					) : (
 						<div className="flex h-full items-center justify-center text-text-secondary">
 							<p className="text-sm">Select a file to start editing</p>
