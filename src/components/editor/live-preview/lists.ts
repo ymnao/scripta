@@ -30,6 +30,7 @@ export class CheckboxWidget extends WidgetType {
 		input.className = "cm-task-checkbox";
 		input.checked = this.checked;
 		input.dataset.pos = String(this.pos);
+		input.setAttribute("aria-label", "Toggle task");
 		return input;
 	}
 
@@ -140,6 +141,7 @@ export const listDecoration = ViewPlugin.fromClass(ListDecorationPlugin, {
 	decorations: (v) => v.decorations,
 	eventHandlers: {
 		mousedown(event: MouseEvent, view: EditorView) {
+			if (event.button !== 0) return;
 			const target = event.target;
 			if (!(target instanceof HTMLInputElement)) return;
 			if (!target.classList.contains("cm-task-checkbox")) return;

@@ -35,6 +35,7 @@ describe("CheckboxWidget", () => {
 		expect(el.className).toBe("cm-task-checkbox");
 		expect(el.checked).toBe(true);
 		expect(el.dataset.pos).toBe("42");
+		expect(el.getAttribute("aria-label")).toBe("Toggle task");
 	});
 
 	it("toDOM() creates unchecked checkbox", () => {
