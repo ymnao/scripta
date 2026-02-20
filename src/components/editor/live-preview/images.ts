@@ -119,24 +119,29 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 				const cursor = node.node.cursor();
 				let url = "";
+				let altFrom = -1;
+				let altTo = -1;
+				let foundOpenBracket = false;
+
 				if (cursor.firstChild()) {
 					do {
-						if (cursor.name === "URL") {
+						if (cursor.name === "LinkMark") {
+							const markText = state.doc.sliceString(cursor.from, cursor.to);
+							if ((markText === "[" || markText === "![") && !foundOpenBracket) {
+								altFrom = cursor.to;
+								foundOpenBracket = true;
+							} else if (markText === "]" && altTo === -1) {
+								altTo = cursor.from;
+							}
+						} else if (cursor.name === "URL") {
 							url = state.doc.sliceString(cursor.from, cursor.to);
 						}
 					} while (cursor.nextSibling());
 				}
 
-				if (!url) return;
+				if (!url || altFrom === -1 || altTo === -1) return;
 
-				const imageText = state.doc.sliceString(node.from, node.to);
-				const bangBracket = imageText.indexOf("![");
-				if (bangBracket === -1) return;
-				const altStart = bangBracket + 2;
-				const closeBracket = imageText.indexOf("]", altStart);
-				if (closeBracket === -1) return;
-
-				const alt = imageText.substring(altStart, closeBracket);
+				const alt = state.doc.sliceString(altFrom, altTo);
 				ranges.push(
 					Decoration.replace({
 						widget: new ImageWidget(url, alt),

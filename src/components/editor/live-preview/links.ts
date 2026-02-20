@@ -37,6 +37,7 @@ class LinkWidget extends WidgetType {
 		anchor.className = "cm-link-widget";
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
+			anchor.href = this.url;
 			anchor.title = this.url;
 			anchor.addEventListener("click", (e) => {
 				e.preventDefault();
