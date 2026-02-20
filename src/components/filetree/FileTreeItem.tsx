@@ -59,7 +59,7 @@ export function FileTreeItem({
 	// Auto-expand folder when creating inside it
 	useEffect(() => {
 		if (isCreatingHere && !expanded) {
-			if (!loaded && !loading) {
+			if (!loaded && !loading && !loadError) {
 				setLoading(true);
 				setLoadError(false);
 				listDirectory(entry.path)
@@ -82,7 +82,7 @@ export function FileTreeItem({
 				setExpanded(true);
 			}
 		}
-	}, [isCreatingHere, expanded, loaded, loading, entry.path]);
+	}, [isCreatingHere, expanded, loaded, loading, loadError, entry.path]);
 
 	// Re-fetch children when refreshKey changes (for expanded folders)
 	const prevRefreshKeyRef = useRef(refreshKey);

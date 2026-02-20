@@ -192,6 +192,17 @@ describe("useWorkspaceStore", () => {
 			expect(useWorkspaceStore.getState().activeTabPath).toBe("/other.md");
 		});
 
+		it("selects right neighbor when closing active middle tab by prefix", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/dir/b.md");
+			openTab("/c.md");
+			useWorkspaceStore.getState().setActiveTab("/dir/b.md");
+
+			useWorkspaceStore.getState().closeTabsByPrefix("/dir/");
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/c.md");
+		});
+
 		it("sets activeTabPath to null when all tabs are closed", () => {
 			const { openTab } = useWorkspaceStore.getState();
 			openTab("/dir/a.md");

@@ -57,25 +57,28 @@ export function FileTree({
 
 	const loadIdRef = useRef(0);
 
-	const loadEntries = useCallback(() => {
-		const id = ++loadIdRef.current;
-		setError(null);
-		setLoading(true);
-		listDirectory(workspacePath)
-			.then((result) => {
-				if (loadIdRef.current !== id) return;
-				setEntries(result);
-			})
-			.catch((err) => {
-				if (loadIdRef.current !== id) return;
-				console.error("Failed to load workspace:", err);
-				setError("Failed to load folder");
-			})
-			.finally(() => {
-				if (loadIdRef.current !== id) return;
-				setLoading(false);
-			});
-	}, [workspacePath]);
+	const loadEntries = useCallback(
+		(silent = false) => {
+			const id = ++loadIdRef.current;
+			setError(null);
+			if (!silent) setLoading(true);
+			listDirectory(workspacePath)
+				.then((result) => {
+					if (loadIdRef.current !== id) return;
+					setEntries(result);
+				})
+				.catch((err) => {
+					if (loadIdRef.current !== id) return;
+					console.error("Failed to load workspace:", err);
+					if (!silent) setError("Failed to load folder");
+				})
+				.finally(() => {
+					if (loadIdRef.current !== id) return;
+					if (!silent) setLoading(false);
+				});
+		},
+		[workspacePath],
+	);
 
 	useEffect(() => {
 		setEntries([]);
@@ -83,7 +86,7 @@ export function FileTree({
 	}, [loadEntries]);
 
 	const refresh = useCallback(() => {
-		loadEntries();
+		loadEntries(true);
 		setRefreshKey((k) => k + 1);
 	}, [loadEntries]);
 

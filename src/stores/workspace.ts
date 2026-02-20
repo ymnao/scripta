@@ -76,13 +76,19 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 
 	closeTabsByPrefix: (prefix) =>
 		set((state) => {
+			const activeIndex =
+				state.activeTabPath != null
+					? state.tabs.findIndex((t) => t.path === state.activeTabPath)
+					: -1;
 			const newTabs = state.tabs.filter((t) => !t.path.startsWith(prefix));
 			if (newTabs.length === state.tabs.length) return state;
 
 			let newActive = state.activeTabPath;
 			if (newActive?.startsWith(prefix)) {
 				if (newTabs.length > 0) {
-					newActive = newTabs[newTabs.length - 1].path;
+					const newIndex =
+						activeIndex >= 0 ? Math.min(activeIndex, newTabs.length - 1) : newTabs.length - 1;
+					newActive = newTabs[newIndex].path;
 				} else {
 					newActive = null;
 				}
