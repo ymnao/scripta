@@ -1,9 +1,12 @@
 /// <reference types="vitest" />
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isTauriMock = process.env.TAURI_E2E_MOCK === "true";
 
 // https://vite.dev/config/
@@ -32,6 +35,6 @@ export default defineConfig({
 	test: {
 		environment: "jsdom",
 		setupFiles: ["./src/test-setup.ts"],
-		exclude: ["e2e/**", "node_modules/**"],
+		exclude: [...configDefaults.exclude, "e2e/**"],
 	},
 });

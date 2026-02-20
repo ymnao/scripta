@@ -18,8 +18,11 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: "TAURI_E2E_MOCK=true pnpm dev",
+		command: "pnpm dev",
 		url: "http://localhost:1420",
 		reuseExistingServer: !process.env.CI,
+		env: {
+			TAURI_E2E_MOCK: "true",
+		},
 	},
 });

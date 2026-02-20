@@ -17,6 +17,8 @@ interface TauriMockStore {
 	dialogResult: string | null;
 }
 
+type WindowWithMock = Window & { __TAURI_MOCK__?: TauriMockStore };
+
 export class TauriMock {
 	constructor(private page: Page) {}
 
@@ -31,27 +33,17 @@ export class TauriMock {
 				dialog,
 			}: { files: string; directories: string; dialog: string | null }) => {
 				const parsedFiles: Record<string, string> = JSON.parse(files);
-				const parsedDirs: Record<string, FileEntry[]> = JSON.parse(directories);
+				const parsedDirs: Record<
+					string,
+					Array<{ name: string; path: string; isDirectory: boolean }>
+				> = JSON.parse(directories);
 
-				interface FileEntry {
-					name: string;
-					path: string;
-					isDirectory: boolean;
-				}
-
-				interface Store {
-					handlers: Record<string, (args: Record<string, unknown>) => unknown>;
-					calls: Record<string, Array<Record<string, unknown>>>;
-					dialogResult: string | null;
-				}
-
-				const win = window as Window & { __TAURI_MOCK__?: Store };
-				const store: Store = {
-					handlers: {},
-					calls: {},
+				const store = {
+					handlers: {} as Record<string, (args: Record<string, unknown>) => unknown>,
+					calls: {} as Record<string, Array<Record<string, unknown>>>,
 					dialogResult: dialog,
 				};
-				win.__TAURI_MOCK__ = store;
+				(window as unknown as Record<string, unknown>).__TAURI_MOCK__ = store;
 
 				store.handlers.read_file = (args: Record<string, unknown>) => {
 					const path = args.path as string;
@@ -81,28 +73,15 @@ export class TauriMock {
 
 	async getCalls(cmd: string): Promise<Array<Record<string, unknown>>> {
 		return this.page.evaluate((c: string) => {
-			const win = window as Window & { __TAURI_MOCK__?: TauriMockStore };
-
-			interface TauriMockStore {
-				calls: Record<string, Array<Record<string, unknown>>>;
-			}
-
-			return win.__TAURI_MOCK__?.calls[c] ?? [];
+			return (window as unknown as WindowWithMock).__TAURI_MOCK__?.calls[c] ?? [];
 		}, cmd);
 	}
 
 	async setFileContent(path: string, content: string): Promise<void> {
 		await this.page.evaluate(
 			({ path, content }: { path: string; content: string }) => {
-				interface TauriMockStore {
-					handlers: Record<string, (args: Record<string, unknown>) => unknown>;
-				}
-
-				const win = window as Window & { __TAURI_MOCK__?: TauriMockStore };
-				const handler = win.__TAURI_MOCK__?.handlers.write_file;
-				if (handler) {
-					handler({ path, content });
-				}
+				const handler = (window as unknown as WindowWithMock).__TAURI_MOCK__?.handlers.write_file;
+				handler?.({ path, content });
 			},
 			{ path, content },
 		);
@@ -110,16 +89,12 @@ export class TauriMock {
 
 	async clearCalls(cmd?: string): Promise<void> {
 		await this.page.evaluate((c: string | undefined) => {
-			interface TauriMockStore {
-				calls: Record<string, Array<Record<string, unknown>>>;
-			}
-
-			const win = window as Window & { __TAURI_MOCK__?: TauriMockStore };
-			if (!win.__TAURI_MOCK__) return;
+			const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
+			if (!store) return;
 			if (c) {
-				win.__TAURI_MOCK__.calls[c] = [];
+				store.calls[c] = [];
 			} else {
-				win.__TAURI_MOCK__.calls = {};
+				store.calls = {};
 			}
 		}, cmd);
 	}
