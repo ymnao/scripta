@@ -1,3 +1,9 @@
+export interface FileEntry {
+	name: string;
+	path: string;
+	isDirectory: boolean;
+}
+
 export interface TauriMockStore {
 	handlers: Record<string, (args: Record<string, unknown>) => unknown>;
 	calls: Record<string, Array<Record<string, unknown>>>;

@@ -1,26 +1,18 @@
 import type { Page } from "@playwright/test";
-
-interface FileEntry {
-	name: string;
-	path: string;
-	isDirectory: boolean;
-}
+import type { FileEntry, TauriMockStore } from "../mocks/types";
 
 export interface MockFileSystem {
 	files: Record<string, string>;
 	directories: Record<string, FileEntry[]>;
 }
 
-interface TauriMockStore {
-	handlers: Record<string, (args: Record<string, unknown>) => unknown>;
-	calls: Record<string, Array<Record<string, unknown>>>;
-	dialogResult: string | null;
-}
-
 type WindowWithMock = Window & { __TAURI_MOCK__?: TauriMockStore };
 
 export class TauriMock {
-	constructor(private page: Page) {}
+	private page: Page;
+	constructor(page: Page) {
+		this.page = page;
+	}
 
 	async setup(fs: MockFileSystem, dialogResult: string | null = null): Promise<void> {
 		const filesJson = JSON.stringify(fs.files);
