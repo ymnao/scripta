@@ -1,13 +1,17 @@
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
 import {
+	blockquoteDecoration,
+	codeBlockDecoration,
 	emphasisDecoration,
 	headingDecoration,
+	horizontalRuleDecoration,
 	imageDecoration,
 	linkDecoration,
+	listDecoration,
 } from "./live-preview";
 
 const editorTheme = EditorView.theme({
@@ -72,9 +76,26 @@ const editorTheme = EditorView.theme({
 		color: "var(--color-text-secondary)",
 		fontSize: "0.85em",
 	},
+	".cm-codeblock-line": {
+		backgroundColor: "var(--color-bg-secondary)",
+	},
+	".cm-task-checkbox": {
+		cursor: "pointer",
+		marginRight: "4px",
+		verticalAlign: "middle",
+	},
+	".cm-blockquote-line": {
+		borderLeft: "3px solid var(--color-border)",
+		paddingLeft: "8px",
+	},
+	".cm-hr-widget": {
+		border: "none",
+		borderTop: "1px solid var(--color-border)",
+		margin: "8px 0",
+	},
 });
 
-const markdownExtension = markdown({ codeLanguages: languages });
+const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
 interface MarkdownEditorProps {
 	value: string;
 	onChange: (value: string) => void;
@@ -93,6 +114,10 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 			emphasisDecoration,
 			linkDecoration,
 			imageDecoration,
+			codeBlockDecoration,
+			listDecoration,
+			blockquoteDecoration,
+			horizontalRuleDecoration,
 			keymap.of([
 				{
 					key: "Mod-s",
