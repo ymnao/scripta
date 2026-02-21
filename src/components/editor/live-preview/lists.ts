@@ -54,6 +54,7 @@ export class CheckboxWidget extends WidgetType {
 			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 			svg.setAttribute("viewBox", "0 0 16 16");
 			svg.setAttribute("fill", "none");
+			svg.setAttribute("aria-hidden", "true");
 			svg.classList.add("cm-task-checkmark");
 			const path = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
 			path.setAttribute("points", "3.5 8 6.5 11 12.5 5");
