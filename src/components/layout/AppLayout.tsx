@@ -167,11 +167,13 @@ export function AppLayout() {
 				} else {
 					readFile(path)
 						.then((loaded) => {
+							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+							// Only update editor state if this file is still the active tab
+							if (useWorkspaceStore.getState().activeTabPath !== path) return;
 							if (loaded === savedContentRef.current) return;
 							savedContentRef.current = loaded;
 							markSaved(loaded);
 							setContent(loaded);
-							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
 						})
 						.catch((err) => {
 							console.error("Failed to reload file:", err);
