@@ -43,20 +43,15 @@ describe("buildDecorations", () => {
 		expect(replaces).toHaveLength(3);
 	});
 
-	it("skips entire blockquote when cursor is on any of its lines", () => {
+	it("keeps decorations when cursor is on blockquote line", () => {
 		const doc = "text\n\n> line1\n> line2";
 		const cursorPos = doc.indexOf("> line2");
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
-		expect(decos).toHaveLength(0);
-	});
-
-	it("skips entire blockquote when cursor is on first line", () => {
-		const doc = "text\n\n> line1\n> line2";
-		const cursorPos = doc.indexOf("> line1");
-		const view = createViewForTest(doc, cursorPos);
-		const decos = collectDecorations(buildDecorations(view));
-		expect(decos).toHaveLength(0);
+		const lines = lineDecorations(decos);
+		const replaces = replaceDecorations(decos);
+		expect(lines).toHaveLength(2);
+		expect(replaces).toHaveLength(2);
 	});
 
 	it("handles > without trailing space", () => {

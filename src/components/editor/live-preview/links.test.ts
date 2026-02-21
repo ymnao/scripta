@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isSafeUrl } from "./links";
+import { LinkWidget, isSafeUrl } from "./links";
 
 vi.mock("@tauri-apps/plugin-shell", () => ({}));
 
@@ -57,5 +57,31 @@ describe("isSafeUrl", () => {
 	it("rejects URLs with whitespace", () => {
 		expect(isSafeUrl("http://example.com/path name")).toBe(false);
 		expect(isSafeUrl("https://example.com\nmalicious")).toBe(false);
+	});
+});
+
+describe("LinkWidget", () => {
+	it("ignoreEvent returns true for click with metaKey", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("click", { metaKey: true });
+		expect(widget.ignoreEvent(event)).toBe(true);
+	});
+
+	it("ignoreEvent returns true for click with ctrlKey", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("click", { ctrlKey: true });
+		expect(widget.ignoreEvent(event)).toBe(true);
+	});
+
+	it("ignoreEvent returns false for click without modifier", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("click", { metaKey: false, ctrlKey: false });
+		expect(widget.ignoreEvent(event)).toBe(false);
+	});
+
+	it("ignoreEvent returns false for non-click events", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("mousedown");
+		expect(widget.ignoreEvent(event)).toBe(false);
 	});
 });

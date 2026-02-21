@@ -5,4 +5,5 @@ export { headingDecoration } from "./headings";
 export { horizontalRuleDecoration } from "./horizontal-rules";
 export { imageDecoration } from "./images";
 export { linkDecoration } from "./links";
-export { listDecoration } from "./lists";
+export { listDecoration, listKeymap } from "./lists";
+export { strikethroughDecoration } from "./strikethrough";
