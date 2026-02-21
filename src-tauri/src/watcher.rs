@@ -28,13 +28,20 @@ pub struct WatcherState {
 }
 
 #[cfg(feature = "tauri-app")]
-impl WatcherState {
-    pub fn new() -> Self {
+impl Default for WatcherState {
+    fn default() -> Self {
         Self {
             watcher: None,
             stop_tx: None,
             thread_handle: None,
         }
+    }
+}
+
+#[cfg(feature = "tauri-app")]
+impl WatcherState {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn start(&mut self, path: &str, app_handle: tauri::AppHandle) -> Result<(), String> {

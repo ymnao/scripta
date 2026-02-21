@@ -183,6 +183,10 @@ export function AppLayout() {
 						});
 				}
 			} else {
+				// Non-active dirty tabs: intentionally no dialog shown here.
+				// Showing a dialog would interrupt the user's current editing.
+				// The dirty content stays in cache; the user can reconcile when
+				// they switch to that tab.
 				const cached = tabCacheRef.current.get(path);
 				if (cached && cached.content === cached.savedContent) {
 					readFile(path)

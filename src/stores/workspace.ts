@@ -27,7 +27,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	activeTabPath: null,
 	fileTreeVersion: 0,
 
-	setWorkspacePath: (path) => set({ workspacePath: path, tabs: [], activeTabPath: null }),
+	setWorkspacePath: (path) =>
+		set({ workspacePath: path, tabs: [], activeTabPath: null, fileTreeVersion: 0 }),
 
 	bumpFileTreeVersion: () => set((s) => ({ fileTreeVersion: s.fileTreeVersion + 1 })),
 
