@@ -58,6 +58,73 @@ export class TauriMock {
 					}
 					return [];
 				};
+
+				const collectMdFiles = (dirPath: string): string[] => {
+					const results: string[] = [];
+					const entries = parsedDirs[dirPath] ?? [];
+					for (const entry of entries) {
+						if (entry.isDirectory) {
+							results.push(...collectMdFiles(entry.path));
+						} else if (entry.name.endsWith(".md")) {
+							results.push(entry.path);
+						}
+					}
+					return results;
+				};
+
+				store.handlers.search_files = (args: Record<string, unknown>) => {
+					const workspacePath = args.workspacePath as string;
+					const query = (args.query as string).toLowerCase();
+					if (!query) return [];
+					const mdFiles = collectMdFiles(workspacePath);
+					const results: Array<{
+						filePath: string;
+						lineNumber: number;
+						lineContent: string;
+						matchStart: number;
+						matchEnd: number;
+					}> = [];
+					for (const filePath of mdFiles) {
+						const content = parsedFiles[filePath];
+						if (!content) continue;
+						const lines = content.split("\n");
+						for (let i = 0; i < lines.length; i++) {
+							const line = lines[i];
+							const lower = line.toLowerCase();
+							let pos = 0;
+							while (true) {
+								const idx = lower.indexOf(query, pos);
+								if (idx === -1) break;
+								results.push({
+									filePath,
+									lineNumber: i + 1,
+									lineContent: line,
+									matchStart: idx,
+									matchEnd: idx + query.length,
+								});
+								pos = idx + query.length;
+							}
+						}
+					}
+					return results;
+				};
+
+				store.handlers.search_filenames = (args: Record<string, unknown>) => {
+					const workspacePath = args.workspacePath as string;
+					const query = (args.query as string).toLowerCase();
+					const mdFiles = collectMdFiles(workspacePath);
+					if (!query) return mdFiles;
+					return mdFiles.filter((filePath) => {
+						const lower = filePath.toLowerCase();
+						let ti = 0;
+						for (const ch of query) {
+							const found = lower.indexOf(ch, ti);
+							if (found === -1) return false;
+							ti = found + 1;
+						}
+						return true;
+					});
+				};
 			},
 			{ files: filesJson, directories: directoriesJson, dialog: dialogResult },
 		);

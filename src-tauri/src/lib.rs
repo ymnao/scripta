@@ -30,6 +30,8 @@ pub fn run() {
             commands::workspace::list_directory,
             commands::watcher::start_watcher,
             commands::watcher::stop_watcher,
+            commands::search::search_files,
+            commands::search::search_filenames,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

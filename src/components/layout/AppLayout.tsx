@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
@@ -7,6 +8,8 @@ import { useWorkspaceStore } from "../../stores/workspace";
 import { Dialog } from "../common/Dialog";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
+import { CommandPalette } from "../search/CommandPalette";
+import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
@@ -21,8 +24,18 @@ export function AppLayout() {
 	const closeTab = useWorkspaceStore((s) => s.closeTab);
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
 	const renameTab = useWorkspaceStore((s) => s.renameTab);
+	const openTab = useWorkspaceStore((s) => s.openTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
+
+	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [searchBarOpen, setSearchBarOpen] = useState(false);
+	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
+	const [searchBarInitialText, setSearchBarInitialText] = useState("");
+	const editorViewRef = useRef<EditorView | null>(null);
+	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
+	const searchBarOpenRef = useRef(false);
+	searchBarOpenRef.current = searchBarOpen;
 
 	const [content, setContent] = useState("");
 	const { saveStatus, saveNow, markSaved, waitForPending } = useAutoSave(
@@ -377,12 +390,54 @@ export function AppLayout() {
 		[closeTab, closeTabsByPrefix],
 	);
 
-	// Cmd+W / Ctrl+W to close active tab
+	const handleEditorView = useCallback((view: EditorView | null) => {
+		editorViewRef.current = view;
+	}, []);
+
+	const handleCommandPaletteSelect = useCallback(
+		(filePath: string) => {
+			openTab(filePath);
+		},
+		[openTab],
+	);
+
+	// Close search bar when switching away from a file
+	useEffect(() => {
+		if (!activeTabPath) setSearchBarOpen(false);
+	}, [activeTabPath]);
+
+	// Keyboard shortcuts: Cmd+W, Cmd+F, Cmd+H, Cmd+P
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
 				e.preventDefault();
 				if (activeTabPath) void handleCloseTab(activeTabPath);
+			}
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "f" || e.key === "h")) {
+				const view = editorViewRef.current;
+				if (view) {
+					e.preventDefault();
+					const sel = view.state.selection.main;
+					const selectedText =
+						!sel.empty && sel.to - sel.from <= 200 ? view.state.sliceDoc(sel.from, sel.to) : "";
+					if (searchBarOpenRef.current) {
+						// Already open: update text if there's a selection, then re-focus
+						if (selectedText) {
+							searchBarHandleRef.current?.setSearch(selectedText);
+						} else {
+							searchBarHandleRef.current?.focusInput();
+						}
+						if (e.key === "h") setSearchBarExpanded(true);
+					} else {
+						setSearchBarInitialText(selectedText);
+						setSearchBarExpanded(e.key === "h");
+						setSearchBarOpen(true);
+					}
+				}
+			}
+			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+				e.preventDefault();
+				setCommandPaletteOpen((prev) => !prev);
 			}
 		};
 		document.addEventListener("keydown", handler);
@@ -394,17 +449,40 @@ export function AppLayout() {
 			<TabBar onCloseTab={handleCloseTab} />
 			<div className="min-h-0 flex flex-1">
 				<Sidebar onFileRenamed={handleFileRenamed} onFileDeleted={handleFileDeleted} />
-				<main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
+				<main className="relative min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
 					{activeTabPath ? (
-						<MarkdownEditor value={content} onChange={setContent} onSave={() => void saveNow()} />
+						<MarkdownEditor
+							value={content}
+							onChange={setContent}
+							onSave={() => void saveNow()}
+							onEditorView={handleEditorView}
+						/>
 					) : (
 						<div className="flex h-full items-center justify-center text-text-secondary">
 							<p className="text-sm">Select a file to start editing</p>
 						</div>
 					)}
+					{searchBarOpen && editorViewRef.current && (
+						<SearchBar
+							view={editorViewRef.current}
+							onClose={() => setSearchBarOpen(false)}
+							initialExpanded={searchBarExpanded}
+							initialSearchText={searchBarInitialText}
+							handleRef={searchBarHandleRef}
+						/>
+					)}
 				</main>
 			</div>
 			<StatusBar saveStatus={activeTabPath ? saveStatus : undefined} />
+
+			{workspacePath && (
+				<CommandPalette
+					open={commandPaletteOpen}
+					workspacePath={workspacePath}
+					onSelect={handleCommandPaletteSelect}
+					onClose={() => setCommandPaletteOpen(false)}
+				/>
+			)}
 
 			<Dialog
 				open={externalConflict?.type === "modified"}

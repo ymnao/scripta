@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SearchResult } from "../types/search";
 import type { FileEntry } from "../types/workspace";
 
 export function readFile(path: string): Promise<string> {
@@ -35,4 +36,12 @@ export function startWatcher(path: string): Promise<void> {
 
 export function stopWatcher(): Promise<void> {
 	return invoke<void>("stop_watcher");
+}
+
+export function searchFiles(workspacePath: string, query: string): Promise<SearchResult[]> {
+	return invoke<SearchResult[]>("search_files", { workspacePath, query });
+}
+
+export function searchFilenames(workspacePath: string, query: string): Promise<string[]> {
+	return invoke<string[]>("search_filenames", { workspacePath, query });
 }
