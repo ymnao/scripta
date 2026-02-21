@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
+import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { readFile, writeFile } from "../../lib/commands";
-import { addTrailingSep, replacePrefix } from "../../lib/path";
+import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { useWorkspaceStore } from "../../stores/workspace";
+import { Dialog } from "../common/Dialog";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
 import { Sidebar } from "./Sidebar";
@@ -20,6 +22,7 @@ export function AppLayout() {
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
 	const renameTab = useWorkspaceStore((s) => s.renameTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
+	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
 
 	const [content, setContent] = useState("");
 	const { saveStatus, saveNow, markSaved, waitForPending } = useAutoSave(
@@ -123,6 +126,137 @@ export function AppLayout() {
 			setTabDirty(activeTabPath, saveStatus !== "saved");
 		}
 	}, [activeTabPath, saveStatus, setTabDirty]);
+
+	// Single state ensures only one dialog is shown at a time. When multiple
+	// files have conflicts, the latest event wins; earlier conflicts are dropped
+	// but dirty content is preserved in memory so no data is lost.
+	const [externalConflict, setExternalConflict] = useState<{
+		path: string;
+		type: "modified" | "deleted";
+	} | null>(null);
+
+	// Clear stale conflict dialog when workspace changes.
+	// workspacePath is read only to satisfy the exhaustive-deps rule;
+	// the real purpose is to trigger on workspace switches.
+	const prevWorkspaceRef = useRef(workspacePath);
+	useEffect(() => {
+		if (prevWorkspaceRef.current !== workspacePath) {
+			prevWorkspaceRef.current = workspacePath;
+			setExternalConflict(null);
+		}
+	}, [workspacePath]);
+
+	const handleTreeChange = useCallback(() => {
+		bumpFileTreeVersion();
+	}, [bumpFileTreeVersion]);
+
+	const handleExternalFileDeleted = useCallback(
+		(path: string) => {
+			const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
+			if (!tab) return;
+
+			if (tab.dirty) {
+				// Deletion supersedes any pending conflict (modified) dialog
+				setExternalConflict({ path, type: "deleted" });
+			} else {
+				tabCacheRef.current.delete(path);
+				closeTab(path);
+			}
+		},
+		[closeTab],
+	);
+
+	const handleExternalFileModified = useCallback(
+		(path: string) => {
+			const state = useWorkspaceStore.getState();
+			const tab = state.tabs.find((t) => t.path === path);
+			if (!tab) return;
+
+			if (path === state.activeTabPath) {
+				if (tab.dirty) {
+					// Don't overwrite a pending delete dialog (delete is more severe)
+					setExternalConflict((prev) =>
+						prev?.type === "deleted" ? prev : { path, type: "modified" },
+					);
+				} else {
+					readFile(path)
+						.then((loaded) => {
+							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+							// Only update editor state if this file is still the active tab
+							if (useWorkspaceStore.getState().activeTabPath !== path) return;
+							if (loaded === savedContentRef.current) return;
+							savedContentRef.current = loaded;
+							markSaved(loaded);
+							setContent(loaded);
+						})
+						.catch((err) => {
+							console.error("Failed to reload file:", err);
+						});
+				}
+			} else {
+				// Non-active dirty tabs: intentionally no dialog shown here.
+				// Showing a dialog would interrupt the user's current editing.
+				// The dirty content stays in cache; the user can reconcile when
+				// they switch to that tab.
+				const cached = tabCacheRef.current.get(path);
+				if (cached && cached.content === cached.savedContent) {
+					readFile(path)
+						.then((loaded) => {
+							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+						})
+						.catch((err) => {
+							console.error("Failed to reload cached file:", err);
+						});
+				}
+			}
+		},
+		[markSaved],
+	);
+
+	useFileWatcher({
+		workspacePath,
+		onTreeChange: handleTreeChange,
+		onFileModified: handleExternalFileModified,
+		onFileDeleted: handleExternalFileDeleted,
+	});
+
+	const handleConflictReload = useCallback(() => {
+		if (externalConflict?.type !== "modified") return;
+		const path = externalConflict.path;
+		setExternalConflict(null);
+		readFile(path)
+			.then((loaded) => {
+				tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+				setTabDirty(path, false);
+				// Only update editor state if this file is still the active tab
+				if (useWorkspaceStore.getState().activeTabPath === path) {
+					savedContentRef.current = loaded;
+					markSaved(loaded);
+					setContent(loaded);
+				}
+			})
+			.catch((err) => {
+				console.error("Failed to reload file on conflict resolve:", err);
+				// File may have been deleted — notify user via the deleted dialog
+				setExternalConflict({ path, type: "deleted" });
+			});
+	}, [externalConflict, markSaved, setTabDirty]);
+
+	const handleConflictKeep = useCallback(() => {
+		setExternalConflict(null);
+	}, []);
+
+	const handleDeletedDirtyDiscard = useCallback(() => {
+		if (externalConflict?.type !== "deleted") return;
+		const path = externalConflict.path;
+		setExternalConflict(null);
+		tabCacheRef.current.delete(path);
+		closeTab(path);
+	}, [externalConflict, closeTab]);
+
+	const handleDeletedDirtyKeep = useCallback(() => {
+		setExternalConflict(null);
+	}, []);
 
 	const closingTabsRef = useRef<Set<string>>(new Set());
 
@@ -271,6 +405,26 @@ export function AppLayout() {
 				</main>
 			</div>
 			<StatusBar saveStatus={activeTabPath ? saveStatus : undefined} />
+
+			<Dialog
+				open={externalConflict?.type === "modified"}
+				title="File changed externally"
+				description={`"${externalConflict ? basename(externalConflict.path) : ""}" has been modified outside the editor. You have unsaved changes.`}
+				confirmLabel="Reload"
+				cancelLabel="Keep my changes"
+				onConfirm={handleConflictReload}
+				onCancel={handleConflictKeep}
+			/>
+
+			<Dialog
+				open={externalConflict?.type === "deleted"}
+				title="File deleted externally"
+				description={`"${externalConflict ? basename(externalConflict.path) : ""}" has been deleted outside the editor. You have unsaved changes.`}
+				confirmLabel="Discard"
+				cancelLabel="Keep editing"
+				onConfirm={handleDeletedDirtyDiscard}
+				onCancel={handleDeletedDirtyKeep}
+			/>
 		</div>
 	);
 }

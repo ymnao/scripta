@@ -149,11 +149,7 @@ mod tests {
     #[test]
     fn test_create_file_with_parent_dirs() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir
-            .path()
-            .join("a/b/new.md")
-            .to_string_lossy()
-            .to_string();
+        let path = dir.path().join("a/b/new.md").to_string_lossy().to_string();
 
         create_file(path.clone()).unwrap();
         assert!(Path::new(&path).exists());

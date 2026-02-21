@@ -6,6 +6,7 @@ function resetStore() {
 		workspacePath: null,
 		tabs: [],
 		activeTabPath: null,
+		fileTreeVersion: 0,
 	});
 }
 
@@ -219,6 +220,16 @@ describe("useWorkspaceStore", () => {
 			useWorkspaceStore.getState().closeTabsByPrefix("/nonexistent/");
 			const state = useWorkspaceStore.getState();
 			expect(state.tabs).toHaveLength(1);
+		});
+	});
+
+	describe("bumpFileTreeVersion", () => {
+		it("increments fileTreeVersion", () => {
+			expect(useWorkspaceStore.getState().fileTreeVersion).toBe(0);
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+			expect(useWorkspaceStore.getState().fileTreeVersion).toBe(1);
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+			expect(useWorkspaceStore.getState().fileTreeVersion).toBe(2);
 		});
 	});
 

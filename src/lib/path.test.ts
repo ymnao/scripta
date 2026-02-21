@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addTrailingSep, dirname, joinPath, replaceName, replacePrefix } from "./path";
+import { addTrailingSep, basename, dirname, joinPath, replaceName, replacePrefix } from "./path";
 
 describe("dirname", () => {
 	it("returns parent directory for a file path", () => {
@@ -29,6 +29,12 @@ describe("dirname", () => {
 	it("returns drive root for single directory at root", () => {
 		expect(dirname("C:\\Users")).toBe("C:\\");
 	});
+
+	it("uses first-found separator for mixed paths", () => {
+		// getSep picks '\' (first match), so lastIndexOf('\') stops at 'C:\'
+		// Mixed separators don't occur in practice (Tauri uses consistent separators)
+		expect(dirname("C:\\Users/docs/file.md")).toBe("C:\\");
+	});
 });
 
 describe("joinPath", () => {
@@ -47,6 +53,10 @@ describe("joinPath", () => {
 	it("handles backslash paths", () => {
 		expect(joinPath("C:\\Users\\docs", "file.md")).toBe("C:\\Users\\docs\\file.md");
 	});
+
+	it("handles base with trailing backslash", () => {
+		expect(joinPath("C:\\Users\\", "file.md")).toBe("C:\\Users\\file.md");
+	});
 });
 
 describe("replaceName", () => {
@@ -60,6 +70,28 @@ describe("replaceName", () => {
 
 	it("handles backslash paths", () => {
 		expect(replaceName("C:\\docs\\old.md", "new.md")).toBe("C:\\docs\\new.md");
+	});
+});
+
+describe("basename", () => {
+	it("returns the last segment of a Unix path", () => {
+		expect(basename("/workspace/hello.md")).toBe("hello.md");
+	});
+
+	it("returns the last segment of a Windows path", () => {
+		expect(basename("C:\\Users\\docs\\file.md")).toBe("file.md");
+	});
+
+	it("returns the string itself when no separator is present", () => {
+		expect(basename("file.md")).toBe("file.md");
+	});
+
+	it("handles root-level file", () => {
+		expect(basename("/file.md")).toBe("file.md");
+	});
+
+	it("handles mixed separators (uses first found)", () => {
+		expect(basename("/workspace\\sub/file.md")).toBe("file.md");
 	});
 });
 
@@ -97,6 +129,12 @@ describe("replacePrefix", () => {
 	it("does not match partial directory names", () => {
 		expect(replacePrefix("/workspace-old/file.md", "/workspace", "/new")).toBe(
 			"/workspace-old/file.md",
+		);
+	});
+
+	it("handles Windows backslash paths", () => {
+		expect(replacePrefix("C:\\old\\dir\\file.md", "C:\\old\\dir", "C:\\new\\dir")).toBe(
+			"C:\\new\\dir\\file.md",
 		);
 	});
 });
