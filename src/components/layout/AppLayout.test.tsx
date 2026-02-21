@@ -546,5 +546,9 @@ describe("AppLayout", () => {
 
 		// Editor should still show b.md content, NOT the reloaded a.md content
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
+
+		// a.md's dirty flag should be cleared after reload
+		const aTab = useWorkspaceStore.getState().tabs.find((tab) => tab.path === "/workspace/a.md");
+		expect(aTab?.dirty).toBe(false);
 	});
 });

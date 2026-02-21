@@ -63,26 +63,44 @@ export function useFileWatcher({
 					pendingEvents.set(event.path, event.kind);
 				}
 			}
+			// Fixed-deadline batching: the timer starts on the first event arrival
+			// and is NOT reset by subsequent events. This matches the Rust-side
+			// batching policy (500ms deadline from first event).
 			if (batchTimer === null) {
 				batchTimer = setTimeout(flush, 300);
 			}
 		};
 
-		startWatcher(workspacePath).catch((err) => {
-			console.error("Failed to start file watcher:", err);
-		});
+		const setup = async () => {
+			try {
+				await startWatcher(workspacePath);
 
-		listen<FsChangeEvent[]>("fs-change", (event) => {
-			if (!cancelled) {
-				handleEvents(event.payload);
+				if (cancelled) {
+					try {
+						await stopWatcher();
+					} catch (err) {
+						console.error("Failed to stop file watcher after cancellation:", err);
+					}
+					return;
+				}
+
+				const fn = await listen<FsChangeEvent[]>("fs-change", (event) => {
+					if (!cancelled) {
+						handleEvents(event.payload);
+					}
+				});
+
+				if (cancelled) {
+					fn();
+				} else {
+					unlistenFn = fn;
+				}
+			} catch (err) {
+				console.error("Failed to set up file watcher:", err);
 			}
-		}).then((fn) => {
-			if (cancelled) {
-				fn();
-			} else {
-				unlistenFn = fn;
-			}
-		});
+		};
+
+		void setup();
 
 		return () => {
 			cancelled = true;

@@ -154,6 +154,12 @@ pub fn is_hidden(path: &Path) -> bool {
 
 /// Reclassify "modify" events for paths that no longer exist as "delete".
 /// macOS FSEvents may report file deletions as modify events.
+///
+/// Note: This has a TOCTOU race — a file could be re-created between the
+/// `exists()` check and the reclassification. In practice the impact is
+/// minimal: a subsequent "create" event will arrive and be merged into
+/// "modify" by `merge_event_kind`, so the frontend will still converge
+/// to the correct state.
 pub fn reclassify_deleted(pending: &mut HashMap<String, String>) {
     let deleted_paths: Vec<String> = pending
         .iter()

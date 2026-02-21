@@ -216,6 +216,7 @@ export function AppLayout() {
 		readFile(path)
 			.then((loaded) => {
 				tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+				setTabDirty(path, false);
 				// Only update editor state if this file is still the active tab
 				if (useWorkspaceStore.getState().activeTabPath === path) {
 					savedContentRef.current = loaded;
@@ -228,7 +229,7 @@ export function AppLayout() {
 				// File may have been deleted — notify user via the deleted dialog
 				setExternalConflict({ path, type: "deleted" });
 			});
-	}, [externalConflict, markSaved]);
+	}, [externalConflict, markSaved, setTabDirty]);
 
 	const handleConflictKeep = useCallback(() => {
 		setExternalConflict(null);
