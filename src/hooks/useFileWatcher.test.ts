@@ -74,7 +74,7 @@ describe("useFileWatcher", () => {
 		expect(startWatcher).not.toHaveBeenCalled();
 	});
 
-	it("batches events with 300ms debounce", async () => {
+	it("batches events with 300ms fixed deadline", async () => {
 		renderHook(() =>
 			useFileWatcher({
 				workspacePath: "/workspace",

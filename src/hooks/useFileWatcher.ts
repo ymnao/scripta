@@ -76,11 +76,8 @@ export function useFileWatcher({
 				await startWatcher(workspacePath);
 
 				if (cancelled) {
-					try {
-						await stopWatcher();
-					} catch (err) {
-						console.error("Failed to stop file watcher after cancellation:", err);
-					}
+					// Cleanup already calls stopWatcher(), so do nothing here
+					// to avoid stopping a newly started watcher from a later effect.
 					return;
 				}
 

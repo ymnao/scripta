@@ -81,18 +81,21 @@ export function FileTree({
 		[workspacePath],
 	);
 
+	const fileTreeVersion = useWorkspaceStore((s) => s.fileTreeVersion);
+	const prevFileTreeVersionRef = useRef(fileTreeVersion);
+
 	useEffect(() => {
 		setEntries([]);
 		loadEntries();
+		// Sync version ref so the fileTreeVersion effect below doesn't
+		// trigger a redundant refresh when workspace changes reset the counter.
+		prevFileTreeVersionRef.current = useWorkspaceStore.getState().fileTreeVersion;
 	}, [loadEntries]);
 
 	const refresh = useCallback(() => {
 		loadEntries(true);
 		setRefreshKey((k) => k + 1);
 	}, [loadEntries]);
-
-	const fileTreeVersion = useWorkspaceStore((s) => s.fileTreeVersion);
-	const prevFileTreeVersionRef = useRef(fileTreeVersion);
 
 	useEffect(() => {
 		if (prevFileTreeVersionRef.current === fileTreeVersion) return;
