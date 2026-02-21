@@ -29,6 +29,13 @@ export function replaceName(path: string, newName: string): string {
 	return path.slice(0, lastIndex + 1) + newName;
 }
 
+export function basename(path: string): string {
+	const sep = getSep(path);
+	const lastIndex = path.lastIndexOf(sep);
+	if (lastIndex === -1) return path;
+	return path.slice(lastIndex + 1);
+}
+
 export function addTrailingSep(path: string): string {
 	const sep = getSep(path);
 	return path.endsWith(sep) ? path : path + sep;

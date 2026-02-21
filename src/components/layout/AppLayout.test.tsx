@@ -2,16 +2,38 @@ import { act, render, screen } from "@testing-library/react";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFile, writeFile } from "../../lib/commands";
 import { useWorkspaceStore } from "../../stores/workspace";
+import type { FsChangeEvent } from "../../types/workspace";
 
 vi.mock("../../lib/commands", () => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn(),
 	listDirectory: vi.fn().mockResolvedValue([]),
+	startWatcher: vi.fn().mockResolvedValue(undefined),
+	stopWatcher: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
 	open: vi.fn(),
 }));
+
+// Capture the fs-change listener callback so tests can emit events
+type FsChangeCallback = (event: { payload: FsChangeEvent[] }) => void;
+let fsChangeCallback: FsChangeCallback | null = null;
+
+vi.mock("@tauri-apps/api/event", () => ({
+	listen: vi.fn().mockImplementation((_name: string, cb: FsChangeCallback) => {
+		fsChangeCallback = cb;
+		return Promise.resolve(() => {
+			fsChangeCallback = null;
+		});
+	}),
+}));
+
+function emitFsChange(events: FsChangeEvent[]) {
+	if (fsChangeCallback) {
+		fsChangeCallback({ payload: events });
+	}
+}
 
 vi.mock("../editor/MarkdownEditor", () => ({
 	MarkdownEditor: ({
@@ -47,6 +69,7 @@ function openFileInStore(workspacePath: string, filePath: string) {
 describe("AppLayout", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
+		fsChangeCallback = null;
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
 		useWorkspaceStore.setState({
@@ -371,5 +394,157 @@ describe("AppLayout", () => {
 
 		expect(useWorkspaceStore.getState().tabs).toEqual([]);
 		expect(useWorkspaceStore.getState().activeTabPath).toBeNull();
+	});
+
+	it("shows conflict dialog when dirty active tab is externally modified", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Make the tab dirty
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(useWorkspaceStore.getState().tabs[0].dirty).toBe(true);
+
+		// Emit external modify event and flush the 300ms batch timer
+		await act(async () => {
+			emitFsChange([{ kind: "modify", path: "/workspace/test.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+
+		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+		expect(screen.queryByText("File deleted externally")).not.toBeInTheDocument();
+	});
+
+	it("shows deleted dialog when dirty tab is externally deleted", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Make the tab dirty
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Emit external delete event and flush
+		await act(async () => {
+			emitFsChange([{ kind: "delete", path: "/workspace/test.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+
+		expect(screen.getByText("File deleted externally")).toBeInTheDocument();
+		expect(screen.queryByText("File changed externally")).not.toBeInTheDocument();
+	});
+
+	it("deleted dialog supersedes conflict dialog for the same file", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Make the tab dirty
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// First: external modify → conflict dialog
+		await act(async () => {
+			emitFsChange([{ kind: "modify", path: "/workspace/test.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+
+		// Then: external delete → should replace with deleted dialog
+		await act(async () => {
+			emitFsChange([{ kind: "delete", path: "/workspace/test.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+
+		expect(screen.getByText("File deleted externally")).toBeInTheDocument();
+		expect(screen.queryByText("File changed externally")).not.toBeInTheDocument();
+	});
+
+	it("only shows one dialog when different files trigger conflicts", async () => {
+		// Open a.md as active tab
+		openFileInStore("/workspace", "/workspace/a.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Make a.md dirty
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(useWorkspaceStore.getState().tabs[0].dirty).toBe(true);
+
+		// External modify on a.md (active, dirty) → conflict dialog
+		await act(async () => {
+			emitFsChange([{ kind: "modify", path: "/workspace/a.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+
+		// Add b.md as a second dirty tab (non-active)
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: true },
+				],
+			});
+		});
+
+		// External delete on b.md (non-active, dirty) → replaces with deleted dialog
+		await act(async () => {
+			emitFsChange([{ kind: "delete", path: "/workspace/b.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+		expect(screen.getByText("File deleted externally")).toBeInTheDocument();
+		expect(screen.queryByText("File changed externally")).not.toBeInTheDocument();
+	});
+
+	it("conflict reload updates only target tab when active tab changed", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		mockedReadFile.mockResolvedValue("content A");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Make a.md dirty
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Trigger conflict dialog for a.md
+		await act(async () => {
+			emitFsChange([{ kind: "modify", path: "/workspace/a.md" }]);
+			vi.advanceTimersByTime(300);
+		});
+		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+
+		// Switch to b.md while dialog is still open
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
+		});
+		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
+
+		// Click "Reload" on the conflict dialog
+		mockedReadFile.mockResolvedValue("reloaded A");
+		await act(async () => {
+			screen.getByRole("button", { name: "Reload" }).click();
+		});
+
+		// Editor should still show b.md content, NOT the reloaded a.md content
+		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
 	});
 });

@@ -3,3 +3,8 @@ export interface FileEntry {
 	path: string;
 	isDirectory: boolean;
 }
+
+export interface FsChangeEvent {
+	kind: "create" | "modify" | "delete";
+	path: string;
+}

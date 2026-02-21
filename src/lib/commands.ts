@@ -28,3 +28,11 @@ export function renameEntry(oldPath: string, newPath: string): Promise<void> {
 export function deleteEntry(path: string): Promise<void> {
 	return invoke<void>("delete_entry", { path });
 }
+
+export function startWatcher(path: string): Promise<void> {
+	return invoke<void>("start_watcher", { path });
+}
+
+export function stopWatcher(): Promise<void> {
+	return invoke<void>("stop_watcher");
+}

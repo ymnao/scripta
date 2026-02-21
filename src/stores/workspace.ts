@@ -9,6 +9,7 @@ interface WorkspaceState {
 	workspacePath: string | null;
 	tabs: Tab[];
 	activeTabPath: string | null;
+	fileTreeVersion: number;
 
 	setWorkspacePath: (path: string | null) => void;
 	openTab: (path: string) => void;
@@ -17,14 +18,18 @@ interface WorkspaceState {
 	setTabDirty: (path: string, dirty: boolean) => void;
 	renameTab: (oldPath: string, newPath: string) => void;
 	closeTabsByPrefix: (prefix: string) => void;
+	bumpFileTreeVersion: () => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	workspacePath: null,
 	tabs: [],
 	activeTabPath: null,
+	fileTreeVersion: 0,
 
 	setWorkspacePath: (path) => set({ workspacePath: path, tabs: [], activeTabPath: null }),
+
+	bumpFileTreeVersion: () => set((s) => ({ fileTreeVersion: s.fileTreeVersion + 1 })),
 
 	openTab: (path) =>
 		set((state) => {
