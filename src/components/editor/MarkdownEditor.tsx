@@ -33,7 +33,7 @@ const editorTheme = EditorView.theme({
 		color: "var(--color-text-primary)",
 	},
 	".cm-scroller": {
-		fontFamily: 'system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif',
+		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	},
 	".cm-content": {
 		caretColor: "var(--color-text-primary)",

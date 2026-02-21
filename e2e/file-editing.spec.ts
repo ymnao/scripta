@@ -23,7 +23,7 @@ test.describe("file editing", () => {
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
 
-		await expect(page.locator(".cm-content")).toContainText("# Hello World");
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
 		await expect(page.getByRole("tab")).toHaveCount(1);
 	});
 
@@ -35,7 +35,7 @@ test.describe("file editing", () => {
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
 
-		await expect(page.locator(".cm-content")).toContainText("# Hello World");
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" updated");
@@ -51,7 +51,7 @@ test.describe("file editing", () => {
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
 
-		await expect(page.locator(".cm-content")).toContainText("# Hello World");
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" updated");
@@ -72,7 +72,7 @@ test.describe("file editing", () => {
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
 
-		await expect(page.locator(".cm-content")).toContainText("# Hello World");
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" manual");

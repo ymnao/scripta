@@ -114,6 +114,13 @@ cd src-tauri && cargo test
 
 - フロントエンドのユニットテストは Vitest を使用
 - Rust 側のテストは `cargo test`
+- e2e テストは Playwright を使用（`npx playwright test`）
+- **コミット前に必ずユニットテストと e2e テストの両方を実行すること**
+
+```bash
+# コミット前の検証（すべて実行必須）
+pnpm format && pnpm lint && pnpm typecheck && pnpm test && npx playwright test
+```
 
 ## Issue・PR
 

@@ -38,7 +38,7 @@ export class LinkWidget extends WidgetType {
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
 			anchor.href = this.url;
-			anchor.title = `${this.url}\nCmd/Ctrl+Click to open`;
+			anchor.title = `${this.url} - Cmd/Ctrl+Click to open`;
 			anchor.addEventListener("click", (e) => {
 				if (!e.metaKey && !e.ctrlKey) return;
 				e.preventDefault();

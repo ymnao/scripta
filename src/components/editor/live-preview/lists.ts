@@ -49,6 +49,7 @@ export class CheckboxWidget extends WidgetType {
 		span.setAttribute("role", "checkbox");
 		span.setAttribute("aria-checked", String(this.checked));
 		span.setAttribute("aria-label", "Toggle task");
+		span.tabIndex = 0;
 		if (this.checked) {
 			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 			svg.setAttribute("viewBox", "0 0 16 16");
@@ -343,6 +344,17 @@ export const listKeymap = [
 	),
 ];
 
+function toggleCheckbox(view: EditorView, checkbox: Element): void {
+	const pos = Number((checkbox as HTMLElement).dataset.pos);
+	if (Number.isNaN(pos) || pos < 0 || pos + 3 > view.state.doc.length) return;
+	const current = view.state.doc.sliceString(pos, pos + 3);
+	const newText = current === "[x]" || current === "[X]" ? "[ ]" : "[x]";
+	view.dispatch({
+		changes: { from: pos, to: pos + 3, insert: newText },
+		annotations: Transaction.userEvent.of("input"),
+	});
+}
+
 export const listDecoration = ViewPlugin.fromClass(ListDecorationPlugin, {
 	decorations: (v) => v.decorations,
 	eventHandlers: {
@@ -351,17 +363,17 @@ export const listDecoration = ViewPlugin.fromClass(ListDecorationPlugin, {
 			if (!(target instanceof Element)) return;
 			const checkbox = target.closest(".cm-task-checkbox");
 			if (!checkbox) return;
-
 			event.preventDefault();
-			const pos = Number((checkbox as HTMLElement).dataset.pos);
-			if (Number.isNaN(pos) || pos < 0 || pos + 3 > view.state.doc.length) return;
-			const current = view.state.doc.sliceString(pos, pos + 3);
-			const newText = current === "[x]" || current === "[X]" ? "[ ]" : "[x]";
-			view.dispatch({
-				changes: { from: pos, to: pos + 3, insert: newText },
-				annotations: Transaction.userEvent.of("input"),
-			});
-			return true;
+			toggleCheckbox(view, checkbox);
+		},
+		keydown(event: KeyboardEvent, view: EditorView) {
+			if (event.key !== " " && event.key !== "Enter") return;
+			const target = event.target;
+			if (!(target instanceof Element)) return;
+			const checkbox = target.closest(".cm-task-checkbox");
+			if (!checkbox) return;
+			event.preventDefault();
+			toggleCheckbox(view, checkbox);
 		},
 	},
 });

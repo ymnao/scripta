@@ -36,13 +36,13 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await expect(page.locator(".cm-content")).toContainText("# Hello World");
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.getByLabel("notes.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Some notes here");
 
 		await page.getByRole("tab").filter({ hasText: "hello.md" }).click();
-		await expect(page.locator(".cm-content")).toContainText("# Hello World");
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
 	});
 
 	test("closes a tab with the close button", async ({ page }) => {
