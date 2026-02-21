@@ -36,15 +36,6 @@ function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
-	const cursorLines = new Set<number>();
-	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			cursorLines.add(l);
-		}
-	}
-
 	for (const { from, to } of view.visibleRanges) {
 		tree.iterate({
 			from,
@@ -53,8 +44,6 @@ function buildDecorations(view: EditorView): DecorationSet {
 				const level = headingNodeNames.get(node.name);
 				if (level === undefined) return;
 				const line = state.doc.lineAt(node.from);
-
-				if (cursorLines.has(line.number)) return;
 
 				builder.add(line.from, line.from, headingLineDecorations[level]);
 
@@ -94,7 +83,6 @@ class HeadingDecorationPlugin implements PluginValue {
 		if (
 			update.docChanged ||
 			update.viewportChanged ||
-			update.selectionSet ||
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
 			this.decorations = buildDecorations(update.view);

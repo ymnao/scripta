@@ -20,7 +20,7 @@ export function isSafeUrl(url: string): boolean {
 	return SAFE_URL_RE.test(url);
 }
 
-class LinkWidget extends WidgetType {
+export class LinkWidget extends WidgetType {
 	constructor(
 		readonly text: string,
 		readonly url: string,
@@ -38,8 +38,9 @@ class LinkWidget extends WidgetType {
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
 			anchor.href = this.url;
-			anchor.title = this.url;
+			anchor.title = `${this.url} - Cmd/Ctrl+Click to open`;
 			anchor.addEventListener("click", (e) => {
+				if (!e.metaKey && !e.ctrlKey) return;
 				e.preventDefault();
 				open(this.url).catch((error) => {
 					console.error("Failed to open external URL:", this.url, error);
@@ -55,7 +56,8 @@ class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		return event.type === "click";
+		const me = event as MouseEvent;
+		return event.type === "click" && (me.metaKey || me.ctrlKey);
 	}
 }
 
@@ -146,9 +148,4 @@ class LinkDecorationPlugin implements PluginValue {
 
 export const linkDecoration = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
-	// Register click handler so CM6 forwards click events to widgets
-	// instead of handling them as editor interactions
-	eventHandlers: {
-		click: () => {},
-	},
 });

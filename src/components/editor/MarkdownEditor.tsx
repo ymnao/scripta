@@ -1,6 +1,8 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { EditorView, keymap } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
 import {
@@ -12,7 +14,16 @@ import {
 	imageDecoration,
 	linkDecoration,
 	listDecoration,
+	listKeymap,
+	strikethroughDecoration,
 } from "./live-preview";
+
+const customHighlightStyle = syntaxHighlighting(
+	HighlightStyle.define([
+		{ tag: tags.heading, fontWeight: "bold" },
+		{ tag: tags.link, textDecoration: "none" },
+	]),
+);
 
 const editorTheme = EditorView.theme({
 	"&": {
@@ -26,6 +37,11 @@ const editorTheme = EditorView.theme({
 	},
 	".cm-content": {
 		caretColor: "var(--color-text-primary)",
+		padding: "8px 0",
+		fontSynthesis: "style",
+	},
+	".cm-line": {
+		padding: "1px 2px",
 	},
 	"&.cm-focused .cm-cursor": {
 		borderLeftColor: "var(--color-text-primary)",
@@ -38,24 +54,48 @@ const editorTheme = EditorView.theme({
 	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent)",
 	},
-	".cm-activeLine": {
-		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 8%, transparent)",
+	".cm-heading-1": {
+		fontSize: "1.8em",
+		fontWeight: "700",
+		lineHeight: "1.3",
+		padding: "0.6em 0 0.2em",
 	},
-	".cm-activeLineGutter": {
-		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 8%, transparent)",
+	".cm-heading-2": {
+		fontSize: "1.5em",
+		fontWeight: "700",
+		lineHeight: "1.3",
+		padding: "0.5em 0 0.15em",
 	},
-	".cm-heading-1": { fontSize: "1.8em", fontWeight: "700", lineHeight: "1.3" },
-	".cm-heading-2": { fontSize: "1.5em", fontWeight: "700", lineHeight: "1.3" },
-	".cm-heading-3": { fontSize: "1.25em", fontWeight: "600", lineHeight: "1.3" },
-	".cm-heading-4": { fontSize: "1.1em", fontWeight: "600", lineHeight: "1.3" },
-	".cm-heading-5": { fontSize: "1em", fontWeight: "600", lineHeight: "1.3" },
-	".cm-heading-6": { fontSize: "0.9em", fontWeight: "600", lineHeight: "1.3" },
+	".cm-heading-3": {
+		fontSize: "1.25em",
+		fontWeight: "600",
+		lineHeight: "1.3",
+		padding: "0.4em 0 0.1em",
+	},
+	".cm-heading-4": {
+		fontSize: "1.1em",
+		fontWeight: "600",
+		lineHeight: "1.3",
+		padding: "0.3em 0 0.1em",
+	},
+	".cm-heading-5": {
+		fontSize: "1em",
+		fontWeight: "600",
+		lineHeight: "1.3",
+		padding: "0.2em 0 0.05em",
+	},
+	".cm-heading-6": {
+		fontSize: "0.9em",
+		fontWeight: "600",
+		lineHeight: "1.3",
+		padding: "0.2em 0 0.05em",
+	},
 	".cm-strong": { fontWeight: "700" },
 	".cm-emphasis": { fontStyle: "italic" },
 	".cm-link-widget": {
 		color: "var(--color-text-link)",
 		textDecoration: "underline",
-		cursor: "pointer",
+		cursor: "text",
 	},
 	".cm-link-widget-disabled": {
 		textDecoration: "none",
@@ -78,11 +118,31 @@ const editorTheme = EditorView.theme({
 	},
 	".cm-codeblock-line": {
 		backgroundColor: "var(--color-bg-secondary)",
+		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	},
 	".cm-task-checkbox": {
-		cursor: "pointer",
-		marginRight: "4px",
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		width: "16px",
+		height: "16px",
+		borderRadius: "4px",
+		border: "1.5px solid var(--color-text-secondary)",
+		marginRight: "6px",
 		verticalAlign: "middle",
+		cursor: "pointer",
+		backgroundColor: "transparent",
+		transition: "background-color 0.15s, border-color 0.15s",
+		flexShrink: "0",
+	},
+	".cm-task-checkbox-checked": {
+		backgroundColor: "var(--color-text-link)",
+		borderColor: "var(--color-text-link)",
+		color: "white",
+	},
+	".cm-task-checkmark": {
+		width: "12px",
+		height: "12px",
 	},
 	".cm-blockquote-line": {
 		borderLeft: "3px solid var(--color-border)",
@@ -92,6 +152,19 @@ const editorTheme = EditorView.theme({
 		border: "none",
 		borderTop: "1px solid var(--color-border)",
 		margin: "8px 0",
+	},
+	".cm-strikethrough": {
+		textDecoration: "line-through",
+	},
+	".cm-task-checked": {
+		textDecoration: "line-through",
+		opacity: "0.6",
+		color: "var(--color-text-secondary)",
+	},
+	".cm-bullet-mark": {
+		color: "var(--color-text-secondary)",
+		fontSize: "0.85em",
+		marginRight: "0.35em",
 	},
 });
 
@@ -108,10 +181,14 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 
 	const extensions = useMemo(
 		() => [
+			listKeymap,
 			editorTheme,
+			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+			customHighlightStyle,
 			markdownExtension,
 			headingDecoration,
 			emphasisDecoration,
+			strikethroughDecoration,
 			linkDecoration,
 			imageDecoration,
 			codeBlockDecoration,
@@ -145,8 +222,8 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 					basicSetup={{
 						lineNumbers: true,
 						foldGutter: true,
-						highlightActiveLine: true,
-						highlightActiveLineGutter: true,
+						highlightActiveLine: false,
+						highlightActiveLineGutter: false,
 						bracketMatching: true,
 						closeBrackets: true,
 						indentOnInput: true,

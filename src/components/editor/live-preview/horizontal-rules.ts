@@ -30,15 +30,6 @@ export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
-	const cursorLines = new Set<number>();
-	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			cursorLines.add(l);
-		}
-	}
-
 	const ranges: Range<Decoration>[] = [];
 
 	for (const { from, to } of view.visibleRanges) {
@@ -47,9 +38,6 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			to,
 			enter(node) {
 				if (node.name !== "HorizontalRule") return;
-
-				const line = state.doc.lineAt(node.from);
-				if (cursorLines.has(line.number)) return;
 
 				ranges.push(
 					Decoration.replace({
@@ -74,7 +62,6 @@ class HorizontalRuleDecorationPlugin implements PluginValue {
 		if (
 			update.docChanged ||
 			update.viewportChanged ||
-			update.selectionSet ||
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
 			this.decorations = buildDecorations(update.view);

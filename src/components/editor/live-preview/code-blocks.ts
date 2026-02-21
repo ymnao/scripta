@@ -12,6 +12,7 @@ import {
 const codeBlockLineDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-line" },
 });
+const replaceDecoration = Decoration.replace({});
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
@@ -38,17 +39,24 @@ export function buildDecorations(view: EditorView): DecorationSet {
 				const startLine = state.doc.lineAt(node.from);
 				const endLine = state.doc.lineAt(node.to);
 
-				// Skip the entire code block if cursor is on any of its lines
-				for (let l = startLine.number; l <= endLine.number; l++) {
-					if (cursorLines.has(l)) return;
-				}
-
 				// Clamp decoration target lines to the current visible range
 				const visibleStartLine = state.doc.lineAt(from);
 				const visibleEndLine = state.doc.lineAt(to);
 				const fromLineNumber = Math.max(startLine.number, visibleStartLine.number);
 				const toLineNumber = Math.min(endLine.number, visibleEndLine.number);
 				if (fromLineNumber > toLineNumber) return;
+
+				// Hide fence lines only when cursor is not on them
+				if (!cursorLines.has(startLine.number) && startLine.from < startLine.to) {
+					ranges.push(replaceDecoration.range(startLine.from, startLine.to));
+				}
+				if (
+					endLine.number !== startLine.number &&
+					!cursorLines.has(endLine.number) &&
+					endLine.from < endLine.to
+				) {
+					ranges.push(replaceDecoration.range(endLine.from, endLine.to));
+				}
 
 				// Add background line decoration only to the visible intersection
 				for (let l = fromLineNumber; l <= toLineNumber; l++) {

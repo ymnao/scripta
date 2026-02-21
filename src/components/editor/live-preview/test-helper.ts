@@ -1,12 +1,19 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import type { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 
-export function createTestState(doc: string, cursorPos?: number): EditorState {
+export function createTestState(
+	doc: string,
+	cursorPos?: number,
+	extraExtensions?: Extension,
+): EditorState {
 	return EditorState.create({
 		doc,
-		extensions: [markdown({ base: markdownLanguage })],
+		extensions: [
+			markdown({ base: markdownLanguage }),
+			...(extraExtensions ? [extraExtensions] : []),
+		],
 		selection: cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined,
 	});
 }
@@ -52,4 +59,15 @@ export function widgetDecorations(
 	decos: { from: number; to: number; value: Decoration }[],
 ): { from: number; to: number; value: Decoration }[] {
 	return decos.filter((d) => (d.value.spec as { widget?: unknown }).widget != null);
+}
+
+export function markDecorations(
+	decos: { from: number; to: number; value: Decoration }[],
+): { from: number; to: number; value: Decoration }[] {
+	return decos.filter(
+		(d) =>
+			d.from < d.to &&
+			(d.value.spec as { class?: string }).class != null &&
+			(d.value.spec as { widget?: unknown }).widget == null,
+	);
 }

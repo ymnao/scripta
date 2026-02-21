@@ -15,11 +15,24 @@ describe("buildDecorations", () => {
 		expect(lines).toHaveLength(3);
 	});
 
-	it("does not create replace decorations", () => {
+	it("creates replace decorations for fence lines", () => {
 		const view = createViewForTest("text\n\n```\ncode\n```");
 		const decos = collectDecorations(buildDecorations(view));
 		const replaces = replaceDecorations(decos);
-		expect(replaces).toHaveLength(0);
+		expect(replaces).toHaveLength(2);
+	});
+
+	it("creates replace decoration for language-specified fence", () => {
+		const view = createViewForTest("text\n\n```js\nconst x = 1;\n```");
+		const decos = collectDecorations(buildDecorations(view));
+		const replaces = replaceDecorations(decos);
+		expect(replaces).toHaveLength(2);
+	});
+
+	it("creates 5 total decorations (3 line + 2 replace)", () => {
+		const view = createViewForTest("text\n\n```\ncode\n```");
+		const decos = collectDecorations(buildDecorations(view));
+		expect(decos).toHaveLength(5);
 	});
 
 	it("applies cm-codeblock-line class", () => {
@@ -59,28 +72,39 @@ describe("buildDecorations", () => {
 		expect(lines).toHaveLength(5);
 	});
 
-	it("skips entire block when cursor is on code line", () => {
+	it("keeps all decorations when cursor is on code line", () => {
 		const doc = "text\n\n```\ncode\n```";
 		const cursorPos = doc.indexOf("code");
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
-		expect(decos).toHaveLength(0);
+		const replaces = replaceDecorations(decos);
+		const lines = lineDecorations(decos);
+		expect(replaces).toHaveLength(2);
+		expect(lines).toHaveLength(3);
 	});
 
-	it("skips entire block when cursor is on opening fence", () => {
+	it("shows opening fence when cursor is on it", () => {
 		const doc = "text\n\n```\ncode\n```";
 		const cursorPos = doc.indexOf("```");
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
-		expect(decos).toHaveLength(0);
+		const replaces = replaceDecorations(decos);
+		const lines = lineDecorations(decos);
+		// Only closing fence is hidden
+		expect(replaces).toHaveLength(1);
+		expect(lines).toHaveLength(3);
 	});
 
-	it("skips entire block when cursor is on closing fence", () => {
+	it("shows closing fence when cursor is on it", () => {
 		const doc = "text\n\n```\ncode\n```";
 		const cursorPos = doc.lastIndexOf("```");
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
-		expect(decos).toHaveLength(0);
+		const replaces = replaceDecorations(decos);
+		const lines = lineDecorations(decos);
+		// Only opening fence is hidden
+		expect(replaces).toHaveLength(1);
+		expect(lines).toHaveLength(3);
 	});
 
 	it("decorates multiple code blocks", () => {
@@ -89,15 +113,6 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildDecorations(view));
 		const lines = lineDecorations(decos);
 		expect(lines).toHaveLength(6);
-	});
-
-	it("only skips the block where cursor is positioned", () => {
-		const doc = "```\na\n```\n\n```\nb\n```";
-		// Cursor on first block
-		const view = createViewForTest(doc, 0);
-		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
-		expect(lines).toHaveLength(3);
 	});
 
 	it("returns empty set for document without code blocks", () => {
