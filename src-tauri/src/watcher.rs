@@ -132,11 +132,8 @@ impl WatcherState {
 }
 
 pub fn is_hidden(path: &Path) -> bool {
-    path.components().any(|c| {
-        c.as_os_str()
-            .to_string_lossy()
-            .starts_with('.')
-    })
+    path.components()
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
 }
 
 /// Reclassify "modify" events for paths that no longer exist as "delete".
@@ -234,10 +231,7 @@ mod tests {
 
     #[test]
     fn test_map_event_kind_access() {
-        assert_eq!(
-            map_event_kind(&EventKind::Access(AccessKind::Read)),
-            None
-        );
+        assert_eq!(map_event_kind(&EventKind::Access(AccessKind::Read)), None);
     }
 
     #[test]

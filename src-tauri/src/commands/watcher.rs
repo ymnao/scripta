@@ -16,9 +16,7 @@ pub fn start_watcher(
 
 #[cfg(feature = "tauri-app")]
 #[tauri::command]
-pub fn stop_watcher(
-    state: tauri::State<'_, Arc<Mutex<WatcherState>>>,
-) -> Result<(), String> {
+pub fn stop_watcher(state: tauri::State<'_, Arc<Mutex<WatcherState>>>) -> Result<(), String> {
     let mut watcher_state = state.lock().map_err(|e| e.to_string())?;
     watcher_state.stop();
     Ok(())

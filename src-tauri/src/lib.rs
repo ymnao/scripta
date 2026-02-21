@@ -4,8 +4,7 @@ mod watcher;
 #[cfg(feature = "tauri-app")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let watcher_state =
-        std::sync::Arc::new(std::sync::Mutex::new(watcher::WatcherState::new()));
+    let watcher_state = std::sync::Arc::new(std::sync::Mutex::new(watcher::WatcherState::new()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
