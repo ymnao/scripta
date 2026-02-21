@@ -24,6 +24,7 @@ pub struct FsChangeEvent {
 pub struct WatcherState {
     watcher: Option<RecommendedWatcher>,
     stop_tx: Option<mpsc::Sender<()>>,
+    thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 #[cfg(feature = "tauri-app")]
@@ -32,6 +33,7 @@ impl WatcherState {
         Self {
             watcher: None,
             stop_tx: None,
+            thread_handle: None,
         }
     }
 
@@ -60,7 +62,7 @@ impl WatcherState {
         self.watcher = Some(watcher);
         self.stop_tx = Some(stop_tx);
 
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let batch_duration = Duration::from_millis(500);
             let poll_interval = Duration::from_millis(50);
             let mut pending: HashMap<String, String> = HashMap::new();
@@ -119,6 +121,7 @@ impl WatcherState {
                 let _ = app_handle.emit("fs-change", &events);
             }
         });
+        self.thread_handle = Some(handle);
 
         Ok(())
     }
@@ -127,7 +130,13 @@ impl WatcherState {
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
         }
+        // Drop the watcher first so no new filesystem events are generated,
+        // then join the aggregator thread to ensure it has fully stopped
+        // before a new watcher can be started (prevents stale event leaks).
         self.watcher = None;
+        if let Some(handle) = self.thread_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 

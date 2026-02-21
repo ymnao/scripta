@@ -40,10 +40,10 @@ export function useFileWatcher({
 			for (const [path, kind] of events) {
 				if (kind === "delete") {
 					onFileDeletedRef.current(path);
-				}
-				if (kind === "modify") {
+				} else if (kind === "modify") {
 					onFileModifiedRef.current(path);
 				}
+				// "create" events need no per-file callback; handled by tree refresh below
 			}
 			// Always refresh — macOS FSEvents may report create/delete as modify.
 			// Tree refresh is idempotent so unconditional refresh is safe.

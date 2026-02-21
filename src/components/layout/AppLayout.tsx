@@ -127,6 +127,9 @@ export function AppLayout() {
 		}
 	}, [activeTabPath, saveStatus, setTabDirty]);
 
+	// Single state ensures only one dialog is shown at a time. When multiple
+	// files have conflicts, the latest event wins; earlier conflicts are dropped
+	// but dirty content is preserved in memory so no data is lost.
 	const [externalConflict, setExternalConflict] = useState<{
 		path: string;
 		type: "modified" | "deleted";
@@ -218,6 +221,8 @@ export function AppLayout() {
 			})
 			.catch((err) => {
 				console.error("Failed to reload file on conflict resolve:", err);
+				// File may have been deleted — notify user via the deleted dialog
+				setExternalConflict({ path, type: "deleted" });
 			});
 	}, [externalConflict, markSaved]);
 
@@ -388,7 +393,7 @@ export function AppLayout() {
 			<Dialog
 				open={externalConflict?.type === "modified"}
 				title="File changed externally"
-				description={`"${externalConflict?.type === "modified" ? basename(externalConflict.path) : ""}" has been modified outside the editor. You have unsaved changes.`}
+				description={`"${externalConflict ? basename(externalConflict.path) : ""}" has been modified outside the editor. You have unsaved changes.`}
 				confirmLabel="Reload"
 				cancelLabel="Keep my changes"
 				onConfirm={handleConflictReload}
@@ -398,7 +403,7 @@ export function AppLayout() {
 			<Dialog
 				open={externalConflict?.type === "deleted"}
 				title="File deleted externally"
-				description={`"${externalConflict?.type === "deleted" ? basename(externalConflict.path) : ""}" has been deleted outside the editor. You have unsaved changes.`}
+				description={`"${externalConflict ? basename(externalConflict.path) : ""}" has been deleted outside the editor. You have unsaved changes.`}
 				confirmLabel="Discard"
 				cancelLabel="Keep editing"
 				onConfirm={handleDeletedDirtyDiscard}
