@@ -135,6 +135,17 @@ export function AppLayout() {
 		type: "modified" | "deleted";
 	} | null>(null);
 
+	// Clear stale conflict dialog when workspace changes.
+	// workspacePath is read only to satisfy the exhaustive-deps rule;
+	// the real purpose is to trigger on workspace switches.
+	const prevWorkspaceRef = useRef(workspacePath);
+	useEffect(() => {
+		if (prevWorkspaceRef.current !== workspacePath) {
+			prevWorkspaceRef.current = workspacePath;
+			setExternalConflict(null);
+		}
+	}, [workspacePath]);
+
 	const handleTreeChange = useCallback(() => {
 		bumpFileTreeVersion();
 	}, [bumpFileTreeVersion]);
