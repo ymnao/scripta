@@ -16,7 +16,7 @@ function applyTheme(theme: Theme) {
 	try {
 		localStorage.setItem("mark-draft-theme", theme);
 	} catch {
-		// ignore Storage access errors
+		// localStorage が利用できない環境（プライベートブラウジング等）でのエラーを無視
 	}
 }
 
@@ -25,7 +25,7 @@ function detectInitialTheme(): Theme {
 		const stored = localStorage.getItem("mark-draft-theme");
 		if (stored === "dark" || stored === "light") return stored;
 	} catch {
-		// ignore Storage access errors
+		// localStorage が利用できない環境（プライベートブラウジング等）でのエラーを無視
 	}
 	if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
 		return "dark";

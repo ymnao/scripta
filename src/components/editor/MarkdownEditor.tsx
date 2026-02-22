@@ -247,8 +247,9 @@ export function MarkdownEditor({
 		onEditorViewRef.current?.(null);
 	}, []);
 
-	const extensions = useMemo(
-		() => [
+	const extensions = useMemo(() => {
+		let statsRafId = 0;
+		return [
 			listKeymap,
 			editorTheme,
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -278,17 +279,19 @@ export function MarkdownEditor({
 				if (!(update.docChanged || update.selectionChanged)) return;
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
-				const sel = update.state.selection.main;
-				const lineInfo = update.state.doc.lineAt(sel.head);
-				callback({
-					line: lineInfo.number,
-					col: sel.head - lineInfo.from + 1,
-					chars: update.state.doc.length,
+				cancelAnimationFrame(statsRafId);
+				statsRafId = requestAnimationFrame(() => {
+					const sel = update.state.selection.main;
+					const lineInfo = update.state.doc.lineAt(sel.head);
+					callback({
+						line: lineInfo.number,
+						col: sel.head - lineInfo.from + 1,
+						chars: update.state.doc.length,
+					});
 				});
 			}),
-		],
-		[],
-	);
+		];
+	}, []);
 
 	return (
 		<div className="relative min-h-0 min-w-0 flex-1">

@@ -109,9 +109,9 @@ export function AppLayout() {
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible]);
 
-	// Flip loadingRef AFTER persistence effects have run for the initial hydration.
-	// Effects execute in declaration order, so this runs after the persistence effects
-	// above, ensuring they see loadingRef.current === true and skip the initial save.
+	// 初回ロード時の永続化をスキップするため、loading が false になった後に loadingRef を更新する。
+	// useEffect は宣言順に実行されるので、上の永続化 effect が先に走り
+	// loadingRef.current === true を見てスキップした後にここで false にする。
 	useEffect(() => {
 		if (!loading) {
 			loadingRef.current = false;
