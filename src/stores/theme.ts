@@ -48,6 +48,7 @@ export const useThemeStore = create<ThemeState>()((set) => ({
 	},
 	setTheme: (theme: Theme) => {
 		applyTheme(theme);
+		void saveTheme(theme);
 		set({ theme });
 	},
 }));
