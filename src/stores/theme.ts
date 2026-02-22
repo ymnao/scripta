@@ -1,12 +1,13 @@
 import { create } from "zustand";
-import { saveTheme } from "../lib/store";
+import { type ThemePreference, saveThemePreference } from "../lib/store";
 
 type Theme = "light" | "dark";
 
 interface ThemeState {
+	preference: ThemePreference;
 	theme: Theme;
-	toggleTheme: () => void;
-	setTheme: (theme: Theme) => void;
+	setPreference: (pref: ThemePreference) => void;
+	cyclePreference: () => void;
 }
 
 function applyTheme(theme: Theme) {
@@ -22,35 +23,72 @@ function applyTheme(theme: Theme) {
 	}
 }
 
-function detectInitialTheme(): Theme {
-	try {
-		const stored = localStorage.getItem("mark-draft-theme");
-		if (stored === "dark" || stored === "light") return stored;
-	} catch {
-		// Ignore — localStorage may be unavailable (e.g. private browsing)
-	}
+function resolveTheme(pref: ThemePreference): Theme {
+	if (pref === "light" || pref === "dark") return pref;
+	// pref === "system"
 	if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
 		return "dark";
 	}
 	return "light";
 }
 
-const initialTheme = detectInitialTheme();
+function detectInitialPreference(): ThemePreference {
+	try {
+		const stored = localStorage.getItem("mark-draft-theme-preference");
+		if (stored === "system" || stored === "light" || stored === "dark") return stored;
+	} catch {
+		// Ignore
+	}
+	// Fallback: check legacy theme cache for initial render
+	try {
+		const legacy = localStorage.getItem("mark-draft-theme");
+		if (legacy === "light" || legacy === "dark") return legacy;
+	} catch {
+		// Ignore
+	}
+	return "system";
+}
+
+function persistPreferenceToLocalStorage(pref: ThemePreference) {
+	try {
+		localStorage.setItem("mark-draft-theme-preference", pref);
+	} catch {
+		// Ignore
+	}
+}
+
+const initialPreference = detectInitialPreference();
+const initialTheme = resolveTheme(initialPreference);
 applyTheme(initialTheme);
 
-export const useThemeStore = create<ThemeState>()((set) => ({
+const CYCLE_ORDER: ThemePreference[] = ["system", "light", "dark"];
+
+export const useThemeStore = create<ThemeState>()((set, get) => ({
+	preference: initialPreference,
 	theme: initialTheme,
-	toggleTheme: () => {
-		set((state) => {
-			const next = state.theme === "light" ? "dark" : "light";
-			applyTheme(next);
-			void saveTheme(next);
-			return { theme: next };
-		});
-	},
-	setTheme: (theme: Theme) => {
+	setPreference: (pref: ThemePreference) => {
+		const theme = resolveTheme(pref);
 		applyTheme(theme);
-		void saveTheme(theme);
-		set({ theme });
+		persistPreferenceToLocalStorage(pref);
+		void saveThemePreference(pref);
+		set({ preference: pref, theme });
+	},
+	cyclePreference: () => {
+		const current = get().preference;
+		const idx = CYCLE_ORDER.indexOf(current);
+		const next = CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length];
+		get().setPreference(next);
 	},
 }));
+
+// Listen for OS theme changes — update resolved theme when preference is "system"
+if (typeof window !== "undefined") {
+	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+		const state = useThemeStore.getState();
+		if (state.preference === "system") {
+			const theme = resolveTheme("system");
+			applyTheme(theme);
+			useThemeStore.setState({ theme });
+		}
+	});
+}

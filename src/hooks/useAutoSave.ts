@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
+import { useSettingsStore } from "../stores/settings";
 
-const DEBOUNCE_MS = 2000;
+function processContent(content: string, trimWhitespace: boolean): string {
+	let result = content;
+	if (trimWhitespace) {
+		result = result.replace(/[ \t]+$/gm, "");
+	}
+	// 最終行末尾改行は常に保証
+	if (result.length === 0 || !result.endsWith("\n")) {
+		result += "\n";
+	}
+	return result;
+}
 
 interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;
@@ -12,6 +23,7 @@ interface UseAutoSaveReturn {
 }
 
 export function useAutoSave(filePath: string, content: string): UseAutoSaveReturn {
+	const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
 	const contentRef = useRef(content);
 	contentRef.current = content;
@@ -31,7 +43,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			saveIdRef.current += 1;
 			const currentSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			const writePromise = inflightRef.current.then(() => writeFile(filePath, contentToSave));
+			const { trimTrailingWhitespace } = useSettingsStore.getState();
+			const processed = processContent(contentToSave, trimTrailingWhitespace);
+			const writePromise = inflightRef.current.then(() => writeFile(filePath, processed));
 			inflightRef.current = writePromise.catch(() => {});
 			return writePromise.then(
 				() => {
@@ -73,7 +87,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			saveIdRef.current += 1;
 			const flushSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			const flushPromise = inflightRef.current.then(() => writeFile(prevPath, currentContent));
+			const { trimTrailingWhitespace } = useSettingsStore.getState();
+			const processed = processContent(currentContent, trimTrailingWhitespace);
+			const flushPromise = inflightRef.current.then(() => writeFile(prevPath, processed));
 			inflightRef.current = flushPromise.catch(() => {});
 			flushPromise
 				.then(() => {
@@ -103,13 +119,13 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		}
 		debounceTimerRef.current = setTimeout(() => {
 			save(content).catch(() => {});
-		}, DEBOUNCE_MS);
+		}, autoSaveDelay);
 		return () => {
 			if (debounceTimerRef.current) {
 				clearTimeout(debounceTimerRef.current);
 			}
 		};
-	}, [content, save]);
+	}, [content, save, autoSaveDelay]);
 
 	useEffect(() => {
 		isMountedRef.current = true;

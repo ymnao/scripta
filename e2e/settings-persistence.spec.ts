@@ -28,6 +28,7 @@ test.describe("settings persistence", () => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace", {
 			sidebarVisible: true,
+			themePreference: "system",
 			workspacePath: "/workspace",
 		});
 

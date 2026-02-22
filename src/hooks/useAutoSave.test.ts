@@ -6,6 +6,16 @@ vi.mock("../lib/commands", () => ({
 	writeFile: vi.fn(),
 }));
 
+vi.mock("../lib/store", () => ({
+	saveShowLineNumbers: vi.fn(),
+	saveFontSize: vi.fn(),
+	saveAutoSaveDelay: vi.fn(),
+	saveIndentSize: vi.fn(),
+	saveHighlightActiveLine: vi.fn(),
+	saveFontFamily: vi.fn(),
+	saveTrimTrailingWhitespace: vi.fn(),
+}));
+
 const { useAutoSave } = await import("./useAutoSave");
 
 const mockedWriteFile = writeFile as Mock;
@@ -52,7 +62,7 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(2000);
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed");
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed\n");
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
@@ -70,7 +80,7 @@ describe("useAutoSave", () => {
 			result.current.saveNow();
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed");
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed\n");
 		expect(result.current.saveStatus).toBe("saved");
 
 		// Verify debounce timer doesn't fire a second save
@@ -178,7 +188,7 @@ describe("useAutoSave", () => {
 		await act(async () => {
 			vi.advanceTimersByTime(500);
 		});
-		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "edit2");
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "edit2\n");
 	});
 
 	it("flushes pending changes to old path when filePath changes", async () => {
@@ -200,7 +210,7 @@ describe("useAutoSave", () => {
 			rerender({ filePath: "b.md", content: "edited A" });
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A");
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
 		expect(mockedWriteFile).not.toHaveBeenCalledWith("b.md", expect.anything());
 		expect(result.current.saveStatus).toBe("saved");
 	});
@@ -226,7 +236,7 @@ describe("useAutoSave", () => {
 			rerender({ filePath: "b.md", content: "edited A" });
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A");
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
 		expect(result.current.saveStatus).toBe("error");
 	});
 
@@ -272,7 +282,7 @@ describe("useAutoSave", () => {
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
-		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited");
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited\n");
 
 		mockedWriteFile.mockClear();
 
@@ -421,7 +431,7 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(2000);
 		});
 		// Auto-save writeFile("v1") is now in-flight (pending)
-		expect(writeOrder).toEqual(["v1"]);
+		expect(writeOrder).toEqual(["v1\n"]);
 
 		// User edits to "v2" and calls saveNow (chains on inflightRef)
 		rerender({ content: "v2" });
@@ -430,7 +440,7 @@ describe("useAutoSave", () => {
 		});
 
 		// writeFile for "v2" should NOT have been called yet (blocked by in-flight auto-save)
-		expect(writeOrder).toEqual(["v1"]);
+		expect(writeOrder).toEqual(["v1\n"]);
 
 		// Resolve the auto-save — unblocks saveNow's chained write
 		await act(async () => {
@@ -438,7 +448,7 @@ describe("useAutoSave", () => {
 		});
 
 		// "v2" should have been written AFTER "v1" — guaranteed last-write-wins
-		expect(writeOrder).toEqual(["v1", "v2"]);
+		expect(writeOrder).toEqual(["v1\n", "v2\n"]);
 		expect(result.current.saveStatus).toBe("saved");
 	});
 });

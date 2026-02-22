@@ -19,12 +19,26 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 vi.mock("../../lib/store", () => ({
 	loadSettings: vi.fn().mockResolvedValue({
 		workspacePath: null,
-		theme: "light",
+		themePreference: "system",
 		sidebarVisible: true,
+		showLineNumbers: true,
+		fontSize: 14,
+		autoSaveDelay: 2000,
+		indentSize: 2,
+		highlightActiveLine: false,
+		fontFamily: "monospace",
+		trimTrailingWhitespace: true,
 	}),
 	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
-	saveTheme: vi.fn().mockResolvedValue(undefined),
+	saveThemePreference: vi.fn().mockResolvedValue(undefined),
 	saveSidebarVisible: vi.fn().mockResolvedValue(undefined),
+	saveShowLineNumbers: vi.fn().mockResolvedValue(undefined),
+	saveFontSize: vi.fn().mockResolvedValue(undefined),
+	saveAutoSaveDelay: vi.fn().mockResolvedValue(undefined),
+	saveIndentSize: vi.fn().mockResolvedValue(undefined),
+	saveHighlightActiveLine: vi.fn().mockResolvedValue(undefined),
+	saveFontFamily: vi.fn().mockResolvedValue(undefined),
+	saveTrimTrailingWhitespace: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Capture the fs-change listener callback so tests can emit events
@@ -147,7 +161,7 @@ describe("AppLayout", () => {
 			vi.advanceTimersByTime(2000);
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content");
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 		expect(screen.getByText("Saved")).toBeInTheDocument();
 	});
 
@@ -166,7 +180,7 @@ describe("AppLayout", () => {
 			screen.getByTestId("editor-save").click();
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content");
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 		expect(screen.getByText("Saved")).toBeInTheDocument();
 	});
 
@@ -198,7 +212,7 @@ describe("AppLayout", () => {
 		});
 
 		// Should have saved "new content" to a.md (NOT b.md)
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content");
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content\n");
 		expect(mockedWriteFile).not.toHaveBeenCalledWith("/workspace/b.md", "new content");
 
 		// Should load file B
@@ -387,7 +401,7 @@ describe("AppLayout", () => {
 			);
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content");
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 		expect(useWorkspaceStore.getState().tabs).toEqual([]);
 	});
 

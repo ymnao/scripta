@@ -11,6 +11,7 @@ if (initData) {
 interface Store {
 	get<T>(key: string): Promise<T | undefined>;
 	set(key: string, value: unknown): Promise<void>;
+	delete(key: string): Promise<void>;
 	save(): Promise<void>;
 }
 
@@ -20,6 +21,9 @@ const storeInstance: Store = {
 	},
 	async set(key: string, value: unknown): Promise<void> {
 		memoryStore.set(key, value);
+	},
+	async delete(key: string): Promise<void> {
+		memoryStore.delete(key);
 	},
 	async save(): Promise<void> {
 		// no-op in mock
