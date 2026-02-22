@@ -2,10 +2,13 @@ import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
-import { readFile, writeFile } from "../../lib/commands";
+import { listDirectory, readFile, writeFile } from "../../lib/commands";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
+import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
+import { useThemeStore } from "../../stores/theme";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { Dialog } from "../common/Dialog";
+import type { CursorInfo } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
@@ -23,18 +26,24 @@ interface TabCache {
 export function AppLayout() {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
 	const closeTab = useWorkspaceStore((s) => s.closeTab);
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
 	const renameTab = useWorkspaceStore((s) => s.renameTab);
 	const openTab = useWorkspaceStore((s) => s.openTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
+	const setTheme = useThemeStore((s) => s.setTheme);
 
+	const [loading, setLoading] = useState(true);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
 	const [sidebarSearchActive, setSidebarSearchActive] = useState(false);
+	const [sidebarVisible, setSidebarVisible] = useState(true);
+	const [cursorInfo, setCursorInfo] = useState<CursorInfo | null>(null);
+	const [editorError, setEditorError] = useState<string | null>(null);
 	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
 	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
@@ -57,8 +66,59 @@ export function AppLayout() {
 	const savedContentRef = useRef("");
 	const prevWorkspacePathRef = useRef(workspacePath);
 
+	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
+	// restore or persist the workspace path — only theme and sidebar are restored.
+	const [isNewWindow] = useState(() =>
+		new URLSearchParams(window.location.search).has("newWindow"),
+	);
+
+	// Load persisted settings on mount
+	useEffect(() => {
+		let cancelled = false;
+
+		(async () => {
+			const settings = await loadSettings();
+			if (cancelled) return;
+
+			if (!isNewWindow && settings.workspacePath) {
+				try {
+					await listDirectory(settings.workspacePath);
+					if (cancelled) return;
+					setWorkspacePath(settings.workspacePath);
+				} catch {
+					void saveWorkspacePath(null);
+				}
+			}
+
+			if (cancelled) return;
+			if (settings.theme) setTheme(settings.theme);
+			setSidebarVisible(settings.sidebarVisible);
+			setLoading(false);
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [isNewWindow, setWorkspacePath, setTheme]);
+
+	// Persist workspace path changes (skip while loading and in new windows)
+	useEffect(() => {
+		if (loading || isNewWindow) return;
+		void saveWorkspacePath(workspacePath);
+	}, [workspacePath, loading, isNewWindow]);
+
+	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
+	useEffect(() => {
+		if (loading) return;
+		void saveSidebarVisible(sidebarVisible);
+	}, [sidebarVisible, loading]);
+
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {
+		// Clear cursor info and error when switching tabs
+		setCursorInfo(null);
+		setEditorError(null);
+
 		const prevPath = prevTabPathRef.current;
 
 		// Clear cache on workspace change (skip saving old tab — it belongs to the old workspace)
@@ -118,6 +178,7 @@ export function AppLayout() {
 			.catch((err) => {
 				if (ignore) return;
 				console.error("Failed to read file:", err);
+				setEditorError(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
 				contentLoadedForPathRef.current = activeTabPath;
 				savedContentRef.current = "";
 				markSaved("");
@@ -444,17 +505,26 @@ export function AppLayout() {
 		setGoToLine(null);
 	}, []);
 
+	const handleStatistics = useCallback((info: CursorInfo) => {
+		setCursorInfo(info);
+	}, []);
+
 	// Close search bar when switching away from a file
 	useEffect(() => {
 		if (!activeTabPath) setSearchBarOpen(false);
 	}, [activeTabPath]);
 
-	// Keyboard shortcuts: Cmd+W, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P
+	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
 				e.preventDefault();
 				if (activeTabPath) void handleCloseTab(activeTabPath);
+			}
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
+				e.preventDefault();
+				setSidebarVisible((prev) => !prev);
+				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "e") {
 				e.preventDefault();
@@ -500,29 +570,42 @@ export function AppLayout() {
 		return () => document.removeEventListener("keydown", handler);
 	}, [activeTabPath, handleCloseTab]);
 
+	if (loading) {
+		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
+	}
+
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
 			<TabBar onCloseTab={handleCloseTab} />
 			<div className="min-h-0 flex flex-1">
-				<Sidebar
-					searchActive={sidebarSearchActive}
-					onShowFiles={handleShowFiles}
-					onShowSearch={handleShowSearch}
-					onSearchNavigate={handleSearchNavigate}
-					searchInputRef={searchInputRef}
-					onFileRenamed={handleFileRenamed}
-					onFileDeleted={handleFileDeleted}
-				/>
+				{sidebarVisible && (
+					<Sidebar
+						searchActive={sidebarSearchActive}
+						onShowFiles={handleShowFiles}
+						onShowSearch={handleShowSearch}
+						onSearchNavigate={handleSearchNavigate}
+						searchInputRef={searchInputRef}
+						onFileRenamed={handleFileRenamed}
+						onFileDeleted={handleFileDeleted}
+					/>
+				)}
 				<main className="relative min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
 					{activeTabPath ? (
-						<MarkdownEditor
-							value={content}
-							onChange={setContent}
-							onSave={() => void saveNow()}
-							onEditorView={handleEditorView}
-							goToLine={goToLine}
-							onGoToLineDone={handleGoToLineDone}
-						/>
+						editorError ? (
+							<div className="editor-error">
+								<p>{editorError}</p>
+							</div>
+						) : (
+							<MarkdownEditor
+								value={content}
+								onChange={setContent}
+								onSave={() => void saveNow()}
+								onEditorView={handleEditorView}
+								goToLine={goToLine}
+								onGoToLineDone={handleGoToLineDone}
+								onStatistics={handleStatistics}
+							/>
+						)
 					) : (
 						<div className="flex h-full items-center justify-center text-text-secondary">
 							<p className="text-sm">Select a file to start editing</p>
@@ -539,7 +622,10 @@ export function AppLayout() {
 					)}
 				</main>
 			</div>
-			<StatusBar saveStatus={activeTabPath ? saveStatus : undefined} />
+			<StatusBar
+				saveStatus={activeTabPath ? saveStatus : undefined}
+				cursorInfo={activeTabPath && !editorError ? (cursorInfo ?? undefined) : undefined}
+			/>
 
 			{workspacePath && (
 				<CommandPalette

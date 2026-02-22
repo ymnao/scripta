@@ -183,6 +183,12 @@ interface GoToLineRequest {
 	query?: string;
 }
 
+export interface CursorInfo {
+	line: number;
+	col: number;
+	chars: number;
+}
+
 interface MarkdownEditorProps {
 	value: string;
 	onChange: (value: string) => void;
@@ -190,6 +196,7 @@ interface MarkdownEditorProps {
 	onEditorView?: (view: EditorView | null) => void;
 	goToLine?: GoToLineRequest | null;
 	onGoToLineDone?: () => void;
+	onStatistics?: (info: CursorInfo) => void;
 }
 
 export function MarkdownEditor({
@@ -199,12 +206,21 @@ export function MarkdownEditor({
 	onEditorView,
 	goToLine,
 	onGoToLineDone,
+	onStatistics,
 }: MarkdownEditorProps) {
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
 	const editorRef = useRef<ReactCodeMirrorRef>(null);
 	const onEditorViewRef = useRef(onEditorView);
 	onEditorViewRef.current = onEditorView;
+	const onStatisticsRef = useRef(onStatistics);
+	onStatisticsRef.current = onStatistics;
+	const statsRafIdRef = useRef(0);
+
+	// Cancel any pending statistics RAF on unmount
+	useEffect(() => {
+		return () => cancelAnimationFrame(statsRafIdRef.current);
+	}, []);
 
 	useEffect(() => {
 		if (goToLine == null) return;
@@ -264,6 +280,21 @@ export function MarkdownEditor({
 					},
 				},
 			]),
+			EditorView.updateListener.of((update) => {
+				if (!(update.docChanged || update.selectionChanged)) return;
+				const callback = onStatisticsRef.current;
+				if (!callback) return;
+				cancelAnimationFrame(statsRafIdRef.current);
+				statsRafIdRef.current = requestAnimationFrame(() => {
+					const sel = update.state.selection.main;
+					const lineInfo = update.state.doc.lineAt(sel.head);
+					callback({
+						line: lineInfo.number,
+						col: sel.head - lineInfo.from + 1,
+						chars: update.state.doc.length,
+					});
+				});
+			}),
 		],
 		[],
 	);

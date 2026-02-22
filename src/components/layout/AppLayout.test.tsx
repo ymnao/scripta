@@ -16,6 +16,17 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 	open: vi.fn(),
 }));
 
+vi.mock("../../lib/store", () => ({
+	loadSettings: vi.fn().mockResolvedValue({
+		workspacePath: null,
+		theme: "light",
+		sidebarVisible: true,
+	}),
+	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
+	saveTheme: vi.fn().mockResolvedValue(undefined),
+	saveSidebarVisible: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Capture the fs-change listener callback so tests can emit events
 type FsChangeCallback = (event: { payload: FsChangeEvent[] }) => void;
 let fsChangeCallback: FsChangeCallback | null = null;
@@ -204,7 +215,7 @@ describe("AppLayout", () => {
 			render(<AppLayout />);
 		});
 
-		expect(screen.getByTestId("editor-value")).toHaveTextContent("");
+		expect(screen.getByText(/Failed to open file/)).toBeInTheDocument();
 		expect(screen.getByText("Saved")).toBeInTheDocument();
 
 		mockedWriteFile.mockClear();

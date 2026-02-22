@@ -30,4 +30,16 @@ describe("StatusBar", () => {
 		expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
 		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
 	});
+
+	it("shows cursor info when provided", () => {
+		render(<StatusBar cursorInfo={{ line: 10, col: 5, chars: 1234 }} />);
+		expect(screen.getByText("Ln 10, Col 5")).toBeInTheDocument();
+		expect(screen.getByText("1234 chars")).toBeInTheDocument();
+	});
+
+	it("does not show cursor info when not provided", () => {
+		render(<StatusBar saveStatus="saved" />);
+		expect(screen.queryByText(/Ln \d+/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/chars/)).not.toBeInTheDocument();
+	});
 });
