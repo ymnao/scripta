@@ -74,7 +74,9 @@ export class TauriMock {
 
 				store.handlers.search_files = (args: Record<string, unknown>) => {
 					const workspacePath = args.workspacePath as string;
-					const query = (args.query as string).toLowerCase();
+					const rawQuery = args.query as string;
+					const caseSensitive = (args.caseSensitive as boolean) ?? false;
+					const query = caseSensitive ? rawQuery : rawQuery.toLowerCase();
 					if (!query) return [];
 					const mdFiles = collectMdFiles(workspacePath);
 					const results: Array<{
@@ -90,10 +92,10 @@ export class TauriMock {
 						const lines = content.split("\n");
 						for (let i = 0; i < lines.length; i++) {
 							const line = lines[i];
-							const lower = line.toLowerCase();
+							const searchLine = caseSensitive ? line : line.toLowerCase();
 							let pos = 0;
 							while (true) {
-								const idx = lower.indexOf(query, pos);
+								const idx = searchLine.indexOf(query, pos);
 								if (idx === -1) break;
 								results.push({
 									filePath,

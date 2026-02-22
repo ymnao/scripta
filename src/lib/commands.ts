@@ -38,8 +38,12 @@ export function stopWatcher(): Promise<void> {
 	return invoke<void>("stop_watcher");
 }
 
-export function searchFiles(workspacePath: string, query: string): Promise<SearchResult[]> {
-	return invoke<SearchResult[]>("search_files", { workspacePath, query });
+export function searchFiles(
+	workspacePath: string,
+	query: string,
+	caseSensitive?: boolean,
+): Promise<SearchResult[]> {
+	return invoke<SearchResult[]>("search_files", { workspacePath, query, caseSensitive });
 }
 
 export function searchFilenames(workspacePath: string, query: string): Promise<string[]> {

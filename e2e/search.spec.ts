@@ -130,3 +130,134 @@ test.describe("in-file search", () => {
 		await expect(page.getByRole("textbox", { name: "Replace" })).not.toBeVisible();
 	});
 });
+
+test.describe("workspace search", () => {
+	test("opens search panel with Cmd+Shift+F", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		await page.keyboard.press(`${modKey}+Shift+f`);
+		// Sidebar header should switch to "Search"
+		await expect(page.getByText("Search", { exact: true })).toBeVisible();
+		await expect(page.getByRole("textbox", { name: "Search in workspace" })).toBeVisible();
+	});
+
+	test("opens search panel via magnifying glass icon", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		await page.getByLabel("Search in workspace").click();
+		await expect(page.getByText("Search", { exact: true })).toBeVisible();
+		await expect(page.getByRole("textbox", { name: "Search in workspace" })).toBeVisible();
+	});
+
+	test("shows search results grouped by file", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		await page.keyboard.press(`${modKey}+Shift+f`);
+		await page.getByRole("textbox", { name: "Search in workspace" }).fill("hello");
+
+		// Wait for debounced search results
+		await expect(page.locator(".search-panel-file-header")).toHaveCount(2, { timeout: 5000 });
+		// Both files should appear
+		await expect(page.locator(".search-panel-file-header").first()).toContainText("hello.md");
+		await expect(page.locator(".search-panel-file-header").last()).toContainText("notes.md");
+	});
+
+	test("navigates to file and line on result click", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		await page.keyboard.press(`${modKey}+Shift+f`);
+		await page.getByRole("textbox", { name: "Search in workspace" }).fill("hello");
+
+		// Wait for results
+		await expect(page.locator(".search-panel-match").first()).toBeVisible({ timeout: 5000 });
+
+		// Click first match
+		await page.locator(".search-panel-match").first().click();
+
+		// File should be opened in the editor
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+	});
+
+	test("highlights correct text when line contains surrogate pairs", async ({ page }) => {
+		const emojiWorkspace = {
+			files: {
+				"/workspace/emoji.md": "😀hello world\n🎉🎊 test file\nnormal line hello",
+			},
+			directories: {
+				"/workspace": [{ name: "emoji.md", path: "/workspace/emoji.md", isDirectory: false }],
+			},
+		};
+		const mock = new TauriMock(page);
+		await mock.setup(emojiWorkspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		await page.keyboard.press(`${modKey}+Shift+f`);
+		await page.getByRole("textbox", { name: "Search in workspace" }).fill("hello");
+
+		// Wait for results
+		const highlights = page.locator(".search-panel-highlight");
+		await expect(highlights.first()).toBeVisible({ timeout: 5000 });
+
+		// Each <mark> should contain exactly "hello", not garbled surrogate pair fragments
+		await expect(highlights).toHaveCount(2);
+		await expect(highlights.nth(0)).toHaveText("hello");
+		await expect(highlights.nth(1)).toHaveText("hello");
+	});
+
+	test("highlights correct text for query after multiple emoji", async ({ page }) => {
+		const emojiWorkspace = {
+			files: {
+				"/workspace/emoji.md": "🎉🎊test",
+			},
+			directories: {
+				"/workspace": [{ name: "emoji.md", path: "/workspace/emoji.md", isDirectory: false }],
+			},
+		};
+		const mock = new TauriMock(page);
+		await mock.setup(emojiWorkspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		await page.keyboard.press(`${modKey}+Shift+f`);
+		await page.getByRole("textbox", { name: "Search in workspace" }).fill("test");
+
+		const highlight = page.locator(".search-panel-highlight");
+		await expect(highlight).toBeVisible({ timeout: 5000 });
+		await expect(highlight).toHaveText("test");
+	});
+
+	test("returns to file explorer when clicking files icon", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		// Open search
+		await page.getByRole("button", { name: "Search in workspace" }).click();
+		await expect(page.getByText("Search", { exact: true })).toBeVisible();
+
+		// Switch back to files
+		await page.getByRole("button", { name: "Show file explorer" }).click();
+		await expect(page.getByText("Files")).toBeVisible();
+	});
+});

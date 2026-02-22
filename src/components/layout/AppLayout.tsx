@@ -13,6 +13,8 @@ import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
+type GoToLine = { line: number; query?: string } | null;
+
 interface TabCache {
 	content: string;
 	savedContent: string;
@@ -32,10 +34,14 @@ export function AppLayout() {
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
+	const [sidebarSearchActive, setSidebarSearchActive] = useState(false);
+	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
 	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
 	const searchBarOpenRef = useRef(false);
 	searchBarOpenRef.current = searchBarOpen;
+	const searchInputRef = useRef<HTMLInputElement | null>(null);
+	const pendingGoToLineRef = useRef<{ line: number; query?: string } | null>(null);
 
 	const [content, setContent] = useState("");
 	const { saveStatus, saveNow, markSaved, waitForPending } = useAutoSave(
@@ -87,6 +93,10 @@ export function AppLayout() {
 			savedContentRef.current = cached.savedContent;
 			markSaved(cached.savedContent);
 			setContent(cached.content);
+			if (pendingGoToLineRef.current !== null) {
+				setGoToLine(pendingGoToLineRef.current);
+				pendingGoToLineRef.current = null;
+			}
 			return;
 		}
 
@@ -100,6 +110,10 @@ export function AppLayout() {
 				savedContentRef.current = loaded;
 				markSaved(loaded);
 				setContent(loaded);
+				if (pendingGoToLineRef.current !== null) {
+					setGoToLine(pendingGoToLineRef.current);
+					pendingGoToLineRef.current = null;
+				}
 			})
 			.catch((err) => {
 				if (ignore) return;
@@ -108,6 +122,7 @@ export function AppLayout() {
 				savedContentRef.current = "";
 				markSaved("");
 				setContent("");
+				pendingGoToLineRef.current = null;
 			});
 		return () => {
 			ignore = true;
@@ -401,17 +416,58 @@ export function AppLayout() {
 		[openTab],
 	);
 
+	const handleShowFiles = useCallback(() => {
+		setSidebarSearchActive(false);
+	}, []);
+
+	const handleShowSearch = useCallback(() => {
+		setSidebarSearchActive(true);
+		requestAnimationFrame(() => {
+			searchInputRef.current?.focus();
+		});
+	}, []);
+
+	const handleSearchNavigate = useCallback(
+		(filePath: string, lineNumber: number, query: string) => {
+			const state = useWorkspaceStore.getState();
+			if (state.activeTabPath === filePath) {
+				setGoToLine({ line: lineNumber, query });
+			} else {
+				pendingGoToLineRef.current = { line: lineNumber, query };
+				openTab(filePath);
+			}
+		},
+		[openTab],
+	);
+
+	const handleGoToLineDone = useCallback(() => {
+		setGoToLine(null);
+	}, []);
+
 	// Close search bar when switching away from a file
 	useEffect(() => {
 		if (!activeTabPath) setSearchBarOpen(false);
 	}, [activeTabPath]);
 
-	// Keyboard shortcuts: Cmd+W, Cmd+F, Cmd+H, Cmd+P
+	// Keyboard shortcuts: Cmd+W, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
 				e.preventDefault();
 				if (activeTabPath) void handleCloseTab(activeTabPath);
+			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "e") {
+				e.preventDefault();
+				setSidebarSearchActive(false);
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
+				e.preventDefault();
+				setSidebarSearchActive(true);
+				requestAnimationFrame(() => {
+					searchInputRef.current?.focus();
+				});
+				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "f" || e.key === "h")) {
 				const view = editorViewRef.current;
@@ -448,7 +504,15 @@ export function AppLayout() {
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
 			<TabBar onCloseTab={handleCloseTab} />
 			<div className="min-h-0 flex flex-1">
-				<Sidebar onFileRenamed={handleFileRenamed} onFileDeleted={handleFileDeleted} />
+				<Sidebar
+					searchActive={sidebarSearchActive}
+					onShowFiles={handleShowFiles}
+					onShowSearch={handleShowSearch}
+					onSearchNavigate={handleSearchNavigate}
+					searchInputRef={searchInputRef}
+					onFileRenamed={handleFileRenamed}
+					onFileDeleted={handleFileDeleted}
+				/>
 				<main className="relative min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
 					{activeTabPath ? (
 						<MarkdownEditor
@@ -456,6 +520,8 @@ export function AppLayout() {
 							onChange={setContent}
 							onSave={() => void saveNow()}
 							onEditorView={handleEditorView}
+							goToLine={goToLine}
+							onGoToLineDone={handleGoToLineDone}
 						/>
 					) : (
 						<div className="flex h-full items-center justify-center text-text-secondary">

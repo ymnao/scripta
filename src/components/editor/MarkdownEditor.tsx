@@ -2,10 +2,12 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
+import { EditorSelection } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
 import {
 	blockquoteDecoration,
 	codeBlockDecoration,
@@ -176,19 +178,56 @@ const editorTheme = EditorView.theme({
 });
 
 const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
+interface GoToLineRequest {
+	line: number;
+	query?: string;
+}
+
 interface MarkdownEditorProps {
 	value: string;
 	onChange: (value: string) => void;
 	onSave: () => void;
 	onEditorView?: (view: EditorView | null) => void;
+	goToLine?: GoToLineRequest | null;
+	onGoToLineDone?: () => void;
 }
 
-export function MarkdownEditor({ value, onChange, onSave, onEditorView }: MarkdownEditorProps) {
+export function MarkdownEditor({
+	value,
+	onChange,
+	onSave,
+	onEditorView,
+	goToLine,
+	onGoToLineDone,
+}: MarkdownEditorProps) {
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
 	const editorRef = useRef<ReactCodeMirrorRef>(null);
 	const onEditorViewRef = useRef(onEditorView);
 	onEditorViewRef.current = onEditorView;
+
+	useEffect(() => {
+		if (goToLine == null) return;
+		const frame = requestAnimationFrame(() => {
+			const view = editorRef.current?.view;
+			if (!view) return;
+			const lineNum = Math.min(goToLine.line, view.state.doc.lines);
+			const lineInfo = view.state.doc.line(lineNum);
+
+			view.dispatch({
+				selection: EditorSelection.cursor(lineInfo.from),
+				effects: goToLine.query ? [setHighlightQuery.of(goToLine.query)] : [],
+			});
+
+			view.dispatch({
+				effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
+			});
+
+			view.focus();
+			onGoToLineDone?.();
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [goToLine, onGoToLineDone]);
 
 	const handleCreateEditor = useCallback((view: EditorView) => {
 		onEditorViewRef.current?.(view);
@@ -206,6 +245,7 @@ export function MarkdownEditor({ value, onChange, onSave, onEditorView }: Markdo
 			customHighlightStyle,
 			markdownExtension,
 			search(),
+			highlightQueryExtension,
 			headingDecoration,
 			emphasisDecoration,
 			strikethroughDecoration,
