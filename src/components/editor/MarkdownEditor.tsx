@@ -275,15 +275,16 @@ export function MarkdownEditor({
 				},
 			]),
 			EditorView.updateListener.of((update) => {
-				if (update.docChanged || update.selectionChanged) {
-					const sel = update.state.selection.main;
-					const lineInfo = update.state.doc.lineAt(sel.head);
-					onStatisticsRef.current?.({
-						line: lineInfo.number,
-						col: sel.head - lineInfo.from + 1,
-						chars: update.state.doc.length,
-					});
-				}
+				if (!(update.docChanged || update.selectionChanged)) return;
+				const callback = onStatisticsRef.current;
+				if (!callback) return;
+				const sel = update.state.selection.main;
+				const lineInfo = update.state.doc.lineAt(sel.head);
+				callback({
+					line: lineInfo.number,
+					col: sel.head - lineInfo.from + 1,
+					chars: update.state.doc.length,
+				});
 			}),
 		],
 		[],

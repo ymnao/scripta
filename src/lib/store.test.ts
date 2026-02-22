@@ -27,7 +27,7 @@ describe("store", () => {
 			const settings = await loadSettings();
 			expect(settings).toEqual({
 				workspacePath: null,
-				theme: "light",
+				theme: null,
 				sidebarVisible: true,
 			});
 		});

@@ -87,7 +87,7 @@ export function AppLayout() {
 			}
 
 			if (cancelled) return;
-			setTheme(settings.theme);
+			if (settings.theme) setTheme(settings.theme);
 			setSidebarVisible(settings.sidebarVisible);
 			setLoading(false);
 		})();

@@ -10,14 +10,7 @@
       html, body { margin: 0; background-color: #ffffff; }
       html.dark, html.dark body { background-color: #1a1a1a; }
     </style>
-    <script>
-      (function() {
-        try {
-          var t = localStorage.getItem("mark-draft-theme");
-          if (t === "dark") document.documentElement.classList.add("dark");
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

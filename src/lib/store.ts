@@ -4,13 +4,13 @@ type Theme = "light" | "dark";
 
 interface AppSettings {
 	workspacePath: string | null;
-	theme: Theme;
+	theme: Theme | null;
 	sidebarVisible: boolean;
 }
 
 const DEFAULTS: AppSettings = {
 	workspacePath: null,
-	theme: "light",
+	theme: null,
 	sidebarVisible: true,
 };
 
@@ -33,7 +33,7 @@ export async function loadSettings(): Promise<AppSettings> {
 			(await store.get<string | null>("workspacePath")) ?? DEFAULTS.workspacePath;
 
 		const rawTheme = await store.get<unknown>("theme");
-		const theme: Theme = rawTheme === "light" || rawTheme === "dark" ? rawTheme : DEFAULTS.theme;
+		const theme: Theme | null = rawTheme === "light" || rawTheme === "dark" ? rawTheme : null;
 
 		const rawSidebarVisible = await store.get<unknown>("sidebarVisible");
 		const sidebarVisible: boolean =
