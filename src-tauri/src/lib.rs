@@ -46,7 +46,7 @@ pub fn run() {
 fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicU64, Ordering};
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
 
     static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -109,12 +109,23 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.set_menu(menu)?;
 
     app.on_menu_event(move |app_handle, event| {
-        if event.id().as_ref() == "open-settings" {
-            let _ = app_handle.emit("menu-open-settings", ());
-            return;
-        }
-        if event.id().as_ref() == "open-help" {
-            let _ = app_handle.emit("menu-open-help", ());
+        if event.id().as_ref() == "open-settings" || event.id().as_ref() == "open-help" {
+            let event_name = if event.id().as_ref() == "open-settings" {
+                "menu-open-settings"
+            } else {
+                "menu-open-help"
+            };
+            // Emit only to the focused window to avoid opening dialogs in all windows
+            let emitted = app_handle
+                .webview_windows()
+                .values()
+                .any(|w| {
+                    w.is_focused().unwrap_or(false) && w.emit(event_name, ()).is_ok()
+                });
+            // Fallback: if no focused window found, broadcast to all
+            if !emitted {
+                let _ = app_handle.emit(event_name, ());
+            }
             return;
         }
         if event.id().as_ref() == "new-window" {

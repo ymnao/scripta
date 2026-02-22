@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { FontFamily, IndentSize, ThemePreference } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
@@ -86,13 +86,11 @@ function NumberInput({
 	onChange: (value: number) => void;
 }) {
 	const [draft, setDraft] = useState(String(value));
-	const prevValueRef = useRef(value);
 
 	// Sync draft when the external value changes (e.g. from another source)
-	if (prevValueRef.current !== value) {
-		prevValueRef.current = value;
+	useEffect(() => {
 		setDraft(String(value));
-	}
+	}, [value]);
 
 	const commit = () => {
 		const num = Number(draft);

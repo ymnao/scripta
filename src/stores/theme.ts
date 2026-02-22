@@ -28,7 +28,11 @@ function applyTheme(theme: Theme) {
 function resolveTheme(pref: ThemePreference): Theme {
 	if (pref === "light" || pref === "dark") return pref;
 	// pref === "system"
-	if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+	if (
+		typeof window !== "undefined" &&
+		typeof window.matchMedia === "function" &&
+		window.matchMedia("(prefers-color-scheme: dark)").matches
+	) {
 		return "dark";
 	}
 	return "light";
@@ -89,14 +93,34 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
 	},
 }));
 
-// Listen for OS theme changes — update resolved theme when preference is "system"
-if (typeof window !== "undefined") {
-	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-		const state = useThemeStore.getState();
-		if (state.preference === "system") {
-			const theme = resolveTheme("system");
-			applyTheme(theme);
-			useThemeStore.setState({ theme });
+// Listen for OS theme changes — update resolved theme when preference is "system".
+// Store references for cleanup (HMR / test re-initialization).
+let osThemeQuery: MediaQueryList | null = null;
+const osThemeHandler = () => {
+	const state = useThemeStore.getState();
+	if (state.preference === "system") {
+		const theme = resolveTheme("system");
+		applyTheme(theme);
+		useThemeStore.setState({ theme });
+	}
+};
+
+function registerOsThemeListener() {
+	if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+	// Prevent duplicate registration (HMR)
+	if (osThemeQuery) return;
+	osThemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+	osThemeQuery.addEventListener("change", osThemeHandler);
+}
+
+registerOsThemeListener();
+
+// Allow cleanup in HMR — Vite calls import.meta.hot.dispose
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => {
+		if (osThemeQuery) {
+			osThemeQuery.removeEventListener("change", osThemeHandler);
+			osThemeQuery = null;
 		}
 	});
 }

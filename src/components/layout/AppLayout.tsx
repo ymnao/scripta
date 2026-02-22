@@ -131,10 +131,27 @@ export function AppLayout() {
 
 	// Listen for native menu events from Tauri
 	useEffect(() => {
+		let cancelled = false;
 		const unlisteners: Array<() => void> = [];
-		void listen("menu-open-settings", () => setSettingsOpen(true)).then((u) => unlisteners.push(u));
-		void listen("menu-open-help", () => setHelpOpen(true)).then((u) => unlisteners.push(u));
+
+		void listen("menu-open-settings", () => setSettingsOpen(true)).then((u) => {
+			if (cancelled) {
+				u();
+				return;
+			}
+			unlisteners.push(u);
+		});
+
+		void listen("menu-open-help", () => setHelpOpen(true)).then((u) => {
+			if (cancelled) {
+				u();
+				return;
+			}
+			unlisteners.push(u);
+		});
+
 		return () => {
+			cancelled = true;
 			for (const u of unlisteners) u();
 		};
 	}, []);
