@@ -66,9 +66,14 @@ export function AppLayout() {
 	const savedContentRef = useRef("");
 	const prevWorkspacePathRef = useRef(workspacePath);
 
+	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
+	// restore or persist the workspace path — only theme and sidebar are restored.
+	const [isNewWindow] = useState(() =>
+		new URLSearchParams(window.location.search).has("newWindow"),
+	);
+
 	// Load persisted settings on mount
 	useEffect(() => {
-		const isNewWindow = new URLSearchParams(window.location.search).has("newWindow");
 		let cancelled = false;
 
 		(async () => {
@@ -94,13 +99,13 @@ export function AppLayout() {
 		return () => {
 			cancelled = true;
 		};
-	}, [setWorkspacePath, setTheme]);
+	}, [isNewWindow, setWorkspacePath, setTheme]);
 
-	// Persist workspace path changes (skip while loading to avoid writing back restored values)
+	// Persist workspace path changes (skip while loading and in new windows)
 	useEffect(() => {
-		if (loading) return;
+		if (loading || isNewWindow) return;
 		void saveWorkspacePath(workspacePath);
-	}, [workspacePath, loading]);
+	}, [workspacePath, loading, isNewWindow]);
 
 	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
 	useEffect(() => {
