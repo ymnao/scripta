@@ -95,16 +95,22 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed)
             );
 
-            let _ = tauri::WebviewWindowBuilder::new(
+            let mut builder = tauri::WebviewWindowBuilder::new(
                 app_handle,
                 &label,
                 tauri::WebviewUrl::App("/".into()),
             )
             .title("mark-draft")
-            .inner_size(800.0, 600.0)
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .build();
+            .inner_size(800.0, 600.0);
+
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
+
+            let _ = builder.build();
         }
     });
 
