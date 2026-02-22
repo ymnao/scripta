@@ -20,7 +20,7 @@ const groups: ShortcutGroup[] = [
 	{
 		title: "書式",
 		shortcuts: [
-			{ keys: [[mod, "B"]], action: "太字" },
+			{ keys: [[mod, "B"]], action: "太字（エディタ内）" },
 			{ keys: [[mod, "I"]], action: "斜体" },
 			{ keys: [[mod, shift, "X"]], action: "取り消し線" },
 			{ keys: [[mod, "1\u20136"]], action: "見出し 1\u20136" },
@@ -45,7 +45,7 @@ const groups: ShortcutGroup[] = [
 	{
 		title: "表示",
 		shortcuts: [
-			{ keys: [[mod, "B"]], action: "サイドバーの切り替え" },
+			{ keys: [[mod, "B"]], action: "サイドバーの切り替え（エディタ外）" },
 			{ keys: [[mod, shift, "E"]], action: "ファイルエクスプローラー" },
 			{ keys: [[mod, ","]], action: "設定" },
 			{ keys: [["F1"]], action: "ヘルプ" },
