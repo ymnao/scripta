@@ -41,9 +41,18 @@ export class TauriMock {
 					Array<{ name: string; path: string; isDirectory: boolean }>
 				> = JSON.parse(directories);
 
-				const store = {
-					handlers: {} as Record<string, (args: Record<string, unknown>) => unknown>,
-					calls: {} as Record<string, Array<Record<string, unknown>>>,
+				const store: {
+					handlers: Record<string, (args: Record<string, unknown>) => unknown>;
+					calls: Record<string, Array<Record<string, unknown>>>;
+					dialogResult: string | null;
+					_files?: Record<string, string>;
+					_directories?: Record<
+						string,
+						Array<{ name: string; path: string; isDirectory: boolean }>
+					>;
+				} = {
+					handlers: {},
+					calls: {},
 					dialogResult: dialog,
 				};
 				(window as unknown as Record<string, unknown>).__TAURI_MOCK__ = store;
@@ -122,6 +131,19 @@ export class TauriMock {
 					return results;
 				};
 
+				store._files = parsedFiles;
+				store._directories = parsedDirs;
+
+				store.handlers.start_watcher = () => {
+					// no-op: just record the call
+					return undefined;
+				};
+
+				store.handlers.stop_watcher = () => {
+					// no-op: just record the call
+					return undefined;
+				};
+
 				store.handlers.search_filenames = (args: Record<string, unknown>) => {
 					const workspacePath = args.workspacePath as string;
 					const query = (args.query as string).toLowerCase();
@@ -156,6 +178,85 @@ export class TauriMock {
 				handler?.({ path, content });
 			},
 			{ path, content },
+		);
+	}
+
+	async simulateFileCreate(
+		filePath: string,
+		content: string,
+		parentDir: string,
+		fileName: string,
+	): Promise<void> {
+		await this.page.evaluate(
+			({
+				filePath,
+				content,
+				parentDir,
+				fileName,
+			}: {
+				filePath: string;
+				content: string;
+				parentDir: string;
+				fileName: string;
+			}) => {
+				const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
+				if (store?._files) store._files[filePath] = content;
+				if (store?._directories?.[parentDir]) {
+					store._directories[parentDir].push({
+						name: fileName,
+						path: filePath,
+						isDirectory: false,
+					});
+				}
+				const eventStore = (
+					window as unknown as Window & {
+						__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
+					}
+				).__TAURI_EVENT__;
+				eventStore?.emit("fs-change", [{ kind: "create", path: filePath }]);
+			},
+			{ filePath, content, parentDir, fileName },
+		);
+	}
+
+	async simulateFileModify(filePath: string, newContent: string): Promise<void> {
+		await this.page.evaluate(
+			({ filePath, newContent }: { filePath: string; newContent: string }) => {
+				const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
+				if (store?._files) store._files[filePath] = newContent;
+				const eventStore = (
+					window as unknown as Window & {
+						__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
+					}
+				).__TAURI_EVENT__;
+				eventStore?.emit("fs-change", [{ kind: "modify", path: filePath }]);
+			},
+			{ filePath, newContent },
+		);
+	}
+
+	async simulateFileDelete(filePath: string, parentDir: string, fileName: string): Promise<void> {
+		await this.page.evaluate(
+			({
+				filePath,
+				parentDir,
+				fileName,
+			}: { filePath: string; parentDir: string; fileName: string }) => {
+				const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
+				if (store?._files) delete store._files[filePath];
+				if (store?._directories?.[parentDir]) {
+					store._directories[parentDir] = store._directories[parentDir].filter(
+						(e) => e.name !== fileName,
+					);
+				}
+				const eventStore = (
+					window as unknown as Window & {
+						__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
+					}
+				).__TAURI_EVENT__;
+				eventStore?.emit("fs-change", [{ kind: "delete", path: filePath }]);
+			},
+			{ filePath, parentDir, fileName },
 		);
 	}
 
