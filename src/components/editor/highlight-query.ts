@@ -9,6 +9,26 @@ import {
 
 export const setHighlightQuery = StateEffect.define<string>();
 
+/**
+ * Build a mapping from UTF-16 positions in the lowercased string back to the original.
+ * `toLowerCase()` can change string length (e.g. İ → i̇), so we need
+ * to map indices found in the lowered string back to their original positions.
+ */
+function buildLowerToOrigMap(text: string): number[] {
+	const map: number[] = [];
+	let origOffset = 0;
+	for (const ch of text) {
+		const origLen = ch.length;
+		const lowerLen = ch.toLowerCase().length;
+		for (let i = 0; i < lowerLen; i++) {
+			map.push(origOffset);
+		}
+		origOffset += origLen;
+	}
+	map.push(origOffset);
+	return map;
+}
+
 const highlightQueryField = StateField.define<string>({
 	create: () => "",
 	update(value, tr) {
@@ -48,11 +68,14 @@ const highlightPlugin = ViewPlugin.fromClass(
 			for (const { from, to } of view.visibleRanges) {
 				const text = view.state.sliceDoc(from, to);
 				const lowerText = text.toLowerCase();
+				const lowerToOrig = buildLowerToOrigMap(text);
 				let pos = 0;
 				while (pos < lowerText.length) {
 					const idx = lowerText.indexOf(lowerQuery, pos);
 					if (idx === -1) break;
-					builder.add(from + idx, from + idx + lowerQuery.length, highlightMark);
+					const origStart = lowerToOrig[idx];
+					const origEnd = lowerToOrig[idx + lowerQuery.length];
+					builder.add(from + origStart, from + origEnd, highlightMark);
 					pos = idx + 1;
 				}
 			}

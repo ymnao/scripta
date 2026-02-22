@@ -17,6 +17,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+	const requestIdRef = useRef(0);
 	const listRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -40,12 +41,15 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 
 	const doSearch = useCallback(
 		(q: string) => {
+			const id = ++requestIdRef.current;
 			searchFilenames(workspacePath, q)
 				.then((res) => {
+					if (requestIdRef.current !== id) return;
 					setFiles(res);
 					setSelectedIndex(0);
 				})
 				.catch(() => {
+					if (requestIdRef.current !== id) return;
 					setFiles([]);
 					setSelectedIndex(0);
 				});

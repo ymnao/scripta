@@ -7,7 +7,8 @@ import {
 	replaceNext,
 	setSearchQuery,
 } from "@codemirror/search";
-import type { EditorView } from "@codemirror/view";
+import { Compartment, StateEffect } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
@@ -96,17 +97,20 @@ export function SearchBar({
 
 	// Listen to CM selection changes to update current match index
 	useEffect(() => {
-		const listener = () => {
-			setMatchInfo(countMatches(view));
+		const compartment = new Compartment();
+		const ext = EditorView.updateListener.of((update) => {
+			if (update.selectionSet) {
+				setMatchInfo(countMatches(view));
+			}
+		});
+		view.dispatch({
+			effects: StateEffect.appendConfig.of(compartment.of(ext)),
+		});
+		return () => {
+			view.dispatch({
+				effects: compartment.reconfigure([]),
+			});
 		};
-		// Use a MutationObserver on the CM dom is overkill; instead use requestAnimationFrame polling
-		// Actually, we'll update after findNext/findPrevious calls explicitly
-		// But also listen to view updates for selection changes
-		const plugin = view.dom.ownerDocument.defaultView;
-		if (!plugin) return;
-		// Use a simple interval for tracking selection
-		const id = setInterval(listener, 200);
-		return () => clearInterval(id);
 	}, [view]);
 
 	const handleFindNext = useCallback(() => {
