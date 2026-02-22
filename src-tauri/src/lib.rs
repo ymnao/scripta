@@ -110,7 +110,9 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     .hidden_title(true);
             }
 
-            let _ = builder.build();
+            if let Err(e) = builder.build() {
+                log::error!("Failed to create new window: {e}");
+            }
         }
     });
 

@@ -51,7 +51,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 
 		const id = ++requestIdRef.current;
 		const timer = setTimeout(() => {
-			searchFiles(workspacePath, query.trim(), caseSensitive || undefined)
+			searchFiles(workspacePath, query.trim(), caseSensitive ? true : undefined)
 				.then((res) => {
 					if (id !== requestIdRef.current) return;
 					setResults(groupByFile(res, workspacePath));

@@ -34,6 +34,26 @@ fn build_lower_to_orig_map(original: &str) -> Vec<usize> {
     map
 }
 
+/// Build a mapping from byte offsets to cumulative UTF-16 code unit counts.
+///
+/// `result[byte_offset]` gives the number of UTF-16 code units before that byte offset.
+/// Only valid at char boundaries; intermediate bytes share the preceding boundary's value.
+/// An extra sentinel entry is appended for the end-of-string position.
+fn build_byte_to_utf16_map(s: &str) -> Vec<usize> {
+    let mut map = Vec::with_capacity(s.len() + 1);
+    let mut utf16_count = 0;
+    for ch in s.chars() {
+        let byte_len = ch.len_utf8();
+        map.push(utf16_count);
+        for _ in 1..byte_len {
+            map.push(utf16_count);
+        }
+        utf16_count += ch.len_utf16();
+    }
+    map.push(utf16_count);
+    map
+}
+
 fn collect_md_files(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
     let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
     for entry_result in entries {
@@ -81,18 +101,16 @@ pub fn search_files(
             Err(_) => continue,
         };
         for (line_idx, line) in content.lines().enumerate() {
+            // Precompute byte-offset → UTF-16 offset map once per line
+            let byte_to_utf16 = build_byte_to_utf16_map(line);
+
             if case_sensitive {
                 let mut search_start = 0;
                 while let Some(pos) = line[search_start..].find(&query_search) {
                     let byte_start = search_start + pos;
                     let byte_end = byte_start + query_search.len();
-                    let utf16_start: usize =
-                        line[..byte_start].chars().map(|c| c.len_utf16()).sum();
-                    let utf16_end: usize = utf16_start
-                        + line[byte_start..byte_end]
-                            .chars()
-                            .map(|c| c.len_utf16())
-                            .sum::<usize>();
+                    let utf16_start = byte_to_utf16[byte_start];
+                    let utf16_end = byte_to_utf16[byte_end];
                     results.push(SearchResult {
                         file_path: file_path.clone(),
                         line_number: line_idx + 1,
@@ -115,13 +133,8 @@ pub fn search_files(
                     let lower_byte_end = lower_byte_start + query_search.len();
                     let orig_byte_start = lower_to_orig[lower_byte_start];
                     let orig_byte_end = lower_to_orig[lower_byte_end];
-                    let utf16_start: usize =
-                        line[..orig_byte_start].chars().map(|c| c.len_utf16()).sum();
-                    let utf16_end: usize = utf16_start
-                        + line[orig_byte_start..orig_byte_end]
-                            .chars()
-                            .map(|c| c.len_utf16())
-                            .sum::<usize>();
+                    let utf16_start = byte_to_utf16[orig_byte_start];
+                    let utf16_end = byte_to_utf16[orig_byte_end];
                     results.push(SearchResult {
                         file_path: file_path.clone(),
                         line_number: line_idx + 1,

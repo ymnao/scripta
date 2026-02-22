@@ -35,7 +35,7 @@ function countMatches(view: EditorView): { current: number; total: number } {
 	let current = 0;
 	while (!cursor.next().done) {
 		total++;
-		if (total > 9999) return { current: 0, total: 10000 };
+		if (total > 9999) return { current, total: 10000 };
 		if (cursor.value.from === sel.from && cursor.value.to === sel.to) {
 			current = total;
 		}
@@ -95,21 +95,27 @@ export function SearchBar({
 		setMatchInfo(countMatches(view));
 	}, [searchText, replaceText, view]);
 
-	// Listen to CM selection changes to update current match index
+	// Listen to CM selection changes to update current match index.
+	// Use a ref-based Compartment so that re-runs reconfigure instead of appending.
+	const compartmentRef = useRef(new Compartment());
+	const appendedRef = useRef(false);
 	useEffect(() => {
-		const compartment = new Compartment();
+		const compartment = compartmentRef.current;
 		const ext = EditorView.updateListener.of((update) => {
 			if (update.selectionSet) {
 				setMatchInfo(countMatches(view));
 			}
 		});
-		view.dispatch({
-			effects: StateEffect.appendConfig.of(compartment.of(ext)),
-		});
-		return () => {
+		if (appendedRef.current) {
+			view.dispatch({ effects: compartment.reconfigure(ext) });
+		} else {
 			view.dispatch({
-				effects: compartment.reconfigure([]),
+				effects: StateEffect.appendConfig.of(compartment.of(ext)),
 			});
+			appendedRef.current = true;
+		}
+		return () => {
+			view.dispatch({ effects: compartment.reconfigure([]) });
 		};
 	}, [view]);
 

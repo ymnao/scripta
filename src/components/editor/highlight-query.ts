@@ -10,11 +10,12 @@ import {
 export const setHighlightQuery = StateEffect.define<string>();
 
 /**
- * Build a mapping from UTF-16 positions in the lowercased string back to the original.
+ * Build a mapping from UTF-16 code unit offsets in the lowercased string
+ * back to the corresponding UTF-16 code unit offsets in the original string.
  * `toLowerCase()` can change string length (e.g. İ → i̇), so we need
  * to map indices found in the lowered string back to their original positions.
  */
-function buildLowerToOrigMap(text: string): number[] {
+function buildLowerToOrigUtf16Map(text: string): number[] {
 	const map: number[] = [];
 	let origOffset = 0;
 	for (const ch of text) {
@@ -68,7 +69,7 @@ const highlightPlugin = ViewPlugin.fromClass(
 			for (const { from, to } of view.visibleRanges) {
 				const text = view.state.sliceDoc(from, to);
 				const lowerText = text.toLowerCase();
-				const lowerToOrig = buildLowerToOrigMap(text);
+				const lowerToOrig = buildLowerToOrigUtf16Map(text);
 				let pos = 0;
 				while (pos < lowerText.length) {
 					const idx = lowerText.indexOf(lowerQuery, pos);
