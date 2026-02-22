@@ -1,10 +1,13 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
+import { search } from "@codemirror/search";
+import { EditorSelection } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import CodeMirror from "@uiw/react-codemirror";
-import { useMemo, useRef } from "react";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
 import {
 	blockquoteDecoration,
 	codeBlockDecoration,
@@ -166,18 +169,73 @@ const editorTheme = EditorView.theme({
 		fontSize: "0.85em",
 		marginRight: "0.35em",
 	},
+	".cm-searchMatch": {
+		backgroundColor: "color-mix(in srgb, #facc15 30%, transparent)",
+	},
+	".cm-searchMatch-selected": {
+		backgroundColor: "color-mix(in srgb, #f97316 40%, transparent)",
+	},
 });
 
 const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
+interface GoToLineRequest {
+	line: number;
+	query?: string;
+}
+
 interface MarkdownEditorProps {
 	value: string;
 	onChange: (value: string) => void;
 	onSave: () => void;
+	onEditorView?: (view: EditorView | null) => void;
+	goToLine?: GoToLineRequest | null;
+	onGoToLineDone?: () => void;
 }
 
-export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps) {
+export function MarkdownEditor({
+	value,
+	onChange,
+	onSave,
+	onEditorView,
+	goToLine,
+	onGoToLineDone,
+}: MarkdownEditorProps) {
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
+	const editorRef = useRef<ReactCodeMirrorRef>(null);
+	const onEditorViewRef = useRef(onEditorView);
+	onEditorViewRef.current = onEditorView;
+
+	useEffect(() => {
+		if (goToLine == null) return;
+		const frame = requestAnimationFrame(() => {
+			const view = editorRef.current?.view;
+			if (!view) return;
+			const lineNum = Math.min(goToLine.line, view.state.doc.lines);
+			const lineInfo = view.state.doc.line(lineNum);
+
+			view.dispatch({
+				selection: EditorSelection.cursor(lineInfo.from),
+				effects: goToLine.query ? [setHighlightQuery.of(goToLine.query)] : [],
+			});
+
+			view.dispatch({
+				effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
+			});
+
+			view.focus();
+			onGoToLineDone?.();
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [goToLine, onGoToLineDone]);
+
+	const handleCreateEditor = useCallback((view: EditorView) => {
+		onEditorViewRef.current?.(view);
+	}, []);
+
+	const handleDestroyEditor = useCallback(() => {
+		onEditorViewRef.current?.(null);
+	}, []);
 
 	const extensions = useMemo(
 		() => [
@@ -186,6 +244,8 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			customHighlightStyle,
 			markdownExtension,
+			search(),
+			highlightQueryExtension,
 			headingDecoration,
 			emphasisDecoration,
 			strikethroughDecoration,
@@ -212,6 +272,7 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 		<div className="relative min-h-0 min-w-0 flex-1">
 			<div className="absolute inset-0">
 				<CodeMirror
+					ref={editorRef}
 					className="h-full"
 					value={value}
 					onChange={onChange}
@@ -219,6 +280,8 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 					height="100%"
 					theme="none"
 					aria-label="Markdown editor"
+					onCreateEditor={handleCreateEditor}
+					onDestroyEditor={handleDestroyEditor}
 					basicSetup={{
 						lineNumbers: true,
 						foldGutter: true,
@@ -227,6 +290,7 @@ export function MarkdownEditor({ value, onChange, onSave }: MarkdownEditorProps)
 						bracketMatching: true,
 						closeBrackets: true,
 						indentOnInput: true,
+						searchKeymap: false,
 					}}
 				/>
 			</div>
