@@ -70,21 +70,31 @@ export function AppLayout() {
 	const loadingRef = useRef(true);
 	useEffect(() => {
 		const isNewWindow = new URLSearchParams(window.location.search).has("newWindow");
+		let cancelled = false;
+
 		(async () => {
 			const settings = await loadSettings();
+			if (cancelled) return;
+
 			if (!isNewWindow && settings.workspacePath) {
 				try {
 					await listDirectory(settings.workspacePath);
+					if (cancelled) return;
 					setWorkspacePath(settings.workspacePath);
 				} catch {
 					void saveWorkspacePath(null);
 				}
 			}
+
+			if (cancelled) return;
 			setTheme(settings.theme);
 			setSidebarVisible(settings.sidebarVisible);
-			loadingRef.current = false;
 			setLoading(false);
 		})();
+
+		return () => {
+			cancelled = true;
+		};
 	}, [setWorkspacePath, setTheme]);
 
 	// Persist workspace path changes
@@ -98,6 +108,15 @@ export function AppLayout() {
 		if (loadingRef.current) return;
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible]);
+
+	// Flip loadingRef AFTER persistence effects have run for the initial hydration.
+	// Effects execute in declaration order, so this runs after the persistence effects
+	// above, ensuring they see loadingRef.current === true and skip the initial save.
+	useEffect(() => {
+		if (!loading) {
+			loadingRef.current = false;
+		}
+	}, [loading]);
 
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {
@@ -507,7 +526,7 @@ export function AppLayout() {
 				e.preventDefault();
 				if (activeTabPath) void handleCloseTab(activeTabPath);
 			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "b") {
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
 				e.preventDefault();
 				setSidebarVisible((prev) => !prev);
 				return;

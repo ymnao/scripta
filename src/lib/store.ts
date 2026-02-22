@@ -18,7 +18,10 @@ let storePromise: Promise<Store> | null = null;
 
 function getStore(): Promise<Store> {
 	if (!storePromise) {
-		storePromise = load("settings.json", { autoSave: false });
+		storePromise = load("settings.json", { autoSave: false }).catch((error) => {
+			storePromise = null;
+			throw error;
+		});
 	}
 	return storePromise;
 }
@@ -28,8 +31,14 @@ export async function loadSettings(): Promise<AppSettings> {
 		const store = await getStore();
 		const workspacePath =
 			(await store.get<string | null>("workspacePath")) ?? DEFAULTS.workspacePath;
-		const theme = (await store.get<Theme>("theme")) ?? DEFAULTS.theme;
-		const sidebarVisible = (await store.get<boolean>("sidebarVisible")) ?? DEFAULTS.sidebarVisible;
+
+		const rawTheme = await store.get<unknown>("theme");
+		const theme: Theme = rawTheme === "light" || rawTheme === "dark" ? rawTheme : DEFAULTS.theme;
+
+		const rawSidebarVisible = await store.get<unknown>("sidebarVisible");
+		const sidebarVisible: boolean =
+			typeof rawSidebarVisible === "boolean" ? rawSidebarVisible : DEFAULTS.sidebarVisible;
+
 		return { workspacePath, theme, sidebarVisible };
 	} catch {
 		return { ...DEFAULTS };

@@ -13,15 +13,19 @@ function applyTheme(theme: Theme) {
 	if (typeof document !== "undefined") {
 		document.documentElement.classList.toggle("dark", theme === "dark");
 	}
-	if (typeof localStorage !== "undefined") {
+	try {
 		localStorage.setItem("mark-draft-theme", theme);
+	} catch {
+		// ignore Storage access errors
 	}
 }
 
 function detectInitialTheme(): Theme {
-	if (typeof localStorage !== "undefined") {
+	try {
 		const stored = localStorage.getItem("mark-draft-theme");
 		if (stored === "dark" || stored === "light") return stored;
+	} catch {
+		// ignore Storage access errors
 	}
 	if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
 		return "dark";
