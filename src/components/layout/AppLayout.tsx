@@ -67,7 +67,6 @@ export function AppLayout() {
 	const prevWorkspacePathRef = useRef(workspacePath);
 
 	// Load persisted settings on mount
-	const loadingRef = useRef(true);
 	useEffect(() => {
 		const isNewWindow = new URLSearchParams(window.location.search).has("newWindow");
 		let cancelled = false;
@@ -97,26 +96,17 @@ export function AppLayout() {
 		};
 	}, [setWorkspacePath, setTheme]);
 
-	// Persist workspace path changes
+	// Persist workspace path changes (skip while loading to avoid writing back restored values)
 	useEffect(() => {
-		if (loadingRef.current) return;
+		if (loading) return;
 		void saveWorkspacePath(workspacePath);
-	}, [workspacePath]);
+	}, [workspacePath, loading]);
 
-	// Persist sidebar visibility changes
+	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
 	useEffect(() => {
-		if (loadingRef.current) return;
+		if (loading) return;
 		void saveSidebarVisible(sidebarVisible);
-	}, [sidebarVisible]);
-
-	// 初回ロード時の永続化をスキップするため、loading が false になった後に loadingRef を更新する。
-	// useEffect は宣言順に実行されるので、上の永続化 effect が先に走り
-	// loadingRef.current === true を見てスキップした後にここで false にする。
-	useEffect(() => {
-		if (!loading) {
-			loadingRef.current = false;
-		}
-	}, [loading]);
+	}, [sidebarVisible, loading]);
 
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {

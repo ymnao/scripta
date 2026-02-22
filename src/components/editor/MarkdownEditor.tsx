@@ -215,6 +215,12 @@ export function MarkdownEditor({
 	onEditorViewRef.current = onEditorView;
 	const onStatisticsRef = useRef(onStatistics);
 	onStatisticsRef.current = onStatistics;
+	const statsRafIdRef = useRef(0);
+
+	// Cancel any pending statistics RAF on unmount
+	useEffect(() => {
+		return () => cancelAnimationFrame(statsRafIdRef.current);
+	}, []);
 
 	useEffect(() => {
 		if (goToLine == null) return;
@@ -247,9 +253,8 @@ export function MarkdownEditor({
 		onEditorViewRef.current?.(null);
 	}, []);
 
-	const extensions = useMemo(() => {
-		let statsRafId = 0;
-		return [
+	const extensions = useMemo(
+		() => [
 			listKeymap,
 			editorTheme,
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -279,8 +284,8 @@ export function MarkdownEditor({
 				if (!(update.docChanged || update.selectionChanged)) return;
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
-				cancelAnimationFrame(statsRafId);
-				statsRafId = requestAnimationFrame(() => {
+				cancelAnimationFrame(statsRafIdRef.current);
+				statsRafIdRef.current = requestAnimationFrame(() => {
 					const sel = update.state.selection.main;
 					const lineInfo = update.state.doc.lineAt(sel.head);
 					callback({
@@ -290,8 +295,9 @@ export function MarkdownEditor({
 					});
 				});
 			}),
-		];
-	}, []);
+		],
+		[],
+	);
 
 	return (
 		<div className="relative min-h-0 min-w-0 flex-1">

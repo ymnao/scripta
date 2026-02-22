@@ -13,10 +13,12 @@ function applyTheme(theme: Theme) {
 	if (typeof document !== "undefined") {
 		document.documentElement.classList.toggle("dark", theme === "dark");
 	}
+	// Mirror to localStorage for synchronous access in theme-init.js (FOUC prevention).
+	// The canonical store is tauri-plugin-store; localStorage is a sync cache only.
 	try {
 		localStorage.setItem("mark-draft-theme", theme);
 	} catch {
-		// localStorage が利用できない環境（プライベートブラウジング等）でのエラーを無視
+		// Ignore — localStorage may be unavailable (e.g. private browsing)
 	}
 }
 
@@ -25,7 +27,7 @@ function detectInitialTheme(): Theme {
 		const stored = localStorage.getItem("mark-draft-theme");
 		if (stored === "dark" || stored === "light") return stored;
 	} catch {
-		// localStorage が利用できない環境（プライベートブラウジング等）でのエラーを無視
+		// Ignore — localStorage may be unavailable (e.g. private browsing)
 	}
 	if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
 		return "dark";
