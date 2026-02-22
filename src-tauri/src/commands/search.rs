@@ -24,7 +24,10 @@ fn build_lower_to_orig_map(original: &str) -> Vec<usize> {
     for ch in original.chars() {
         let orig_len = ch.len_utf8();
         let mut buf = [0u8; 4];
-        let lower_len: usize = ch.to_lowercase().map(|lc| lc.encode_utf8(&mut buf).len()).sum();
+        let lower_len: usize = ch
+            .to_lowercase()
+            .map(|lc| lc.encode_utf8(&mut buf).len())
+            .sum();
         for _ in 0..lower_len {
             map.push(orig_offset);
         }
@@ -202,11 +205,18 @@ mod tests {
     #[test]
     fn test_search_files_finds_matches() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("test.md"), "Hello World\nfoo bar\nhello again").unwrap();
+        fs::write(
+            dir.path().join("test.md"),
+            "Hello World\nfoo bar\nhello again",
+        )
+        .unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].line_number, 1);
         assert_eq!(results[0].match_start, 0);
@@ -219,9 +229,12 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("test.md"), "Hello HELLO hElLo").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 3);
     }
 
@@ -232,9 +245,12 @@ mod tests {
         // back to the original string where İ is 1 char / 1 UTF-16 code unit.
         fs::write(dir.path().join("test.md"), "İhello").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].line_content, "İhello");
         // İ is 1 UTF-16 code unit, so "hello" starts at 1
@@ -263,9 +279,12 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("test.md"), "あいう hello world").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         // "あいう " is 4 chars, so "hello" starts at char index 4
         assert_eq!(results[0].match_start, 4);
@@ -278,9 +297,12 @@ mod tests {
         // U+1F600 (😀) is a supplementary plane char: 1 Rust char, 2 UTF-16 code units
         fs::write(dir.path().join("test.md"), "😀hello world").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         // "😀" = 2 UTF-16 code units, so "hello" starts at index 2
         assert_eq!(results[0].match_start, 2);
@@ -293,9 +315,12 @@ mod tests {
         // "🎉🎊test" — each emoji is 2 UTF-16 code units
         fs::write(dir.path().join("test.md"), "🎉🎊test").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "test".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "test".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].match_start, 4); // 2+2 UTF-16 code units
         assert_eq!(results[0].match_end, 8);
@@ -306,9 +331,12 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("test.md"), "foo bar baz").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "xyz".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "xyz".to_string(),
+            None,
+        )
+        .unwrap();
         assert!(results.is_empty());
     }
 
@@ -317,8 +345,12 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("test.md"), "content").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "".to_string(), None).unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "".to_string(),
+            None,
+        )
+        .unwrap();
         assert!(results.is_empty());
     }
 
@@ -329,9 +361,12 @@ mod tests {
         fs::write(dir.path().join(".hidden/secret.md"), "hello").unwrap();
         fs::write(dir.path().join("visible.md"), "hello").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].file_path.contains("visible.md"));
     }
@@ -342,9 +377,12 @@ mod tests {
         fs::write(dir.path().join("test.md"), "hello").unwrap();
         fs::write(dir.path().join("test.txt"), "hello").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].file_path.contains("test.md"));
     }
@@ -355,9 +393,12 @@ mod tests {
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub/nested.md"), "hello").unwrap();
 
-        let results =
-            search_files(dir.path().to_string_lossy().to_string(), "hello".to_string(), None)
-                .unwrap();
+        let results = search_files(
+            dir.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].file_path.contains("nested.md"));
     }

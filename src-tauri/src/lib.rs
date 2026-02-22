@@ -7,6 +7,8 @@ pub fn run() {
     let watcher_state = std::sync::Arc::new(std::sync::Mutex::new(watcher::WatcherState::new()));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -90,15 +92,12 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     app.on_menu_event(move |app_handle, event| {
         if event.id().as_ref() == "new-window" {
-            let label = format!(
-                "window-{}",
-                WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed)
-            );
+            let label = format!("window-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
 
             let mut builder = tauri::WebviewWindowBuilder::new(
                 app_handle,
                 &label,
-                tauri::WebviewUrl::App("/".into()),
+                tauri::WebviewUrl::App("/?newWindow=true".into()),
             )
             .title("mark-draft")
             .inner_size(800.0, 600.0);

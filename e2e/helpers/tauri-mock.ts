@@ -14,7 +14,18 @@ export class TauriMock {
 		this.page = page;
 	}
 
-	async setup(fs: MockFileSystem, dialogResult: string | null = null): Promise<void> {
+	async setup(
+		fs: MockFileSystem,
+		dialogResult: string | null = null,
+		storeValues?: Record<string, unknown>,
+	): Promise<void> {
+		if (storeValues) {
+			const storeJson = JSON.stringify(storeValues);
+			await this.page.addInitScript((data: string) => {
+				(window as unknown as Record<string, unknown>).__STORE_INIT__ = JSON.parse(data);
+			}, storeJson);
+		}
+
 		const filesJson = JSON.stringify(fs.files);
 		const directoriesJson = JSON.stringify(fs.directories);
 
@@ -56,7 +67,7 @@ export class TauriMock {
 					if (path in parsedDirs) {
 						return parsedDirs[path];
 					}
-					return [];
+					throw new Error(`Directory not found: ${path}`);
 				};
 
 				const collectMdFiles = (dirPath: string): string[] => {
