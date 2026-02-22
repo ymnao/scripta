@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { FontFamily, IndentSize, ThemePreference } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
@@ -85,6 +85,27 @@ function NumberInput({
 	unit: string;
 	onChange: (value: number) => void;
 }) {
+	const [draft, setDraft] = useState(String(value));
+	const prevValueRef = useRef(value);
+
+	// Sync draft when the external value changes (e.g. from another source)
+	if (prevValueRef.current !== value) {
+		prevValueRef.current = value;
+		setDraft(String(value));
+	}
+
+	const commit = () => {
+		const num = Number(draft);
+		if (!Number.isNaN(num)) {
+			const clamped = Math.min(max, Math.max(min, num));
+			onChange(clamped);
+			setDraft(String(clamped));
+		} else {
+			// Invalid input — revert to current value
+			setDraft(String(value));
+		}
+	};
+
 	return (
 		<div className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2">
 			<label htmlFor={id} className="text-xs font-medium text-text-primary">
@@ -97,11 +118,12 @@ function NumberInput({
 					min={min}
 					max={max}
 					step={step}
-					value={value}
-					onChange={(e) => {
-						const num = Number(e.target.value);
-						if (!Number.isNaN(num) && num >= min && num <= max) {
-							onChange(num);
+					value={draft}
+					onChange={(e) => setDraft(e.target.value)}
+					onBlur={commit}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") {
+							e.currentTarget.blur();
 						}
 					}}
 					className="w-16 rounded border border-border bg-bg-primary px-2 py-0.5 text-right text-xs text-text-primary outline-none focus:border-blue-500"

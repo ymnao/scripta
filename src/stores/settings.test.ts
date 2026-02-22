@@ -10,6 +10,7 @@ vi.mock("../lib/store", () => ({
 	saveTrimTrailingWhitespace: vi.fn(),
 }));
 
+import { saveAutoSaveDelay, saveFontSize } from "../lib/store";
 import { useSettingsStore } from "./settings";
 
 describe("useSettingsStore", () => {
@@ -92,5 +93,23 @@ describe("useSettingsStore", () => {
 	it("sets trimTrailingWhitespace", () => {
 		useSettingsStore.getState().setTrimTrailingWhitespace(false);
 		expect(useSettingsStore.getState().trimTrailingWhitespace).toBe(false);
+	});
+
+	it("hydrate sets state without calling save functions", () => {
+		vi.mocked(saveFontSize).mockClear();
+		vi.mocked(saveAutoSaveDelay).mockClear();
+
+		useSettingsStore.getState().hydrate({
+			fontSize: 20,
+			autoSaveDelay: 5000,
+			highlightActiveLine: true,
+		});
+
+		expect(useSettingsStore.getState().fontSize).toBe(20);
+		expect(useSettingsStore.getState().autoSaveDelay).toBe(5000);
+		expect(useSettingsStore.getState().highlightActiveLine).toBe(true);
+		// save functions should NOT have been called
+		expect(saveFontSize).not.toHaveBeenCalled();
+		expect(saveAutoSaveDelay).not.toHaveBeenCalled();
 	});
 });

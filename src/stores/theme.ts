@@ -8,6 +8,8 @@ interface ThemeState {
 	theme: Theme;
 	setPreference: (pref: ThemePreference) => void;
 	cyclePreference: () => void;
+	/** Set preference without persisting to store — used for initial hydration */
+	hydratePreference: (pref: ThemePreference) => void;
 }
 
 function applyTheme(theme: Theme) {
@@ -78,6 +80,12 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
 		const idx = CYCLE_ORDER.indexOf(current);
 		const next = CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length];
 		get().setPreference(next);
+	},
+	hydratePreference: (pref: ThemePreference) => {
+		const theme = resolveTheme(pref);
+		applyTheme(theme);
+		persistPreferenceToLocalStorage(pref);
+		set({ preference: pref, theme });
 	},
 }));
 

@@ -52,6 +52,18 @@ describe("toggleItalic", () => {
 		toggleItalic(view);
 		expect(getDoc(view)).toBe("hello world");
 	});
+
+	it("does not unwrap bold markers when toggling italic", () => {
+		const view = createView("hello **bold**", 6, 14);
+		toggleItalic(view);
+		expect(getDoc(view)).toBe("hello ***bold***");
+	});
+
+	it("does not unwrap bold markers with leading **", () => {
+		const view = createView("**bold**", 0, 8);
+		toggleItalic(view);
+		expect(getDoc(view)).toBe("***bold***");
+	});
 });
 
 describe("toggleStrikethrough", () => {

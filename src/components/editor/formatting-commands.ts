@@ -8,9 +8,21 @@ function toggleWrap(view: EditorView, marker: string): boolean {
 	const len = marker.length;
 
 	if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= len * 2) {
-		view.dispatch({
-			changes: { from, to, insert: selected.slice(len, -len) },
-		});
+		// Guard against false matches: for a single-char marker like "*",
+		// ensure we're not actually inside a longer marker (e.g. "**").
+		// If the inner text still starts/ends with the marker char, the selection
+		// is wrapped with a longer marker (e.g. "**bold**"), so don't unwrap.
+		const inner = selected.slice(len, -len);
+		if (len === 1 && inner.length > 0 && (inner.startsWith(marker) || inner.endsWith(marker))) {
+			// Not our marker — wrap instead
+			view.dispatch({
+				changes: { from, to, insert: marker + selected + marker },
+			});
+		} else {
+			view.dispatch({
+				changes: { from, to, insert: inner },
+			});
+		}
 	} else {
 		view.dispatch({
 			changes: { from, to, insert: marker + selected + marker },

@@ -10,7 +10,7 @@ import {
 	saveTrimTrailingWhitespace,
 } from "../lib/store";
 
-interface SettingsState {
+interface SettingsValues {
 	showLineNumbers: boolean;
 	fontSize: number;
 	autoSaveDelay: number;
@@ -18,6 +18,9 @@ interface SettingsState {
 	highlightActiveLine: boolean;
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
+}
+
+interface SettingsState extends SettingsValues {
 	setShowLineNumbers: (show: boolean) => void;
 	setFontSize: (size: number) => void;
 	setAutoSaveDelay: (delay: number) => void;
@@ -25,6 +28,8 @@ interface SettingsState {
 	setHighlightActiveLine: (highlight: boolean) => void;
 	setFontFamily: (family: FontFamily) => void;
 	setTrimTrailingWhitespace: (trim: boolean) => void;
+	/** Set state without persisting — used for initial hydration from store */
+	hydrate: (values: Partial<SettingsValues>) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()((set) => ({
@@ -62,5 +67,8 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	setTrimTrailingWhitespace: (trim: boolean) => {
 		void saveTrimTrailingWhitespace(trim);
 		set({ trimTrailingWhitespace: trim });
+	},
+	hydrate: (values: Partial<SettingsValues>) => {
+		set(values);
 	},
 }));

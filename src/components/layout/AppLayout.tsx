@@ -37,14 +37,8 @@ export function AppLayout() {
 	const openTab = useWorkspaceStore((s) => s.openTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
-	const setPreference = useThemeStore((s) => s.setPreference);
-	const setShowLineNumbers = useSettingsStore((s) => s.setShowLineNumbers);
-	const setFontSize = useSettingsStore((s) => s.setFontSize);
-	const setAutoSaveDelay = useSettingsStore((s) => s.setAutoSaveDelay);
-	const setIndentSize = useSettingsStore((s) => s.setIndentSize);
-	const setHighlightActiveLine = useSettingsStore((s) => s.setHighlightActiveLine);
-	const setFontFamily = useSettingsStore((s) => s.setFontFamily);
-	const setTrimTrailingWhitespace = useSettingsStore((s) => s.setTrimTrailingWhitespace);
+	const hydratePreference = useThemeStore((s) => s.hydratePreference);
+	const hydrateSettings = useSettingsStore((s) => s.hydrate);
 
 	const [loading, setLoading] = useState(true);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -104,14 +98,16 @@ export function AppLayout() {
 			}
 
 			if (cancelled) return;
-			setPreference(settings.themePreference);
-			setShowLineNumbers(settings.showLineNumbers);
-			setFontSize(settings.fontSize);
-			setAutoSaveDelay(settings.autoSaveDelay);
-			setIndentSize(settings.indentSize);
-			setHighlightActiveLine(settings.highlightActiveLine);
-			setFontFamily(settings.fontFamily);
-			setTrimTrailingWhitespace(settings.trimTrailingWhitespace);
+			hydratePreference(settings.themePreference);
+			hydrateSettings({
+				showLineNumbers: settings.showLineNumbers,
+				fontSize: settings.fontSize,
+				autoSaveDelay: settings.autoSaveDelay,
+				indentSize: settings.indentSize,
+				highlightActiveLine: settings.highlightActiveLine,
+				fontFamily: settings.fontFamily,
+				trimTrailingWhitespace: settings.trimTrailingWhitespace,
+			});
 			setSidebarVisible(settings.sidebarVisible);
 			setLoading(false);
 		})();
@@ -119,18 +115,7 @@ export function AppLayout() {
 		return () => {
 			cancelled = true;
 		};
-	}, [
-		isNewWindow,
-		setWorkspacePath,
-		setPreference,
-		setShowLineNumbers,
-		setFontSize,
-		setAutoSaveDelay,
-		setIndentSize,
-		setHighlightActiveLine,
-		setFontFamily,
-		setTrimTrailingWhitespace,
-	]);
+	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings]);
 
 	// Persist workspace path changes (skip while loading and in new windows)
 	useEffect(() => {
