@@ -9,7 +9,7 @@ export interface TauriMockStore {
 	calls: Record<string, Array<Record<string, unknown>>>;
 	dialogResult: string | null;
 	_files?: Record<string, string>;
-	_directories?: Record<string, Array<{ name: string; path: string; isDirectory: boolean }>>;
+	_directories?: Record<string, Array<FileEntry>>;
 }
 
 export function getMockStore(): TauriMockStore {

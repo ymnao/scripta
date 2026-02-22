@@ -7,6 +7,9 @@ export interface MockFileSystem {
 }
 
 type WindowWithMock = Window & { __TAURI_MOCK__?: TauriMockStore };
+type WindowWithEvent = Window & {
+	__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
+};
 
 export class TauriMock {
 	private page: Page;
@@ -41,16 +44,7 @@ export class TauriMock {
 					Array<{ name: string; path: string; isDirectory: boolean }>
 				> = JSON.parse(directories);
 
-				const store: {
-					handlers: Record<string, (args: Record<string, unknown>) => unknown>;
-					calls: Record<string, Array<Record<string, unknown>>>;
-					dialogResult: string | null;
-					_files?: Record<string, string>;
-					_directories?: Record<
-						string,
-						Array<{ name: string; path: string; isDirectory: boolean }>
-					>;
-				} = {
+				const store: TauriMockStore = {
 					handlers: {},
 					calls: {},
 					dialogResult: dialog,
@@ -208,11 +202,7 @@ export class TauriMock {
 						isDirectory: false,
 					});
 				}
-				const eventStore = (
-					window as unknown as Window & {
-						__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
-					}
-				).__TAURI_EVENT__;
+				const eventStore = (window as unknown as WindowWithEvent).__TAURI_EVENT__;
 				eventStore?.emit("fs-change", [{ kind: "create", path: filePath }]);
 			},
 			{ filePath, content, parentDir, fileName },
@@ -224,11 +214,7 @@ export class TauriMock {
 			({ filePath, newContent }: { filePath: string; newContent: string }) => {
 				const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
 				if (store?._files) store._files[filePath] = newContent;
-				const eventStore = (
-					window as unknown as Window & {
-						__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
-					}
-				).__TAURI_EVENT__;
+				const eventStore = (window as unknown as WindowWithEvent).__TAURI_EVENT__;
 				eventStore?.emit("fs-change", [{ kind: "modify", path: filePath }]);
 			},
 			{ filePath, newContent },
@@ -249,11 +235,7 @@ export class TauriMock {
 						(e) => e.name !== fileName,
 					);
 				}
-				const eventStore = (
-					window as unknown as Window & {
-						__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
-					}
-				).__TAURI_EVENT__;
+				const eventStore = (window as unknown as WindowWithEvent).__TAURI_EVENT__;
 				eventStore?.emit("fs-change", [{ kind: "delete", path: filePath }]);
 			},
 			{ filePath, parentDir, fileName },
