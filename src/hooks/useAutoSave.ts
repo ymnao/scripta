@@ -27,7 +27,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
 	const contentRef = useRef(content);
 	contentRef.current = content;
-	const lastSavedContentRef = useRef(content);
+	const lastSavedContentRef = useRef(
+		processContent(content, useSettingsStore.getState().trimTrailingWhitespace),
+	);
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
@@ -37,21 +39,21 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 
 	const save = useCallback(
 		(contentToSave: string): Promise<void> => {
-			if (contentToSave === lastSavedContentRef.current) {
+			const { trimTrailingWhitespace } = useSettingsStore.getState();
+			const processed = processContent(contentToSave, trimTrailingWhitespace);
+			if (processed === lastSavedContentRef.current) {
 				return Promise.resolve();
 			}
 			saveIdRef.current += 1;
 			const currentSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			const { trimTrailingWhitespace } = useSettingsStore.getState();
-			const processed = processContent(contentToSave, trimTrailingWhitespace);
 			const writePromise = inflightRef.current.then(() => writeFile(filePath, processed));
 			inflightRef.current = writePromise.catch(() => {});
 			return writePromise.then(
 				() => {
 					if (!isMountedRef.current) return;
 					if (currentSaveId !== saveIdRef.current) return;
-					lastSavedContentRef.current = contentToSave;
+					lastSavedContentRef.current = processed;
 					setSaveStatus("saved");
 				},
 				(err) => {
@@ -77,7 +79,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 
 		const prevPath = prevFilePathRef.current;
 		const currentContent = contentRef.current;
-		const hadUnsavedChanges = prevPath && currentContent !== lastSavedContentRef.current;
+		const { trimTrailingWhitespace } = useSettingsStore.getState();
+		const processed = processContent(currentContent, trimTrailingWhitespace);
+		const hadUnsavedChanges = prevPath && processed !== lastSavedContentRef.current;
 		prevFilePathRef.current = filePath;
 		// Suppress content effect until markSaved is called with the new file's content.
 		// This prevents saving stale content from the old file to the new path.
@@ -87,8 +91,6 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			saveIdRef.current += 1;
 			const flushSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			const { trimTrailingWhitespace } = useSettingsStore.getState();
-			const processed = processContent(currentContent, trimTrailingWhitespace);
 			const flushPromise = inflightRef.current.then(() => writeFile(prevPath, processed));
 			inflightRef.current = flushPromise.catch(() => {});
 			flushPromise
@@ -110,7 +112,8 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		if (awaitingNewFileRef.current) {
 			return;
 		}
-		if (content === lastSavedContentRef.current) {
+		const { trimTrailingWhitespace } = useSettingsStore.getState();
+		if (processContent(content, trimTrailingWhitespace) === lastSavedContentRef.current) {
 			return;
 		}
 		setSaveStatus("unsaved");
@@ -149,7 +152,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	}, [save]);
 
 	const markSaved = useCallback((savedContent: string) => {
-		lastSavedContentRef.current = savedContent;
+		// Normalize to match the format written to disk for consistent comparison
+		const { trimTrailingWhitespace } = useSettingsStore.getState();
+		lastSavedContentRef.current = processContent(savedContent, trimTrailingWhitespace);
 		awaitingNewFileRef.current = false;
 		setSaveStatus("saved");
 	}, []);

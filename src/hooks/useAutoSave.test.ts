@@ -17,6 +17,7 @@ vi.mock("../lib/store", () => ({
 }));
 
 const { useAutoSave } = await import("./useAutoSave");
+const { useSettingsStore } = await import("../stores/settings");
 
 const mockedWriteFile = writeFile as Mock;
 
@@ -24,6 +25,8 @@ describe("useAutoSave", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockedWriteFile.mockResolvedValue(undefined);
+		// Reset to default trimTrailingWhitespace
+		useSettingsStore.setState({ trimTrailingWhitespace: true });
 	});
 
 	afterEach(() => {
@@ -449,6 +452,68 @@ describe("useAutoSave", () => {
 
 		// "v2" should have been written AFTER "v1" — guaranteed last-write-wins
 		expect(writeOrder).toEqual(["v1\n", "v2\n"]);
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("trims trailing whitespace when trimTrailingWhitespace is true", async () => {
+		useSettingsStore.setState({ trimTrailingWhitespace: true });
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "hello world   \nfoo\t\t\n" });
+
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "hello world\nfoo\n");
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("preserves trailing whitespace when trimTrailingWhitespace is false", async () => {
+		useSettingsStore.setState({ trimTrailingWhitespace: false });
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "hello world   \nfoo\t\t" });
+
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		// Trailing whitespace preserved, but final newline still guaranteed
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "hello world   \nfoo\t\t\n");
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("does not re-save when processed content matches saved content", async () => {
+		useSettingsStore.setState({ trimTrailingWhitespace: true });
+		mockedWriteFile.mockClear();
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		// Edit to content that differs only by trailing whitespace
+		rerender({ content: "initial   " });
+
+		// After processing, "initial   " → "initial\n" which matches saved content
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		// Should NOT trigger a save since processed content matches
+		expect(mockedWriteFile).not.toHaveBeenCalled();
 		expect(result.current.saveStatus).toBe("saved");
 	});
 });
