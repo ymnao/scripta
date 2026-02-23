@@ -29,17 +29,7 @@ export function translateError(error: unknown): string {
 	return `エラーが発生しました: ${raw}`;
 }
 
-const NON_TRANSIENT = [
-	/^Already exists:/,
-	/^Source not found:/,
-	/^Target already exists:/,
-	/^Not found:/,
-	/\(os error 2\)/,
-	/\(os error 13\)/,
-	/\(os error 17\)/,
-	/\(os error 28\)/,
-	/\(os error 30\)/,
-];
+const NON_TRANSIENT = PATTERNS.map(({ test }) => test);
 
 export function isTransientError(error: unknown): boolean {
 	const raw = extractMessage(error);

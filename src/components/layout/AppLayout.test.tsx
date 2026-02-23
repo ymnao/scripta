@@ -701,6 +701,45 @@ describe("AppLayout", () => {
 		expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
 	});
 
+	it("normalizes cached content and updates dirty state on window close", async () => {
+		// Open a.md and edit it
+		openFileInStore("/workspace", "/workspace/a.md");
+		mockedReadFile.mockResolvedValue("content A");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Switch to b.md (caches a.md's dirty content)
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
+		});
+
+		mockedWriteFile.mockClear();
+
+		// Simulate window close — cached tab should be saved with normalization
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		// Should write normalized content (trailing newline)
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content\n");
+		// Dirty flag should be cleared after successful save
+		const aTab = useWorkspaceStore.getState().tabs.find((t) => t.path === "/workspace/a.md");
+		expect(aTab?.dirty).toBe(false);
+		expect(mockDestroy).toHaveBeenCalled();
+	});
+
 	it("does not destroy window when cached tab save fails on close", async () => {
 		// Open a.md and edit it
 		openFileInStore("/workspace", "/workspace/a.md");

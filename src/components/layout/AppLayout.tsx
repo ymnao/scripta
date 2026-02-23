@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
+import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
@@ -163,6 +164,7 @@ export function AppLayout() {
 
 	// Save all dirty tabs before window closes
 	useEffect(() => {
+		let cancelled = false;
 		let unlisten: (() => void) | null = null;
 
 		getCurrentWindow()
@@ -171,6 +173,7 @@ export function AppLayout() {
 
 				let hasFailed = false;
 				const currentActiveTab = useWorkspaceStore.getState().activeTabPath;
+				const { trimTrailingWhitespace } = useSettingsStore.getState();
 
 				// Save active tab if dirty
 				if (currentActiveTab && contentRef.current !== savedContentRef.current) {
@@ -178,35 +181,49 @@ export function AppLayout() {
 					if (!saved) hasFailed = true;
 				}
 
-				// Save all dirty cached non-active tabs
-				const saves: Promise<boolean>[] = [];
+				// Save all dirty cached non-active tabs with content normalization
+				const saves: Promise<{ path: string; ok: boolean; content: string }>[] = [];
 				for (const [path, cached] of tabCacheRef.current) {
 					if (path !== currentActiveTab && cached.content !== cached.savedContent) {
+						const normalized = processContent(cached.content, trimTrailingWhitespace);
 						saves.push(
-							writeFile(path, cached.content).then(
-								() => true,
+							writeFile(path, normalized).then(
+								() => ({ path, ok: true, content: normalized }),
 								(err) => {
 									console.error("Failed to save file on window close:", err);
-									return false;
+									return { path, ok: false, content: normalized };
 								},
 							),
 						);
 					}
 				}
 				const results = await Promise.all(saves);
-				if (results.some((ok) => !ok)) hasFailed = true;
+				for (const { path, ok, content } of results) {
+					if (ok) {
+						const cached = tabCacheRef.current.get(path);
+						if (cached) cached.savedContent = content;
+						setTabDirty(path, false);
+					} else {
+						hasFailed = true;
+					}
+				}
 
 				if (hasFailed) return;
 				await getCurrentWindow().destroy();
 			})
 			.then((fn) => {
-				unlisten = fn;
+				if (cancelled) {
+					fn();
+				} else {
+					unlisten = fn;
+				}
 			});
 
 		return () => {
+			cancelled = true;
 			unlisten?.();
 		};
-	}, []);
+	}, [setTabDirty]);
 
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {

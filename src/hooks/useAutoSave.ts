@@ -1,23 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
+import { processContent } from "../lib/content";
 import { isTransientError } from "../lib/errors";
 import { useSettingsStore } from "../stores/settings";
 
 const MAX_SAVE_RETRIES = 3;
 const SAVE_RETRY_BASE_MS = 5000;
-
-function processContent(content: string, trimWhitespace: boolean): string {
-	let result = content;
-	if (trimWhitespace) {
-		result = result.replace(/[ \t]+$/gm, "");
-	}
-	// 最終行末尾改行は常に保証
-	if (result.length === 0 || !result.endsWith("\n")) {
-		result += "\n";
-	}
-	return result;
-}
 
 interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;

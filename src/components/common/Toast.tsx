@@ -17,8 +17,8 @@ function ToastMessage({ toast }: { toast: ToastItem }) {
 
 	return (
 		<div
-			role="alert"
-			aria-live="polite"
+			role={isError ? "alert" : "status"}
+			aria-live={isError ? "assertive" : "polite"}
 			className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 shadow-lg ${
 				isError
 					? "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
