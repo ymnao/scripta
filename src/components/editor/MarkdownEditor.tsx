@@ -86,20 +86,8 @@ const staticEditorTheme = EditorView.theme({
 		padding: "0 8px 0 12px",
 	},
 	".cm-activeLineGutter": {
+		backgroundColor: "transparent",
 		color: "var(--color-text-primary)",
-	},
-	".cm-foldGutter .cm-gutterElement": {
-		padding: "0 4px",
-		cursor: "pointer",
-		color: "var(--color-text-secondary)",
-		opacity: "0",
-		transition: "opacity 0.15s",
-	},
-	".cm-gutters:hover .cm-foldGutter .cm-gutterElement": {
-		opacity: "1",
-	},
-	".cm-foldGutter .cm-gutterElement[aria-label]": {
-		opacity: "1",
 	},
 	".cm-foldPlaceholder": {
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 10%, transparent)",
@@ -419,9 +407,9 @@ export function MarkdownEditor({
 					onDestroyEditor={handleDestroyEditor}
 					basicSetup={{
 						lineNumbers: showLineNumbers,
-						foldGutter: true,
+						foldGutter: false,
 						highlightActiveLine,
-						highlightActiveLineGutter: highlightActiveLine,
+						highlightActiveLineGutter: true,
 						bracketMatching: true,
 						closeBrackets: true,
 						indentOnInput: true,
