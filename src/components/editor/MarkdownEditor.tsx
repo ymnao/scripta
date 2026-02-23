@@ -2,8 +2,10 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
 	HighlightStyle,
 	defaultHighlightStyle,
+	foldService,
 	indentUnit,
 	syntaxHighlighting,
+	syntaxTree,
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
@@ -60,11 +62,11 @@ function createDynamicEditorTheme(fontSize: number, fontFamily: FontFamily) {
 		},
 		".cm-content": {
 			caretColor: "var(--color-text-primary)",
-			padding: "8px 0",
+			padding: "8px 16px",
 			fontSynthesis: "style",
 		},
 		".cm-line": {
-			padding: "1px 2px",
+			padding: "1px 0",
 		},
 	});
 }
@@ -74,9 +76,34 @@ const staticEditorTheme = EditorView.theme({
 		borderLeftColor: "var(--color-text-primary)",
 	},
 	".cm-gutters": {
-		backgroundColor: "var(--color-bg-secondary)",
+		backgroundColor: "var(--color-bg-primary)",
 		color: "var(--color-text-secondary)",
-		borderRight: "1px solid var(--color-border)",
+		border: "none",
+		fontSize: "0.85em",
+		minWidth: "3em",
+	},
+	".cm-lineNumbers .cm-gutterElement": {
+		padding: "0 8px 0 12px",
+	},
+	".cm-activeLineGutter": {
+		backgroundColor: "transparent",
+		color: "var(--color-text-primary)",
+	},
+	".cm-foldGutter .cm-gutterElement": {
+		padding: "0 4px",
+		cursor: "pointer",
+		color: "var(--color-text-secondary)",
+		opacity: "0",
+		transition: "opacity 0.15s",
+	},
+	".cm-gutters:hover .cm-foldGutter .cm-gutterElement": {
+		opacity: "1",
+	},
+	".cm-foldGutter .cm-gutterElement[aria-label]": {
+		opacity: "1",
+	},
+	".cm-foldPlaceholder": {
+		display: "none",
 	},
 	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent)",
@@ -201,6 +228,26 @@ const staticEditorTheme = EditorView.theme({
 	},
 });
 
+const listFoldService = foldService.of((state, lineStart, lineEnd) => {
+	const tree = syntaxTree(state);
+	let result: { from: number; to: number } | null = null;
+	tree.iterate({
+		from: lineStart,
+		to: lineEnd,
+		enter(node) {
+			if (result) return false;
+			if (node.name !== "ListItem") return;
+			const startLine = state.doc.lineAt(node.from);
+			if (startLine.from !== lineStart) return false;
+			const endLine = state.doc.lineAt(node.to > node.from ? node.to - 1 : node.to);
+			if (endLine.number <= startLine.number) return false;
+			result = { from: startLine.to, to: endLine.to };
+			return false;
+		},
+	});
+	return result;
+});
+
 const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
 interface GoToLineRequest {
 	line: number;
@@ -211,6 +258,8 @@ export interface CursorInfo {
 	line: number;
 	col: number;
 	chars: number;
+	selectedChars?: number;
+	selectedLines?: number;
 }
 
 interface MarkdownEditorProps {
@@ -285,6 +334,7 @@ export function MarkdownEditor({
 	const extensions = useMemo(
 		() => [
 			listKeymap,
+			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, fontFamily),
 			indentUnit.of(" ".repeat(indentSize)),
@@ -292,6 +342,7 @@ export function MarkdownEditor({
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			customHighlightStyle,
 			markdownExtension,
+			listFoldService,
 			search(),
 			highlightQueryExtension,
 			headingDecoration,
@@ -322,18 +373,25 @@ export function MarkdownEditor({
 				{ key: "Mod-6", run: toggleHeading(6) },
 			]),
 			EditorView.updateListener.of((update) => {
-				if (!(update.docChanged || update.selectionChanged)) return;
+				if (!(update.docChanged || update.selectionSet)) return;
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
 				cancelAnimationFrame(statsRafIdRef.current);
 				statsRafIdRef.current = requestAnimationFrame(() => {
 					const sel = update.state.selection.main;
 					const lineInfo = update.state.doc.lineAt(sel.head);
-					callback({
+					const info: CursorInfo = {
 						line: lineInfo.number,
 						col: sel.head - lineInfo.from + 1,
 						chars: update.state.doc.length,
-					});
+					};
+					if (!sel.empty) {
+						info.selectedChars = update.state.sliceDoc(sel.from, sel.to).length;
+						const fromLine = update.state.doc.lineAt(sel.from).number;
+						const toLine = update.state.doc.lineAt(sel.to).number;
+						info.selectedLines = toLine - fromLine + 1;
+					}
+					callback(info);
 				});
 			}),
 		],
@@ -358,7 +416,7 @@ export function MarkdownEditor({
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
 						highlightActiveLine,
-						highlightActiveLineGutter: highlightActiveLine,
+						highlightActiveLineGutter: true,
 						bracketMatching: true,
 						closeBrackets: true,
 						indentOnInput: true,

@@ -64,7 +64,7 @@ export function AppLayout() {
 	const pendingGoToLineRef = useRef<{ line: number; query?: string } | null>(null);
 
 	const [content, setContent] = useState("");
-	const { saveStatus, saveNow, markSaved, waitForPending } = useAutoSave(
+	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent } = useAutoSave(
 		activeTabPath ?? "",
 		content,
 	);
@@ -78,6 +78,7 @@ export function AppLayout() {
 	const saveNowRef = useRef(saveNow);
 	saveNowRef.current = saveNow;
 	const prevWorkspacePathRef = useRef(workspacePath);
+	const justSwitchedRef = useRef(false);
 
 	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
 	// restore or persist the workspace path — only theme and sidebar are restored.
@@ -252,6 +253,7 @@ export function AppLayout() {
 		}
 
 		prevTabPathRef.current = activeTabPath;
+		justSwitchedRef.current = true;
 
 		if (!activeTabPath) {
 			contentLoadedForPathRef.current = null;
@@ -307,7 +309,12 @@ export function AppLayout() {
 	// Keep savedContent in cache and ref in sync when save completes.
 	// Guard with contentLoadedForPathRef to avoid misattributing a flush save
 	// (for the previous file) as a save for the current activeTabPath.
+	// Also skip when just switched tabs — contentRef still has the old tab's content.
 	useEffect(() => {
+		if (justSwitchedRef.current) {
+			justSwitchedRef.current = false;
+			return;
+		}
 		if (
 			activeTabPath &&
 			saveStatus === "saved" &&
@@ -369,6 +376,9 @@ export function AppLayout() {
 		[closeTab],
 	);
 
+	const getLastSavedContentRef = useRef(getLastSavedContent);
+	getLastSavedContentRef.current = getLastSavedContent;
+
 	const handleExternalFileModified = useCallback(
 		(path: string) => {
 			const state = useWorkspaceStore.getState();
@@ -377,10 +387,22 @@ export function AppLayout() {
 
 			if (path === state.activeTabPath) {
 				if (tab.dirty) {
-					// Don't overwrite a pending delete dialog (delete is more severe)
-					setExternalConflict((prev) =>
-						prev?.type === "deleted" ? prev : { path, type: "modified" },
-					);
+					// Read file to check if this is our own save or genuine external change
+					readFile(path)
+						.then((loaded) => {
+							if (useWorkspaceStore.getState().activeTabPath !== path) return;
+							if (loaded === getLastSavedContentRef.current()) {
+								// File matches what we last saved — this was our own write
+								return;
+							}
+							// Don't overwrite a pending delete dialog (delete is more severe)
+							setExternalConflict((prev) =>
+								prev?.type === "deleted" ? prev : { path, type: "modified" },
+							);
+						})
+						.catch((err) => {
+							console.error("Failed to read file for conflict check:", err);
+						});
 				} else {
 					readFile(path)
 						.then((loaded) => {
@@ -750,6 +772,13 @@ export function AppLayout() {
 			<StatusBar
 				saveStatus={activeTabPath ? saveStatus : undefined}
 				cursorInfo={activeTabPath && !editorError ? (cursorInfo ?? undefined) : undefined}
+				filePath={
+					activeTabPath
+						? ((workspacePath
+								? activeTabPath.replace(addTrailingSep(workspacePath), "")
+								: activeTabPath) ?? undefined)
+						: undefined
+				}
 				onOpenSettings={() => setSettingsOpen(true)}
 				onOpenHelp={() => setHelpOpen(true)}
 			/>
