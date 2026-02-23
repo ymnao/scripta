@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { StatusBar } from "./StatusBar";
 
 describe("StatusBar", () => {
@@ -41,5 +42,36 @@ describe("StatusBar", () => {
 		render(<StatusBar saveStatus="saved" />);
 		expect(screen.queryByText(/Ln \d+/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/chars/)).not.toBeInTheDocument();
+	});
+
+	it("shows file path when provided", () => {
+		render(<StatusBar filePath="docs/readme.md" />);
+		expect(screen.getByTestId("file-path")).toHaveTextContent("docs/readme.md");
+	});
+
+	it("copies file path to clipboard on click", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.assign(navigator, { clipboard: { writeText } });
+
+		render(<StatusBar filePath="docs/readme.md" />);
+		await userEvent.click(screen.getByTestId("file-path"));
+
+		expect(writeText).toHaveBeenCalledWith("docs/readme.md");
+	});
+
+	it("shows selection info when selectedChars and selectedLines are present", () => {
+		render(
+			<StatusBar
+				cursorInfo={{ line: 3, col: 1, chars: 500, selectedChars: 42, selectedLines: 3 }}
+			/>,
+		);
+		expect(screen.getByTestId("selection-info")).toHaveTextContent("3 行選択, 42 文字選択");
+		expect(screen.queryByText(/Ln \d+/)).not.toBeInTheDocument();
+	});
+
+	it("shows cursor position when no selection", () => {
+		render(<StatusBar cursorInfo={{ line: 5, col: 10, chars: 200 }} />);
+		expect(screen.getByText("Ln 5, Col 10")).toBeInTheDocument();
+		expect(screen.queryByTestId("selection-info")).not.toBeInTheDocument();
 	});
 });
