@@ -33,6 +33,8 @@ export function TabBar({
 	const [dragState, setDragState] = useState<{
 		fromIndex: number;
 		overIndex: number | null;
+		overSide: "left" | "right" | null;
+		deltaX: number;
 	} | null>(null);
 	const dragRef = useRef<{
 		fromIndex: number;
@@ -45,33 +47,45 @@ export function TabBar({
 	const onReorderTabRef = useRef(onReorderTab);
 	onReorderTabRef.current = onReorderTab;
 
-	const findTabIndexAt = useCallback((clientX: number): number | null => {
-		const tablist = tablistRef.current;
-		if (!tablist) return null;
-		const tabElements = tablist.querySelectorAll<HTMLElement>("[data-index]");
-		for (const el of tabElements) {
-			const rect = el.getBoundingClientRect();
-			if (clientX >= rect.left && clientX < rect.right) {
+	const findDropTarget = useCallback(
+		(clientX: number, skipIndex?: number): { index: number; side: "left" | "right" } | null => {
+			const tablist = tablistRef.current;
+			if (!tablist) return null;
+			const tabElements = tablist.querySelectorAll<HTMLElement>("[data-index]");
+			for (const el of tabElements) {
 				const idx = Number(el.dataset.index);
-				return Number.isNaN(idx) ? null : idx;
+				if (Number.isNaN(idx) || idx === skipIndex) continue;
+				const rect = el.getBoundingClientRect();
+				if (clientX >= rect.left && clientX < rect.right) {
+					const midX = (rect.left + rect.right) / 2;
+					return { index: idx, side: clientX < midX ? "left" : "right" };
+				}
 			}
-		}
-		return null;
-	}, []);
+			return null;
+		},
+		[],
+	);
 
 	useEffect(() => {
 		const handlePointerMove = (e: PointerEvent) => {
 			const drag = dragRef.current;
 			if (!drag) return;
-			if (!drag.started && Math.abs(e.clientX - drag.startX) > DRAG_THRESHOLD) {
+			const deltaX = e.clientX - drag.startX;
+			if (!drag.started && Math.abs(deltaX) > DRAG_THRESHOLD) {
 				drag.started = true;
-				setDragState({ fromIndex: drag.fromIndex, overIndex: null });
+				setDragState({ fromIndex: drag.fromIndex, overIndex: null, overSide: null, deltaX });
 			}
 			if (drag.started) {
-				const overIndex = findTabIndexAt(e.clientX);
-				setDragState((prev) =>
-					prev ? { ...prev, overIndex: overIndex !== drag.fromIndex ? overIndex : null } : null,
-				);
+				const target = findDropTarget(e.clientX, drag.fromIndex);
+				if (target) {
+					setDragState((prev) =>
+						prev ? { ...prev, overIndex: target.index, overSide: target.side, deltaX } : null,
+					);
+				} else {
+					setDragState((prev) =>
+						prev ? { ...prev, overIndex: null, overSide: null, deltaX } : null,
+					);
+				}
 			}
 		};
 
@@ -81,12 +95,35 @@ export function TabBar({
 
 			if (drag.started) {
 				skipNextClickRef.current = true;
-				// Determine drop target: first try e.target (works when released over a tab),
-				// then fall back to coordinate-based lookup.
+				// Skip the dragged tab itself (its translated rect may overlap targets).
 				const targetEl = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
-				const toIndex = targetEl ? Number(targetEl.dataset.index) : findTabIndexAt(e.clientX);
-				if (toIndex != null && !Number.isNaN(toIndex) && toIndex !== drag.fromIndex) {
-					onReorderTabRef.current(drag.fromIndex, toIndex);
+				let dropTarget: { index: number; side: "left" | "right" } | null = null;
+				if (targetEl && Number(targetEl.dataset.index) !== drag.fromIndex) {
+					const idx = Number(targetEl.dataset.index);
+					if (!Number.isNaN(idx)) {
+						const rect = targetEl.getBoundingClientRect();
+						const midX = (rect.left + rect.right) / 2;
+						dropTarget = { index: idx, side: e.clientX < midX ? "left" : "right" };
+					}
+				}
+				if (!dropTarget) {
+					dropTarget = findDropTarget(e.clientX, drag.fromIndex);
+				}
+
+				if (dropTarget) {
+					const { index: targetIndex, side } = dropTarget;
+					// Calculate toIndex based on which half of the target tab was dropped on.
+					// "left" = insert before target, "right" = insert after target.
+					// Account for index shift caused by removing the source tab first.
+					let toIndex: number;
+					if (side === "left") {
+						toIndex = drag.fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+					} else {
+						toIndex = drag.fromIndex < targetIndex ? targetIndex : targetIndex + 1;
+					}
+					if (toIndex !== drag.fromIndex) {
+						onReorderTabRef.current(drag.fromIndex, toIndex);
+					}
 				}
 			}
 
@@ -100,7 +137,7 @@ export function TabBar({
 			document.removeEventListener("pointermove", handlePointerMove);
 			document.removeEventListener("pointerup", handlePointerUp);
 		};
-	}, [findTabIndexAt]);
+	}, [findDropTarget]);
 
 	return (
 		<div
@@ -135,6 +172,9 @@ export function TabBar({
 				{tabs.map((tab, index) => {
 					const isActive = tab.path === activeTabPath;
 					const fileName = tab.path.split(/[\\/]/).pop() ?? tab.path;
+					const isDragging = dragState?.fromIndex === index;
+					const isOver = dragState?.overIndex === index;
+					const overSide = dragState?.overSide;
 
 					return (
 						<div
@@ -203,11 +243,20 @@ export function TabBar({
 									}
 								}
 							}}
-							className={`group flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs select-none ${
+							style={
+								isDragging && dragState
+									? {
+											transform: `translateX(${dragState.deltaX}px)`,
+											zIndex: 10,
+											pointerEvents: "none" as const,
+										}
+									: undefined
+							}
+							className={`group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs select-none ${
 								isActive
 									? "bg-bg-secondary text-text-primary"
 									: "text-text-secondary hover:bg-bg-secondary/50"
-							} ${dragState?.fromIndex === index ? "opacity-50" : ""} ${dragState?.overIndex === index ? "border-l-2 border-l-text-secondary" : ""}`}
+							} ${isDragging ? "opacity-50" : ""} ${isOver && overSide === "left" ? "border-l-2 border-l-text-secondary" : ""} ${isOver && overSide === "right" ? "border-r-2 border-r-text-secondary" : ""}`}
 						>
 							<span className="flex items-center gap-1.5">
 								{tab.dirty && (

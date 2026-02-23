@@ -244,7 +244,7 @@ describe("TabBar", () => {
 	});
 
 	describe("pointer-based drag reorder", () => {
-		it("calls onReorderTab when pointer-dragged to another tab", () => {
+		it("calls onReorderTab when dragged rightward (right half of target)", () => {
 			useWorkspaceStore.setState({
 				tabs: [
 					{ path: "/workspace/a.md", dirty: false },
@@ -257,14 +257,63 @@ describe("TabBar", () => {
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
 
-			// Start drag on first tab
+			// Drag A (index 0) → drop on right half of C (index 2)
+			// jsdom: getBoundingClientRect returns {left:0,right:0}, midX=0
+			// clientX >= 0 → side="right"
 			fireEvent.pointerDown(tabs[0], { clientX: 0, button: 0 });
-			// Move past threshold to start drag
 			fireEvent(document, new PointerEvent("pointermove", { clientX: 100, bubbles: true }));
-			// Release pointer over the third tab — e.target.closest('[data-index]') resolves to tabs[2]
-			fireEvent.pointerUp(tabs[2]);
+			fireEvent.pointerUp(tabs[2], { clientX: 10 });
 
+			// side="right", fromIndex=0 < targetIndex=2 → toIndex=2
+			// [A,B,C] → remove A → [B,C] → insert at 2 → [B,C,A]
 			expect(onReorderTab).toHaveBeenCalledWith(0, 2);
+		});
+
+		it("inserts to right of target when dragging leftward", () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: false },
+					{ path: "/workspace/b.md", dirty: false },
+					{ path: "/workspace/c.md", dirty: false },
+				],
+				activeTabPath: "/workspace/c.md",
+			});
+
+			render(<TabBar {...defaultProps} />);
+			const tabs = screen.getAllByRole("tab");
+
+			// Drag C (index 2) → drop on right half of A (index 0)
+			fireEvent.pointerDown(tabs[2], { clientX: 100, button: 0 });
+			fireEvent(document, new PointerEvent("pointermove", { clientX: 0, bubbles: true }));
+			fireEvent.pointerUp(tabs[0], { clientX: 10 });
+
+			// side="right", fromIndex=2 > targetIndex=0 → toIndex=0+1=1
+			// [A,B,C] → remove C → [A,B] → insert at 1 → [A,C,B]
+			expect(onReorderTab).toHaveBeenCalledWith(2, 1);
+		});
+
+		it("can move tab to leftmost position by dropping on left half", () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: false },
+					{ path: "/workspace/b.md", dirty: false },
+					{ path: "/workspace/c.md", dirty: false },
+				],
+				activeTabPath: "/workspace/c.md",
+			});
+
+			render(<TabBar {...defaultProps} />);
+			const tabs = screen.getAllByRole("tab");
+
+			// Drag C (index 2) → drop on left half of A (index 0)
+			// clientX < 0 → side="left" (jsdom midX=0)
+			fireEvent.pointerDown(tabs[2], { clientX: 100, button: 0 });
+			fireEvent(document, new PointerEvent("pointermove", { clientX: -10, bubbles: true }));
+			fireEvent.pointerUp(tabs[0], { clientX: -10 });
+
+			// side="left", fromIndex=2 > targetIndex=0 → toIndex=0
+			// [A,B,C] → remove C → [A,B] → insert at 0 → [C,A,B]
+			expect(onReorderTab).toHaveBeenCalledWith(2, 0);
 		});
 
 		it("does not call onReorderTab when released on same tab", () => {
