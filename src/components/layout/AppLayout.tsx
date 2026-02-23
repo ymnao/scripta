@@ -178,6 +178,7 @@ export function AppLayout() {
 				// Save active tab if dirty
 				if (currentActiveTab && contentRef.current !== savedContentRef.current) {
 					const saved = await saveNowRef.current();
+					if (cancelled) return;
 					if (!saved) hasFailed = true;
 				}
 
@@ -198,6 +199,7 @@ export function AppLayout() {
 					}
 				}
 				const results = await Promise.all(saves);
+				if (cancelled) return;
 				for (const { path, ok, content } of results) {
 					if (ok) {
 						const cached = tabCacheRef.current.get(path);
