@@ -34,12 +34,6 @@ export function StatusBar({
 	return (
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary pl-2 pr-3 text-text-secondary">
 			<div className="flex min-w-0 items-center gap-3 text-xs">
-				<output className="shrink-0">
-					{saveStatus === "unsaved" && "未保存"}
-					{saveStatus === "saving" && "保存中..."}
-					{saveStatus === "saved" && "保存済み"}
-					{saveStatus === "error" && "保存失敗"}
-				</output>
 				{filePath && (
 					<button
 						type="button"
@@ -61,12 +55,18 @@ export function StatusBar({
 							</span>
 						) : (
 							<span>
-								Ln {cursorInfo.line}, Col {cursorInfo.col}
+								{cursorInfo.line} 行, {cursorInfo.col} 列
 							</span>
 						)}
-						<span>{cursorInfo.chars} chars</span>
+						<span>{cursorInfo.chars} 文字</span>
 					</>
 				)}
+				<output className="shrink-0">
+					{saveStatus === "unsaved" && "未保存"}
+					{saveStatus === "saving" && "保存中..."}
+					{saveStatus === "saved" && "保存済み"}
+					{saveStatus === "error" && "保存失敗"}
+				</output>
 				<button
 					type="button"
 					onClick={onOpenSettings}

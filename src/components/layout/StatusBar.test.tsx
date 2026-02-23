@@ -34,14 +34,14 @@ describe("StatusBar", () => {
 
 	it("shows cursor info when provided", () => {
 		render(<StatusBar cursorInfo={{ line: 10, col: 5, chars: 1234 }} />);
-		expect(screen.getByText("Ln 10, Col 5")).toBeInTheDocument();
-		expect(screen.getByText("1234 chars")).toBeInTheDocument();
+		expect(screen.getByText("10 行, 5 列")).toBeInTheDocument();
+		expect(screen.getByText("1234 文字")).toBeInTheDocument();
 	});
 
 	it("does not show cursor info when not provided", () => {
 		render(<StatusBar saveStatus="saved" />);
-		expect(screen.queryByText(/Ln \d+/)).not.toBeInTheDocument();
-		expect(screen.queryByText(/chars/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/\d+ 行,/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/文字/)).not.toBeInTheDocument();
 	});
 
 	it("shows file path when provided", () => {
@@ -66,12 +66,12 @@ describe("StatusBar", () => {
 			/>,
 		);
 		expect(screen.getByTestId("selection-info")).toHaveTextContent("3 行選択, 42 文字選択");
-		expect(screen.queryByText(/Ln \d+/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/\d+ 行,/)).not.toBeInTheDocument();
 	});
 
 	it("shows cursor position when no selection", () => {
 		render(<StatusBar cursorInfo={{ line: 5, col: 10, chars: 200 }} />);
-		expect(screen.getByText("Ln 5, Col 10")).toBeInTheDocument();
+		expect(screen.getByText("5 行, 10 列")).toBeInTheDocument();
 		expect(screen.queryByTestId("selection-info")).not.toBeInTheDocument();
 	});
 });

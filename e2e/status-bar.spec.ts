@@ -21,8 +21,8 @@ test.describe("status bar", () => {
 		await page.getByLabel("test.md file").click();
 
 		// Wait for the editor to load and cursor info to appear
-		await expect(page.getByText(/Ln \d+, Col \d+/)).toBeVisible();
-		await expect(page.getByText(/\d+ chars/)).toBeVisible();
+		await expect(page.getByText(/\d+ 行, \d+ 列/)).toBeVisible();
+		await expect(page.getByText(/\d+ 文字/)).toBeVisible();
 	});
 
 	test("does not show cursor info when no file is open", async ({ page }) => {
@@ -30,8 +30,8 @@ test.describe("status bar", () => {
 		await mock.setup({ files: {}, directories: {} }, null);
 
 		await page.goto("/");
-		await expect(page.getByText(/Ln \d+, Col \d+/)).not.toBeVisible();
-		await expect(page.getByText(/\d+ chars/)).not.toBeVisible();
+		await expect(page.getByText(/\d+ 行, \d+ 列/)).not.toBeVisible();
+		await expect(page.getByText(/\d+ 文字/)).not.toBeVisible();
 	});
 
 	test("shows file path in status bar", async ({ page }) => {
