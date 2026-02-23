@@ -516,4 +516,161 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 		expect(result.current.saveStatus).toBe("saved");
 	});
+
+	it("schedules auto-retry on transient save error", async () => {
+		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		// Trigger auto-save
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(result.current.saveStatus).toBe("error");
+		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+
+		// Retry should fire after 5 seconds
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+		expect(mockedWriteFile).toHaveBeenCalledTimes(2);
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("does not retry on non-transient save error", async () => {
+		mockedWriteFile.mockRejectedValue("Not found: /test.md");
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(result.current.saveStatus).toBe("error");
+
+		mockedWriteFile.mockClear();
+
+		// Advance past retry window — no retry should occur
+		await act(async () => {
+			vi.advanceTimersByTime(10000);
+		});
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("cancels retry when content changes", async () => {
+		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		// Trigger auto-save (fails)
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(result.current.saveStatus).toBe("error");
+
+		mockedWriteFile.mockClear();
+
+		// Edit again before retry fires — retry should be cancelled
+		rerender({ content: "changed again" });
+		expect(result.current.saveStatus).toBe("unsaved");
+
+		// Advance past original retry time — the new debounce save should fire, not the retry
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed again\n");
+	});
+
+	it("saveNow cancels pending retry timer", async () => {
+		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		// Trigger auto-save (fails with transient error → retry scheduled at 5s)
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(result.current.saveStatus).toBe("error");
+
+		const callsAfterError = mockedWriteFile.mock.calls.length;
+
+		// Call saveNow before the retry fires — should cancel the retry
+		await act(async () => {
+			await result.current.saveNow();
+		});
+		expect(result.current.saveStatus).toBe("saved");
+		expect(mockedWriteFile.mock.calls.length - callsAfterError).toBe(1);
+
+		// Advance past retry window — no extra save should fire
+		mockedWriteFile.mockClear();
+		await act(async () => {
+			vi.advanceTimersByTime(10000);
+		});
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("stops retrying after max retries", async () => {
+		mockedWriteFile.mockRejectedValue("Connection timed out");
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		// Initial save fails
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(result.current.saveStatus).toBe("error");
+
+		const callsAfterInitial = mockedWriteFile.mock.calls.length;
+
+		// Advance through all retry windows: 5s + 10s + 20s + 40s (extra margin)
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(10000);
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(20000);
+		});
+
+		const callsAfterRetries = mockedWriteFile.mock.calls.length;
+		// Should have retried exactly 3 times (MAX_SAVE_RETRIES)
+		expect(callsAfterRetries - callsAfterInitial).toBe(3);
+
+		// No more retries after max
+		mockedWriteFile.mockClear();
+		await act(async () => {
+			vi.advanceTimersByTime(40000);
+		});
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
 });

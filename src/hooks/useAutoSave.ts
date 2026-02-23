@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
+import { isTransientError } from "../lib/errors";
 import { useSettingsStore } from "../stores/settings";
+
+const MAX_SAVE_RETRIES = 3;
+const SAVE_RETRY_BASE_MS = 5000;
 
 function processContent(content: string, trimWhitespace: boolean): string {
 	let result = content;
@@ -36,6 +40,16 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 	const prevFilePathRef = useRef(filePath);
 	const awaitingNewFileRef = useRef(false);
 	const inflightRef = useRef<Promise<void>>(Promise.resolve());
+	const saveRetryCountRef = useRef(0);
+	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const clearRetryState = useCallback(() => {
+		if (retryTimerRef.current) {
+			clearTimeout(retryTimerRef.current);
+			retryTimerRef.current = null;
+		}
+		saveRetryCountRef.current = 0;
+	}, []);
 
 	const save = useCallback(
 		(contentToSave: string): Promise<void> => {
@@ -54,18 +68,26 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 					if (!isMountedRef.current) return;
 					if (currentSaveId !== saveIdRef.current) return;
 					lastSavedContentRef.current = processed;
+					clearRetryState();
 					setSaveStatus("saved");
 				},
 				(err) => {
 					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
 						console.error("Failed to save file:", err);
 						setSaveStatus("error");
+						if (isTransientError(err) && saveRetryCountRef.current < MAX_SAVE_RETRIES) {
+							saveRetryCountRef.current += 1;
+							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
+							retryTimerRef.current = setTimeout(() => {
+								save(contentRef.current).catch(() => {});
+							}, delay);
+						}
 					}
 					throw err;
 				},
 			);
 		},
-		[filePath],
+		[filePath, clearRetryState],
 	);
 
 	// Flush pending changes to the OLD path when filePath changes
@@ -76,6 +98,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			clearTimeout(debounceTimerRef.current);
 			debounceTimerRef.current = null;
 		}
+
+		// Clear retry state on file switch
+		clearRetryState();
 
 		const prevPath = prevFilePathRef.current;
 		const currentContent = contentRef.current;
@@ -106,7 +131,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 					setSaveStatus("error");
 				});
 		}
-	}, [filePath]);
+	}, [filePath, clearRetryState]);
 
 	useEffect(() => {
 		if (awaitingNewFileRef.current) {
@@ -117,6 +142,10 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			return;
 		}
 		setSaveStatus("unsaved");
+
+		// Clear retry state on content change (new debounce save will take over)
+		clearRetryState();
+
 		if (debounceTimerRef.current) {
 			clearTimeout(debounceTimerRef.current);
 		}
@@ -128,7 +157,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 				clearTimeout(debounceTimerRef.current);
 			}
 		};
-	}, [content, save, autoSaveDelay]);
+	}, [content, save, autoSaveDelay, clearRetryState]);
 
 	useEffect(() => {
 		isMountedRef.current = true;
@@ -136,6 +165,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			isMountedRef.current = false;
 			if (debounceTimerRef.current) {
 				clearTimeout(debounceTimerRef.current);
+			}
+			if (retryTimerRef.current) {
+				clearTimeout(retryTimerRef.current);
 			}
 		};
 	}, []);
@@ -145,11 +177,12 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			clearTimeout(debounceTimerRef.current);
 			debounceTimerRef.current = null;
 		}
+		clearRetryState();
 		return save(contentRef.current).then(
 			() => true,
 			() => false,
 		);
-	}, [save]);
+	}, [save, clearRetryState]);
 
 	const markSaved = useCallback((savedContent: string) => {
 		// Normalize to match the format written to disk for consistent comparison

@@ -1,9 +1,11 @@
 import type { EditorView } from "@codemirror/view";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
+import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
@@ -12,6 +14,7 @@ import { useWorkspaceStore } from "../../stores/workspace";
 import { Dialog } from "../common/Dialog";
 import { HelpDialog } from "../common/HelpDialog";
 import { SettingsDialog } from "../common/SettingsDialog";
+import { ToastContainer } from "../common/Toast";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
@@ -71,6 +74,8 @@ export function AppLayout() {
 	const contentRef = useRef(content);
 	contentRef.current = content;
 	const savedContentRef = useRef("");
+	const saveNowRef = useRef(saveNow);
+	saveNowRef.current = saveNow;
 	const prevWorkspacePathRef = useRef(workspacePath);
 
 	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
@@ -156,6 +161,53 @@ export function AppLayout() {
 		};
 	}, []);
 
+	// Save all dirty tabs before window closes
+	useEffect(() => {
+		let unlisten: (() => void) | null = null;
+
+		getCurrentWindow()
+			.onCloseRequested(async (event) => {
+				event.preventDefault();
+
+				let hasFailed = false;
+				const currentActiveTab = useWorkspaceStore.getState().activeTabPath;
+
+				// Save active tab if dirty
+				if (currentActiveTab && contentRef.current !== savedContentRef.current) {
+					const saved = await saveNowRef.current();
+					if (!saved) hasFailed = true;
+				}
+
+				// Save all dirty cached non-active tabs
+				const saves: Promise<boolean>[] = [];
+				for (const [path, cached] of tabCacheRef.current) {
+					if (path !== currentActiveTab && cached.content !== cached.savedContent) {
+						saves.push(
+							writeFile(path, cached.content).then(
+								() => true,
+								(err) => {
+									console.error("Failed to save file on window close:", err);
+									return false;
+								},
+							),
+						);
+					}
+				}
+				const results = await Promise.all(saves);
+				if (results.some((ok) => !ok)) hasFailed = true;
+
+				if (hasFailed) return;
+				await getCurrentWindow().destroy();
+			})
+			.then((fn) => {
+				unlisten = fn;
+			});
+
+		return () => {
+			unlisten?.();
+		};
+	}, []);
+
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {
 		// Clear cursor info and error when switching tabs
@@ -221,7 +273,7 @@ export function AppLayout() {
 			.catch((err) => {
 				if (ignore) return;
 				console.error("Failed to read file:", err);
-				setEditorError(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
+				setEditorError(translateError(err));
 				contentLoadedForPathRef.current = activeTabPath;
 				savedContentRef.current = "";
 				markSaved("");
@@ -694,23 +746,24 @@ export function AppLayout() {
 
 			<SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+			<ToastContainer />
 
 			<Dialog
 				open={externalConflict?.type === "modified"}
-				title="File changed externally"
-				description={`"${externalConflict ? basename(externalConflict.path) : ""}" has been modified outside the editor. You have unsaved changes.`}
-				confirmLabel="Reload"
-				cancelLabel="Keep my changes"
+				title="ファイルが外部で変更されました"
+				description={`「${externalConflict ? basename(externalConflict.path) : ""}」がエディタの外部で変更されました。未保存の変更があります。`}
+				confirmLabel="再読み込み"
+				cancelLabel="自分の変更を保持"
 				onConfirm={handleConflictReload}
 				onCancel={handleConflictKeep}
 			/>
 
 			<Dialog
 				open={externalConflict?.type === "deleted"}
-				title="File deleted externally"
-				description={`"${externalConflict ? basename(externalConflict.path) : ""}" has been deleted outside the editor. You have unsaved changes.`}
-				confirmLabel="Discard"
-				cancelLabel="Keep editing"
+				title="ファイルが外部で削除されました"
+				description={`「${externalConflict ? basename(externalConflict.path) : ""}」がエディタの外部で削除されました。未保存の変更があります。`}
+				confirmLabel="破棄"
+				cancelLabel="編集を続ける"
 				onConfirm={handleDeletedDirtyDiscard}
 				onCancel={handleDeletedDirtyKeep}
 			/>

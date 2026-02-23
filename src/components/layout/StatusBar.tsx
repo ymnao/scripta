@@ -14,10 +14,10 @@ export function StatusBar({ saveStatus, cursorInfo, onOpenSettings, onOpenHelp }
 	return (
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary pl-2 pr-3 text-text-secondary">
 			<output className="text-xs">
-				{saveStatus === "unsaved" && "Unsaved"}
-				{saveStatus === "saving" && "Saving..."}
-				{saveStatus === "saved" && "Saved"}
-				{saveStatus === "error" && "Save failed"}
+				{saveStatus === "unsaved" && "未保存"}
+				{saveStatus === "saving" && "保存中..."}
+				{saveStatus === "saved" && "保存済み"}
+				{saveStatus === "error" && "保存失敗"}
 			</output>
 			<div className="flex items-center gap-3 text-xs">
 				{cursorInfo && (

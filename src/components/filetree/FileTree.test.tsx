@@ -126,7 +126,7 @@ describe("FileTree", () => {
 			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
 		});
 
-		expect(screen.getByText("Failed to load folder")).toBeInTheDocument();
+		expect(screen.getByText("フォルダの読み込みに失敗しました")).toBeInTheDocument();
 	});
 
 	it("creates a file via context menu and calls onFileSelect", async () => {
@@ -234,10 +234,10 @@ describe("FileTree", () => {
 
 		await userEvent.click(screen.getByText("Delete"));
 
-		expect(screen.getByText(/Are you sure you want to delete "hello.md"/)).toBeInTheDocument();
+		expect(screen.getByText(/を削除しますか？ゴミ箱に移動されます/)).toBeInTheDocument();
 
 		await act(async () => {
-			await userEvent.click(screen.getByText("Delete", { selector: "button" }));
+			await userEvent.click(screen.getByText("削除", { selector: "button" }));
 		});
 
 		expect(mockedDeleteEntry).toHaveBeenCalledWith("/workspace/hello.md");
