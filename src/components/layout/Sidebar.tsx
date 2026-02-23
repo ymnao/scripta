@@ -10,6 +10,8 @@ interface SidebarProps {
 	onShowFiles: () => void;
 	onShowSearch: () => void;
 	onSearchNavigate: (filePath: string, lineNumber: number, query: string) => void;
+	onFileSelect: (path: string) => void;
+	onFileOpenNewTab: (path: string) => void;
 	searchInputRef?: React.RefObject<HTMLInputElement | null>;
 	onFileRenamed?: (oldPath: string, newPath: string, isDirectory: boolean) => void;
 	onFileDeleted?: (path: string, isDirectory: boolean) => void;
@@ -20,6 +22,8 @@ export function Sidebar({
 	onShowFiles,
 	onShowSearch,
 	onSearchNavigate,
+	onFileSelect,
+	onFileOpenNewTab,
 	searchInputRef,
 	onFileRenamed,
 	onFileDeleted,
@@ -27,7 +31,6 @@ export function Sidebar({
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
-	const openTab = useWorkspaceStore((s) => s.openTab);
 
 	const handleOpenFolder = useCallback(async () => {
 		const selected = await open({ directory: true });
@@ -72,7 +75,8 @@ export function Sidebar({
 					<FileTree
 						workspacePath={workspacePath}
 						selectedPath={activeTabPath}
-						onFileSelect={openTab}
+						onFileSelect={onFileSelect}
+						onFileOpenNewTab={onFileOpenNewTab}
 						onFileRenamed={onFileRenamed}
 						onFileDeleted={onFileDeleted}
 					/>

@@ -17,16 +17,45 @@ const workspace = {
 };
 
 test.describe("tab management", () => {
-	test("opens multiple files in tabs", async ({ page }) => {
+	test("replaces active tab on normal file click", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click();
+		await expect(page.getByRole("tab")).toHaveCount(1);
+		await expect(page.getByRole("tab", { selected: true })).toContainText("hello.md");
 
+		await page.getByLabel("notes.md file").click();
+		await expect(page.getByRole("tab")).toHaveCount(1);
+		await expect(page.getByRole("tab", { selected: true })).toContainText("notes.md");
+	});
+
+	test("opens new tab with Cmd+Click", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("hello.md file").click();
+		await expect(page.getByRole("tab")).toHaveCount(1);
+
+		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
 		await expect(page.getByRole("tab")).toHaveCount(2);
+	});
+
+	test("switches editor content when replacing tab", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("hello.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		await page.getByLabel("notes.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Some notes here");
 	});
 
 	test("switches editor content when switching tabs", async ({ page }) => {
@@ -38,7 +67,8 @@ test.describe("tab management", () => {
 		await page.getByLabel("hello.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
-		await page.getByLabel("notes.md file").click();
+		// Cmd+Click to open in new tab
+		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
 		await expect(page.locator(".cm-content")).toContainText("Some notes here");
 
 		await page.getByRole("tab").filter({ hasText: "hello.md" }).click();
@@ -52,7 +82,8 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click();
+		// Cmd+Click to open a second tab
+		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
 
 		await expect(page.getByRole("tab")).toHaveCount(2);
 
@@ -67,7 +98,8 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click();
+		// Cmd+Click to open a second tab
+		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
 
 		await expect(page.getByRole("tab")).toHaveCount(2);
 
@@ -82,11 +114,13 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click();
+		// Cmd+Click to open second tab
+		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
 
 		await expect(page.getByRole("tab")).toHaveCount(2);
 		await expect(page.getByRole("tab", { selected: true })).toContainText("notes.md");
 
+		// Normal click on already-open file switches to it (no new tab)
 		await page.getByLabel("hello.md file").click();
 		await expect(page.getByRole("tab")).toHaveCount(2);
 		await expect(page.getByRole("tab", { selected: true })).toContainText("hello.md");

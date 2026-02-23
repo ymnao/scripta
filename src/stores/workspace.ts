@@ -19,6 +19,8 @@ interface WorkspaceState {
 	renameTab: (oldPath: string, newPath: string) => void;
 	closeTabsByPrefix: (prefix: string) => void;
 	bumpFileTreeVersion: () => void;
+	replaceActiveTab: (newPath: string) => void;
+	reorderTab: (fromIndex: number, toIndex: number) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
@@ -79,6 +81,46 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 			tabs: state.tabs.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)),
 			activeTabPath: state.activeTabPath === oldPath ? newPath : state.activeTabPath,
 		})),
+
+	replaceActiveTab: (newPath) =>
+		set((state) => {
+			// Already on a tab with this path → just activate
+			const existing = state.tabs.find((t) => t.path === newPath);
+			if (existing) {
+				return { activeTabPath: newPath };
+			}
+			// No active tab → create new
+			if (!state.activeTabPath) {
+				return {
+					tabs: [...state.tabs, { path: newPath, dirty: false }],
+					activeTabPath: newPath,
+				};
+			}
+			// Replace active tab's path
+			return {
+				tabs: state.tabs.map((t) =>
+					t.path === state.activeTabPath ? { path: newPath, dirty: false } : t,
+				),
+				activeTabPath: newPath,
+			};
+		}),
+
+	reorderTab: (fromIndex, toIndex) =>
+		set((state) => {
+			if (
+				fromIndex === toIndex ||
+				fromIndex < 0 ||
+				toIndex < 0 ||
+				fromIndex >= state.tabs.length ||
+				toIndex >= state.tabs.length
+			) {
+				return state;
+			}
+			const newTabs = [...state.tabs];
+			const [moved] = newTabs.splice(fromIndex, 1);
+			newTabs.splice(toIndex, 0, moved);
+			return { tabs: newTabs };
+		}),
 
 	closeTabsByPrefix: (prefix) =>
 		set((state) => {

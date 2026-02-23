@@ -9,6 +9,7 @@ import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
+import { useNavigationStore } from "../../stores/navigation";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useWorkspaceStore } from "../../stores/workspace";
@@ -36,13 +37,25 @@ export function AppLayout() {
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
 	const closeTab = useWorkspaceStore((s) => s.closeTab);
+	const setActiveTab = useWorkspaceStore((s) => s.setActiveTab);
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
 	const renameTab = useWorkspaceStore((s) => s.renameTab);
 	const openTab = useWorkspaceStore((s) => s.openTab);
+	const replaceActiveTab = useWorkspaceStore((s) => s.replaceActiveTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
+	const reorderTab = useWorkspaceStore((s) => s.reorderTab);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
 	const hydratePreference = useThemeStore((s) => s.hydratePreference);
 	const hydrateSettings = useSettingsStore((s) => s.hydrate);
+
+	const pushNavigation = useNavigationStore((s) => s.push);
+	const goBackNavigation = useNavigationStore((s) => s.goBack);
+	const goForwardNavigation = useNavigationStore((s) => s.goForward);
+	const resetNavigation = useNavigationStore((s) => s.reset);
+	const renameNavigationPath = useNavigationStore((s) => s.renamePath);
+	const renameNavigationPathsByPrefix = useNavigationStore((s) => s.renamePathsByPrefix);
+	const navHistory = useNavigationStore((s) => s.history);
+	const navHistoryIndex = useNavigationStore((s) => s.historyIndex);
 
 	const [loading, setLoading] = useState(true);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -243,13 +256,19 @@ export function AppLayout() {
 			tabCacheRef.current.clear();
 		}
 
-		// Save previous tab to cache (only if content was actually loaded for it)
+		// Save previous tab to cache (only if content was actually loaded for it
+		// and the tab still exists — replaceActiveTab removes the old tab)
 		if (!workspaceChanged && prevPath && contentLoadedForPathRef.current === prevPath) {
-			const currentCache = tabCacheRef.current.get(prevPath);
-			tabCacheRef.current.set(prevPath, {
-				content: contentRef.current,
-				savedContent: currentCache?.savedContent ?? savedContentRef.current,
-			});
+			const tabStillExists = useWorkspaceStore.getState().tabs.some((t) => t.path === prevPath);
+			if (tabStillExists) {
+				const currentCache = tabCacheRef.current.get(prevPath);
+				tabCacheRef.current.set(prevPath, {
+					content: contentRef.current,
+					savedContent: currentCache?.savedContent ?? savedContentRef.current,
+				});
+			} else {
+				tabCacheRef.current.delete(prevPath);
+			}
 		}
 
 		prevTabPathRef.current = activeTabPath;
@@ -571,6 +590,7 @@ export function AppLayout() {
 					updateRefs(oldKey, newKey);
 					renameTab(oldKey, newKey);
 				}
+				renameNavigationPathsByPrefix(prefix, addTrailingSep(newPath));
 			} else {
 				const cached = tabCacheRef.current.get(oldPath);
 				if (cached) {
@@ -579,9 +599,10 @@ export function AppLayout() {
 				}
 				updateRefs(oldPath, newPath);
 				renameTab(oldPath, newPath);
+				renameNavigationPath(oldPath, newPath);
 			}
 		},
-		[renameTab],
+		[renameTab, renameNavigationPath, renameNavigationPathsByPrefix],
 	);
 
 	const handleFileDeleted = useCallback(
@@ -606,11 +627,67 @@ export function AppLayout() {
 		editorViewRef.current = view;
 	}, []);
 
+	// Navigation handlers
+	const handleFileSelect = useCallback(
+		(path: string) => {
+			// Save current file before replacing if dirty
+			if (activeTabPath && contentRef.current !== savedContentRef.current) {
+				void saveNow();
+			}
+			replaceActiveTab(path);
+			pushNavigation(path);
+		},
+		[activeTabPath, replaceActiveTab, pushNavigation, saveNow],
+	);
+
+	const handleFileOpenNewTab = useCallback(
+		(path: string) => {
+			openTab(path);
+			pushNavigation(path);
+		},
+		[openTab, pushNavigation],
+	);
+
+	const handleTabSelect = useCallback(
+		(path: string) => {
+			setActiveTab(path);
+			pushNavigation(path);
+		},
+		[setActiveTab, pushNavigation],
+	);
+
+	const navigateTo = useCallback(
+		(path: string) => {
+			// Save current file before navigating if dirty
+			if (activeTabPath && contentRef.current !== savedContentRef.current) {
+				void saveNow();
+			}
+			const state = useWorkspaceStore.getState();
+			if (state.tabs.some((t) => t.path === path)) {
+				setActiveTab(path);
+			} else {
+				replaceActiveTab(path);
+			}
+		},
+		[activeTabPath, setActiveTab, replaceActiveTab, saveNow],
+	);
+
+	const handleGoBack = useCallback(() => {
+		const path = goBackNavigation();
+		if (path) navigateTo(path);
+	}, [goBackNavigation, navigateTo]);
+
+	const handleGoForward = useCallback(() => {
+		const path = goForwardNavigation();
+		if (path) navigateTo(path);
+	}, [goForwardNavigation, navigateTo]);
+
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
 			openTab(filePath);
+			pushNavigation(filePath);
 		},
-		[openTab],
+		[openTab, pushNavigation],
 	);
 
 	const handleShowFiles = useCallback(() => {
@@ -633,8 +710,9 @@ export function AppLayout() {
 				pendingGoToLineRef.current = { line: lineNumber, query };
 				openTab(filePath);
 			}
+			pushNavigation(filePath);
 		},
-		[openTab],
+		[openTab, pushNavigation],
 	);
 
 	const handleGoToLineDone = useCallback(() => {
@@ -650,9 +728,39 @@ export function AppLayout() {
 		if (!activeTabPath) setSearchBarOpen(false);
 	}, [activeTabPath]);
 
-	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P, Cmd+,, F1
+	// Reset navigation on workspace change
+	const prevNavWorkspaceRef = useRef(workspacePath);
+	useEffect(() => {
+		if (prevNavWorkspaceRef.current !== workspacePath) {
+			prevNavWorkspaceRef.current = workspacePath;
+			resetNavigation();
+		}
+	}, [workspacePath, resetNavigation]);
+
+	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P, Cmd+,, F1, Cmd+[/], Alt+Left/Right
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
+			// Navigation: Cmd+[ / Alt+Left = back, Cmd+] / Alt+Right = forward
+			if ((e.metaKey || e.ctrlKey) && e.key === "[") {
+				e.preventDefault();
+				handleGoBack();
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.key === "]") {
+				e.preventDefault();
+				handleGoForward();
+				return;
+			}
+			if (e.altKey && e.key === "ArrowLeft") {
+				e.preventDefault();
+				handleGoBack();
+				return;
+			}
+			if (e.altKey && e.key === "ArrowRight") {
+				e.preventDefault();
+				handleGoForward();
+				return;
+			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
 				e.preventDefault();
 				if (activeTabPath) void handleCloseTab(activeTabPath);
@@ -715,7 +823,7 @@ export function AppLayout() {
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [activeTabPath, handleCloseTab]);
+	}, [activeTabPath, handleCloseTab, handleGoBack, handleGoForward]);
 
 	if (loading) {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
@@ -723,7 +831,15 @@ export function AppLayout() {
 
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
-			<TabBar onCloseTab={handleCloseTab} />
+			<TabBar
+				onCloseTab={handleCloseTab}
+				onTabSelect={handleTabSelect}
+				canGoBack={navHistoryIndex > 0}
+				canGoForward={navHistoryIndex < navHistory.length - 1}
+				onGoBack={handleGoBack}
+				onGoForward={handleGoForward}
+				onReorderTab={reorderTab}
+			/>
 			<div className="min-h-0 flex flex-1">
 				{sidebarVisible && (
 					<Sidebar
@@ -731,6 +847,8 @@ export function AppLayout() {
 						onShowFiles={handleShowFiles}
 						onShowSearch={handleShowSearch}
 						onSearchNavigate={handleSearchNavigate}
+						onFileSelect={handleFileSelect}
+						onFileOpenNewTab={handleFileOpenNewTab}
 						searchInputRef={searchInputRef}
 						onFileRenamed={handleFileRenamed}
 						onFileDeleted={handleFileDeleted}

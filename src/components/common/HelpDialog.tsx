@@ -31,6 +31,20 @@ const groups: ShortcutGroup[] = [
 		shortcuts: [
 			{ keys: [[mod, "S"]], action: "保存" },
 			{ keys: [[mod, "W"]], action: "タブを閉じる" },
+			{
+				keys: [
+					[mod, "["],
+					["Alt", "\u2190"],
+				],
+				action: "戻る",
+			},
+			{
+				keys: [
+					[mod, "]"],
+					["Alt", "\u2192"],
+				],
+				action: "進む",
+			},
 		],
 	},
 	{

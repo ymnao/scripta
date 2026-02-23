@@ -172,6 +172,45 @@ describe("useWorkspaceStore", () => {
 		});
 	});
 
+	describe("replaceActiveTab", () => {
+		it("creates a new tab when no active tab", () => {
+			useWorkspaceStore.getState().replaceActiveTab("/a.md");
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs).toEqual([{ path: "/a.md", dirty: false }]);
+			expect(state.activeTabPath).toBe("/a.md");
+		});
+
+		it("switches to existing tab if newPath already open", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+
+			useWorkspaceStore.getState().replaceActiveTab("/a.md");
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs).toHaveLength(2);
+			expect(state.activeTabPath).toBe("/a.md");
+		});
+
+		it("replaces the active tab path", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+			// active is /b.md
+			useWorkspaceStore.getState().replaceActiveTab("/c.md");
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs.map((t) => t.path)).toEqual(["/a.md", "/c.md"]);
+			expect(state.activeTabPath).toBe("/c.md");
+		});
+
+		it("resets dirty flag when replacing", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().setTabDirty("/a.md", true);
+			useWorkspaceStore.getState().replaceActiveTab("/b.md");
+			const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === "/b.md");
+			expect(tab?.dirty).toBe(false);
+		});
+	});
+
 	describe("closeTabsByPrefix", () => {
 		it("closes all tabs matching the prefix", () => {
 			const { openTab } = useWorkspaceStore.getState();
@@ -220,6 +259,67 @@ describe("useWorkspaceStore", () => {
 			useWorkspaceStore.getState().closeTabsByPrefix("/nonexistent/");
 			const state = useWorkspaceStore.getState();
 			expect(state.tabs).toHaveLength(1);
+		});
+	});
+
+	describe("reorderTab", () => {
+		it("moves a tab from one position to another", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+			openTab("/c.md");
+
+			useWorkspaceStore.getState().reorderTab(0, 2);
+			expect(useWorkspaceStore.getState().tabs.map((t) => t.path)).toEqual([
+				"/b.md",
+				"/c.md",
+				"/a.md",
+			]);
+		});
+
+		it("moves a tab backward", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+			openTab("/c.md");
+
+			useWorkspaceStore.getState().reorderTab(2, 0);
+			expect(useWorkspaceStore.getState().tabs.map((t) => t.path)).toEqual([
+				"/c.md",
+				"/a.md",
+				"/b.md",
+			]);
+		});
+
+		it("does nothing when fromIndex equals toIndex", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+
+			useWorkspaceStore.getState().reorderTab(0, 0);
+			expect(useWorkspaceStore.getState().tabs.map((t) => t.path)).toEqual(["/a.md", "/b.md"]);
+		});
+
+		it("does nothing for out-of-range indices", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+
+			useWorkspaceStore.getState().reorderTab(-1, 0);
+			expect(useWorkspaceStore.getState().tabs.map((t) => t.path)).toEqual(["/a.md", "/b.md"]);
+
+			useWorkspaceStore.getState().reorderTab(0, 5);
+			expect(useWorkspaceStore.getState().tabs.map((t) => t.path)).toEqual(["/a.md", "/b.md"]);
+		});
+
+		it("does not change activeTabPath", () => {
+			const { openTab } = useWorkspaceStore.getState();
+			openTab("/a.md");
+			openTab("/b.md");
+			openTab("/c.md");
+
+			useWorkspaceStore.getState().reorderTab(0, 2);
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/c.md");
 		});
 	});
 
