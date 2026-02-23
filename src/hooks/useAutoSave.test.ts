@@ -6,7 +6,18 @@ vi.mock("../lib/commands", () => ({
 	writeFile: vi.fn(),
 }));
 
+vi.mock("../lib/store", () => ({
+	saveShowLineNumbers: vi.fn(),
+	saveFontSize: vi.fn(),
+	saveAutoSaveDelay: vi.fn(),
+	saveIndentSize: vi.fn(),
+	saveHighlightActiveLine: vi.fn(),
+	saveFontFamily: vi.fn(),
+	saveTrimTrailingWhitespace: vi.fn(),
+}));
+
 const { useAutoSave } = await import("./useAutoSave");
+const { useSettingsStore } = await import("../stores/settings");
 
 const mockedWriteFile = writeFile as Mock;
 
@@ -14,6 +25,8 @@ describe("useAutoSave", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockedWriteFile.mockResolvedValue(undefined);
+		// Reset to default trimTrailingWhitespace
+		useSettingsStore.setState({ trimTrailingWhitespace: true });
 	});
 
 	afterEach(() => {
@@ -52,7 +65,7 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(2000);
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed");
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed\n");
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
@@ -70,7 +83,7 @@ describe("useAutoSave", () => {
 			result.current.saveNow();
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed");
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed\n");
 		expect(result.current.saveStatus).toBe("saved");
 
 		// Verify debounce timer doesn't fire a second save
@@ -178,7 +191,7 @@ describe("useAutoSave", () => {
 		await act(async () => {
 			vi.advanceTimersByTime(500);
 		});
-		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "edit2");
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "edit2\n");
 	});
 
 	it("flushes pending changes to old path when filePath changes", async () => {
@@ -200,7 +213,7 @@ describe("useAutoSave", () => {
 			rerender({ filePath: "b.md", content: "edited A" });
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A");
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
 		expect(mockedWriteFile).not.toHaveBeenCalledWith("b.md", expect.anything());
 		expect(result.current.saveStatus).toBe("saved");
 	});
@@ -226,7 +239,7 @@ describe("useAutoSave", () => {
 			rerender({ filePath: "b.md", content: "edited A" });
 		});
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A");
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
 		expect(result.current.saveStatus).toBe("error");
 	});
 
@@ -272,7 +285,7 @@ describe("useAutoSave", () => {
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
-		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited");
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited\n");
 
 		mockedWriteFile.mockClear();
 
@@ -421,7 +434,7 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(2000);
 		});
 		// Auto-save writeFile("v1") is now in-flight (pending)
-		expect(writeOrder).toEqual(["v1"]);
+		expect(writeOrder).toEqual(["v1\n"]);
 
 		// User edits to "v2" and calls saveNow (chains on inflightRef)
 		rerender({ content: "v2" });
@@ -430,7 +443,7 @@ describe("useAutoSave", () => {
 		});
 
 		// writeFile for "v2" should NOT have been called yet (blocked by in-flight auto-save)
-		expect(writeOrder).toEqual(["v1"]);
+		expect(writeOrder).toEqual(["v1\n"]);
 
 		// Resolve the auto-save — unblocks saveNow's chained write
 		await act(async () => {
@@ -438,7 +451,69 @@ describe("useAutoSave", () => {
 		});
 
 		// "v2" should have been written AFTER "v1" — guaranteed last-write-wins
-		expect(writeOrder).toEqual(["v1", "v2"]);
+		expect(writeOrder).toEqual(["v1\n", "v2\n"]);
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("trims trailing whitespace when trimTrailingWhitespace is true", async () => {
+		useSettingsStore.setState({ trimTrailingWhitespace: true });
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "hello world   \nfoo\t\t\n" });
+
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "hello world\nfoo\n");
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("preserves trailing whitespace when trimTrailingWhitespace is false", async () => {
+		useSettingsStore.setState({ trimTrailingWhitespace: false });
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "hello world   \nfoo\t\t" });
+
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		// Trailing whitespace preserved, but final newline still guaranteed
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "hello world   \nfoo\t\t\n");
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("does not re-save when processed content matches saved content", async () => {
+		useSettingsStore.setState({ trimTrailingWhitespace: true });
+		mockedWriteFile.mockClear();
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		// Edit to content that differs only by trailing whitespace
+		rerender({ content: "initial   " });
+
+		// After processing, "initial   " → "initial\n" which matches saved content
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		// Should NOT trigger a save since processed content matches
+		expect(mockedWriteFile).not.toHaveBeenCalled();
 		expect(result.current.saveStatus).toBe("saved");
 	});
 });

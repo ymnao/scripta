@@ -1,5 +1,4 @@
-import { Moon, Sun } from "lucide-react";
-import { useThemeStore } from "../../stores/theme";
+import { CircleHelp, Settings } from "lucide-react";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
 export type SaveStatus = "saved" | "unsaved" | "saving" | "error";
@@ -7,13 +6,13 @@ export type SaveStatus = "saved" | "unsaved" | "saving" | "error";
 interface StatusBarProps {
 	saveStatus?: SaveStatus;
 	cursorInfo?: CursorInfo;
+	onOpenSettings?: () => void;
+	onOpenHelp?: () => void;
 }
 
-export function StatusBar({ saveStatus, cursorInfo }: StatusBarProps) {
-	const { theme, toggleTheme } = useThemeStore();
-
+export function StatusBar({ saveStatus, cursorInfo, onOpenSettings, onOpenHelp }: StatusBarProps) {
 	return (
-		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary px-2 text-text-secondary">
+		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary pl-2 pr-3 text-text-secondary">
 			<output className="text-xs">
 				{saveStatus === "unsaved" && "Unsaved"}
 				{saveStatus === "saving" && "Saving..."}
@@ -31,11 +30,21 @@ export function StatusBar({ saveStatus, cursorInfo }: StatusBarProps) {
 				)}
 				<button
 					type="button"
-					onClick={toggleTheme}
-					aria-label="Toggle theme"
+					onClick={onOpenSettings}
+					aria-label="Settings"
+					title="Settings"
 					className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
 				>
-					{theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
+					<Settings size={15} />
+				</button>
+				<button
+					type="button"
+					onClick={onOpenHelp}
+					aria-label="Keyboard Shortcuts"
+					title="Keyboard Shortcuts"
+					className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
+				>
+					<CircleHelp size={15} />
 				</button>
 			</div>
 		</div>

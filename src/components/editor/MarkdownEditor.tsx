@@ -1,12 +1,25 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import {
+	HighlightStyle,
+	defaultHighlightStyle,
+	indentUnit,
+	syntaxHighlighting,
+} from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
-import { EditorSelection } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { FontFamily } from "../../lib/store";
+import { useSettingsStore } from "../../stores/settings";
+import {
+	toggleBold,
+	toggleHeading,
+	toggleItalic,
+	toggleStrikethrough,
+} from "./formatting-commands";
 import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
 import {
 	blockquoteDecoration,
@@ -28,24 +41,35 @@ const customHighlightStyle = syntaxHighlighting(
 	]),
 );
 
-const editorTheme = EditorView.theme({
-	"&": {
-		height: "100%",
-		fontSize: "14px",
-		backgroundColor: "var(--color-bg-primary)",
-		color: "var(--color-text-primary)",
-	},
-	".cm-scroller": {
-		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
-	},
-	".cm-content": {
-		caretColor: "var(--color-text-primary)",
-		padding: "8px 0",
-		fontSynthesis: "style",
-	},
-	".cm-line": {
-		padding: "1px 2px",
-	},
+const FONT_FAMILY_MAP: Record<FontFamily, string> = {
+	monospace: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+	"sans-serif": "system-ui, -apple-system, sans-serif",
+	serif: "Georgia, 'Times New Roman', serif",
+};
+
+function createDynamicEditorTheme(fontSize: number, fontFamily: FontFamily) {
+	return EditorView.theme({
+		"&": {
+			height: "100%",
+			fontSize: `${fontSize}px`,
+			backgroundColor: "var(--color-bg-primary)",
+			color: "var(--color-text-primary)",
+		},
+		".cm-scroller": {
+			fontFamily: FONT_FAMILY_MAP[fontFamily],
+		},
+		".cm-content": {
+			caretColor: "var(--color-text-primary)",
+			padding: "8px 0",
+			fontSynthesis: "style",
+		},
+		".cm-line": {
+			padding: "1px 2px",
+		},
+	});
+}
+
+const staticEditorTheme = EditorView.theme({
 	"&.cm-focused .cm-cursor": {
 		borderLeftColor: "var(--color-text-primary)",
 	},
@@ -208,6 +232,11 @@ export function MarkdownEditor({
 	onGoToLineDone,
 	onStatistics,
 }: MarkdownEditorProps) {
+	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
+	const fontSize = useSettingsStore((s) => s.fontSize);
+	const fontFamily = useSettingsStore((s) => s.fontFamily);
+	const indentSize = useSettingsStore((s) => s.indentSize);
+	const highlightActiveLine = useSettingsStore((s) => s.highlightActiveLine);
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
 	const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -256,7 +285,10 @@ export function MarkdownEditor({
 	const extensions = useMemo(
 		() => [
 			listKeymap,
-			editorTheme,
+			staticEditorTheme,
+			createDynamicEditorTheme(fontSize, fontFamily),
+			indentUnit.of(" ".repeat(indentSize)),
+			EditorState.tabSize.of(indentSize),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			customHighlightStyle,
 			markdownExtension,
@@ -279,6 +311,15 @@ export function MarkdownEditor({
 						return true;
 					},
 				},
+				{ key: "Mod-b", run: toggleBold },
+				{ key: "Mod-i", run: toggleItalic },
+				{ key: "Mod-Shift-x", run: toggleStrikethrough },
+				{ key: "Mod-1", run: toggleHeading(1) },
+				{ key: "Mod-2", run: toggleHeading(2) },
+				{ key: "Mod-3", run: toggleHeading(3) },
+				{ key: "Mod-4", run: toggleHeading(4) },
+				{ key: "Mod-5", run: toggleHeading(5) },
+				{ key: "Mod-6", run: toggleHeading(6) },
 			]),
 			EditorView.updateListener.of((update) => {
 				if (!(update.docChanged || update.selectionChanged)) return;
@@ -296,7 +337,7 @@ export function MarkdownEditor({
 				});
 			}),
 		],
-		[],
+		[fontSize, fontFamily, indentSize],
 	);
 
 	return (
@@ -314,10 +355,10 @@ export function MarkdownEditor({
 					onCreateEditor={handleCreateEditor}
 					onDestroyEditor={handleDestroyEditor}
 					basicSetup={{
-						lineNumbers: true,
+						lineNumbers: showLineNumbers,
 						foldGutter: true,
-						highlightActiveLine: false,
-						highlightActiveLineGutter: false,
+						highlightActiveLine,
+						highlightActiveLineGutter: highlightActiveLine,
 						bracketMatching: true,
 						closeBrackets: true,
 						indentOnInput: true,

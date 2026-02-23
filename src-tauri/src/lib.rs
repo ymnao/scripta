@@ -46,13 +46,21 @@ pub fn run() {
 fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicU64, Ordering};
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+    use tauri::{Emitter, Manager};
 
     static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let handle = app.handle();
 
+    let settings_item = MenuItemBuilder::new("Settings...")
+        .id("open-settings")
+        .accelerator("CmdOrCtrl+,")
+        .build(handle)?;
+
     let app_menu = SubmenuBuilder::new(handle, "mark-draft")
         .about(None)
+        .separator()
+        .item(&settings_item)
         .separator()
         .services()
         .separator()
@@ -82,15 +90,44 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .select_all()
         .build()?;
 
+    let keyboard_shortcuts = MenuItemBuilder::new("Keyboard Shortcuts")
+        .id("open-help")
+        .accelerator("F1")
+        .build(handle)?;
+
+    let help_menu = SubmenuBuilder::new(handle, "Help")
+        .item(&keyboard_shortcuts)
+        .build()?;
+
     let menu = MenuBuilder::new(handle)
         .item(&app_menu)
         .item(&file_menu)
         .item(&edit_menu)
+        .item(&help_menu)
         .build()?;
 
     app.set_menu(menu)?;
 
     app.on_menu_event(move |app_handle, event| {
+        if event.id().as_ref() == "open-settings" || event.id().as_ref() == "open-help" {
+            let event_name = if event.id().as_ref() == "open-settings" {
+                "menu-open-settings"
+            } else {
+                "menu-open-help"
+            };
+            // Emit only to the focused window to avoid opening dialogs in all windows
+            let emitted = app_handle
+                .webview_windows()
+                .values()
+                .any(|w| {
+                    w.is_focused().unwrap_or(false) && w.emit(event_name, ()).is_ok()
+                });
+            // Fallback: if no focused window found, broadcast to all
+            if !emitted {
+                let _ = app_handle.emit(event_name, ());
+            }
+            return;
+        }
         if event.id().as_ref() == "new-window" {
             let label = format!("window-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
 

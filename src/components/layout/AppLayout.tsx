@@ -1,13 +1,17 @@
 import type { EditorView } from "@codemirror/view";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
+import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { Dialog } from "../common/Dialog";
+import { HelpDialog } from "../common/HelpDialog";
+import { SettingsDialog } from "../common/SettingsDialog";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { TabBar } from "../editor/TabBar";
@@ -33,10 +37,13 @@ export function AppLayout() {
 	const openTab = useWorkspaceStore((s) => s.openTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
-	const setTheme = useThemeStore((s) => s.setTheme);
+	const hydratePreference = useThemeStore((s) => s.hydratePreference);
+	const hydrateSettings = useSettingsStore((s) => s.hydrate);
 
 	const [loading, setLoading] = useState(true);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [helpOpen, setHelpOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
@@ -91,7 +98,16 @@ export function AppLayout() {
 			}
 
 			if (cancelled) return;
-			if (settings.theme) setTheme(settings.theme);
+			hydratePreference(settings.themePreference);
+			hydrateSettings({
+				showLineNumbers: settings.showLineNumbers,
+				fontSize: settings.fontSize,
+				autoSaveDelay: settings.autoSaveDelay,
+				indentSize: settings.indentSize,
+				highlightActiveLine: settings.highlightActiveLine,
+				fontFamily: settings.fontFamily,
+				trimTrailingWhitespace: settings.trimTrailingWhitespace,
+			});
 			setSidebarVisible(settings.sidebarVisible);
 			setLoading(false);
 		})();
@@ -99,7 +115,7 @@ export function AppLayout() {
 		return () => {
 			cancelled = true;
 		};
-	}, [isNewWindow, setWorkspacePath, setTheme]);
+	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings]);
 
 	// Persist workspace path changes (skip while loading and in new windows)
 	useEffect(() => {
@@ -112,6 +128,33 @@ export function AppLayout() {
 		if (loading) return;
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible, loading]);
+
+	// Listen for native menu events from Tauri
+	useEffect(() => {
+		let cancelled = false;
+		const unlisteners: Array<() => void> = [];
+
+		void listen("menu-open-settings", () => setSettingsOpen(true)).then((u) => {
+			if (cancelled) {
+				u();
+				return;
+			}
+			unlisteners.push(u);
+		});
+
+		void listen("menu-open-help", () => setHelpOpen(true)).then((u) => {
+			if (cancelled) {
+				u();
+				return;
+			}
+			unlisteners.push(u);
+		});
+
+		return () => {
+			cancelled = true;
+			for (const u of unlisteners) u();
+		};
+	}, []);
 
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {
@@ -514,7 +557,7 @@ export function AppLayout() {
 		if (!activeTabPath) setSearchBarOpen(false);
 	}, [activeTabPath]);
 
-	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P
+	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P, Cmd+,, F1
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
@@ -522,6 +565,9 @@ export function AppLayout() {
 				if (activeTabPath) void handleCloseTab(activeTabPath);
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
+				// Skip sidebar toggle when editor has focus — CodeMirror handles Mod-b for bold
+				const view = editorViewRef.current;
+				if (view?.hasFocus) return;
 				e.preventDefault();
 				setSidebarVisible((prev) => !prev);
 				return;
@@ -564,6 +610,14 @@ export function AppLayout() {
 			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
 				e.preventDefault();
 				setCommandPaletteOpen((prev) => !prev);
+			}
+			if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+				e.preventDefault();
+				setSettingsOpen((prev) => !prev);
+			}
+			if (e.key === "F1") {
+				e.preventDefault();
+				setHelpOpen((prev) => !prev);
 			}
 		};
 		document.addEventListener("keydown", handler);
@@ -625,6 +679,8 @@ export function AppLayout() {
 			<StatusBar
 				saveStatus={activeTabPath ? saveStatus : undefined}
 				cursorInfo={activeTabPath && !editorError ? (cursorInfo ?? undefined) : undefined}
+				onOpenSettings={() => setSettingsOpen(true)}
+				onOpenHelp={() => setHelpOpen(true)}
 			/>
 
 			{workspacePath && (
@@ -635,6 +691,9 @@ export function AppLayout() {
 					onClose={() => setCommandPaletteOpen(false)}
 				/>
 			)}
+
+			<SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
 
 			<Dialog
 				open={externalConflict?.type === "modified"}
