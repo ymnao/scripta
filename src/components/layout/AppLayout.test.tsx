@@ -60,6 +60,23 @@ function emitFsChange(events: FsChangeEvent[]) {
 	}
 }
 
+type CloseRequestedEvent = { preventDefault: () => void };
+type CloseHandler = (event: CloseRequestedEvent) => void | Promise<void>;
+let closeHandler: CloseHandler | null = null;
+const mockDestroy = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("@tauri-apps/api/window", () => ({
+	getCurrentWindow: () => ({
+		onCloseRequested: vi.fn().mockImplementation((handler: CloseHandler) => {
+			closeHandler = handler;
+			return Promise.resolve(() => {
+				closeHandler = null;
+			});
+		}),
+		destroy: mockDestroy,
+	}),
+}));
+
 vi.mock("../editor/MarkdownEditor", () => ({
 	MarkdownEditor: ({
 		value,
@@ -95,6 +112,8 @@ describe("AppLayout", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		fsChangeCallback = null;
+		closeHandler = null;
+		mockDestroy.mockClear();
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
 		useWorkspaceStore.setState({
@@ -126,15 +145,15 @@ describe("AppLayout", () => {
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("# Hello");
 	});
 
-	it('shows "Saved" after loading file', async () => {
+	it('shows "保存済み" after loading file', async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
 		});
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.getByText("保存済み")).toBeInTheDocument();
 	});
 
-	it('shows "Unsaved" when content changes', async () => {
+	it('shows "未保存" when content changes', async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {
 			render(<AppLayout />);
@@ -143,7 +162,7 @@ describe("AppLayout", () => {
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+		expect(screen.getByText("未保存")).toBeInTheDocument();
 	});
 
 	it("auto-saves after debounce period", async () => {
@@ -155,14 +174,14 @@ describe("AppLayout", () => {
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+		expect(screen.getByText("未保存")).toBeInTheDocument();
 
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.getByText("保存済み")).toBeInTheDocument();
 	});
 
 	it("saves immediately on Cmd+S (saveNow)", async () => {
@@ -174,14 +193,14 @@ describe("AppLayout", () => {
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+		expect(screen.getByText("未保存")).toBeInTheDocument();
 
 		await act(async () => {
 			screen.getByTestId("editor-save").click();
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.getByText("保存済み")).toBeInTheDocument();
 	});
 
 	it("saves previous file to correct path when switching tabs", async () => {
@@ -197,7 +216,7 @@ describe("AppLayout", () => {
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+		expect(screen.getByText("未保存")).toBeInTheDocument();
 
 		// Switch to file B by adding tab and activating it
 		mockedReadFile.mockResolvedValue("content B");
@@ -229,8 +248,8 @@ describe("AppLayout", () => {
 			render(<AppLayout />);
 		});
 
-		expect(screen.getByText(/Failed to open file/)).toBeInTheDocument();
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.getByText(/エラーが発生しました/)).toBeInTheDocument();
+		expect(screen.getByText("保存済み")).toBeInTheDocument();
 
 		mockedWriteFile.mockClear();
 
@@ -240,7 +259,7 @@ describe("AppLayout", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 	});
 
-	it('shows "Save failed" on save error', async () => {
+	it('shows "保存失敗" on save error', async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 		mockedWriteFile.mockRejectedValue(new Error("write error"));
 
@@ -256,7 +275,7 @@ describe("AppLayout", () => {
 			vi.advanceTimersByTime(2000);
 		});
 
-		expect(screen.getByText("Save failed")).toBeInTheDocument();
+		expect(screen.getByText("保存失敗")).toBeInTheDocument();
 	});
 
 	it("restores cached content when switching back to a tab", async () => {
@@ -321,7 +340,7 @@ describe("AppLayout", () => {
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
-		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+		expect(screen.getByText("未保存")).toBeInTheDocument();
 
 		// Make writeFile fail
 		mockedWriteFile.mockRejectedValue(new Error("disk full"));
@@ -439,8 +458,8 @@ describe("AppLayout", () => {
 			vi.advanceTimersByTime(300);
 		});
 
-		expect(screen.getByText("File changed externally")).toBeInTheDocument();
-		expect(screen.queryByText("File deleted externally")).not.toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で変更されました")).toBeInTheDocument();
+		expect(screen.queryByText("ファイルが外部で削除されました")).not.toBeInTheDocument();
 	});
 
 	it("shows deleted dialog when dirty tab is externally deleted", async () => {
@@ -460,8 +479,8 @@ describe("AppLayout", () => {
 			vi.advanceTimersByTime(300);
 		});
 
-		expect(screen.getByText("File deleted externally")).toBeInTheDocument();
-		expect(screen.queryByText("File changed externally")).not.toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で削除されました")).toBeInTheDocument();
+		expect(screen.queryByText("ファイルが外部で変更されました")).not.toBeInTheDocument();
 	});
 
 	it("deleted dialog supersedes conflict dialog for the same file", async () => {
@@ -480,7 +499,7 @@ describe("AppLayout", () => {
 			emitFsChange([{ kind: "modify", path: "/workspace/test.md" }]);
 			vi.advanceTimersByTime(300);
 		});
-		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で変更されました")).toBeInTheDocument();
 
 		// Then: external delete → should replace with deleted dialog
 		await act(async () => {
@@ -488,8 +507,8 @@ describe("AppLayout", () => {
 			vi.advanceTimersByTime(300);
 		});
 
-		expect(screen.getByText("File deleted externally")).toBeInTheDocument();
-		expect(screen.queryByText("File changed externally")).not.toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で削除されました")).toBeInTheDocument();
+		expect(screen.queryByText("ファイルが外部で変更されました")).not.toBeInTheDocument();
 	});
 
 	it("only shows one dialog when different files trigger conflicts", async () => {
@@ -510,7 +529,7 @@ describe("AppLayout", () => {
 			emitFsChange([{ kind: "modify", path: "/workspace/a.md" }]);
 			vi.advanceTimersByTime(300);
 		});
-		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で変更されました")).toBeInTheDocument();
 
 		// Add b.md as a second dirty tab (non-active)
 		await act(async () => {
@@ -527,8 +546,8 @@ describe("AppLayout", () => {
 			emitFsChange([{ kind: "delete", path: "/workspace/b.md" }]);
 			vi.advanceTimersByTime(300);
 		});
-		expect(screen.getByText("File deleted externally")).toBeInTheDocument();
-		expect(screen.queryByText("File changed externally")).not.toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で削除されました")).toBeInTheDocument();
+		expect(screen.queryByText("ファイルが外部で変更されました")).not.toBeInTheDocument();
 	});
 
 	it("conflict reload updates only target tab when active tab changed", async () => {
@@ -548,7 +567,7 @@ describe("AppLayout", () => {
 			emitFsChange([{ kind: "modify", path: "/workspace/a.md" }]);
 			vi.advanceTimersByTime(300);
 		});
-		expect(screen.getByText("File changed externally")).toBeInTheDocument();
+		expect(screen.getByText("ファイルが外部で変更されました")).toBeInTheDocument();
 
 		// Switch to b.md while dialog is still open
 		mockedReadFile.mockResolvedValue("content B");
@@ -563,10 +582,10 @@ describe("AppLayout", () => {
 		});
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
 
-		// Click "Reload" on the conflict dialog
+		// Click "再読み込み" on the conflict dialog
 		mockedReadFile.mockResolvedValue("reloaded A");
 		await act(async () => {
-			screen.getByRole("button", { name: "Reload" }).click();
+			screen.getByRole("button", { name: "再読み込み" }).click();
 		});
 
 		// Editor should still show b.md content, NOT the reloaded a.md content
@@ -575,5 +594,185 @@ describe("AppLayout", () => {
 		// a.md's dirty flag should be cleared after reload
 		const aTab = useWorkspaceStore.getState().tabs.find((tab) => tab.path === "/workspace/a.md");
 		expect(aTab?.dirty).toBe(false);
+	});
+
+	it("saves dirty active tab on window close", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Edit file
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(screen.getByText("未保存")).toBeInTheDocument();
+
+		// Simulate window close
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		expect(preventDefault).toHaveBeenCalled();
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
+		expect(mockDestroy).toHaveBeenCalled();
+	});
+
+	it("saves dirty cached tabs on window close", async () => {
+		// Open a.md and edit it
+		openFileInStore("/workspace", "/workspace/a.md");
+		mockedReadFile.mockResolvedValue("content A");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Switch to b.md (caches a.md's dirty content)
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
+		});
+
+		mockedWriteFile.mockClear();
+
+		// Simulate window close — a.md should be saved from cache
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		expect(preventDefault).toHaveBeenCalled();
+		expect(mockedWriteFile).toHaveBeenCalledWith(
+			"/workspace/a.md",
+			expect.stringContaining("new content"),
+		);
+		expect(mockDestroy).toHaveBeenCalled();
+	});
+
+	it("destroys window even when no dirty tabs exist", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// No edits — tab is clean
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		expect(preventDefault).toHaveBeenCalled();
+		expect(mockDestroy).toHaveBeenCalled();
+	});
+
+	it("does not destroy window when active tab save fails on close", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Edit file
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(screen.getByText("未保存")).toBeInTheDocument();
+
+		// Make save fail
+		mockedWriteFile.mockRejectedValue(new Error("disk full"));
+
+		// Simulate window close
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		expect(preventDefault).toHaveBeenCalled();
+		expect(mockDestroy).not.toHaveBeenCalled();
+		// Tab should still be open
+		expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
+	});
+
+	it("normalizes cached content and updates dirty state on window close", async () => {
+		// Open a.md and edit it
+		openFileInStore("/workspace", "/workspace/a.md");
+		mockedReadFile.mockResolvedValue("content A");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Switch to b.md (caches a.md's dirty content)
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
+		});
+
+		mockedWriteFile.mockClear();
+
+		// Simulate window close — cached tab should be saved with normalization
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		// Should write normalized content (trailing newline)
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content\n");
+		// Dirty flag should be cleared after successful save
+		const aTab = useWorkspaceStore.getState().tabs.find((t) => t.path === "/workspace/a.md");
+		expect(aTab?.dirty).toBe(false);
+		expect(mockDestroy).toHaveBeenCalled();
+	});
+
+	it("does not destroy window when cached tab save fails on close", async () => {
+		// Open a.md and edit it
+		openFileInStore("/workspace", "/workspace/a.md");
+		mockedReadFile.mockResolvedValue("content A");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Switch to b.md (caches a.md's dirty content)
+		mockedReadFile.mockResolvedValue("content B");
+		await act(async () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: true },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/b.md",
+			});
+		});
+
+		// Make save fail for cached tab
+		mockedWriteFile.mockRejectedValue(new Error("disk full"));
+
+		// Simulate window close
+		const preventDefault = vi.fn();
+		await act(async () => {
+			await closeHandler?.({ preventDefault });
+		});
+
+		expect(preventDefault).toHaveBeenCalled();
+		expect(mockDestroy).not.toHaveBeenCalled();
 	});
 });

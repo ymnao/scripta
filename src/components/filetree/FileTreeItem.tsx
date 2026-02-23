@@ -182,7 +182,11 @@ export function FileTreeItem({
 				)}
 				<span className="truncate">{entry.name}</span>
 				{loadError && (
-					<AlertTriangle size={12} className="shrink-0 text-red-500" aria-label="Failed to load" />
+					<AlertTriangle
+						size={12}
+						className="shrink-0 text-red-500"
+						aria-label="読み込みに失敗しました"
+					/>
 				)}
 			</button>
 			{entry.isDirectory &&

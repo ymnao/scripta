@@ -1,13 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchResult } from "../types/search";
 import type { FileEntry } from "../types/workspace";
+import { isTransientError } from "./errors";
+
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, baseDelayMs = 200): Promise<T> {
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		try {
+			return await fn();
+		} catch (error) {
+			if (!isTransientError(error) || attempt === maxRetries) throw error;
+			await new Promise((resolve) => setTimeout(resolve, baseDelayMs * 2 ** attempt));
+		}
+	}
+	throw new Error("unreachable");
+}
 
 export function readFile(path: string): Promise<string> {
-	return invoke<string>("read_file", { path });
+	return withRetry(() => invoke<string>("read_file", { path }));
 }
 
 export function writeFile(path: string, content: string): Promise<void> {
-	return invoke<void>("write_file", { path, content });
+	return withRetry(() => invoke<void>("write_file", { path, content }));
 }
 
 export function listDirectory(path: string): Promise<FileEntry[]> {

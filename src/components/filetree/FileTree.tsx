@@ -6,7 +6,9 @@ import {
 	listDirectory,
 	renameEntry,
 } from "../../lib/commands";
+import { translateError } from "../../lib/errors";
 import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
+import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import type { FileEntry } from "../../types/workspace";
 import { Dialog } from "../common/Dialog";
@@ -33,8 +35,8 @@ interface CreatingState {
 }
 
 function validateName(name: string): string | null {
-	if (SEP_RE.test(name)) return "File name cannot contain path separators";
-	if (name === "." || name === "..") return "File name cannot be '.' or '..'";
+	if (SEP_RE.test(name)) return "ファイル名にパス区切り文字は使用できません";
+	if (name === "." || name === "..") return "ファイル名に「.」や「..」は使用できません";
 	return null;
 }
 
@@ -54,7 +56,6 @@ export function FileTree({
 	const [creating, setCreating] = useState<CreatingState | null>(null);
 	const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
-	const [operationError, setOperationError] = useState<string | null>(null);
 
 	const loadIdRef = useRef(0);
 
@@ -71,7 +72,7 @@ export function FileTree({
 				.catch((err) => {
 					if (loadIdRef.current !== id) return;
 					console.error("Failed to load workspace:", err);
-					if (!silent) setError("Failed to load folder");
+					if (!silent) setError("フォルダの読み込みに失敗しました");
 				})
 				.finally(() => {
 					if (loadIdRef.current !== id) return;
@@ -160,7 +161,7 @@ export function FileTree({
 			if (!creating) return;
 			const nameError = validateName(name);
 			if (nameError) {
-				setOperationError(nameError);
+				useToastStore.getState().addToast("warning", nameError);
 				setCreating(null);
 				return;
 			}
@@ -176,8 +177,7 @@ export function FileTree({
 				}
 			} catch (err) {
 				console.error("Failed to create:", err);
-				const msg = err instanceof Error ? err.message : String(err);
-				setOperationError(`Failed to create ${creating.type}: ${msg}`);
+				useToastStore.getState().addToast("error", `作成に失敗しました: ${translateError(err)}`);
 			}
 			setCreating(null);
 		},
@@ -191,7 +191,7 @@ export function FileTree({
 			if (!renamingEntry) return;
 			const nameError = validateName(newName);
 			if (nameError) {
-				setOperationError(nameError);
+				useToastStore.getState().addToast("warning", nameError);
 				setRenamingEntry(null);
 				return;
 			}
@@ -209,8 +209,9 @@ export function FileTree({
 				onFileRenamed?.(oldPath, newPath, renamingEntry.isDirectory);
 			} catch (err) {
 				console.error("Failed to rename:", err);
-				const msg = err instanceof Error ? err.message : String(err);
-				setOperationError(`Failed to rename: ${msg}`);
+				useToastStore
+					.getState()
+					.addToast("error", `名前の変更に失敗しました: ${translateError(err)}`);
 			}
 			setRenamingEntry(null);
 		},
@@ -227,8 +228,7 @@ export function FileTree({
 			onFileDeleted?.(deleteTarget.path, deleteTarget.isDirectory);
 		} catch (err) {
 			console.error("Failed to delete:", err);
-			const msg = err instanceof Error ? err.message : String(err);
-			setOperationError(`Failed to delete: ${msg}`);
+			useToastStore.getState().addToast("error", `削除に失敗しました: ${translateError(err)}`);
 		}
 		setDeleteTarget(null);
 	}, [deleteTarget, onFileDeleted, refresh]);
@@ -241,13 +241,6 @@ export function FileTree({
 		},
 		[handleContextMenu],
 	);
-
-	// Auto-dismiss operation error after 5 seconds
-	useEffect(() => {
-		if (!operationError) return;
-		const timer = setTimeout(() => setOperationError(null), 5000);
-		return () => clearTimeout(timer);
-	}, [operationError]);
 
 	if (error) {
 		return <p className="px-3 py-2 text-xs text-text-secondary">{error}</p>;
@@ -262,11 +255,6 @@ export function FileTree({
 
 	return (
 		<>
-			{operationError && (
-				<p className="bg-red-50 px-3 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
-					{operationError}
-				</p>
-			)}
 			<ul
 				className="min-h-full select-none overflow-y-auto px-1 py-1"
 				onContextMenu={handleRootContextMenu}
@@ -311,10 +299,10 @@ export function FileTree({
 
 			<Dialog
 				open={deleteTarget !== null}
-				title={`Delete ${deleteTarget?.isDirectory ? "folder" : "file"}`}
-				description={`Are you sure you want to delete "${deleteTarget?.name}"? It will be moved to the trash.`}
-				confirmLabel="Delete"
-				cancelLabel="Cancel"
+				title={`${deleteTarget?.isDirectory ? "フォルダ" : "ファイル"}を削除`}
+				description={`「${deleteTarget?.name}」を削除しますか？ゴミ箱に移動されます。`}
+				confirmLabel="削除"
+				cancelLabel="キャンセル"
 				variant="danger"
 				onConfirm={handleDeleteConfirm}
 				onCancel={handleDeleteCancel}

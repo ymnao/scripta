@@ -3,32 +3,32 @@ import { describe, expect, it } from "vitest";
 import { StatusBar } from "./StatusBar";
 
 describe("StatusBar", () => {
-	it('shows "Unsaved" when saveStatus is unsaved', () => {
+	it('shows "未保存" when saveStatus is unsaved', () => {
 		render(<StatusBar saveStatus="unsaved" />);
-		expect(screen.getByText("Unsaved")).toBeInTheDocument();
+		expect(screen.getByText("未保存")).toBeInTheDocument();
 	});
 
-	it('shows "Saving..." when saveStatus is saving', () => {
+	it('shows "保存中..." when saveStatus is saving', () => {
 		render(<StatusBar saveStatus="saving" />);
-		expect(screen.getByText("Saving...")).toBeInTheDocument();
+		expect(screen.getByText("保存中...")).toBeInTheDocument();
 	});
 
-	it('shows "Saved" when saveStatus is saved', () => {
+	it('shows "保存済み" when saveStatus is saved', () => {
 		render(<StatusBar saveStatus="saved" />);
-		expect(screen.getByText("Saved")).toBeInTheDocument();
+		expect(screen.getByText("保存済み")).toBeInTheDocument();
 	});
 
-	it('shows "Save failed" when saveStatus is error', () => {
+	it('shows "保存失敗" when saveStatus is error', () => {
 		render(<StatusBar saveStatus="error" />);
-		expect(screen.getByText("Save failed")).toBeInTheDocument();
+		expect(screen.getByText("保存失敗")).toBeInTheDocument();
 	});
 
 	it("shows no status text when saveStatus is not provided", () => {
 		render(<StatusBar />);
-		expect(screen.queryByText("Saved")).not.toBeInTheDocument();
-		expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
-		expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
-		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
+		expect(screen.queryByText("保存済み")).not.toBeInTheDocument();
+		expect(screen.queryByText("未保存")).not.toBeInTheDocument();
+		expect(screen.queryByText("保存中...")).not.toBeInTheDocument();
+		expect(screen.queryByText("保存失敗")).not.toBeInTheDocument();
 	});
 
 	it("shows cursor info when provided", () => {

@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { startWatcher, stopWatcher } from "../lib/commands";
+import { useToastStore } from "../stores/toast";
 import type { FsChangeEvent } from "../types/workspace";
 
 interface UseFileWatcherOptions {
@@ -94,6 +95,7 @@ export function useFileWatcher({
 				}
 			} catch (err) {
 				console.error("Failed to set up file watcher:", err);
+				useToastStore.getState().addToast("warning", "ファイル監視の開始に失敗しました");
 			}
 		};
 

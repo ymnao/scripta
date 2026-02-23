@@ -76,13 +76,13 @@ test.describe("file watcher", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" edited");
 
-		await expect(page.getByText("Unsaved")).toBeVisible();
+		await expect(page.getByText("未保存")).toBeVisible();
 
 		await mock.simulateFileModify("/workspace/hello.md", "# External Change");
 
-		await expect(page.getByText("File changed externally")).toBeVisible({ timeout: 2000 });
-		await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
-		await expect(page.getByRole("button", { name: "Keep my changes" })).toBeVisible();
+		await expect(page.getByText("ファイルが外部で変更されました")).toBeVisible({ timeout: 2000 });
+		await expect(page.getByRole("button", { name: "再読み込み" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "自分の変更を保持" })).toBeVisible();
 	});
 
 	test("file delete on dirty tab shows delete dialog", async ({ page }) => {
@@ -98,13 +98,13 @@ test.describe("file watcher", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" edited");
 
-		await expect(page.getByText("Unsaved")).toBeVisible();
+		await expect(page.getByText("未保存")).toBeVisible();
 
 		await mock.simulateFileDelete("/workspace/hello.md", "/workspace", "hello.md");
 
-		await expect(page.getByText("File deleted externally")).toBeVisible({ timeout: 2000 });
-		await expect(page.getByRole("button", { name: "Discard" })).toBeVisible();
-		await expect(page.getByRole("button", { name: "Keep editing" })).toBeVisible();
+		await expect(page.getByText("ファイルが外部で削除されました")).toBeVisible({ timeout: 2000 });
+		await expect(page.getByRole("button", { name: "破棄" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "編集を続ける" })).toBeVisible();
 	});
 
 	test("workspace switch starts a new watcher", async ({ page }) => {

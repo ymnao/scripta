@@ -27,7 +27,7 @@ test.describe("file editing", () => {
 		await expect(page.getByRole("tab")).toHaveCount(1);
 	});
 
-	test("shows Unsaved status after editing", async ({ page }) => {
+	test("shows 未保存 status after editing", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");
 
@@ -40,10 +40,10 @@ test.describe("file editing", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" updated");
 
-		await expect(page.getByText("Unsaved")).toBeVisible();
+		await expect(page.getByText("未保存")).toBeVisible();
 	});
 
-	test("auto-saves after debounce and shows Saved status", async ({ page }) => {
+	test("auto-saves after debounce and shows 保存済み status", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");
 
@@ -56,8 +56,8 @@ test.describe("file editing", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" updated");
 
-		await expect(page.getByText("Unsaved")).toBeVisible();
-		await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 5000 });
+		await expect(page.getByText("未保存")).toBeVisible();
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 5000 });
 
 		const calls = await mock.getCalls("write_file");
 		expect(calls.length).toBeGreaterThanOrEqual(1);
@@ -77,10 +77,10 @@ test.describe("file editing", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" manual");
 
-		await expect(page.getByText("Unsaved")).toBeVisible();
+		await expect(page.getByText("未保存")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 3000 });
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
 
 		const calls = await mock.getCalls("write_file");
 		expect(calls.length).toBeGreaterThanOrEqual(1);
