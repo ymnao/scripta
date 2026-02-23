@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { TauriMock, modKey } from "./helpers/tauri-mock";
+import { TauriMock } from "./helpers/tauri-mock";
 
 test.describe("status bar", () => {
 	test("shows cursor position and character count when editing", async ({ page }) => {

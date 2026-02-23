@@ -1,5 +1,5 @@
 import { CircleHelp, Settings } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
 export type SaveStatus = "saved" | "unsaved" | "saving" | "error";
@@ -22,13 +22,20 @@ export function StatusBar({
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef(0);
 
+	useEffect(() => {
+		return () => clearTimeout(timerRef.current);
+	}, []);
+
 	const handleCopyPath = useCallback(() => {
 		if (!filePath) return;
-		navigator.clipboard.writeText(filePath).then(() => {
-			clearTimeout(timerRef.current);
-			setCopied(true);
-			timerRef.current = window.setTimeout(() => setCopied(false), 1500);
-		});
+		navigator.clipboard?.writeText(filePath).then(
+			() => {
+				clearTimeout(timerRef.current);
+				setCopied(true);
+				timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+			},
+			() => {},
+		);
 	}, [filePath]);
 
 	return (
