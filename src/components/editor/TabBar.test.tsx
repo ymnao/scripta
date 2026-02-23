@@ -243,19 +243,8 @@ describe("TabBar", () => {
 		});
 	});
 
-	describe("drag and drop reorder", () => {
-		it("makes tabs draggable", () => {
-			useWorkspaceStore.setState({
-				tabs: [{ path: "/workspace/a.md", dirty: false }],
-				activeTabPath: "/workspace/a.md",
-			});
-
-			render(<TabBar {...defaultProps} />);
-			const tab = screen.getByRole("tab");
-			expect(tab).toHaveAttribute("draggable", "true");
-		});
-
-		it("calls onReorderTab on drop", () => {
+	describe("pointer-based drag reorder", () => {
+		it("calls onReorderTab when pointer-dragged to another tab", () => {
 			useWorkspaceStore.setState({
 				tabs: [
 					{ path: "/workspace/a.md", dirty: false },
@@ -268,20 +257,17 @@ describe("TabBar", () => {
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
 
-			fireEvent.dragStart(tabs[0], {
-				dataTransfer: { effectAllowed: "move", setData: vi.fn() },
-			});
-			fireEvent.dragOver(tabs[2], {
-				dataTransfer: { dropEffect: "move" },
-			});
-			fireEvent.drop(tabs[2], {
-				dataTransfer: {},
-			});
+			// Start drag on first tab
+			fireEvent.pointerDown(tabs[0], { clientX: 0, button: 0 });
+			// Move past threshold to start drag
+			fireEvent(document, new PointerEvent("pointermove", { clientX: 100, bubbles: true }));
+			// Release pointer over the third tab — e.target.closest('[data-index]') resolves to tabs[2]
+			fireEvent.pointerUp(tabs[2]);
 
 			expect(onReorderTab).toHaveBeenCalledWith(0, 2);
 		});
 
-		it("does not call onReorderTab when dropping on same position", () => {
+		it("does not call onReorderTab when released on same tab", () => {
 			useWorkspaceStore.setState({
 				tabs: [
 					{ path: "/workspace/a.md", dirty: false },
@@ -293,14 +279,54 @@ describe("TabBar", () => {
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
 
-			fireEvent.dragStart(tabs[0], {
-				dataTransfer: { effectAllowed: "move", setData: vi.fn() },
-			});
-			fireEvent.drop(tabs[0], {
-				dataTransfer: {},
-			});
+			fireEvent.pointerDown(tabs[0], { clientX: 0, button: 0 });
+			fireEvent(document, new PointerEvent("pointermove", { clientX: 100, bubbles: true }));
+			fireEvent.pointerUp(tabs[0]);
 
 			expect(onReorderTab).not.toHaveBeenCalled();
+		});
+
+		it("does not trigger drag on small pointer movement (click)", () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: false },
+					{ path: "/workspace/b.md", dirty: false },
+				],
+				activeTabPath: "/workspace/a.md",
+			});
+
+			render(<TabBar {...defaultProps} />);
+			const tabs = screen.getAllByRole("tab");
+
+			// Small movement within threshold
+			fireEvent.pointerDown(tabs[0], { clientX: 0, button: 0 });
+			fireEvent(document, new PointerEvent("pointermove", { clientX: 3, bubbles: true }));
+			fireEvent.pointerUp(tabs[1]);
+
+			expect(onReorderTab).not.toHaveBeenCalled();
+			// The click handler should still work
+		});
+
+		it("suppresses click after drag completes", () => {
+			useWorkspaceStore.setState({
+				tabs: [
+					{ path: "/workspace/a.md", dirty: false },
+					{ path: "/workspace/b.md", dirty: false },
+					{ path: "/workspace/c.md", dirty: false },
+				],
+				activeTabPath: "/workspace/a.md",
+			});
+
+			render(<TabBar {...defaultProps} />);
+			const tabs = screen.getAllByRole("tab");
+
+			fireEvent.pointerDown(tabs[0], { clientX: 0, button: 0 });
+			fireEvent(document, new PointerEvent("pointermove", { clientX: 100, bubbles: true }));
+			fireEvent.pointerUp(tabs[2]);
+
+			// Click fires after pointerUp (browser behavior) — should be suppressed
+			fireEvent.click(tabs[2]);
+			expect(onTabSelect).not.toHaveBeenCalled();
 		});
 	});
 });

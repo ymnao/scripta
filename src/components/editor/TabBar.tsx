@@ -1,9 +1,11 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useWorkspaceStore } from "../../stores/workspace";
 
 const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
+
+const DRAG_THRESHOLD = 5;
 
 interface TabBarProps {
 	onCloseTab: (path: string) => void;
@@ -28,9 +30,77 @@ export function TabBar({
 		useShallow((s) => ({ tabs: s.tabs, activeTabPath: s.activeTabPath })),
 	);
 
-	const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-	const draggingIndexRef = useRef<number | null>(null);
-	const [dropIndex, setDropIndex] = useState<number | null>(null);
+	const [dragState, setDragState] = useState<{
+		fromIndex: number;
+		overIndex: number | null;
+	} | null>(null);
+	const dragRef = useRef<{
+		fromIndex: number;
+		startX: number;
+		started: boolean;
+	} | null>(null);
+	const skipNextClickRef = useRef(false);
+	const tablistRef = useRef<HTMLDivElement>(null);
+
+	const onReorderTabRef = useRef(onReorderTab);
+	onReorderTabRef.current = onReorderTab;
+
+	const findTabIndexAt = useCallback((clientX: number): number | null => {
+		const tablist = tablistRef.current;
+		if (!tablist) return null;
+		const tabElements = tablist.querySelectorAll<HTMLElement>("[data-index]");
+		for (const el of tabElements) {
+			const rect = el.getBoundingClientRect();
+			if (clientX >= rect.left && clientX < rect.right) {
+				const idx = Number(el.dataset.index);
+				return Number.isNaN(idx) ? null : idx;
+			}
+		}
+		return null;
+	}, []);
+
+	useEffect(() => {
+		const handlePointerMove = (e: PointerEvent) => {
+			const drag = dragRef.current;
+			if (!drag) return;
+			if (!drag.started && Math.abs(e.clientX - drag.startX) > DRAG_THRESHOLD) {
+				drag.started = true;
+				setDragState({ fromIndex: drag.fromIndex, overIndex: null });
+			}
+			if (drag.started) {
+				const overIndex = findTabIndexAt(e.clientX);
+				setDragState((prev) =>
+					prev ? { ...prev, overIndex: overIndex !== drag.fromIndex ? overIndex : null } : null,
+				);
+			}
+		};
+
+		const handlePointerUp = (e: PointerEvent) => {
+			const drag = dragRef.current;
+			if (!drag) return;
+
+			if (drag.started) {
+				skipNextClickRef.current = true;
+				// Determine drop target: first try e.target (works when released over a tab),
+				// then fall back to coordinate-based lookup.
+				const targetEl = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
+				const toIndex = targetEl ? Number(targetEl.dataset.index) : findTabIndexAt(e.clientX);
+				if (toIndex != null && !Number.isNaN(toIndex) && toIndex !== drag.fromIndex) {
+					onReorderTabRef.current(drag.fromIndex, toIndex);
+				}
+			}
+
+			dragRef.current = null;
+			setDragState(null);
+		};
+
+		document.addEventListener("pointermove", handlePointerMove);
+		document.addEventListener("pointerup", handlePointerUp);
+		return () => {
+			document.removeEventListener("pointermove", handlePointerMove);
+			document.removeEventListener("pointerup", handlePointerUp);
+		};
+	}, [findTabIndexAt]);
 
 	return (
 		<div
@@ -56,7 +126,12 @@ export function TabBar({
 					<ChevronRight size={14} />
 				</button>
 			</div>
-			<div className="flex items-center overflow-x-auto" role="tablist" aria-label="Editor tabs">
+			<div
+				className="flex items-center overflow-x-auto"
+				role="tablist"
+				aria-label="Editor tabs"
+				ref={tablistRef}
+			>
 				{tabs.map((tab, index) => {
 					const isActive = tab.path === activeTabPath;
 					const fileName = tab.path.split(/[\\/]/).pop() ?? tab.path;
@@ -71,37 +146,18 @@ export function TabBar({
 							tabIndex={isActive ? 0 : -1}
 							aria-selected={isActive}
 							aria-label={tab.dirty ? `${fileName}, unsaved changes` : undefined}
-							draggable
-							onDragStart={(e) => {
-								draggingIndexRef.current = index;
-								setDraggingIndex(index);
-								e.dataTransfer.effectAllowed = "move";
-								e.dataTransfer.setData("text/plain", tab.path);
+							onPointerDown={(e) => {
+								if ((e.target as HTMLElement).closest("button")) return;
+								if (e.button !== 0) return;
+								dragRef.current = { fromIndex: index, startX: e.clientX, started: false };
 							}}
-							onDragOver={(e) => {
-								e.preventDefault();
-								e.dataTransfer.dropEffect = "move";
-								setDropIndex(index);
-							}}
-							onDragLeave={() => {
-								setDropIndex((prev) => (prev === index ? null : prev));
-							}}
-							onDrop={(e) => {
-								e.preventDefault();
-								const from = draggingIndexRef.current;
-								if (from != null && from !== index) {
-									onReorderTab(from, index);
+							onClick={() => {
+								if (skipNextClickRef.current) {
+									skipNextClickRef.current = false;
+									return;
 								}
-								draggingIndexRef.current = null;
-								setDraggingIndex(null);
-								setDropIndex(null);
+								onTabSelect(tab.path);
 							}}
-							onDragEnd={() => {
-								draggingIndexRef.current = null;
-								setDraggingIndex(null);
-								setDropIndex(null);
-							}}
-							onClick={() => onTabSelect(tab.path)}
 							onKeyDown={(e) => {
 								if (e.key === "Enter" || e.key === " ") {
 									e.preventDefault();
@@ -147,11 +203,11 @@ export function TabBar({
 									}
 								}
 							}}
-							className={`group flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs ${
+							className={`group flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs select-none ${
 								isActive
 									? "bg-bg-secondary text-text-primary"
 									: "text-text-secondary hover:bg-bg-secondary/50"
-							} ${draggingIndex === index ? "opacity-50" : ""} ${dropIndex === index && draggingIndex !== index ? "border-l-2 border-l-text-secondary" : ""}`}
+							} ${dragState?.fromIndex === index ? "opacity-50" : ""} ${dragState?.overIndex === index ? "border-l-2 border-l-text-secondary" : ""}`}
 						>
 							<span className="flex items-center gap-1.5">
 								{tab.dirty && (
