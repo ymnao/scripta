@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useWorkspaceStore } from "../../stores/workspace";
 
@@ -29,6 +29,7 @@ export function TabBar({
 	);
 
 	const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+	const draggingIndexRef = useRef<number | null>(null);
 	const [dropIndex, setDropIndex] = useState<number | null>(null);
 
 	return (
@@ -72,6 +73,7 @@ export function TabBar({
 							aria-label={tab.dirty ? `${fileName}, unsaved changes` : undefined}
 							draggable
 							onDragStart={(e) => {
+								draggingIndexRef.current = index;
 								setDraggingIndex(index);
 								e.dataTransfer.effectAllowed = "move";
 								e.dataTransfer.setData("text/plain", tab.path);
@@ -86,13 +88,16 @@ export function TabBar({
 							}}
 							onDrop={(e) => {
 								e.preventDefault();
-								if (draggingIndex != null && draggingIndex !== index) {
-									onReorderTab(draggingIndex, index);
+								const from = draggingIndexRef.current;
+								if (from != null && from !== index) {
+									onReorderTab(from, index);
 								}
+								draggingIndexRef.current = null;
 								setDraggingIndex(null);
 								setDropIndex(null);
 							}}
 							onDragEnd={() => {
+								draggingIndexRef.current = null;
 								setDraggingIndex(null);
 								setDropIndex(null);
 							}}
