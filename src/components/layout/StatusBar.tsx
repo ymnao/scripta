@@ -27,8 +27,8 @@ export function StatusBar({
 	}, []);
 
 	const handleCopyPath = useCallback(() => {
-		if (!filePath) return;
-		navigator.clipboard?.writeText(filePath).then(
+		if (!filePath || !navigator.clipboard) return;
+		navigator.clipboard.writeText(filePath).then(
 			() => {
 				clearTimeout(timerRef.current);
 				setCopied(true);

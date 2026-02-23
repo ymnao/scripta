@@ -59,6 +59,17 @@ describe("StatusBar", () => {
 		expect(writeText).toHaveBeenCalledWith("docs/readme.md");
 	});
 
+	it("does not throw when clipboard is unavailable", async () => {
+		const original = navigator.clipboard;
+		Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+
+		render(<StatusBar filePath="docs/readme.md" />);
+		await userEvent.click(screen.getByTestId("file-path"));
+		// Should not throw
+
+		Object.defineProperty(navigator, "clipboard", { value: original, configurable: true });
+	});
+
 	it("shows selection info when selectedChars and selectedLines are present", () => {
 		render(
 			<StatusBar
