@@ -634,10 +634,11 @@ export function AppLayout() {
 
 	// Navigation handlers
 	const handleFileSelect = useCallback(
-		(path: string) => {
-			// Save current file before replacing if dirty
+		async (path: string) => {
+			// Save current file before navigating if dirty
 			if (activeTabPath && contentRef.current !== savedContentRef.current) {
-				void saveNow();
+				const saved = await saveNow();
+				if (!saved) return;
 			}
 			navigateInTab(path);
 		},
@@ -658,18 +659,20 @@ export function AppLayout() {
 		[setActiveTabById],
 	);
 
-	const handleGoBack = useCallback(() => {
+	const handleGoBack = useCallback(async () => {
 		// Save current file before navigating if dirty
 		if (activeTabPath && contentRef.current !== savedContentRef.current) {
-			void saveNow();
+			const saved = await saveNow();
+			if (!saved) return;
 		}
 		goBackInTab();
 	}, [activeTabPath, goBackInTab, saveNow]);
 
-	const handleGoForward = useCallback(() => {
+	const handleGoForward = useCallback(async () => {
 		// Save current file before navigating if dirty
 		if (activeTabPath && contentRef.current !== savedContentRef.current) {
-			void saveNow();
+			const saved = await saveNow();
+			if (!saved) return;
 		}
 		goForwardInTab();
 	}, [activeTabPath, goForwardInTab, saveNow]);

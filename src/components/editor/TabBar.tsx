@@ -134,9 +134,11 @@ export function TabBar({
 
 		document.addEventListener("pointermove", handlePointerMove);
 		document.addEventListener("pointerup", handlePointerUp);
+		document.addEventListener("pointercancel", handlePointerUp);
 		return () => {
 			document.removeEventListener("pointermove", handlePointerMove);
 			document.removeEventListener("pointerup", handlePointerUp);
+			document.removeEventListener("pointercancel", handlePointerUp);
 		};
 	}, [findDropTarget]);
 
