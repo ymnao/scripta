@@ -463,11 +463,16 @@ export function MarkdownEditor({
 					basicSetup={{
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
+						// ::selection CSS で選択範囲スタイルを制御するため標準の描画を無効化
 						drawSelection: false,
+						// 検索ハイライトは highlightQueryExtension で制御するため無効化
 						highlightSelectionMatches: false,
+						// Markdown エディタとしてシンプルな入力体験を優先するため無効化
 						autocompletion: false,
 						highlightActiveLine,
 						highlightActiveLineGutter: true,
+						// タスクマーカー [] やリンク [text](url) 等の Markdown 構文で
+						// 不要なブラケットハイライトが出るため無効化
 						bracketMatching: false,
 						closeBrackets: true,
 						indentOnInput: true,
