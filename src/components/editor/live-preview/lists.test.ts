@@ -1,3 +1,4 @@
+import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import {
@@ -506,6 +507,22 @@ describe("findMarkerRange", () => {
 		const state = createTestState("hello\n- item");
 		const line = state.doc.line(2);
 		expect(findMarkerRange(state, line)).toEqual({ from: 6, to: 8 });
+	});
+
+	it("returns null for bullet marker inside fenced code block", () => {
+		const doc = "text\n\n```\n- item\n```";
+		const state = createTestState(doc);
+		ensureSyntaxTree(state, state.doc.length, 5000);
+		const line = state.doc.line(4); // "- item" inside code block
+		expect(findMarkerRange(state, line)).toBeNull();
+	});
+
+	it("returns null for task marker inside fenced code block", () => {
+		const doc = "text\n\n```\n- [ ] task\n```";
+		const state = createTestState(doc);
+		ensureSyntaxTree(state, state.doc.length, 5000);
+		const line = state.doc.line(4); // "- [ ] task" inside code block
+		expect(findMarkerRange(state, line)).toBeNull();
 	});
 });
 

@@ -330,14 +330,29 @@ export function findMarkerRange(
 ): { from: number; to: number } | null {
 	const text = state.doc.sliceString(line.from, line.to);
 	const taskMatch = taskMarkerRe.exec(text);
+	const bulletMatch = !taskMatch ? bulletMarkerRe.exec(text) : null;
+
+	if (!taskMatch && !bulletMatch) return null;
+
+	// Guard: don't treat markers inside code blocks as list items.
+	// syntaxTree may be partially parsed (no EditorView in tests), in
+	// which case ancestors are just Document and the guard is a no-op.
+	const tree = syntaxTree(state);
+	const node = tree.resolve(line.from, 1);
+	for (let cur = node.parent; cur; cur = cur.parent) {
+		const name = cur.name;
+		if (name === "FencedCode" || name === "CodeBlock" || name === "IndentedCode") {
+			return null;
+		}
+	}
+
 	if (taskMatch) {
 		return { from: line.from, to: line.from + taskMatch[1].length };
 	}
-	const bulletMatch = bulletMarkerRe.exec(text);
-	if (bulletMatch) {
-		return { from: line.from, to: line.from + bulletMatch[1].length };
-	}
-	return null;
+	// bulletMatch is guaranteed non-null here (early return above ensures
+	// at least one of taskMatch/bulletMatch matched).
+	const matched = bulletMatch as RegExpExecArray;
+	return { from: line.from, to: line.from + matched[1].length };
 }
 
 /**
