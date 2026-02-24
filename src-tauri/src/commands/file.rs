@@ -105,8 +105,7 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
         } else {
             std::process::Command::new("explorer")
-                .arg("/select,")
-                .arg(&resolved)
+                .arg(format!("/select,{}", resolved.display()))
                 .spawn()
                 .map_err(|e| e.to_string())?;
         }
@@ -124,6 +123,9 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    return Err("Unsupported platform".to_string());
 
     Ok(())
 }

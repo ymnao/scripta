@@ -51,6 +51,30 @@ test.describe("workspace", () => {
 		await expect(page.getByLabel("readme.md file")).toBeVisible();
 	});
 
+	test("context menu 'フォルダで表示' calls show_in_folder", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(
+			{
+				files: {
+					"/workspace/hello.md": "# Hello",
+				},
+				directories: {
+					"/workspace": [{ name: "hello.md", path: "/workspace/hello.md", isDirectory: false }],
+				},
+			},
+			"/workspace",
+		);
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("hello.md file").click({ button: "right" });
+		await page.getByText("フォルダで表示").click();
+
+		const calls = await mock.getCalls("show_in_folder");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toEqual({ path: "/workspace/hello.md" });
+	});
+
 	test("shows empty state when no workspace is selected", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup({ files: {}, directories: {} }, null);
