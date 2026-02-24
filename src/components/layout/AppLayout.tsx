@@ -752,9 +752,19 @@ export function AppLayout() {
 				handleGoForward();
 				return;
 			}
-			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") {
 				e.preventDefault();
-				if (activeTabId != null) void handleCloseTab(activeTabId);
+				if (e.shiftKey) {
+					// Cmd+Shift+W: 常にウィンドウを閉じる
+					void getCurrentWindow().close();
+					return;
+				}
+				if (activeTabId != null) {
+					void handleCloseTab(activeTabId);
+				} else {
+					// タブがない時はウィンドウを閉じる
+					void getCurrentWindow().close();
+				}
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
 				// Skip sidebar toggle when editor has focus — CodeMirror handles Mod-b for bold

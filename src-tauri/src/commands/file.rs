@@ -71,6 +71,43 @@ pub fn delete_entry(path: String) -> Result<(), String> {
     trash::delete(&resolved).map_err(|e| e.to_string())
 }
 
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn show_in_folder(path: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if !resolved.exists() {
+        return Err(format!("Not found: {}", resolved.display()));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&resolved)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(&resolved)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let target = resolved.parent().unwrap_or(&resolved);
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,4 +279,19 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not found"));
     }
+
+    #[test]
+    fn test_show_in_folder_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+
+        let result = show_in_folder(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Not found"));
+    }
+
 }
