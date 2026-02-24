@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { getFileIcon } from "../../lib/file-icon";
 import { useWorkspaceStore } from "../../stores/workspace";
 
 const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
@@ -8,8 +9,8 @@ const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navi
 const DRAG_THRESHOLD = 5;
 
 interface TabBarProps {
-	onCloseTab: (path: string) => void;
-	onTabSelect: (path: string) => void;
+	onCloseTab: (id: number) => void;
+	onTabSelect: (id: number) => void;
 	canGoBack: boolean;
 	canGoForward: boolean;
 	onGoBack: () => void;
@@ -26,8 +27,8 @@ export function TabBar({
 	onGoForward,
 	onReorderTab,
 }: TabBarProps) {
-	const { tabs, activeTabPath } = useWorkspaceStore(
-		useShallow((s) => ({ tabs: s.tabs, activeTabPath: s.activeTabPath })),
+	const { tabs, activeTabId } = useWorkspaceStore(
+		useShallow((s) => ({ tabs: s.tabs, activeTabId: s.activeTabId })),
 	);
 
 	const [dragState, setDragState] = useState<{
@@ -164,23 +165,24 @@ export function TabBar({
 				</button>
 			</div>
 			<div
-				className="flex items-center overflow-x-auto"
+				className="flex items-center overflow-x-auto border-l border-border"
 				role="tablist"
 				aria-label="Editor tabs"
 				ref={tablistRef}
 			>
 				{tabs.map((tab, index) => {
-					const isActive = tab.path === activeTabPath;
+					const isActive = tab.id === activeTabId;
 					const fileName = tab.path.split(/[\\/]/).pop() ?? tab.path;
 					const isDragging = dragState?.fromIndex === index;
 					const isOver = dragState?.overIndex === index;
 					const overSide = dragState?.overSide;
+					const FileIcon = getFileIcon(fileName);
 
 					return (
 						<div
-							key={tab.path}
+							key={tab.id}
 							title={tab.path}
-							data-path={tab.path}
+							data-tab-id={tab.id}
 							data-index={index}
 							role="tab"
 							tabIndex={isActive ? 0 : -1}
@@ -196,16 +198,16 @@ export function TabBar({
 									skipNextClickRef.current = false;
 									return;
 								}
-								onTabSelect(tab.path);
+								onTabSelect(tab.id);
 							}}
 							onKeyDown={(e) => {
 								if (e.key === "Enter" || e.key === " ") {
 									e.preventDefault();
-									onTabSelect(tab.path);
+									onTabSelect(tab.id);
 								}
 								if (e.key === "Delete" || e.key === "Backspace") {
 									e.preventDefault();
-									onCloseTab(tab.path);
+									onCloseTab(tab.id);
 								}
 								if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
 									e.preventDefault();
@@ -221,7 +223,8 @@ export function TabBar({
 											: (currentIndex - 1 + tabElements.length) % tabElements.length;
 									const next = tabElements[nextIndex];
 									next.focus();
-									if (next.dataset.path) onTabSelect(next.dataset.path);
+									const tabId = next.dataset.tabId;
+									if (tabId) onTabSelect(Number(tabId));
 								}
 								if (e.key === "Home") {
 									e.preventDefault();
@@ -229,7 +232,8 @@ export function TabBar({
 										e.currentTarget.parentElement?.querySelector<HTMLElement>('[role="tab"]');
 									if (first) {
 										first.focus();
-										if (first.dataset.path) onTabSelect(first.dataset.path);
+										const tabId = first.dataset.tabId;
+										if (tabId) onTabSelect(Number(tabId));
 									}
 								}
 								if (e.key === "End") {
@@ -239,7 +243,8 @@ export function TabBar({
 									if (all?.length) {
 										const last = all[all.length - 1];
 										last.focus();
-										if (last.dataset.path) onTabSelect(last.dataset.path);
+										const tabId = last.dataset.tabId;
+										if (tabId) onTabSelect(Number(tabId));
 									}
 								}
 							}}
@@ -252,12 +257,13 @@ export function TabBar({
 										}
 									: undefined
 							}
-							className={`group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs select-none ${
+							className={`group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-xs select-none transition-colors duration-150 ${
 								isActive
 									? "bg-bg-secondary text-text-primary"
 									: "text-text-secondary hover:bg-bg-secondary/50"
 							} ${isDragging ? "opacity-50" : ""} ${isOver && overSide === "left" ? "border-l-2 border-l-text-secondary" : ""} ${isOver && overSide === "right" ? "border-r-2 border-r-text-secondary" : ""}`}
 						>
+							<FileIcon size={14} className="shrink-0 text-text-secondary" />
 							<span className="flex items-center gap-1.5">
 								{tab.dirty && (
 									<span
@@ -272,9 +278,9 @@ export function TabBar({
 								aria-label={`Close ${fileName}`}
 								onClick={(e) => {
 									e.stopPropagation();
-									onCloseTab(tab.path);
+									onCloseTab(tab.id);
 								}}
-								className="rounded p-0.5 opacity-0 hover:bg-black/10 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-white/10"
+								className="rounded p-0.5 opacity-0 transition-opacity duration-100 hover:bg-black/10 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-white/10"
 							>
 								<X size={12} />
 							</button>

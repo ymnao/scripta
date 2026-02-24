@@ -20,6 +20,22 @@ describe("TabBar", () => {
 		onReorderTab,
 	};
 
+	function setTabs(
+		tabs: Array<{ id: number; path: string; dirty: boolean }>,
+		activeTabId: number | null,
+	) {
+		useWorkspaceStore.setState({
+			workspacePath: "/workspace",
+			tabs: tabs.map((t) => ({
+				...t,
+				history: [t.path],
+				historyIndex: 0,
+			})),
+			activeTabPath: tabs.find((t) => t.id === activeTabId)?.path ?? null,
+			activeTabId,
+		});
+	}
+
 	beforeEach(() => {
 		onCloseTab.mockClear();
 		onTabSelect.mockClear();
@@ -30,6 +46,8 @@ describe("TabBar", () => {
 			workspacePath: "/workspace",
 			tabs: [],
 			activeTabPath: null,
+			activeTabId: null,
+			_nextTabId: 1,
 		});
 	});
 
@@ -44,13 +62,13 @@ describe("TabBar", () => {
 	});
 
 	it("renders tab list with file names", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: false },
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: false },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
 			],
-			activeTabPath: "/workspace/a.md",
-		});
+			1,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		expect(screen.getByText("a.md")).toBeInTheDocument();
@@ -58,13 +76,13 @@ describe("TabBar", () => {
 	});
 
 	it("marks active tab with aria-selected", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: false },
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: false },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
 			],
-			activeTabPath: "/workspace/a.md",
-		});
+			1,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		const tabs = screen.getAllByRole("tab");
@@ -72,41 +90,38 @@ describe("TabBar", () => {
 		expect(tabs[1]).toHaveAttribute("aria-selected", "false");
 	});
 
-	it("calls onTabSelect on tab click", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: false },
+	it("calls onTabSelect with tab id on click", () => {
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: false },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
 			],
-			activeTabPath: "/workspace/a.md",
-		});
+			1,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		fireEvent.click(screen.getByText("b.md"));
 
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/b.md");
+		expect(onTabSelect).toHaveBeenCalledWith(2);
 	});
 
-	it("calls onCloseTab when close button is clicked", () => {
-		useWorkspaceStore.setState({
-			tabs: [{ path: "/workspace/a.md", dirty: false }],
-			activeTabPath: "/workspace/a.md",
-		});
+	it("calls onCloseTab with tab id when close button is clicked", () => {
+		setTabs([{ id: 1, path: "/workspace/a.md", dirty: false }], 1);
 
 		render(<TabBar {...defaultProps} />);
 		fireEvent.click(screen.getByLabelText("Close a.md"));
 
-		expect(onCloseTab).toHaveBeenCalledWith("/workspace/a.md");
+		expect(onCloseTab).toHaveBeenCalledWith(1);
 	});
 
 	it("shows dirty indicator for dirty tabs", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: true },
-				{ path: "/workspace/b.md", dirty: false },
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: true },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
 			],
-			activeTabPath: "/workspace/a.md",
-		});
+			1,
+		);
 
 		const { container } = render(<TabBar {...defaultProps} />);
 		const dots = container.querySelectorAll(".rounded-full");
@@ -114,13 +129,13 @@ describe("TabBar", () => {
 	});
 
 	it("announces unsaved changes via aria-label on dirty tab", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: true },
-				{ path: "/workspace/b.md", dirty: false },
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: true },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
 			],
-			activeTabPath: "/workspace/a.md",
-		});
+			1,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		const tabs = screen.getAllByRole("tab");
@@ -128,27 +143,24 @@ describe("TabBar", () => {
 		expect(tabs[1]).not.toHaveAttribute("aria-label");
 	});
 
-	it("calls onCloseTab when Delete key is pressed on focused tab", () => {
-		useWorkspaceStore.setState({
-			tabs: [{ path: "/workspace/a.md", dirty: false }],
-			activeTabPath: "/workspace/a.md",
-		});
+	it("calls onCloseTab with tab id when Delete key is pressed on focused tab", () => {
+		setTabs([{ id: 1, path: "/workspace/a.md", dirty: false }], 1);
 
 		render(<TabBar {...defaultProps} />);
 		const tab = screen.getByRole("tab");
 		fireEvent.keyDown(tab, { key: "Delete" });
 
-		expect(onCloseTab).toHaveBeenCalledWith("/workspace/a.md");
+		expect(onCloseTab).toHaveBeenCalledWith(1);
 	});
 
 	it("uses roving tabindex (active=0, others=-1)", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: false },
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: false },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
 			],
-			activeTabPath: "/workspace/b.md",
-		});
+			2,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		const tabs = screen.getAllByRole("tab");
@@ -156,15 +168,15 @@ describe("TabBar", () => {
 		expect(tabs[1]).toHaveAttribute("tabindex", "0");
 	});
 
-	it("calls onTabSelect with arrow keys", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: false },
-				{ path: "/workspace/c.md", dirty: false },
+	it("calls onTabSelect with tab id on arrow keys", () => {
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: false },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
+				{ id: 3, path: "/workspace/c.md", dirty: false },
 			],
-			activeTabPath: "/workspace/a.md",
-		});
+			1,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		const tabs = screen.getAllByRole("tab");
@@ -172,31 +184,31 @@ describe("TabBar", () => {
 
 		fireEvent.keyDown(tabs[0], { key: "ArrowRight" });
 		expect(document.activeElement).toBe(tabs[1]);
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/b.md");
+		expect(onTabSelect).toHaveBeenCalledWith(2);
 
 		fireEvent.keyDown(tabs[1], { key: "ArrowRight" });
 		expect(document.activeElement).toBe(tabs[2]);
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/c.md");
+		expect(onTabSelect).toHaveBeenCalledWith(3);
 
 		// Wraps around
 		fireEvent.keyDown(tabs[2], { key: "ArrowRight" });
 		expect(document.activeElement).toBe(tabs[0]);
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/a.md");
+		expect(onTabSelect).toHaveBeenCalledWith(1);
 
 		fireEvent.keyDown(tabs[0], { key: "ArrowLeft" });
 		expect(document.activeElement).toBe(tabs[2]);
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/c.md");
+		expect(onTabSelect).toHaveBeenCalledWith(3);
 	});
 
-	it("calls onTabSelect with Home/End keys", () => {
-		useWorkspaceStore.setState({
-			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: false },
-				{ path: "/workspace/c.md", dirty: false },
+	it("calls onTabSelect with tab id on Home/End keys", () => {
+		setTabs(
+			[
+				{ id: 1, path: "/workspace/a.md", dirty: false },
+				{ id: 2, path: "/workspace/b.md", dirty: false },
+				{ id: 3, path: "/workspace/c.md", dirty: false },
 			],
-			activeTabPath: "/workspace/b.md",
-		});
+			2,
+		);
 
 		render(<TabBar {...defaultProps} />);
 		const tabs = screen.getAllByRole("tab");
@@ -204,11 +216,11 @@ describe("TabBar", () => {
 
 		fireEvent.keyDown(tabs[1], { key: "End" });
 		expect(document.activeElement).toBe(tabs[2]);
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/c.md");
+		expect(onTabSelect).toHaveBeenCalledWith(3);
 
 		fireEvent.keyDown(tabs[2], { key: "Home" });
 		expect(document.activeElement).toBe(tabs[0]);
-		expect(onTabSelect).toHaveBeenCalledWith("/workspace/a.md");
+		expect(onTabSelect).toHaveBeenCalledWith(1);
 	});
 
 	describe("navigation buttons", () => {
@@ -245,14 +257,14 @@ describe("TabBar", () => {
 
 	describe("pointer-based drag reorder", () => {
 		it("calls onReorderTab when dragged rightward (right half of target)", () => {
-			useWorkspaceStore.setState({
-				tabs: [
-					{ path: "/workspace/a.md", dirty: false },
-					{ path: "/workspace/b.md", dirty: false },
-					{ path: "/workspace/c.md", dirty: false },
+			setTabs(
+				[
+					{ id: 1, path: "/workspace/a.md", dirty: false },
+					{ id: 2, path: "/workspace/b.md", dirty: false },
+					{ id: 3, path: "/workspace/c.md", dirty: false },
 				],
-				activeTabPath: "/workspace/a.md",
-			});
+				1,
+			);
 
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
@@ -270,14 +282,14 @@ describe("TabBar", () => {
 		});
 
 		it("inserts to right of target when dragging leftward", () => {
-			useWorkspaceStore.setState({
-				tabs: [
-					{ path: "/workspace/a.md", dirty: false },
-					{ path: "/workspace/b.md", dirty: false },
-					{ path: "/workspace/c.md", dirty: false },
+			setTabs(
+				[
+					{ id: 1, path: "/workspace/a.md", dirty: false },
+					{ id: 2, path: "/workspace/b.md", dirty: false },
+					{ id: 3, path: "/workspace/c.md", dirty: false },
 				],
-				activeTabPath: "/workspace/c.md",
-			});
+				3,
+			);
 
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
@@ -293,14 +305,14 @@ describe("TabBar", () => {
 		});
 
 		it("can move tab to leftmost position by dropping on left half", () => {
-			useWorkspaceStore.setState({
-				tabs: [
-					{ path: "/workspace/a.md", dirty: false },
-					{ path: "/workspace/b.md", dirty: false },
-					{ path: "/workspace/c.md", dirty: false },
+			setTabs(
+				[
+					{ id: 1, path: "/workspace/a.md", dirty: false },
+					{ id: 2, path: "/workspace/b.md", dirty: false },
+					{ id: 3, path: "/workspace/c.md", dirty: false },
 				],
-				activeTabPath: "/workspace/c.md",
-			});
+				3,
+			);
 
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
@@ -317,13 +329,13 @@ describe("TabBar", () => {
 		});
 
 		it("does not call onReorderTab when released on same tab", () => {
-			useWorkspaceStore.setState({
-				tabs: [
-					{ path: "/workspace/a.md", dirty: false },
-					{ path: "/workspace/b.md", dirty: false },
+			setTabs(
+				[
+					{ id: 1, path: "/workspace/a.md", dirty: false },
+					{ id: 2, path: "/workspace/b.md", dirty: false },
 				],
-				activeTabPath: "/workspace/a.md",
-			});
+				1,
+			);
 
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
@@ -336,13 +348,13 @@ describe("TabBar", () => {
 		});
 
 		it("does not trigger drag on small pointer movement (click)", () => {
-			useWorkspaceStore.setState({
-				tabs: [
-					{ path: "/workspace/a.md", dirty: false },
-					{ path: "/workspace/b.md", dirty: false },
+			setTabs(
+				[
+					{ id: 1, path: "/workspace/a.md", dirty: false },
+					{ id: 2, path: "/workspace/b.md", dirty: false },
 				],
-				activeTabPath: "/workspace/a.md",
-			});
+				1,
+			);
 
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");
@@ -357,14 +369,14 @@ describe("TabBar", () => {
 		});
 
 		it("suppresses click after drag completes", () => {
-			useWorkspaceStore.setState({
-				tabs: [
-					{ path: "/workspace/a.md", dirty: false },
-					{ path: "/workspace/b.md", dirty: false },
-					{ path: "/workspace/c.md", dirty: false },
+			setTabs(
+				[
+					{ id: 1, path: "/workspace/a.md", dirty: false },
+					{ id: 2, path: "/workspace/b.md", dirty: false },
+					{ id: 3, path: "/workspace/c.md", dirty: false },
 				],
-				activeTabPath: "/workspace/a.md",
-			});
+				1,
+			);
 
 			render(<TabBar {...defaultProps} />);
 			const tabs = screen.getAllByRole("tab");

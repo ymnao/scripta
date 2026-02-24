@@ -1,25 +1,37 @@
 import { create } from "zustand";
 
+const MAX_HISTORY = 100;
+
 export interface Tab {
+	id: number;
 	path: string;
 	dirty: boolean;
+	history: string[];
+	historyIndex: number;
 }
 
 interface WorkspaceState {
 	workspacePath: string | null;
 	tabs: Tab[];
 	activeTabPath: string | null;
+	activeTabId: number | null;
+	_nextTabId: number;
 	fileTreeVersion: number;
 
 	setWorkspacePath: (path: string | null) => void;
 	openTab: (path: string) => void;
 	closeTab: (path: string) => void;
+	closeTabById: (id: number) => void;
 	setActiveTab: (path: string) => void;
+	setActiveTabById: (id: number) => void;
 	setTabDirty: (path: string, dirty: boolean) => void;
 	renameTab: (oldPath: string, newPath: string) => void;
+	renameTabsByPrefix: (oldPrefix: string, newPrefix: string) => void;
 	closeTabsByPrefix: (prefix: string) => void;
 	bumpFileTreeVersion: () => void;
-	replaceActiveTab: (newPath: string) => void;
+	navigateInTab: (path: string) => void;
+	goBackInTab: () => void;
+	goForwardInTab: () => void;
 	reorderTab: (fromIndex: number, toIndex: number) => void;
 }
 
@@ -27,10 +39,19 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	workspacePath: null,
 	tabs: [],
 	activeTabPath: null,
+	activeTabId: null,
+	_nextTabId: 1,
 	fileTreeVersion: 0,
 
 	setWorkspacePath: (path) =>
-		set({ workspacePath: path, tabs: [], activeTabPath: null, fileTreeVersion: 0 }),
+		set({
+			workspacePath: path,
+			tabs: [],
+			activeTabPath: null,
+			activeTabId: null,
+			_nextTabId: 1,
+			fileTreeVersion: 0,
+		}),
 
 	bumpFileTreeVersion: () => set((s) => ({ fileTreeVersion: s.fileTreeVersion + 1 })),
 
@@ -38,11 +59,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 		set((state) => {
 			const existing = state.tabs.find((t) => t.path === path);
 			if (existing) {
-				return { activeTabPath: path };
+				return { activeTabPath: path, activeTabId: existing.id };
 			}
+			const id = state._nextTabId;
 			return {
-				tabs: [...state.tabs, { path, dirty: false }],
+				tabs: [...state.tabs, { id, path, dirty: false, history: [path], historyIndex: 0 }],
 				activeTabPath: path,
+				activeTabId: id,
+				_nextTabId: id + 1,
 			};
 		}),
 
@@ -57,18 +81,53 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 				return { tabs: newTabs };
 			}
 
-			let newActive: string | null = null;
+			let newActive: Tab | null = null;
 			if (newTabs.length > 0) {
-				newActive = index < newTabs.length ? newTabs[index].path : newTabs[newTabs.length - 1].path;
+				newActive = index < newTabs.length ? newTabs[index] : newTabs[newTabs.length - 1];
 			}
 
-			return { tabs: newTabs, activeTabPath: newActive };
+			return {
+				tabs: newTabs,
+				activeTabPath: newActive?.path ?? null,
+				activeTabId: newActive?.id ?? null,
+			};
+		}),
+
+	closeTabById: (id) =>
+		set((state) => {
+			const index = state.tabs.findIndex((t) => t.id === id);
+			if (index === -1) return state;
+
+			const newTabs = state.tabs.filter((t) => t.id !== id);
+
+			if (state.activeTabId !== id) {
+				return { tabs: newTabs };
+			}
+
+			let newActive: Tab | null = null;
+			if (newTabs.length > 0) {
+				newActive = index < newTabs.length ? newTabs[index] : newTabs[newTabs.length - 1];
+			}
+
+			return {
+				tabs: newTabs,
+				activeTabPath: newActive?.path ?? null,
+				activeTabId: newActive?.id ?? null,
+			};
 		}),
 
 	setActiveTab: (path) =>
 		set((state) => {
-			if (!state.tabs.some((t) => t.path === path)) return state;
-			return { activeTabPath: path };
+			const tab = state.tabs.find((t) => t.path === path);
+			if (!tab) return state;
+			return { activeTabPath: path, activeTabId: tab.id };
+		}),
+
+	setActiveTabById: (id) =>
+		set((state) => {
+			const tab = state.tabs.find((t) => t.id === id);
+			if (!tab) return state;
+			return { activeTabPath: tab.path, activeTabId: tab.id };
 		}),
 
 	setTabDirty: (path, dirty) =>
@@ -78,28 +137,104 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 
 	renameTab: (oldPath, newPath) =>
 		set((state) => ({
-			tabs: state.tabs.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)),
+			tabs: state.tabs.map((t) =>
+				t.path === oldPath
+					? {
+							...t,
+							path: newPath,
+							history: t.history.map((p) => (p === oldPath ? newPath : p)),
+						}
+					: t,
+			),
 			activeTabPath: state.activeTabPath === oldPath ? newPath : state.activeTabPath,
 		})),
 
-	replaceActiveTab: (newPath) =>
+	renameTabsByPrefix: (oldPrefix, newPrefix) =>
+		set((state) => ({
+			tabs: state.tabs.map((t) => {
+				const newPath = t.path.startsWith(oldPrefix)
+					? newPrefix + t.path.slice(oldPrefix.length)
+					: t.path;
+				const newHistory = t.history.map((p) =>
+					p.startsWith(oldPrefix) ? newPrefix + p.slice(oldPrefix.length) : p,
+				);
+				if (newPath === t.path && newHistory.every((p, i) => p === t.history[i])) return t;
+				return { ...t, path: newPath, history: newHistory };
+			}),
+			activeTabPath: state.activeTabPath?.startsWith(oldPrefix)
+				? newPrefix + state.activeTabPath.slice(oldPrefix.length)
+				: state.activeTabPath,
+		})),
+
+	navigateInTab: (path) =>
 		set((state) => {
-			// Already on a tab with this path → just activate
-			const existing = state.tabs.find((t) => t.path === newPath);
+			const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+
+			// Same path as current → no-op
+			if (activeTab?.path === path) return state;
+
+			// Another tab already shows this path → switch to it
+			const existing = state.tabs.find((t) => t.path === path);
 			if (existing) {
-				return { activeTabPath: newPath };
+				return { activeTabPath: path, activeTabId: existing.id };
 			}
+
 			// No active tab → create new
-			if (!state.activeTabPath) {
+			if (!activeTab) {
+				const id = state._nextTabId;
 				return {
-					tabs: [...state.tabs, { path: newPath, dirty: false }],
-					activeTabPath: newPath,
+					tabs: [...state.tabs, { id, path, dirty: false, history: [path], historyIndex: 0 }],
+					activeTabPath: path,
+					activeTabId: id,
+					_nextTabId: id + 1,
 				};
 			}
-			// Replace active tab's path
+
+			// Push to active tab's history
+			const trimmed = activeTab.history.slice(0, activeTab.historyIndex + 1);
+			const next = [...trimmed, path];
+			if (next.length > MAX_HISTORY) {
+				next.splice(0, next.length - MAX_HISTORY);
+			}
+			const newIndex = next.length - 1;
+
 			return {
 				tabs: state.tabs.map((t) =>
-					t.path === state.activeTabPath ? { path: newPath, dirty: false } : t,
+					t.id === activeTab.id
+						? { ...t, path, dirty: false, history: next, historyIndex: newIndex }
+						: t,
+				),
+				activeTabPath: path,
+			};
+		}),
+
+	goBackInTab: () =>
+		set((state) => {
+			const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+			if (!activeTab || activeTab.historyIndex <= 0) return state;
+
+			const newIndex = activeTab.historyIndex - 1;
+			const newPath = activeTab.history[newIndex];
+
+			return {
+				tabs: state.tabs.map((t) =>
+					t.id === activeTab.id ? { ...t, path: newPath, historyIndex: newIndex } : t,
+				),
+				activeTabPath: newPath,
+			};
+		}),
+
+	goForwardInTab: () =>
+		set((state) => {
+			const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+			if (!activeTab || activeTab.historyIndex >= activeTab.history.length - 1) return state;
+
+			const newIndex = activeTab.historyIndex + 1;
+			const newPath = activeTab.history[newIndex];
+
+			return {
+				tabs: state.tabs.map((t) =>
+					t.id === activeTab.id ? { ...t, path: newPath, historyIndex: newIndex } : t,
 				),
 				activeTabPath: newPath,
 			};
@@ -125,23 +260,27 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	closeTabsByPrefix: (prefix) =>
 		set((state) => {
 			const activeIndex =
-				state.activeTabPath != null
-					? state.tabs.findIndex((t) => t.path === state.activeTabPath)
-					: -1;
+				state.activeTabId != null ? state.tabs.findIndex((t) => t.id === state.activeTabId) : -1;
 			const newTabs = state.tabs.filter((t) => !t.path.startsWith(prefix));
 			if (newTabs.length === state.tabs.length) return state;
 
-			let newActive = state.activeTabPath;
-			if (newActive?.startsWith(prefix)) {
+			let newActive: Tab | null =
+				state.activeTabId != null
+					? (newTabs.find((t) => t.id === state.activeTabId) ?? null)
+					: null;
+
+			if (!newActive) {
 				if (newTabs.length > 0) {
 					const newIndex =
 						activeIndex >= 0 ? Math.min(activeIndex, newTabs.length - 1) : newTabs.length - 1;
-					newActive = newTabs[newIndex].path;
-				} else {
-					newActive = null;
+					newActive = newTabs[newIndex];
 				}
 			}
 
-			return { tabs: newTabs, activeTabPath: newActive };
+			return {
+				tabs: newTabs,
+				activeTabPath: newActive?.path ?? null,
+				activeTabId: newActive?.id ?? null,
+			};
 		}),
 }));
