@@ -10,7 +10,7 @@ import {
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -41,6 +41,33 @@ const customHighlightStyle = syntaxHighlighting(
 		{ tag: tags.heading, fontWeight: "bold" },
 		{ tag: tags.link, textDecoration: "none" },
 	]),
+);
+
+/**
+ * IME コンポジション中にエディタへ cm-composing クラスを付与する。
+ * WKWebView では ::selection の背景色がコンポジションテキストに
+ * 不正に適用される (WebKit Bug 37788) ため、このクラスで抑制する。
+ */
+const composingClass = ViewPlugin.fromClass(
+	class {
+		private view: EditorView;
+		constructor(view: EditorView) {
+			this.view = view;
+			view.contentDOM.addEventListener("compositionstart", this.onStart);
+			view.contentDOM.addEventListener("compositionend", this.onEnd);
+		}
+		private onStart = () => {
+			this.view.dom.classList.add("cm-composing");
+		};
+		private onEnd = () => {
+			this.view.dom.classList.remove("cm-composing");
+		};
+		destroy() {
+			this.view.contentDOM.removeEventListener("compositionstart", this.onStart);
+			this.view.contentDOM.removeEventListener("compositionend", this.onEnd);
+			this.view.dom.classList.remove("cm-composing");
+		}
+	},
 );
 
 const FONT_FAMILY_MAP: Record<FontFamily, string> = {
@@ -105,8 +132,11 @@ const staticEditorTheme = EditorView.theme({
 	".cm-foldPlaceholder": {
 		display: "none",
 	},
-	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+	".cm-content ::selection": {
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent)",
+	},
+	"&.cm-composing .cm-content ::selection": {
+		backgroundColor: "transparent",
 	},
 	".cm-heading-1": {
 		fontSize: "1.8em",
@@ -174,16 +204,24 @@ const staticEditorTheme = EditorView.theme({
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	},
+	".cm-list-marker": {
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "flex-start",
+		verticalAlign: "middle",
+		transform: "translateY(-0.08em)",
+		width: "2ch",
+		flexShrink: "0",
+	},
 	".cm-task-checkbox": {
 		display: "inline-flex",
 		alignItems: "center",
 		justifyContent: "center",
-		width: "16px",
-		height: "16px",
-		borderRadius: "4px",
+		boxSizing: "border-box",
+		width: "0.85em",
+		height: "0.85em",
+		borderRadius: "3px",
 		border: "1.5px solid var(--color-text-secondary)",
-		marginRight: "6px",
-		verticalAlign: "middle",
 		cursor: "pointer",
 		backgroundColor: "transparent",
 		transition: "background-color 0.15s, border-color 0.15s",
@@ -195,8 +233,8 @@ const staticEditorTheme = EditorView.theme({
 		color: "white",
 	},
 	".cm-task-checkmark": {
-		width: "12px",
-		height: "12px",
+		width: "0.6em",
+		height: "0.6em",
 	},
 	".cm-blockquote-line": {
 		borderLeft: "3px solid var(--color-border)",
@@ -217,8 +255,7 @@ const staticEditorTheme = EditorView.theme({
 	},
 	".cm-bullet-mark": {
 		color: "var(--color-text-secondary)",
-		fontSize: "0.85em",
-		marginRight: "0.35em",
+		fontSize: "0.75em",
 	},
 	".cm-searchMatch": {
 		backgroundColor: "color-mix(in srgb, #facc15 30%, transparent)",
@@ -284,7 +321,6 @@ export function MarkdownEditor({
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
 	const fontSize = useSettingsStore((s) => s.fontSize);
 	const fontFamily = useSettingsStore((s) => s.fontFamily);
-	const indentSize = useSettingsStore((s) => s.indentSize);
 	const highlightActiveLine = useSettingsStore((s) => s.highlightActiveLine);
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
@@ -325,6 +361,17 @@ export function MarkdownEditor({
 
 	const handleCreateEditor = useCallback((view: EditorView) => {
 		onEditorViewRef.current?.(view);
+		// Emit initial cursor stats on mount (updateListener only fires on updates)
+		const callback = onStatisticsRef.current;
+		if (callback) {
+			const sel = view.state.selection.main;
+			const lineInfo = view.state.doc.lineAt(sel.head);
+			callback({
+				line: lineInfo.number,
+				col: sel.head - lineInfo.from + 1,
+				chars: view.state.doc.length,
+			});
+		}
 	}, []);
 
 	const handleDestroyEditor = useCallback(() => {
@@ -334,11 +381,12 @@ export function MarkdownEditor({
 	const extensions = useMemo(
 		() => [
 			listKeymap,
+			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, fontFamily),
-			indentUnit.of(" ".repeat(indentSize)),
-			EditorState.tabSize.of(indentSize),
+			indentUnit.of("  "),
+			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			customHighlightStyle,
 			markdownExtension,
@@ -395,7 +443,7 @@ export function MarkdownEditor({
 				});
 			}),
 		],
-		[fontSize, fontFamily, indentSize],
+		[fontSize, fontFamily],
 	);
 
 	return (
@@ -415,9 +463,17 @@ export function MarkdownEditor({
 					basicSetup={{
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
+						// ::selection CSS で選択範囲スタイルを制御するため標準の描画を無効化
+						drawSelection: false,
+						// 検索ハイライトは highlightQueryExtension で制御するため無効化
+						highlightSelectionMatches: false,
+						// Markdown エディタとしてシンプルな入力体験を優先するため無効化
+						autocompletion: false,
 						highlightActiveLine,
 						highlightActiveLineGutter: true,
-						bracketMatching: true,
+						// タスクマーカー [] やリンク [text](url) 等の Markdown 構文で
+						// 不要なブラケットハイライトが出るため無効化
+						bracketMatching: false,
 						closeBrackets: true,
 						indentOnInput: true,
 						searchKeymap: false,

@@ -2,8 +2,6 @@ import { type Store, load } from "@tauri-apps/plugin-store";
 
 export type ThemePreference = "system" | "light" | "dark";
 export type FontFamily = "monospace" | "sans-serif" | "serif";
-export type IndentSize = 2 | 4;
-
 interface AppSettings {
 	workspacePath: string | null;
 	themePreference: ThemePreference;
@@ -11,7 +9,6 @@ interface AppSettings {
 	showLineNumbers: boolean;
 	fontSize: number;
 	autoSaveDelay: number;
-	indentSize: IndentSize;
 	highlightActiveLine: boolean;
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
@@ -24,7 +21,6 @@ const DEFAULTS: AppSettings = {
 	showLineNumbers: true,
 	fontSize: 14,
 	autoSaveDelay: 2000,
-	indentSize: 2,
 	highlightActiveLine: false,
 	fontFamily: "monospace",
 	trimTrailingWhitespace: true,
@@ -89,10 +85,6 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawAutoSaveDelay
 				: DEFAULTS.autoSaveDelay;
 
-		const rawIndentSize = await store.get<unknown>("indentSize");
-		const indentSize: IndentSize =
-			rawIndentSize === 2 || rawIndentSize === 4 ? rawIndentSize : DEFAULTS.indentSize;
-
 		const rawHighlightActiveLine = await store.get<unknown>("highlightActiveLine");
 		const highlightActiveLine: boolean =
 			typeof rawHighlightActiveLine === "boolean"
@@ -118,7 +110,6 @@ export async function loadSettings(): Promise<AppSettings> {
 			showLineNumbers,
 			fontSize,
 			autoSaveDelay,
-			indentSize,
 			highlightActiveLine,
 			fontFamily,
 			trimTrailingWhitespace,
@@ -182,16 +173,6 @@ export async function saveAutoSaveDelay(delay: number): Promise<void> {
 	try {
 		const store = await getStore();
 		await store.set("autoSaveDelay", delay);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveIndentSize(size: IndentSize): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("indentSize", size);
 		await store.save();
 	} catch {
 		// Ignore save errors

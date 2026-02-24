@@ -103,7 +103,6 @@ test.describe("settings dialog", () => {
 		await nav.getByText("エディタ").click();
 		await expect(page.getByText("フォントサイズ")).toBeVisible();
 		await expect(page.getByText("フォント", { exact: true })).toBeVisible();
-		await expect(page.getByText("インデントサイズ")).toBeVisible();
 		// 外観の項目は非表示
 		await expect(page.getByText("テーマ")).not.toBeVisible();
 
@@ -167,24 +166,5 @@ test.describe("settings dialog", () => {
 
 		await fontSelect.selectOption("serif");
 		await expect(fontSelect).toHaveValue("serif");
-	});
-
-	test("can change indent size", async ({ page }) => {
-		const mock = new TauriMock(page);
-		await mock.setup(workspace, "/workspace");
-
-		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
-
-		await page.keyboard.press(`${modKey}+,`);
-
-		// エディタセクションに切り替え
-		await page.locator('nav[aria-label="設定セクション"]').getByText("エディタ").click();
-
-		const indentSelect = page.locator("#indent-size-select");
-		await expect(indentSelect).toHaveValue("2");
-
-		await indentSelect.selectOption("4");
-		await expect(indentSelect).toHaveValue("4");
 	});
 });

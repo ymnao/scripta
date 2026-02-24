@@ -632,6 +632,96 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 	});
 
+	it("schedules follow-up save when content changed during write", async () => {
+		let resolveSave!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveSave = resolve;
+				}),
+		);
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// Edit to "v1" and trigger auto-save
+		rerender({ content: "v1" });
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+		expect(result.current.saveStatus).toBe("saving");
+
+		// While write is in-flight, content reverts to saved value
+		rerender({ content: "initial" });
+
+		// Then changes to "v2"
+		rerender({ content: "v2" });
+
+		// Content effect sees "v2" !== lastSavedRef ("initial\n") → sets timer.
+		// But now resolve the in-flight save for "v1" — lastSavedRef becomes "v1\n".
+		mockedWriteFile.mockResolvedValue(undefined);
+		await act(async () => {
+			resolveSave();
+		});
+
+		// The success handler detects contentRef ("v2") !== saved ("v1\n")
+		// and sets status to "unsaved", scheduling a follow-up timer.
+		expect(result.current.saveStatus).toBe("unsaved");
+
+		// Advance past follow-up timer
+		mockedWriteFile.mockClear();
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "v2\n");
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("does not schedule follow-up when content matches after write", async () => {
+		let resolveSave!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveSave = resolve;
+				}),
+		);
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// Edit and trigger save
+		rerender({ content: "v1" });
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		// Content stays at "v1" while save completes
+		mockedWriteFile.mockClear();
+		await act(async () => {
+			resolveSave();
+		});
+
+		// No mismatch → status should be "saved", no follow-up
+		expect(result.current.saveStatus).toBe("saved");
+
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
 	it("stops retrying after max retries", async () => {
 		mockedWriteFile.mockRejectedValue("Connection timed out");
 

@@ -4,7 +4,6 @@ vi.mock("../lib/store", () => ({
 	saveShowLineNumbers: vi.fn(),
 	saveFontSize: vi.fn(),
 	saveAutoSaveDelay: vi.fn(),
-	saveIndentSize: vi.fn(),
 	saveHighlightActiveLine: vi.fn(),
 	saveFontFamily: vi.fn(),
 	saveTrimTrailingWhitespace: vi.fn(),
@@ -19,7 +18,6 @@ describe("useSettingsStore", () => {
 			showLineNumbers: true,
 			fontSize: 14,
 			autoSaveDelay: 2000,
-			indentSize: 2,
 			highlightActiveLine: false,
 			fontFamily: "monospace",
 			trimTrailingWhitespace: true,
@@ -57,15 +55,6 @@ describe("useSettingsStore", () => {
 	it("sets autoSaveDelay", () => {
 		useSettingsStore.getState().setAutoSaveDelay(5000);
 		expect(useSettingsStore.getState().autoSaveDelay).toBe(5000);
-	});
-
-	it("has indentSize 2 by default", () => {
-		expect(useSettingsStore.getState().indentSize).toBe(2);
-	});
-
-	it("sets indentSize", () => {
-		useSettingsStore.getState().setIndentSize(4);
-		expect(useSettingsStore.getState().indentSize).toBe(4);
 	});
 
 	it("has highlightActiveLine false by default", () => {

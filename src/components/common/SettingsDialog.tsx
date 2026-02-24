@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import type { FontFamily, IndentSize, ThemePreference } from "../../lib/store";
+import type { FontFamily, ThemePreference } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { DialogBase } from "./DialogBase";
@@ -20,11 +20,6 @@ const fontFamilyOptions: { value: FontFamily; label: string }[] = [
 	{ value: "monospace", label: "等幅 (Monospace)" },
 	{ value: "sans-serif", label: "ゴシック (Sans-serif)" },
 	{ value: "serif", label: "明朝 (Serif)" },
-];
-
-const indentSizeOptions: { value: IndentSize; label: string }[] = [
-	{ value: 2, label: "2" },
-	{ value: 4, label: "4" },
 ];
 
 type Section = "appearance" | "editor" | "save";
@@ -183,8 +178,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 	const setFontSize = useSettingsStore((s) => s.setFontSize);
 	const fontFamily = useSettingsStore((s) => s.fontFamily);
 	const setFontFamily = useSettingsStore((s) => s.setFontFamily);
-	const indentSize = useSettingsStore((s) => s.indentSize);
-	const setIndentSize = useSettingsStore((s) => s.setIndentSize);
 	const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
 	const setAutoSaveDelay = useSettingsStore((s) => s.setAutoSaveDelay);
 	const trimTrailingWhitespace = useSettingsStore((s) => s.trimTrailingWhitespace);
@@ -269,13 +262,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 								value={fontFamily}
 								options={fontFamilyOptions}
 								onChange={setFontFamily}
-							/>
-							<SelectInput
-								id="indent-size-select"
-								label="インデントサイズ"
-								value={indentSize}
-								options={indentSizeOptions}
-								onChange={setIndentSize}
 							/>
 						</>
 					)}
