@@ -52,6 +52,10 @@ const highlightPlugin = ViewPlugin.fromClass(
 		}
 
 		update(update: ViewUpdate) {
+			if (update.view.composing) {
+				if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+				return;
+			}
 			const queryChanged =
 				update.state.field(highlightQueryField) !== update.startState.field(highlightQueryField);
 			if (queryChanged || update.docChanged || update.viewportChanged) {

@@ -69,6 +69,7 @@ export function AppLayout() {
 	const [editorError, setEditorError] = useState<string | null>(null);
 	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
+	const [editorView, setEditorView] = useState<EditorView | null>(null);
 	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
 	const searchBarOpenRef = useRef(false);
 	searchBarOpenRef.current = searchBarOpen;
@@ -76,6 +77,7 @@ export function AppLayout() {
 	const pendingGoToLineRef = useRef<{ line: number; query?: string } | null>(null);
 
 	const [content, setContent] = useState("");
+	const [editorKey, setEditorKey] = useState(0);
 	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent } = useAutoSave(
 		activeTabPath ?? "",
 		content,
@@ -288,6 +290,7 @@ export function AppLayout() {
 			savedContentRef.current = cached.savedContent;
 			markSaved(cached.savedContent);
 			setContent(cached.content);
+			setEditorKey((k) => k + 1);
 			if (pendingGoToLineRef.current !== null) {
 				setGoToLine(pendingGoToLineRef.current);
 				pendingGoToLineRef.current = null;
@@ -305,6 +308,7 @@ export function AppLayout() {
 				savedContentRef.current = loaded;
 				markSaved(loaded);
 				setContent(loaded);
+				setEditorKey((k) => k + 1);
 				if (pendingGoToLineRef.current !== null) {
 					setGoToLine(pendingGoToLineRef.current);
 					pendingGoToLineRef.current = null;
@@ -433,6 +437,7 @@ export function AppLayout() {
 							savedContentRef.current = loaded;
 							markSaved(loaded);
 							setContent(loaded);
+							setEditorKey((k) => k + 1);
 						})
 						.catch((err) => {
 							console.error("Failed to reload file:", err);
@@ -478,6 +483,7 @@ export function AppLayout() {
 					savedContentRef.current = loaded;
 					markSaved(loaded);
 					setContent(loaded);
+					setEditorKey((k) => k + 1);
 				}
 			})
 			.catch((err) => {
@@ -630,6 +636,7 @@ export function AppLayout() {
 
 	const handleEditorView = useCallback((view: EditorView | null) => {
 		editorViewRef.current = view;
+		setEditorView(view);
 	}, []);
 
 	// Navigation handlers
@@ -846,6 +853,7 @@ export function AppLayout() {
 							</div>
 						) : (
 							<MarkdownEditor
+								key={editorKey}
 								value={content}
 								onChange={setContent}
 								onSave={() => void saveNow()}
@@ -860,9 +868,9 @@ export function AppLayout() {
 							<p className="text-sm">Select a file to start editing</p>
 						</div>
 					)}
-					{searchBarOpen && editorViewRef.current && (
+					{searchBarOpen && editorView && (
 						<SearchBar
-							view={editorViewRef.current}
+							view={editorView}
 							onClose={() => setSearchBarOpen(false)}
 							initialExpanded={searchBarExpanded}
 							initialSearchText={searchBarInitialText}

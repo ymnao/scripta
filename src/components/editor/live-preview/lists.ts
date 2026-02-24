@@ -213,6 +213,10 @@ class ListDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
+		if (update.view.composing) {
+			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+			return;
+		}
 		if (
 			update.docChanged ||
 			update.viewportChanged ||
@@ -267,10 +271,39 @@ const ensureTaskMarkerSpace = EditorState.transactionFilter.of((tr) => {
 	return [tr, { changes: inserts, sequential: true }];
 });
 
+/** Matches bullet list markers: `- `, `* `, `+ ` with optional leading indent */
+const bulletMarkerRe = /^([ \t]*[-*+] )/;
+/** Matches task list markers: `- [ ] `, `- [x] `, etc. with optional leading indent */
+const taskMarkerRe = /^([ \t]*[-*+] \[[ xX]\] )/;
+
+/**
+ * Find the marker range (ListMark + optional TaskMarker + trailing space)
+ * for a bullet/task list item on the given line using regex.
+ * Returns `{ from, to }` or `null` if not found.
+ */
+function findMarkerRange(
+	state: EditorState,
+	line: { from: number; to: number; number: number },
+): { from: number; to: number } | null {
+	const text = state.doc.sliceString(line.from, line.to);
+	const taskMatch = taskMarkerRe.exec(text);
+	if (taskMatch) {
+		return { from: line.from, to: line.from + taskMatch[1].length };
+	}
+	const bulletMatch = bulletMarkerRe.exec(text);
+	if (bulletMatch) {
+		return { from: line.from, to: line.from + bulletMatch[1].length };
+	}
+	return null;
+}
+
 /**
  * Backspace on the content start of a bullet/task list item deletes
  * the entire marker (and task marker) + trailing space in one
  * keystroke, so the line immediately becomes plain text.
+ *
+ * ArrowLeft at the content start skips the hidden marker area and
+ * moves the cursor to the end of the previous line.
  *
  * Wrapped in Prec.high so it runs before defaultKeymap's
  * deleteCharBackward (which always returns true and would otherwise
@@ -291,85 +324,72 @@ export const listKeymap = [
 					const line = state.doc.lineAt(head);
 					if (head === line.from) return false;
 
-					const tree = syntaxTree(state);
-					let deleteFrom = -1;
-					let deleteTo = -1;
-
-					tree.iterate({
-						from: line.from,
-						to: line.to,
-						enter(node) {
-							if (node.name !== "ListItem") return;
-
-							const listItemNode = node.node;
-							if (listItemNode.parent?.name !== "BulletList") return;
-
-							// Only handle ListItem whose markers are on the cursor's line
-							if (state.doc.lineAt(node.from).number !== line.number) return;
-
-							// Find ListMark
-							let listMarkFrom = -1;
-							let contentEnd = -1;
-							const itemCursor = listItemNode.cursor();
-							if (itemCursor.firstChild()) {
-								do {
-									if (itemCursor.name === "ListMark") {
-										listMarkFrom = itemCursor.from;
-										contentEnd = itemCursor.to;
-										if (
-											contentEnd < line.to &&
-											state.doc.sliceString(contentEnd, contentEnd + 1) === " "
-										) {
-											contentEnd += 1;
-										}
-										break;
-									}
-								} while (itemCursor.nextSibling());
-							}
-							if (listMarkFrom === -1) return false;
-
-							// Extend range if there is a Task > TaskMarker
-							const itemCursor2 = listItemNode.cursor();
-							if (itemCursor2.firstChild()) {
-								do {
-									if (itemCursor2.name === "Task") {
-										const taskCursor = itemCursor2.node.cursor();
-										if (taskCursor.firstChild()) {
-											do {
-												if (taskCursor.name === "TaskMarker") {
-													contentEnd = taskCursor.to;
-													if (
-														contentEnd < line.to &&
-														state.doc.sliceString(contentEnd, contentEnd + 1) === " "
-													) {
-														contentEnd += 1;
-													}
-													break;
-												}
-											} while (taskCursor.nextSibling());
-										}
-										break;
-									}
-								} while (itemCursor2.nextSibling());
-							}
-
-							// Accept Backspace if cursor is within the marker area
-							if (head > listMarkFrom && head <= contentEnd) {
-								deleteFrom = listMarkFrom;
-								deleteTo = contentEnd;
-							}
-
-							return false;
-						},
-					});
-
-					if (deleteFrom === -1) return false;
+					const range = findMarkerRange(state, line);
+					if (!range) return false;
+					if (head <= range.from || head > range.to) return false;
 
 					view.dispatch({
-						changes: { from: deleteFrom, to: deleteTo },
+						changes: { from: range.from, to: range.to },
 						annotations: Transaction.userEvent.of("delete.backward"),
 					});
 					return true;
+				},
+			},
+			{
+				key: "ArrowLeft",
+				run(view) {
+					const { state } = view;
+					const { main } = state.selection;
+					if (!main.empty) return false;
+
+					const head = main.head;
+					const line = state.doc.lineAt(head);
+					const range = findMarkerRange(state, line);
+					if (!range) return false;
+
+					// Cursor is within or at the end of the marker area
+					if (head > range.from && head <= range.to) {
+						if (line.number <= 1) return false;
+						const prevLine = state.doc.line(line.number - 1);
+						view.dispatch({
+							selection: EditorSelection.cursor(prevLine.to),
+						});
+						return true;
+					}
+					return false;
+				},
+			},
+			{
+				key: "ArrowRight",
+				run(view) {
+					const { state } = view;
+					const { main } = state.selection;
+					if (!main.empty) return false;
+
+					const head = main.head;
+					const line = state.doc.lineAt(head);
+
+					// At end of line, check if next line has a marker to skip
+					if (head === line.to && line.number < state.doc.lines) {
+						const nextLine = state.doc.line(line.number + 1);
+						const range = findMarkerRange(state, nextLine);
+						if (range) {
+							view.dispatch({
+								selection: EditorSelection.cursor(range.to),
+							});
+							return true;
+						}
+					}
+
+					// Inside marker area, jump to content start
+					const range = findMarkerRange(state, line);
+					if (range && head >= range.from && head < range.to) {
+						view.dispatch({
+							selection: EditorSelection.cursor(range.to),
+						});
+						return true;
+					}
+					return false;
 				},
 			},
 		]),

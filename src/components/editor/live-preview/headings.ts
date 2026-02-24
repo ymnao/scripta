@@ -80,6 +80,10 @@ class HeadingDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
+		if (update.view.composing) {
+			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+			return;
+		}
 		if (
 			update.docChanged ||
 			update.viewportChanged ||

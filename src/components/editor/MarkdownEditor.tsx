@@ -10,7 +10,7 @@ import {
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -41,6 +41,32 @@ const customHighlightStyle = syntaxHighlighting(
 		{ tag: tags.heading, fontWeight: "bold" },
 		{ tag: tags.link, textDecoration: "none" },
 	]),
+);
+
+/**
+ * IME コンポジション中にエディタへ cm-composing クラスを付与する。
+ * WKWebView では ::selection の背景色がコンポジションテキストに
+ * 不正に適用される (WebKit Bug 37788) ため、このクラスで抑制する。
+ */
+const composingClass = ViewPlugin.fromClass(
+	class {
+		private view: EditorView;
+		constructor(view: EditorView) {
+			this.view = view;
+			view.contentDOM.addEventListener("compositionstart", this.onStart);
+			view.contentDOM.addEventListener("compositionend", this.onEnd);
+		}
+		private onStart = () => {
+			this.view.dom.classList.add("cm-composing");
+		};
+		private onEnd = () => {
+			this.view.dom.classList.remove("cm-composing");
+		};
+		destroy() {
+			this.view.contentDOM.removeEventListener("compositionstart", this.onStart);
+			this.view.contentDOM.removeEventListener("compositionend", this.onEnd);
+		}
+	},
 );
 
 const FONT_FAMILY_MAP: Record<FontFamily, string> = {
@@ -105,8 +131,18 @@ const staticEditorTheme = EditorView.theme({
 	".cm-foldPlaceholder": {
 		display: "none",
 	},
-	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+	".cm-content ::selection": {
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent)",
+	},
+	"&.cm-composing .cm-content ::selection": {
+		backgroundColor: "transparent",
+	},
+	".cm-matchingBracket, .cm-nonmatchingBracket": {
+		backgroundColor: "transparent !important",
+		outline: "none !important",
+	},
+	".cm-selectionMatch": {
+		backgroundColor: "transparent !important",
 	},
 	".cm-heading-1": {
 		fontSize: "1.8em",
@@ -177,7 +213,8 @@ const staticEditorTheme = EditorView.theme({
 	".cm-list-marker": {
 		display: "inline-flex",
 		alignItems: "center",
-		justifyContent: "center",
+		justifyContent: "flex-start",
+		verticalAlign: "middle",
 		width: "2ch",
 		flexShrink: "0",
 	},
@@ -185,11 +222,11 @@ const staticEditorTheme = EditorView.theme({
 		display: "inline-flex",
 		alignItems: "center",
 		justifyContent: "center",
-		width: "0.95em",
-		height: "0.95em",
+		boxSizing: "border-box",
+		width: "0.85em",
+		height: "0.85em",
 		borderRadius: "3px",
 		border: "1.5px solid var(--color-text-secondary)",
-		verticalAlign: "middle",
 		cursor: "pointer",
 		backgroundColor: "transparent",
 		transition: "background-color 0.15s, border-color 0.15s",
@@ -201,8 +238,8 @@ const staticEditorTheme = EditorView.theme({
 		color: "white",
 	},
 	".cm-task-checkmark": {
-		width: "0.7em",
-		height: "0.7em",
+		width: "0.6em",
+		height: "0.6em",
 	},
 	".cm-blockquote-line": {
 		borderLeft: "3px solid var(--color-border)",
@@ -223,7 +260,7 @@ const staticEditorTheme = EditorView.theme({
 	},
 	".cm-bullet-mark": {
 		color: "var(--color-text-secondary)",
-		fontSize: "0.85em",
+		fontSize: "0.75em",
 	},
 	".cm-searchMatch": {
 		backgroundColor: "color-mix(in srgb, #facc15 30%, transparent)",
@@ -329,6 +366,17 @@ export function MarkdownEditor({
 
 	const handleCreateEditor = useCallback((view: EditorView) => {
 		onEditorViewRef.current?.(view);
+		// Emit initial cursor stats on mount (updateListener only fires on updates)
+		const callback = onStatisticsRef.current;
+		if (callback) {
+			const sel = view.state.selection.main;
+			const lineInfo = view.state.doc.lineAt(sel.head);
+			callback({
+				line: lineInfo.number,
+				col: sel.head - lineInfo.from + 1,
+				chars: view.state.doc.length,
+			});
+		}
 	}, []);
 
 	const handleDestroyEditor = useCallback(() => {
@@ -338,6 +386,7 @@ export function MarkdownEditor({
 	const extensions = useMemo(
 		() => [
 			listKeymap,
+			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, fontFamily),
@@ -419,9 +468,12 @@ export function MarkdownEditor({
 					basicSetup={{
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
+						drawSelection: false,
+						highlightSelectionMatches: false,
+						autocompletion: false,
 						highlightActiveLine,
 						highlightActiveLineGutter: true,
-						bracketMatching: true,
+						bracketMatching: false,
 						closeBrackets: true,
 						indentOnInput: true,
 						searchKeymap: false,
