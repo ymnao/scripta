@@ -33,16 +33,28 @@ interface TabCache {
 
 export function AppLayout() {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
+	const activeTabId = useWorkspaceStore((s) => s.activeTabId);
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
 	const closeTab = useWorkspaceStore((s) => s.closeTab);
+	const closeTabById = useWorkspaceStore((s) => s.closeTabById);
+	const setActiveTabById = useWorkspaceStore((s) => s.setActiveTabById);
 	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
 	const renameTab = useWorkspaceStore((s) => s.renameTab);
 	const openTab = useWorkspaceStore((s) => s.openTab);
+	const navigateInTab = useWorkspaceStore((s) => s.navigateInTab);
+	const goBackInTab = useWorkspaceStore((s) => s.goBackInTab);
+	const goForwardInTab = useWorkspaceStore((s) => s.goForwardInTab);
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
+	const renameTabsByPrefix = useWorkspaceStore((s) => s.renameTabsByPrefix);
+	const reorderTab = useWorkspaceStore((s) => s.reorderTab);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
 	const hydratePreference = useThemeStore((s) => s.hydratePreference);
 	const hydrateSettings = useSettingsStore((s) => s.hydrate);
+
+	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
+	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
+	const canGoForward = activeTab ? activeTab.historyIndex < activeTab.history.length - 1 : false;
 
 	const [loading, setLoading] = useState(true);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -243,13 +255,21 @@ export function AppLayout() {
 			tabCacheRef.current.clear();
 		}
 
-		// Save previous tab to cache (only if content was actually loaded for it)
+		// Save previous tab to cache (only if content was actually loaded for it
+		// and the tab still exists — navigateInTab may change the tab's path)
 		if (!workspaceChanged && prevPath && contentLoadedForPathRef.current === prevPath) {
-			const currentCache = tabCacheRef.current.get(prevPath);
-			tabCacheRef.current.set(prevPath, {
-				content: contentRef.current,
-				savedContent: currentCache?.savedContent ?? savedContentRef.current,
-			});
+			const tabStillExists = useWorkspaceStore
+				.getState()
+				.tabs.some((t) => t.path === prevPath || t.history.includes(prevPath));
+			if (tabStillExists) {
+				const currentCache = tabCacheRef.current.get(prevPath);
+				tabCacheRef.current.set(prevPath, {
+					content: contentRef.current,
+					savedContent: currentCache?.savedContent ?? savedContentRef.current,
+				});
+			} else {
+				tabCacheRef.current.delete(prevPath);
+			}
 		}
 
 		prevTabPathRef.current = activeTabPath;
@@ -483,21 +503,26 @@ export function AppLayout() {
 		setExternalConflict(null);
 	}, []);
 
-	const closingTabsRef = useRef<Set<string>>(new Set());
+	const closingTabsRef = useRef<Set<number>>(new Set());
 
 	const handleCloseTab = useCallback(
-		async (path: string) => {
-			if (closingTabsRef.current.has(path)) return;
-			closingTabsRef.current.add(path);
+		async (id: number) => {
+			if (closingTabsRef.current.has(id)) return;
+			closingTabsRef.current.add(id);
 
 			try {
-				if (path === activeTabPath) {
+				const state = useWorkspaceStore.getState();
+				const tab = state.tabs.find((t) => t.id === id);
+				if (!tab) return;
+				const path = tab.path;
+
+				if (id === state.activeTabId) {
 					if (contentRef.current !== savedContentRef.current) {
 						const saved = await saveNow();
 						if (!saved) return;
 					}
 					tabCacheRef.current.delete(path);
-					closeTab(path);
+					closeTabById(id);
 					return;
 				}
 
@@ -505,13 +530,14 @@ export function AppLayout() {
 				await waitForPending();
 
 				// Re-check: tab may have become active during waitForPending
-				if (path === useWorkspaceStore.getState().activeTabPath) {
+				const currentState = useWorkspaceStore.getState();
+				if (id === currentState.activeTabId) {
 					if (contentRef.current !== savedContentRef.current) {
 						const saved = await saveNow();
 						if (!saved) return;
 					}
 					tabCacheRef.current.delete(path);
-					closeTab(path);
+					closeTabById(id);
 					return;
 				}
 
@@ -519,9 +545,9 @@ export function AppLayout() {
 				if (!cached) {
 					// Cache missing (e.g. tab opened but readFile not yet completed).
 					// Check store dirty flag to decide if it's safe to close.
-					const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
-					if (tab?.dirty) return;
-					closeTab(path);
+					const currentTab = useWorkspaceStore.getState().tabs.find((t) => t.id === id);
+					if (currentTab?.dirty) return;
+					closeTabById(id);
 					return;
 				}
 				if (cached.content !== cached.savedContent) {
@@ -533,12 +559,12 @@ export function AppLayout() {
 					}
 				}
 				tabCacheRef.current.delete(path);
-				closeTab(path);
+				closeTabById(id);
 			} finally {
-				closingTabsRef.current.delete(path);
+				closingTabsRef.current.delete(id);
 			}
 		},
-		[activeTabPath, saveNow, closeTab, waitForPending],
+		[saveNow, closeTabById, waitForPending],
 	);
 
 	const handleFileRenamed = useCallback(
@@ -569,8 +595,8 @@ export function AppLayout() {
 					cache.delete(oldKey);
 					cache.set(newKey, value);
 					updateRefs(oldKey, newKey);
-					renameTab(oldKey, newKey);
 				}
+				renameTabsByPrefix(prefix, addTrailingSep(newPath));
 			} else {
 				const cached = tabCacheRef.current.get(oldPath);
 				if (cached) {
@@ -581,7 +607,7 @@ export function AppLayout() {
 				renameTab(oldPath, newPath);
 			}
 		},
-		[renameTab],
+		[renameTab, renameTabsByPrefix],
 	);
 
 	const handleFileDeleted = useCallback(
@@ -605,6 +631,51 @@ export function AppLayout() {
 	const handleEditorView = useCallback((view: EditorView | null) => {
 		editorViewRef.current = view;
 	}, []);
+
+	// Navigation handlers
+	const handleFileSelect = useCallback(
+		async (path: string) => {
+			// Save current file before navigating if dirty
+			if (activeTabPath && contentRef.current !== savedContentRef.current) {
+				const saved = await saveNow();
+				if (!saved) return;
+			}
+			navigateInTab(path);
+		},
+		[activeTabPath, navigateInTab, saveNow],
+	);
+
+	const handleFileOpenNewTab = useCallback(
+		(path: string) => {
+			openTab(path);
+		},
+		[openTab],
+	);
+
+	const handleTabSelect = useCallback(
+		(id: number) => {
+			setActiveTabById(id);
+		},
+		[setActiveTabById],
+	);
+
+	const handleGoBack = useCallback(async () => {
+		// Save current file before navigating if dirty
+		if (activeTabPath && contentRef.current !== savedContentRef.current) {
+			const saved = await saveNow();
+			if (!saved) return;
+		}
+		goBackInTab();
+	}, [activeTabPath, goBackInTab, saveNow]);
+
+	const handleGoForward = useCallback(async () => {
+		// Save current file before navigating if dirty
+		if (activeTabPath && contentRef.current !== savedContentRef.current) {
+			const saved = await saveNow();
+			if (!saved) return;
+		}
+		goForwardInTab();
+	}, [activeTabPath, goForwardInTab, saveNow]);
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
@@ -650,12 +721,33 @@ export function AppLayout() {
 		if (!activeTabPath) setSearchBarOpen(false);
 	}, [activeTabPath]);
 
-	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P, Cmd+,, F1
+	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P, Cmd+,, F1, Cmd+[/], Alt+Left/Right
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
+			// Navigation: Cmd+[ / Alt+Left = back, Cmd+] / Alt+Right = forward
+			if ((e.metaKey || e.ctrlKey) && e.key === "[") {
+				e.preventDefault();
+				handleGoBack();
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.key === "]") {
+				e.preventDefault();
+				handleGoForward();
+				return;
+			}
+			if (e.altKey && e.key === "ArrowLeft") {
+				e.preventDefault();
+				handleGoBack();
+				return;
+			}
+			if (e.altKey && e.key === "ArrowRight") {
+				e.preventDefault();
+				handleGoForward();
+				return;
+			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "w") {
 				e.preventDefault();
-				if (activeTabPath) void handleCloseTab(activeTabPath);
+				if (activeTabId != null) void handleCloseTab(activeTabId);
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
 				// Skip sidebar toggle when editor has focus — CodeMirror handles Mod-b for bold
@@ -715,7 +807,7 @@ export function AppLayout() {
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [activeTabPath, handleCloseTab]);
+	}, [activeTabId, handleCloseTab, handleGoBack, handleGoForward]);
 
 	if (loading) {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
@@ -723,7 +815,15 @@ export function AppLayout() {
 
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
-			<TabBar onCloseTab={handleCloseTab} />
+			<TabBar
+				onCloseTab={handleCloseTab}
+				onTabSelect={handleTabSelect}
+				canGoBack={canGoBack}
+				canGoForward={canGoForward}
+				onGoBack={handleGoBack}
+				onGoForward={handleGoForward}
+				onReorderTab={reorderTab}
+			/>
 			<div className="min-h-0 flex flex-1">
 				{sidebarVisible && (
 					<Sidebar
@@ -731,6 +831,8 @@ export function AppLayout() {
 						onShowFiles={handleShowFiles}
 						onShowSearch={handleShowSearch}
 						onSearchNavigate={handleSearchNavigate}
+						onFileSelect={handleFileSelect}
+						onFileOpenNewTab={handleFileOpenNewTab}
 						searchInputRef={searchInputRef}
 						onFileRenamed={handleFileRenamed}
 						onFileDeleted={handleFileDeleted}

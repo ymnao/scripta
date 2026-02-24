@@ -100,11 +100,15 @@ const { AppLayout } = await import("./AppLayout");
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
 
+let nextId = 1;
 function openFileInStore(workspacePath: string, filePath: string) {
+	const id = nextId++;
 	useWorkspaceStore.setState({
 		workspacePath,
-		tabs: [{ path: filePath, dirty: false }],
+		tabs: [{ id, path: filePath, dirty: false, history: [filePath], historyIndex: 0 }],
 		activeTabPath: filePath,
+		activeTabId: id,
+		_nextTabId: id + 1,
 	});
 }
 
@@ -116,10 +120,13 @@ describe("AppLayout", () => {
 		mockDestroy.mockClear();
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
+		nextId = 1;
 		useWorkspaceStore.setState({
 			workspacePath: null,
 			tabs: [],
 			activeTabPath: null,
+			activeTabId: null,
+			_nextTabId: 1,
 		});
 	});
 
@@ -223,10 +230,24 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: false },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: false,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
 				activeTabPath: "/workspace/b.md",
+				activeTabId: 2,
+				_nextTabId: 3,
 			});
 		});
 
@@ -297,10 +318,24 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: false },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: false,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
 				activeTabPath: "/workspace/b.md",
+				activeTabId: 2,
+				_nextTabId: 3,
 			});
 		});
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
@@ -308,7 +343,7 @@ describe("AppLayout", () => {
 		// Switch back to A — should restore edited content from cache
 		mockedReadFile.mockClear();
 		await act(async () => {
-			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md" });
+			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md", activeTabId: 1 });
 		});
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("new content");
 		// Should NOT re-read from disk
@@ -364,10 +399,24 @@ describe("AppLayout", () => {
 		useWorkspaceStore.setState({
 			workspacePath: "/workspace",
 			tabs: [
-				{ path: "/workspace/a.md", dirty: false },
-				{ path: "/workspace/b.md", dirty: true },
+				{
+					id: 1,
+					path: "/workspace/a.md",
+					dirty: false,
+					history: ["/workspace/a.md"],
+					historyIndex: 0,
+				},
+				{
+					id: 2,
+					path: "/workspace/b.md",
+					dirty: true,
+					history: ["/workspace/b.md"],
+					historyIndex: 0,
+				},
 			],
 			activeTabPath: "/workspace/a.md",
+			activeTabId: 1,
+			_nextTabId: 3,
 		});
 		mockedReadFile.mockResolvedValue("content A");
 
@@ -378,14 +427,14 @@ describe("AppLayout", () => {
 		// Switch to b.md so it gets cached, then switch back to a.md
 		mockedReadFile.mockResolvedValue("content B");
 		await act(async () => {
-			useWorkspaceStore.setState({ activeTabPath: "/workspace/b.md" });
+			useWorkspaceStore.setState({ activeTabPath: "/workspace/b.md", activeTabId: 2 });
 		});
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
 		mockedReadFile.mockResolvedValue("content A");
 		await act(async () => {
-			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md" });
+			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md", activeTabId: 1 });
 		});
 
 		// Now b.md has dirty content in cache. Make writeFile fail.
@@ -535,9 +584,22 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: true },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: true,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
+				_nextTabId: 3,
 			});
 		});
 
@@ -574,10 +636,24 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: false },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: false,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
 				activeTabPath: "/workspace/b.md",
+				activeTabId: 2,
+				_nextTabId: 3,
 			});
 		});
 		expect(screen.getByTestId("editor-value")).toHaveTextContent("content B");
@@ -635,10 +711,24 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: false },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: false,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
 				activeTabPath: "/workspace/b.md",
+				activeTabId: 2,
+				_nextTabId: 3,
 			});
 		});
 
@@ -717,10 +807,24 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: false },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: false,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
 				activeTabPath: "/workspace/b.md",
+				activeTabId: 2,
+				_nextTabId: 3,
 			});
 		});
 
@@ -756,10 +860,24 @@ describe("AppLayout", () => {
 		await act(async () => {
 			useWorkspaceStore.setState({
 				tabs: [
-					{ path: "/workspace/a.md", dirty: true },
-					{ path: "/workspace/b.md", dirty: false },
+					{
+						id: 1,
+						path: "/workspace/a.md",
+						dirty: true,
+						history: ["/workspace/a.md"],
+						historyIndex: 0,
+					},
+					{
+						id: 2,
+						path: "/workspace/b.md",
+						dirty: false,
+						history: ["/workspace/b.md"],
+						historyIndex: 0,
+					},
 				],
 				activeTabPath: "/workspace/b.md",
+				activeTabId: 2,
+				_nextTabId: 3,
 			});
 		});
 

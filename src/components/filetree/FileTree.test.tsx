@@ -214,6 +214,89 @@ describe("FileTree", () => {
 		);
 	});
 
+	it("shows 'open in new tab' in context menu for files", async () => {
+		const onFileOpenNewTab = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath={null}
+					onFileSelect={() => {}}
+					onFileOpenNewTab={onFileOpenNewTab}
+				/>,
+			);
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(fileButton);
+		});
+
+		await userEvent.click(screen.getByText("新しいタブで開く"));
+		expect(onFileOpenNewTab).toHaveBeenCalledWith("/workspace/hello.md");
+	});
+
+	it("does not show 'open in new tab' for folders", async () => {
+		const onFileOpenNewTab = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath={null}
+					onFileSelect={() => {}}
+					onFileOpenNewTab={onFileOpenNewTab}
+				/>,
+			);
+		});
+
+		const folderButton = screen.getByText("docs").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(folderButton);
+		});
+
+		expect(screen.queryByText("新しいタブで開く")).not.toBeInTheDocument();
+	});
+
+	it("calls onFileOpenNewTab on Cmd+Click", async () => {
+		const onFileSelect = vi.fn();
+		const onFileOpenNewTab = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath={null}
+					onFileSelect={onFileSelect}
+					onFileOpenNewTab={onFileOpenNewTab}
+				/>,
+			);
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		fireEvent.click(fileButton, { metaKey: true });
+		expect(onFileOpenNewTab).toHaveBeenCalledWith("/workspace/hello.md");
+		expect(onFileSelect).not.toHaveBeenCalled();
+	});
+
+	it("calls onFileSelect on normal click (no modifier)", async () => {
+		const onFileSelect = vi.fn();
+		const onFileOpenNewTab = vi.fn();
+		await act(async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath={null}
+					onFileSelect={onFileSelect}
+					onFileOpenNewTab={onFileOpenNewTab}
+				/>,
+			);
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		fireEvent.click(fileButton);
+		expect(onFileSelect).toHaveBeenCalledWith("/workspace/hello.md");
+		expect(onFileOpenNewTab).not.toHaveBeenCalled();
+	});
+
 	it("deletes a file via context menu and calls onFileDeleted", async () => {
 		const onFileDeleted = vi.fn();
 		await act(async () => {

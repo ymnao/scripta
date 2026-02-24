@@ -20,6 +20,7 @@ interface FileTreeProps {
 	workspacePath: string;
 	selectedPath: string | null;
 	onFileSelect: (path: string) => void;
+	onFileOpenNewTab?: (path: string) => void;
 	onFileRenamed?: (oldPath: string, newPath: string, isDirectory: boolean) => void;
 	onFileDeleted?: (path: string, isDirectory: boolean) => void;
 }
@@ -44,6 +45,7 @@ export function FileTree({
 	workspacePath,
 	selectedPath,
 	onFileSelect,
+	onFileOpenNewTab,
 	onFileRenamed,
 	onFileDeleted,
 }: FileTreeProps) {
@@ -120,7 +122,23 @@ export function FileTree({
 				: dirname(entry.path)
 			: workspacePath;
 
-		const items: ContextMenuItem[] = [
+		const items: ContextMenuItem[] = [];
+
+		if (entry && !entry.isDirectory && onFileOpenNewTab) {
+			items.push({
+				id: "open-new-tab",
+				label: "新しいタブで開く",
+				onClick: () => onFileOpenNewTab(entry.path),
+			});
+			items.push({
+				id: "separator-open",
+				label: "---",
+				separator: true,
+				onClick: () => {},
+			});
+		}
+
+		items.push(
 			{
 				id: "new-file",
 				label: "New File",
@@ -131,7 +149,7 @@ export function FileTree({
 				label: "New Folder",
 				onClick: () => setCreating({ parentPath, type: "folder" }),
 			},
-		];
+		);
 
 		if (entry) {
 			items.push({
@@ -154,7 +172,7 @@ export function FileTree({
 		}
 
 		return items;
-	}, [contextMenu, workspacePath]);
+	}, [contextMenu, workspacePath, onFileOpenNewTab]);
 
 	const handleCreateConfirm = useCallback(
 		async (name: string) => {
@@ -274,6 +292,7 @@ export function FileTree({
 						depth={0}
 						selectedPath={selectedPath}
 						onFileSelect={onFileSelect}
+						onFileOpenNewTab={onFileOpenNewTab}
 						refreshKey={refreshKey}
 						creating={creating}
 						renamingPath={renamingPath}

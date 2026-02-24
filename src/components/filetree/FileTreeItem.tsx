@@ -1,6 +1,7 @@
-import { AlertTriangle, ChevronDown, ChevronRight, File, Folder } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
+import { getFileIcon } from "../../lib/file-icon";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
 
@@ -14,6 +15,7 @@ interface FileTreeItemProps {
 	depth: number;
 	selectedPath: string | null;
 	onFileSelect: (path: string) => void;
+	onFileOpenNewTab?: (path: string) => void;
 	refreshKey: number;
 	creating: CreatingState | null;
 	renamingPath: string | null;
@@ -29,6 +31,7 @@ export function FileTreeItem({
 	depth,
 	selectedPath,
 	onFileSelect,
+	onFileOpenNewTab,
 	refreshKey,
 	creating,
 	renamingPath,
@@ -105,34 +108,39 @@ export function FileTreeItem({
 		};
 	}, [refreshKey, entry.isDirectory, entry.path, expanded, loaded]);
 
-	const handleClick = useCallback(() => {
-		if (entry.isDirectory) {
-			if ((!loaded || loadError) && !loading) {
-				setLoading(true);
-				setLoadError(false);
-				listDirectory(entry.path)
-					.then((entries) => {
-						if (!isMountedRef.current) return;
-						setChildren(entries);
-						setLoaded(true);
-						setExpanded(true);
-					})
-					.catch((err) => {
-						if (!isMountedRef.current) return;
-						console.error("Failed to list directory:", err);
-						setLoadError(true);
-					})
-					.finally(() => {
-						if (!isMountedRef.current) return;
-						setLoading(false);
-					});
-			} else if (loaded) {
-				setExpanded((prev) => !prev);
+	const handleClick = useCallback(
+		(e: React.MouseEvent) => {
+			if (entry.isDirectory) {
+				if ((!loaded || loadError) && !loading) {
+					setLoading(true);
+					setLoadError(false);
+					listDirectory(entry.path)
+						.then((entries) => {
+							if (!isMountedRef.current) return;
+							setChildren(entries);
+							setLoaded(true);
+							setExpanded(true);
+						})
+						.catch((err) => {
+							if (!isMountedRef.current) return;
+							console.error("Failed to list directory:", err);
+							setLoadError(true);
+						})
+						.finally(() => {
+							if (!isMountedRef.current) return;
+							setLoading(false);
+						});
+				} else if (loaded) {
+					setExpanded((prev) => !prev);
+				}
+			} else if ((e.metaKey || e.ctrlKey) && onFileOpenNewTab) {
+				onFileOpenNewTab(entry.path);
+			} else {
+				onFileSelect(entry.path);
 			}
-		} else {
-			onFileSelect(entry.path);
-		}
-	}, [entry.isDirectory, entry.path, loaded, loadError, loading, onFileSelect]);
+		},
+		[entry.isDirectory, entry.path, loaded, loadError, loading, onFileSelect, onFileOpenNewTab],
+	);
 
 	const handleContextMenuEvent = useCallback(
 		(e: React.MouseEvent) => {
@@ -175,10 +183,15 @@ export function FileTreeItem({
 						<Folder size={14} className="shrink-0 text-text-secondary" />
 					</>
 				) : (
-					<>
-						<span className="inline-block w-3.5 shrink-0" />
-						<File size={14} className="shrink-0 text-text-secondary" />
-					</>
+					(() => {
+						const Icon = getFileIcon(entry.name);
+						return (
+							<>
+								<span className="inline-block w-3.5 shrink-0" />
+								<Icon size={14} className="shrink-0 text-text-secondary" />
+							</>
+						);
+					})()
 				)}
 				<span className="truncate">{entry.name}</span>
 				{loadError && (
@@ -209,6 +222,7 @@ export function FileTreeItem({
 								depth={depth + 1}
 								selectedPath={selectedPath}
 								onFileSelect={onFileSelect}
+								onFileOpenNewTab={onFileOpenNewTab}
 								refreshKey={refreshKey}
 								creating={creating}
 								renamingPath={renamingPath}
