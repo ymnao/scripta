@@ -281,7 +281,7 @@ const taskMarkerRe = /^([ \t]*[-*+] \[[ xX]\] )/;
  * for a bullet/task list item on the given line using regex.
  * Returns `{ from, to }` or `null` if not found.
  */
-function findMarkerRange(
+export function findMarkerRange(
 	state: EditorState,
 	line: { from: number; to: number; number: number },
 ): { from: number; to: number } | null {

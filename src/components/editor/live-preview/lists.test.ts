@@ -1,6 +1,12 @@
 import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { BulletWidget, CheckboxWidget, buildDecorations, listKeymap } from "./lists";
+import {
+	BulletWidget,
+	CheckboxWidget,
+	buildDecorations,
+	findMarkerRange,
+	listKeymap,
+} from "./lists";
 import {
 	collectDecorations,
 	createTestState,
@@ -347,5 +353,157 @@ describe("ensureTaskMarkerSpace", () => {
 		expect(tr.state.doc.line(1).text).toBe("- [ ] ");
 		// Cursor maps to end of deleted range = line 1 boundary, not inside marker
 		expect(tr.state.selection.main.head).toBeGreaterThanOrEqual(tr.state.doc.line(1).to);
+	});
+});
+
+describe("findMarkerRange", () => {
+	it("detects bullet marker range", () => {
+		const state = createTestState("- item");
+		const line = state.doc.line(1);
+		const range = findMarkerRange(state, line);
+		expect(range).toEqual({ from: 0, to: 2 });
+	});
+
+	it("detects task marker range", () => {
+		const state = createTestState("- [ ] task");
+		const line = state.doc.line(1);
+		const range = findMarkerRange(state, line);
+		expect(range).toEqual({ from: 0, to: 6 });
+	});
+
+	it("detects indented bullet marker range", () => {
+		const state = createTestState("  - nested");
+		const line = state.doc.line(1);
+		const range = findMarkerRange(state, line);
+		expect(range).toEqual({ from: 0, to: 4 });
+	});
+
+	it("detects indented task marker range", () => {
+		const state = createTestState("  - [x] done");
+		const line = state.doc.line(1);
+		const range = findMarkerRange(state, line);
+		expect(range).toEqual({ from: 0, to: 8 });
+	});
+
+	it("returns null for plain text", () => {
+		const state = createTestState("just text");
+		const line = state.doc.line(1);
+		expect(findMarkerRange(state, line)).toBeNull();
+	});
+
+	it("returns null for ordered list", () => {
+		const state = createTestState("1. ordered");
+		const line = state.doc.line(1);
+		expect(findMarkerRange(state, line)).toBeNull();
+	});
+
+	it("handles * and + markers", () => {
+		const stateAsterisk = createTestState("* item");
+		expect(findMarkerRange(stateAsterisk, stateAsterisk.doc.line(1))).toEqual({ from: 0, to: 2 });
+
+		const statePlus = createTestState("+ item");
+		expect(findMarkerRange(statePlus, statePlus.doc.line(1))).toEqual({ from: 0, to: 2 });
+	});
+
+	it("returns correct range for line not at document start", () => {
+		const state = createTestState("hello\n- item");
+		const line = state.doc.line(2);
+		expect(findMarkerRange(state, line)).toEqual({ from: 6, to: 8 });
+	});
+});
+
+describe("ArrowLeft keymap", () => {
+	it("moves cursor to previous line end from marker area", () => {
+		// Cursor at content start of bullet list (position 8 = after "- ")
+		const doc = "hello\n- item";
+		const contentStart = doc.indexOf("item");
+		const state = createTestState(doc, contentStart, listKeymap);
+		// ArrowLeft handler checks head > range.from && head <= range.to
+		// range = { from: 6, to: 8 }, head = 8 → should jump to line 1 end (5)
+		const line = state.doc.lineAt(contentStart);
+		const range = findMarkerRange(state, line);
+		expect(range).not.toBeNull();
+		expect(contentStart).toBe(range?.to);
+		// Verify handler would move to previous line end
+		const prevLine = state.doc.line(line.number - 1);
+		expect(prevLine.to).toBe(5);
+	});
+
+	it("does not activate when cursor is in content area", () => {
+		const doc = "hello\n- item";
+		const state = createTestState(doc, doc.indexOf("tem"), listKeymap);
+		const line = state.doc.lineAt(doc.indexOf("tem"));
+		const range = findMarkerRange(state, line);
+		// Cursor at position 10 ("tem"), range.to = 8
+		// head > range.to → handler returns false
+		expect(range).not.toBeNull();
+		expect(doc.indexOf("tem")).toBeGreaterThan(range?.to);
+	});
+
+	it("does not activate on first line of document", () => {
+		const state = createTestState("- item", 2, listKeymap);
+		const line = state.doc.lineAt(2);
+		const range = findMarkerRange(state, line);
+		expect(range).not.toBeNull();
+		// line.number === 1, so handler returns false (no previous line)
+		expect(line.number).toBe(1);
+	});
+
+	it("does not activate for non-list lines", () => {
+		const state = createTestState("hello\nworld", 6, listKeymap);
+		const line = state.doc.lineAt(6);
+		expect(findMarkerRange(state, line)).toBeNull();
+	});
+});
+
+describe("ArrowRight keymap", () => {
+	it("skips marker when moving from line end to next list line", () => {
+		const doc = "hello\n- item";
+		const lineEndPos = 5; // end of "hello"
+		const state = createTestState(doc, lineEndPos, listKeymap);
+		const line = state.doc.lineAt(lineEndPos);
+		// head === line.to (5) and next line has a marker
+		expect(line.to).toBe(lineEndPos);
+		const nextLine = state.doc.line(line.number + 1);
+		const range = findMarkerRange(state, nextLine);
+		expect(range).not.toBeNull();
+		// Handler would move cursor to range.to = 8 (content start)
+		expect(range?.to).toBe(8);
+	});
+
+	it("skips marker when cursor is inside marker area", () => {
+		const doc = "- item";
+		const state = createTestState(doc, 0, listKeymap);
+		const line = state.doc.lineAt(0);
+		const range = findMarkerRange(state, line);
+		expect(range).not.toBeNull();
+		// head (0) >= range.from (0) && head (0) < range.to (2) → jump to 2
+		expect(range?.to).toBe(2);
+	});
+
+	it("does not activate when cursor is in content area", () => {
+		const doc = "- item";
+		const state = createTestState(doc, 3, listKeymap);
+		const line = state.doc.lineAt(3);
+		const range = findMarkerRange(state, line);
+		expect(range).not.toBeNull();
+		// head (3) >= range.from but head (3) >= range.to (2) → not inside marker
+		expect(3).toBeGreaterThanOrEqual(range?.to);
+	});
+
+	it("does not activate at end of last line", () => {
+		const doc = "- item";
+		const state = createTestState(doc, 6, listKeymap);
+		const line = state.doc.lineAt(6);
+		// head === line.to but line.number === state.doc.lines → no next line
+		expect(line.number).toBe(state.doc.lines);
+	});
+
+	it("does not activate when next line is not a list item", () => {
+		const doc = "hello\nworld";
+		const state = createTestState(doc, 5, listKeymap);
+		const line = state.doc.lineAt(5);
+		const nextLine = state.doc.line(line.number + 1);
+		expect(findMarkerRange(state, nextLine)).toBeNull();
 	});
 });
