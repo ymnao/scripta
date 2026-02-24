@@ -174,15 +174,21 @@ const staticEditorTheme = EditorView.theme({
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	},
+	".cm-list-marker": {
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		width: "2ch",
+		flexShrink: "0",
+	},
 	".cm-task-checkbox": {
 		display: "inline-flex",
 		alignItems: "center",
 		justifyContent: "center",
-		width: "16px",
-		height: "16px",
-		borderRadius: "4px",
+		width: "0.95em",
+		height: "0.95em",
+		borderRadius: "3px",
 		border: "1.5px solid var(--color-text-secondary)",
-		marginRight: "6px",
 		verticalAlign: "middle",
 		cursor: "pointer",
 		backgroundColor: "transparent",
@@ -195,8 +201,8 @@ const staticEditorTheme = EditorView.theme({
 		color: "white",
 	},
 	".cm-task-checkmark": {
-		width: "12px",
-		height: "12px",
+		width: "0.7em",
+		height: "0.7em",
 	},
 	".cm-blockquote-line": {
 		borderLeft: "3px solid var(--color-border)",
@@ -218,7 +224,6 @@ const staticEditorTheme = EditorView.theme({
 	".cm-bullet-mark": {
 		color: "var(--color-text-secondary)",
 		fontSize: "0.85em",
-		marginRight: "0.35em",
 	},
 	".cm-searchMatch": {
 		backgroundColor: "color-mix(in srgb, #facc15 30%, transparent)",
@@ -284,7 +289,6 @@ export function MarkdownEditor({
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
 	const fontSize = useSettingsStore((s) => s.fontSize);
 	const fontFamily = useSettingsStore((s) => s.fontFamily);
-	const indentSize = useSettingsStore((s) => s.indentSize);
 	const highlightActiveLine = useSettingsStore((s) => s.highlightActiveLine);
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
@@ -337,8 +341,8 @@ export function MarkdownEditor({
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, fontFamily),
-			indentUnit.of(" ".repeat(indentSize)),
-			EditorState.tabSize.of(indentSize),
+			indentUnit.of("  "),
+			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			customHighlightStyle,
 			markdownExtension,
@@ -395,7 +399,7 @@ export function MarkdownEditor({
 				});
 			}),
 		],
-		[fontSize, fontFamily, indentSize],
+		[fontSize, fontFamily],
 	);
 
 	return (

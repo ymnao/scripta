@@ -122,7 +122,6 @@ export function AppLayout() {
 				showLineNumbers: settings.showLineNumbers,
 				fontSize: settings.fontSize,
 				autoSaveDelay: settings.autoSaveDelay,
-				indentSize: settings.indentSize,
 				highlightActiveLine: settings.highlightActiveLine,
 				fontFamily: settings.fontFamily,
 				trimTrailingWhitespace: settings.trimTrailingWhitespace,
@@ -429,7 +428,8 @@ export function AppLayout() {
 							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
 							// Only update editor state if this file is still the active tab
 							if (useWorkspaceStore.getState().activeTabPath !== path) return;
-							if (loaded === savedContentRef.current) return;
+							// Compare with last written content (processed) to detect our own saves
+							if (loaded === getLastSavedContentRef.current()) return;
 							savedContentRef.current = loaded;
 							markSaved(loaded);
 							setContent(loaded);

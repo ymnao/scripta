@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorState, Prec, type Range, Transaction } from "@codemirror/state";
+import { EditorSelection, EditorState, Prec, type Range, Transaction } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -11,18 +11,19 @@ import {
 	keymap,
 } from "@codemirror/view";
 
-const replaceDecoration = Decoration.replace({});
-
 export class BulletWidget extends WidgetType {
 	eq(): boolean {
 		return true;
 	}
 
 	toDOM(): HTMLElement {
+		const container = document.createElement("span");
+		container.className = "cm-list-marker";
 		const span = document.createElement("span");
 		span.className = "cm-bullet-mark";
 		span.textContent = "•";
-		return span;
+		container.appendChild(span);
+		return container;
 	}
 
 	ignoreEvent(): boolean {
@@ -43,6 +44,8 @@ export class CheckboxWidget extends WidgetType {
 	}
 
 	toDOM(): HTMLElement {
+		const container = document.createElement("span");
+		container.className = "cm-list-marker";
 		const span = document.createElement("span");
 		span.className = `cm-task-checkbox${this.checked ? " cm-task-checkbox-checked" : ""}`;
 		span.dataset.pos = String(this.pos);
@@ -65,7 +68,8 @@ export class CheckboxWidget extends WidgetType {
 			svg.appendChild(path);
 			span.appendChild(svg);
 		}
-		return span;
+		container.appendChild(span);
+		return container;
 	}
 
 	ignoreEvent(): boolean {
@@ -125,19 +129,27 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 					if (listMarkFrom === -1) return;
 
-					// Hide ListMark + space before TaskMarker
-					ranges.push(replaceDecoration.range(listMarkFrom, taskMarkerFrom));
+					// Consume TaskMarker trailing space
+					let replaceEnd = taskMarkerTo;
+					if (replaceEnd < line.to && state.doc.sliceString(replaceEnd, replaceEnd + 1) === " ") {
+						replaceEnd += 1;
+					}
 
-					// Replace TaskMarker with checkbox widget
+					// Replace ListMark through TaskMarker with checkbox widget
 					ranges.push(
 						Decoration.replace({
 							widget: new CheckboxWidget(checked, taskMarkerFrom),
-						}).range(taskMarkerFrom, taskMarkerTo),
+						}).range(listMarkFrom, taskMarkerTo),
 					);
+
+					// Hide trailing space separately (keeps cursor away from widget boundary)
+					if (replaceEnd > taskMarkerTo) {
+						ranges.push(Decoration.replace({}).range(taskMarkerTo, replaceEnd));
+					}
 
 					// Apply strikethrough for checked tasks
 					if (checked) {
-						const contentFrom = taskMarkerTo + 1;
+						const contentFrom = replaceEnd;
 						const lineEnd = line.to;
 						if (contentFrom < lineEnd) {
 							ranges.push(
@@ -167,13 +179,15 @@ export function buildDecorations(view: EditorView): DecorationSet {
 						do {
 							if (markCursor.name === "ListMark") {
 								const line = state.doc.lineAt(node.from);
-								let replaceEnd = markCursor.to;
+								const afterMark = markCursor.to;
+								// Only decorate when followed by a space (e.g. "- ")
 								if (
-									replaceEnd < line.to &&
-									state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
+									afterMark >= line.to ||
+									state.doc.sliceString(afterMark, afterMark + 1) !== " "
 								) {
-									replaceEnd += 1;
+									break;
 								}
+								const replaceEnd = afterMark + 1;
 								ranges.push(
 									Decoration.replace({
 										widget: new BulletWidget(),
@@ -214,12 +228,17 @@ class ListDecorationPlugin implements PluginValue {
  * `- [ ]` without a trailing space. The Lezer markdown parser only
  * recognises `- [ ] ` (with space) as a Task, so we append the
  * missing space via a transaction filter.
+ *
+ * Also handles closeBrackets interaction: when `[` auto-inserts `]`,
+ * the cursor ends up inside the marker. We move it past the appended
+ * space so it lands outside the decoration range.
  */
 const ensureTaskMarkerSpace = EditorState.transactionFilter.of((tr) => {
 	if (!tr.docChanged) return tr;
 
 	const newDoc = tr.newDoc;
 	const inserts: { from: number; insert: string }[] = [];
+	let cursorTarget: number | null = null;
 
 	tr.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
 		const startLine = newDoc.lineAt(fromB).number;
@@ -228,11 +247,23 @@ const ensureTaskMarkerSpace = EditorState.transactionFilter.of((tr) => {
 			const line = newDoc.line(i);
 			if (/^[ \t]*[-*+][ \t]\[[ xX]\]$/.test(line.text)) {
 				inserts.push({ from: line.to, insert: " " });
+				// If cursor is inside the task marker (e.g. closeBrackets put it before ']'),
+				// move it past the appended space so typing goes after the checkbox widget.
+				const head = tr.newSelection.main.head;
+				if (head >= line.from && head < line.to) {
+					cursorTarget = line.to + 1;
+				}
 			}
 		}
 	});
 
 	if (inserts.length === 0) return tr;
+	if (cursorTarget !== null) {
+		return [
+			tr,
+			{ changes: inserts, selection: EditorSelection.cursor(cursorTarget), sequential: true },
+		];
+	}
 	return [tr, { changes: inserts, sequential: true }];
 });
 
@@ -271,10 +302,10 @@ export const listKeymap = [
 							if (node.name !== "ListItem") return;
 
 							const listItemNode = node.node;
-							if (listItemNode.parent?.name !== "BulletList") return false;
+							if (listItemNode.parent?.name !== "BulletList") return;
 
 							// Only handle ListItem whose markers are on the cursor's line
-							if (state.doc.lineAt(node.from).number !== line.number) return false;
+							if (state.doc.lineAt(node.from).number !== line.number) return;
 
 							// Find ListMark
 							let listMarkFrom = -1;

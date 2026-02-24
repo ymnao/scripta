@@ -19,7 +19,6 @@ const {
 	saveShowLineNumbers,
 	saveFontSize,
 	saveAutoSaveDelay,
-	saveIndentSize,
 	saveHighlightActiveLine,
 	saveFontFamily,
 	saveTrimTrailingWhitespace,
@@ -47,7 +46,6 @@ describe("store", () => {
 				showLineNumbers: true,
 				fontSize: 14,
 				autoSaveDelay: 2000,
-				indentSize: 2,
 				highlightActiveLine: false,
 				fontFamily: "monospace",
 				trimTrailingWhitespace: true,
@@ -63,7 +61,6 @@ describe("store", () => {
 					showLineNumbers: false,
 					fontSize: 18,
 					autoSaveDelay: 5000,
-					indentSize: 4,
 					highlightActiveLine: true,
 					fontFamily: "serif",
 					trimTrailingWhitespace: false,
@@ -79,7 +76,6 @@ describe("store", () => {
 				showLineNumbers: false,
 				fontSize: 18,
 				autoSaveDelay: 5000,
-				indentSize: 4,
 				highlightActiveLine: true,
 				fontFamily: "serif",
 				trimTrailingWhitespace: false,
@@ -131,15 +127,6 @@ describe("store", () => {
 			});
 			const settings = await loadSettings();
 			expect(settings.autoSaveDelay).toBe(2000);
-		});
-
-		it("falls back to default for invalid indentSize", async () => {
-			mockStore.get.mockImplementation((key: string) => {
-				const values: Record<string, unknown> = { indentSize: 3 };
-				return Promise.resolve(values[key]);
-			});
-			const settings = await loadSettings();
-			expect(settings.indentSize).toBe(2);
 		});
 
 		it("falls back to default for invalid fontFamily", async () => {
@@ -232,14 +219,6 @@ describe("store", () => {
 		it("saves autoSaveDelay to store", async () => {
 			await saveAutoSaveDelay(5000);
 			expect(mockStore.set).toHaveBeenCalledWith("autoSaveDelay", 5000);
-			expect(mockStore.save).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveIndentSize", () => {
-		it("saves indentSize to store", async () => {
-			await saveIndentSize(4);
-			expect(mockStore.set).toHaveBeenCalledWith("indentSize", 4);
 			expect(mockStore.save).toHaveBeenCalled();
 		});
 	});

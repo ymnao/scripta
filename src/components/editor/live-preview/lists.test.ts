@@ -1,3 +1,4 @@
+import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { BulletWidget, CheckboxWidget, buildDecorations, listKeymap } from "./lists";
 import {
@@ -28,11 +29,13 @@ describe("CheckboxWidget", () => {
 		expect(a.eq(b)).toBe(false);
 	});
 
-	it("toDOM() creates a span with correct attributes when checked", () => {
+	it("toDOM() creates a cm-list-marker container with checked checkbox inside", () => {
 		const widget = new CheckboxWidget(true, 42);
-		const el = widget.toDOM();
-		expect(el.tagName).toBe("SPAN");
-		expect(el.classList.contains("cm-task-checkbox")).toBe(true);
+		const container = widget.toDOM();
+		expect(container.tagName).toBe("SPAN");
+		expect(container.classList.contains("cm-list-marker")).toBe(true);
+		const el = container.querySelector(".cm-task-checkbox") as HTMLElement;
+		expect(el).not.toBeNull();
 		expect(el.classList.contains("cm-task-checkbox-checked")).toBe(true);
 		expect(el.dataset.pos).toBe("42");
 		expect(el.getAttribute("role")).toBe("checkbox");
@@ -43,11 +46,13 @@ describe("CheckboxWidget", () => {
 		expect(svg?.classList.contains("cm-task-checkmark")).toBe(true);
 	});
 
-	it("toDOM() creates unchecked span without SVG", () => {
+	it("toDOM() creates a cm-list-marker container with unchecked checkbox inside", () => {
 		const widget = new CheckboxWidget(false, 0);
-		const el = widget.toDOM();
-		expect(el.tagName).toBe("SPAN");
-		expect(el.classList.contains("cm-task-checkbox")).toBe(true);
+		const container = widget.toDOM();
+		expect(container.tagName).toBe("SPAN");
+		expect(container.classList.contains("cm-list-marker")).toBe(true);
+		const el = container.querySelector(".cm-task-checkbox") as HTMLElement;
+		expect(el).not.toBeNull();
 		expect(el.classList.contains("cm-task-checkbox-checked")).toBe(false);
 		expect(el.getAttribute("aria-checked")).toBe("false");
 		expect(el.querySelector("svg")).toBeNull();
@@ -66,12 +71,14 @@ describe("BulletWidget", () => {
 		expect(a.eq(b)).toBe(true);
 	});
 
-	it("toDOM() creates a span with bullet character", () => {
+	it("toDOM() creates a cm-list-marker container with bullet inside", () => {
 		const widget = new BulletWidget();
-		const el = widget.toDOM();
-		expect(el.tagName).toBe("SPAN");
-		expect(el.className).toBe("cm-bullet-mark");
-		expect(el.textContent).toBe("•");
+		const container = widget.toDOM();
+		expect(container.tagName).toBe("SPAN");
+		expect(container.classList.contains("cm-list-marker")).toBe(true);
+		const inner = container.querySelector(".cm-bullet-mark") as HTMLElement;
+		expect(inner).not.toBeNull();
+		expect(inner.textContent).toBe("•");
 	});
 
 	it("ignoreEvent() returns true", () => {
@@ -81,11 +88,11 @@ describe("BulletWidget", () => {
 });
 
 describe("buildDecorations", () => {
-	it("creates replace decorations for a task item", () => {
+	it("creates two replace decorations for a task item", () => {
 		const view = createViewForTest("text\n\n- [ ] task");
 		const decos = collectDecorations(buildDecorations(view));
 		const replaces = replaceDecorations(decos);
-		// 1 replace for ListMark+space, 1 replace+widget for TaskMarker
+		// 1 replace+widget for ListMark through TaskMarker, 1 replace for trailing space
 		expect(replaces).toHaveLength(2);
 	});
 
@@ -144,6 +151,14 @@ describe("buildDecorations", () => {
 		}
 	});
 
+	it("does not decorate bullet marker without trailing space", () => {
+		// "-" alone at end of line should not become a bullet widget
+		const view = createViewForTest("text\n\n-");
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(0);
+	});
+
 	it("does not replace markers for ordered list items", () => {
 		const view = createViewForTest("text\n\n1. first\n2. second");
 		const decos = collectDecorations(buildDecorations(view));
@@ -195,16 +210,49 @@ describe("buildDecorations", () => {
 		expect(widgets).toHaveLength(1);
 	});
 
-	it("first replace range covers ListMark to TaskMarker", () => {
+	it("replace ranges cover ListMark-TaskMarker and trailing space separately", () => {
 		const doc = "text\n\n- [ ] task";
 		const view = createViewForTest(doc);
 		const decos = collectDecorations(buildDecorations(view));
 		const replaces = replaceDecorations(decos);
-		// First replace: ListMark.from to TaskMarker.from
 		const listMarkPos = doc.indexOf("- [ ]");
-		const taskMarkerPos = doc.indexOf("[ ]");
+		// First replace: ListMark through TaskMarker "- [ ]" = 5 chars
 		expect(replaces[0].from).toBe(listMarkPos);
-		expect(replaces[0].to).toBe(taskMarkerPos);
+		expect(replaces[0].to).toBe(listMarkPos + 5);
+		// Second replace: trailing space
+		expect(replaces[1].from).toBe(listMarkPos + 5);
+		expect(replaces[1].to).toBe(listMarkPos + 6);
+	});
+
+	it("both bullet and checkbox widgets use cm-list-marker container", () => {
+		const bulletWidget = new BulletWidget();
+		const checkboxWidget = new CheckboxWidget(false, 0);
+		const bulletContainer = bulletWidget.toDOM();
+		const checkboxContainer = checkboxWidget.toDOM();
+		expect(bulletContainer.classList.contains("cm-list-marker")).toBe(true);
+		expect(checkboxContainer.classList.contains("cm-list-marker")).toBe(true);
+	});
+
+	it("decorates nested bullet list items", () => {
+		const doc = "text\n\n- parent\n  - child";
+		const view = createViewForTest(doc);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(2);
+		for (const w of widgets) {
+			expect(w.value.spec.widget).toBeInstanceOf(BulletWidget);
+		}
+	});
+
+	it("decorates nested task list items", () => {
+		const doc = "text\n\n- [ ] parent\n  - [ ] child";
+		const view = createViewForTest(doc);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(2);
+		for (const w of widgets) {
+			expect(w.value.spec.widget).toBeInstanceOf(CheckboxWidget);
+		}
 	});
 
 	it("returns empty set for document without lists", () => {
@@ -275,5 +323,29 @@ describe("ensureTaskMarkerSpace", () => {
 			changes: { from: state.doc.length, insert: "d" },
 		});
 		expect(tr.state.doc.toString()).toBe("- [ ] abcd");
+	});
+
+	it("moves cursor past appended space when cursor is inside marker (closeBrackets)", () => {
+		// closeBrackets auto-inserts "]" when "[" is typed, leaving cursor before "]".
+		// After typing space: "- [ ]" with cursor at position 4 (before "]").
+		const state = createTestState("- []", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 3, insert: " " },
+			selection: EditorSelection.cursor(4),
+		});
+		expect(tr.state.doc.toString()).toBe("- [ ] ");
+		expect(tr.state.selection.main.head).toBe(6);
+	});
+
+	it("does not move cursor when cursor is after marker (Enter split)", () => {
+		const state = createTestState("- [ ] abc", undefined, listKeymap);
+		const pos = state.doc.toString().indexOf(" abc");
+		const tr = state.update({
+			changes: { from: pos, to: pos + 4, insert: "\n- [ ] abc" },
+		});
+		// Space should be appended but cursor should NOT be moved inside line 1's marker
+		expect(tr.state.doc.line(1).text).toBe("- [ ] ");
+		// Cursor maps to end of deleted range = line 1 boundary, not inside marker
+		expect(tr.state.selection.main.head).toBeGreaterThanOrEqual(tr.state.doc.line(1).to);
 	});
 });
