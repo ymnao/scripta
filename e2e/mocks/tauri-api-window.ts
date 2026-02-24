@@ -6,6 +6,8 @@ type CloseHandler = (event: CloseRequestedEvent) => void | Promise<void>;
 
 interface TauriWindowStore {
 	closeHandler: CloseHandler | null;
+	closeCalled?: boolean;
+	destroyed?: boolean;
 }
 
 type WindowWithStore = Window & { __TAURI_WINDOW__: TauriWindowStore };
@@ -23,8 +25,16 @@ class MockWindow {
 		};
 	}
 
+	async close(): Promise<void> {
+		win.__TAURI_WINDOW__.closeCalled = true;
+		const handler = win.__TAURI_WINDOW__.closeHandler;
+		if (handler) {
+			await handler({ preventDefault: () => {} });
+		}
+	}
+
 	async destroy(): Promise<void> {
-		// no-op in mock
+		win.__TAURI_WINDOW__.destroyed = true;
 	}
 }
 

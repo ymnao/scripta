@@ -107,6 +107,41 @@ test.describe("tab management", () => {
 		await expect(page.getByRole("tab")).toHaveCount(1);
 	});
 
+	test("Cmd+W closes window when no tabs are open", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		// No tabs open — Cmd+W should trigger window close
+		await expect(page.getByRole("tab")).toHaveCount(0);
+		await page.keyboard.press(`${modKey}+w`);
+
+		// close() sets closeCalled synchronously before awaiting the handler
+		await page.waitForFunction(() => {
+			type W = Window & { __TAURI_WINDOW__?: { closeCalled?: boolean } };
+			return (window as W).__TAURI_WINDOW__?.closeCalled === true;
+		});
+	});
+
+	test("Cmd+Shift+W closes window even with tabs open", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("hello.md file").click();
+		await expect(page.getByRole("tab")).toHaveCount(1);
+
+		await page.keyboard.press(`${modKey}+Shift+w`);
+
+		await page.waitForFunction(() => {
+			type W = Window & { __TAURI_WINDOW__?: { closeCalled?: boolean } };
+			return (window as W).__TAURI_WINDOW__?.closeCalled === true;
+		});
+	});
+
 	test("activates existing tab when clicking an already-open file", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");

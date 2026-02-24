@@ -128,6 +128,11 @@ export class TauriMock {
 				store._files = parsedFiles;
 				store._directories = parsedDirs;
 
+				store.handlers.show_in_folder = () => {
+					// no-op: just record the call
+					return undefined;
+				};
+
 				store.handlers.start_watcher = () => {
 					// no-op: just record the call
 					return undefined;

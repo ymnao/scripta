@@ -71,6 +71,65 @@ pub fn delete_entry(path: String) -> Result<(), String> {
     trash::delete(&resolved).map_err(|e| e.to_string())
 }
 
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn show_in_folder(path: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if !resolved.exists() {
+        return Err(format!("Not found: {}", resolved.display()));
+    }
+
+    let is_dir = resolved.is_dir();
+
+    #[cfg(target_os = "macos")]
+    {
+        if is_dir {
+            std::process::Command::new("open")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if is_dir {
+            std::process::Command::new("explorer")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("explorer")
+                .arg(format!("/select,{}", resolved.display()))
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let target = if is_dir {
+            resolved.as_path()
+        } else {
+            resolved.parent().unwrap_or(&resolved)
+        };
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    return Err("Unsupported platform".to_string());
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,4 +301,19 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not found"));
     }
+
+    #[test]
+    fn test_show_in_folder_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+
+        let result = show_in_folder(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Not found"));
+    }
+
 }

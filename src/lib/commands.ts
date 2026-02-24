@@ -62,3 +62,7 @@ export function searchFiles(
 export function searchFilenames(workspacePath: string, query: string): Promise<string[]> {
 	return invoke<string[]>("search_filenames", { workspacePath, query });
 }
+
+export function showInFolder(path: string): Promise<void> {
+	return invoke<void>("show_in_folder", { path });
+}

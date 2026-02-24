@@ -32,6 +32,7 @@ pub fn run() {
             commands::file::create_directory,
             commands::file::rename_entry,
             commands::file::delete_entry,
+            commands::file::show_in_folder,
             commands::workspace::list_directory,
             commands::watcher::start_watcher,
             commands::watcher::stop_watcher,

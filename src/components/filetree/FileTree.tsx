@@ -5,6 +5,7 @@ import {
 	deleteEntry,
 	listDirectory,
 	renameEntry,
+	showInFolder,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
 import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
@@ -157,6 +158,17 @@ export function FileTree({
 				label: "---",
 				separator: true,
 				onClick: () => {},
+			});
+			items.push({
+				id: "show-in-folder",
+				label: "フォルダで表示",
+				onClick: () => {
+					showInFolder(entry.path).catch((err) => {
+						useToastStore
+							.getState()
+							.addToast("error", `フォルダの表示に失敗しました: ${translateError(err)}`);
+					});
+				},
 			});
 			items.push({
 				id: "rename",
