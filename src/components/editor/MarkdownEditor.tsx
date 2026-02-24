@@ -138,13 +138,6 @@ const staticEditorTheme = EditorView.theme({
 	"&.cm-composing .cm-content ::selection": {
 		backgroundColor: "transparent",
 	},
-	".cm-matchingBracket, .cm-nonmatchingBracket": {
-		backgroundColor: "transparent !important",
-		outline: "none !important",
-	},
-	".cm-selectionMatch": {
-		backgroundColor: "transparent !important",
-	},
 	".cm-heading-1": {
 		fontSize: "1.8em",
 		fontWeight: "700",
