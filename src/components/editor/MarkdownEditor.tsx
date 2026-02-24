@@ -215,6 +215,7 @@ const staticEditorTheme = EditorView.theme({
 		alignItems: "center",
 		justifyContent: "flex-start",
 		verticalAlign: "middle",
+		transform: "translateY(-0.08em)",
 		width: "2ch",
 		flexShrink: "0",
 	},

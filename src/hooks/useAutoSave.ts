@@ -59,7 +59,25 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 					if (currentSaveId !== saveIdRef.current) return;
 					lastSavedContentRef.current = processed;
 					clearRetryState();
-					setSaveStatus("saved");
+
+					// Content may have changed while the write was in flight.
+					// The content effect may have already evaluated and found
+					// no diff (against the OLD lastSavedRef), so it won't
+					// re-run. Detect the mismatch and schedule a follow-up.
+					const { trimTrailingWhitespace: tw, autoSaveDelay: followUpDelay } =
+						useSettingsStore.getState();
+					const currentProcessed = processContent(contentRef.current, tw);
+					if (currentProcessed !== processed) {
+						setSaveStatus("unsaved");
+						if (debounceTimerRef.current) {
+							clearTimeout(debounceTimerRef.current);
+						}
+						debounceTimerRef.current = setTimeout(() => {
+							save(contentRef.current).catch(() => {});
+						}, followUpDelay);
+					} else {
+						setSaveStatus("saved");
+					}
 				},
 				(err) => {
 					if (isMountedRef.current && currentSaveId === saveIdRef.current) {

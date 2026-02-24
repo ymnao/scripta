@@ -356,6 +356,103 @@ describe("ensureTaskMarkerSpace", () => {
 	});
 });
 
+describe("convertBracketToTask", () => {
+	it("converts `[] ` to `- [ ] `", () => {
+		const state = createTestState("[]", undefined, listKeymap);
+		// Type a space after "[]" → "[] "
+		const tr = state.update({
+			changes: { from: 2, insert: " " },
+			selection: EditorSelection.cursor(3),
+		});
+		expect(tr.state.doc.toString()).toBe("- [ ] ");
+	});
+
+	it("converts indented `  [] ` to `  - [ ] `", () => {
+		const state = createTestState("  []", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 4, insert: " " },
+			selection: EditorSelection.cursor(5),
+		});
+		expect(tr.state.doc.toString()).toBe("  - [ ] ");
+	});
+
+	it("does not convert `[]` mid-line", () => {
+		const state = createTestState("text []", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 7, insert: " " },
+			selection: EditorSelection.cursor(8),
+		});
+		expect(tr.state.doc.toString()).toBe("text [] ");
+	});
+
+	it("does not convert `[x] `", () => {
+		const state = createTestState("[x]", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 3, insert: " " },
+			selection: EditorSelection.cursor(4),
+		});
+		expect(tr.state.doc.toString()).toBe("[x] ");
+	});
+
+	it("moves cursor to end of `- [ ] ` after conversion", () => {
+		const state = createTestState("[]", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 2, insert: " " },
+			selection: EditorSelection.cursor(3),
+		});
+		// "- [ ] " has length 6, cursor should be at 6
+		expect(tr.state.selection.main.head).toBe(6);
+	});
+
+	it("moves cursor correctly for indented conversion", () => {
+		const state = createTestState("\t[]", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 3, insert: " " },
+			selection: EditorSelection.cursor(4),
+		});
+		expect(tr.state.doc.toString()).toBe("\t- [ ] ");
+		// "\t" (1) + "- [ ] " (6) = 7
+		expect(tr.state.selection.main.head).toBe(7);
+	});
+
+	it("converts `[ ]` (space inside brackets) to `- [ ] `", () => {
+		const state = createTestState("[]", undefined, listKeymap);
+		// Type a space inside [] → "[ ]" with cursor at position 2
+		const tr = state.update({
+			changes: { from: 1, insert: " " },
+			selection: EditorSelection.cursor(2),
+		});
+		expect(tr.state.doc.toString()).toBe("- [ ] ");
+	});
+
+	it("converts indented `  [ ]` to `  - [ ] `", () => {
+		const state = createTestState("  []", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 3, insert: " " },
+			selection: EditorSelection.cursor(4),
+		});
+		expect(tr.state.doc.toString()).toBe("  - [ ] ");
+	});
+
+	it("does not convert `[ ]` mid-line", () => {
+		const state = createTestState("text []", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 6, insert: " " },
+			selection: EditorSelection.cursor(7),
+		});
+		expect(tr.state.doc.toString()).toBe("text [ ]");
+	});
+
+	it("moves cursor to end of `- [ ] ` after `[ ]` conversion", () => {
+		const state = createTestState("[]", undefined, listKeymap);
+		const tr = state.update({
+			changes: { from: 1, insert: " " },
+			selection: EditorSelection.cursor(2),
+		});
+		expect(tr.state.selection.main.head).toBe(6);
+	});
+});
+
 describe("findMarkerRange", () => {
 	it("detects bullet marker range", () => {
 		const state = createTestState("- item");

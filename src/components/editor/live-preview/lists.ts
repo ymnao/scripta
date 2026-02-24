@@ -228,6 +228,49 @@ class ListDecorationPlugin implements PluginValue {
 }
 
 /**
+ * 行頭の `[] ` または `[ ]` を `- [ ] ` に変換するトランザクションフィルタ。
+ * closeBrackets により `[` → `[]` が自動生成された後、
+ * - `]` を抜けてスペース → `[] ` となるケース
+ * - `[]` の中でスペース → `[ ]` となるケース
+ * を検出し、タスクリストマーカーに変換する。
+ */
+const convertBracketToTask = EditorState.transactionFilter.of((tr) => {
+	if (!tr.docChanged) return tr;
+
+	const newDoc = tr.newDoc;
+	const changes: { from: number; to: number; insert: string }[] = [];
+	let cursorTarget: number | null = null;
+
+	tr.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+		const startLine = newDoc.lineAt(fromB).number;
+		const endLine = newDoc.lineAt(Math.min(toB, newDoc.length)).number;
+		for (let i = startLine; i <= endLine; i++) {
+			const line = newDoc.line(i);
+			const match = /^([ \t]*)(?:\[\] |\[ \])$/.exec(line.text);
+			if (match) {
+				const indent = match[1];
+				changes.push({
+					from: line.from,
+					to: line.to,
+					insert: `${indent}- [ ] `,
+				});
+				cursorTarget = line.from + indent.length + 6; // after "- [ ] "
+			}
+		}
+	});
+
+	if (changes.length === 0) return tr;
+	return [
+		tr,
+		{
+			changes,
+			selection: cursorTarget !== null ? EditorSelection.cursor(cursorTarget) : undefined,
+			sequential: true,
+		},
+	];
+});
+
+/**
  * When a task line is split by Enter, the upper line may become
  * `- [ ]` without a trailing space. The Lezer markdown parser only
  * recognises `- [ ] ` (with space) as a Task, so we append the
@@ -310,6 +353,7 @@ export function findMarkerRange(
  * swallow the event).
  */
 export const listKeymap = [
+	convertBracketToTask,
 	ensureTaskMarkerSpace,
 	Prec.high(
 		keymap.of([
