@@ -78,27 +78,47 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
         return Err(format!("Not found: {}", resolved.display()));
     }
 
+    let is_dir = resolved.is_dir();
+
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(&resolved)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        if is_dir {
+            std::process::Command::new("open")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
     }
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg("/select,")
-            .arg(&resolved)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        if is_dir {
+            std::process::Command::new("explorer")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("explorer")
+                .arg("/select,")
+                .arg(&resolved)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
     }
 
     #[cfg(target_os = "linux")]
     {
-        let target = resolved.parent().unwrap_or(&resolved);
+        let target = if is_dir {
+            resolved.as_path()
+        } else {
+            resolved.parent().unwrap_or(&resolved)
+        };
         std::process::Command::new("xdg-open")
             .arg(target)
             .spawn()
