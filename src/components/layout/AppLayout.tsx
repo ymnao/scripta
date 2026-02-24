@@ -755,7 +755,7 @@ export function AppLayout() {
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") {
 				e.preventDefault();
 				if (e.shiftKey) {
-					// Cmd+Shift+W: 常にウィンドウを閉じる
+					// Cmd+Shift+W: タブの有無に関わらずウィンドウを閉じる（未保存の変更は保存される）
 					void getCurrentWindow().close();
 					return;
 				}
