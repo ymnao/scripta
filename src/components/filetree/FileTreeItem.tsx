@@ -1,6 +1,7 @@
-import { AlertTriangle, ChevronDown, ChevronRight, File, Folder } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
+import { getFileIcon } from "../../lib/file-icon";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
 
@@ -182,10 +183,15 @@ export function FileTreeItem({
 						<Folder size={14} className="shrink-0 text-text-secondary" />
 					</>
 				) : (
-					<>
-						<span className="inline-block w-3.5 shrink-0" />
-						<File size={14} className="shrink-0 text-text-secondary" />
-					</>
+					(() => {
+						const Icon = getFileIcon(entry.name);
+						return (
+							<>
+								<span className="inline-block w-3.5 shrink-0" />
+								<Icon size={14} className="shrink-0 text-text-secondary" />
+							</>
+						);
+					})()
 				)}
 				<span className="truncate">{entry.name}</span>
 				{loadError && (
