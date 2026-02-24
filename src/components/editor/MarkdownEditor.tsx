@@ -65,6 +65,7 @@ const composingClass = ViewPlugin.fromClass(
 		destroy() {
 			this.view.contentDOM.removeEventListener("compositionstart", this.onStart);
 			this.view.contentDOM.removeEventListener("compositionend", this.onEnd);
+			this.view.dom.classList.remove("cm-composing");
 		}
 	},
 );
