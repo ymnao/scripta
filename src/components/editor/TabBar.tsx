@@ -97,7 +97,10 @@ export function TabBar({
 			if (drag.started) {
 				skipNextClickRef.current = true;
 				// Skip the dragged tab itself (its translated rect may overlap targets).
-				const targetEl = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
+				let targetEl: HTMLElement | null = null;
+				if (e.target instanceof Element) {
+					targetEl = e.target.closest<HTMLElement>("[data-index]");
+				}
 				let dropTarget: { index: number; side: "left" | "right" } | null = null;
 				if (targetEl && Number(targetEl.dataset.index) !== drag.fromIndex) {
 					const idx = Number(targetEl.dataset.index);
