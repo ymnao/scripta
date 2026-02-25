@@ -8,3 +8,5 @@ export { linkDecoration } from "./links";
 export { listDecoration, listKeymap } from "./lists";
 export { mathDecoration } from "./math";
 export { strikethroughDecoration } from "./strikethrough";
+export { wikilinkDecoration } from "./wikilinks";
+export { wikilinkCompletion } from "./wikilink-completion";
