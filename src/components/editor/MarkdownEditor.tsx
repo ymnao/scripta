@@ -1,3 +1,4 @@
+import "katex/dist/katex.min.css";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
 	HighlightStyle,
@@ -33,6 +34,7 @@ import {
 	linkDecoration,
 	listDecoration,
 	listKeymap,
+	mathDecoration,
 	strikethroughDecoration,
 } from "./live-preview";
 
@@ -263,6 +265,20 @@ const staticEditorTheme = EditorView.theme({
 	".cm-searchMatch-selected": {
 		backgroundColor: "color-mix(in srgb, #f97316 40%, transparent)",
 	},
+	".cm-math-display": {
+		display: "block",
+		textAlign: "center",
+		padding: "8px 0",
+		overflowX: "auto",
+	},
+	".cm-math-inline": {
+		display: "inline",
+	},
+	".cm-math-error": {
+		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 10%, transparent)",
+		color: "var(--color-text-secondary)",
+	},
 });
 
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
@@ -402,6 +418,7 @@ export function MarkdownEditor({
 			listDecoration,
 			blockquoteDecoration,
 			horizontalRuleDecoration,
+			mathDecoration,
 			keymap.of([
 				{
 					key: "Mod-s",
