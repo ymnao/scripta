@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import type { Extension, Range } from "@codemirror/state";
+import { EditorSelection, type Extension, type Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -31,7 +31,8 @@ export function resolveWikilinkPath(pageName: string): string {
 	if (!workspacePath) return pageName;
 
 	const fileName = pageName.endsWith(".md") ? pageName : `${pageName}.md`;
-	const sep = workspacePath.includes("\\") ? "\\" : "/";
+	const lastSepIndex = Math.max(workspacePath.lastIndexOf("/"), workspacePath.lastIndexOf("\\"));
+	const sep = lastSepIndex !== -1 ? workspacePath[lastSepIndex] : "/";
 	return `${workspacePath}${sep}${fileName}`;
 }
 
@@ -178,13 +179,19 @@ function createWikilinkClickHandler() {
 			const pos = view.posAtDOM(wikilinkEl);
 			const plugin = view.plugin(wikilinkPlugin);
 			if (plugin) {
+				let endPos = -1;
 				const iter = plugin.decorations.iter();
 				while (iter.value) {
-					// Find the mark decoration that contains pos
-					if (iter.from <= pos && pos < iter.to && (iter.value.spec as { class?: string }).class) {
+					if (iter.from <= pos && pos <= iter.to) {
+						endPos = iter.to;
 						break;
 					}
+					if (iter.from > pos) break;
 					iter.next();
+				}
+				if (endPos !== -1) {
+					view.dispatch({ selection: EditorSelection.cursor(endPos) });
+					view.focus();
 				}
 			}
 

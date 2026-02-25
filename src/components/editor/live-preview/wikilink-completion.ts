@@ -7,7 +7,7 @@ import type { Extension } from "@codemirror/state";
 import { searchFilenames } from "../../../lib/commands";
 import { useWorkspaceStore } from "../../../stores/workspace";
 
-async function wikilinkCompletionSource(
+export async function wikilinkCompletionSource(
 	context: CompletionContext,
 ): Promise<CompletionResult | null> {
 	const match = context.matchBefore(/\[\[([^\]]*)/);
@@ -28,7 +28,7 @@ async function wikilinkCompletionSource(
 				detail: filePath,
 				apply: (view, _completion, from, to) => {
 					const after = view.state.doc.sliceString(to, to + 2);
-					const skip = after === "]]" ? 2 : after[0] === "]" ? 1 : 0;
+					const skip = after === "]]" ? 2 : after.startsWith("]") ? 1 : 0;
 					view.dispatch({
 						changes: { from, to: to + skip, insert: `${fileName}]]` },
 					});

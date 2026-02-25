@@ -83,8 +83,9 @@ function buildDecorations(view: EditorView): DecorationSet {
 			enter(node) {
 				if (node.name !== "Link") return;
 
-				// Skip Link nodes that are part of a [[wikilink]] pattern
-				if (node.from > 0 && state.doc.sliceString(node.from - 1, node.from) === "[") {
+				// Skip Link nodes that are part of a [[wikilink]] pattern (but not escaped \\[[...)
+				const prefix = state.doc.sliceString(Math.max(0, node.from - 3), node.from);
+				if (prefix.endsWith("[[") && !prefix.endsWith("\\[[")) {
 					return;
 				}
 
