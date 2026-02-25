@@ -1,0 +1,326 @@
+import { syntaxTree } from "@codemirror/language";
+import { EditorSelection, type Extension, type Range } from "@codemirror/state";
+import {
+	Decoration,
+	type DecorationSet,
+	EditorView,
+	type PluginValue,
+	ViewPlugin,
+	type ViewUpdate,
+	WidgetType,
+	keymap,
+} from "@codemirror/view";
+import katex from "katex";
+
+const DISPLAY_MATH_RE = /\$\$([\s\S]+?)\$\$/g;
+const INLINE_MATH_RE = /\$([^\n$]+)\$/g;
+
+/** Check whether the `$` at position `pos` in `text` is escaped by an odd number of preceding backslashes. */
+export function isEscaped(text: string, pos: number): boolean {
+	let count = 0;
+	let i = pos - 1;
+	while (i >= 0 && text[i] === "\\") {
+		count++;
+		i--;
+	}
+	return count % 2 === 1;
+}
+
+interface CodeRange {
+	from: number;
+	to: number;
+}
+
+/** Collect the document ranges occupied by FencedCode, InlineCode, and CodeBlock nodes. */
+export function collectCodeRanges(
+	tree: ReturnType<typeof syntaxTree>,
+	from: number,
+	to: number,
+): CodeRange[] {
+	const ranges: CodeRange[] = [];
+	tree.iterate({
+		from,
+		to,
+		enter(node) {
+			if (
+				node.name === "FencedCode" ||
+				node.name === "InlineCode" ||
+				node.name === "CodeBlock" ||
+				node.name === "CodeMark" ||
+				node.name === "CodeText"
+			) {
+				ranges.push({ from: node.from, to: node.to });
+			}
+		},
+	});
+	return ranges;
+}
+
+function overlapsCodeBlock(from: number, to: number, codeRanges: CodeRange[]): boolean {
+	for (const range of codeRanges) {
+		if (from < range.to && to > range.from) return true;
+	}
+	return false;
+}
+
+export class MathWidget extends WidgetType {
+	constructor(
+		readonly tex: string,
+		readonly displayMode: boolean,
+	) {
+		super();
+	}
+
+	eq(other: MathWidget): boolean {
+		return this.tex === other.tex && this.displayMode === other.displayMode;
+	}
+
+	toDOM(): HTMLElement {
+		const wrap = document.createElement("span");
+		wrap.className = this.displayMode ? "cm-math-display" : "cm-math-inline";
+		try {
+			katex.render(this.tex, wrap, {
+				displayMode: this.displayMode,
+				throwOnError: false,
+			});
+		} catch {
+			wrap.className = "cm-math-error";
+			wrap.textContent = this.tex;
+		}
+		return wrap;
+	}
+
+	ignoreEvent(): boolean {
+		return false;
+	}
+}
+
+export function buildDecorations(view: EditorView): DecorationSet {
+	const { state } = view;
+	const tree = syntaxTree(state);
+
+	const cursorLines = new Set<number>();
+	for (const range of state.selection.ranges) {
+		const fromLine = state.doc.lineAt(range.from).number;
+		const toLine = state.doc.lineAt(range.to).number;
+		for (let l = fromLine; l <= toLine; l++) {
+			cursorLines.add(l);
+		}
+	}
+
+	const ranges: Range<Decoration>[] = [];
+	const displayRanges: CodeRange[] = [];
+
+	for (const { from, to } of view.visibleRanges) {
+		const text = state.doc.sliceString(from, to);
+		const codeRanges = collectCodeRanges(tree, from, to);
+
+		// Pass 1: Display math ($$...$$)
+		for (const match of text.matchAll(DISPLAY_MATH_RE)) {
+			const matchFrom = from + match.index;
+			const matchTo = matchFrom + match[0].length;
+
+			if (isEscaped(text, match.index)) continue;
+			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+
+			const startLine = state.doc.lineAt(matchFrom).number;
+			const endLine = state.doc.lineAt(matchTo).number;
+			let onCursorLine = false;
+			for (let l = startLine; l <= endLine; l++) {
+				if (cursorLines.has(l)) {
+					onCursorLine = true;
+					break;
+				}
+			}
+			if (onCursorLine) continue;
+
+			const tex = match[1];
+			displayRanges.push({ from: matchFrom, to: matchTo });
+			ranges.push(
+				Decoration.replace({
+					widget: new MathWidget(tex, true),
+				}).range(matchFrom, matchTo),
+			);
+		}
+
+		// Pass 2: Inline math ($...$)
+		for (const match of text.matchAll(INLINE_MATH_RE)) {
+			const matchFrom = from + match.index;
+			const matchTo = matchFrom + match[0].length;
+
+			if (isEscaped(text, match.index)) continue;
+			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+
+			// Skip if overlapping with a display math range
+			let overlapsDisplay = false;
+			for (const dr of displayRanges) {
+				if (matchFrom < dr.to && matchTo > dr.from) {
+					overlapsDisplay = true;
+					break;
+				}
+			}
+			if (overlapsDisplay) continue;
+
+			const lineNum = state.doc.lineAt(matchFrom).number;
+			if (cursorLines.has(lineNum)) continue;
+
+			const tex = match[1];
+			ranges.push(
+				Decoration.replace({
+					widget: new MathWidget(tex, false),
+				}).range(matchFrom, matchTo),
+			);
+		}
+	}
+
+	return Decoration.set(ranges, true);
+}
+
+class MathDecorationPlugin implements PluginValue {
+	decorations: DecorationSet;
+
+	constructor(view: EditorView) {
+		this.decorations = buildDecorations(view);
+	}
+
+	update(update: ViewUpdate) {
+		if (update.view.composing) {
+			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+			return;
+		}
+		if (
+			update.docChanged ||
+			update.viewportChanged ||
+			update.selectionSet ||
+			syntaxTree(update.state) !== syntaxTree(update.startState)
+		) {
+			this.decorations = buildDecorations(update.view);
+		}
+	}
+}
+
+const mathPlugin = ViewPlugin.fromClass(MathDecorationPlugin, {
+	decorations: (v) => v.decorations,
+});
+
+/**
+ * Click handler for math widgets.
+ * domEventHandlers runs before the editor's built-in mousedown processing,
+ * so returning true prevents the default range-selection behaviour.
+ * If this handler somehow fails to match, ignoreEvent()=>false lets the
+ * editor place the cursor normally as a fallback.
+ */
+function createMathClickHandler() {
+	return EditorView.domEventHandlers({
+		mousedown(event: MouseEvent, view: EditorView) {
+			const target = event.target as HTMLElement;
+			const mathEl = target.closest(".cm-math-inline, .cm-math-display");
+			if (!mathEl) return false;
+
+			// Use the plugin's own decoration set to find the exact range
+			const plugin = view.plugin(mathPlugin);
+			if (!plugin) return false;
+
+			const pos = view.posAtDOM(mathEl);
+			let endPos = -1;
+
+			// Search for the decoration that covers `pos`
+			const iter = plugin.decorations.iter();
+			while (iter.value) {
+				if (iter.from <= pos && pos <= iter.to) {
+					endPos = iter.to;
+					break;
+				}
+				if (iter.from > pos) break;
+				iter.next();
+			}
+
+			if (endPos === -1) return false;
+
+			event.preventDefault();
+			view.dispatch({ selection: EditorSelection.cursor(endPos) });
+			view.focus();
+			return true;
+		},
+	});
+}
+
+/**
+ * Auto-close `$` like brackets/quotes:
+ * - Typing `$` inserts `$$` with cursor between
+ * - Typing `$` when next char is `$` skips over it
+ */
+const dollarInputHandler = EditorView.inputHandler.of((view, from, to, insert) => {
+	if (insert !== "$") return false;
+
+	const { state } = view;
+
+	// Handle each selection range
+	const changes = state.changeByRange((range) => {
+		const pos = range.from;
+		const nextChar = state.doc.sliceString(pos, pos + 1);
+
+		// Skip-over: if cursor is right before a `$`, just move past it
+		if (range.empty && nextChar === "$") {
+			return {
+				range: EditorSelection.cursor(pos + 1),
+				changes: { from: pos, to: pos, insert: "" },
+			};
+		}
+
+		// Selection wrapping: wrap selected text in $...$
+		if (!range.empty) {
+			return {
+				range: EditorSelection.cursor(range.to + 2),
+				changes: [
+					{ from: range.from, insert: "$" },
+					{ from: range.to, insert: "$" },
+				],
+			};
+		}
+
+		// Auto-close: insert $$ with cursor between
+		return {
+			range: EditorSelection.cursor(range.from + 1),
+			changes: { from: range.from, to: range.to, insert: "$$" },
+		};
+	});
+
+	view.dispatch(changes, { scrollIntoView: true, userEvent: "input" });
+	return true;
+});
+
+/** Backspace between empty `$$` deletes both. */
+const dollarBackspace = keymap.of([
+	{
+		key: "Backspace",
+		run(view) {
+			const { state } = view;
+			// Only handle if all ranges are empty cursors between $$
+			for (const range of state.selection.ranges) {
+				if (!range.empty) return false;
+				const pos = range.from;
+				if (pos === 0 || pos >= state.doc.length) return false;
+				const before = state.doc.sliceString(pos - 1, pos);
+				const after = state.doc.sliceString(pos, pos + 1);
+				if (before !== "$" || after !== "$") return false;
+			}
+
+			view.dispatch(
+				state.changeByRange((range) => ({
+					range: EditorSelection.cursor(range.from - 1),
+					changes: { from: range.from - 1, to: range.from + 1 },
+				})),
+				{ scrollIntoView: true, userEvent: "delete" },
+			);
+			return true;
+		},
+	},
+]);
+
+export const mathDecoration: Extension = [
+	mathPlugin,
+	createMathClickHandler(),
+	dollarInputHandler,
+	dollarBackspace,
+];

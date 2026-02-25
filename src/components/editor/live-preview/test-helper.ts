@@ -18,17 +18,24 @@ export function createTestState(
 	});
 }
 
-export function createMockView(state: EditorState): EditorView {
+export function createMockView(
+	state: EditorState,
+	visibleRanges?: { from: number; to: number }[],
+): EditorView {
 	ensureSyntaxTree(state, state.doc.length, 5000);
 	return {
 		state,
-		visibleRanges: [{ from: 0, to: state.doc.length }],
+		visibleRanges: visibleRanges ?? [{ from: 0, to: state.doc.length }],
 	} as unknown as EditorView;
 }
 
-export function createViewForTest(doc: string, cursorPos?: number): EditorView {
+export function createViewForTest(
+	doc: string,
+	cursorPos?: number,
+	visibleRanges?: { from: number; to: number }[],
+): EditorView {
 	const state = createTestState(doc, cursorPos);
-	return createMockView(state);
+	return createMockView(state, visibleRanges);
 }
 
 export function collectDecorations(

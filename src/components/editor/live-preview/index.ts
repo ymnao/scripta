@@ -6,4 +6,5 @@ export { horizontalRuleDecoration } from "./horizontal-rules";
 export { imageDecoration } from "./images";
 export { linkDecoration } from "./links";
 export { listDecoration, listKeymap } from "./lists";
+export { mathDecoration } from "./math";
 export { strikethroughDecoration } from "./strikethrough";
