@@ -38,14 +38,17 @@ export class LinkWidget extends WidgetType {
 		anchor.className = "cm-link-widget";
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
+			anchor.href = this.url;
 			anchor.title = this.url;
 			anchor.tabIndex = 0;
-			anchor.setAttribute("role", "link");
 			const openUrl = () => {
 				open(this.url).catch((error) => {
 					console.error("Failed to open external URL:", this.url, error);
 				});
 			};
+			anchor.addEventListener("click", (e) => {
+				e.preventDefault();
+			});
 			anchor.addEventListener("mousedown", (e) => {
 				if (e.button !== 0) return;
 				e.preventDefault();

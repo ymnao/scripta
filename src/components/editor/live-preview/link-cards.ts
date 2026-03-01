@@ -89,13 +89,18 @@ export class LinkCardWidget extends WidgetType {
 		container.dataset.linkCardUrl = this.url;
 		container.title = this.url;
 
+		if (isSafeUrl(this.url)) {
+			container.href = this.url;
+		}
 		container.tabIndex = 0;
-		container.setAttribute("role", "link");
 		const openUrl = () => {
 			open(this.url).catch((error) => {
 				console.error("Failed to open URL:", this.url, error);
 			});
 		};
+		container.addEventListener("click", (e) => {
+			e.preventDefault();
+		});
 		container.addEventListener("mousedown", (e) => {
 			if (e.button !== 0) return;
 			e.preventDefault();
