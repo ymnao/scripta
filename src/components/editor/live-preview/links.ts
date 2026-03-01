@@ -92,7 +92,11 @@ function buildDecorations(view: EditorView): DecorationSet {
 						else break;
 					}
 					// Odd backslashes = escaped, so treat as normal link; even = real wikilink
-					if (bsCount % 2 === 0) return;
+					if (bsCount % 2 === 0) {
+						// Also verify closing ]] exists after the Link node
+						const suffix = state.doc.sliceString(node.to, node.to + 2);
+						if (suffix === "]]") return;
+					}
 				}
 
 				const startLine = state.doc.lineAt(node.from).number;

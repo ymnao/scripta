@@ -108,8 +108,10 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 			if (!page) continue;
 			const stripped = page.endsWith(".md") ? page.slice(0, -3) : page;
 			const normalizedPage = stripped.normalize("NFC");
+			const fileMapLoaded = fileMap.size > 0;
 			const mapped = fileMap.get(normalizedPage);
-			const resolvedPath = mapped ?? resolveWikilinkPath(normalizedPage);
+			// fileMap 未ロード時はフォールバックパスでの誤作成を防ぐため、デコレーションを作らない
+			const resolvedPath = fileMapLoaded ? (mapped ?? resolveWikilinkPath(normalizedPage)) : null;
 			if (!resolvedPath) continue;
 			const exists = mapped != null;
 
