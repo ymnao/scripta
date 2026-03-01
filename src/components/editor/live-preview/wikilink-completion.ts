@@ -16,7 +16,7 @@ let cachedWorkspacePath = "";
 export async function wikilinkCompletionSource(
 	context: CompletionContext,
 ): Promise<CompletionResult | null> {
-	const match = context.matchBefore(/\[\[([^\]]*)/);
+	const match = context.matchBefore(/\[\[([^\]\n\r|]*)/);
 	if (!match) return null;
 
 	const workspacePath = useWorkspaceStore.getState().workspacePath;

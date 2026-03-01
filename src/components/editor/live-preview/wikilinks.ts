@@ -148,6 +148,9 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 					attributes: {
 						"data-wikilink-path": resolvedPath,
 						"data-wikilink-exists": exists ? "1" : "0",
+						role: "link",
+						tabindex: "0",
+						"aria-label": state.doc.sliceString(displayFrom, displayTo),
 					},
 				}).range(displayFrom, displayTo),
 			);
