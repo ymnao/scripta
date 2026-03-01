@@ -5,6 +5,7 @@ mod watcher;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let watcher_state = std::sync::Arc::new(std::sync::Mutex::new(watcher::WatcherState::new()));
+    let ogp_cache = std::sync::Arc::new(std::sync::Mutex::new(commands::ogp::OgpCache::new()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::new().build())
@@ -25,6 +26,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .manage(watcher_state)
+        .manage(ogp_cache)
         .invoke_handler(tauri::generate_handler![
             commands::file::read_file,
             commands::file::write_file,
@@ -38,6 +40,7 @@ pub fn run() {
             commands::watcher::stop_watcher,
             commands::search::search_files,
             commands::search::search_filenames,
+            commands::ogp::fetch_ogp,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

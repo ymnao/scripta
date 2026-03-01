@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
 import type { FileEntry } from "../types/workspace";
 import { isTransientError } from "./errors";
@@ -65,4 +66,8 @@ export function searchFilenames(workspacePath: string, query: string): Promise<s
 
 export function showInFolder(path: string): Promise<void> {
 	return invoke<void>("show_in_folder", { path });
+}
+
+export function fetchOgp(url: string): Promise<OgpData> {
+	return invoke<OgpData>("fetch_ogp", { url });
 }

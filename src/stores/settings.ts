@@ -6,6 +6,7 @@ import {
 	saveFontSize,
 	saveHighlightActiveLine,
 	saveShowLineNumbers,
+	saveShowLinkCards,
 	saveTrimTrailingWhitespace,
 } from "../lib/store";
 
@@ -16,6 +17,7 @@ interface SettingsValues {
 	highlightActiveLine: boolean;
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
+	showLinkCards: boolean;
 }
 
 interface SettingsState extends SettingsValues {
@@ -25,6 +27,7 @@ interface SettingsState extends SettingsValues {
 	setHighlightActiveLine: (highlight: boolean) => void;
 	setFontFamily: (family: FontFamily) => void;
 	setTrimTrailingWhitespace: (trim: boolean) => void;
+	setShowLinkCards: (show: boolean) => void;
 	/** Set state without persisting — used for initial hydration from store */
 	hydrate: (values: Partial<SettingsValues>) => void;
 }
@@ -36,6 +39,7 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	highlightActiveLine: false,
 	fontFamily: "monospace",
 	trimTrailingWhitespace: true,
+	showLinkCards: true,
 	setShowLineNumbers: (show: boolean) => {
 		void saveShowLineNumbers(show);
 		set({ showLineNumbers: show });
@@ -59,6 +63,10 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	setTrimTrailingWhitespace: (trim: boolean) => {
 		void saveTrimTrailingWhitespace(trim);
 		set({ trimTrailingWhitespace: trim });
+	},
+	setShowLinkCards: (show: boolean) => {
+		void saveShowLinkCards(show);
+		set({ showLinkCards: show });
 	},
 	hydrate: (values: Partial<SettingsValues>) => {
 		set(values);

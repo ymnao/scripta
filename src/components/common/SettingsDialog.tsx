@@ -182,6 +182,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 	const setAutoSaveDelay = useSettingsStore((s) => s.setAutoSaveDelay);
 	const trimTrailingWhitespace = useSettingsStore((s) => s.trimTrailingWhitespace);
 	const setTrimTrailingWhitespace = useSettingsStore((s) => s.setTrimTrailingWhitespace);
+	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
+	const setShowLinkCards = useSettingsStore((s) => s.setShowLinkCards);
 
 	return (
 		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} className="max-w-lg">
@@ -262,6 +264,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 								value={fontFamily}
 								options={fontFamilyOptions}
 								onChange={setFontFamily}
+							/>
+							<Toggle
+								id="show-link-cards-toggle"
+								label="URLリンクカードを表示"
+								checked={showLinkCards}
+								onChange={setShowLinkCards}
 							/>
 						</>
 					)}

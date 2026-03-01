@@ -12,6 +12,7 @@ interface AppSettings {
 	highlightActiveLine: boolean;
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
+	showLinkCards: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -24,6 +25,7 @@ const DEFAULTS: AppSettings = {
 	highlightActiveLine: false,
 	fontFamily: "monospace",
 	trimTrailingWhitespace: true,
+	showLinkCards: true,
 };
 
 let storePromise: Promise<Store> | null = null;
@@ -103,6 +105,10 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawTrimTrailingWhitespace
 				: DEFAULTS.trimTrailingWhitespace;
 
+		const rawShowLinkCards = await store.get<unknown>("showLinkCards");
+		const showLinkCards: boolean =
+			typeof rawShowLinkCards === "boolean" ? rawShowLinkCards : DEFAULTS.showLinkCards;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -113,6 +119,7 @@ export async function loadSettings(): Promise<AppSettings> {
 			highlightActiveLine,
 			fontFamily,
 			trimTrailingWhitespace,
+			showLinkCards,
 		};
 	} catch {
 		return { ...DEFAULTS };
@@ -203,6 +210,16 @@ export async function saveTrimTrailingWhitespace(trim: boolean): Promise<void> {
 	try {
 		const store = await getStore();
 		await store.set("trimTrailingWhitespace", trim);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveShowLinkCards(show: boolean): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("showLinkCards", show);
 		await store.save();
 	} catch {
 		// Ignore save errors

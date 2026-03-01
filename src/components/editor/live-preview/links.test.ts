@@ -61,27 +61,21 @@ describe("isSafeUrl", () => {
 });
 
 describe("LinkWidget", () => {
-	it("ignoreEvent returns true for click with metaKey", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click", { metaKey: true });
-		expect(widget.ignoreEvent(event)).toBe(true);
-	});
-
-	it("ignoreEvent returns true for click with ctrlKey", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click", { ctrlKey: true });
-		expect(widget.ignoreEvent(event)).toBe(true);
-	});
-
-	it("ignoreEvent returns false for click without modifier", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click", { metaKey: false, ctrlKey: false });
-		expect(widget.ignoreEvent(event)).toBe(false);
-	});
-
-	it("ignoreEvent returns false for non-click events", () => {
+	it("ignoreEvent returns false for mousedown (widget handles it)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
 		const event = new MouseEvent("mousedown");
 		expect(widget.ignoreEvent(event)).toBe(false);
+	});
+
+	it("ignoreEvent returns false for click (widget handles it)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("click");
+		expect(widget.ignoreEvent(event)).toBe(false);
+	});
+
+	it("ignoreEvent returns true for other events (editor handles them)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new KeyboardEvent("keydown");
+		expect(widget.ignoreEvent(event)).toBe(true);
 	});
 });

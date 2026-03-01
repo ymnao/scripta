@@ -1,15 +1,16 @@
 import { syntaxTree } from "@codemirror/language";
-import type { Range } from "@codemirror/state";
+import { EditorSelection, type Extension, type Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
-	type EditorView,
+	EditorView,
 	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
 import { open } from "@tauri-apps/plugin-shell";
+import { collectCursorLines } from "./cursor-utils";
 
 // Only allow http/https URLs without whitespace characters.
 // data: URLs are explicitly blocked as defense-in-depth.
@@ -37,10 +38,9 @@ export class LinkWidget extends WidgetType {
 		anchor.className = "cm-link-widget";
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
-			anchor.href = this.url;
-			anchor.title = `${this.url} - Cmd/Ctrl+Click to open`;
-			anchor.addEventListener("click", (e) => {
-				if (!e.metaKey && !e.ctrlKey) return;
+			anchor.title = this.url;
+			anchor.addEventListener("mousedown", (e) => {
+				if (e.button !== 0) return;
 				e.preventDefault();
 				open(this.url).catch((error) => {
 					console.error("Failed to open external URL:", this.url, error);
@@ -56,8 +56,9 @@ export class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		const me = event as MouseEvent;
-		return event.type === "click" && (me.metaKey || me.ctrlKey);
+		// false = ウィジェットが処理（エディタはカーソル移動しない）
+		if (event.type === "mousedown" || event.type === "click") return false;
+		return true;
 	}
 }
 
@@ -65,14 +66,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
-	const cursorLines = new Set<number>();
-	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			cursorLines.add(l);
-		}
-	}
+	const cursorLines = collectCursorLines(view);
 
 	const ranges: Range<Decoration>[] = [];
 
@@ -159,6 +153,7 @@ class LinkDecorationPlugin implements PluginValue {
 			update.docChanged ||
 			update.viewportChanged ||
 			update.selectionSet ||
+			update.focusChanged ||
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
 			this.decorations = buildDecorations(update.view);
@@ -166,6 +161,44 @@ class LinkDecorationPlugin implements PluginValue {
 	}
 }
 
-export const linkDecoration = ViewPlugin.fromClass(LinkDecorationPlugin, {
+const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
 });
+
+const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
+
+const urlPasteHandler = EditorView.domEventHandlers({
+	paste(event: ClipboardEvent, view: EditorView) {
+		const text = event.clipboardData?.getData("text/plain")?.trim();
+		if (!text || !URL_PASTE_RE.test(text)) return false;
+
+		const { state } = view;
+		const tree = syntaxTree(state);
+
+		// コードブロック内では変換しない
+		for (const range of state.selection.ranges) {
+			let node = tree.resolveInner(range.from);
+			while (node) {
+				if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
+					return false;
+				}
+				if (!node.parent) break;
+				node = node.parent;
+			}
+		}
+
+		event.preventDefault();
+		const changes = state.changeByRange((range) => {
+			const selected = state.doc.sliceString(range.from, range.to);
+			const insert = `[${selected}](${text})`;
+			return {
+				range: EditorSelection.cursor(range.from + 1 + selected.length),
+				changes: { from: range.from, to: range.to, insert },
+			};
+		});
+		view.dispatch(changes, { userEvent: "input.paste" });
+		return true;
+	},
+});
+
+export const linkDecoration: Extension = [linkPlugin, urlPasteHandler];
