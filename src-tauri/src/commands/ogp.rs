@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::time::Instant;
 
 #[derive(Debug, Serialize, Clone)]
@@ -141,6 +142,58 @@ fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
     None
 }
 
+/// Allowlist approach: returns true only for globally routable IPs.
+/// Rejects all non-global addresses including private, loopback, link-local,
+/// CGNAT (100.64/10), documentation, benchmarking, reserved, etc.
+fn is_global_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            // Reject everything that is not globally routable:
+            let octets = v4.octets();
+            !(v4.is_unspecified()         // 0.0.0.0/8
+                || v4.is_loopback()       // 127.0.0.0/8
+                || v4.is_private()        // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()     // 169.254/16
+                || v4.is_broadcast()      // 255.255.255.255
+                || octets[0] == 100 && (octets[1] & 0xc0) == 64  // 100.64.0.0/10 (CGNAT)
+                || octets[0] == 192 && octets[1] == 0 && octets[2] == 0    // 192.0.0.0/24 (IETF)
+                || octets[0] == 192 && octets[1] == 0 && octets[2] == 2    // 192.0.2.0/24 (TEST-NET-1)
+                || octets[0] == 198 && (octets[1] & 0xfe) == 18  // 198.18.0.0/15 (benchmarking)
+                || octets[0] == 198 && octets[1] == 51 && octets[2] == 100 // 198.51.100.0/24 (TEST-NET-2)
+                || octets[0] == 203 && octets[1] == 0 && octets[2] == 113  // 203.0.113.0/24 (TEST-NET-3)
+                || octets[0] >= 240)      // 240.0.0.0/4 (reserved + broadcast)
+        }
+        IpAddr::V6(v6) => {
+            let seg0 = v6.segments()[0];
+            // Only allow global unicast (2000::/3)
+            (seg0 & 0xe000) == 0x2000
+        }
+    }
+}
+
+/// Custom DNS resolver that only allows globally routable IPs.
+/// This prevents DNS rebinding attacks by validating IPs at the point of
+/// connection, not as a separate check-then-use step.
+struct SsrfSafeResolver;
+
+impl ureq::Resolver for SsrfSafeResolver {
+    fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
+        let addrs: Vec<SocketAddr> = netloc.to_socket_addrs()?.collect();
+        for addr in &addrs {
+            if !is_global_ip(addr.ip()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Access to non-global network address is not allowed: {}",
+                        addr.ip()
+                    ),
+                ));
+            }
+        }
+        Ok(addrs)
+    }
+}
+
 pub fn parse_ogp(html: &str, url: &str) -> OgpData {
     let title = extract_og_meta(html, "title").or_else(|| extract_title_tag(html));
     let description = extract_og_meta(html, "description");
@@ -162,12 +215,12 @@ pub fn fetch_ogp(
     url: String,
     cache: tauri::State<'_, std::sync::Arc<std::sync::Mutex<OgpCache>>>,
 ) -> Result<OgpData, String> {
-    // Validate URL
+    // Validate URL scheme
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Only http and https URLs are supported".to_string());
     }
 
-    // Check cache
+    // Check cache first (avoids unnecessary DNS resolution)
     {
         let cache_guard = cache.lock().map_err(|e| e.to_string())?;
         if let Some(cached) = cache_guard.get(&url) {
@@ -175,9 +228,17 @@ pub fn fetch_ogp(
         }
     }
 
-    // Fetch URL
-    let response = ureq::get(&url)
+    // Fetch URL with SSRF-safe resolver.
+    // SsrfSafeResolver validates IPs at DNS resolution time, preventing
+    // DNS rebinding (TOCTOU) attacks. Redirects are also safe because
+    // each redirect target goes through the same resolver.
+    let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(5))
+        .resolver(SsrfSafeResolver)
+        .build();
+
+    let response = agent
+        .get(&url)
         .call()
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;
 
@@ -304,6 +365,77 @@ mod tests {
         cache.insert("https://example.com".to_string(), data);
         assert!(cache.get("https://example.com").is_some());
         assert!(cache.get("https://other.com").is_none());
+    }
+
+    #[test]
+    fn test_is_global_ip_v4_rejects_non_global() {
+        use std::net::Ipv4Addr;
+        // Loopback
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        // Private ranges
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+        // Link-local
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))));
+        // Unspecified
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))));
+        // CGNAT (100.64.0.0/10)
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(100, 127, 255, 254))));
+        // Documentation ranges
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));    // TEST-NET-1
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)))); // TEST-NET-2
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1))));  // TEST-NET-3
+        // Benchmarking (198.18.0.0/15)
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(198, 19, 255, 1))));
+        // Reserved (240+)
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(240, 0, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255))));
+    }
+
+    #[test]
+    fn test_is_global_ip_v4_allows_public() {
+        use std::net::Ipv4Addr;
+        assert!(is_global_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+        assert!(is_global_ip(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))));
+        assert!(is_global_ip(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
+        // Edge: 100.63.x.x is NOT CGNAT, should be allowed
+        assert!(is_global_ip(IpAddr::V4(Ipv4Addr::new(100, 63, 255, 255))));
+    }
+
+    #[test]
+    fn test_is_global_ip_v6() {
+        use std::net::Ipv6Addr;
+        // Non-global
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
+        // ULA (fc00::/7)
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1))));
+        // Link-local (fe80::/10)
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))));
+        // Global unicast (2000::/3)
+        assert!(is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888))));
+    }
+
+    #[test]
+    fn test_ssrf_safe_resolver_blocks_private() {
+        use ureq::Resolver;
+        let resolver = SsrfSafeResolver;
+        // localhost
+        assert!(resolver.resolve("127.0.0.1:80").is_err());
+        // IPv6 loopback
+        assert!(resolver.resolve("[::1]:80").is_err());
+    }
+
+    #[test]
+    fn test_ssrf_safe_resolver_allows_public() {
+        use ureq::Resolver;
+        let resolver = SsrfSafeResolver;
+        // Public DNS (8.8.8.8)
+        assert!(resolver.resolve("8.8.8.8:80").is_ok());
     }
 
     #[test]

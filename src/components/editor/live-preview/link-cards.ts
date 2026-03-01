@@ -22,9 +22,37 @@ export function isStandaloneUrlLine(lineText: string): string | null {
 	return STANDALONE_URL_RE.test(trimmed) ? trimmed : null;
 }
 
-type CacheEntry = { status: "loading" } | { status: "loaded"; data: OgpData } | { status: "error" };
+type CacheEntry =
+	| { status: "loading"; cachedAt: number }
+	| { status: "loaded"; data: OgpData; cachedAt: number }
+	| { status: "error"; errorAt: number };
 
 const ogpCache = new Map<string, CacheEntry>();
+
+const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
+const MAX_CACHE_ENTRIES = 500;
+
+function evictStaleCache() {
+	const now = Date.now();
+	for (const [key, entry] of ogpCache) {
+		const age = entry.status === "error" ? now - entry.errorAt : now - entry.cachedAt;
+		if (age > CACHE_TTL_MS) {
+			ogpCache.delete(key);
+		}
+	}
+	if (ogpCache.size > MAX_CACHE_ENTRIES) {
+		const entries = [...ogpCache.entries()].sort((a, b) => {
+			const timeA = a[1].status === "error" ? a[1].errorAt : a[1].cachedAt;
+			const timeB = b[1].status === "error" ? b[1].errorAt : b[1].cachedAt;
+			return timeA - timeB;
+		});
+		const excess = ogpCache.size - MAX_CACHE_ENTRIES;
+		for (let i = 0; i < excess; i++) {
+			ogpCache.delete(entries[i][0]);
+		}
+	}
+}
 
 function extractDomain(url: string): string {
 	try {
@@ -59,12 +87,23 @@ export class LinkCardWidget extends WidgetType {
 		container.dataset.linkCardUrl = this.url;
 		container.title = this.url;
 
-		container.addEventListener("mousedown", (e) => {
-			if (e.button !== 0) return;
-			e.preventDefault();
+		container.tabIndex = 0;
+		container.setAttribute("role", "link");
+		const openUrl = () => {
 			open(this.url).catch((error) => {
 				console.error("Failed to open URL:", this.url, error);
 			});
+		};
+		container.addEventListener("mousedown", (e) => {
+			if (e.button !== 0) return;
+			e.preventDefault();
+			openUrl();
+		});
+		container.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				openUrl();
+			}
 		});
 
 		if (!this.ogp) {
@@ -194,33 +233,49 @@ class LinkCardDecorationPlugin implements PluginValue {
 
 	private fetchMissingOgp(view: EditorView) {
 		const { state } = view;
+		const tree = syntaxTree(state);
+		const cursorLines = collectCursorLines(view);
 
 		for (const { from, to } of view.visibleRanges) {
+			const codeRanges = collectCodeRanges(tree, from, to);
 			const startLine = state.doc.lineAt(from).number;
 			const endLine = state.doc.lineAt(to).number;
 
 			for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
+				if (cursorLines.has(lineNum)) continue;
+
 				const line = state.doc.line(lineNum);
 				const url = isStandaloneUrlLine(line.text);
 				if (!url) continue;
-				if (ogpCache.has(url)) continue;
-				if (this.fetchingUrls.has(url)) continue;
 
-				ogpCache.set(url, { status: "loading" });
+				if (isInsideCodeBlock(line.from, line.to, codeRanges)) continue;
+
+				if (this.fetchingUrls.has(url)) continue;
+				const cached = ogpCache.get(url);
+				if (cached) {
+					if (cached.status === "error") {
+						if (Date.now() - cached.errorAt < ERROR_RETRY_MS) continue;
+					} else if (Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+						continue;
+					}
+				}
+
+				evictStaleCache();
+				ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
 				this.fetchingUrls.add(url);
 
 				fetchOgp(url)
 					.then((data) => {
 						this.fetchingUrls.delete(url);
+						ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
 						if (this.destroyed) return;
-						ogpCache.set(url, { status: "loaded", data });
 						this.pendingUpdate = true;
 						this.view.dispatch({});
 					})
 					.catch(() => {
 						this.fetchingUrls.delete(url);
+						ogpCache.set(url, { status: "error", errorAt: Date.now() });
 						if (this.destroyed) return;
-						ogpCache.set(url, { status: "error" });
 						this.pendingUpdate = true;
 						this.view.dispatch({});
 					});

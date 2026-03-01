@@ -39,12 +39,23 @@ export class LinkWidget extends WidgetType {
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
 			anchor.title = this.url;
-			anchor.addEventListener("mousedown", (e) => {
-				if (e.button !== 0) return;
-				e.preventDefault();
+			anchor.tabIndex = 0;
+			anchor.setAttribute("role", "link");
+			const openUrl = () => {
 				open(this.url).catch((error) => {
 					console.error("Failed to open external URL:", this.url, error);
 				});
+			};
+			anchor.addEventListener("mousedown", (e) => {
+				if (e.button !== 0) return;
+				e.preventDefault();
+				openUrl();
+			});
+			anchor.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					openUrl();
+				}
 			});
 		} else {
 			anchor.className = "cm-link-widget cm-link-widget-disabled";
