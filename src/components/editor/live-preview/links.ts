@@ -83,6 +83,22 @@ function buildDecorations(view: EditorView): DecorationSet {
 			enter(node) {
 				if (node.name !== "Link") return;
 
+				// Skip Link nodes that are part of a [[wikilink]] pattern
+				if (node.from >= 2 && state.doc.sliceString(node.from - 2, node.from) === "[[") {
+					// Count consecutive backslashes before "[["
+					let bsCount = 0;
+					for (let i = node.from - 3; i >= 0; i--) {
+						if (state.doc.sliceString(i, i + 1) === "\\") bsCount++;
+						else break;
+					}
+					// Odd backslashes = escaped, so treat as normal link; even = real wikilink
+					if (bsCount % 2 === 0) {
+						// Also verify closing ]] exists after the Link node
+						const suffix = state.doc.sliceString(node.to, node.to + 2);
+						if (suffix === "]]") return;
+					}
+				}
+
 				const startLine = state.doc.lineAt(node.from).number;
 				const endLine = state.doc.lineAt(node.to).number;
 				for (let l = startLine; l <= endLine; l++) {

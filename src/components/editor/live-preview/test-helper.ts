@@ -21,11 +21,13 @@ export function createTestState(
 export function createMockView(
 	state: EditorState,
 	visibleRanges?: { from: number; to: number }[],
+	hasFocus = false,
 ): EditorView {
 	ensureSyntaxTree(state, state.doc.length, 5000);
 	return {
 		state,
 		visibleRanges: visibleRanges ?? [{ from: 0, to: state.doc.length }],
+		hasFocus,
 	} as unknown as EditorView;
 }
 
@@ -33,9 +35,10 @@ export function createViewForTest(
 	doc: string,
 	cursorPos?: number,
 	visibleRanges?: { from: number; to: number }[],
+	hasFocus = false,
 ): EditorView {
 	const state = createTestState(doc, cursorPos);
-	return createMockView(state, visibleRanges);
+	return createMockView(state, visibleRanges, hasFocus);
 }
 
 export function collectDecorations(

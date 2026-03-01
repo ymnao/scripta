@@ -36,6 +36,8 @@ import {
 	listKeymap,
 	mathDecoration,
 	strikethroughDecoration,
+	wikilinkCompletion,
+	wikilinkDecoration,
 } from "./live-preview";
 
 const customHighlightStyle = syntaxHighlighting(
@@ -279,6 +281,15 @@ const staticEditorTheme = EditorView.theme({
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 10%, transparent)",
 		color: "var(--color-text-secondary)",
 	},
+	".cm-wikilink": {
+		color: "var(--color-text-link)",
+		cursor: "pointer",
+		textDecoration: "underline",
+	},
+	".cm-wikilink-missing": {
+		opacity: "0.6",
+		textDecoration: "underline dashed",
+	},
 });
 
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
@@ -412,6 +423,7 @@ export function MarkdownEditor({
 			headingDecoration,
 			emphasisDecoration,
 			strikethroughDecoration,
+			wikilinkDecoration,
 			linkDecoration,
 			imageDecoration,
 			codeBlockDecoration,
@@ -419,6 +431,7 @@ export function MarkdownEditor({
 			blockquoteDecoration,
 			horizontalRuleDecoration,
 			mathDecoration,
+			wikilinkCompletion,
 			keymap.of([
 				{
 					key: "Mod-s",
