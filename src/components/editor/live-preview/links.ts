@@ -21,15 +21,52 @@ export function isSafeUrl(url: string): boolean {
 	return SAFE_URL_RE.test(url);
 }
 
-const PRIVATE_HOST_RE =
-	/^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1\]|\[fe80:[^\]]*\]|\[fc00:[^\]]*\]|\[fd[0-9a-f]{2}:[^\]]*\])$/i;
+/**
+ * hostname がプライベート/ループバック/リンクローカルなど
+ * WebView から直接アクセスさせたくないアドレスかどうかを判定する。
+ *
+ * DNS 解決は行わないため、ホスト名ベースで判定できる範囲のみ扱う。
+ * nip.io 等の名前解決結果がプライベート IP になるケースは
+ * バックエンド側の SsrfSafeResolver で検証する。
+ */
+export function isPrivateHostname(hostname: string): boolean {
+	const lower = hostname.toLowerCase();
+
+	if (!lower || lower === "localhost") return true;
+
+	// IPv6 形式（コロンを含む）はすべて拒否
+	// ::1, fe80::1, ::ffff:127.0.0.1 等
+	if (lower.includes(":")) return true;
+
+	// 数値 IPv4 リテラル判定
+	const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(lower);
+	if (!ipv4Match) {
+		// 通常のドメイン名はここでは拒否しない
+		return false;
+	}
+
+	const octets = ipv4Match.slice(1).map(Number);
+	if (octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) return true;
+
+	const [o1, o2] = octets;
+	if (o1 === 0) return true; // 0.0.0.0/8
+	if (o1 === 127) return true; // 127.0.0.0/8
+	if (o1 === 10) return true; // 10.0.0.0/8
+	if (o1 === 169 && o2 === 254) return true; // 169.254.0.0/16
+	if (o1 === 172 && o2 >= 16 && o2 <= 31) return true; // 172.16.0.0/12
+	if (o1 === 192 && o2 === 168) return true; // 192.168.0.0/16
+	if (o1 === 100 && o2 >= 64 && o2 <= 127) return true; // 100.64.0.0/10 (CGNAT)
+	if (o1 >= 224) return true; // 224.0.0.0+ (multicast/reserved)
+
+	return false;
+}
 
 /** isSafeUrl + rejects private/loopback hosts (for use with image src). */
 export function isSafeImageUrl(url: string): boolean {
 	if (!isSafeUrl(url)) return false;
 	try {
 		const hostname = new URL(url).hostname;
-		return !PRIVATE_HOST_RE.test(hostname);
+		return !isPrivateHostname(hostname);
 	} catch {
 		return false;
 	}
@@ -86,8 +123,11 @@ export class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		// true = エディタがイベントを無視（ウィジェット側で処理）
-		if (event.type === "mousedown" || event.type === "click") return true;
+		// 安全な URL のときだけマウスイベントをウィジェット側で処理し、
+		// 無効リンクの場合はエディタ側に処理させてカーソル移動等を可能にする
+		if ((event.type === "mousedown" || event.type === "click") && isSafeUrl(this.url)) {
+			return true;
+		}
 		return false;
 	}
 }

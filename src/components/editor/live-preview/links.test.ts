@@ -4,6 +4,7 @@ import {
 	URL_PASTE_RE,
 	buildMarkdownLink,
 	escapeMarkdownLabel,
+	isPrivateHostname,
 	isSafeImageUrl,
 	isSafeUrl,
 } from "./links";
@@ -116,6 +117,55 @@ describe("isSafeImageUrl", () => {
 	it("rejects data URLs", () => {
 		expect(isSafeImageUrl("data:image/png;base64,abc")).toBe(false);
 	});
+
+	it("rejects IPv6-mapped IPv4", () => {
+		expect(isSafeImageUrl("http://[::ffff:127.0.0.1]/image.png")).toBe(false);
+	});
+
+	it("rejects CGNAT range", () => {
+		expect(isSafeImageUrl("http://100.64.0.1/image.png")).toBe(false);
+	});
+
+	it("rejects multicast range", () => {
+		expect(isSafeImageUrl("http://224.0.0.1/image.png")).toBe(false);
+	});
+});
+
+describe("isPrivateHostname", () => {
+	it("rejects localhost", () => {
+		expect(isPrivateHostname("localhost")).toBe(true);
+	});
+
+	it("rejects empty string", () => {
+		expect(isPrivateHostname("")).toBe(true);
+	});
+
+	it("rejects IPv6 addresses (all forms)", () => {
+		expect(isPrivateHostname("::1")).toBe(true);
+		expect(isPrivateHostname("fe80::1")).toBe(true);
+		expect(isPrivateHostname("::ffff:127.0.0.1")).toBe(true);
+	});
+
+	it("rejects private IPv4", () => {
+		expect(isPrivateHostname("10.0.0.1")).toBe(true);
+		expect(isPrivateHostname("172.16.0.1")).toBe(true);
+		expect(isPrivateHostname("192.168.1.1")).toBe(true);
+		expect(isPrivateHostname("127.0.0.1")).toBe(true);
+	});
+
+	it("allows public IPs", () => {
+		expect(isPrivateHostname("8.8.8.8")).toBe(false);
+		expect(isPrivateHostname("1.1.1.1")).toBe(false);
+	});
+
+	it("allows public domain names", () => {
+		expect(isPrivateHostname("example.com")).toBe(false);
+		expect(isPrivateHostname("cdn.example.com")).toBe(false);
+	});
+
+	it("rejects invalid IPv4 octets", () => {
+		expect(isPrivateHostname("999.999.999.999")).toBe(true);
+	});
 });
 
 describe("URL_PASTE_RE", () => {
@@ -214,5 +264,11 @@ describe("LinkWidget", () => {
 		const widget = new LinkWidget("text", "https://example.com");
 		const event = new KeyboardEvent("keydown");
 		expect(widget.ignoreEvent(event)).toBe(false);
+	});
+
+	it("ignoreEvent returns false for disabled links (editor handles cursor)", () => {
+		const widget = new LinkWidget("text", "ftp://example.com");
+		expect(widget.ignoreEvent(new MouseEvent("mousedown"))).toBe(false);
+		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(false);
 	});
 });
