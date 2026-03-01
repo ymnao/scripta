@@ -201,9 +201,10 @@ const urlPasteHandler = EditorView.domEventHandlers({
 		event.preventDefault();
 		const changes = state.changeByRange((range) => {
 			const selected = state.doc.sliceString(range.from, range.to);
-			const insert = `[${selected}](${text})`;
+			const label = selected || text;
+			const insert = `[${label}](${text})`;
 			return {
-				range: EditorSelection.cursor(range.from + 1 + selected.length),
+				range: EditorSelection.cursor(range.from + insert.length),
 				changes: { from: range.from, to: range.to, insert },
 			};
 		});

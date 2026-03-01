@@ -93,7 +93,6 @@ dependencies = [
  "tempfile",
  "trash",
  "ureq",
- "url",
 ]
 
 [[package]]

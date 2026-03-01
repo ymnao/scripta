@@ -13,9 +13,10 @@ import { open } from "@tauri-apps/plugin-shell";
 import { fetchOgp } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines } from "./cursor-utils";
+import { isSafeUrl } from "./links";
 import { collectCodeRanges } from "./math";
 
-const STANDALONE_URL_RE = /^https?:\/\/[^\s]+$/;
+const STANDALONE_URL_RE = /^https?:\/\/[^\s]+$/i;
 
 export function isStandaloneUrlLine(lineText: string): string | null {
 	const trimmed = lineText.trim();
@@ -77,7 +78,8 @@ export class LinkCardWidget extends WidgetType {
 		return (
 			this.ogp.title === other.ogp.title &&
 			this.ogp.description === other.ogp.description &&
-			this.ogp.image === other.ogp.image
+			this.ogp.image === other.ogp.image &&
+			this.ogp.siteName === other.ogp.siteName
 		);
 	}
 
@@ -142,7 +144,7 @@ export class LinkCardWidget extends WidgetType {
 
 		content.appendChild(textSection);
 
-		if (this.ogp.image) {
+		if (this.ogp.image && isSafeUrl(this.ogp.image)) {
 			const imgWrapper = document.createElement("div");
 			imgWrapper.className = "cm-link-card-thumbnail-wrapper";
 			const img = document.createElement("img");

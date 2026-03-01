@@ -36,7 +36,6 @@ tauri-plugin-log = { version = "2", optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 trash = "5"
 notify = "6"
-url = "2"
 ureq = { version = "2", features = ["tls"] }
 tauri-plugin-store = { version = "2", optional = true }
 tauri-plugin-window-state = { version = "2", optional = true }

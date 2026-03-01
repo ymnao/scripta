@@ -143,30 +143,33 @@ fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
 }
 
 /// Allowlist approach: returns true only for globally routable IPs.
-/// Rejects all non-global addresses including private, loopback, link-local,
-/// CGNAT (100.64/10), documentation, benchmarking, reserved, etc.
+/// Mirrors the logic of the unstable `Ipv4Addr::is_global()` / `Ipv6Addr::is_global()`
+/// plus additional special-purpose ranges from IANA registries.
 fn is_global_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            // Reject everything that is not globally routable:
             let octets = v4.octets();
-            !(v4.is_unspecified()         // 0.0.0.0/8
+            !(octets[0] == 0              // 0.0.0.0/8 ("This network")
                 || v4.is_loopback()       // 127.0.0.0/8
                 || v4.is_private()        // 10/8, 172.16/12, 192.168/16
                 || v4.is_link_local()     // 169.254/16
-                || v4.is_broadcast()      // 255.255.255.255
-                || octets[0] == 100 && (octets[1] & 0xc0) == 64  // 100.64.0.0/10 (CGNAT)
-                || octets[0] == 192 && octets[1] == 0 && octets[2] == 0    // 192.0.0.0/24 (IETF)
-                || octets[0] == 192 && octets[1] == 0 && octets[2] == 2    // 192.0.2.0/24 (TEST-NET-1)
-                || octets[0] == 198 && (octets[1] & 0xfe) == 18  // 198.18.0.0/15 (benchmarking)
-                || octets[0] == 198 && octets[1] == 51 && octets[2] == 100 // 198.51.100.0/24 (TEST-NET-2)
-                || octets[0] == 203 && octets[1] == 0 && octets[2] == 113  // 203.0.113.0/24 (TEST-NET-3)
+                || (octets[0] == 100 && (octets[1] & 0xc0) == 64)  // 100.64.0.0/10 (CGNAT)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)  // 192.0.0.0/24 (IETF)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)  // 192.0.2.0/24 (TEST-NET-1)
+                || (octets[0] == 198 && (octets[1] & 0xfe) == 18)  // 198.18.0.0/15 (benchmarking)
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100) // 198.51.100.0/24 (TEST-NET-2)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)  // 203.0.113.0/24 (TEST-NET-3)
+                || (octets[0] & 0xf0) == 224  // 224.0.0.0/4 (multicast)
                 || octets[0] >= 240)      // 240.0.0.0/4 (reserved + broadcast)
         }
         IpAddr::V6(v6) => {
-            let seg0 = v6.segments()[0];
-            // Only allow global unicast (2000::/3)
-            (seg0 & 0xe000) == 0x2000
+            let segs = v6.segments();
+            // Must be global unicast (2000::/3) ...
+            (segs[0] & 0xe000) == 0x2000
+                // ... but exclude special-purpose prefixes within 2000::/3:
+                && !((segs[0] == 0x2001) && (segs[1] == 0x0db8))  // 2001:db8::/32 (documentation)
+                && !((segs[0] == 0x2001) && (segs[1] < 0x0200))   // 2001::/23 (IETF protocol assignments)
+                && !((segs[0] == 0x2002))                          // 2002::/16 (6to4, deprecated)
         }
     }
 }
@@ -378,8 +381,13 @@ mod tests {
         assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
         // Link-local
         assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))));
-        // Unspecified
+        // 0.0.0.0/8 ("This network") — entire range, not just 0.0.0.0
         assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(0, 1, 2, 3))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(0, 255, 255, 255))));
+        // Multicast (224.0.0.0/4)
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(239, 255, 255, 255))));
         // CGNAT (100.64.0.0/10)
         assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1))));
         assert!(!is_global_ip(IpAddr::V4(Ipv4Addr::new(100, 127, 255, 254))));
@@ -416,8 +424,16 @@ mod tests {
         assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1))));
         // Link-local (fe80::/10)
         assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))));
+        // Documentation (2001:db8::/32)
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1))));
+        // IETF protocol assignments (2001::/23)
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0x0000, 0, 0, 0, 0, 0, 1))));
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0x01ff, 0, 0, 0, 0, 0, 1))));
+        // 6to4 (2002::/16, deprecated)
+        assert!(!is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 1))));
         // Global unicast (2000::/3)
         assert!(is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888))));
+        assert!(is_global_ip(IpAddr::V6(Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111))));
     }
 
     #[test]
