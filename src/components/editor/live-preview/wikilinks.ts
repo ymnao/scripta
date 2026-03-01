@@ -244,7 +244,7 @@ class WikilinkDecorationPlugin implements PluginValue {
 	view: EditorView;
 	destroyed = false;
 	private pendingFileMapUpdate = false;
-	private fetchRequestId = 0;
+	private fetching = false;
 
 	constructor(view: EditorView) {
 		this.view = view;
@@ -253,20 +253,22 @@ class WikilinkDecorationPlugin implements PluginValue {
 	}
 
 	private fetchFiles() {
+		if (this.fetching) return;
 		const workspacePath = useWorkspaceStore.getState().workspacePath;
 		if (!workspacePath) return;
 		const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
-		const requestId = ++this.fetchRequestId;
+		this.fetching = true;
 		searchFilenames(workspacePath, "")
 			.then((files) => {
-				if (this.destroyed || requestId !== this.fetchRequestId) return;
+				this.fetching = false;
+				if (this.destroyed) return;
 				this.fileMap = buildFileMap(files);
 				this.lastFileTreeVersion = currentVersion;
 				this.pendingFileMapUpdate = true;
 				this.view.dispatch({});
 			})
 			.catch((error) => {
-				if (requestId !== this.fetchRequestId) return;
+				this.fetching = false;
 				// lastFileTreeVersion を更新しないことで、次の update() で再取得を試みる
 				console.error("[wikilinks] Failed to fetch filenames:", error);
 			});

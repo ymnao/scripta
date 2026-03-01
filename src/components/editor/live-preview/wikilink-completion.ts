@@ -12,6 +12,7 @@ import { useWorkspaceStore } from "../../../stores/workspace";
 let cachedFiles: string[] = [];
 let cachedVersion = -1;
 let cachedWorkspacePath = "";
+let fetchRequestId = 0;
 
 export async function wikilinkCompletionSource(
 	context: CompletionContext,
@@ -24,11 +25,16 @@ export async function wikilinkCompletionSource(
 
 	const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
 	if (currentVersion !== cachedVersion || workspacePath !== cachedWorkspacePath) {
+		const requestId = ++fetchRequestId;
 		try {
-			cachedFiles = await searchFilenames(workspacePath, "");
+			const files = await searchFilenames(workspacePath, "");
+			// 後発リクエストが先に完了した場合、古い結果での上書きを防ぐ
+			if (requestId !== fetchRequestId) return null;
+			cachedFiles = files;
 			cachedVersion = currentVersion;
 			cachedWorkspacePath = workspacePath;
 		} catch {
+			if (requestId !== fetchRequestId) return null;
 			cachedFiles = [];
 			cachedVersion = -1;
 			cachedWorkspacePath = "";
