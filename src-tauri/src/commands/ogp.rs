@@ -107,13 +107,13 @@ fn extract_og_meta(html: &str, property: &str) -> Option<String> {
 }
 
 fn extract_title_tag(html: &str) -> Option<String> {
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     let start = lower.find("<title")?.checked_add(6)?;
     let rest = &lower[start..];
     // Skip past the closing '>' of the opening tag
     let content_start = rest.find('>')? + 1;
     let content_rest = &html[start + content_start..];
-    let end = content_rest.to_lowercase().find("</title>")?;
+    let end = content_rest.to_ascii_lowercase().find("</title>")?;
     let title = content_rest[..end].trim().to_string();
     let decoded = decode_html_entities(&title);
     if decoded.is_empty() {
@@ -124,7 +124,7 @@ fn extract_title_tag(html: &str) -> Option<String> {
 }
 
 fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
-    let lower = tag.to_lowercase();
+    let lower = tag.to_ascii_lowercase();
     // Try double quotes
     let pattern_dq = format!("{}=\"", attr_name);
     if let Some(pos) = lower.find(&pattern_dq) {
