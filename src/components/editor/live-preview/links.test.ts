@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LinkWidget, isSafeUrl } from "./links";
+import { LinkWidget, URL_PASTE_RE, buildMarkdownLink, isSafeUrl } from "./links";
 
 vi.mock("@tauri-apps/plugin-shell", () => ({}));
 
@@ -57,6 +57,62 @@ describe("isSafeUrl", () => {
 	it("rejects URLs with whitespace", () => {
 		expect(isSafeUrl("http://example.com/path name")).toBe(false);
 		expect(isSafeUrl("https://example.com\nmalicious")).toBe(false);
+	});
+});
+
+describe("URL_PASTE_RE", () => {
+	it("matches http URLs", () => {
+		expect(URL_PASTE_RE.test("http://example.com")).toBe(true);
+	});
+
+	it("matches https URLs", () => {
+		expect(URL_PASTE_RE.test("https://example.com/path?q=1")).toBe(true);
+	});
+
+	it("is case-insensitive", () => {
+		expect(URL_PASTE_RE.test("HTTPS://EXAMPLE.COM")).toBe(true);
+	});
+
+	it("rejects non-URL text", () => {
+		expect(URL_PASTE_RE.test("just some text")).toBe(false);
+	});
+
+	it("rejects text with spaces", () => {
+		expect(URL_PASTE_RE.test("https://example.com has spaces")).toBe(false);
+	});
+
+	it("rejects ftp URLs", () => {
+		expect(URL_PASTE_RE.test("ftp://example.com")).toBe(false);
+	});
+
+	it("rejects empty string", () => {
+		expect(URL_PASTE_RE.test("")).toBe(false);
+	});
+});
+
+describe("buildMarkdownLink", () => {
+	it("uses selected text as label when provided", () => {
+		expect(buildMarkdownLink("https://example.com", "my link")).toBe(
+			"[my link](https://example.com)",
+		);
+	});
+
+	it("uses URL as label when selected text is empty", () => {
+		expect(buildMarkdownLink("https://example.com", "")).toBe(
+			"[https://example.com](https://example.com)",
+		);
+	});
+
+	it("preserves special characters in URL", () => {
+		expect(buildMarkdownLink("https://example.com/path?q=1&b=2", "")).toBe(
+			"[https://example.com/path?q=1&b=2](https://example.com/path?q=1&b=2)",
+		);
+	});
+
+	it("preserves selected text exactly", () => {
+		expect(buildMarkdownLink("https://example.com", "  spaced  ")).toBe(
+			"[  spaced  ](https://example.com)",
+		);
 	});
 });
 

@@ -176,7 +176,13 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
 });
 
-const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
+export const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
+
+/** Build a Markdown link from a pasted URL and optional selected text. */
+export function buildMarkdownLink(url: string, selectedText: string): string {
+	const label = selectedText || url;
+	return `[${label}](${url})`;
+}
 
 const urlPasteHandler = EditorView.domEventHandlers({
 	paste(event: ClipboardEvent, view: EditorView) {
@@ -201,14 +207,13 @@ const urlPasteHandler = EditorView.domEventHandlers({
 		event.preventDefault();
 		const changes = state.changeByRange((range) => {
 			const selected = state.doc.sliceString(range.from, range.to);
-			const label = selected || text;
-			const insert = `[${label}](${text})`;
+			const insert = buildMarkdownLink(text, selected);
 			return {
 				range: EditorSelection.cursor(range.from + insert.length),
 				changes: { from: range.from, to: range.to, insert },
 			};
 		});
-		view.dispatch(changes, { userEvent: "input.paste" });
+		view.dispatch({ ...changes, userEvent: "input.paste" });
 		return true;
 	},
 });
