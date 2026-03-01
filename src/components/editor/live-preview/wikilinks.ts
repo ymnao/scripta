@@ -13,7 +13,7 @@ import { SEP_RE, joinPath } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCodeRanges, isEscaped } from "./math";
 
-const WIKILINK_RE = /\[\[([^\[\]]+)\]\]/g;
+const WIKILINK_RE = /\[\[([^\[\]\n\r]+)\]\]/g;
 
 const hideBrackets = Decoration.replace({});
 
@@ -47,7 +47,7 @@ export function buildFileMap(files: string[]): Map<string, string> {
 		const key = basename.normalize("NFC");
 		if (!key) continue;
 		const existing = map.get(key);
-		if (!existing || filePath.localeCompare(existing) < 0) {
+		if (!existing || filePath < existing) {
 			map.set(key, filePath);
 		}
 	}
@@ -109,7 +109,7 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 			const stripped = page.endsWith(".md") ? page.slice(0, -3) : page;
 			const normalizedPage = stripped.normalize("NFC");
 			const mapped = fileMap.get(normalizedPage);
-			const resolvedPath = mapped ?? resolveWikilinkPath(page);
+			const resolvedPath = mapped ?? resolveWikilinkPath(normalizedPage);
 			if (!resolvedPath) continue;
 			const exists = mapped != null;
 
@@ -257,6 +257,11 @@ class WikilinkDecorationPlugin implements PluginValue {
 		if (this.pendingFileMapUpdate) {
 			this.pendingFileMapUpdate = false;
 			this.decorations = buildDecorations(update.view, this.fileMap);
+			// 一覧取得中に fileTreeVersion が進んでいた場合の取りこぼしを防ぐ
+			const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
+			if (currentVersion !== this.lastFileTreeVersion) {
+				this.fetchFiles();
+			}
 			return;
 		}
 
