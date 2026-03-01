@@ -67,13 +67,15 @@ impl OgpCache {
 }
 
 fn decode_html_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
+    // &amp; must be decoded LAST to prevent double-decoding
+    // (e.g. &amp;lt; → &lt; → < if &amp; were first)
+    s.replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&#x27;", "'")
         .replace("&#x2F;", "/")
+        .replace("&amp;", "&")
 }
 
 fn extract_og_meta(html: &str, property: &str) -> Option<String> {
@@ -218,8 +220,9 @@ pub fn fetch_ogp(
     url: String,
     cache: tauri::State<'_, std::sync::Arc<std::sync::Mutex<OgpCache>>>,
 ) -> Result<OgpData, String> {
-    // Validate URL scheme
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    // Validate URL scheme (case-insensitive)
+    let lower_url = url.to_ascii_lowercase();
+    if !lower_url.starts_with("http://") && !lower_url.starts_with("https://") {
         return Err("Only http and https URLs are supported".to_string());
     }
 
@@ -324,6 +327,13 @@ mod tests {
         let ogp = parse_ogp(html, "https://example.com");
         assert_eq!(ogp.title, Some("Title & More <3>".to_string()));
         assert_eq!(ogp.description, Some("It's \"great\"".to_string()));
+    }
+
+    #[test]
+    fn test_decode_html_entities_no_double_decode() {
+        // &amp;lt; should decode to &lt; (not <)
+        assert_eq!(decode_html_entities("&amp;lt;"), "&lt;");
+        assert_eq!(decode_html_entities("&amp;amp;"), "&amp;");
     }
 
     #[test]

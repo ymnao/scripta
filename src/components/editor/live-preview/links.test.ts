@@ -61,21 +61,21 @@ describe("isSafeUrl", () => {
 });
 
 describe("LinkWidget", () => {
-	it("ignoreEvent returns false for mousedown (widget handles it)", () => {
+	it("ignoreEvent returns true for mousedown (editor ignores, widget handles)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
 		const event = new MouseEvent("mousedown");
-		expect(widget.ignoreEvent(event)).toBe(false);
+		expect(widget.ignoreEvent(event)).toBe(true);
 	});
 
-	it("ignoreEvent returns false for click (widget handles it)", () => {
+	it("ignoreEvent returns true for click (editor ignores, widget handles)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
 		const event = new MouseEvent("click");
-		expect(widget.ignoreEvent(event)).toBe(false);
+		expect(widget.ignoreEvent(event)).toBe(true);
 	});
 
-	it("ignoreEvent returns true for other events (editor handles them)", () => {
+	it("ignoreEvent returns false for other events (editor handles them)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
 		const event = new KeyboardEvent("keydown");
-		expect(widget.ignoreEvent(event)).toBe(true);
+		expect(widget.ignoreEvent(event)).toBe(false);
 	});
 });

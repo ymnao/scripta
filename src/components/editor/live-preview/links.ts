@@ -67,9 +67,9 @@ export class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		// false = ウィジェットが処理（エディタはカーソル移動しない）
-		if (event.type === "mousedown" || event.type === "click") return false;
-		return true;
+		// true = エディタがイベントを無視（ウィジェット側で処理）
+		if (event.type === "mousedown" || event.type === "click") return true;
+		return false;
 	}
 }
 

@@ -168,22 +168,22 @@ describe("LinkCardWidget", () => {
 	});
 
 	describe("ignoreEvent", () => {
-		it("returns false for mousedown (widget handles it)", () => {
+		it("returns true for mousedown (editor ignores, widget handles)", () => {
 			const widget = new LinkCardWidget("https://example.com", null);
 			const event = new MouseEvent("mousedown");
-			expect(widget.ignoreEvent(event)).toBe(false);
+			expect(widget.ignoreEvent(event)).toBe(true);
 		});
 
-		it("returns false for click (widget handles it)", () => {
+		it("returns true for click (editor ignores, widget handles)", () => {
 			const widget = new LinkCardWidget("https://example.com", null);
 			const event = new MouseEvent("click");
-			expect(widget.ignoreEvent(event)).toBe(false);
+			expect(widget.ignoreEvent(event)).toBe(true);
 		});
 
-		it("returns true for other events (editor handles them)", () => {
+		it("returns false for other events (editor handles them)", () => {
 			const widget = new LinkCardWidget("https://example.com", null);
 			const event = new KeyboardEvent("keydown");
-			expect(widget.ignoreEvent(event)).toBe(true);
+			expect(widget.ignoreEvent(event)).toBe(false);
 		});
 	});
 });
