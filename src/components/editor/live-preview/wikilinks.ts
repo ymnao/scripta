@@ -154,8 +154,10 @@ function createWikilinkClickHandler() {
 			const wikilinkEl = target.closest<HTMLElement>("[data-wikilink-path]");
 			if (!wikilinkEl) return false;
 
+			// 左クリック以外（右クリック・中クリック等）は標準動作を妨げない
+			if (event.button !== 0) return false;
+
 			event.preventDefault();
-			event.stopPropagation();
 
 			const resolvedPath = wikilinkEl.dataset.wikilinkPath;
 			if (!resolvedPath) return true;
@@ -217,15 +219,19 @@ class WikilinkDecorationPlugin implements PluginValue {
 	private fetchFiles() {
 		const workspacePath = useWorkspaceStore.getState().workspacePath;
 		if (!workspacePath) return;
+		const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
 		searchFilenames(workspacePath, "")
 			.then((files) => {
 				if (this.destroyed) return;
 				this.fileMap = buildFileMap(files);
-				this.lastFileTreeVersion = useWorkspaceStore.getState().fileTreeVersion;
+				this.lastFileTreeVersion = currentVersion;
 				this.pendingFileMapUpdate = true;
 				this.view.dispatch();
 			})
-			.catch(() => {});
+			.catch((error) => {
+				this.lastFileTreeVersion = currentVersion;
+				console.error("[wikilinks] Failed to fetch filenames:", error);
+			});
 	}
 
 	update(update: ViewUpdate) {

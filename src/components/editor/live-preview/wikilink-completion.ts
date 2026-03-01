@@ -7,6 +7,9 @@ import type { Extension } from "@codemirror/state";
 import { searchFilenames } from "../../../lib/commands";
 import { useWorkspaceStore } from "../../../stores/workspace";
 
+let cachedFiles: string[] = [];
+let cachedVersion = -1;
+
 export async function wikilinkCompletionSource(
 	context: CompletionContext,
 ): Promise<CompletionResult | null> {
@@ -16,8 +19,14 @@ export async function wikilinkCompletionSource(
 	const workspacePath = useWorkspaceStore.getState().workspacePath;
 	if (!workspacePath) return null;
 
-	const query = match.text.slice(2);
-	const files = await searchFilenames(workspacePath, query);
+	const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
+	if (currentVersion !== cachedVersion) {
+		cachedFiles = await searchFilenames(workspacePath, "");
+		cachedVersion = currentVersion;
+	}
+
+	const query = match.text.slice(2).toLowerCase();
+	const files = query ? cachedFiles.filter((f) => f.toLowerCase().includes(query)) : cachedFiles;
 
 	return {
 		from: match.from + 2,

@@ -1,13 +1,17 @@
 import { CompletionContext as CC, type CompletionContext } from "@codemirror/autocomplete";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestState } from "./test-helper";
 
 const mockSearchFilenames = vi.fn(() => Promise.resolve([] as string[]));
+let mockFileTreeVersion = 0;
 
 vi.mock("../../../stores/workspace", () => ({
 	useWorkspaceStore: {
 		getState: () => ({
 			workspacePath: "/workspace",
+			get fileTreeVersion() {
+				return mockFileTreeVersion;
+			},
 		}),
 	},
 }));
@@ -24,6 +28,12 @@ function createContext(doc: string, pos: number): CompletionContext {
 }
 
 describe("wikilinkCompletion", () => {
+	beforeEach(() => {
+		mockSearchFilenames.mockClear();
+		// Bump version to invalidate cache for each test
+		mockFileTreeVersion++;
+	});
+
 	it("exports an Extension", () => {
 		expect(wikilinkCompletion).toBeDefined();
 	});
@@ -42,11 +52,27 @@ describe("wikilinkCompletion", () => {
 		expect(result?.options[1].label).toBe("todo");
 	});
 
-	it("passes query text to searchFilenames", async () => {
-		mockSearchFilenames.mockClear();
-		mockSearchFilenames.mockResolvedValueOnce([]);
-		await wikilinkCompletionSource(createContext("[[not", 5));
-		expect(mockSearchFilenames).toHaveBeenCalledWith("/workspace", "not");
+	it("fetches all files and filters client-side by query", async () => {
+		mockSearchFilenames.mockResolvedValueOnce([
+			"/workspace/note.md",
+			"/workspace/todo.md",
+			"/workspace/readme.md",
+		]);
+		const result = await wikilinkCompletionSource(createContext("[[not", 5));
+		expect(mockSearchFilenames).toHaveBeenCalledWith("/workspace", "");
+		expect(result?.options).toHaveLength(1);
+		expect(result?.options[0].label).toBe("note");
+	});
+
+	it("uses cache on subsequent calls with same fileTreeVersion", async () => {
+		mockSearchFilenames.mockResolvedValueOnce(["/workspace/note.md"]);
+		await wikilinkCompletionSource(createContext("[[", 2));
+		expect(mockSearchFilenames).toHaveBeenCalledTimes(1);
+
+		// Same version — should use cache, no new fetch
+		const result = await wikilinkCompletionSource(createContext("[[n", 3));
+		expect(mockSearchFilenames).toHaveBeenCalledTimes(1);
+		expect(result?.options).toHaveLength(1);
 	});
 
 	it("sets from to after [[", async () => {
