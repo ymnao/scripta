@@ -4,6 +4,7 @@ import {
 	URL_PASTE_RE,
 	buildMarkdownLink,
 	escapeMarkdownLabel,
+	isSafeImageUrl,
 	isSafeUrl,
 } from "./links";
 
@@ -63,6 +64,52 @@ describe("isSafeUrl", () => {
 	it("rejects URLs with whitespace", () => {
 		expect(isSafeUrl("http://example.com/path name")).toBe(false);
 		expect(isSafeUrl("https://example.com\nmalicious")).toBe(false);
+	});
+});
+
+describe("isSafeImageUrl", () => {
+	it("allows public URLs", () => {
+		expect(isSafeImageUrl("https://example.com/image.png")).toBe(true);
+		expect(isSafeImageUrl("http://cdn.example.com/photo.jpg")).toBe(true);
+	});
+
+	it("rejects localhost", () => {
+		expect(isSafeImageUrl("http://localhost/image.png")).toBe(false);
+		expect(isSafeImageUrl("http://localhost:8080/image.png")).toBe(false);
+	});
+
+	it("rejects loopback IPs", () => {
+		expect(isSafeImageUrl("http://127.0.0.1/image.png")).toBe(false);
+		expect(isSafeImageUrl("http://127.0.0.1:3000/image.png")).toBe(false);
+	});
+
+	it("rejects private 10.x IPs", () => {
+		expect(isSafeImageUrl("http://10.0.0.1/image.png")).toBe(false);
+	});
+
+	it("rejects private 172.16-31.x IPs", () => {
+		expect(isSafeImageUrl("http://172.16.0.1/image.png")).toBe(false);
+		expect(isSafeImageUrl("http://172.31.255.255/image.png")).toBe(false);
+	});
+
+	it("rejects private 192.168.x IPs", () => {
+		expect(isSafeImageUrl("http://192.168.1.1/image.png")).toBe(false);
+	});
+
+	it("rejects IPv6 loopback", () => {
+		expect(isSafeImageUrl("http://[::1]/image.png")).toBe(false);
+	});
+
+	it("rejects 0.0.0.0", () => {
+		expect(isSafeImageUrl("http://0.0.0.0/image.png")).toBe(false);
+	});
+
+	it("rejects non-http schemes", () => {
+		expect(isSafeImageUrl("ftp://example.com/image.png")).toBe(false);
+	});
+
+	it("rejects data URLs", () => {
+		expect(isSafeImageUrl("data:image/png;base64,abc")).toBe(false);
 	});
 });
 

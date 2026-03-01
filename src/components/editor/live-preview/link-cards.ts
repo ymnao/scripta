@@ -13,7 +13,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { fetchOgp } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines } from "./cursor-utils";
-import { isSafeUrl } from "./links";
+import { isSafeImageUrl, isSafeUrl } from "./links";
 import { collectCodeRanges } from "./math";
 
 const STANDALONE_URL_RE = /^https?:\/\/[^\s]+$/i;
@@ -150,7 +150,7 @@ export class LinkCardWidget extends WidgetType {
 
 		content.appendChild(textSection);
 
-		if (this.ogp.image && isSafeUrl(this.ogp.image)) {
+		if (this.ogp.image && isSafeImageUrl(this.ogp.image)) {
 			const imgWrapper = document.createElement("div");
 			imgWrapper.className = "cm-link-card-thumbnail-wrapper";
 			const img = document.createElement("img");
@@ -335,6 +335,9 @@ const linkCardPlugin = ViewPlugin.fromClass(LinkCardDecorationPlugin, {
 function createLinkCardClickGuard() {
 	return EditorView.domEventHandlers({
 		mousedown(event: MouseEvent, view: EditorView) {
+			// 左クリックのみブロック（右クリック等のコンテキストメニューは通す）
+			if (event.button !== 0) return false;
+
 			const target = event.target;
 			if (target instanceof Element && target.closest(".cm-link-card")) return false;
 
