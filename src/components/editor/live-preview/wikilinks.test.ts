@@ -46,19 +46,19 @@ describe("resolveWikilinkPath", () => {
 		expect(resolveWikilinkPath("note.md")).toBe("/workspace/note.md");
 	});
 
-	it("rejects page names containing path separators", () => {
-		expect(resolveWikilinkPath("../secret")).toBe("../secret");
-		expect(resolveWikilinkPath("sub/note")).toBe("sub/note");
-		expect(resolveWikilinkPath("sub\\note")).toBe("sub\\note");
+	it("returns null for page names containing path separators", () => {
+		expect(resolveWikilinkPath("../secret")).toBeNull();
+		expect(resolveWikilinkPath("sub/note")).toBeNull();
+		expect(resolveWikilinkPath("sub\\note")).toBeNull();
 	});
 
-	it("rejects dot and double-dot names", () => {
-		expect(resolveWikilinkPath(".")).toBe(".");
-		expect(resolveWikilinkPath("..")).toBe("..");
+	it("returns null for dot and double-dot names", () => {
+		expect(resolveWikilinkPath(".")).toBeNull();
+		expect(resolveWikilinkPath("..")).toBeNull();
 	});
 
-	it("rejects names with embedded .. segments", () => {
-		expect(resolveWikilinkPath("foo..bar")).toBe("foo..bar");
+	it("returns null for names with embedded .. segments", () => {
+		expect(resolveWikilinkPath("foo..bar")).toBeNull();
 	});
 });
 
@@ -272,8 +272,8 @@ describe("buildDecorations", () => {
 		expect(attrs["data-wikilink-exists"]).toBe("1");
 	});
 
-	it("detects wikilink on first line when cursor is at position 0", () => {
-		// Cursor at 0 means line 1 is the cursor line — wikilink should still render
+	it("detects wikilink on first line when selection is at 0 and view is unfocused", () => {
+		// hasFocus=false の状態では選択位置が 0 でも wikilink が抑制されない
 		const view = createViewForTest("[[note]] some text", 0);
 		const decos = collectDecorations(buildDecorations(view, fileMap));
 		const marks = markDecorations(decos);

@@ -128,6 +128,25 @@ export class TauriMock {
 				store._files = parsedFiles;
 				store._directories = parsedDirs;
 
+				store.handlers.create_file = (args: Record<string, unknown>) => {
+					const path = args.path as string;
+					if (path in parsedFiles) {
+						throw new Error(`Already exists: ${path}`);
+					}
+					parsedFiles[path] = "";
+					// Add to parent directory listing
+					const parts = path.split("/");
+					const name = parts[parts.length - 1];
+					const parentPath = parts.slice(0, -1).join("/");
+					if (parentPath in parsedDirs) {
+						parsedDirs[parentPath].push({
+							name,
+							path,
+							isDirectory: false,
+						});
+					}
+				};
+
 				store.handlers.show_in_folder = () => {
 					// no-op: just record the call
 					return undefined;

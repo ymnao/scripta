@@ -27,13 +27,13 @@ export function parseWikilink(content: string): { page: string; display: string 
 	return { page, display: display || page };
 }
 
-export function resolveWikilinkPath(pageName: string): string {
+export function resolveWikilinkPath(pageName: string): string | null {
 	const workspacePath = useWorkspaceStore.getState().workspacePath;
-	if (!workspacePath) return pageName;
+	if (!workspacePath) return null;
 
 	// パストラバーサル防止: パス区切り文字・".."・"." を含む名前は拒否
 	if (SEP_RE.test(pageName) || pageName === "." || pageName === ".." || pageName.includes("..")) {
-		return pageName;
+		return null;
 	}
 
 	const fileName = pageName.endsWith(".md") ? pageName : `${pageName}.md`;
@@ -108,6 +108,7 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 			const normalizedPage = stripped.normalize("NFC");
 			const mapped = fileMap.get(normalizedPage);
 			const resolvedPath = mapped ?? resolveWikilinkPath(page);
+			if (!resolvedPath) continue;
 			const exists = mapped != null;
 
 			// Hide [[ and ]]
@@ -219,6 +220,7 @@ class WikilinkDecorationPlugin implements PluginValue {
 	view: EditorView;
 	destroyed = false;
 	private pendingFileMapUpdate = false;
+	private fetchRequestId = 0;
 
 	constructor(view: EditorView) {
 		this.view = view;
@@ -230,15 +232,17 @@ class WikilinkDecorationPlugin implements PluginValue {
 		const workspacePath = useWorkspaceStore.getState().workspacePath;
 		if (!workspacePath) return;
 		const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
+		const requestId = ++this.fetchRequestId;
 		searchFilenames(workspacePath, "")
 			.then((files) => {
-				if (this.destroyed) return;
+				if (this.destroyed || requestId !== this.fetchRequestId) return;
 				this.fileMap = buildFileMap(files);
 				this.lastFileTreeVersion = currentVersion;
 				this.pendingFileMapUpdate = true;
 				this.view.dispatch({});
 			})
 			.catch((error) => {
+				if (requestId !== this.fetchRequestId) return;
 				this.lastFileTreeVersion = currentVersion;
 				console.error("[wikilinks] Failed to fetch filenames:", error);
 			});
