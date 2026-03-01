@@ -83,10 +83,16 @@ function buildDecorations(view: EditorView): DecorationSet {
 			enter(node) {
 				if (node.name !== "Link") return;
 
-				// Skip Link nodes that are part of a [[wikilink]] pattern (but not escaped \\[[...)
-				const prefix = state.doc.sliceString(Math.max(0, node.from - 3), node.from);
-				if (prefix.endsWith("[[") && !prefix.endsWith("\\[[")) {
-					return;
+				// Skip Link nodes that are part of a [[wikilink]] pattern
+				if (node.from >= 2 && state.doc.sliceString(node.from - 2, node.from) === "[[") {
+					// Count consecutive backslashes before "[["
+					let bsCount = 0;
+					for (let i = node.from - 3; i >= 0; i--) {
+						if (state.doc.sliceString(i, i + 1) === "\\") bsCount++;
+						else break;
+					}
+					// Odd backslashes = escaped, so treat as normal link; even = real wikilink
+					if (bsCount % 2 === 0) return;
 				}
 
 				const startLine = state.doc.lineAt(node.from).number;
