@@ -269,7 +269,9 @@ class WikilinkDecorationPlugin implements PluginValue {
 			})
 			.catch((error) => {
 				this.fetching = false;
-				// lastFileTreeVersion を更新しないことで、次の update() で再取得を試みる
+				if (this.destroyed) return;
+				// 失敗時も lastFileTreeVersion を進め、同一バージョンでの無制限リトライを防ぐ
+				this.lastFileTreeVersion = currentVersion;
 				console.error("[wikilinks] Failed to fetch filenames:", error);
 			});
 	}
