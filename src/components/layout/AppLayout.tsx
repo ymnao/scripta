@@ -127,6 +127,7 @@ export function AppLayout() {
 				highlightActiveLine: settings.highlightActiveLine,
 				fontFamily: settings.fontFamily,
 				trimTrailingWhitespace: settings.trimTrailingWhitespace,
+				showLinkCards: settings.showLinkCards,
 			});
 			setSidebarVisible(settings.sidebarVisible);
 			setLoading(false);

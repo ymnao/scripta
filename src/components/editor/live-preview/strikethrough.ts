@@ -8,6 +8,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
+import { collectCursorLines } from "./cursor-utils";
 
 const replaceDecoration = Decoration.replace({});
 const strikethroughMark = Decoration.mark({ class: "cm-strikethrough" });
@@ -16,14 +17,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
-	const cursorLines = new Set<number>();
-	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			cursorLines.add(l);
-		}
-	}
+	const cursorLines = collectCursorLines(view);
 
 	const ranges: Range<Decoration>[] = [];
 
@@ -82,6 +76,7 @@ class StrikethroughDecorationPlugin implements PluginValue {
 			update.docChanged ||
 			update.viewportChanged ||
 			update.selectionSet ||
+			update.focusChanged ||
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
 			this.decorations = buildDecorations(update.view);

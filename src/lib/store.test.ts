@@ -22,6 +22,7 @@ const {
 	saveHighlightActiveLine,
 	saveFontFamily,
 	saveTrimTrailingWhitespace,
+	saveShowLinkCards,
 } = await import("./store");
 
 describe("store", () => {
@@ -49,6 +50,7 @@ describe("store", () => {
 				highlightActiveLine: false,
 				fontFamily: "monospace",
 				trimTrailingWhitespace: true,
+				showLinkCards: true,
 			});
 		});
 
@@ -64,6 +66,7 @@ describe("store", () => {
 					highlightActiveLine: true,
 					fontFamily: "serif",
 					trimTrailingWhitespace: false,
+					showLinkCards: false,
 				};
 				return Promise.resolve(values[key]);
 			});
@@ -79,6 +82,7 @@ describe("store", () => {
 				highlightActiveLine: true,
 				fontFamily: "serif",
 				trimTrailingWhitespace: false,
+				showLinkCards: false,
 			});
 		});
 
@@ -243,6 +247,14 @@ describe("store", () => {
 		it("saves trimTrailingWhitespace to store", async () => {
 			await saveTrimTrailingWhitespace(false);
 			expect(mockStore.set).toHaveBeenCalledWith("trimTrailingWhitespace", false);
+			expect(mockStore.save).toHaveBeenCalled();
+		});
+	});
+
+	describe("saveShowLinkCards", () => {
+		it("saves showLinkCards to store", async () => {
+			await saveShowLinkCards(false);
+			expect(mockStore.set).toHaveBeenCalledWith("showLinkCards", false);
 			expect(mockStore.save).toHaveBeenCalled();
 		});
 	});

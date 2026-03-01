@@ -35,10 +35,10 @@ export function createViewForTest(
 	doc: string,
 	cursorPos?: number,
 	visibleRanges?: { from: number; to: number }[],
-	hasFocus = false,
+	hasFocus?: boolean,
 ): EditorView {
 	const state = createTestState(doc, cursorPos);
-	return createMockView(state, visibleRanges, hasFocus);
+	return createMockView(state, visibleRanges, hasFocus ?? cursorPos != null);
 }
 
 export function collectDecorations(

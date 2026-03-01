@@ -283,7 +283,7 @@ describe("buildDecorations", () => {
 
 	it("detects wikilink on first line when selection is at 0 and view is unfocused", () => {
 		// hasFocus=false の状態では選択位置が 0 でも wikilink が抑制されない
-		const view = createViewForTest("[[note]] some text", 0);
+		const view = createViewForTest("[[note]] some text", 0, undefined, false);
 		const decos = collectDecorations(buildDecorations(view, fileMap));
 		const marks = markDecorations(decos);
 		expect(marks).toHaveLength(1);

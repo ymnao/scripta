@@ -11,6 +11,7 @@ import {
 import { createFile, searchFilenames } from "../../../lib/commands";
 import { SEP_RE, joinPath } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
+import { collectCursorLines } from "./cursor-utils";
 import { collectCodeRanges, isEscaped } from "./math";
 
 const WIKILINK_RE = /\[\[([^\[\]\n\r]+)\]\]/g;
@@ -72,16 +73,7 @@ export function buildDecorations(
 	const { state } = view;
 	const tree = syntaxTree(state);
 
-	const cursorLines = new Set<number>();
-	if (view.hasFocus) {
-		for (const range of state.selection.ranges) {
-			const fromLine = state.doc.lineAt(range.from).number;
-			const toLine = state.doc.lineAt(range.to).number;
-			for (let l = fromLine; l <= toLine; l++) {
-				cursorLines.add(l);
-			}
-		}
-	}
+	const cursorLines = collectCursorLines(view);
 
 	const ranges: Range<Decoration>[] = [];
 

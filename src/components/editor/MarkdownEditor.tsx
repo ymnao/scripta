@@ -31,6 +31,7 @@ import {
 	headingDecoration,
 	horizontalRuleDecoration,
 	imageDecoration,
+	linkCardDecoration,
 	linkDecoration,
 	listDecoration,
 	listKeymap,
@@ -290,6 +291,64 @@ const staticEditorTheme = EditorView.theme({
 		opacity: "0.6",
 		textDecoration: "underline dashed",
 	},
+	".cm-link-card": {
+		display: "block",
+		border: "1px solid var(--color-border)",
+		borderRadius: "8px",
+		padding: "8px 12px",
+		maxWidth: "600px",
+		cursor: "pointer",
+		transition: "background-color 0.15s",
+		margin: "2px 0",
+		color: "inherit",
+		textDecoration: "none",
+	},
+	".cm-link-card:hover": {
+		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 8%, transparent)",
+	},
+	".cm-link-card-loading": {
+		color: "var(--color-text-secondary)",
+		fontSize: "0.85em",
+	},
+	".cm-link-card-content": {
+		display: "flex",
+		gap: "12px",
+		alignItems: "flex-start",
+	},
+	".cm-link-card-text": {
+		flex: "1",
+		minWidth: "0",
+		overflow: "hidden",
+	},
+	".cm-link-card-title": {
+		fontWeight: "600",
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+	},
+	".cm-link-card-description": {
+		fontSize: "0.8em",
+		color: "var(--color-text-secondary)",
+		marginTop: "4px",
+		display: "-webkit-box",
+		WebkitLineClamp: "2",
+		WebkitBoxOrient: "vertical",
+		overflow: "hidden",
+	},
+	".cm-link-card-domain": {
+		fontSize: "0.75em",
+		color: "var(--color-text-secondary)",
+		marginTop: "4px",
+	},
+	".cm-link-card-thumbnail-wrapper": {
+		flexShrink: "0",
+	},
+	".cm-link-card-thumbnail": {
+		width: "120px",
+		height: "80px",
+		objectFit: "cover",
+		borderRadius: "4px",
+	},
 });
 
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
@@ -349,6 +408,7 @@ export function MarkdownEditor({
 	const fontSize = useSettingsStore((s) => s.fontSize);
 	const fontFamily = useSettingsStore((s) => s.fontFamily);
 	const highlightActiveLine = useSettingsStore((s) => s.highlightActiveLine);
+	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
 	const editorRef = useRef<ReactCodeMirrorRef>(null);
@@ -431,6 +491,7 @@ export function MarkdownEditor({
 			blockquoteDecoration,
 			horizontalRuleDecoration,
 			mathDecoration,
+			...(showLinkCards ? [linkCardDecoration] : []),
 			wikilinkCompletion,
 			keymap.of([
 				{
@@ -473,7 +534,7 @@ export function MarkdownEditor({
 				});
 			}),
 		],
-		[fontSize, fontFamily],
+		[fontSize, fontFamily, showLinkCards],
 	);
 
 	return (

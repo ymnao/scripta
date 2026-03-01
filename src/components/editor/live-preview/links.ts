@@ -1,15 +1,16 @@
 import { syntaxTree } from "@codemirror/language";
-import type { Range } from "@codemirror/state";
+import { EditorSelection, type Extension, type Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
-	type EditorView,
+	EditorView,
 	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
 import { open } from "@tauri-apps/plugin-shell";
+import { collectCursorLines } from "./cursor-utils";
 
 // Only allow http/https URLs without whitespace characters.
 // data: URLs are explicitly blocked as defense-in-depth.
@@ -18,6 +19,59 @@ const SAFE_URL_RE = /^https?:\/\/[^\s]+$/i;
 export function isSafeUrl(url: string): boolean {
 	if (/^data:/i.test(url)) return false;
 	return SAFE_URL_RE.test(url);
+}
+
+/**
+ * hostname がプライベート/ループバック/リンクローカルなど
+ * WebView から直接アクセスさせたくないアドレスかどうかを判定する。
+ *
+ * DNS 解決は行わないため、ホスト名ベースで判定できる範囲のみ扱う。
+ * nip.io 等の名前解決結果がプライベート IP になるケースは
+ * バックエンド側の SsrfSafeResolver で検証する。
+ */
+export function isPrivateHostname(hostname: string): boolean {
+	const lower = hostname.toLowerCase();
+
+	if (!lower || lower === "localhost" || lower === "localhost." || lower.endsWith(".localhost")) {
+		return true;
+	}
+
+	// IPv6 形式（コロンを含む）はすべて拒否
+	// ::1, fe80::1, ::ffff:127.0.0.1 等
+	if (lower.includes(":")) return true;
+
+	// 数値 IPv4 リテラル判定
+	const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(lower);
+	if (!ipv4Match) {
+		// 通常のドメイン名はここでは拒否しない
+		return false;
+	}
+
+	const octets = ipv4Match.slice(1).map(Number);
+	if (octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) return true;
+
+	const [o1, o2] = octets;
+	if (o1 === 0) return true; // 0.0.0.0/8
+	if (o1 === 127) return true; // 127.0.0.0/8
+	if (o1 === 10) return true; // 10.0.0.0/8
+	if (o1 === 169 && o2 === 254) return true; // 169.254.0.0/16
+	if (o1 === 172 && o2 >= 16 && o2 <= 31) return true; // 172.16.0.0/12
+	if (o1 === 192 && o2 === 168) return true; // 192.168.0.0/16
+	if (o1 === 100 && o2 >= 64 && o2 <= 127) return true; // 100.64.0.0/10 (CGNAT)
+	if (o1 >= 224) return true; // 224.0.0.0+ (multicast/reserved)
+
+	return false;
+}
+
+/** isSafeUrl + rejects private/loopback hosts (for use with image src). */
+export function isSafeImageUrl(url: string): boolean {
+	if (!isSafeUrl(url)) return false;
+	try {
+		const hostname = new URL(url).hostname;
+		return !isPrivateHostname(hostname);
+	} catch {
+		return false;
+	}
 }
 
 export class LinkWidget extends WidgetType {
@@ -38,13 +92,28 @@ export class LinkWidget extends WidgetType {
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
 			anchor.href = this.url;
-			anchor.title = `${this.url} - Cmd/Ctrl+Click to open`;
-			anchor.addEventListener("click", (e) => {
-				if (!e.metaKey && !e.ctrlKey) return;
-				e.preventDefault();
+			anchor.title = this.url;
+			anchor.tabIndex = 0;
+			const openUrl = () => {
 				open(this.url).catch((error) => {
 					console.error("Failed to open external URL:", this.url, error);
 				});
+			};
+			anchor.addEventListener("click", (e) => {
+				e.preventDefault();
+				if (e.button !== 0) return;
+				openUrl();
+			});
+			anchor.addEventListener("mousedown", (e) => {
+				if (e.button !== 0) return;
+				e.preventDefault();
+			});
+			anchor.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					e.stopPropagation();
+					openUrl();
+				}
 			});
 		} else {
 			anchor.className = "cm-link-widget cm-link-widget-disabled";
@@ -56,8 +125,12 @@ export class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		const me = event as MouseEvent;
-		return event.type === "click" && (me.metaKey || me.ctrlKey);
+		// 安全な URL のときだけマウスイベントをウィジェット側で処理し、
+		// 無効リンクの場合はエディタ側に処理させてカーソル移動等を可能にする
+		if ((event.type === "mousedown" || event.type === "click") && isSafeUrl(this.url)) {
+			return true;
+		}
+		return false;
 	}
 }
 
@@ -65,14 +138,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
-	const cursorLines = new Set<number>();
-	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			cursorLines.add(l);
-		}
-	}
+	const cursorLines = collectCursorLines(view);
 
 	const ranges: Range<Decoration>[] = [];
 
@@ -159,6 +225,7 @@ class LinkDecorationPlugin implements PluginValue {
 			update.docChanged ||
 			update.viewportChanged ||
 			update.selectionSet ||
+			update.focusChanged ||
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
 			this.decorations = buildDecorations(update.view);
@@ -166,6 +233,57 @@ class LinkDecorationPlugin implements PluginValue {
 	}
 }
 
-export const linkDecoration = ViewPlugin.fromClass(LinkDecorationPlugin, {
+const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
 });
+
+export const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
+
+/** Escape label text for safe use inside Markdown link brackets. */
+export function escapeMarkdownLabel(label: string): string {
+	return label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+}
+
+/** Build a Markdown link from a pasted URL and optional selected text. */
+export function buildMarkdownLink(url: string, selectedText: string): string {
+	const rawLabel = selectedText || url;
+	const label = escapeMarkdownLabel(rawLabel);
+	// angle bracket で URL を囲み、URL 内の ')' 等でリンクが壊れないようにする
+	return `[${label}](<${url}>)`;
+}
+
+const urlPasteHandler = EditorView.domEventHandlers({
+	paste(event: ClipboardEvent, view: EditorView) {
+		const text = event.clipboardData?.getData("text/plain")?.trim();
+		if (!text || !URL_PASTE_RE.test(text)) return false;
+
+		const { state } = view;
+		const tree = syntaxTree(state);
+
+		// コードブロック内では変換しない
+		for (const range of state.selection.ranges) {
+			let node = tree.resolveInner(range.from);
+			while (node) {
+				if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
+					return false;
+				}
+				if (!node.parent) break;
+				node = node.parent;
+			}
+		}
+
+		event.preventDefault();
+		const changes = state.changeByRange((range) => {
+			const selected = state.doc.sliceString(range.from, range.to);
+			const insert = buildMarkdownLink(text, selected);
+			return {
+				range: EditorSelection.cursor(range.from + insert.length),
+				changes: { from: range.from, to: range.to, insert },
+			};
+		});
+		view.dispatch({ ...changes, userEvent: "input.paste" });
+		return true;
+	},
+});
+
+export const linkDecoration: Extension = [linkPlugin, urlPasteHandler];
