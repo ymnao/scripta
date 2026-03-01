@@ -69,8 +69,8 @@ describe("buildFileMap", () => {
 		expect(map.get("todo")).toBe("/workspace/todo.md");
 	});
 
-	it("uses first occurrence for duplicate basenames", () => {
-		const map = buildFileMap(["/workspace/a/note.md", "/workspace/b/note.md"]);
+	it("uses lexicographically smallest path for duplicate basenames", () => {
+		const map = buildFileMap(["/workspace/b/note.md", "/workspace/a/note.md"]);
 		expect(map.get("note")).toBe("/workspace/a/note.md");
 	});
 

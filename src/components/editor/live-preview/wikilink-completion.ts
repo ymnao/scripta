@@ -1,9 +1,11 @@
 import {
+	type Completion,
 	type CompletionContext,
 	type CompletionResult,
 	autocompletion,
 } from "@codemirror/autocomplete";
 import type { Extension } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { searchFilenames } from "../../../lib/commands";
 import { useWorkspaceStore } from "../../../stores/workspace";
 
@@ -37,23 +39,27 @@ export async function wikilinkCompletionSource(
 	const query = match.text.slice(2).toLowerCase();
 	const files = query ? cachedFiles.filter((f) => f.toLowerCase().includes(query)) : cachedFiles;
 
-	return {
-		from: match.from + 2,
-		options: files.map((filePath) => {
-			const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.md$/, "") ?? filePath;
-			return {
+	const seen = new Set<string>();
+	const options = files.flatMap((filePath) => {
+		const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.md$/, "") ?? filePath;
+		if (seen.has(fileName)) return [];
+		seen.add(fileName);
+		return [
+			{
 				label: fileName,
 				detail: filePath,
-				apply: (view, _completion, from, to) => {
+				apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
 					const after = view.state.doc.sliceString(to, to + 2);
 					const skip = after === "]]" ? 2 : after.startsWith("]") ? 1 : 0;
 					view.dispatch({
 						changes: { from, to: to + skip, insert: `${fileName}]]` },
 					});
 				},
-			};
-		}),
-	};
+			},
+		];
+	});
+
+	return { from: match.from + 2, options };
 }
 
 export const wikilinkCompletion: Extension = autocompletion({

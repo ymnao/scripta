@@ -45,7 +45,9 @@ export function buildFileMap(files: string[]): Map<string, string> {
 	for (const filePath of files) {
 		const basename = filePath.split(/[/\\]/).pop()?.replace(/\.md$/, "") ?? "";
 		const key = basename.normalize("NFC");
-		if (key && !map.has(key)) {
+		if (!key) continue;
+		const existing = map.get(key);
+		if (!existing || filePath.localeCompare(existing) < 0) {
 			map.set(key, filePath);
 		}
 	}
@@ -188,14 +190,14 @@ function createWikilinkClickHandler() {
 				navigateInTab(resolvedPath);
 			}
 
-			// Place cursor after the wikilink so the line isn't "active"
+			// Move cursor to the end of the wikilink decoration to avoid treating the wikilink itself as "active"
 			const pos = view.posAtDOM(wikilinkEl);
 			const plugin = view.plugin(wikilinkPlugin);
 			if (plugin) {
 				let endPos = -1;
 				const iter = plugin.decorations.iter();
 				while (iter.value) {
-					if (iter.from <= pos && pos <= iter.to) {
+					if (iter.from <= pos && pos < iter.to) {
 						endPos = iter.to;
 						break;
 					}
