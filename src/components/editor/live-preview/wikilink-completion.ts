@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "../../../stores/workspace";
 
 let cachedFiles: string[] = [];
 let cachedVersion = -1;
+let cachedWorkspacePath = "";
 
 export async function wikilinkCompletionSource(
 	context: CompletionContext,
@@ -20,9 +21,10 @@ export async function wikilinkCompletionSource(
 	if (!workspacePath) return null;
 
 	const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
-	if (currentVersion !== cachedVersion) {
+	if (currentVersion !== cachedVersion || workspacePath !== cachedWorkspacePath) {
 		cachedFiles = await searchFilenames(workspacePath, "");
 		cachedVersion = currentVersion;
+		cachedWorkspacePath = workspacePath;
 	}
 
 	const query = match.text.slice(2).toLowerCase();

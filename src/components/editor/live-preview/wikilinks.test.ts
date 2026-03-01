@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { collectDecorations, createViewForTest, markDecorations } from "./test-helper";
-import { buildDecorations, buildFileMap, parseWikilink } from "./wikilinks";
+import { buildDecorations, buildFileMap, parseWikilink, resolveWikilinkPath } from "./wikilinks";
 
 vi.mock("../../../stores/workspace", () => ({
 	useWorkspaceStore: {
@@ -30,6 +30,31 @@ describe("parseWikilink", () => {
 
 	it("handles pipe in display text", () => {
 		expect(parseWikilink("page|a|b")).toEqual({ page: "page", display: "a|b" });
+	});
+});
+
+describe("resolveWikilinkPath", () => {
+	it("joins workspace path and page name with .md extension", () => {
+		expect(resolveWikilinkPath("note")).toBe("/workspace/note.md");
+	});
+
+	it("does not double .md extension", () => {
+		expect(resolveWikilinkPath("note.md")).toBe("/workspace/note.md");
+	});
+
+	it("rejects page names containing path separators", () => {
+		expect(resolveWikilinkPath("../secret")).toBe("../secret");
+		expect(resolveWikilinkPath("sub/note")).toBe("sub/note");
+		expect(resolveWikilinkPath("sub\\note")).toBe("sub\\note");
+	});
+
+	it("rejects dot and double-dot names", () => {
+		expect(resolveWikilinkPath(".")).toBe(".");
+		expect(resolveWikilinkPath("..")).toBe("..");
+	});
+
+	it("rejects names with embedded .. segments", () => {
+		expect(resolveWikilinkPath("foo..bar")).toBe("foo..bar");
 	});
 });
 

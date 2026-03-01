@@ -9,6 +9,7 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { createFile, searchFilenames } from "../../../lib/commands";
+import { SEP_RE, joinPath } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCodeRanges, isEscaped } from "./math";
 
@@ -30,10 +31,13 @@ export function resolveWikilinkPath(pageName: string): string {
 	const workspacePath = useWorkspaceStore.getState().workspacePath;
 	if (!workspacePath) return pageName;
 
+	// パストラバーサル防止: パス区切り文字・".."・"." を含む名前は拒否
+	if (SEP_RE.test(pageName) || pageName === "." || pageName === ".." || pageName.includes("..")) {
+		return pageName;
+	}
+
 	const fileName = pageName.endsWith(".md") ? pageName : `${pageName}.md`;
-	const lastSepIndex = Math.max(workspacePath.lastIndexOf("/"), workspacePath.lastIndexOf("\\"));
-	const sep = lastSepIndex !== -1 ? workspacePath[lastSepIndex] : "/";
-	return `${workspacePath}${sep}${fileName}`;
+	return joinPath(workspacePath, fileName);
 }
 
 export function buildFileMap(files: string[]): Map<string, string> {
@@ -98,7 +102,7 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 			}
 			if (onCursorLine) continue;
 
-			const { page, display } = parseWikilink(match[1]);
+			const { page } = parseWikilink(match[1]);
 			const stripped = page.endsWith(".md") ? page.slice(0, -3) : page;
 			const normalizedPage = stripped.normalize("NFC");
 			const mapped = fileMap.get(normalizedPage);

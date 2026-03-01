@@ -4,11 +4,14 @@ import { createTestState } from "./test-helper";
 
 const mockSearchFilenames = vi.fn(() => Promise.resolve([] as string[]));
 let mockFileTreeVersion = 0;
+let mockWorkspacePath = "/workspace";
 
 vi.mock("../../../stores/workspace", () => ({
 	useWorkspaceStore: {
 		getState: () => ({
-			workspacePath: "/workspace",
+			get workspacePath() {
+				return mockWorkspacePath;
+			},
 			get fileTreeVersion() {
 				return mockFileTreeVersion;
 			},
@@ -30,6 +33,7 @@ function createContext(doc: string, pos: number): CompletionContext {
 describe("wikilinkCompletion", () => {
 	beforeEach(() => {
 		mockSearchFilenames.mockClear();
+		mockWorkspacePath = "/workspace";
 		// Bump version to invalidate cache for each test
 		mockFileTreeVersion++;
 	});
@@ -73,6 +77,19 @@ describe("wikilinkCompletion", () => {
 		const result = await wikilinkCompletionSource(createContext("[[n", 3));
 		expect(mockSearchFilenames).toHaveBeenCalledTimes(1);
 		expect(result?.options).toHaveLength(1);
+	});
+
+	it("invalidates cache when workspacePath changes", async () => {
+		mockSearchFilenames.mockResolvedValueOnce(["/workspace/note.md"]);
+		await wikilinkCompletionSource(createContext("[[", 2));
+		expect(mockSearchFilenames).toHaveBeenCalledTimes(1);
+
+		// Switch workspace (same version but different path)
+		mockWorkspacePath = "/other-workspace";
+		mockSearchFilenames.mockResolvedValueOnce(["/other-workspace/other.md"]);
+		const result = await wikilinkCompletionSource(createContext("[[", 2));
+		expect(mockSearchFilenames).toHaveBeenCalledTimes(2);
+		expect(result?.options[0].label).toBe("other");
 	});
 
 	it("sets from to after [[", async () => {
