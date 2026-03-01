@@ -22,9 +22,16 @@ export async function wikilinkCompletionSource(
 
 	const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
 	if (currentVersion !== cachedVersion || workspacePath !== cachedWorkspacePath) {
-		cachedFiles = await searchFilenames(workspacePath, "");
-		cachedVersion = currentVersion;
-		cachedWorkspacePath = workspacePath;
+		try {
+			cachedFiles = await searchFilenames(workspacePath, "");
+			cachedVersion = currentVersion;
+			cachedWorkspacePath = workspacePath;
+		} catch {
+			cachedFiles = [];
+			cachedVersion = -1;
+			cachedWorkspacePath = "";
+			return null;
+		}
 	}
 
 	const query = match.text.slice(2).toLowerCase();

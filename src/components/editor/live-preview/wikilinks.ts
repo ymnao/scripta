@@ -103,6 +103,7 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 			if (onCursorLine) continue;
 
 			const { page } = parseWikilink(match[1]);
+			if (!page) continue;
 			const stripped = page.endsWith(".md") ? page.slice(0, -3) : page;
 			const normalizedPage = stripped.normalize("NFC");
 			const mapped = fileMap.get(normalizedPage);
@@ -176,6 +177,11 @@ function createWikilinkClickHandler() {
 					})
 					.catch((error) => {
 						console.error("Failed to create wikilink target:", error);
+						// ファイルが既に存在する場合（fileMap未ロード等）はナビゲーションにフォールバック
+						const msg = String(error).toLowerCase();
+						if (msg.includes("already exists") || msg.includes("eexist")) {
+							navigateInTab(resolvedPath);
+						}
 					});
 			} else {
 				navigateInTab(resolvedPath);
@@ -230,7 +236,7 @@ class WikilinkDecorationPlugin implements PluginValue {
 				this.fileMap = buildFileMap(files);
 				this.lastFileTreeVersion = currentVersion;
 				this.pendingFileMapUpdate = true;
-				this.view.dispatch();
+				this.view.dispatch({});
 			})
 			.catch((error) => {
 				this.lastFileTreeVersion = currentVersion;

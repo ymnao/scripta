@@ -105,4 +105,10 @@ describe("wikilinkCompletion", () => {
 		expect(result?.options[0].label).toBe("my-note");
 		expect(result?.options[0].detail).toBe("/workspace/sub/my-note.md");
 	});
+
+	it("returns null on searchFilenames failure", async () => {
+		mockSearchFilenames.mockRejectedValueOnce(new Error("invoke error"));
+		const result = await wikilinkCompletionSource(createContext("[[", 2));
+		expect(result).toBeNull();
+	});
 });

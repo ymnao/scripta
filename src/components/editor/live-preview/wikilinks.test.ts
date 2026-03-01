@@ -31,6 +31,10 @@ describe("parseWikilink", () => {
 	it("handles pipe in display text", () => {
 		expect(parseWikilink("page|a|b")).toEqual({ page: "page", display: "a|b" });
 	});
+
+	it("returns empty page for pipe-only content", () => {
+		expect(parseWikilink("|alias")).toEqual({ page: "", display: "alias" });
+	});
 });
 
 describe("resolveWikilinkPath", () => {
@@ -139,6 +143,13 @@ describe("buildDecorations", () => {
 		expect(decos).toHaveLength(4);
 		const attrs = (marks[0].value.spec as { attributes: Record<string, string> }).attributes;
 		expect(attrs["data-wikilink-exists"]).toBe("1");
+	});
+
+	it("skips [[|alias]] with empty page name", () => {
+		const view = createViewForTest("text\n\n[[|alias]]", 0);
+		const decos = collectDecorations(buildDecorations(view, fileMap));
+		const marks = markDecorations(decos);
+		expect(marks).toHaveLength(0);
 	});
 
 	it("marks non-existing files with exists=false", () => {
