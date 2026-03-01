@@ -132,8 +132,10 @@ describe("isSafeImageUrl", () => {
 });
 
 describe("isPrivateHostname", () => {
-	it("rejects localhost", () => {
+	it("rejects localhost variants", () => {
 		expect(isPrivateHostname("localhost")).toBe(true);
+		expect(isPrivateHostname("localhost.")).toBe(true);
+		expect(isPrivateHostname("sub.localhost")).toBe(true);
 	});
 
 	it("rejects empty string", () => {

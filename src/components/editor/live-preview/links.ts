@@ -32,7 +32,9 @@ export function isSafeUrl(url: string): boolean {
 export function isPrivateHostname(hostname: string): boolean {
 	const lower = hostname.toLowerCase();
 
-	if (!lower || lower === "localhost") return true;
+	if (!lower || lower === "localhost" || lower === "localhost." || lower.endsWith(".localhost")) {
+		return true;
+	}
 
 	// IPv6 形式（コロンを含む）はすべて拒否
 	// ::1, fe80::1, ::ffff:127.0.0.1 等

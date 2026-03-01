@@ -91,29 +91,32 @@ export class LinkCardWidget extends WidgetType {
 
 		if (isSafeUrl(this.url)) {
 			container.href = this.url;
-		}
-		container.tabIndex = 0;
-		const openUrl = () => {
-			open(this.url).catch((error) => {
-				console.error("Failed to open URL:", this.url, error);
-			});
-		};
-		container.addEventListener("click", (e) => {
-			e.preventDefault();
-			if (e.button !== 0) return;
-			openUrl();
-		});
-		container.addEventListener("mousedown", (e) => {
-			if (e.button !== 0) return;
-			e.preventDefault();
-		});
-		container.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" || e.key === " ") {
+			container.tabIndex = 0;
+			const openUrl = () => {
+				open(this.url).catch((error) => {
+					console.error("Failed to open URL:", this.url, error);
+				});
+			};
+			container.addEventListener("click", (e) => {
 				e.preventDefault();
-				e.stopPropagation();
+				if (e.button !== 0) return;
 				openUrl();
-			}
-		});
+			});
+			container.addEventListener("mousedown", (e) => {
+				if (e.button !== 0) return;
+				e.preventDefault();
+			});
+			container.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					e.stopPropagation();
+					openUrl();
+				}
+			});
+		} else {
+			container.tabIndex = -1;
+			container.setAttribute("aria-disabled", "true");
+		}
 
 		if (!this.ogp) {
 			// Loading state
@@ -171,8 +174,11 @@ export class LinkCardWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		// true = エディタがイベントを無視（ウィジェット側で処理）
-		if (event.type === "mousedown" || event.type === "click") return true;
+		// 安全なURLのときだけマウスイベントをウィジェット側で処理し、
+		// それ以外はエディタにイベントを渡して基本操作を妨げない
+		if ((event.type === "mousedown" || event.type === "click") && isSafeUrl(this.url)) {
+			return true;
+		}
 		return false;
 	}
 }
@@ -188,17 +194,18 @@ function isInsideCodeBlock(
 	return false;
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
+interface StandaloneUrlInfo {
+	line: { from: number; to: number };
+	url: string;
+}
+
+function forEachStandaloneUrl(view: EditorView, cb: (info: StandaloneUrlInfo) => void): void {
 	const { state } = view;
 	const tree = syntaxTree(state);
-
 	const cursorLines = collectCursorLines(view);
-
-	const ranges: Range<Decoration>[] = [];
 
 	for (const { from, to } of view.visibleRanges) {
 		const codeRanges = collectCodeRanges(tree, from, to);
-
 		const startLine = state.doc.lineAt(from).number;
 		const endLine = state.doc.lineAt(to).number;
 
@@ -211,18 +218,26 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 			if (isInsideCodeBlock(line.from, line.to, codeRanges)) continue;
 
-			const entry = ogpCache.get(url);
-			// Skip if error — show as normal text
-			if (entry?.status === "error") continue;
-
-			const ogp = entry?.status === "loaded" ? entry.data : null;
-			ranges.push(
-				Decoration.replace({
-					widget: new LinkCardWidget(url, ogp),
-				}).range(line.from, line.to),
-			);
+			cb({ line: { from: line.from, to: line.to }, url });
 		}
 	}
+}
+
+function buildDecorations(view: EditorView): DecorationSet {
+	const ranges: Range<Decoration>[] = [];
+
+	forEachStandaloneUrl(view, ({ line, url }) => {
+		const entry = ogpCache.get(url);
+		// Skip if error — show as normal text
+		if (entry?.status === "error") return;
+
+		const ogp = entry?.status === "loaded" ? entry.data : null;
+		ranges.push(
+			Decoration.replace({
+				widget: new LinkCardWidget(url, ogp),
+			}).range(line.from, line.to),
+		);
+	});
 
 	return Decoration.set(ranges, true);
 }
@@ -241,55 +256,37 @@ class LinkCardDecorationPlugin implements PluginValue {
 	}
 
 	private fetchMissingOgp(view: EditorView) {
-		const { state } = view;
-		const tree = syntaxTree(state);
-		const cursorLines = collectCursorLines(view);
-
-		for (const { from, to } of view.visibleRanges) {
-			const codeRanges = collectCodeRanges(tree, from, to);
-			const startLine = state.doc.lineAt(from).number;
-			const endLine = state.doc.lineAt(to).number;
-
-			for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
-				if (cursorLines.has(lineNum)) continue;
-
-				const line = state.doc.line(lineNum);
-				const url = isStandaloneUrlLine(line.text);
-				if (!url) continue;
-
-				if (isInsideCodeBlock(line.from, line.to, codeRanges)) continue;
-
-				if (this.fetchingUrls.has(url)) continue;
-				const cached = ogpCache.get(url);
-				if (cached) {
-					if (cached.status === "error") {
-						if (Date.now() - cached.errorAt < ERROR_RETRY_MS) continue;
-					} else if (Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-						continue;
-					}
+		forEachStandaloneUrl(view, ({ url }) => {
+			if (this.fetchingUrls.has(url)) return;
+			const cached = ogpCache.get(url);
+			if (cached) {
+				if (cached.status === "error") {
+					if (Date.now() - cached.errorAt < ERROR_RETRY_MS) return;
+				} else if (Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+					return;
 				}
-
-				evictStaleCache();
-				ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
-				this.fetchingUrls.add(url);
-
-				fetchOgp(url)
-					.then((data) => {
-						this.fetchingUrls.delete(url);
-						ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
-						if (this.destroyed) return;
-						this.pendingUpdate = true;
-						this.view.dispatch({});
-					})
-					.catch(() => {
-						this.fetchingUrls.delete(url);
-						ogpCache.set(url, { status: "error", errorAt: Date.now() });
-						if (this.destroyed) return;
-						this.pendingUpdate = true;
-						this.view.dispatch({});
-					});
 			}
-		}
+
+			evictStaleCache();
+			ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
+			this.fetchingUrls.add(url);
+
+			fetchOgp(url)
+				.then((data) => {
+					this.fetchingUrls.delete(url);
+					ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
+					if (this.destroyed) return;
+					this.pendingUpdate = true;
+					this.view.dispatch({});
+				})
+				.catch(() => {
+					this.fetchingUrls.delete(url);
+					ogpCache.set(url, { status: "error", errorAt: Date.now() });
+					if (this.destroyed) return;
+					this.pendingUpdate = true;
+					this.view.dispatch({});
+				});
+		});
 	}
 
 	update(update: ViewUpdate) {

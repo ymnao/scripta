@@ -45,6 +45,9 @@ impl OgpCache {
     }
 
     fn insert(&mut self, url: String, data: OgpData) {
+        // Remove expired entries before inserting to keep the cache healthy
+        self.entries
+            .retain(|_, entry| entry.fetched_at.elapsed().as_secs() < CACHE_TTL_SECS);
         if self.entries.len() >= MAX_CACHE_ENTRIES && !self.entries.contains_key(&url) {
             // Remove the oldest entry
             if let Some(oldest_key) = self
