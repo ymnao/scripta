@@ -96,6 +96,11 @@ describe("isSafeImageUrl", () => {
 		expect(isSafeImageUrl("http://192.168.1.1/image.png")).toBe(false);
 	});
 
+	it("rejects link-local 169.254.x IPs", () => {
+		expect(isSafeImageUrl("http://169.254.0.1/image.png")).toBe(false);
+		expect(isSafeImageUrl("http://169.254.169.254/latest/meta-data")).toBe(false);
+	});
+
 	it("rejects IPv6 loopback", () => {
 		expect(isSafeImageUrl("http://[::1]/image.png")).toBe(false);
 	});

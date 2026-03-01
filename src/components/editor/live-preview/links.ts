@@ -22,7 +22,7 @@ export function isSafeUrl(url: string): boolean {
 }
 
 const PRIVATE_HOST_RE =
-	/^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|0\.0\.0\.0|\[::1\]|\[fe80:[^\]]*\]|\[fc00:[^\]]*\]|\[fd[0-9a-f]{2}:[^\]]*\])$/i;
+	/^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1\]|\[fe80:[^\]]*\]|\[fc00:[^\]]*\]|\[fd[0-9a-f]{2}:[^\]]*\])$/i;
 
 /** isSafeUrl + rejects private/loopback hosts (for use with image src). */
 export function isSafeImageUrl(url: string): boolean {
