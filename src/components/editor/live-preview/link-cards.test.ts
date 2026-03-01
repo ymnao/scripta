@@ -152,6 +152,50 @@ describe("LinkCardWidget", () => {
 			expect(img.src).toBe("https://example.com/image.png");
 		});
 
+		it("resolves relative image URL using ogp.url as base", () => {
+			const ogp = {
+				title: "Title",
+				description: null,
+				image: "/og.png",
+				siteName: null,
+				url: "https://example.com/page",
+			};
+			const widget = new LinkCardWidget("https://example.com/page", ogp);
+			const dom = widget.toDOM();
+			const img = dom.querySelector(".cm-link-card-thumbnail") as HTMLImageElement;
+			expect(img).not.toBeNull();
+			expect(img.src).toBe("https://example.com/og.png");
+		});
+
+		it("resolves relative image URL using card url when ogp.url is empty", () => {
+			const ogp = {
+				title: "Title",
+				description: null,
+				image: "/images/thumb.jpg",
+				siteName: null,
+				url: "",
+			};
+			const widget = new LinkCardWidget("https://other.com/page", ogp);
+			const dom = widget.toDOM();
+			const img = dom.querySelector(".cm-link-card-thumbnail") as HTMLImageElement;
+			expect(img).not.toBeNull();
+			expect(img.src).toBe("https://other.com/images/thumb.jpg");
+		});
+
+		it("skips thumbnail when image URL resolution fails", () => {
+			const ogp = {
+				title: "Title",
+				description: null,
+				image: "://invalid",
+				siteName: null,
+				url: "",
+			};
+			const widget = new LinkCardWidget("not-a-url", ogp);
+			const dom = widget.toDOM();
+			const img = dom.querySelector(".cm-link-card-thumbnail");
+			expect(img).toBeNull();
+		});
+
 		it("shows domain name when siteName is null", () => {
 			const ogp = {
 				title: "Title",

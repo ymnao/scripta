@@ -154,12 +154,22 @@ export class LinkCardWidget extends WidgetType {
 
 		content.appendChild(textSection);
 
-		if (this.ogp.image && isSafeImageUrl(this.ogp.image)) {
+		let resolvedImageUrl: string | undefined = this.ogp.image ?? undefined;
+		if (resolvedImageUrl) {
+			try {
+				const baseUrl = this.ogp.url || this.url;
+				resolvedImageUrl = new URL(resolvedImageUrl, baseUrl).toString();
+			} catch {
+				resolvedImageUrl = undefined;
+			}
+		}
+
+		if (resolvedImageUrl && isSafeImageUrl(resolvedImageUrl)) {
 			const imgWrapper = document.createElement("div");
 			imgWrapper.className = "cm-link-card-thumbnail-wrapper";
 			const img = document.createElement("img");
 			img.className = "cm-link-card-thumbnail";
-			img.src = this.ogp.image;
+			img.src = resolvedImageUrl;
 			img.alt = this.ogp.title || "";
 			img.loading = "lazy";
 			img.addEventListener("error", () => {
