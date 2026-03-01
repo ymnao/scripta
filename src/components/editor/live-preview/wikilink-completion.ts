@@ -41,7 +41,7 @@ export async function wikilinkCompletionSource(
 
 	const seen = new Set<string>();
 	const options = files.flatMap((filePath) => {
-		const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.md$/, "") ?? filePath;
+		const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.md$/i, "") ?? filePath;
 		if (seen.has(fileName)) return [];
 		seen.add(fileName);
 		return [

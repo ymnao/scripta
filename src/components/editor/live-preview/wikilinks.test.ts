@@ -46,6 +46,10 @@ describe("resolveWikilinkPath", () => {
 		expect(resolveWikilinkPath("note.md")).toBe("/workspace/note.md");
 	});
 
+	it("does not double .MD extension (case-insensitive)", () => {
+		expect(resolveWikilinkPath("note.MD")).toBe("/workspace/note.MD");
+	});
+
 	it("returns null for page names containing path separators", () => {
 		expect(resolveWikilinkPath("../secret")).toBeNull();
 		expect(resolveWikilinkPath("sub/note")).toBeNull();
@@ -80,6 +84,11 @@ describe("buildFileMap", () => {
 		const map = buildFileMap([nfdPath]);
 		// NFC lookup: が(U+304C)
 		expect(map.get("\u304C")).toBe(nfdPath);
+	});
+
+	it("strips .MD extension case-insensitively", () => {
+		const map = buildFileMap(["/workspace/README.MD"]);
+		expect(map.get("README")).toBe("/workspace/README.MD");
 	});
 
 	it("handles kanji file names", () => {
@@ -285,5 +294,31 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildDecorations(view, fileMap));
 		const marks = markDecorations(decos);
 		expect(marks).toHaveLength(1);
+	});
+
+	it("skips decorations when fileMap is null (not yet loaded)", () => {
+		const view = createViewForTest("text\n\n[[note]]", 0);
+		const decos = collectDecorations(buildDecorations(view, null));
+		expect(markDecorations(decos)).toHaveLength(0);
+	});
+
+	it("decorates wikilinks when fileMap is empty (loaded but no files)", () => {
+		const emptyMap = buildFileMap([]);
+		const view = createViewForTest("text\n\n[[note]]", 0);
+		const decos = collectDecorations(buildDecorations(view, emptyMap));
+		const marks = markDecorations(decos);
+		expect(marks).toHaveLength(1);
+		const attrs = (marks[0].value.spec as { attributes: Record<string, string> }).attributes;
+		expect(attrs["data-wikilink-exists"]).toBe("0");
+	});
+
+	it("handles case-insensitive .md extension in page name", () => {
+		const map = buildFileMap(["/workspace/README.MD"]);
+		const view = createViewForTest("text\n\n[[README.MD]]", 0);
+		const decos = collectDecorations(buildDecorations(view, map));
+		const marks = markDecorations(decos);
+		expect(marks).toHaveLength(1);
+		const attrs = (marks[0].value.spec as { attributes: Record<string, string> }).attributes;
+		expect(attrs["data-wikilink-exists"]).toBe("1");
 	});
 });

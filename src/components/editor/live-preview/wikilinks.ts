@@ -36,14 +36,14 @@ export function resolveWikilinkPath(pageName: string): string | null {
 		return null;
 	}
 
-	const fileName = pageName.endsWith(".md") ? pageName : `${pageName}.md`;
+	const fileName = pageName.toLowerCase().endsWith(".md") ? pageName : `${pageName}.md`;
 	return joinPath(workspacePath, fileName);
 }
 
 export function buildFileMap(files: string[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const filePath of files) {
-		const basename = filePath.split(/[/\\]/).pop()?.replace(/\.md$/, "") ?? "";
+		const basename = filePath.split(/[/\\]/).pop()?.replace(/\.md$/i, "") ?? "";
 		const key = basename.normalize("NFC");
 		if (!key) continue;
 		const existing = map.get(key);
@@ -65,7 +65,10 @@ function overlapsCodeBlock(
 	return false;
 }
 
-export function buildDecorations(view: EditorView, fileMap: Map<string, string>): DecorationSet {
+export function buildDecorations(
+	view: EditorView,
+	fileMap: Map<string, string> | null,
+): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
@@ -106,14 +109,14 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 
 			const { page } = parseWikilink(match[1]);
 			if (!page) continue;
-			const stripped = page.endsWith(".md") ? page.slice(0, -3) : page;
+			const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
 			const normalizedPage = stripped.normalize("NFC");
-			const fileMapLoaded = fileMap.size > 0;
-			const mapped = fileMap.get(normalizedPage);
+			const fileMapLoaded = fileMap !== null;
+			const mapped = fileMapLoaded ? fileMap.get(normalizedPage) : undefined;
 			// fileMap 未ロード時はフォールバックパスでの誤作成を防ぐため、デコレーションを作らない
 			const resolvedPath = fileMapLoaded ? (mapped ?? resolveWikilinkPath(normalizedPage)) : null;
 			if (!resolvedPath) continue;
-			const exists = mapped != null;
+			const exists = fileMapLoaded && mapped != null;
 
 			// Hide [[ and ]]
 			ranges.push(hideBrackets.range(matchFrom, matchFrom + 2));
@@ -160,10 +163,56 @@ export function buildDecorations(view: EditorView, fileMap: Map<string, string>)
 	return Decoration.set(ranges, true);
 }
 
+function navigateWikilink(wikilinkEl: HTMLElement, view: EditorView) {
+	const resolvedPath = wikilinkEl.dataset.wikilinkPath;
+	if (!resolvedPath) return;
+	const exists = wikilinkEl.dataset.wikilinkExists === "1";
+
+	const { navigateInTab, bumpFileTreeVersion } = useWorkspaceStore.getState();
+	if (!exists) {
+		createFile(resolvedPath)
+			.then(() => {
+				bumpFileTreeVersion();
+				navigateInTab(resolvedPath);
+			})
+			.catch((error) => {
+				console.error("Failed to create wikilink target:", error);
+				// ファイルが既に存在する場合（fileMap未ロード等）はナビゲーションにフォールバック
+				const msg = String(error).toLowerCase();
+				if (msg.includes("already exists") || msg.includes("eexist")) {
+					navigateInTab(resolvedPath);
+				}
+			});
+	} else {
+		navigateInTab(resolvedPath);
+	}
+
+	// Move cursor to the end of the wikilink decoration to avoid treating the wikilink itself as "active"
+	const pos = view.posAtDOM(wikilinkEl);
+	const plugin = view.plugin(wikilinkPlugin);
+	if (plugin) {
+		let endPos = -1;
+		const iter = plugin.decorations.iter();
+		while (iter.value) {
+			if (iter.from <= pos && pos < iter.to) {
+				endPos = iter.to;
+				break;
+			}
+			if (iter.from > pos) break;
+			iter.next();
+		}
+		if (endPos !== -1) {
+			view.dispatch({ selection: EditorSelection.cursor(endPos) });
+			view.focus();
+		}
+	}
+}
+
 function createWikilinkClickHandler() {
 	return EditorView.domEventHandlers({
 		mousedown(event: MouseEvent, view: EditorView) {
-			const target = event.target as HTMLElement;
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
 			const wikilinkEl = target.closest<HTMLElement>("[data-wikilink-path]");
 			if (!wikilinkEl) return false;
 
@@ -171,50 +220,18 @@ function createWikilinkClickHandler() {
 			if (event.button !== 0) return false;
 
 			event.preventDefault();
+			navigateWikilink(wikilinkEl, view);
+			return true;
+		},
+		keydown(event: KeyboardEvent, view: EditorView) {
+			if (event.key !== "Enter" && event.key !== " ") return false;
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const wikilinkEl = target.closest<HTMLElement>("[data-wikilink-path]");
+			if (!wikilinkEl) return false;
 
-			const resolvedPath = wikilinkEl.dataset.wikilinkPath;
-			if (!resolvedPath) return true;
-			const exists = wikilinkEl.dataset.wikilinkExists === "1";
-
-			const { navigateInTab, bumpFileTreeVersion } = useWorkspaceStore.getState();
-			if (!exists) {
-				createFile(resolvedPath)
-					.then(() => {
-						bumpFileTreeVersion();
-						navigateInTab(resolvedPath);
-					})
-					.catch((error) => {
-						console.error("Failed to create wikilink target:", error);
-						// ファイルが既に存在する場合（fileMap未ロード等）はナビゲーションにフォールバック
-						const msg = String(error).toLowerCase();
-						if (msg.includes("already exists") || msg.includes("eexist")) {
-							navigateInTab(resolvedPath);
-						}
-					});
-			} else {
-				navigateInTab(resolvedPath);
-			}
-
-			// Move cursor to the end of the wikilink decoration to avoid treating the wikilink itself as "active"
-			const pos = view.posAtDOM(wikilinkEl);
-			const plugin = view.plugin(wikilinkPlugin);
-			if (plugin) {
-				let endPos = -1;
-				const iter = plugin.decorations.iter();
-				while (iter.value) {
-					if (iter.from <= pos && pos < iter.to) {
-						endPos = iter.to;
-						break;
-					}
-					if (iter.from > pos) break;
-					iter.next();
-				}
-				if (endPos !== -1) {
-					view.dispatch({ selection: EditorSelection.cursor(endPos) });
-					view.focus();
-				}
-			}
-
+			event.preventDefault();
+			navigateWikilink(wikilinkEl, view);
 			return true;
 		},
 	});
@@ -222,7 +239,7 @@ function createWikilinkClickHandler() {
 
 class WikilinkDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
-	fileMap: Map<string, string> = new Map();
+	fileMap: Map<string, string> | null = null;
 	lastFileTreeVersion = -1;
 	view: EditorView;
 	destroyed = false;
