@@ -100,11 +100,12 @@ export class LinkCardWidget extends WidgetType {
 		};
 		container.addEventListener("click", (e) => {
 			e.preventDefault();
+			if (e.button !== 0) return;
+			openUrl();
 		});
 		container.addEventListener("mousedown", (e) => {
 			if (e.button !== 0) return;
 			e.preventDefault();
-			openUrl();
 		});
 		container.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") {

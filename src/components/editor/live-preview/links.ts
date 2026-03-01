@@ -62,11 +62,12 @@ export class LinkWidget extends WidgetType {
 			};
 			anchor.addEventListener("click", (e) => {
 				e.preventDefault();
+				if (e.button !== 0) return;
+				openUrl();
 			});
 			anchor.addEventListener("mousedown", (e) => {
 				if (e.button !== 0) return;
 				e.preventDefault();
-				openUrl();
 			});
 			anchor.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
