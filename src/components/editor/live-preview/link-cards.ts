@@ -104,6 +104,7 @@ export class LinkCardWidget extends WidgetType {
 		container.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault();
+				e.stopPropagation();
 				openUrl();
 			}
 		});

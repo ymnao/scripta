@@ -54,6 +54,7 @@ export class LinkWidget extends WidgetType {
 			anchor.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault();
+					e.stopPropagation();
 					openUrl();
 				}
 			});
@@ -178,10 +179,17 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 
 export const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
 
+/** Escape label text for safe use inside Markdown link brackets. */
+export function escapeMarkdownLabel(label: string): string {
+	return label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+}
+
 /** Build a Markdown link from a pasted URL and optional selected text. */
 export function buildMarkdownLink(url: string, selectedText: string): string {
-	const label = selectedText || url;
-	return `[${label}](${url})`;
+	const rawLabel = selectedText || url;
+	const label = escapeMarkdownLabel(rawLabel);
+	// angle bracket で URL を囲み、URL 内の ')' 等でリンクが壊れないようにする
+	return `[${label}](<${url}>)`;
 }
 
 const urlPasteHandler = EditorView.domEventHandlers({

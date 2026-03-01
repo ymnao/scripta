@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { LinkWidget, URL_PASTE_RE, buildMarkdownLink, isSafeUrl } from "./links";
+import {
+	LinkWidget,
+	URL_PASTE_RE,
+	buildMarkdownLink,
+	escapeMarkdownLabel,
+	isSafeUrl,
+} from "./links";
 
 vi.mock("@tauri-apps/plugin-shell", () => ({}));
 
@@ -90,28 +96,51 @@ describe("URL_PASTE_RE", () => {
 	});
 });
 
+describe("escapeMarkdownLabel", () => {
+	it("escapes square brackets", () => {
+		expect(escapeMarkdownLabel("text [with] brackets")).toBe("text \\[with\\] brackets");
+	});
+
+	it("escapes backslashes", () => {
+		expect(escapeMarkdownLabel("back\\slash")).toBe("back\\\\slash");
+	});
+
+	it("escapes backslash before bracket", () => {
+		expect(escapeMarkdownLabel("\\]")).toBe("\\\\\\]");
+	});
+
+	it("returns plain text unchanged", () => {
+		expect(escapeMarkdownLabel("hello world")).toBe("hello world");
+	});
+});
+
 describe("buildMarkdownLink", () => {
 	it("uses selected text as label when provided", () => {
 		expect(buildMarkdownLink("https://example.com", "my link")).toBe(
-			"[my link](https://example.com)",
+			"[my link](<https://example.com>)",
 		);
 	});
 
 	it("uses URL as label when selected text is empty", () => {
 		expect(buildMarkdownLink("https://example.com", "")).toBe(
-			"[https://example.com](https://example.com)",
+			"[https://example.com](<https://example.com>)",
+		);
+	});
+
+	it("handles URL with parentheses (e.g. Wikipedia)", () => {
+		const url = "https://en.wikipedia.org/wiki/Mars_(planet)";
+		expect(buildMarkdownLink(url, "Mars")).toBe(`[Mars](<${url}>)`);
+	});
+
+	it("escapes brackets in selected text", () => {
+		expect(buildMarkdownLink("https://example.com", "see [here]")).toBe(
+			"[see \\[here\\]](<https://example.com>)",
 		);
 	});
 
 	it("preserves special characters in URL", () => {
-		expect(buildMarkdownLink("https://example.com/path?q=1&b=2", "")).toBe(
-			"[https://example.com/path?q=1&b=2](https://example.com/path?q=1&b=2)",
-		);
-	});
-
-	it("preserves selected text exactly", () => {
-		expect(buildMarkdownLink("https://example.com", "  spaced  ")).toBe(
-			"[  spaced  ](https://example.com)",
+		expect(buildMarkdownLink("https://example.com/path?q=1&b=2", "link")).toBe(
+			"[link](<https://example.com/path?q=1&b=2>)",
 		);
 	});
 });
