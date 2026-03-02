@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import katex from "katex";
 import { Marked } from "marked";
 
@@ -38,30 +39,6 @@ function isEscaped(text: string, pos: number): boolean {
 		i--;
 	}
 	return count % 2 === 1;
-}
-
-const DANGEROUS_SELECTORS = "script, iframe, object, embed";
-
-function sanitizeHtml(html: string): string {
-	const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
-
-	for (const el of doc.querySelectorAll(DANGEROUS_SELECTORS)) {
-		el.remove();
-	}
-
-	for (const el of doc.body.querySelectorAll("*")) {
-		for (const attr of [...el.attributes]) {
-			if (
-				attr.name.startsWith("on") ||
-				((attr.name === "href" || attr.name === "src") &&
-					attr.value.trimStart().toLowerCase().startsWith("javascript:"))
-			) {
-				el.removeAttribute(attr.name);
-			}
-		}
-	}
-
-	return doc.body.innerHTML;
 }
 
 interface MathPlaceholder {
@@ -119,9 +96,8 @@ export function markdownToHtml(markdown: string): string {
 	const marked = new Marked({ gfm: true, breaks: false });
 	let html = marked.parse(processed) as string;
 
-	// Sanitize: strip dangerous elements before restoring math placeholders
-	// so that KaTeX output (restored afterwards) is not affected.
-	html = sanitizeHtml(html);
+	// Sanitize before restoring math placeholders so KaTeX output is not affected.
+	html = DOMPurify.sanitize(html);
 
 	// Restore math placeholders
 	for (const { placeholder, html: mathHtml } of placeholders) {
