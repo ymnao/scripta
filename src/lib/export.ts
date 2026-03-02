@@ -157,7 +157,17 @@ export async function exportAsHtml(
 	return true;
 }
 
-const PROMPT_TEMPLATE = `# HTML変換プロンプト
+function buildFence(content: string): string {
+	let max = 2;
+	for (const m of content.matchAll(/`{3,}/g)) {
+		if (m[0].length > max) max = m[0].length;
+	}
+	return "`".repeat(max + 1);
+}
+
+function buildPrompt(title: string, content: string): string {
+	const fence = buildFence(content);
+	return `# HTML変換プロンプト
 
 以下のMarkdownコンテンツを、美しく整形されたHTMLファイルに変換してください。
 
@@ -174,14 +184,15 @@ const PROMPT_TEMPLATE = `# HTML変換プロンプト
 
 ## ドキュメントタイトル
 
-{title}
+${title}
 
 ## Markdownコンテンツ
 
-\`\`\`markdown
-{content}
-\`\`\`
+${fence}markdown
+${content}
+${fence}
 `;
+}
 
 /**
  * Markdown をプロンプト形式で .md ファイルにエクスポートする。
@@ -198,7 +209,7 @@ export async function exportAsPrompt(markdown: string, filePath: string): Promis
 
 	if (!savePath) return false;
 
-	const output = PROMPT_TEMPLATE.replace("{title}", title).replace("{content}", markdown);
+	const output = buildPrompt(title, markdown);
 	await writeFile(savePath, output);
 	return true;
 }

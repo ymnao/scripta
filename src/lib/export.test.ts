@@ -125,4 +125,22 @@ describe("exportAsPrompt", () => {
 		expect(output).toContain("```markdown");
 		expect(output).toContain("some content");
 	});
+
+	it("uses longer fence when content contains triple backticks", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const md = "Some text\n```js\nconsole.log('hi');\n```\nEnd";
+		await exportAsPrompt(md, "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		// Fence must be longer than the 3 backticks in content
+		expect(output).toContain("````markdown");
+		expect(output).toContain(md);
+	});
+
+	it("uses even longer fence for nested fences", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const md = "````\ninner\n````";
+		await exportAsPrompt(md, "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("`````markdown");
+	});
 });

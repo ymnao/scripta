@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useId, useState } from "react";
+import { translateError } from "../../lib/errors";
 import { type ExportTheme, exportAsHtml, exportAsPrompt } from "../../lib/export";
 import { useToastStore } from "../../stores/toast";
 import { DialogBase } from "./DialogBase";
@@ -36,7 +37,9 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			const result = await exportAsHtml(markdown, filePath, { theme: htmlTheme });
 			if (result) onClose();
 		} catch (err: unknown) {
-			useToastStore.getState().addToast("error", `HTMLエクスポートに失敗しました: ${err}`);
+			useToastStore
+				.getState()
+				.addToast("error", `HTMLエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
 		}
@@ -48,7 +51,9 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			const result = await exportAsPrompt(markdown, filePath);
 			if (result) onClose();
 		} catch (err: unknown) {
-			useToastStore.getState().addToast("error", `プロンプトエクスポートに失敗しました: ${err}`);
+			useToastStore
+				.getState()
+				.addToast("error", `プロンプトエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
 		}

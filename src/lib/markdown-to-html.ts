@@ -41,6 +41,14 @@ function isEscaped(text: string, pos: number): boolean {
 	return count % 2 === 1;
 }
 
+function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
 interface MathPlaceholder {
 	placeholder: string;
 	html: string;
@@ -52,6 +60,8 @@ interface MathPlaceholder {
  */
 export function markdownToHtml(markdown: string): string {
 	const placeholders: MathPlaceholder[] = [];
+	// Per-call nonce to prevent placeholder collision with user content
+	const nonce = crypto.randomUUID().replace(/-/g, "");
 
 	let processed = markdown;
 
@@ -63,31 +73,37 @@ export function markdownToHtml(markdown: string): string {
 		if (isEscaped(processed, offset)) return match;
 		if (overlapsCode(offset, offset + match.length, codeRangesPass1)) return match;
 
-		const placeholder = `%%MATH_DISPLAY_${placeholders.length}%%`;
+		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
 		try {
 			const html = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
 			placeholders.push({ placeholder, html });
 		} catch {
-			placeholders.push({ placeholder, html: `<span class="math-error">${tex}</span>` });
+			placeholders.push({
+				placeholder,
+				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+			});
 		}
 		return placeholder;
 	});
 
 	// Pass 2: Inline math ($...$)
 	// Re-collect code ranges from the modified string so offsets are correct.
-	// Display math placeholders (%%MATH_DISPLAY_N%%) contain no '$', so the
-	// inline regex cannot match within them — no explicit display-range check needed.
+	// Display math placeholders contain no '$', so the inline regex cannot
+	// match within them — no explicit display-range check needed.
 	const codeRangesPass2 = collectCodeRanges(processed);
 	processed = processed.replace(/\$([^\n$]+)\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
 		if (overlapsCode(offset, offset + match.length, codeRangesPass2)) return match;
 
-		const placeholder = `%%MATH_INLINE_${placeholders.length}%%`;
+		const placeholder = `%%MATH_I_${nonce}_${placeholders.length}%%`;
 		try {
 			const html = katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
 			placeholders.push({ placeholder, html });
 		} catch {
-			placeholders.push({ placeholder, html: `<span class="math-error">${tex}</span>` });
+			placeholders.push({
+				placeholder,
+				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+			});
 		}
 		return placeholder;
 	});
