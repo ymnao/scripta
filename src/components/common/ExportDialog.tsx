@@ -68,7 +68,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 				<button
 					type="button"
 					onClick={onClose}
-					aria-label="Close"
+					aria-label="閉じる"
 					className="rounded p-0.5 text-text-secondary hover:bg-black/10 hover:text-text-primary dark:hover:bg-white/10"
 				>
 					<X size={16} />

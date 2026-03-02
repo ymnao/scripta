@@ -1,5 +1,4 @@
 import { save } from "@tauri-apps/plugin-dialog";
-import katexCss from "katex/dist/katex.min.css?raw";
 import { writeFile } from "./commands";
 import { markdownToHtml } from "./markdown-to-html";
 import { basename } from "./path";
@@ -47,9 +46,7 @@ function buildHtmlDocument(bodyHtml: string, title: string, theme: ExportTheme =
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(title)}</title>
-<style>
-${katexCss}
-</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
 <style>
 :root {
   color-scheme: ${theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark"};

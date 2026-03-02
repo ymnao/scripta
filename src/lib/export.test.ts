@@ -8,10 +8,6 @@ vi.mock("./commands", () => ({
 	writeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("katex/dist/katex.min.css?raw", () => ({
-	default: "/* katex css */",
-}));
-
 const { save } = await import("@tauri-apps/plugin-dialog");
 const { writeFile } = await import("./commands");
 const { exportAsHtml, exportAsPrompt } = await import("./export");
@@ -48,11 +44,11 @@ describe("exportAsHtml", () => {
 		expect(html).toContain("<title>my-note</title>");
 	});
 
-	it("includes KaTeX CSS in HTML", async () => {
+	it("includes KaTeX CDN link in HTML", async () => {
 		mockedSave.mockResolvedValue("/output/test.html");
 		await exportAsHtml("$x^2$", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
-		expect(html).toContain("katex css");
+		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
 	});
 
 	it("converts markdown content to HTML", async () => {

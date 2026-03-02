@@ -3,11 +3,42 @@ import katex from "katex";
 import { Marked } from "marked";
 
 const FENCED_CODE_RE = /^[ \t]*(`{3,}|~{3,})[\s\S]*?\n[ \t]*\1[ \t]*$/gm;
-const INLINE_CODE_RE = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
 
 interface CodeRange {
 	from: number;
 	to: number;
+}
+
+function collectInlineCodeRanges(text: string): CodeRange[] {
+	const ranges: CodeRange[] = [];
+	let pos = 0;
+	while (pos < text.length) {
+		if (text[pos] !== "`") {
+			pos++;
+			continue;
+		}
+		const start = pos;
+		while (pos < text.length && text[pos] === "`") pos++;
+		const tickCount = pos - start;
+		const closer = "`".repeat(tickCount);
+		let searchFrom = pos;
+		let found = false;
+		while (searchFrom < text.length) {
+			const idx = text.indexOf(closer, searchFrom);
+			if (idx === -1) break;
+			if (idx + tickCount < text.length && text[idx + tickCount] === "`") {
+				searchFrom = idx + tickCount;
+				while (searchFrom < text.length && text[searchFrom] === "`") searchFrom++;
+				continue;
+			}
+			ranges.push({ from: start, to: idx + tickCount });
+			pos = idx + tickCount;
+			found = true;
+			break;
+		}
+		if (!found) break;
+	}
+	return ranges;
 }
 
 function collectCodeRanges(markdown: string): CodeRange[] {
@@ -17,9 +48,7 @@ function collectCodeRanges(markdown: string): CodeRange[] {
 		ranges.push({ from: match.index, to: match.index + match[0].length });
 	}
 
-	for (const match of markdown.matchAll(INLINE_CODE_RE)) {
-		ranges.push({ from: match.index, to: match.index + match[0].length });
-	}
+	ranges.push(...collectInlineCodeRanges(markdown));
 
 	return ranges;
 }
@@ -61,7 +90,9 @@ interface MathPlaceholder {
 export function markdownToHtml(markdown: string): string {
 	const placeholders: MathPlaceholder[] = [];
 	// Per-call nonce to prevent placeholder collision with user content
-	const nonce = crypto.randomUUID().replace(/-/g, "");
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 	let processed = markdown;
 
