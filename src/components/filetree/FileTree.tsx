@@ -24,6 +24,7 @@ interface FileTreeProps {
 	onFileOpenNewTab?: (path: string) => void;
 	onFileRenamed?: (oldPath: string, newPath: string, isDirectory: boolean) => void;
 	onFileDeleted?: (path: string, isDirectory: boolean) => void;
+	onExport?: (path: string) => void;
 }
 
 interface ContextMenuState {
@@ -49,6 +50,7 @@ export function FileTree({
 	onFileOpenNewTab,
 	onFileRenamed,
 	onFileDeleted,
+	onExport,
 }: FileTreeProps) {
 	const [entries, setEntries] = useState<FileEntry[]>([]);
 	const [error, setError] = useState<string | null>(null);
@@ -125,18 +127,29 @@ export function FileTree({
 
 		const items: ContextMenuItem[] = [];
 
-		if (entry && !entry.isDirectory && onFileOpenNewTab) {
-			items.push({
-				id: "open-new-tab",
-				label: "新しいタブで開く",
-				onClick: () => onFileOpenNewTab(entry.path),
-			});
-			items.push({
-				id: "separator-open",
-				label: "---",
-				separator: true,
-				onClick: () => {},
-			});
+		if (entry && !entry.isDirectory) {
+			if (onFileOpenNewTab) {
+				items.push({
+					id: "open-new-tab",
+					label: "新しいタブで開く",
+					onClick: () => onFileOpenNewTab(entry.path),
+				});
+			}
+			if (onExport) {
+				items.push({
+					id: "export",
+					label: "エクスポート...",
+					onClick: () => onExport(entry.path),
+				});
+			}
+			if (onFileOpenNewTab || onExport) {
+				items.push({
+					id: "separator-open",
+					label: "---",
+					separator: true,
+					onClick: () => {},
+				});
+			}
 		}
 
 		items.push(
@@ -184,7 +197,7 @@ export function FileTree({
 		}
 
 		return items;
-	}, [contextMenu, workspacePath, onFileOpenNewTab]);
+	}, [contextMenu, workspacePath, onFileOpenNewTab, onExport]);
 
 	const handleCreateConfirm = useCallback(
 		async (name: string) => {

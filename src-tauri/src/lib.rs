@@ -80,8 +80,15 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .accelerator("CmdOrCtrl+Shift+N")
         .build(handle)?;
 
+    let export_item = MenuItemBuilder::new("エクスポート...")
+        .id("export")
+        .accelerator("CmdOrCtrl+Shift+E")
+        .build(handle)?;
+
     let file_menu = SubmenuBuilder::new(handle, "File")
         .item(&new_window)
+        .separator()
+        .item(&export_item)
         .build()?;
 
     let edit_menu = SubmenuBuilder::new(handle, "Edit")
@@ -113,13 +120,8 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.set_menu(menu)?;
 
     app.on_menu_event(move |app_handle, event| {
-        if event.id().as_ref() == "open-settings" || event.id().as_ref() == "open-help" {
-            let event_name = if event.id().as_ref() == "open-settings" {
-                "menu-open-settings"
-            } else {
-                "menu-open-help"
-            };
-            // Emit only to the focused window to avoid opening dialogs in all windows
+        let emit_to_focused = |event_name: &str| {
+            // Emit only to the focused window to avoid triggering in all windows
             let emitted = app_handle
                 .webview_windows()
                 .values()
@@ -130,29 +132,35 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             if !emitted {
                 let _ = app_handle.emit(event_name, ());
             }
-            return;
-        }
-        if event.id().as_ref() == "new-window" {
-            let label = format!("window-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
+        };
 
-            let mut builder = tauri::WebviewWindowBuilder::new(
-                app_handle,
-                &label,
-                tauri::WebviewUrl::App("/?newWindow=true".into()),
-            )
-            .title("mark-draft")
-            .inner_size(800.0, 600.0);
+        match event.id().as_ref() {
+            "open-settings" => emit_to_focused("menu-open-settings"),
+            "open-help" => emit_to_focused("menu-open-help"),
+            "export" => emit_to_focused("menu-export"),
+            "new-window" => {
+                let label = format!("window-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
 
-            #[cfg(target_os = "macos")]
-            {
-                builder = builder
-                    .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true);
+                let mut builder = tauri::WebviewWindowBuilder::new(
+                    app_handle,
+                    &label,
+                    tauri::WebviewUrl::App("/?newWindow=true".into()),
+                )
+                .title("mark-draft")
+                .inner_size(800.0, 600.0);
+
+                #[cfg(target_os = "macos")]
+                {
+                    builder = builder
+                        .title_bar_style(tauri::TitleBarStyle::Overlay)
+                        .hidden_title(true);
+                }
+
+                if let Err(e) = builder.build() {
+                    log::error!("Failed to create new window: {e}");
+                }
             }
-
-            if let Err(e) = builder.build() {
-                log::error!("Failed to create new window: {e}");
-            }
+            _ => {}
         }
     });
 

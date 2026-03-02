@@ -8,6 +8,7 @@ export interface TauriMockStore {
 	handlers: Record<string, (args: Record<string, unknown>) => unknown>;
 	calls: Record<string, Array<Record<string, unknown>>>;
 	dialogResult: string | null;
+	saveDialogResult: string | null;
 	_files?: Record<string, string>;
 	_directories?: Record<string, Array<FileEntry>>;
 }
@@ -19,6 +20,7 @@ export function getMockStore(): TauriMockStore {
 			handlers: {},
 			calls: {},
 			dialogResult: null,
+			saveDialogResult: null,
 		};
 	}
 	return win.__TAURI_MOCK__;

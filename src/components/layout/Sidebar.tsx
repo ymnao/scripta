@@ -15,6 +15,7 @@ interface SidebarProps {
 	searchInputRef?: React.RefObject<HTMLInputElement | null>;
 	onFileRenamed?: (oldPath: string, newPath: string, isDirectory: boolean) => void;
 	onFileDeleted?: (path: string, isDirectory: boolean) => void;
+	onExport?: (path: string) => void;
 }
 
 export function Sidebar({
@@ -27,6 +28,7 @@ export function Sidebar({
 	searchInputRef,
 	onFileRenamed,
 	onFileDeleted,
+	onExport,
 }: SidebarProps) {
 	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
@@ -79,6 +81,7 @@ export function Sidebar({
 						onFileOpenNewTab={onFileOpenNewTab}
 						onFileRenamed={onFileRenamed}
 						onFileDeleted={onFileDeleted}
+						onExport={onExport}
 					/>
 				) : (
 					<div className="flex flex-col items-center gap-3 px-4 py-8">
