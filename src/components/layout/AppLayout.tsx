@@ -704,6 +704,20 @@ export function AppLayout() {
 	);
 
 	const handleExport = useCallback((path: string) => {
+		// Prefer in-memory content so unsaved edits are included
+		const state = useWorkspaceStore.getState();
+		if (path === state.activeTabPath) {
+			setExportTarget({ markdown: contentRef.current, filePath: path });
+			setExportOpen(true);
+			return;
+		}
+		const cached = tabCacheRef.current.get(path);
+		if (cached) {
+			setExportTarget({ markdown: cached.content, filePath: path });
+			setExportOpen(true);
+			return;
+		}
+		// File not open in any tab — read from disk
 		readFile(path)
 			.then((markdown) => {
 				setExportTarget({ markdown, filePath: path });

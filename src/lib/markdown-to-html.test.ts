@@ -68,4 +68,52 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("<ul>");
 		expect(html).toContain("<li>item1</li>");
 	});
+
+	it("does not process $ inside inline code after display math replacement shifts offsets", () => {
+		// Regression: display math replacement changes string length, so
+		// code-range offsets collected from the original string become invalid
+		// for the inline math pass.
+		const md = "$$a^2$$\n\nSome text with `$var` in code";
+		const html = markdownToHtml(md);
+		expect(html).toContain("katex-display"); // display math rendered
+		expect(html).toContain("<code>$var</code>"); // inline code preserved
+		expect(html).not.toMatch(/<code>.*katex.*<\/code>/); // no katex inside code
+	});
+
+	it("handles display math followed by inline math correctly", () => {
+		const md = "$$x^2$$\n\nThen $y^2$ inline";
+		const html = markdownToHtml(md);
+		expect(html).toContain("katex-display");
+		// inline math should also be rendered
+		expect(html.match(/katex/g)?.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("strips script tags from raw HTML in markdown", () => {
+		const md = 'Hello\n\n<script>alert("xss")</script>\n\nWorld';
+		const html = markdownToHtml(md);
+		expect(html).not.toContain("<script");
+		expect(html).toContain("Hello");
+		expect(html).toContain("World");
+	});
+
+	it("strips event handlers from HTML tags", () => {
+		const md = '<div onclick="alert(1)">click me</div>';
+		const html = markdownToHtml(md);
+		expect(html).not.toContain("onclick");
+		expect(html).toContain("click me");
+	});
+
+	it("strips javascript: URIs from links", () => {
+		const md = '<a href="javascript:alert(1)">link</a>';
+		const html = markdownToHtml(md);
+		expect(html).not.toContain("javascript:");
+		expect(html).toContain("link");
+	});
+
+	it("preserves safe HTML tags", () => {
+		const md = "<details><summary>Toggle</summary>\n\nHidden content\n\n</details>";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<details>");
+		expect(html).toContain("<summary>");
+	});
 });

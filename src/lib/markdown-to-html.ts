@@ -40,6 +40,30 @@ function isEscaped(text: string, pos: number): boolean {
 	return count % 2 === 1;
 }
 
+const DANGEROUS_SELECTORS = "script, iframe, object, embed";
+
+function sanitizeHtml(html: string): string {
+	const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+
+	for (const el of doc.querySelectorAll(DANGEROUS_SELECTORS)) {
+		el.remove();
+	}
+
+	for (const el of doc.body.querySelectorAll("*")) {
+		for (const attr of [...el.attributes]) {
+			if (
+				attr.name.startsWith("on") ||
+				((attr.name === "href" || attr.name === "src") &&
+					attr.value.trimStart().toLowerCase().startsWith("javascript:"))
+			) {
+				el.removeAttribute(attr.name);
+			}
+		}
+	}
+
+	return doc.body.innerHTML;
+}
+
 interface MathPlaceholder {
 	placeholder: string;
 	html: string;
@@ -50,18 +74,17 @@ interface MathPlaceholder {
  * GFM（テーブル・取り消し線・タスクリスト）と KaTeX 数式をサポート。
  */
 export function markdownToHtml(markdown: string): string {
-	const codeRanges = collectCodeRanges(markdown);
 	const placeholders: MathPlaceholder[] = [];
 
 	let processed = markdown;
 
 	// Pass 1: Display math ($$...$$)
-	const displayRanges: CodeRange[] = [];
+	// Collect code ranges from the current string before each pass so that
+	// offsets in the replace callback match the actual string being searched.
+	const codeRangesPass1 = collectCodeRanges(processed);
 	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
-		if (overlapsCode(offset, offset + match.length, codeRanges)) return match;
-
-		displayRanges.push({ from: offset, to: offset + match.length });
+		if (overlapsCode(offset, offset + match.length, codeRangesPass1)) return match;
 
 		const placeholder = `%%MATH_DISPLAY_${placeholders.length}%%`;
 		try {
@@ -74,14 +97,13 @@ export function markdownToHtml(markdown: string): string {
 	});
 
 	// Pass 2: Inline math ($...$)
+	// Re-collect code ranges from the modified string so offsets are correct.
+	// Display math placeholders (%%MATH_DISPLAY_N%%) contain no '$', so the
+	// inline regex cannot match within them — no explicit display-range check needed.
+	const codeRangesPass2 = collectCodeRanges(processed);
 	processed = processed.replace(/\$([^\n$]+)\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
-		if (overlapsCode(offset, offset + match.length, codeRanges)) return match;
-
-		// Skip if overlapping with display math
-		for (const dr of displayRanges) {
-			if (offset < dr.to && offset + match.length > dr.from) return match;
-		}
+		if (overlapsCode(offset, offset + match.length, codeRangesPass2)) return match;
 
 		const placeholder = `%%MATH_INLINE_${placeholders.length}%%`;
 		try {
@@ -96,6 +118,10 @@ export function markdownToHtml(markdown: string): string {
 	// Markdown → HTML
 	const marked = new Marked({ gfm: true, breaks: false });
 	let html = marked.parse(processed) as string;
+
+	// Sanitize: strip dangerous elements before restoring math placeholders
+	// so that KaTeX output (restored afterwards) is not affected.
+	html = sanitizeHtml(html);
 
 	// Restore math placeholders
 	for (const { placeholder, html: mathHtml } of placeholders) {
