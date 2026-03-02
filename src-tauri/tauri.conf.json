@@ -1,8 +1,8 @@
 {
 	"$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-	"productName": "mark-draft",
+	"productName": "scripta",
 	"version": "0.1.0",
-	"identifier": "com.mark-draft.app",
+	"identifier": "com.scripta.app",
 	"build": {
 		"frontendDist": "../dist",
 		"devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
 		"windows": [
 			{
 				"label": "main",
-				"title": "mark-draft",
+				"title": "scripta",
 				"width": 800,
 				"height": 600,
 				"resizable": true,

@@ -133,11 +133,12 @@ describe("AppLayout", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("shows empty state when no file is open", async () => {
+	it("shows motto when no workspace is open", async () => {
 		await act(async () => {
 			render(<AppLayout />);
 		});
-		expect(screen.getByText("Select a file to start editing")).toBeInTheDocument();
+		expect(screen.getByText("scripta")).toBeInTheDocument();
+		expect(screen.getByText("Verba volant, scripta manent.")).toBeInTheDocument();
 		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
 

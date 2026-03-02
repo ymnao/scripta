@@ -1,4 +1,4 @@
-# mark-draft
+# scripta
 
 ローカルファイルベースの軽量 Markdown メモアプリケーション。
 Obsidian のように任意のフォルダを「ワークスペース」として開き、Markdown ファイルを Live Preview 方式で編集できるデスクトップアプリ。
@@ -52,7 +52,7 @@ pnpm test
 ## プロジェクト構成
 
 ```
-mark-draft/
+scripta/
 ├── src-tauri/                    # Rust バックエンド
 │   ├── src/
 │   │   ├── main.rs

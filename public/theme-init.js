@@ -2,7 +2,16 @@
 // This file is loaded as a blocking <script> in index.html.
 (() => {
 	try {
-		const t = localStorage.getItem("mark-draft-theme");
+		let t = localStorage.getItem("scripta-theme");
+		if (!t) {
+			// Migrate from old key
+			const old = localStorage.getItem("mark-draft-theme");
+			if (old) {
+				t = old;
+				localStorage.setItem("scripta-theme", old);
+				localStorage.removeItem("mark-draft-theme");
+			}
+		}
 		if (t === "dark") document.documentElement.classList.add("dark");
 		else if (t === "light") document.documentElement.classList.remove("dark");
 		else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {

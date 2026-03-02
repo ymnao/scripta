@@ -16,7 +16,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 		await expect(page.getByText("設定")).toBeVisible();
@@ -29,7 +29,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 		await expect(page.getByText("設定")).toBeVisible();
@@ -43,7 +43,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 		await expect(page.getByText("設定")).toBeVisible();
@@ -63,7 +63,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 		await expect(page.getByText("設定")).toBeVisible();
@@ -83,7 +83,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 		await expect(page.getByText("設定")).toBeVisible();
@@ -119,7 +119,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 
@@ -135,7 +135,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 
@@ -154,7 +154,7 @@ test.describe("settings dialog", () => {
 		await mock.setup(workspace, "/workspace");
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 
