@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["ymnao"]
 license = "MIT"
-repository = "https://github.com/ymnao/mark-draft"
+repository = "https://github.com/ymnao/scripta"
 edition = "2021"
 rust-version = "1.77.2"
 

@@ -61,7 +61,7 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .accelerator("CmdOrCtrl+,")
         .build(handle)?;
 
-    let app_menu = SubmenuBuilder::new(handle, "mark-draft")
+    let app_menu = SubmenuBuilder::new(handle, "scripta")
         .about(None)
         .separator()
         .item(&settings_item)
@@ -146,7 +146,7 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     &label,
                     tauri::WebviewUrl::App("/?newWindow=true".into()),
                 )
-                .title("mark-draft")
+                .title("scripta")
                 .inner_size(800.0, 600.0);
 
                 #[cfg(target_os = "macos")]

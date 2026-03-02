@@ -7,7 +7,7 @@ test.describe("help dialog", () => {
 		await mock.setup({ files: {}, directories: {} }, null);
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press("F1");
 		await expect(page.getByText("キーボードショートカット")).toBeVisible();
@@ -21,7 +21,7 @@ test.describe("help dialog", () => {
 		await mock.setup({ files: {}, directories: {} }, null);
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press("F1");
 		await expect(page.getByText("キーボードショートカット")).toBeVisible();
@@ -35,7 +35,7 @@ test.describe("help dialog", () => {
 		await mock.setup({ files: {}, directories: {} }, null);
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press("F1");
 		await expect(page.getByText("キーボードショートカット")).toBeVisible();

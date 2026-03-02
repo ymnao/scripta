@@ -927,9 +927,14 @@ export function AppLayout() {
 								onStatistics={handleStatistics}
 							/>
 						)
-					) : (
+					) : workspacePath ? (
 						<div className="flex h-full items-center justify-center text-text-secondary">
 							<p className="text-sm">Select a file to start editing</p>
+						</div>
+					) : (
+						<div className="flex h-full flex-col items-center justify-center gap-2">
+							<p className="text-2xl font-light text-text-primary">scripta</p>
+							<p className="text-sm italic text-text-secondary/60">Verba volant, scripta manent.</p>
 						</div>
 					)}
 					{searchBarOpen && editorView && (

@@ -19,7 +19,7 @@ function applyTheme(theme: Theme) {
 	// Mirror to localStorage for synchronous access in theme-init.js (FOUC prevention).
 	// The canonical store is tauri-plugin-store; localStorage is a sync cache only.
 	try {
-		localStorage.setItem("mark-draft-theme", theme);
+		localStorage.setItem("scripta-theme", theme);
 	} catch {
 		// Ignore — localStorage may be unavailable (e.g. private browsing)
 	}
@@ -40,14 +40,31 @@ function resolveTheme(pref: ThemePreference): Theme {
 
 function detectInitialPreference(): ThemePreference {
 	try {
-		const stored = localStorage.getItem("mark-draft-theme-preference");
+		let stored = localStorage.getItem("scripta-theme-preference");
+		if (!stored) {
+			// Migrate from old key
+			const old = localStorage.getItem("mark-draft-theme-preference");
+			if (old) {
+				stored = old;
+				localStorage.setItem("scripta-theme-preference", old);
+				localStorage.removeItem("mark-draft-theme-preference");
+			}
+		}
 		if (stored === "system" || stored === "light" || stored === "dark") return stored;
 	} catch {
 		// Ignore
 	}
 	// Fallback: check legacy theme cache for initial render
 	try {
-		const legacy = localStorage.getItem("mark-draft-theme");
+		let legacy = localStorage.getItem("scripta-theme");
+		if (!legacy) {
+			const old = localStorage.getItem("mark-draft-theme");
+			if (old) {
+				legacy = old;
+				localStorage.setItem("scripta-theme", old);
+				localStorage.removeItem("mark-draft-theme");
+			}
+		}
 		if (legacy === "light" || legacy === "dark") return legacy;
 	} catch {
 		// Ignore
@@ -57,7 +74,7 @@ function detectInitialPreference(): ThemePreference {
 
 function persistPreferenceToLocalStorage(pref: ThemePreference) {
 	try {
-		localStorage.setItem("mark-draft-theme-preference", pref);
+		localStorage.setItem("scripta-theme-preference", pref);
 	} catch {
 		// Ignore
 	}

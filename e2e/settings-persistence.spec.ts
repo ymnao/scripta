@@ -45,8 +45,8 @@ test.describe("settings persistence", () => {
 
 		// Navigate with newWindow query param
 		await page.goto("/?newWindow=true");
-		// Should show empty state — no file tree loaded
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		// Should show motto — no workspace loaded
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
 		// Should NOT have the "Open folder" button area showing workspace files
 		await expect(page.getByLabel("Open folder")).toBeVisible();
@@ -61,8 +61,8 @@ test.describe("settings persistence", () => {
 		});
 
 		await page.goto("/");
-		// Should show empty state since the path validation failed
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		// Should show motto since the path validation failed and no workspace is set
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 		await expect(page.getByLabel("Open folder")).toBeVisible();
 	});
 });
