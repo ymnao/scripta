@@ -21,6 +21,7 @@ export class TauriMock {
 		fs: MockFileSystem,
 		dialogResult: string | null = null,
 		storeValues?: Record<string, unknown>,
+		saveDialogResult?: string | null,
 	): Promise<void> {
 		if (storeValues) {
 			const storeJson = JSON.stringify(storeValues);
@@ -37,7 +38,13 @@ export class TauriMock {
 				files,
 				directories,
 				dialog,
-			}: { files: string; directories: string; dialog: string | null }) => {
+				saveDialog,
+			}: {
+				files: string;
+				directories: string;
+				dialog: string | null;
+				saveDialog: string | null;
+			}) => {
 				const parsedFiles: Record<string, string> = JSON.parse(files);
 				const parsedDirs: Record<
 					string,
@@ -48,6 +55,7 @@ export class TauriMock {
 					handlers: {},
 					calls: {},
 					dialogResult: dialog,
+					saveDialogResult: saveDialog,
 				};
 				(window as unknown as Record<string, unknown>).__TAURI_MOCK__ = store;
 
@@ -179,7 +187,12 @@ export class TauriMock {
 					});
 				};
 			},
-			{ files: filesJson, directories: directoriesJson, dialog: dialogResult },
+			{
+				files: filesJson,
+				directories: directoriesJson,
+				dialog: dialogResult,
+				saveDialog: saveDialogResult ?? null,
+			},
 		);
 	}
 

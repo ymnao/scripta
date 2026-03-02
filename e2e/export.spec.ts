@@ -1,0 +1,147 @@
+import { expect, test } from "@playwright/test";
+import { TauriMock, modKey } from "./helpers/tauri-mock";
+
+const workspace = {
+	files: {
+		"/workspace/note.md": "# Hello World\n\nThis is a test.",
+	},
+	directories: {
+		"/workspace": [{ name: "note.md", path: "/workspace/note.md", isDirectory: false }],
+	},
+};
+
+type WindowWithEvent = Window & {
+	__TAURI_EVENT__?: { emit: (event: string, payload: unknown) => void };
+};
+
+test.describe("export dialog", () => {
+	test("opens export dialog via menu event and exports HTML", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("note.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		// Trigger menu-export event
+		await page.evaluate(() => {
+			(window as unknown as WindowWithEvent).__TAURI_EVENT__?.emit("menu-export", undefined);
+		});
+
+		// Dialog should appear
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole("heading", { name: "エクスポート" })).toBeVisible();
+
+		// HTML section should be active by default
+		await expect(dialog.getByRole("button", { name: "HTMLとしてエクスポート" })).toBeVisible();
+
+		// Click export button
+		await dialog.getByRole("button", { name: "HTMLとしてエクスポート" }).click();
+
+		// Wait for write_file to be called
+		await expect
+			.poll(async () => {
+				const calls = await mock.getCalls("write_file");
+				return calls.some(
+					(c) =>
+						c.path === "/export/note.html" &&
+						typeof c.content === "string" &&
+						(c.content as string).includes("<!DOCTYPE html>"),
+				);
+			})
+			.toBe(true);
+	});
+
+	test("opens export dialog via keyboard shortcut", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("note.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		// Cmd+Shift+E should open export dialog
+		await page.keyboard.press(`${modKey}+Shift+E`);
+
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole("heading", { name: "エクスポート" })).toBeVisible();
+	});
+
+	test("export dialog is no-op when no file is open", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		// Trigger menu-export without opening a file
+		await page.evaluate(() => {
+			(window as unknown as WindowWithEvent).__TAURI_EVENT__?.emit("menu-export", undefined);
+		});
+
+		// Dialog should NOT appear
+		await page.waitForTimeout(500);
+		const dialog = page.locator("dialog");
+		await expect(dialog).not.toBeVisible();
+	});
+
+	test("switches to Prompt section and exports", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note-prompt.md");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("note.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		await page.evaluate(() => {
+			(window as unknown as WindowWithEvent).__TAURI_EVENT__?.emit("menu-export", undefined);
+		});
+
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+
+		// Switch to Prompt section
+		await dialog.getByRole("button", { name: "プロンプト" }).click();
+		await expect(dialog.getByRole("button", { name: "プロンプトをエクスポート" })).toBeVisible();
+
+		// Click export
+		await dialog.getByRole("button", { name: "プロンプトをエクスポート" }).click();
+
+		// Wait for write_file to be called with prompt content
+		await expect
+			.poll(async () => {
+				const calls = await mock.getCalls("write_file");
+				return calls.some(
+					(c) =>
+						c.path === "/export/note-prompt.md" &&
+						typeof c.content === "string" &&
+						(c.content as string).includes("HTML変換プロンプト"),
+				);
+			})
+			.toBe(true);
+	});
+
+	test("context menu export opens dialog for a file", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+
+		// Right-click on the file in the tree
+		await page.getByLabel("note.md file").click({ button: "right" });
+
+		// Click "エクスポート..." in context menu
+		await page.getByText("エクスポート...").click();
+
+		// Dialog should appear
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole("heading", { name: "エクスポート" })).toBeVisible();
+	});
+});

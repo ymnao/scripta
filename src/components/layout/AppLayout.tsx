@@ -11,8 +11,10 @@ import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
+import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { Dialog } from "../common/Dialog";
+import { ExportDialog } from "../common/ExportDialog";
 import { HelpDialog } from "../common/HelpDialog";
 import { SettingsDialog } from "../common/SettingsDialog";
 import { ToastContainer } from "../common/Toast";
@@ -60,6 +62,11 @@ export function AppLayout() {
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
+	const [exportOpen, setExportOpen] = useState(false);
+	const [exportTarget, setExportTarget] = useState<{
+		markdown: string;
+		filePath: string;
+	} | null>(null);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
@@ -155,20 +162,24 @@ export function AppLayout() {
 		let cancelled = false;
 		const unlisteners: Array<() => void> = [];
 
-		void listen("menu-open-settings", () => setSettingsOpen(true)).then((u) => {
-			if (cancelled) {
-				u();
-				return;
-			}
-			unlisteners.push(u);
-		});
+		const addListener = (event: string, handler: () => void) => {
+			void listen(event, handler).then((u) => {
+				if (cancelled) {
+					u();
+					return;
+				}
+				unlisteners.push(u);
+			});
+		};
 
-		void listen("menu-open-help", () => setHelpOpen(true)).then((u) => {
-			if (cancelled) {
-				u();
-				return;
-			}
-			unlisteners.push(u);
+		addListener("menu-open-settings", () => setSettingsOpen(true));
+		addListener("menu-open-help", () => setHelpOpen(true));
+
+		addListener("menu-export", () => {
+			const path = useWorkspaceStore.getState().activeTabPath;
+			if (!path) return;
+			setExportTarget({ markdown: contentRef.current, filePath: path });
+			setExportOpen(true);
 		});
 
 		return () => {
@@ -692,6 +703,22 @@ export function AppLayout() {
 		[openTab],
 	);
 
+	const handleExport = useCallback((path: string) => {
+		readFile(path)
+			.then((markdown) => {
+				setExportTarget({ markdown, filePath: path });
+				setExportOpen(true);
+			})
+			.catch((err) => {
+				useToastStore
+					.getState()
+					.addToast(
+						"error",
+						`エクスポート用のファイル読み込みに失敗しました: ${translateError(err)}`,
+					);
+			});
+	}, []);
+
 	const handleShowFiles = useCallback(() => {
 		setSidebarSearchActive(false);
 	}, []);
@@ -775,9 +802,17 @@ export function AppLayout() {
 				setSidebarVisible((prev) => !prev);
 				return;
 			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "e") {
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "e") {
 				e.preventDefault();
 				setSidebarSearchActive(false);
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
+				e.preventDefault();
+				const path = useWorkspaceStore.getState().activeTabPath;
+				if (!path) return;
+				setExportTarget({ markdown: contentRef.current, filePath: path });
+				setExportOpen(true);
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
@@ -854,6 +889,7 @@ export function AppLayout() {
 						searchInputRef={searchInputRef}
 						onFileRenamed={handleFileRenamed}
 						onFileDeleted={handleFileDeleted}
+						onExport={handleExport}
 					/>
 				)}
 				<main className="relative min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
@@ -915,6 +951,14 @@ export function AppLayout() {
 
 			<SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+			{exportTarget && (
+				<ExportDialog
+					open={exportOpen}
+					onClose={() => setExportOpen(false)}
+					markdown={exportTarget.markdown}
+					filePath={exportTarget.filePath}
+				/>
+			)}
 			<ToastContainer />
 
 			<Dialog
