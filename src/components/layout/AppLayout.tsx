@@ -158,6 +158,40 @@ export function AppLayout() {
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible, loading]);
 
+	const handleExport = useCallback((path: string) => {
+		// Prefer in-memory content so unsaved edits are included
+		const state = useWorkspaceStore.getState();
+		if (path === state.activeTabPath) {
+			setExportTarget({ markdown: contentRef.current, filePath: path });
+			setExportOpen(true);
+			return;
+		}
+		const cached = tabCacheRef.current.get(path);
+		if (cached) {
+			setExportTarget({ markdown: cached.content, filePath: path });
+			setExportOpen(true);
+			return;
+		}
+		// File not open in any tab — read from disk.
+		// Track request ID so only the latest readFile response takes effect.
+		const requestId = ++exportRequestIdRef.current;
+		readFile(path)
+			.then((markdown) => {
+				if (exportRequestIdRef.current !== requestId) return;
+				setExportTarget({ markdown, filePath: path });
+				setExportOpen(true);
+			})
+			.catch((err) => {
+				if (exportRequestIdRef.current !== requestId) return;
+				useToastStore
+					.getState()
+					.addToast(
+						"error",
+						`エクスポート用のファイル読み込みに失敗しました: ${translateError(err)}`,
+					);
+			});
+	}, []);
+
 	// Listen for native menu events from Tauri
 	useEffect(() => {
 		let cancelled = false;
@@ -179,15 +213,14 @@ export function AppLayout() {
 		addListener("menu-export", () => {
 			const path = useWorkspaceStore.getState().activeTabPath;
 			if (!path) return;
-			setExportTarget({ markdown: contentRef.current, filePath: path });
-			setExportOpen(true);
+			handleExport(path);
 		});
 
 		return () => {
 			cancelled = true;
 			for (const u of unlisteners) u();
 		};
-	}, []);
+	}, [handleExport]);
 
 	// Save all dirty tabs before window closes
 	useEffect(() => {
@@ -704,40 +737,6 @@ export function AppLayout() {
 		[openTab],
 	);
 
-	const handleExport = useCallback((path: string) => {
-		// Prefer in-memory content so unsaved edits are included
-		const state = useWorkspaceStore.getState();
-		if (path === state.activeTabPath) {
-			setExportTarget({ markdown: contentRef.current, filePath: path });
-			setExportOpen(true);
-			return;
-		}
-		const cached = tabCacheRef.current.get(path);
-		if (cached) {
-			setExportTarget({ markdown: cached.content, filePath: path });
-			setExportOpen(true);
-			return;
-		}
-		// File not open in any tab — read from disk.
-		// Track request ID so only the latest readFile response takes effect.
-		const requestId = ++exportRequestIdRef.current;
-		readFile(path)
-			.then((markdown) => {
-				if (exportRequestIdRef.current !== requestId) return;
-				setExportTarget({ markdown, filePath: path });
-				setExportOpen(true);
-			})
-			.catch((err) => {
-				if (exportRequestIdRef.current !== requestId) return;
-				useToastStore
-					.getState()
-					.addToast(
-						"error",
-						`エクスポート用のファイル読み込みに失敗しました: ${translateError(err)}`,
-					);
-			});
-	}, []);
-
 	const handleShowFiles = useCallback(() => {
 		setSidebarSearchActive(false);
 	}, []);
@@ -830,8 +829,7 @@ export function AppLayout() {
 				e.preventDefault();
 				const path = useWorkspaceStore.getState().activeTabPath;
 				if (!path) return;
-				setExportTarget({ markdown: contentRef.current, filePath: path });
-				setExportOpen(true);
+				handleExport(path);
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
@@ -879,7 +877,7 @@ export function AppLayout() {
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [activeTabId, handleCloseTab, handleGoBack, handleGoForward]);
+	}, [activeTabId, handleCloseTab, handleExport, handleGoBack, handleGoForward]);
 
 	if (loading) {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
