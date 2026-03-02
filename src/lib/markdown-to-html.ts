@@ -1,64 +1,6 @@
 import DOMPurify from "dompurify";
 import katex from "katex";
-import { Marked } from "marked";
-
-const FENCED_CODE_RE = /^[ \t]*(`{3,}|~{3,})[\s\S]*?\n[ \t]*\1[ \t]*$/gm;
-
-interface CodeRange {
-	from: number;
-	to: number;
-}
-
-function collectInlineCodeRanges(text: string): CodeRange[] {
-	const ranges: CodeRange[] = [];
-	let pos = 0;
-	while (pos < text.length) {
-		if (text[pos] !== "`") {
-			pos++;
-			continue;
-		}
-		const start = pos;
-		while (pos < text.length && text[pos] === "`") pos++;
-		const tickCount = pos - start;
-		const closer = "`".repeat(tickCount);
-		let searchFrom = pos;
-		let found = false;
-		while (searchFrom < text.length) {
-			const idx = text.indexOf(closer, searchFrom);
-			if (idx === -1) break;
-			if (idx + tickCount < text.length && text[idx + tickCount] === "`") {
-				searchFrom = idx + tickCount;
-				while (searchFrom < text.length && text[searchFrom] === "`") searchFrom++;
-				continue;
-			}
-			ranges.push({ from: start, to: idx + tickCount });
-			pos = idx + tickCount;
-			found = true;
-			break;
-		}
-		if (!found) break;
-	}
-	return ranges;
-}
-
-function collectCodeRanges(markdown: string): CodeRange[] {
-	const ranges: CodeRange[] = [];
-
-	for (const match of markdown.matchAll(FENCED_CODE_RE)) {
-		ranges.push({ from: match.index, to: match.index + match[0].length });
-	}
-
-	ranges.push(...collectInlineCodeRanges(markdown));
-
-	return ranges;
-}
-
-function overlapsCode(from: number, to: number, codeRanges: CodeRange[]): boolean {
-	for (const range of codeRanges) {
-		if (from < range.to && to > range.from) return true;
-	}
-	return false;
-}
+import { Marked, type Token, type Tokens } from "marked";
 
 function isEscaped(text: string, pos: number): boolean {
 	let count = 0;
@@ -83,26 +25,12 @@ interface MathPlaceholder {
 	html: string;
 }
 
-/**
- * Markdown テキストを HTML 文字列に変換する。
- * GFM（テーブル・取り消し線・タスクリスト）と KaTeX 数式をサポート。
- */
-export function markdownToHtml(markdown: string): string {
-	const placeholders: MathPlaceholder[] = [];
-	// Per-call nonce to prevent placeholder collision with user content
-	const bytes = new Uint8Array(16);
-	crypto.getRandomValues(bytes);
-	const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-
-	let processed = markdown;
+function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
+	let processed = text;
 
 	// Pass 1: Display math ($$...$$)
-	// Collect code ranges from the current string before each pass so that
-	// offsets in the replace callback match the actual string being searched.
-	const codeRangesPass1 = collectCodeRanges(processed);
 	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
-		if (overlapsCode(offset, offset + match.length, codeRangesPass1)) return match;
 
 		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
 		try {
@@ -118,13 +46,8 @@ export function markdownToHtml(markdown: string): string {
 	});
 
 	// Pass 2: Inline math ($...$)
-	// Re-collect code ranges from the modified string so offsets are correct.
-	// Display math placeholders contain no '$', so the inline regex cannot
-	// match within them — no explicit display-range check needed.
-	const codeRangesPass2 = collectCodeRanges(processed);
 	processed = processed.replace(/\$([^\n$]+)\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
-		if (overlapsCode(offset, offset + match.length, codeRangesPass2)) return match;
 
 		const placeholder = `%%MATH_I_${nonce}_${placeholders.length}%%`;
 		try {
@@ -139,9 +62,63 @@ export function markdownToHtml(markdown: string): string {
 		return placeholder;
 	});
 
-	// Markdown → HTML
+	return processed;
+}
+
+function walkTokens(tokens: Token[], placeholders: MathPlaceholder[], nonce: string): void {
+	for (const token of tokens) {
+		// Only replace math in text tokens (not in code, link URLs, etc.)
+		if (token.type === "text") {
+			const t = token as Tokens.Text;
+			t.text = replaceMath(t.text, placeholders, nonce);
+			if (t.raw) t.raw = t.text;
+		}
+
+		// Paragraphs contain inline math in their raw text; re-lex after replacement
+		if (token.type === "paragraph") {
+			const p = token as Tokens.Paragraph;
+			p.text = replaceMath(p.text, placeholders, nonce);
+			// Paragraph raw also needs updating so Marked doesn't re-parse the original
+			if (p.raw) p.raw = replaceMath(p.raw, placeholders, nonce);
+		}
+
+		// Recurse into child tokens
+		if ("tokens" in token && Array.isArray(token.tokens)) {
+			walkTokens(token.tokens, placeholders, nonce);
+		}
+
+		// List items have nested tokens
+		if (token.type === "list") {
+			const list = token as Tokens.List;
+			for (const item of list.items) {
+				if (Array.isArray(item.tokens)) {
+					walkTokens(item.tokens, placeholders, nonce);
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Markdown テキストを HTML 文字列に変換する。
+ * GFM（テーブル・取り消し線・タスクリスト）と KaTeX 数式をサポート。
+ */
+export function markdownToHtml(markdown: string): string {
+	const placeholders: MathPlaceholder[] = [];
+	// Per-call nonce to prevent placeholder collision with user content
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
 	const marked = new Marked({ gfm: true, breaks: false });
-	let html = marked.parse(processed) as string;
+	const tokens = marked.lexer(markdown);
+
+	// Walk token tree and replace math only in text nodes,
+	// leaving link URLs, image paths, code spans etc. untouched.
+	walkTokens(tokens, placeholders, nonce);
+
+	// Render tokens to HTML
+	let html = marked.parser(tokens);
 
 	// Sanitize before restoring math placeholders so KaTeX output is not affected.
 	html = DOMPurify.sanitize(html);

@@ -46,7 +46,7 @@ function buildHtmlDocument(bodyHtml: string, title: string, theme: ExportTheme =
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.33/dist/katex.min.css">
 <style>
 :root {
   color-scheme: ${theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark"};
@@ -171,10 +171,10 @@ function buildPrompt(title: string, content: string): string {
 ## 要件
 
 - 完全なHTMLドキュメント（DOCTYPE、head、body）
-- インラインCSSのみ（外部ファイル参照なし）
+- スタイルは原則インラインCSSで記述（ただし数式用の KaTeX CSS/JS は CDN から読み込み可）
 - レスポンシブデザイン対応
 - @media (prefers-color-scheme: dark) によるダーク/ライト自動切替
-- 数式は KaTeX CDN でレンダリング
+- 数式は KaTeX を用い、CDN から必要な CSS/JS を読み込んでレンダリング
 - コードブロックはモノスペースフォント + 背景色付き
 - テーブルは罫線付き
 - @media print ルールを含む

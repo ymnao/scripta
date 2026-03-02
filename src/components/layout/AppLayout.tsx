@@ -67,6 +67,7 @@ export function AppLayout() {
 		markdown: string;
 		filePath: string;
 	} | null>(null);
+	const exportRequestIdRef = useRef(0);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
@@ -717,13 +718,17 @@ export function AppLayout() {
 			setExportOpen(true);
 			return;
 		}
-		// File not open in any tab — read from disk
+		// File not open in any tab — read from disk.
+		// Track request ID so only the latest readFile response takes effect.
+		const requestId = ++exportRequestIdRef.current;
 		readFile(path)
 			.then((markdown) => {
+				if (exportRequestIdRef.current !== requestId) return;
 				setExportTarget({ markdown, filePath: path });
 				setExportOpen(true);
 			})
 			.catch((err) => {
+				if (exportRequestIdRef.current !== requestId) return;
 				useToastStore
 					.getState()
 					.addToast(

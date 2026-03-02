@@ -116,4 +116,18 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("<details>");
 		expect(html).toContain("<summary>");
 	});
+
+	it("does not process $ inside link URLs", () => {
+		const md = "[link]($x$)";
+		const html = markdownToHtml(md);
+		expect(html).toContain('href="$x$"');
+		expect(html).not.toContain("katex");
+	});
+
+	it("does not process $ inside image URLs", () => {
+		const md = "![alt]($img$)";
+		const html = markdownToHtml(md);
+		expect(html).toContain('src="$img$"');
+		expect(html).not.toContain("katex");
+	});
 });
