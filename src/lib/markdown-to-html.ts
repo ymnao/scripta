@@ -37,16 +37,18 @@ function preprocessDisplayMath(
 	nonce: string,
 ): string {
 	// Build ranges covered by fenced code blocks to skip them.
+	// CommonMark allows 0-3 spaces indent and both ``` and ~~~ fences.
 	const codeRanges: Array<[number, number]> = [];
-	const fenceRe = /^(`{3,})[^\n]*\n([\s\S]*?)\n\1\s*$/gm;
+	const fenceRe = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n[ \t]{0,3}\1[ \t]*$/gm;
 	for (const m of markdown.matchAll(fenceRe)) {
 		codeRanges.push([m.index, m.index + m[0].length]);
 	}
 
-	// Only match display math where $$ appears on its own line.
-	// This prevents incorrect pairing with inline $...$ tokens.
+	// Match display math where $$ appears on its own line.
+	// Allows optional container prefixes (>, -, *, +, digits) for
+	// blockquote / list contexts.
 	return markdown.replace(
-		/^[ \t]*\$\$[ \t]*\n([\s\S]*?)\n[ \t]*\$\$[ \t]*$/gm,
+		/^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*[ \t]*\$\$[ \t]*\n([\s\S]*?)\n(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*[ \t]*\$\$[ \t]*$/gm,
 		(match, tex: string, offset: number) => {
 			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
 				return match;

@@ -22,6 +22,33 @@ pub async fn export_pdf(
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
     let label = format!("pdf-export-{counter}");
 
+    // Clean up any stale .scripta-backup-* files from previous crashes.
+    // If the output file doesn't exist but a backup does, restore it first.
+    if let Some(parent) = std::path::Path::new(&output_path).parent() {
+        let prefix = format!(
+            "{}.scripta-backup-",
+            std::path::Path::new(&output_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            let output_exists = std::fs::metadata(&output_path).is_ok();
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with(&prefix) {
+                    if !output_exists {
+                        // Restore the first backup found as the original file
+                        let _ = std::fs::rename(entry.path(), &output_path);
+                    }
+                    // Remove any remaining stale backups
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+
     // If a file already exists at the output path, move it to a temporary
     // backup so we can unambiguously detect the new file.  On failure the
     // backup is restored, avoiding data loss.

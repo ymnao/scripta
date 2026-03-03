@@ -183,7 +183,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 							)}
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								MarkdownをPDFファイルとして書き出します。
-								{!isPdfSupported && "macOS・Windowsのみ対応。"}
+								{!isPdfSupported && " macOS・Windowsのみ対応。"}
 							</p>
 							<div className="flex justify-end">
 								<button
