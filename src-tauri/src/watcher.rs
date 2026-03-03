@@ -20,22 +20,12 @@ pub struct FsChangeEvent {
     pub path: String,
 }
 
+#[derive(Default)]
 #[cfg(feature = "tauri-app")]
 pub struct WatcherState {
     watcher: Option<RecommendedWatcher>,
     stop_tx: Option<mpsc::Sender<()>>,
     thread_handle: Option<thread::JoinHandle<()>>,
-}
-
-#[cfg(feature = "tauri-app")]
-impl Default for WatcherState {
-    fn default() -> Self {
-        Self {
-            watcher: None,
-            stop_tx: None,
-            thread_handle: None,
-        }
-    }
 }
 
 #[cfg(feature = "tauri-app")]
