@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { useId, useState } from "react";
 import { translateError } from "../../lib/errors";
-import { type ExportTheme, exportAsHtml, exportAsPrompt } from "../../lib/export";
+import { type ExportTheme, exportAsHtml, exportAsPdf, exportAsPrompt } from "../../lib/export";
 import { useToastStore } from "../../stores/toast";
 import { DialogBase } from "./DialogBase";
 
@@ -12,10 +12,11 @@ interface ExportDialogProps {
 	filePath: string;
 }
 
-type Section = "html" | "prompt";
+type Section = "html" | "pdf" | "prompt";
 
 const sections: { key: Section; label: string }[] = [
 	{ key: "html", label: "HTML" },
+	{ key: "pdf", label: "PDF" },
 	{ key: "prompt", label: "プロンプト" },
 ];
 
@@ -25,10 +26,16 @@ const htmlThemeOptions: { value: ExportTheme; label: string }[] = [
 	{ value: "dark", label: "ダーク" },
 ];
 
+const pdfThemeOptions: { value: ExportTheme; label: string }[] = [
+	{ value: "light", label: "ライト" },
+	{ value: "dark", label: "ダーク" },
+];
+
 export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialogProps) {
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
+	const [pdfTheme, setPdfTheme] = useState<ExportTheme>("light");
 	const [exporting, setExporting] = useState(false);
 
 	const handleExportHtml = async () => {
@@ -40,6 +47,20 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			useToastStore
 				.getState()
 				.addToast("error", `HTMLエクスポートに失敗しました: ${translateError(err)}`);
+		} finally {
+			setExporting(false);
+		}
+	};
+
+	const handleExportPdf = async () => {
+		setExporting(true);
+		try {
+			const result = await exportAsPdf(markdown, filePath, { theme: pdfTheme });
+			if (result) onClose();
+		} catch (err: unknown) {
+			useToastStore
+				.getState()
+				.addToast("error", `PDFエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
 		}
@@ -114,6 +135,31 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 									className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 								>
 									HTMLとしてエクスポート
+								</button>
+							</div>
+						</>
+					)}
+
+					{activeSection === "pdf" && (
+						<>
+							<SelectInput
+								id="export-pdf-theme"
+								label="テーマ"
+								value={pdfTheme}
+								options={pdfThemeOptions}
+								onChange={setPdfTheme}
+							/>
+							<p className="text-[11px] leading-relaxed text-text-secondary">
+								MarkdownをPDFファイルとして書き出します。macOSのみ対応。
+							</p>
+							<div className="flex justify-end">
+								<button
+									type="button"
+									disabled={exporting}
+									onClick={handleExportPdf}
+									className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+								>
+									PDFとしてエクスポート
 								</button>
 							</div>
 						</>

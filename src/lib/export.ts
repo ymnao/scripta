@@ -1,5 +1,5 @@
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "./commands";
+import { exportPdf, writeFile } from "./commands";
 import { markdownToHtml } from "./markdown-to-html";
 import { basename } from "./path";
 
@@ -39,7 +39,11 @@ function buildThemeCss(theme: ExportTheme): string {
 }`;
 }
 
-function buildHtmlDocument(bodyHtml: string, title: string, theme: ExportTheme = "system"): string {
+export function buildHtmlDocument(
+	bodyHtml: string,
+	title: string,
+	theme: ExportTheme = "system",
+): string {
 	return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -151,6 +155,31 @@ export async function exportAsHtml(
 	const bodyHtml = markdownToHtml(markdown);
 	const html = buildHtmlDocument(bodyHtml, title, options?.theme);
 	await writeFile(savePath, html);
+	return true;
+}
+
+/**
+ * Markdown を PDF ファイルとしてエクスポートする。
+ * @returns save ダイアログでキャンセルされた場合は false
+ */
+export async function exportAsPdf(
+	markdown: string,
+	filePath: string,
+	options?: { theme?: ExportTheme },
+): Promise<boolean> {
+	const title = extractTitle(filePath);
+	const defaultName = `${title}.pdf`;
+
+	const savePath = await save({
+		defaultPath: defaultName,
+		filters: [{ name: "PDF", extensions: ["pdf"] }],
+	});
+
+	if (!savePath) return false;
+
+	const bodyHtml = markdownToHtml(markdown);
+	const html = buildHtmlDocument(bodyHtml, title, options?.theme ?? "light");
+	await exportPdf(html, savePath);
 	return true;
 }
 

@@ -170,6 +170,11 @@ export class TauriMock {
 					return undefined;
 				};
 
+				store.handlers.export_pdf = () => {
+					// no-op: just record the call
+					return undefined;
+				};
+
 				store.handlers.search_filenames = (args: Record<string, unknown>) => {
 					const workspacePath = args.workspacePath as string;
 					const query = (args.query as string).toLowerCase();

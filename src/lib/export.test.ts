@@ -6,14 +6,16 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("./commands", () => ({
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	exportPdf: vi.fn().mockResolvedValue(undefined),
 }));
 
 const { save } = await import("@tauri-apps/plugin-dialog");
-const { writeFile } = await import("./commands");
-const { exportAsHtml, exportAsPrompt } = await import("./export");
+const { writeFile, exportPdf } = await import("./commands");
+const { exportAsHtml, exportAsPdf, exportAsPrompt } = await import("./export");
 
 const mockedSave = save as Mock;
 const mockedWriteFile = writeFile as Mock;
+const mockedExportPdf = exportPdf as Mock;
 
 describe("exportAsHtml", () => {
 	beforeEach(() => {
@@ -138,5 +140,55 @@ describe("exportAsPrompt", () => {
 		await exportAsPrompt(md, "/workspace/test.md");
 		const output = mockedWriteFile.mock.calls[0][1] as string;
 		expect(output).toContain("`````markdown");
+	});
+});
+
+describe("exportAsPdf", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns false when save dialog is cancelled", async () => {
+		mockedSave.mockResolvedValue(null);
+		const result = await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(result).toBe(false);
+		expect(mockedExportPdf).not.toHaveBeenCalled();
+	});
+
+	it("calls exportPdf command on save", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		const result = await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(result).toBe(true);
+		expect(mockedExportPdf).toHaveBeenCalledWith(
+			expect.stringContaining("<!DOCTYPE html>"),
+			"/output/test.pdf",
+		);
+	});
+
+	it("defaults to light theme for PDF", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("applies dark theme when specified", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { theme: "dark" });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: dark");
+		expect(html).toContain("background: #1a1a1a");
+	});
+
+	it("uses pdf filter for save dialog", async () => {
+		mockedSave.mockResolvedValue(null);
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(mockedSave).toHaveBeenCalledWith(
+			expect.objectContaining({
+				defaultPath: "test.pdf",
+				filters: [{ name: "PDF", extensions: ["pdf"] }],
+			}),
+		);
 	});
 });
