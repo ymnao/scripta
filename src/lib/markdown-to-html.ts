@@ -60,11 +60,14 @@ function preprocessDisplayMath(
 			}
 			if (isEscaped(markdown, offset)) return match;
 
-			// Strip container prefixes from each line of the tex content
-			const stripRe = new RegExp(`^${containerPrefix.source}`);
+			// Strip only the container prefix captured on the opening $$ line.
+			// Do NOT use the generic containerPrefix pattern here — it would
+			// incorrectly strip leading -, +, * etc. from normal TeX content.
+			const escapedPrefix = prefix ? prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+			const stripRe = escapedPrefix ? new RegExp(`^${escapedPrefix}`) : null;
 			const tex = rawTex
 				.split("\n")
-				.map((line) => line.replace(stripRe, ""))
+				.map((line) => (stripRe ? line.replace(stripRe, "") : line))
 				.join("\n");
 
 			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;

@@ -165,6 +165,15 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("<blockquote>");
 	});
 
+	it("does not strip leading minus/plus from display math content", () => {
+		const md = "$$\n-x^2 + y\n$$";
+		const html = markdownToHtml(md);
+		expect(html).toContain("katex");
+		// The minus sign must not be stripped — verify by checking
+		// that KaTeX rendered the minus (rendered as <mo>−</mo>)
+		expect(html).toContain("−");
+	});
+
 	it("does not convert single newlines to <br> by default", () => {
 		const html = markdownToHtml("line1\nline2");
 		expect(html).not.toContain("<br");
