@@ -19,7 +19,8 @@ pub async fn export_pdf(
 
     let file_url = tauri::Url::from_file_path(&tmp_html)
         .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
-    let label = format!("pdf-export-{}", COUNTER.fetch_add(1, Ordering::Relaxed));
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let label = format!("pdf-export-{counter}");
 
     // Channel to signal that the print operation has been started
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
@@ -143,11 +144,7 @@ pub async fn export_pdf(
     // backup is restored, avoiding data loss.
     // Use a unique backup name to avoid collisions with concurrent exports
     // and to prevent deleting stale backups that may be the user's only copy.
-    let backup_path = format!(
-        "{}.scripta-backup-{}",
-        output_path,
-        COUNTER.load(Ordering::Relaxed)
-    );
+    let backup_path = format!("{}.scripta-backup-{counter}", output_path);
     let has_backup = match std::fs::rename(&output_path, &backup_path) {
         Ok(()) => true,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
@@ -227,7 +224,8 @@ pub async fn export_pdf(
 
     let file_url = tauri::Url::from_file_path(&tmp_html)
         .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
-    let label = format!("pdf-export-{}", COUNTER.fetch_add(1, Ordering::Relaxed));
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let label = format!("pdf-export-{counter}");
 
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     let output = output_path.clone();
