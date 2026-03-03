@@ -5,25 +5,25 @@ import { basename } from "./path";
 
 export type ExportTheme = "system" | "light" | "dark";
 
-const LIGHT_STYLES = `body { color: #1a1a1a; background: #fff; }
-h1, h2 { border-bottom-color: #e5e5e5; }
-code { background: #f0f0f0; }
-pre { background: #f6f6f6; }
-blockquote { border-left-color: #ddd; color: #555; }
-th, td { border-color: #ddd; }
-th { background: #f6f6f6; }
-a { color: #0366d6; }
-hr { border-top-color: #e5e5e5; }`;
+const LIGHT_STYLES = `body { color: #333; background: #fff; }
+code { background: #f8f8f8; }
+pre { background: #f8f8f8; }
+blockquote { border-left-color: #e8e8e8; color: #555; }
+th, td { border-color: #e8e8e8; }
+th { background: #f8f8f8; }
+a { color: #2563eb; }
+hr { border-top-color: #e8e8e8; }
+li::marker { color: #999; }`;
 
-const DARK_STYLES = `body { color: #e0e0e0; background: #1a1a1a; }
-h1, h2 { border-bottom-color: #333; }
-code { background: #2d2d2d; }
-pre { background: #252525; }
-blockquote { border-left-color: #444; color: #aaa; }
+const DARK_STYLES = `body { color: #d4d4d4; background: #1a1a1a; }
+code { background: #222; }
+pre { background: #222; }
+blockquote { border-left-color: #333; color: #777; }
 th, td { border-color: #333; }
-th { background: #252525; }
-a { color: #58a6ff; }
-hr { border-top-color: #333; }`;
+th { background: #222; }
+a { color: #60a5fa; }
+hr { border-top-color: #333; }
+li::marker { color: #777; }`;
 
 function buildThemeCss(theme: ExportTheme): string {
 	if (theme === "light") {
@@ -57,27 +57,30 @@ export function buildHtmlDocument(
 }
 body {
   font-family: system-ui, -apple-system, sans-serif;
-  line-height: 1.8;
+  line-height: 1.6;
   max-width: 800px;
   margin: 0 auto;
   padding: 2rem;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 h1, h2, h3, h4, h5, h6 {
-  margin-top: 1.5em;
-  margin-bottom: 0.5em;
   line-height: 1.3;
 }
-h1 { font-size: 2em; border-bottom: 1px solid; padding-bottom: 0.3em; }
-h2 { font-size: 1.5em; border-bottom: 1px solid; padding-bottom: 0.3em; }
-h3 { font-size: 1.25em; }
+h1 { font-size: 1.8em; font-weight: 700; margin: 1.2em 0 0.3em; }
+h2 { font-size: 1.5em; font-weight: 700; margin: 1em 0 0.25em; }
+h3 { font-size: 1.25em; font-weight: 600; margin: 0.8em 0 0.2em; }
+h4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.15em; }
+h5 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.1em; }
+h6 { font-size: 0.9em; font-weight: 600; margin: 0.5em 0 0.1em; }
 code {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   font-size: 0.9em;
-  padding: 0.15em 0.3em;
+  padding: 0.2em 0.4em;
   border-radius: 3px;
 }
 pre {
-  padding: 1em;
+  padding: 0.8em 1em;
   border-radius: 6px;
   overflow-x: auto;
 }
@@ -86,9 +89,9 @@ pre code {
   padding: 0;
 }
 blockquote {
-  border-left: 4px solid;
-  margin: 1em 0;
-  padding: 0.5em 1em;
+  border-left: 3px solid;
+  margin: 0.5em 0;
+  padding: 0 0 0 0.75em;
 }
 table {
   border-collapse: collapse;
@@ -102,8 +105,10 @@ th, td {
 }
 th { font-weight: 600; }
 img { max-width: 100%; height: auto; }
-hr { border: none; border-top: 1px solid; margin: 2em 0; }
-ul, ol { padding-left: 2em; }
+hr { border: none; border-top: 1px solid; margin: 1em 0; }
+ul, ol { padding-left: 1.5em; }
+ul > li::marker { font-size: 0.75em; }
+li:has(> input[type="checkbox"]) { list-style: none; }
 input[type="checkbox"] { margin-right: 0.5em; }
 ${buildThemeCss(theme)}
 
@@ -112,9 +117,8 @@ ${buildThemeCss(theme)}
   margin: 20mm;
 }
 @media print {
-  body { padding: 0; color: #000; background: #fff; }
+  body { padding: 0; }
   pre { white-space: pre-wrap; word-wrap: break-word; }
-  a { color: #000; text-decoration: underline; }
   h1, h2, h3, h4, h5, h6 { break-after: avoid; }
   pre, blockquote, table, img { break-inside: avoid; }
 }

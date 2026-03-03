@@ -25,10 +25,57 @@ interface MathPlaceholder {
 	html: string;
 }
 
+/**
+ * Replace multi-line display math ($$...\n...\n$$) in raw markdown
+ * before lexing. With `breaks: true`, newlines inside display math
+ * would be converted to <br>, breaking KaTeX rendering.
+ * Single-line $$...$$ is handled later by walkTokens.
+ */
+function preprocessDisplayMath(
+	markdown: string,
+	placeholders: MathPlaceholder[],
+	nonce: string,
+): string {
+	// Build ranges covered by fenced code blocks to skip them.
+	const codeRanges: Array<[number, number]> = [];
+	const fenceRe = /^(`{3,})[^\n]*\n([\s\S]*?)\n\1\s*$/gm;
+	for (const m of markdown.matchAll(fenceRe)) {
+		codeRanges.push([m.index, m.index + m[0].length]);
+	}
+
+	// Only match display math where $$ appears on its own line.
+	// This prevents incorrect pairing with inline $...$ tokens.
+	return markdown.replace(
+		/^[ \t]*\$\$[ \t]*\n([\s\S]*?)\n[ \t]*\$\$[ \t]*$/gm,
+		(match, tex: string, offset: number) => {
+			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
+				return match;
+			}
+			if (isEscaped(markdown, offset)) return match;
+
+			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
+			try {
+				const html = katex.renderToString(tex.trim(), {
+					displayMode: true,
+					throwOnError: false,
+				});
+				placeholders.push({ placeholder, html });
+			} catch {
+				placeholders.push({
+					placeholder,
+					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+				});
+			}
+			return placeholder;
+		},
+	);
+}
+
 function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
 	let processed = text;
 
-	// Pass 1: Display math ($$...$$)
+	// Pass 1: Display math ($$...$$) — single-line only
+	// (multi-line display math is handled by preprocessDisplayMath)
 	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
 
@@ -110,8 +157,16 @@ export function markdownToHtml(markdown: string): string {
 	crypto.getRandomValues(bytes);
 	const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-	const marked = new Marked({ gfm: true, breaks: false });
-	const tokens = marked.lexer(markdown);
+	// Ensure empty task list items (e.g. "- [ ]") are recognized by marked.
+	// marked requires content after [ ]/[x] to detect task lists.
+	const withTasks = markdown.replace(/^(\s*(?:[-*+]|\d+\.)\s+\[[ xX]\])\s*$/gm, "$1 \u200B");
+
+	// Replace multi-line display math before lexing to prevent
+	// `breaks: true` from inserting <br> inside math blocks.
+	const preprocessed = preprocessDisplayMath(withTasks, placeholders, nonce);
+
+	const marked = new Marked({ gfm: true, breaks: true });
+	const tokens = marked.lexer(preprocessed);
 
 	// Walk token tree and replace math only in text nodes,
 	// leaving link URLs, image paths, code spans etc. untouched.
