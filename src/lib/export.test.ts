@@ -11,7 +11,7 @@ vi.mock("./commands", () => ({
 
 const { save } = await import("@tauri-apps/plugin-dialog");
 const { writeFile, exportPdf } = await import("./commands");
-const { exportAsHtml, exportAsPdf, exportAsPrompt } = await import("./export");
+const { buildHtmlDocument, exportAsHtml, exportAsPdf, exportAsPrompt } = await import("./export");
 
 const mockedSave = save as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -182,5 +182,106 @@ describe("exportAsPdf", () => {
 				filters: [{ name: "PDF", extensions: ["pdf"] }],
 			}),
 		);
+	});
+});
+
+describe("buildHtmlDocument page break", () => {
+	it("includes h1 break-before when level is h1", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h1",
+			smart: false,
+		});
+		expect(html).toContain("h1 { break-before: page; }");
+	});
+
+	it("includes h1 and h2 break-before when level is h2", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h2",
+			smart: false,
+		});
+		expect(html).toContain("h1, h2 { break-before: page; }");
+	});
+
+	it("includes h1, h2 and h3 break-before when level is h3", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h3",
+			smart: false,
+		});
+		expect(html).toContain("h1, h2, h3 { break-before: page; }");
+	});
+
+	it("smart: marks first heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>First</h2><p>text</p><h2>Second</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>First</h2>");
+		expect(html).toContain("<h2>Second</h2>");
+		expect(html).toContain("[data-no-break] { break-before: auto !important; }");
+	});
+
+	it("smart: marks sub-heading with data-no-break even with content between", () => {
+		const html = buildHtmlDocument("<h2>Section</h2><p>intro</p><h3>Sub</h3>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>Section</h2>");
+		expect(html).toContain("<h3 data-no-break>Sub</h3>");
+	});
+
+	it("smart: does not mark same-level heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>A</h2>");
+		expect(html).toContain("<h2>B</h2>");
+	});
+
+	it("smart: does not mark shallower heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>A</h2><h3>B</h3><p>text</p><h2>C</h2>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>A</h2>");
+		expect(html).toContain("<h3 data-no-break>B</h3>");
+		expect(html).toContain("<h2>C</h2>");
+	});
+
+	it("smart: ignores headings beyond target level", () => {
+		const html = buildHtmlDocument(
+			"<h1>Ch</h1><h2>Sec</h2><h3>Sub</h3><h2>Next</h2>",
+			"test",
+			"light",
+			{ level: "h2", smart: true },
+		);
+		expect(html).toContain("<h1 data-no-break>Ch</h1>");
+		expect(html).toContain("<h2 data-no-break>Sec</h2>");
+		expect(html).toContain("<h3>Sub</h3>");
+		expect(html).toContain("<h2>Next</h2>");
+	});
+
+	it("smart: does not suppress sub-heading when many blocks between", () => {
+		const html = buildHtmlDocument(
+			"<h2>Section</h2><p>intro</p><ul><li>a</li></ul><h3>Sub</h3>",
+			"test",
+			"light",
+			{ level: "h3", smart: true },
+		);
+		expect(html).toContain("<h2 data-no-break>Section</h2>");
+		expect(html).toContain("<h3>Sub</h3>");
+	});
+
+	it("does not include break-before when level is none", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "none",
+			smart: true,
+		});
+		expect(html).not.toContain("break-before: page");
+	});
+
+	it("does not include break-before when pageBreak is undefined", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light");
+		expect(html).not.toContain("break-before: page");
 	});
 });

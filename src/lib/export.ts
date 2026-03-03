@@ -4,6 +4,7 @@ import { markdownToHtml } from "./markdown-to-html";
 import { basename } from "./path";
 
 export type ExportTheme = "system" | "light" | "dark";
+export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
 
 const LIGHT_STYLES = `body { color: #333; background: #fff; }
 code { background: #f8f8f8; }
@@ -25,6 +26,55 @@ a { color: #60a5fa; }
 hr { border-top-color: #333; }
 li::marker { color: #777; }`;
 
+function buildPageBreakCss(level: PageBreakLevel, smart: boolean): string {
+	if (level === "none") return "";
+
+	const selectors: string[] = ["h1"];
+	if (level === "h2" || level === "h3") selectors.push("h2");
+	if (level === "h3") selectors.push("h3");
+
+	let css = `${selectors.join(", ")} { break-before: page; }`;
+
+	if (smart) {
+		css += "\n[data-no-break] { break-before: auto !important; }";
+	}
+
+	return css;
+}
+
+function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
+	if (level === "none") return bodyHtml;
+	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
+
+	const pattern = /<h([1-6])/g;
+	const suppressSet = new Set<number>();
+	let prevLevel = 0;
+	let lastMatchEnd = 0;
+
+	for (let m = pattern.exec(bodyHtml); m !== null; m = pattern.exec(bodyHtml)) {
+		const current = Number.parseInt(m[1], 10);
+		if (current > maxLevel) continue;
+
+		const between = bodyHtml.slice(lastMatchEnd, m.index);
+		const blockCount = (between.match(/<(?:p|ul|ol|pre|blockquote|table|hr|div)[\s>\/]/gi) || [])
+			.length;
+
+		if (prevLevel === 0 || (current > prevLevel && blockCount <= 1)) {
+			suppressSet.add(m.index);
+		}
+
+		prevLevel = current;
+		lastMatchEnd = m.index + m[0].length;
+	}
+
+	if (suppressSet.size === 0) return bodyHtml;
+
+	return bodyHtml.replace(/<h([1-6])/g, (match, levelStr: string, offset: number) => {
+		if (suppressSet.has(offset)) return `<h${levelStr} data-no-break`;
+		return match;
+	});
+}
+
 function buildThemeCss(theme: ExportTheme): string {
 	if (theme === "light") {
 		return LIGHT_STYLES;
@@ -43,6 +93,7 @@ export function buildHtmlDocument(
 	bodyHtml: string,
 	title: string,
 	theme: ExportTheme = "system",
+	pageBreak?: { level: PageBreakLevel; smart: boolean },
 ): string {
 	return `<!DOCTYPE html>
 <html lang="ja">
@@ -121,11 +172,12 @@ ${buildThemeCss(theme)}
   pre { white-space: pre-wrap; word-wrap: break-word; }
   h1, h2, h3, h4, h5, h6 { break-after: avoid; }
   pre, blockquote, table, img { break-inside: avoid; }
+${pageBreak ? `  ${buildPageBreakCss(pageBreak.level, pageBreak.smart).split("\n").join("\n  ")}` : ""}
 }
 </style>
 </head>
 <body>
-${bodyHtml}
+${pageBreak?.smart ? applySmartPageBreaks(bodyHtml, pageBreak.level) : bodyHtml}
 </body>
 </html>`;
 }
@@ -172,7 +224,11 @@ export async function exportAsHtml(
  * Markdown を PDF ファイルとしてエクスポートする。
  * @returns save ダイアログでキャンセルされた場合は false
  */
-export async function exportAsPdf(markdown: string, filePath: string): Promise<boolean> {
+export async function exportAsPdf(
+	markdown: string,
+	filePath: string,
+	options?: { pageBreakLevel?: PageBreakLevel; smartPageBreak?: boolean },
+): Promise<boolean> {
 	const title = extractTitle(filePath);
 	const defaultName = `${title}.pdf`;
 
@@ -183,8 +239,13 @@ export async function exportAsPdf(markdown: string, filePath: string): Promise<b
 
 	if (!savePath) return false;
 
+	const pageBreak =
+		options?.pageBreakLevel && options.pageBreakLevel !== "none"
+			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
+			: undefined;
+
 	const bodyHtml = markdownToHtml(markdown);
-	const html = buildHtmlDocument(bodyHtml, title, "light");
+	const html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 	await exportPdf(html, savePath);
 	return true;
 }
