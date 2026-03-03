@@ -22,6 +22,24 @@ pub async fn export_pdf(
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
     let label = format!("pdf-export-{counter}");
 
+    // If a file already exists at the output path, move it to a temporary
+    // backup so we can unambiguously detect the new file.  On failure the
+    // backup is restored, avoiding data loss.
+    // Use PID + counter for a globally unique name that survives app restarts
+    // and avoids collisions with concurrent exports.
+    let backup_path = format!(
+        "{}.scripta-backup-{}-{counter}",
+        output_path,
+        std::process::id()
+    );
+    let has_backup = match std::fs::rename(&output_path, &backup_path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            return Err(format!("既存ファイルの退避に失敗しました: {e}"));
+        }
+    };
+
     // Channel to signal that the print operation has been started
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
@@ -139,22 +157,6 @@ pub async fn export_pdf(
         }
     });
 
-    // If a file already exists at the output path, move it to a temporary
-    // backup so we can unambiguously detect the new file.  On failure the
-    // backup is restored, avoiding data loss.
-    // Use a unique backup name to avoid collisions with concurrent exports
-    // and to prevent deleting stale backups that may be the user's only copy.
-    let backup_path = format!("{}.scripta-backup-{counter}", output_path);
-    let has_backup = match std::fs::rename(&output_path, &backup_path) {
-        Ok(()) => true,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(e) => {
-            return Err(format!(
-                "既存ファイルの退避に失敗しました: {e}"
-            ));
-        }
-    };
-
     // Wait for the print operation to be dispatched, then poll for the output file
     let output_for_poll = output_path.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -195,6 +197,10 @@ pub async fn export_pdf(
             }
         }
     } else if has_backup {
+        // Remove any partial/empty file left by the failed print operation
+        // before restoring the backup (rename atomically replaces on Unix,
+        // but removing first makes the intent explicit).
+        let _ = std::fs::remove_file(&output_path);
         if let Err(e) = std::fs::rename(&backup_path, &output_path) {
             log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
         }

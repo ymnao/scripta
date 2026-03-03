@@ -74,9 +74,9 @@ function preprocessDisplayMath(
 function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
 	let processed = text;
 
-	// Pass 1: Display math ($$...$$) — single-line only
-	// (multi-line display math is handled by preprocessDisplayMath)
-	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex: string, offset: number) => {
+	// Pass 1: Display math ($$...$$) — handles remaining $$...$$ after
+	// preprocessDisplayMath has replaced multi-line instances.
+	processed = processed.replace(/\$\$([^\n$]+)\$\$/g, (match, tex: string, offset: number) => {
 		if (isEscaped(processed, offset)) return match;
 
 		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
