@@ -183,6 +183,39 @@ describe("exportAsPdf", () => {
 			}),
 		);
 	});
+
+	it("includes A4 page size and print margins in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("size: A4");
+		expect(html).toContain("margin: 20mm");
+	});
+
+	it("converts single newlines to <br> in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("line1\nline2", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<br");
+	});
+
+	it("renders KaTeX math in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("$x^2$", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("katex");
+		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("includes page break CSS when pageBreakLevel is set", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("h1, h2 { break-before: page; }");
+	});
 });
 
 describe("buildHtmlDocument page break", () => {

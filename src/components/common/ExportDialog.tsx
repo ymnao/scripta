@@ -11,7 +11,9 @@ import {
 import { useToastStore } from "../../stores/toast";
 import { DialogBase } from "./DialogBase";
 
-const isPdfSupported = typeof navigator !== "undefined" && /Mac|Win/.test(navigator.platform);
+const isPdfSupported =
+	typeof navigator !== "undefined" &&
+	/mac|win/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? "");
 
 interface ExportDialogProps {
 	open: boolean;
