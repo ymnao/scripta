@@ -138,10 +138,13 @@ pub async fn export_pdf(
         }
     });
 
-    // Remove any existing file at the output path so we can reliably detect
-    // when the print operation creates a new file (avoids false success from
-    // a stale PDF left over from a previous export).
-    let _ = std::fs::remove_file(&output_path);
+    // Record metadata of any existing file at the output path so we can
+    // detect when the print operation actually writes a new file.  This
+    // avoids both false success (stale PDF) and data loss (deleting the
+    // original before a potentially failing print).
+    let prev_modified = std::fs::metadata(&output_path)
+        .ok()
+        .and_then(|m| m.modified().ok());
 
     // Wait for the print operation to be dispatched, then poll for the output file
     let output_for_poll = output_path.clone();
@@ -152,15 +155,21 @@ pub async fn export_pdf(
             .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")));
         started?;
 
-        // Poll for the PDF file to appear (print operation writes it asynchronously)
+        // Poll for the PDF file to appear or be updated
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
             if let Ok(meta) = std::fs::metadata(&output_for_poll) {
                 if meta.len() > 0 {
-                    // File exists and has content — give a small grace period
-                    // for the write to finish
-                    std::thread::sleep(Duration::from_millis(200));
-                    return Ok(());
+                    // If there was no previous file, any non-empty file is new
+                    // If there was a previous file, check that modified time changed
+                    let dominated_by_prev = prev_modified
+                        .and_then(|prev| meta.modified().ok().map(|cur| cur <= prev))
+                        .unwrap_or(false);
+                    if !dominated_by_prev {
+                        // Give a small grace period for the write to finish
+                        std::thread::sleep(Duration::from_millis(200));
+                        return Ok(());
+                    }
                 }
             }
             if std::time::Instant::now() >= deadline {
