@@ -149,8 +149,11 @@ function walkTokens(tokens: Token[], placeholders: MathPlaceholder[], nonce: str
 /**
  * Markdown テキストを HTML 文字列に変換する。
  * GFM（テーブル・取り消し線・タスクリスト）と KaTeX 数式をサポート。
+ *
+ * @param options.breaks - true にすると単一改行を `<br>` に変換する（PDF 用）。
+ *                         デフォルトは false（標準 Markdown の挙動）。
  */
-export function markdownToHtml(markdown: string): string {
+export function markdownToHtml(markdown: string, options?: { breaks?: boolean }): string {
 	const placeholders: MathPlaceholder[] = [];
 	// Per-call nonce to prevent placeholder collision with user content
 	const bytes = new Uint8Array(16);
@@ -162,10 +165,11 @@ export function markdownToHtml(markdown: string): string {
 	const withTasks = markdown.replace(/^(\s*(?:[-*+]|\d+\.)\s+\[[ xX]\])\s*$/gm, "$1 \u200B");
 
 	// Replace multi-line display math before lexing to prevent
-	// `breaks: true` from inserting <br> inside math blocks.
+	// `breaks: true` (when enabled) from inserting <br> inside math blocks.
 	const preprocessed = preprocessDisplayMath(withTasks, placeholders, nonce);
 
-	const marked = new Marked({ gfm: true, breaks: true });
+	const breaks = options?.breaks ?? false;
+	const marked = new Marked({ gfm: true, breaks });
 	const tokens = marked.lexer(preprocessed);
 
 	// Walk token tree and replace math only in text nodes,

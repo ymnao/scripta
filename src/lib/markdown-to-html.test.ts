@@ -151,4 +151,14 @@ describe("markdownToHtml", () => {
 		expect(html).toContain('src="$img$"');
 		expect(html).not.toContain("katex");
 	});
+
+	it("does not convert single newlines to <br> by default", () => {
+		const html = markdownToHtml("line1\nline2");
+		expect(html).not.toContain("<br");
+	});
+
+	it("converts single newlines to <br> when breaks option is true", () => {
+		const html = markdownToHtml("line1\nline2", { breaks: true });
+		expect(html).toContain("<br");
+	});
 });

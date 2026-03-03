@@ -244,7 +244,7 @@ export async function exportAsPdf(
 			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
 			: undefined;
 
-	const bodyHtml = markdownToHtml(markdown);
+	const bodyHtml = markdownToHtml(markdown, { breaks: true });
 	const html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 	await exportPdf(html, savePath);
 	return true;
