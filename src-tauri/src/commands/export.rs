@@ -142,9 +142,9 @@ pub async fn export_pdf(
     // detect when the print operation actually writes a new file.  This
     // avoids both false success (stale PDF) and data loss (deleting the
     // original before a potentially failing print).
-    let prev_modified = std::fs::metadata(&output_path)
-        .ok()
-        .and_then(|m| m.modified().ok());
+    let prev_meta = std::fs::metadata(&output_path).ok();
+    let prev_modified = prev_meta.as_ref().and_then(|m| m.modified().ok());
+    let prev_len = prev_meta.as_ref().map(|m| m.len());
 
     // Wait for the print operation to be dispatched, then poll for the output file
     let output_for_poll = output_path.clone();
@@ -155,17 +155,18 @@ pub async fn export_pdf(
             .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")));
         started?;
 
-        // Poll for the PDF file to appear or be updated
+        // Poll for the PDF file to appear or be updated.
+        // Detect change via modified time OR file size difference to
+        // handle filesystems with coarse mtime resolution.
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
             if let Ok(meta) = std::fs::metadata(&output_for_poll) {
                 if meta.len() > 0 {
-                    // If there was no previous file, any non-empty file is new
-                    // If there was a previous file, check that modified time changed
-                    let dominated_by_prev = prev_modified
-                        .and_then(|prev| meta.modified().ok().map(|cur| cur <= prev))
-                        .unwrap_or(false);
-                    if !dominated_by_prev {
+                    let mtime_changed = prev_modified
+                        .and_then(|prev| meta.modified().ok().map(|cur| cur > prev))
+                        .unwrap_or(true); // no previous file → new
+                    let size_changed = prev_len != Some(meta.len());
+                    if mtime_changed || size_changed {
                         // Give a small grace period for the write to finish
                         std::thread::sleep(Duration::from_millis(200));
                         return Ok(());
