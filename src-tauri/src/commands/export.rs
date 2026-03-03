@@ -138,13 +138,11 @@ pub async fn export_pdf(
         }
     });
 
-    // Record metadata of any existing file at the output path so we can
-    // detect when the print operation actually writes a new file.  This
-    // avoids both false success (stale PDF) and data loss (deleting the
-    // original before a potentially failing print).
-    let prev_meta = std::fs::metadata(&output_path).ok();
-    let prev_modified = prev_meta.as_ref().and_then(|m| m.modified().ok());
-    let prev_len = prev_meta.as_ref().map(|m| m.len());
+    // If a file already exists at the output path, move it to a temporary
+    // backup so we can unambiguously detect the new file.  On failure the
+    // backup is restored, avoiding data loss.
+    let backup_path = format!("{}.scripta-backup", output_path);
+    let has_backup = std::fs::rename(&output_path, &backup_path).is_ok();
 
     // Wait for the print operation to be dispatched, then poll for the output file
     let output_for_poll = output_path.clone();
@@ -155,22 +153,14 @@ pub async fn export_pdf(
             .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")));
         started?;
 
-        // Poll for the PDF file to appear or be updated.
-        // Detect change via modified time OR file size difference to
-        // handle filesystems with coarse mtime resolution.
+        // Poll for the PDF file to appear (fresh — no ambiguity with old data)
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
             if let Ok(meta) = std::fs::metadata(&output_for_poll) {
                 if meta.len() > 0 {
-                    let mtime_changed = prev_modified
-                        .and_then(|prev| meta.modified().ok().map(|cur| cur > prev))
-                        .unwrap_or(true); // no previous file → new
-                    let size_changed = prev_len != Some(meta.len());
-                    if mtime_changed || size_changed {
-                        // Give a small grace period for the write to finish
-                        std::thread::sleep(Duration::from_millis(200));
-                        return Ok(());
-                    }
+                    // Give a small grace period for the write to finish
+                    std::thread::sleep(Duration::from_millis(200));
+                    return Ok(());
                 }
             }
             if std::time::Instant::now() >= deadline {
@@ -185,6 +175,15 @@ pub async fn export_pdf(
     // Cleanup
     let _ = webview_window.close();
     drop(tmp_dir);
+
+    // On success, remove the backup; on failure, restore it.
+    if result.is_ok() {
+        if has_backup {
+            let _ = std::fs::remove_file(&backup_path);
+        }
+    } else if has_backup {
+        let _ = std::fs::rename(&backup_path, &output_path);
+    }
 
     result
 }
