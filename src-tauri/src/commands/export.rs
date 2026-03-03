@@ -193,7 +193,8 @@ pub async fn export_pdf(
     let tmp_html = tmp_dir.path().join("export.html");
     std::fs::write(&tmp_html, &html).map_err(|e| e.to_string())?;
 
-    let file_url = format!("file://{}", tmp_html.display());
+    let file_url = tauri::Url::from_file_path(&tmp_html)
+        .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
     let label = format!("pdf-export-{}", COUNTER.fetch_add(1, Ordering::Relaxed));
 
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
@@ -202,7 +203,7 @@ pub async fn export_pdf(
     let webview_window = tauri::webview::WebviewWindowBuilder::new(
         &app_handle,
         &label,
-        WebviewUrl::External(file_url.parse::<tauri::Url>().map_err(|e| e.to_string())?),
+        WebviewUrl::External(file_url),
     )
     .title("PDF Export")
     .inner_size(800.0, 600.0)
