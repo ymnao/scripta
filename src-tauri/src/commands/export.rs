@@ -141,16 +141,13 @@ pub async fn export_pdf(
     // If a file already exists at the output path, move it to a temporary
     // backup so we can unambiguously detect the new file.  On failure the
     // backup is restored, avoiding data loss.
-    let backup_path = format!("{}.scripta-backup", output_path);
-    // Clean up any stale backup from a previous crash/failure before
-    // attempting rename, to prevent AlreadyExists errors.
-    if std::fs::metadata(&backup_path).is_ok() {
-        if let Err(e) = std::fs::remove_file(&backup_path) {
-            return Err(format!(
-                "前回のバックアップファイルの削除に失敗しました: {e}"
-            ));
-        }
-    }
+    // Use a unique backup name to avoid collisions with concurrent exports
+    // and to prevent deleting stale backups that may be the user's only copy.
+    let backup_path = format!(
+        "{}.scripta-backup-{}",
+        output_path,
+        COUNTER.load(Ordering::Relaxed)
+    );
     let has_backup = match std::fs::rename(&output_path, &backup_path) {
         Ok(()) => true,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
