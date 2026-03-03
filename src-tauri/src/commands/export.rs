@@ -142,7 +142,15 @@ pub async fn export_pdf(
     // backup so we can unambiguously detect the new file.  On failure the
     // backup is restored, avoiding data loss.
     let backup_path = format!("{}.scripta-backup", output_path);
-    let has_backup = std::fs::rename(&output_path, &backup_path).is_ok();
+    let has_backup = match std::fs::rename(&output_path, &backup_path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            return Err(format!(
+                "既存ファイルの退避に失敗しました: {e}"
+            ));
+        }
+    };
 
     // Wait for the print operation to be dispatched, then poll for the output file
     let output_for_poll = output_path.clone();
