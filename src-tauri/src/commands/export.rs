@@ -138,6 +138,11 @@ pub async fn export_pdf(
         }
     });
 
+    // Remove any existing file at the output path so we can reliably detect
+    // when the print operation creates a new file (avoids false success from
+    // a stale PDF left over from a previous export).
+    let _ = std::fs::remove_file(&output_path);
+
     // Wait for the print operation to be dispatched, then poll for the output file
     let output_for_poll = output_path.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
