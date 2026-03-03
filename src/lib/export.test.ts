@@ -165,20 +165,12 @@ describe("exportAsPdf", () => {
 		);
 	});
 
-	it("defaults to light theme for PDF", async () => {
+	it("always uses light theme for PDF", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Hello", "/workspace/test.md");
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain("color-scheme: light");
 		expect(html).not.toContain("prefers-color-scheme");
-	});
-
-	it("applies dark theme when specified", async () => {
-		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# Hello", "/workspace/test.md", { theme: "dark" });
-		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).toContain("color-scheme: dark");
-		expect(html).toContain("background: #1a1a1a");
 	});
 
 	it("uses pdf filter for save dialog", async () => {

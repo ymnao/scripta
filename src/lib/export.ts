@@ -172,11 +172,7 @@ export async function exportAsHtml(
  * Markdown を PDF ファイルとしてエクスポートする。
  * @returns save ダイアログでキャンセルされた場合は false
  */
-export async function exportAsPdf(
-	markdown: string,
-	filePath: string,
-	options?: { theme?: ExportTheme },
-): Promise<boolean> {
+export async function exportAsPdf(markdown: string, filePath: string): Promise<boolean> {
 	const title = extractTitle(filePath);
 	const defaultName = `${title}.pdf`;
 
@@ -188,7 +184,7 @@ export async function exportAsPdf(
 	if (!savePath) return false;
 
 	const bodyHtml = markdownToHtml(markdown);
-	const html = buildHtmlDocument(bodyHtml, title, options?.theme ?? "light");
+	const html = buildHtmlDocument(bodyHtml, title, "light");
 	await exportPdf(html, savePath);
 	return true;
 }
