@@ -17,7 +17,8 @@ pub async fn export_pdf(
     let tmp_html = tmp_dir.path().join("export.html");
     std::fs::write(&tmp_html, &html).map_err(|e| e.to_string())?;
 
-    let file_url = format!("file://{}", tmp_html.display());
+    let file_url = tauri::Url::from_file_path(&tmp_html)
+        .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
     let label = format!("pdf-export-{}", COUNTER.fetch_add(1, Ordering::Relaxed));
 
     // Channel to signal that the print operation has been started
@@ -28,7 +29,7 @@ pub async fn export_pdf(
     let webview_window = tauri::webview::WebviewWindowBuilder::new(
         &app_handle,
         &label,
-        WebviewUrl::External(file_url.parse::<tauri::Url>().map_err(|e| e.to_string())?),
+        WebviewUrl::External(file_url),
     )
     .title("PDF Export")
     .inner_size(800.0, 600.0)
@@ -217,36 +218,51 @@ pub async fn export_pdf(
 
         let res = webview.with_webview(move |platform_wv| {
             // SAFETY: with_webview runs on the main thread; we access WebView2 COM API
-            unsafe {
+            let result: Result<(), String> = unsafe {
                 use webview2_com::Microsoft::Web::WebView2::Win32::*;
                 use webview2_com::PrintToPdfCompletedHandler;
                 use windows::core::Interface;
 
                 let controller = platform_wv.controller();
-                let core = controller.CoreWebView2().unwrap();
+                let core = controller
+                    .CoreWebView2()
+                    .map_err(|e| format!("CoreWebView2の取得に失敗: {e}"))?;
 
-                // ICoreWebView2 -> ICoreWebView2_2 -> Environment -> ICoreWebView2Environment6
-                let core2: ICoreWebView2_2 = core.cast().unwrap();
-                let env = core2.Environment().unwrap();
-                let env6: ICoreWebView2Environment6 = env.cast().unwrap();
+                let core2: ICoreWebView2_2 = core
+                    .cast()
+                    .map_err(|e| format!("ICoreWebView2_2へのキャストに失敗: {e}"))?;
+                let env = core2
+                    .Environment()
+                    .map_err(|e| format!("Environmentの取得に失敗: {e}"))?;
+                let env6: ICoreWebView2Environment6 = env
+                    .cast()
+                    .map_err(|e| format!("ICoreWebView2Environment6へのキャストに失敗: {e}"))?;
 
-                let settings = env6.CreatePrintSettings().unwrap();
+                let settings = env6
+                    .CreatePrintSettings()
+                    .map_err(|e| format!("PrintSettingsの作成に失敗: {e}"))?;
 
                 // A4 size in inches: 8.27 x 11.69
-                settings.SetPageWidth(8.27).unwrap();
-                settings.SetPageHeight(11.69).unwrap();
+                settings.SetPageWidth(8.27).map_err(|e| e.to_string())?;
+                settings.SetPageHeight(11.69).map_err(|e| e.to_string())?;
 
                 // Margins 20mm = 0.787in
-                settings.SetMarginTop(0.787).unwrap();
-                settings.SetMarginBottom(0.787).unwrap();
-                settings.SetMarginLeft(0.787).unwrap();
-                settings.SetMarginRight(0.787).unwrap();
+                settings.SetMarginTop(0.787).map_err(|e| e.to_string())?;
+                settings.SetMarginBottom(0.787).map_err(|e| e.to_string())?;
+                settings.SetMarginLeft(0.787).map_err(|e| e.to_string())?;
+                settings.SetMarginRight(0.787).map_err(|e| e.to_string())?;
 
-                settings.SetShouldPrintBackgrounds(true).unwrap();
-                settings.SetShouldPrintHeaderAndFooter(false).unwrap();
+                settings
+                    .SetShouldPrintBackgrounds(true)
+                    .map_err(|e| e.to_string())?;
+                settings
+                    .SetShouldPrintHeaderAndFooter(false)
+                    .map_err(|e| e.to_string())?;
 
                 // ICoreWebView2_7::PrintToPdf
-                let core7: ICoreWebView2_7 = core.cast().unwrap();
+                let core7: ICoreWebView2_7 = core
+                    .cast()
+                    .map_err(|e| format!("ICoreWebView2_7へのキャストに失敗: {e}"))?;
 
                 let output_wide: Vec<u16> = output
                     .encode_utf16()
@@ -273,7 +289,13 @@ pub async fn export_pdf(
                         &settings,
                         &handler,
                     )
-                    .unwrap();
+                    .map_err(|e| format!("PrintToPdfの呼び出しに失敗: {e}"))?;
+
+                Ok(())
+            };
+
+            if let Err(e) = result {
+                let _ = tx_err.send(Err(e));
             }
         });
 
