@@ -55,6 +55,17 @@ pub async fn export_pdf(
                     MainThreadMarker::new().expect("with_webview runs on main thread");
                 let config = WKPDFConfiguration::new(mtm);
 
+                // A4 size in points (1pt = 1/72 inch): 595.28 x 841.89
+                use objc2_foundation::{NSPoint, NSRect, NSSize};
+                let a4_rect = NSRect {
+                    origin: NSPoint { x: 0.0, y: 0.0 },
+                    size: NSSize {
+                        width: 595.28,
+                        height: 841.89,
+                    },
+                };
+                config.setRect(a4_rect);
+
                 let block = RcBlock::new(
                     move |data: *mut objc2_foundation::NSData,
                           error: *mut objc2_foundation::NSError| {

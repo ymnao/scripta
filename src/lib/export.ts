@@ -107,10 +107,16 @@ ul, ol { padding-left: 2em; }
 input[type="checkbox"] { margin-right: 0.5em; }
 ${buildThemeCss(theme)}
 
+@page {
+  size: A4;
+  margin: 20mm;
+}
 @media print {
   body { padding: 0; color: #000; background: #fff; }
   pre { white-space: pre-wrap; word-wrap: break-word; }
   a { color: #000; text-decoration: underline; }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
+  pre, blockquote, table, img { break-inside: avoid; }
 }
 </style>
 </head>
