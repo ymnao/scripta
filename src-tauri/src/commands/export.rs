@@ -187,10 +187,14 @@ pub async fn export_pdf(
     // On success, remove the backup; on failure, restore it.
     if result.is_ok() {
         if has_backup {
-            let _ = std::fs::remove_file(&backup_path);
+            if let Err(e) = std::fs::remove_file(&backup_path) {
+                log::warn!("バックアップファイルの削除に失敗: {backup_path}: {e}");
+            }
         }
     } else if has_backup {
-        let _ = std::fs::rename(&backup_path, &output_path);
+        if let Err(e) = std::fs::rename(&backup_path, &output_path) {
+            log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+        }
     }
 
     result
