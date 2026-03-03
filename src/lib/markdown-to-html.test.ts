@@ -158,10 +158,11 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
-	it("renders display math inside blockquote", () => {
+	it("renders display math inside blockquote preserving structure", () => {
 		const md = "> $$\n> x^2\n> $$";
 		const html = markdownToHtml(md);
 		expect(html).toContain("katex");
+		expect(html).toContain("<blockquote>");
 	});
 
 	it("does not convert single newlines to <br> by default", () => {

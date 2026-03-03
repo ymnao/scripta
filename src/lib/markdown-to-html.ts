@@ -46,14 +46,26 @@ function preprocessDisplayMath(
 
 	// Match display math where $$ appears on its own line.
 	// Allows optional container prefixes (>, -, *, +, digits) for
-	// blockquote / list contexts.
+	// blockquote / list contexts.  Capture the prefix so we can
+	// preserve the container structure in the replacement.
+	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
 	return markdown.replace(
-		/^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*[ \t]*\$\$[ \t]*\n([\s\S]*?)\n(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*[ \t]*\$\$[ \t]*$/gm,
-		(match, tex: string, offset: number) => {
+		new RegExp(
+			`^(${containerPrefix.source})[ \\t]*\\$\\$[ \\t]*\\n([\\s\\S]*?)\\n${containerPrefix.source}[ \\t]*\\$\\$[ \\t]*$`,
+			"gm",
+		),
+		(match, prefix: string, rawTex: string, offset: number) => {
 			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
 				return match;
 			}
 			if (isEscaped(markdown, offset)) return match;
+
+			// Strip container prefixes from each line of the tex content
+			const stripRe = new RegExp(`^${containerPrefix.source}`);
+			const tex = rawTex
+				.split("\n")
+				.map((line) => line.replace(stripRe, ""))
+				.join("\n");
 
 			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
 			try {
@@ -68,7 +80,8 @@ function preprocessDisplayMath(
 					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
 				});
 			}
-			return placeholder;
+			// Preserve container prefix so blockquote/list structure remains intact
+			return `${prefix}${placeholder}`;
 		},
 	);
 }

@@ -33,17 +33,19 @@ pub async fn export_pdf(
                 .to_string_lossy()
         );
         if let Ok(entries) = std::fs::read_dir(parent) {
-            let output_exists = std::fs::metadata(&output_path).is_ok();
+            let mut output_restored = std::fs::metadata(&output_path).is_ok();
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
                 if name_str.starts_with(&prefix) {
-                    if !output_exists {
+                    if !output_restored {
                         // Restore the first backup found as the original file
                         let _ = std::fs::rename(entry.path(), &output_path);
+                        output_restored = true;
+                    } else {
+                        // Already restored or original exists; just delete stale backup
+                        let _ = std::fs::remove_file(entry.path());
                     }
-                    // Remove any remaining stale backups
-                    let _ = std::fs::remove_file(entry.path());
                 }
             }
         }
