@@ -36,10 +36,16 @@ function preprocessDisplayMath(
 	placeholders: MathPlaceholder[],
 	nonce: string,
 ): string {
+	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
+
 	// Build ranges covered by fenced code blocks to skip them.
 	// CommonMark allows 0-3 spaces indent and both ``` and ~~~ fences.
+	// Also handles fences nested inside blockquotes / lists.
 	const codeRanges: Array<[number, number]> = [];
-	const fenceRe = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n[ \t]{0,3}\1[ \t]*$/gm;
+	const fenceRe = new RegExp(
+		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
+		"gm",
+	);
 	for (const m of markdown.matchAll(fenceRe)) {
 		codeRanges.push([m.index, m.index + m[0].length]);
 	}
@@ -47,10 +53,8 @@ function preprocessDisplayMath(
 	// Match display math $$...$$ that spans at least one newline.
 	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
 	// Uses (?:(?!\$\$)[\s\S]) to prevent matching across $$ boundaries.
-	// Allows optional container prefixes (>, -, *, +, digits) for
-	// blockquote / list contexts.  Capture the prefix so we can
-	// preserve the container structure in the replacement.
-	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
+	// Allows optional container prefixes for blockquote / list contexts.
+	// Capture the prefix to preserve the container structure.
 	return markdown.replace(
 		new RegExp(
 			`^(?=[ \\t]{0,3}\\S)(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,

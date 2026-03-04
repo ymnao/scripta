@@ -171,6 +171,13 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("does not process display math inside blockquote fenced code blocks", () => {
+		const md = "> ```\n> $$\n> x^2\n> $$\n> ```";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<blockquote>");
+		expect(html).not.toContain("katex");
+	});
+
 	it("does not process display math inside tilde fenced code blocks", () => {
 		const md = "~~~\n$$\nx^2\n$$\n~~~";
 		const html = markdownToHtml(md);
