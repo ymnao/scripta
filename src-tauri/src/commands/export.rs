@@ -1,13 +1,19 @@
 /// Timeout for PDF export operations (5 minutes).
 /// Large documents may take longer to render; 30 seconds is too aggressive.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const PDF_EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+const PDF_EXPORT_TIMEOUT_SECS: u64 = 300;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const PDF_EXPORT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(PDF_EXPORT_TIMEOUT_SECS);
 
 /// Age threshold to distinguish stale backups from in-progress ones.
 /// Backups younger than this may belong to a concurrent export and must not
 /// be restored or deleted.
+/// Must be >= PDF_EXPORT_TIMEOUT to avoid misclassifying in-progress backups.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const BACKUP_STALE_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(60);
+const BACKUP_STALE_THRESHOLD: std::time::Duration =
+    std::time::Duration::from_secs(PDF_EXPORT_TIMEOUT_SECS);
 
 /// Clean up stale `.scripta-backup-*` files from previous crashes.
 /// If the output file doesn't exist, restore the newest *stale* backup (by mtime).

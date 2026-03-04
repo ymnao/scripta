@@ -271,14 +271,15 @@ function ToggleInput({
 }) {
 	return (
 		<div className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2">
-			<label htmlFor={id} className="text-xs font-medium text-text-primary">
+			<span id={`${id}-label`} className="text-xs font-medium text-text-primary">
 				{label}
-			</label>
+			</span>
 			<button
 				id={id}
 				type="button"
 				role="switch"
 				aria-checked={checked}
+				aria-labelledby={`${id}-label`}
 				onClick={() => onChange(!checked)}
 				className={`relative h-4 w-7 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-black/20 dark:bg-white/20"}`}
 			>
