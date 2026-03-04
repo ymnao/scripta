@@ -317,4 +317,11 @@ describe("buildHtmlDocument page break", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light");
 		expect(html).not.toContain("break-before: page");
 	});
+
+	it("adds task-list-item class to li elements with checkboxes", () => {
+		const body = '<ul><li><input disabled="" type="checkbox"> task</li></ul>';
+		const html = buildHtmlDocument(body, "test", "light");
+		expect(html).toContain('class="task-list-item"');
+		expect(html).toContain(".task-list-item { list-style: none; }");
+	});
 });

@@ -159,7 +159,7 @@ img { max-width: 100%; height: auto; }
 hr { border: none; border-top: 1px solid; margin: 1em 0; }
 ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
-li:has(> input[type="checkbox"]) { list-style: none; }
+.task-list-item { list-style: none; }
 input[type="checkbox"] { margin-right: 0.5em; }
 ${buildThemeCss(theme)}
 
@@ -177,9 +177,15 @@ ${pageBreak ? `  ${buildPageBreakCss(pageBreak.level, pageBreak.smart).split("\n
 </style>
 </head>
 <body>
-${pageBreak?.smart ? applySmartPageBreaks(bodyHtml, pageBreak.level) : bodyHtml}
+${pageBreak?.smart ? applySmartPageBreaks(addTaskListClass(bodyHtml), pageBreak.level) : addTaskListClass(bodyHtml)}
 </body>
 </html>`;
+}
+
+/** Add .task-list-item class to <li> elements containing checkboxes.
+ * Avoids relying on :has() CSS selector for older WebKit compatibility. */
+function addTaskListClass(html: string): string {
+	return html.replace(/<li><input /g, '<li class="task-list-item"><input ');
 }
 
 function escapeHtml(text: string): string {

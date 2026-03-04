@@ -1,3 +1,66 @@
+/// Clean up stale `.scripta-backup-*` files from previous crashes.
+/// If the output file doesn't exist, restore the newest backup (by mtime).
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn cleanup_stale_backups(output_path: &str) {
+    let path = std::path::Path::new(output_path);
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return,
+    };
+    let prefix = format!(
+        "{}.scripta-backup-",
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+    );
+    let entries = match std::fs::read_dir(parent) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    // Collect all stale backup paths
+    let mut backups: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with(&prefix) {
+            backups.push(entry.path());
+        }
+    }
+
+    if backups.is_empty() {
+        return;
+    }
+
+    let output_exists = std::fs::metadata(output_path).is_ok();
+
+    if !output_exists {
+        // Sort by mtime descending to pick the newest backup for restoration
+        backups.sort_by(|a, b| {
+            let mtime = |p: &std::path::Path| {
+                std::fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH)
+            };
+            mtime(b).cmp(&mtime(a))
+        });
+
+        // Restore the newest backup
+        if let Some(newest) = backups.first() {
+            let _ = std::fs::rename(newest, output_path);
+        }
+
+        // Delete remaining backups (skip the first which was just renamed)
+        for backup in backups.iter().skip(1) {
+            let _ = std::fs::remove_file(backup);
+        }
+    } else {
+        // Output exists; just delete all stale backups
+        for backup in &backups {
+            let _ = std::fs::remove_file(backup);
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn export_pdf(
@@ -23,33 +86,8 @@ pub async fn export_pdf(
     let label = format!("pdf-export-{counter}");
 
     // Clean up any stale .scripta-backup-* files from previous crashes.
-    // If the output file doesn't exist but a backup does, restore it first.
-    if let Some(parent) = std::path::Path::new(&output_path).parent() {
-        let prefix = format!(
-            "{}.scripta-backup-",
-            std::path::Path::new(&output_path)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-        );
-        if let Ok(entries) = std::fs::read_dir(parent) {
-            let mut output_restored = std::fs::metadata(&output_path).is_ok();
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if name_str.starts_with(&prefix) {
-                    if !output_restored {
-                        // Restore the first backup found as the original file
-                        let _ = std::fs::rename(entry.path(), &output_path);
-                        output_restored = true;
-                    } else {
-                        // Already restored or original exists; just delete stale backup
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
-        }
-    }
+    // If the output file doesn't exist but a backup does, restore the newest one.
+    cleanup_stale_backups(&output_path);
 
     // If a file already exists at the output path, move it to a temporary
     // backup so we can unambiguously detect the new file.  On failure the
@@ -262,6 +300,21 @@ pub async fn export_pdf(
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
     let label = format!("pdf-export-{counter}");
 
+    // Clean up stale backups and create a new backup for safe overwrite detection
+    cleanup_stale_backups(&output_path);
+    let backup_path = format!(
+        "{}.scripta-backup-{}-{counter}",
+        output_path,
+        std::process::id()
+    );
+    let has_backup = match std::fs::rename(&output_path, &backup_path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            return Err(format!("既存ファイルの退避に失敗しました: {e}"));
+        }
+    };
+
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     let output = output_path.clone();
 
@@ -383,6 +436,20 @@ pub async fn export_pdf(
     // Cleanup
     let _ = webview_window.close();
     drop(tmp_dir);
+
+    // On success, remove the backup; on failure, restore it.
+    if result.is_ok() {
+        if has_backup {
+            if let Err(e) = std::fs::remove_file(&backup_path) {
+                log::warn!("バックアップファイルの削除に失敗: {backup_path}: {e}");
+            }
+        }
+    } else if has_backup {
+        let _ = std::fs::remove_file(&output_path);
+        if let Err(e) = std::fs::rename(&backup_path, &output_path) {
+            log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+        }
+    }
 
     result
 }

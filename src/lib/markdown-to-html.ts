@@ -94,21 +94,24 @@ function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: strin
 
 	// Pass 1: Display math ($$...$$) — handles remaining $$...$$ after
 	// preprocessDisplayMath has replaced multi-line instances.
-	processed = processed.replace(/\$\$([^\n$]+)\$\$/g, (match, tex: string, offset: number) => {
-		if (isEscaped(processed, offset)) return match;
+	processed = processed.replace(
+		/\$\$((?:(?!\$\$)[^\n])+)\$\$/g,
+		(match, tex: string, offset: number) => {
+			if (isEscaped(processed, offset)) return match;
 
-		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
-		try {
-			const html = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
-			placeholders.push({ placeholder, html });
-		} catch {
-			placeholders.push({
-				placeholder,
-				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
-			});
-		}
-		return placeholder;
-	});
+			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
+			try {
+				const html = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+				placeholders.push({ placeholder, html });
+			} catch {
+				placeholders.push({
+					placeholder,
+					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+				});
+			}
+			return placeholder;
+		},
+	);
 
 	// Pass 2: Inline math ($...$)
 	processed = processed.replace(/\$([^\n$]+)\$/g, (match, tex: string, offset: number) => {
