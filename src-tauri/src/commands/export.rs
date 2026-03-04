@@ -1,5 +1,18 @@
+/// Timeout for PDF export operations (5 minutes).
+/// Large documents may take longer to render; 30 seconds is too aggressive.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const PDF_EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Age threshold to distinguish stale backups from in-progress ones.
+/// Backups younger than this may belong to a concurrent export and must not
+/// be restored or deleted.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const BACKUP_STALE_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Clean up stale `.scripta-backup-*` files from previous crashes.
-/// If the output file doesn't exist, restore the newest backup (by mtime).
+/// If the output file doesn't exist, restore the newest *stale* backup (by mtime).
+/// Backups younger than `BACKUP_STALE_THRESHOLD` are never restored or deleted
+/// because they may belong to a concurrent in-progress export.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn cleanup_stale_backups(output_path: &str) {
     let path = std::path::Path::new(output_path);
@@ -31,11 +44,20 @@ fn cleanup_stale_backups(output_path: &str) {
         return;
     }
 
+    let now = std::time::SystemTime::now();
+    let is_stale = |p: &std::path::Path| -> bool {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .map(|mtime| now.duration_since(mtime).unwrap_or_default() > BACKUP_STALE_THRESHOLD)
+            .unwrap_or(true)
+    };
+
     let output_exists = std::fs::metadata(output_path).is_ok();
 
     if !output_exists {
-        // Output is missing — restore the newest backup regardless of age.
-        // Sort by mtime descending to pick the newest.
+        // Output is missing — restore the newest *stale* backup.
+        // Recent backups (< BACKUP_STALE_THRESHOLD) are skipped because they
+        // likely belong to a concurrent export that just renamed the output.
         backups.sort_by(|a, b| {
             let mtime = |p: &std::path::Path| {
                 std::fs::metadata(p)
@@ -45,35 +67,33 @@ fn cleanup_stale_backups(output_path: &str) {
             mtime(b).cmp(&mtime(a))
         });
 
-        if let Some(newest) = backups.first() {
-            match std::fs::rename(newest, output_path) {
+        // Find the newest stale backup to restore
+        let restore_idx = backups.iter().position(|b| is_stale(b));
+        if let Some(idx) = restore_idx {
+            match std::fs::rename(&backups[idx], output_path) {
                 Ok(_) => {
-                    // Delete remaining stale backups (skip the first which was just renamed)
-                    for backup in backups.iter().skip(1) {
-                        let _ = std::fs::remove_file(backup);
+                    // Delete remaining stale backups
+                    for (i, backup) in backups.iter().enumerate() {
+                        if i != idx && is_stale(backup) {
+                            let _ = std::fs::remove_file(backup);
+                        }
                     }
                 }
                 Err(e) => {
                     // Restoration failed; keep all backups for manual recovery
                     log::warn!(
                         "バックアップの復元に失敗（手動復旧が必要）: {:?} → {}: {e}",
-                        newest,
+                        backups[idx],
                         output_path
                     );
                 }
             }
         }
     } else {
-        // Output exists; delete only stale backups (older than 60 seconds).
+        // Output exists; delete only stale backups.
         // Recent backups may belong to an in-progress concurrent export.
-        let stale_threshold = std::time::Duration::from_secs(60);
-        let now = std::time::SystemTime::now();
         for backup in &backups {
-            let is_stale = std::fs::metadata(backup)
-                .and_then(|m| m.modified())
-                .map(|mtime| now.duration_since(mtime).unwrap_or_default() > stale_threshold)
-                .unwrap_or(true);
-            if is_stale {
+            if is_stale(backup) {
                 let _ = std::fs::remove_file(backup);
             }
         }
@@ -248,12 +268,12 @@ pub async fn export_pdf(
     let result = tauri::async_runtime::spawn_blocking(move || {
         // First, wait for on_page_load to fire and start the print operation
         let started = rx
-            .recv_timeout(Duration::from_secs(30))
+            .recv_timeout(PDF_EXPORT_TIMEOUT)
             .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")));
         started?;
 
         // Poll for the PDF file to appear (fresh — no ambiguity with old data)
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + PDF_EXPORT_TIMEOUT;
         loop {
             if let Ok(meta) = std::fs::metadata(&output_for_poll) {
                 if meta.len() > 0 {
@@ -304,7 +324,6 @@ pub async fn export_pdf(
 ) -> Result<(), String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
-    use std::time::Duration;
     use tauri::WebviewUrl;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -446,7 +465,7 @@ pub async fn export_pdf(
 
     // Wait for PrintToPdf completion callback
     let result = tauri::async_runtime::spawn_blocking(move || {
-        rx.recv_timeout(Duration::from_secs(30))
+        rx.recv_timeout(PDF_EXPORT_TIMEOUT)
             .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")))
     })
     .await
