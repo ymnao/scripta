@@ -15,6 +15,20 @@ const PDF_EXPORT_TIMEOUT: std::time::Duration =
 const BACKUP_STALE_THRESHOLD: std::time::Duration =
     std::time::Duration::from_secs(PDF_EXPORT_TIMEOUT_SECS);
 
+/// Verify that the output file exists and is non-empty after export.
+/// Returns Ok(()) if valid, or Err if the file is missing/empty.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn verify_output(output_path: &str) -> Result<(), String> {
+    match std::fs::metadata(output_path) {
+        Ok(meta) if meta.len() > 0 => Ok(()),
+        Ok(_) => Err("PDFファイルが空です".to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err("PDFファイルが生成されませんでした".to_string())
+        }
+        Err(e) => Err(format!("PDFファイルの検証に失敗しました: {e}")),
+    }
+}
+
 /// Clean up stale `.scripta-backup-*` files from previous crashes.
 /// If the output file doesn't exist, restore the newest *stale* backup (by mtime).
 /// Backups younger than `BACKUP_STALE_THRESHOLD` are never restored or deleted
@@ -284,6 +298,10 @@ pub async fn export_pdf(
     let _ = webview_window.close();
     drop(tmp_dir);
 
+    // Verify output even on apparent success — the print operation may have
+    // completed without actually writing a valid PDF.
+    let result = result.and_then(|()| verify_output(&output_path));
+
     // On success, remove the backup; on failure, restore it.
     if result.is_ok() {
         if has_backup {
@@ -483,6 +501,10 @@ pub async fn export_pdf(
     // Cleanup
     let _ = webview_window.close();
     drop(tmp_dir);
+
+    // Verify output even on apparent success — PrintToPdf callback may report
+    // success without actually writing a valid PDF.
+    let result = result.and_then(|()| verify_output(&output_path));
 
     // On success, remove the backup; on failure, restore it.
     if result.is_ok() {
