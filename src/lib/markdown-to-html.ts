@@ -25,25 +25,99 @@ interface MathPlaceholder {
 	html: string;
 }
 
+/**
+ * Replace multi-line display math ($$...\n...\n$$) in raw markdown
+ * before lexing. With `breaks: true`, newlines inside display math
+ * would be converted to <br>, breaking KaTeX rendering.
+ * Single-line $$...$$ is handled later by walkTokens.
+ */
+function preprocessDisplayMath(
+	markdown: string,
+	placeholders: MathPlaceholder[],
+	nonce: string,
+): string {
+	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
+
+	// Build ranges covered by fenced code blocks to skip them.
+	// CommonMark allows 0-3 spaces indent and both ``` and ~~~ fences.
+	// Also handles fences nested inside blockquotes / lists.
+	const codeRanges: Array<[number, number]> = [];
+	const fenceRe = new RegExp(
+		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
+		"gm",
+	);
+	for (const m of markdown.matchAll(fenceRe)) {
+		codeRanges.push([m.index, m.index + m[0].length]);
+	}
+
+	// Match display math $$...$$ that spans at least one newline.
+	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
+	// Uses (?:(?!\$\$)[\s\S]) to prevent matching across $$ boundaries.
+	// Allows optional container prefixes for blockquote / list contexts.
+	// Capture the prefix to preserve the container structure.
+	return markdown.replace(
+		new RegExp(
+			`^(?=[ \\t]{0,3}\\S)(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,
+			"gm",
+		),
+		(match, prefix: string, rawTex: string, offset: number) => {
+			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
+				return match;
+			}
+			if (isEscaped(markdown, offset)) return match;
+
+			// Strip only the container prefix captured on the opening $$ line.
+			// Do NOT use the generic containerPrefix pattern here — it would
+			// incorrectly strip leading -, +, * etc. from normal TeX content.
+			const escapedPrefix = prefix ? prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+			const stripRe = escapedPrefix ? new RegExp(`^${escapedPrefix}`) : null;
+			const tex = rawTex
+				.split("\n")
+				.map((line) => (stripRe ? line.replace(stripRe, "") : line))
+				.join("\n");
+
+			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
+			try {
+				const html = katex.renderToString(tex.trim(), {
+					displayMode: true,
+					throwOnError: false,
+				});
+				placeholders.push({ placeholder, html });
+			} catch {
+				placeholders.push({
+					placeholder,
+					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+				});
+			}
+			// Preserve container prefix so blockquote/list structure remains intact
+			return `${prefix}${placeholder}`;
+		},
+	);
+}
+
 function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
 	let processed = text;
 
-	// Pass 1: Display math ($$...$$)
-	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex: string, offset: number) => {
-		if (isEscaped(processed, offset)) return match;
+	// Pass 1: Display math ($$...$$) — handles remaining $$...$$ after
+	// preprocessDisplayMath has replaced multi-line instances.
+	processed = processed.replace(
+		/\$\$((?:(?!\$\$)[^\n])+)\$\$/g,
+		(match, tex: string, offset: number) => {
+			if (isEscaped(processed, offset)) return match;
 
-		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
-		try {
-			const html = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
-			placeholders.push({ placeholder, html });
-		} catch {
-			placeholders.push({
-				placeholder,
-				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
-			});
-		}
-		return placeholder;
-	});
+			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
+			try {
+				const html = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+				placeholders.push({ placeholder, html });
+			} catch {
+				placeholders.push({
+					placeholder,
+					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+				});
+			}
+			return placeholder;
+		},
+	);
 
 	// Pass 2: Inline math ($...$)
 	processed = processed.replace(/\$([^\n$]+)\$/g, (match, tex: string, offset: number) => {
@@ -102,16 +176,31 @@ function walkTokens(tokens: Token[], placeholders: MathPlaceholder[], nonce: str
 /**
  * Markdown テキストを HTML 文字列に変換する。
  * GFM（テーブル・取り消し線・タスクリスト）と KaTeX 数式をサポート。
+ *
+ * @param options.breaks - true にすると単一改行を `<br>` に変換する（PDF 用）。
+ *                         デフォルトは false（標準 Markdown の挙動）。
  */
-export function markdownToHtml(markdown: string): string {
+export function markdownToHtml(markdown: string, options?: { breaks?: boolean }): string {
 	const placeholders: MathPlaceholder[] = [];
 	// Per-call nonce to prevent placeholder collision with user content
 	const bytes = new Uint8Array(16);
 	crypto.getRandomValues(bytes);
 	const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-	const marked = new Marked({ gfm: true, breaks: false });
-	const tokens = marked.lexer(markdown);
+	// Normalize CRLF / CR to LF so regex patterns using \n work on Windows input
+	const normalized = markdown.replace(/\r\n?/g, "\n");
+
+	// Ensure empty task list items (e.g. "- [ ]") are recognized by marked.
+	// marked requires content after [ ]/[x] to detect task lists.
+	const withTasks = normalized.replace(/^(\s*(?:[-*+]|\d+\.)\s+\[[ xX]\])\s*$/gm, "$1 \u200B");
+
+	// Replace multi-line display math before lexing to prevent
+	// `breaks: true` (when enabled) from inserting <br> inside math blocks.
+	const preprocessed = preprocessDisplayMath(withTasks, placeholders, nonce);
+
+	const breaks = options?.breaks ?? false;
+	const marked = new Marked({ gfm: true, breaks });
+	const tokens = marked.lexer(preprocessed);
 
 	// Walk token tree and replace math only in text nodes,
 	// leaving link URLs, image paths, code spans etc. untouched.

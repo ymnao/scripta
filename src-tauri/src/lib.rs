@@ -41,6 +41,7 @@ pub fn run() {
             commands::search::search_files,
             commands::search::search_filenames,
             commands::ogp::fetch_ogp,
+            commands::export::export_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

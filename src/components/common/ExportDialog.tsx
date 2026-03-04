@@ -1,9 +1,19 @@
 import { X } from "lucide-react";
 import { useId, useState } from "react";
 import { translateError } from "../../lib/errors";
-import { type ExportTheme, exportAsHtml, exportAsPrompt } from "../../lib/export";
+import {
+	type ExportTheme,
+	type PageBreakLevel,
+	exportAsHtml,
+	exportAsPdf,
+	exportAsPrompt,
+} from "../../lib/export";
 import { useToastStore } from "../../stores/toast";
 import { DialogBase } from "./DialogBase";
+
+const isPdfSupported =
+	typeof navigator !== "undefined" &&
+	/mac|win/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? "");
 
 interface ExportDialogProps {
 	open: boolean;
@@ -12,10 +22,11 @@ interface ExportDialogProps {
 	filePath: string;
 }
 
-type Section = "html" | "prompt";
+type Section = "html" | "pdf" | "prompt";
 
 const sections: { key: Section; label: string }[] = [
 	{ key: "html", label: "HTML" },
+	{ key: "pdf", label: "PDF" },
 	{ key: "prompt", label: "プロンプト" },
 ];
 
@@ -25,10 +36,19 @@ const htmlThemeOptions: { value: ExportTheme; label: string }[] = [
 	{ value: "dark", label: "ダーク" },
 ];
 
+const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: string }[] = [
+	{ value: "h1", label: "h1のみ" },
+	{ value: "h2", label: "h2まで" },
+	{ value: "h3", label: "h3まで" },
+];
+
 export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialogProps) {
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
+	const [pageBreakEnabled, setPageBreakEnabled] = useState(false);
+	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
+	const [smartPageBreak, setSmartPageBreak] = useState(true);
 	const [exporting, setExporting] = useState(false);
 
 	const handleExportHtml = async () => {
@@ -40,6 +60,23 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			useToastStore
 				.getState()
 				.addToast("error", `HTMLエクスポートに失敗しました: ${translateError(err)}`);
+		} finally {
+			setExporting(false);
+		}
+	};
+
+	const handleExportPdf = async () => {
+		setExporting(true);
+		try {
+			const result = await exportAsPdf(markdown, filePath, {
+				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
+				smartPageBreak,
+			});
+			if (result) onClose();
+		} catch (err: unknown) {
+			useToastStore
+				.getState()
+				.addToast("error", `PDFエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
 		}
@@ -113,7 +150,49 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 									onClick={handleExportHtml}
 									className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 								>
-									HTMLとしてエクスポート
+									{exporting ? "エクスポート中..." : "HTMLとしてエクスポート"}
+								</button>
+							</div>
+						</>
+					)}
+
+					{activeSection === "pdf" && (
+						<>
+							<ToggleInput
+								id="export-pdf-page-break"
+								label="見出しで改ページ"
+								checked={pageBreakEnabled}
+								onChange={setPageBreakEnabled}
+							/>
+							{pageBreakEnabled && (
+								<>
+									<SelectInput
+										id="export-pdf-page-break-level"
+										label="対象レベル"
+										value={pageBreakLevel}
+										options={pageBreakLevelOptions}
+										onChange={setPageBreakLevel}
+									/>
+									<ToggleInput
+										id="export-pdf-smart-page-break"
+										label="不要な改ページを抑制"
+										checked={smartPageBreak}
+										onChange={setSmartPageBreak}
+									/>
+								</>
+							)}
+							<p className="text-[11px] leading-relaxed text-text-secondary">
+								MarkdownをPDFファイルとして書き出します。
+								{!isPdfSupported && " macOS・Windowsのみ対応。"}
+							</p>
+							<div className="flex justify-end">
+								<button
+									type="button"
+									disabled={exporting || !isPdfSupported}
+									onClick={handleExportPdf}
+									className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+								>
+									{exporting ? "エクスポート中..." : "PDFとしてエクスポート"}
 								</button>
 							</div>
 						</>
@@ -131,7 +210,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 									onClick={handleExportPrompt}
 									className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 								>
-									プロンプトをエクスポート
+									{exporting ? "エクスポート中..." : "プロンプトをエクスポート"}
 								</button>
 							</div>
 						</>
@@ -175,6 +254,39 @@ function SelectInput<T extends string>({
 					</option>
 				))}
 			</select>
+		</div>
+	);
+}
+
+function ToggleInput({
+	id,
+	label,
+	checked,
+	onChange,
+}: {
+	id: string;
+	label: string;
+	checked: boolean;
+	onChange: (checked: boolean) => void;
+}) {
+	return (
+		<div className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2">
+			<span id={`${id}-label`} className="text-xs font-medium text-text-primary">
+				{label}
+			</span>
+			<button
+				id={id}
+				type="button"
+				role="switch"
+				aria-checked={checked}
+				aria-labelledby={`${id}-label`}
+				onClick={() => onChange(!checked)}
+				className={`relative h-4 w-7 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-black/20 dark:bg-white/20"}`}
+			>
+				<span
+					className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform ${checked ? "translate-x-3" : ""}`}
+				/>
+			</button>
 		</div>
 	);
 }

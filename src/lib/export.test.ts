@@ -6,14 +6,16 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("./commands", () => ({
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	exportPdf: vi.fn().mockResolvedValue(undefined),
 }));
 
 const { save } = await import("@tauri-apps/plugin-dialog");
-const { writeFile } = await import("./commands");
-const { exportAsHtml, exportAsPrompt } = await import("./export");
+const { writeFile, exportPdf } = await import("./commands");
+const { buildHtmlDocument, exportAsHtml, exportAsPdf, exportAsPrompt } = await import("./export");
 
 const mockedSave = save as Mock;
 const mockedWriteFile = writeFile as Mock;
+const mockedExportPdf = exportPdf as Mock;
 
 describe("exportAsHtml", () => {
 	beforeEach(() => {
@@ -138,5 +140,188 @@ describe("exportAsPrompt", () => {
 		await exportAsPrompt(md, "/workspace/test.md");
 		const output = mockedWriteFile.mock.calls[0][1] as string;
 		expect(output).toContain("`````markdown");
+	});
+});
+
+describe("exportAsPdf", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns false when save dialog is cancelled", async () => {
+		mockedSave.mockResolvedValue(null);
+		const result = await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(result).toBe(false);
+		expect(mockedExportPdf).not.toHaveBeenCalled();
+	});
+
+	it("calls exportPdf command on save", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		const result = await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(result).toBe(true);
+		expect(mockedExportPdf).toHaveBeenCalledWith(
+			expect.stringContaining("<!DOCTYPE html>"),
+			"/output/test.pdf",
+		);
+	});
+
+	it("always uses light theme for PDF", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("uses pdf filter for save dialog", async () => {
+		mockedSave.mockResolvedValue(null);
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(mockedSave).toHaveBeenCalledWith(
+			expect.objectContaining({
+				defaultPath: "test.pdf",
+				filters: [{ name: "PDF", extensions: ["pdf"] }],
+			}),
+		);
+	});
+
+	it("includes A4 page size and print margins in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("size: A4");
+		expect(html).toContain("margin: 20mm");
+	});
+
+	it("converts single newlines to <br> in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("line1\nline2", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<br");
+	});
+
+	it("renders KaTeX math in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("$x^2$", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("katex");
+		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("includes page break CSS when pageBreakLevel is set", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("h1, h2 { break-before: page; }");
+	});
+});
+
+describe("buildHtmlDocument page break", () => {
+	it("includes h1 break-before when level is h1", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h1",
+			smart: false,
+		});
+		expect(html).toContain("h1 { break-before: page; }");
+	});
+
+	it("includes h1 and h2 break-before when level is h2", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h2",
+			smart: false,
+		});
+		expect(html).toContain("h1, h2 { break-before: page; }");
+	});
+
+	it("includes h1, h2 and h3 break-before when level is h3", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h3",
+			smart: false,
+		});
+		expect(html).toContain("h1, h2, h3 { break-before: page; }");
+	});
+
+	it("smart: marks first heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>First</h2><p>text</p><h2>Second</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>First</h2>");
+		expect(html).toContain("<h2>Second</h2>");
+		expect(html).toContain("[data-no-break] { break-before: auto !important; }");
+	});
+
+	it("smart: marks sub-heading with data-no-break even with content between", () => {
+		const html = buildHtmlDocument("<h2>Section</h2><p>intro</p><h3>Sub</h3>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>Section</h2>");
+		expect(html).toContain("<h3 data-no-break>Sub</h3>");
+	});
+
+	it("smart: does not mark same-level heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>A</h2>");
+		expect(html).toContain("<h2>B</h2>");
+	});
+
+	it("smart: does not mark shallower heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>A</h2><h3>B</h3><p>text</p><h2>C</h2>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>A</h2>");
+		expect(html).toContain("<h3 data-no-break>B</h3>");
+		expect(html).toContain("<h2>C</h2>");
+	});
+
+	it("smart: ignores headings beyond target level", () => {
+		const html = buildHtmlDocument(
+			"<h1>Ch</h1><h2>Sec</h2><h3>Sub</h3><h2>Next</h2>",
+			"test",
+			"light",
+			{ level: "h2", smart: true },
+		);
+		expect(html).toContain("<h1 data-no-break>Ch</h1>");
+		expect(html).toContain("<h2 data-no-break>Sec</h2>");
+		expect(html).toContain("<h3>Sub</h3>");
+		expect(html).toContain("<h2>Next</h2>");
+	});
+
+	it("smart: does not suppress sub-heading when many blocks between", () => {
+		const html = buildHtmlDocument(
+			"<h2>Section</h2><p>intro</p><ul><li>a</li></ul><h3>Sub</h3>",
+			"test",
+			"light",
+			{ level: "h3", smart: true },
+		);
+		expect(html).toContain("<h2 data-no-break>Section</h2>");
+		expect(html).toContain("<h3>Sub</h3>");
+	});
+
+	it("does not include break-before when level is none", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "none",
+			smart: true,
+		});
+		expect(html).not.toContain("break-before: page");
+	});
+
+	it("does not include break-before when pageBreak is undefined", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light");
+		expect(html).not.toContain("break-before: page");
+	});
+
+	it("adds task-list-item class to li elements with checkboxes", () => {
+		const body = '<ul><li><input disabled="" type="checkbox"> task</li></ul>';
+		const html = buildHtmlDocument(body, "test", "light");
+		expect(html).toContain('class="task-list-item"');
+		expect(html).toContain(".task-list-item { list-style: none; }");
 	});
 });

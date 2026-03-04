@@ -172,9 +172,9 @@ fn is_global_ip(ip: IpAddr) -> bool {
             // Must be global unicast (2000::/3) ...
             (segs[0] & 0xe000) == 0x2000
                 // ... but exclude special-purpose prefixes within 2000::/3:
-                && !((segs[0] == 0x2001) && (segs[1] == 0x0db8))  // 2001:db8::/32 (documentation)
-                && !((segs[0] == 0x2001) && (segs[1] < 0x0200))   // 2001::/23 (IETF protocol assignments)
-                && !((segs[0] == 0x2002))                          // 2002::/16 (6to4, deprecated)
+                && !(segs[0] == 0x2001 && segs[1] == 0x0db8)  // 2001:db8::/32 (documentation)
+                && !(segs[0] == 0x2001 && segs[1] < 0x0200)   // 2001::/23 (IETF protocol assignments)
+                && segs[0] != 0x2002                           // 2002::/16 (6to4, deprecated)
         }
     }
 }

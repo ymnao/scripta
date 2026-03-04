@@ -126,6 +126,47 @@ test.describe("export dialog", () => {
 			.toBe(true);
 	});
 
+	test("switches to PDF section and exports", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note.pdf");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("note.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		await page.evaluate(() => {
+			(window as unknown as WindowWithEvent).__TAURI_EVENT__?.emit("menu-export", undefined);
+		});
+
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+
+		// Switch to PDF section
+		await dialog.getByRole("button", { name: "PDF" }).click();
+		const exportBtn = dialog.getByRole("button", { name: "PDFとしてエクスポート" });
+		await expect(exportBtn).toBeVisible();
+
+		// Skip export test if PDF is not supported on this platform (e.g. Linux CI)
+		if (await exportBtn.isDisabled()) return;
+
+		// Click export
+		await exportBtn.click();
+
+		// Wait for export_pdf to be called
+		await expect
+			.poll(async () => {
+				const calls = await mock.getCalls("export_pdf");
+				return calls.some(
+					(c) =>
+						typeof c.html === "string" &&
+						(c.html as string).includes("<!DOCTYPE html>") &&
+						c.outputPath === "/export/note.pdf",
+				);
+			})
+			.toBe(true);
+	});
+
 	test("context menu export opens dialog for a file", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");

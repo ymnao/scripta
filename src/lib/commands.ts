@@ -71,3 +71,7 @@ export function showInFolder(path: string): Promise<void> {
 export function fetchOgp(url: string): Promise<OgpData> {
 	return invoke<OgpData>("fetch_ogp", { url });
 }
+
+export function exportPdf(html: string, outputPath: string): Promise<void> {
+	return invoke<void>("export_pdf", { html, outputPath });
+}
