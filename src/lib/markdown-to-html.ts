@@ -44,14 +44,16 @@ function preprocessDisplayMath(
 		codeRanges.push([m.index, m.index + m[0].length]);
 	}
 
-	// Match display math where $$ appears on its own line.
+	// Match display math $$...$$ that spans at least one newline.
+	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
+	// Uses (?:(?!\$\$)[\s\S]) to prevent matching across $$ boundaries.
 	// Allows optional container prefixes (>, -, *, +, digits) for
 	// blockquote / list contexts.  Capture the prefix so we can
 	// preserve the container structure in the replacement.
 	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
 	return markdown.replace(
 		new RegExp(
-			`^(${containerPrefix.source})[ \\t]*\\$\\$[ \\t]*\\n([\\s\\S]*?)\\n${containerPrefix.source}[ \\t]*\\$\\$[ \\t]*$`,
+			`^(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,
 			"gm",
 		),
 		(match, prefix: string, rawTex: string, offset: number) => {

@@ -33,6 +33,18 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("katex-display");
 	});
 
+	it("renders display math where content starts on same line as $$", () => {
+		const html = markdownToHtml("$$E=mc^2\n+ x$$");
+		expect(html).toContain("katex");
+		expect(html).toContain("katex-display");
+	});
+
+	it("renders display math where content ends on same line as $$", () => {
+		const html = markdownToHtml("$$\nE=mc^2$$");
+		expect(html).toContain("katex");
+		expect(html).toContain("katex-display");
+	});
+
 	it("does not process $ inside inline code", () => {
 		const html = markdownToHtml("Use `$variable` in shell");
 		expect(html).toContain("<code>");
