@@ -18,12 +18,22 @@ fn cleanup_stale_backups(output_path: &str) {
         Err(_) => return,
     };
 
-    // Collect all stale backup paths
+    // Collect only stale backup paths (older than 60 seconds).
+    // Recent backups may belong to an in-progress concurrent export
+    // and must not be touched to avoid data loss or false failures.
+    let stale_threshold = std::time::Duration::from_secs(60);
+    let now = std::time::SystemTime::now();
     let mut backups: Vec<std::path::PathBuf> = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with(&prefix) {
-            backups.push(entry.path());
+            let is_stale = std::fs::metadata(entry.path())
+                .and_then(|m| m.modified())
+                .map(|mtime| now.duration_since(mtime).unwrap_or_default() > stale_threshold)
+                .unwrap_or(true);
+            if is_stale {
+                backups.push(entry.path());
+            }
         }
     }
 
