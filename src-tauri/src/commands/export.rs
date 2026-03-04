@@ -115,7 +115,6 @@ pub async fn export_pdf(
 ) -> Result<(), String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
-    use std::time::Duration;
     use tauri::WebviewUrl;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -152,7 +151,9 @@ pub async fn export_pdf(
         }
     };
 
-    // Channel to signal that the print operation has been started
+    // Channel to signal print completion. runOperationModalForWindow blocks
+    // synchronously until the PDF is fully written, so tx.send(Ok(())) means
+    // the file has been generated (not just that printing started).
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
     let output = output_path.clone();
@@ -269,30 +270,12 @@ pub async fn export_pdf(
         }
     });
 
-    // Wait for the print operation to be dispatched, then poll for the output file
-    let output_for_poll = output_path.clone();
+    // Wait for the print operation to complete.
+    // runOperationModalForWindow is synchronous — it blocks inside with_webview
+    // until the PDF is fully written. So recv_timeout covers page load + printing.
     let result = tauri::async_runtime::spawn_blocking(move || {
-        // First, wait for on_page_load to fire and start the print operation
-        let started = rx
-            .recv_timeout(PDF_EXPORT_TIMEOUT)
-            .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")));
-        started?;
-
-        // Poll for the PDF file to appear (fresh — no ambiguity with old data)
-        let deadline = std::time::Instant::now() + PDF_EXPORT_TIMEOUT;
-        loop {
-            if let Ok(meta) = std::fs::metadata(&output_for_poll) {
-                if meta.len() > 0 {
-                    // Give a small grace period for the write to finish
-                    std::thread::sleep(Duration::from_millis(200));
-                    return Ok(());
-                }
-            }
-            if std::time::Instant::now() >= deadline {
-                return Err("PDFの書き出しがタイムアウトしました".to_string());
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        rx.recv_timeout(PDF_EXPORT_TIMEOUT)
+            .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")))
     })
     .await
     .map_err(|e| format!("PDFエクスポートタスクエラー: {e}"))?;
