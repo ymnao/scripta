@@ -309,12 +309,32 @@ pub async fn export_pdf(
             }
         }
     } else if has_backup {
-        // Remove any partial/empty file left by the failed print operation
-        // before restoring the backup (rename atomically replaces on Unix,
-        // but removing first makes the intent explicit).
-        let _ = std::fs::remove_file(&output_path);
-        if let Err(e) = std::fs::rename(&backup_path, &output_path) {
-            log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+        // Restore backup only if output_path is missing or empty (partial write).
+        // A non-empty file may have been written by a concurrent successful export.
+        let should_restore = match std::fs::metadata(&output_path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Ok(meta) if meta.len() == 0 => true,
+            Ok(_) => {
+                log::warn!(
+                    "バックアップファイルの復元をスキップしました: {output_path} に非空ファイルが存在します"
+                );
+                false
+            }
+            Err(e) => {
+                log::warn!(
+                    "バックアップ復元前のファイルメタデータ取得に失敗したため復元をスキップします: {output_path}: {e}"
+                );
+                false
+            }
+        };
+        if should_restore {
+            let _ = std::fs::remove_file(&output_path);
+            if let Err(e) = std::fs::rename(&backup_path, &output_path) {
+                log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+            }
+        } else {
+            // Discard backup since output is already valid
+            let _ = std::fs::remove_file(&backup_path);
         }
     }
 
@@ -489,9 +509,31 @@ pub async fn export_pdf(
             }
         }
     } else if has_backup {
-        let _ = std::fs::remove_file(&output_path);
-        if let Err(e) = std::fs::rename(&backup_path, &output_path) {
-            log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+        // Restore backup only if output_path is missing or empty.
+        // A non-empty file may belong to a concurrent successful export.
+        let should_restore = match std::fs::metadata(&output_path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Ok(meta) if meta.len() == 0 => true,
+            Ok(_) => {
+                log::warn!(
+                    "バックアップファイルの復元をスキップしました: {output_path} に非空ファイルが存在します"
+                );
+                false
+            }
+            Err(e) => {
+                log::warn!(
+                    "バックアップ復元前のファイルメタデータ取得に失敗したため復元をスキップします: {output_path}: {e}"
+                );
+                false
+            }
+        };
+        if should_restore {
+            let _ = std::fs::remove_file(&output_path);
+            if let Err(e) = std::fs::rename(&backup_path, &output_path) {
+                log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+            }
+        } else {
+            let _ = std::fs::remove_file(&backup_path);
         }
     }
 

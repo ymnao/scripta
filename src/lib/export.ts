@@ -46,18 +46,34 @@ function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
 	if (level === "none") return bodyHtml;
 	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
 
+	// Collect block element positions once to avoid O(n^2) substring scanning.
+	const blockPattern = /<(?:p|ul|ol|pre|blockquote|table|hr|div)[\s>\/]/gi;
+	const blockPositions: number[] = [];
+	for (let bm = blockPattern.exec(bodyHtml); bm !== null; bm = blockPattern.exec(bodyHtml)) {
+		blockPositions.push(bm.index);
+	}
+
 	const pattern = /<h([1-6])/g;
 	const suppressSet = new Set<number>();
 	let prevLevel = 0;
 	let lastMatchEnd = 0;
+	let blockIndex = 0;
 
 	for (let m = pattern.exec(bodyHtml); m !== null; m = pattern.exec(bodyHtml)) {
 		const current = Number.parseInt(m[1], 10);
 		if (current > maxLevel) continue;
 
-		const between = bodyHtml.slice(lastMatchEnd, m.index);
-		const blockCount = (between.match(/<(?:p|ul|ol|pre|blockquote|table|hr|div)[\s>\/]/gi) || [])
-			.length;
+		// Advance blockIndex past elements before the previous heading
+		while (blockIndex < blockPositions.length && blockPositions[blockIndex] < lastMatchEnd) {
+			blockIndex++;
+		}
+		// Count block elements between previous heading and current one
+		let blockCount = 0;
+		let bi = blockIndex;
+		while (bi < blockPositions.length && blockPositions[bi] < m.index) {
+			blockCount++;
+			bi++;
+		}
 
 		if (prevLevel === 0 || (current > prevLevel && blockCount <= 1)) {
 			suppressSet.add(m.index);
