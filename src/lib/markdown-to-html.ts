@@ -53,7 +53,7 @@ function preprocessDisplayMath(
 	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
 	return markdown.replace(
 		new RegExp(
-			`^(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,
+			`^(?=[ \\t]{0,3}\\S)(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,
 			"gm",
 		),
 		(match, prefix: string, rawTex: string, offset: number) => {

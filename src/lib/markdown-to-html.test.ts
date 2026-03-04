@@ -164,6 +164,13 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("does not process display math in 4-space indented code blocks", () => {
+		const md = "    $$\n    x^2\n    $$";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).not.toContain("katex");
+	});
+
 	it("does not process display math inside tilde fenced code blocks", () => {
 		const md = "~~~\n$$\nx^2\n$$\n~~~";
 		const html = markdownToHtml(md);

@@ -18,22 +18,12 @@ fn cleanup_stale_backups(output_path: &str) {
         Err(_) => return,
     };
 
-    // Collect only stale backup paths (older than 60 seconds).
-    // Recent backups may belong to an in-progress concurrent export
-    // and must not be touched to avoid data loss or false failures.
-    let stale_threshold = std::time::Duration::from_secs(60);
-    let now = std::time::SystemTime::now();
+    // Collect all backup paths
     let mut backups: Vec<std::path::PathBuf> = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with(&prefix) {
-            let is_stale = std::fs::metadata(entry.path())
-                .and_then(|m| m.modified())
-                .map(|mtime| now.duration_since(mtime).unwrap_or_default() > stale_threshold)
-                .unwrap_or(true);
-            if is_stale {
-                backups.push(entry.path());
-            }
+            backups.push(entry.path());
         }
     }
 
@@ -44,7 +34,8 @@ fn cleanup_stale_backups(output_path: &str) {
     let output_exists = std::fs::metadata(output_path).is_ok();
 
     if !output_exists {
-        // Sort by mtime descending to pick the newest backup for restoration
+        // Output is missing — restore the newest backup regardless of age.
+        // Sort by mtime descending to pick the newest.
         backups.sort_by(|a, b| {
             let mtime = |p: &std::path::Path| {
                 std::fs::metadata(p)
@@ -54,19 +45,37 @@ fn cleanup_stale_backups(output_path: &str) {
             mtime(b).cmp(&mtime(a))
         });
 
-        // Restore the newest backup
         if let Some(newest) = backups.first() {
-            let _ = std::fs::rename(newest, output_path);
-        }
-
-        // Delete remaining backups (skip the first which was just renamed)
-        for backup in backups.iter().skip(1) {
-            let _ = std::fs::remove_file(backup);
+            match std::fs::rename(newest, output_path) {
+                Ok(_) => {
+                    // Delete remaining stale backups (skip the first which was just renamed)
+                    for backup in backups.iter().skip(1) {
+                        let _ = std::fs::remove_file(backup);
+                    }
+                }
+                Err(e) => {
+                    // Restoration failed; keep all backups for manual recovery
+                    log::warn!(
+                        "バックアップの復元に失敗（手動復旧が必要）: {:?} → {}: {e}",
+                        newest,
+                        output_path
+                    );
+                }
+            }
         }
     } else {
-        // Output exists; just delete all stale backups
+        // Output exists; delete only stale backups (older than 60 seconds).
+        // Recent backups may belong to an in-progress concurrent export.
+        let stale_threshold = std::time::Duration::from_secs(60);
+        let now = std::time::SystemTime::now();
         for backup in &backups {
-            let _ = std::fs::remove_file(backup);
+            let is_stale = std::fs::metadata(backup)
+                .and_then(|m| m.modified())
+                .map(|mtime| now.duration_since(mtime).unwrap_or_default() > stale_threshold)
+                .unwrap_or(true);
+            if is_stale {
+                let _ = std::fs::remove_file(backup);
+            }
         }
     }
 }
