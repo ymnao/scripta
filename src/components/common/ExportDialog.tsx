@@ -49,6 +49,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const [pageBreakEnabled, setPageBreakEnabled] = useState(false);
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
+	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 
 	const handleExportHtml = async () => {
@@ -71,6 +72,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
+				zoom: pdfZoom,
 			});
 			if (result) onClose();
 		} catch (err: unknown) {
@@ -181,6 +183,16 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 									/>
 								</>
 							)}
+							<RangeInput
+								id="export-pdf-zoom"
+								label="縮尺"
+								value={pdfZoom}
+								min={50}
+								max={150}
+								step={10}
+								unit="%"
+								onChange={setPdfZoom}
+							/>
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								MarkdownをPDFファイルとして書き出します。
 								{!isPdfSupported && " macOS・Windowsのみ対応。"}
@@ -254,6 +266,50 @@ function SelectInput<T extends string>({
 					</option>
 				))}
 			</select>
+		</div>
+	);
+}
+
+function RangeInput({
+	id,
+	label,
+	value,
+	min,
+	max,
+	step,
+	unit,
+	onChange,
+}: {
+	id: string;
+	label: string;
+	value: number;
+	min: number;
+	max: number;
+	step: number;
+	unit: string;
+	onChange: (value: number) => void;
+}) {
+	return (
+		<div className="flex items-center justify-between gap-3 rounded-md bg-bg-secondary px-3 py-2">
+			<label htmlFor={id} className="shrink-0 text-xs font-medium text-text-primary">
+				{label}
+			</label>
+			<div className="flex items-center gap-2">
+				<input
+					id={id}
+					type="range"
+					min={min}
+					max={max}
+					step={step}
+					value={value}
+					onChange={(e) => onChange(Number(e.target.value))}
+					className="h-1 w-20 cursor-pointer accent-blue-600"
+				/>
+				<span className="w-10 text-right text-xs tabular-nums text-text-secondary">
+					{value}
+					{unit}
+				</span>
+			</div>
 		</div>
 	);
 }

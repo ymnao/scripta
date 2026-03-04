@@ -468,7 +468,6 @@ pub async fn export_pdf(
                 settings
                     .SetShouldPrintHeaderAndFooter(false)
                     .map_err(|e| e.to_string())?;
-
                 // ICoreWebView2_7::PrintToPdf
                 let core7: ICoreWebView2_7 = core
                     .cast()

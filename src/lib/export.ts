@@ -249,7 +249,7 @@ export async function exportAsHtml(
 export async function exportAsPdf(
 	markdown: string,
 	filePath: string,
-	options?: { pageBreakLevel?: PageBreakLevel; smartPageBreak?: boolean },
+	options?: { pageBreakLevel?: PageBreakLevel; smartPageBreak?: boolean; zoom?: number },
 ): Promise<boolean> {
 	const title = extractTitle(filePath);
 	const defaultName = `${title}.pdf`;
@@ -261,13 +261,25 @@ export async function exportAsPdf(
 
 	if (!savePath) return false;
 
+	const zoom = options?.zoom ?? 100;
+	const scaleFactor = zoom / 100;
+
 	const pageBreak =
 		options?.pageBreakLevel && options.pageBreakLevel !== "none"
 			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
 			: undefined;
 
 	const bodyHtml = markdownToHtml(markdown, { breaks: true });
-	const html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
+	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
+	if (scaleFactor !== 1) {
+		// Compensate max-width so the content fills the same visual width
+		// regardless of zoom (e.g. zoom 0.5 → max-width 1600px → visual 800px)
+		const maxWidth = Math.round(800 / scaleFactor);
+		html = html.replace(
+			"<body>",
+			`<body style="zoom: ${scaleFactor}; max-width: ${maxWidth}px">`,
+		);
+	}
 	await exportPdf(html, savePath);
 	return true;
 }

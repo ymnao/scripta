@@ -325,3 +325,38 @@ describe("buildHtmlDocument page break", () => {
 		expect(html).toContain(".task-list-item { list-style: none; }");
 	});
 });
+
+describe("exportAsPdf zoom", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("adds zoom and compensated max-width when zoom is not 100", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 80 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 0.8; max-width: 1000px">');
+	});
+
+	it("does not add zoom style when zoom is 100", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<body>");
+		expect(html).not.toContain("zoom:");
+	});
+
+	it("compensates max-width for 50% zoom", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 50 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 0.5; max-width: 1600px">');
+	});
+
+	it("compensates max-width for 150% zoom", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 150 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 1.5; max-width: 533px">');
+	});
+});
