@@ -174,6 +174,13 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("−");
 	});
 
+	it("handles CRLF line endings in display math", () => {
+		const md = "$$\r\nx^2 + y^2 = z^2\r\n$$";
+		const html = markdownToHtml(md);
+		expect(html).toContain("katex");
+		expect(html).toContain("katex-display");
+	});
+
 	it("does not convert single newlines to <br> by default", () => {
 		const html = markdownToHtml("line1\nline2");
 		expect(html).not.toContain("<br");

@@ -181,9 +181,12 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	crypto.getRandomValues(bytes);
 	const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
+	// Normalize CRLF / CR to LF so regex patterns using \n work on Windows input
+	const normalized = markdown.replace(/\r\n?/g, "\n");
+
 	// Ensure empty task list items (e.g. "- [ ]") are recognized by marked.
 	// marked requires content after [ ]/[x] to detect task lists.
-	const withTasks = markdown.replace(/^(\s*(?:[-*+]|\d+\.)\s+\[[ xX]\])\s*$/gm, "$1 \u200B");
+	const withTasks = normalized.replace(/^(\s*(?:[-*+]|\d+\.)\s+\[[ xX]\])\s*$/gm, "$1 \u200B");
 
 	// Replace multi-line display math before lexing to prevent
 	// `breaks: true` (when enabled) from inserting <br> inside math blocks.
