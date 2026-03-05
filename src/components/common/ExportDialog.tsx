@@ -301,6 +301,11 @@ function RangeInput({
 }) {
 	const [draft, setDraft] = useState<string | null>(null);
 
+	const handleSlider = (e: React.ChangeEvent<HTMLInputElement>) => {
+		setDraft(null);
+		onChange(Number(e.target.value));
+	};
+
 	const handleBlur = () => {
 		if (draft !== null) {
 			const raw = Number.parseInt(draft, 10);
@@ -324,7 +329,7 @@ function RangeInput({
 					max={max}
 					step={step}
 					value={value}
-					onChange={(e) => onChange(Number(e.target.value))}
+					onChange={handleSlider}
 					className="h-1 w-20 cursor-pointer accent-blue-600"
 				/>
 				<div className="flex items-center gap-0.5">
