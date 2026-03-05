@@ -197,9 +197,9 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 								id="export-pdf-zoom"
 								label="縮尺"
 								value={pdfZoom}
-								min={50}
-								max={150}
-								step={10}
+								min={25}
+								max={200}
+								step={5}
 								unit="%"
 								onChange={setPdfZoom}
 							/>
@@ -299,6 +299,13 @@ function RangeInput({
 	unit: string;
 	onChange: (value: number) => void;
 }) {
+	const handleNumberInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const raw = Number.parseInt(e.target.value, 10);
+		if (!Number.isNaN(raw)) {
+			onChange(Math.min(max, Math.max(min, raw)));
+		}
+	};
+
 	return (
 		<div className="flex items-center justify-between gap-3 rounded-md bg-bg-secondary px-3 py-2">
 			<label htmlFor={id} className="shrink-0 text-xs font-medium text-text-primary">
@@ -315,10 +322,18 @@ function RangeInput({
 					onChange={(e) => onChange(Number(e.target.value))}
 					className="h-1 w-20 cursor-pointer accent-blue-600"
 				/>
-				<span className="w-10 text-right text-xs tabular-nums text-text-secondary">
-					{value}
-					{unit}
-				</span>
+				<div className="flex items-center">
+					<input
+						type="number"
+						min={min}
+						max={max}
+						value={value}
+						onChange={handleNumberInput}
+						aria-label={`${label}の値`}
+						className="w-10 bg-transparent text-right text-xs tabular-nums text-text-secondary outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+					/>
+					<span className="text-xs text-text-secondary">{unit}</span>
+				</div>
 			</div>
 		</div>
 	);
