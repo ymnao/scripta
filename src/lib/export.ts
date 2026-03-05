@@ -96,10 +96,17 @@ function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
  * 要素の実測高さに基づいてページ残量に収まるか判定し、
  * 収まる場合は data-no-break 属性を付与して改ページを抑制する。
  */
-export function buildDynamicPageBreakScript(level: PageBreakLevel): string {
+export function buildDynamicPageBreakScript(
+	level: PageBreakLevel,
+	forceUpperBreak = false,
+): string {
 	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
+	// forceUpperBreak: maxLevel未満の見出し（例: h3設定ならh1,h2）は常に改ページ
+	// h1設定時やオフ時は全レベルをsmart対象にする（forceLevel=0）
+	const forceLevel = forceUpperBreak && maxLevel > 1 ? maxLevel - 1 : 0;
 	return `(function() {
   var maxLevel = ${maxLevel};
+  var forceLevel = ${forceLevel};
   var selectors = [];
   for (var i = 1; i <= maxLevel; i++) selectors.push('h' + i);
   var sel = selectors.join(',');
@@ -204,10 +211,14 @@ export function buildDynamicPageBreakScript(level: PageBreakLevel): string {
     var isTargetHeading = hMatch && parseInt(hMatch[1]) <= maxLevel;
 
     if (isTargetHeading) {
+      var headingLevel = parseInt(hMatch[1]);
       if (firstTargetHeading) {
         // 最初の見出し: 常に data-no-break（白紙1ページ目を防ぐ）
         el.setAttribute('data-no-break', '');
         firstTargetHeading = false;
+      } else if (forceLevel > 0 && headingLevel <= forceLevel) {
+        // 上位見出し強制改ページ: smart抑制の対象外 → 常に改ページ
+        pageUsed = 0;
       } else {
         // 見出し + 直後コンテンツ2ブロック分の最小必要高さを計算
         // 1ブロックだけだと導入文のみで判定してしまい、見出し+導入文だけが
@@ -409,7 +420,12 @@ export async function exportAsHtml(
 export async function exportAsPdf(
 	markdown: string,
 	filePath: string,
-	options?: { pageBreakLevel?: PageBreakLevel; smartPageBreak?: boolean; zoom?: number },
+	options?: {
+		pageBreakLevel?: PageBreakLevel;
+		smartPageBreak?: boolean;
+		forceUpperBreak?: boolean;
+		zoom?: number;
+	},
 ): Promise<boolean> {
 	const title = extractTitle(filePath);
 	const defaultName = `${title}.pdf`;
@@ -434,7 +450,7 @@ export async function exportAsPdf(
 
 	// PDF用: 静的判定を動的スクリプトで上書き
 	if (pageBreak?.smart) {
-		const script = buildDynamicPageBreakScript(pageBreak.level);
+		const script = buildDynamicPageBreakScript(pageBreak.level, options?.forceUpperBreak ?? false);
 		html = html.replace("</body>", `<script>${script}</script>\n</body>`);
 	}
 

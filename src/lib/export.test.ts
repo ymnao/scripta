@@ -382,6 +382,26 @@ describe("buildDynamicPageBreakScript", () => {
 		const script = buildDynamicPageBreakScript("h3");
 		expect(script).toContain("var maxLevel = 3;");
 	});
+
+	it("sets forceLevel to 0 by default", () => {
+		const script = buildDynamicPageBreakScript("h3");
+		expect(script).toContain("var forceLevel = 0;");
+	});
+
+	it("sets forceLevel to maxLevel-1 when forceUpperBreak is true", () => {
+		const script = buildDynamicPageBreakScript("h3", true);
+		expect(script).toContain("var forceLevel = 2;");
+	});
+
+	it("sets forceLevel to 1 for h2 with forceUpperBreak", () => {
+		const script = buildDynamicPageBreakScript("h2", true);
+		expect(script).toContain("var forceLevel = 1;");
+	});
+
+	it("sets forceLevel to 0 for h1 with forceUpperBreak (no upper levels)", () => {
+		const script = buildDynamicPageBreakScript("h1", true);
+		expect(script).toContain("var forceLevel = 0;");
+	});
 });
 
 describe("exportAsPdf dynamic page break script", () => {
@@ -426,5 +446,26 @@ describe("exportAsPdf dynamic page break script", () => {
 		await exportAsPdf("# Hello", "/workspace/test.md");
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).not.toContain("<script>");
+	});
+
+	it("passes forceUpperBreak to script when enabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World\n### Section", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+			forceUpperBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("var forceLevel = 2;");
+	});
+
+	it("sets forceLevel to 0 when forceUpperBreak is not set", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("var forceLevel = 0;");
 	});
 });

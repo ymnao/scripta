@@ -49,6 +49,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const [pageBreakEnabled, setPageBreakEnabled] = useState(false);
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
+	const [forceUpperBreak, setForceUpperBreak] = useState(false);
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 
@@ -72,6 +73,7 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
+				forceUpperBreak,
 				zoom: pdfZoom,
 			});
 			if (result) onClose();
@@ -181,6 +183,14 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 										checked={smartPageBreak}
 										onChange={setSmartPageBreak}
 									/>
+									{smartPageBreak && pageBreakLevel !== "h1" && (
+										<ToggleInput
+											id="export-pdf-force-upper-break"
+											label="上位見出しは常に改ページ"
+											checked={forceUpperBreak}
+											onChange={setForceUpperBreak}
+										/>
+									)}
 								</>
 							)}
 							<RangeInput
