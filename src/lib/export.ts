@@ -112,10 +112,14 @@ export function buildDynamicPageBreakScript(
   var sel = selectors.join(',');
 
   // 1. A4印刷領域高さ(257mm = 297mm - 20mm*2)をルーラーdivで実測
+  //    CSS zoom適用時、getBoundingClientRect() はzoom後の座標を返す。
+  //    物理ページサイズは257mm固定なので、zoom分を補正して
+  //    「1物理ページにzoomed座標で何px分収まるか」を求める。
+  var zoom = parseFloat(document.body.style.zoom) || 1;
   var ruler = document.createElement('div');
   ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
   document.body.appendChild(ruler);
-  var pageHeight = ruler.offsetHeight;
+  var pageHeight = ruler.getBoundingClientRect().height / zoom;
   document.body.removeChild(ruler);
   if (pageHeight <= 0) return;
 
@@ -128,7 +132,6 @@ export function buildDynamicPageBreakScript(
   // 3. 印刷レイアウトをシミュレーション
   //    スクリーン幅(800px)と印刷幅(170mm≈644px)の差でテキスト折り返しが変わり
   //    セクション高さが過小評価されるのを防ぐため、bodyを印刷幅に一時変更
-  var zoom = parseFloat(document.body.style.zoom) || 1;
   var origPadding = document.body.style.padding;
   var origWidth = document.body.style.width;
   var origMaxWidth = document.body.style.maxWidth;
@@ -154,7 +157,7 @@ export function buildDynamicPageBreakScript(
   lineRuler.style.cssText = 'position:absolute;visibility:hidden;margin:0;padding:0;';
   lineRuler.textContent = 'x';
   document.body.appendChild(lineRuler);
-  var safetyBuffer = lineRuler.offsetHeight;
+  var safetyBuffer = lineRuler.getBoundingClientRect().height;
   document.body.removeChild(lineRuler);
   var safePageHeight = pageHeight - safetyBuffer * 3;
 

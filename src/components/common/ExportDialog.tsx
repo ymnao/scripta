@@ -46,10 +46,10 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
-	const [pageBreakEnabled, setPageBreakEnabled] = useState(false);
-	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
+	const [pageBreakEnabled, setPageBreakEnabled] = useState(true);
+	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h3");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
-	const [forceUpperBreak, setForceUpperBreak] = useState(false);
+	const [forceUpperBreak, setForceUpperBreak] = useState(true);
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 
