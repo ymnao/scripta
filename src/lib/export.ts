@@ -97,7 +97,7 @@ function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
  * 収まる場合は data-no-break 属性を付与して改ページを抑制する。
  */
 export function buildDynamicPageBreakScript(
-	level: PageBreakLevel,
+	level: Exclude<PageBreakLevel, "none">,
 	forceUpperBreak = false,
 ): string {
 	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;

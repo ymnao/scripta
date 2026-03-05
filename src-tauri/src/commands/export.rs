@@ -300,7 +300,9 @@ pub async fn export_pdf(
             // Check for errors from with_webview (non-blocking 500ms window)
             match rx.recv_timeout(std::time::Duration::from_millis(500)) {
                 Ok(Err(e)) => return Err(e),
-                Ok(Ok(())) => return Ok(()),
+                // Ok(Ok(())) is unreachable: macOS uses fire-and-forget print;
+                // completion is detected by file polling below.
+                Ok(Ok(())) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     // Channel dropped — sleep to avoid busy-looping
