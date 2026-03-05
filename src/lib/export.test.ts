@@ -11,7 +11,13 @@ vi.mock("./commands", () => ({
 
 const { save } = await import("@tauri-apps/plugin-dialog");
 const { writeFile, exportPdf } = await import("./commands");
-const { buildHtmlDocument, exportAsHtml, exportAsPdf, exportAsPrompt } = await import("./export");
+const {
+	buildDynamicPageBreakScript,
+	buildHtmlDocument,
+	exportAsHtml,
+	exportAsPdf,
+	exportAsPrompt,
+} = await import("./export");
 
 const mockedSave = save as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -323,5 +329,169 @@ describe("buildHtmlDocument page break", () => {
 		const html = buildHtmlDocument(body, "test", "light");
 		expect(html).toContain('class="task-list-item"');
 		expect(html).toContain(".task-list-item { list-style: none; }");
+	});
+});
+
+describe("exportAsPdf zoom", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("adds zoom and compensated max-width when zoom is not 100", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 80 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 0.8; max-width: 1000px">');
+	});
+
+	it("does not add zoom style when zoom is 100", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<body>");
+		expect(html).not.toContain("zoom:");
+	});
+
+	it("compensates max-width for 50% zoom", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 50 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 0.5; max-width: 1600px">');
+	});
+
+	it("compensates max-width for 150% zoom", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 150 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 1.5; max-width: 533px">');
+	});
+});
+
+describe("buildDynamicPageBreakScript", () => {
+	it("includes correct maxLevel for h1", () => {
+		const script = buildDynamicPageBreakScript("h1");
+		expect(script).toContain("var maxLevel = 1;");
+	});
+
+	it("includes correct maxLevel for h2", () => {
+		const script = buildDynamicPageBreakScript("h2");
+		expect(script).toContain("var maxLevel = 2;");
+	});
+
+	it("includes correct maxLevel for h3", () => {
+		const script = buildDynamicPageBreakScript("h3");
+		expect(script).toContain("var maxLevel = 3;");
+	});
+
+	it("sets forceLevel to 0 by default", () => {
+		const script = buildDynamicPageBreakScript("h3");
+		expect(script).toContain("var forceLevel = 0;");
+	});
+
+	it("sets forceLevel to maxLevel-1 when forceUpperBreak is true", () => {
+		const script = buildDynamicPageBreakScript("h3", true);
+		expect(script).toContain("var forceLevel = 2;");
+	});
+
+	it("sets forceLevel to 1 for h2 with forceUpperBreak", () => {
+		const script = buildDynamicPageBreakScript("h2", true);
+		expect(script).toContain("var forceLevel = 1;");
+	});
+
+	it("sets forceLevel to 0 for h1 with forceUpperBreak (no upper levels)", () => {
+		const script = buildDynamicPageBreakScript("h1", true);
+		expect(script).toContain("var forceLevel = 0;");
+	});
+});
+
+describe("exportAsPdf dynamic page break script", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("injects script when smart page break is enabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<script>");
+		expect(html).toContain("var maxLevel = 2;");
+		expect(html).toContain("</script>\n</body>");
+	});
+
+	it("does not inject script when smart page break is disabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("does not inject script when pageBreakLevel is none", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "none",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("does not inject script when pageBreak options are not provided", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("passes forceUpperBreak to script when enabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World\n### Section", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+			forceUpperBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("var forceLevel = 2;");
+	});
+
+	it("sets forceLevel to 0 when forceUpperBreak is not set", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("var forceLevel = 0;");
+	});
+
+	it("injects script right before the final </body>", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Test\n\nparagraph", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// Script should appear right before </body></html>
+		expect(html).toMatch(/<\/script>\n<\/body>\s*\n<\/html>/);
+		// Only one </body> should exist
+		const bodyCloseCount = html.split("</body>").length - 1;
+		expect(bodyCloseCount).toBe(1);
+	});
+
+	it("applies zoom to the first <body> tag", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Test\n\nparagraph", "/workspace/test.md", {
+			zoom: 80,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toMatch(/<body style="zoom: 0\.8; max-width: 1000px">/);
+		// Only one <body> tag should exist
+		const bodyOpenCount = html.split("<body").length - 1;
+		expect(bodyOpenCount).toBe(1);
 	});
 });

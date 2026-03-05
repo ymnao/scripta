@@ -46,9 +46,11 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
-	const [pageBreakEnabled, setPageBreakEnabled] = useState(false);
-	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
+	const [pageBreakEnabled, setPageBreakEnabled] = useState(true);
+	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h3");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
+	const [forceUpperBreak, setForceUpperBreak] = useState(true);
+	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 
 	const handleExportHtml = async () => {
@@ -71,6 +73,8 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
+				forceUpperBreak,
+				zoom: pdfZoom,
 			});
 			if (result) onClose();
 		} catch (err: unknown) {
@@ -179,8 +183,26 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 										checked={smartPageBreak}
 										onChange={setSmartPageBreak}
 									/>
+									{smartPageBreak && pageBreakLevel !== "h1" && (
+										<ToggleInput
+											id="export-pdf-force-upper-break"
+											label="上位見出しは常に改ページ"
+											checked={forceUpperBreak}
+											onChange={setForceUpperBreak}
+										/>
+									)}
 								</>
 							)}
+							<RangeInput
+								id="export-pdf-zoom"
+								label="縮尺"
+								value={pdfZoom}
+								min={25}
+								max={200}
+								step={5}
+								unit="%"
+								onChange={setPdfZoom}
+							/>
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								MarkdownをPDFファイルとして書き出します。
 								{!isPdfSupported && " macOS・Windowsのみ対応。"}
@@ -254,6 +276,78 @@ function SelectInput<T extends string>({
 					</option>
 				))}
 			</select>
+		</div>
+	);
+}
+
+function RangeInput({
+	id,
+	label,
+	value,
+	min,
+	max,
+	step,
+	unit,
+	onChange,
+}: {
+	id: string;
+	label: string;
+	value: number;
+	min: number;
+	max: number;
+	step: number;
+	unit: string;
+	onChange: (value: number) => void;
+}) {
+	const [draft, setDraft] = useState<string | null>(null);
+
+	const handleSlider = (e: React.ChangeEvent<HTMLInputElement>) => {
+		setDraft(null);
+		onChange(Number(e.target.value));
+	};
+
+	const handleBlur = () => {
+		if (draft !== null) {
+			const raw = Number.parseInt(draft, 10);
+			if (!Number.isNaN(raw)) {
+				onChange(Math.min(max, Math.max(min, raw)));
+			}
+			setDraft(null);
+		}
+	};
+
+	return (
+		<div className="flex items-center justify-between gap-3 rounded-md bg-bg-secondary px-3 py-2">
+			<label htmlFor={id} className="shrink-0 text-xs font-medium text-text-primary">
+				{label}
+			</label>
+			<div className="flex items-center gap-2">
+				<input
+					id={id}
+					type="range"
+					min={min}
+					max={max}
+					step={step}
+					value={value}
+					onChange={handleSlider}
+					className="h-1 w-20 cursor-pointer accent-blue-600"
+				/>
+				<div className="flex items-center gap-0.5">
+					<input
+						type="text"
+						inputMode="numeric"
+						value={draft ?? value}
+						onChange={(e) => setDraft(e.target.value)}
+						onBlur={handleBlur}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") e.currentTarget.blur();
+						}}
+						aria-label={`${label}の値`}
+						className="w-10 rounded border border-border bg-bg-primary px-1 py-0.5 text-right text-xs tabular-nums text-text-primary outline-none focus:border-blue-500"
+					/>
+					<span className="text-xs text-text-secondary">{unit}</span>
+				</div>
+			</div>
 		</div>
 	);
 }

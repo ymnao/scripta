@@ -165,9 +165,10 @@ pub async fn export_pdf(
         }
     };
 
-    // Channel to signal print completion. runOperationModalForWindow blocks
-    // synchronously until the PDF is fully written, so tx.send(Ok(())) means
-    // the file has been generated (not just that printing started).
+    // Channel to signal print errors. runOperationModalForWindow is
+    // asynchronous — it starts the print operation on a background thread
+    // and returns immediately.  Completion is detected by polling for
+    // the output file; the channel is used only for error reporting.
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
     let output = output_path.clone();
@@ -251,6 +252,11 @@ pub async fn export_pdf(
                 // Must use runOperationModalForWindow (not runOperation) because
                 // WKWebView needs the modal session's run loop to process IPC
                 // with its WebContent process; runOperation deadlocks.
+                //
+                // IMPORTANT: runOperationModalForWindow is ASYNCHRONOUS — it
+                // starts the print operation on a background thread and returns
+                // immediately.  Do NOT send Ok(()) here; the caller polls for
+                // the output file to detect completion.
                 let ns_window: &objc2_app_kit::NSWindow =
                     &*platform_wv.ns_window().cast();
                 print_op
@@ -260,8 +266,6 @@ pub async fn export_pdf(
                         None,
                         std::ptr::null_mut(),
                     );
-
-                let _ = tx.send(Ok(()));
             }
         });
 
@@ -285,11 +289,37 @@ pub async fn export_pdf(
     });
 
     // Wait for the print operation to complete.
-    // runOperationModalForWindow is synchronous — it blocks inside with_webview
-    // until the PDF is fully written. So recv_timeout covers page load + printing.
+    // runOperationModalForWindow is asynchronous — it starts the print op on
+    // a background thread and returns immediately.  We detect completion by
+    // polling for the output file, while also checking the channel for any
+    // errors reported by with_webview.
+    let output_poll = output_path.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        rx.recv_timeout(PDF_EXPORT_TIMEOUT)
-            .unwrap_or_else(|e| Err(format!("PDFエクスポートがタイムアウトしました: {e}")))
+        let start = std::time::Instant::now();
+        loop {
+            // Check for errors from with_webview (non-blocking 500ms window)
+            match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(Err(e)) => return Err(e),
+                // Ok(Ok(())) is unreachable: macOS uses fire-and-forget print;
+                // completion is detected by file polling below.
+                Ok(Ok(())) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    // Channel dropped — sleep to avoid busy-looping
+                    // (recv_timeout returns Disconnected immediately on subsequent calls)
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
+            // Check if the output file has been written
+            if let Ok(meta) = std::fs::metadata(&output_poll) {
+                if meta.len() > 0 {
+                    return Ok(());
+                }
+            }
+            if start.elapsed() > PDF_EXPORT_TIMEOUT {
+                return Err("PDFエクスポートがタイムアウトしました".to_string());
+            }
+        }
     })
     .await
     .map_err(|e| format!("PDFエクスポートタスクエラー: {e}"))?;
@@ -442,7 +472,6 @@ pub async fn export_pdf(
                 settings
                     .SetShouldPrintHeaderAndFooter(false)
                     .map_err(|e| e.to_string())?;
-
                 // ICoreWebView2_7::PrintToPdf
                 let core7: ICoreWebView2_7 = core
                     .cast()
