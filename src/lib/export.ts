@@ -91,6 +91,166 @@ function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
 	});
 }
 
+/**
+ * PDF用WebView内で実行される動的改ページ判定スクリプトを生成する。
+ * 要素の実測高さに基づいてページ残量に収まるか判定し、
+ * 収まる場合は data-no-break 属性を付与して改ページを抑制する。
+ */
+export function buildDynamicPageBreakScript(level: PageBreakLevel): string {
+	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
+	return `(function() {
+  var maxLevel = ${maxLevel};
+  var selectors = [];
+  for (var i = 1; i <= maxLevel; i++) selectors.push('h' + i);
+  var sel = selectors.join(',');
+
+  // 1. A4印刷領域高さ(257mm = 297mm - 20mm*2)をルーラーdivで実測
+  var ruler = document.createElement('div');
+  ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
+  document.body.appendChild(ruler);
+  var pageHeight = ruler.offsetHeight;
+  document.body.removeChild(ruler);
+  if (pageHeight <= 0) return;
+
+  // 2. 静的 applySmartPageBreaks の結果を全クリア
+  var allHeadings = document.querySelectorAll('[data-no-break]');
+  for (var i = 0; i < allHeadings.length; i++) {
+    allHeadings[i].removeAttribute('data-no-break');
+  }
+
+  // 3. 印刷レイアウトをシミュレーション
+  //    スクリーン幅(800px)と印刷幅(170mm≈644px)の差でテキスト折り返しが変わり
+  //    セクション高さが過小評価されるのを防ぐため、bodyを印刷幅に一時変更
+  var zoom = parseFloat(document.body.style.zoom) || 1;
+  var origPadding = document.body.style.padding;
+  var origWidth = document.body.style.width;
+  var origMaxWidth = document.body.style.maxWidth;
+  document.body.style.padding = '0';
+  var pw = (170 / zoom) + 'mm';
+  document.body.style.width = pw;
+  document.body.style.maxWidth = pw;
+
+  // 全対象見出しの break-before を一時無効化し自然レイアウトで高さ測定
+  // pre も印刷時と同じ折り返しモードにする
+  var style = document.createElement('style');
+  style.textContent = sel + ' { break-before: auto !important; } pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
+  document.head.appendChild(style);
+
+  // レイアウト再計算を強制
+  document.body.offsetHeight;
+
+  // 安全マージン: 行高さを実測し、pageHeight から差し引く
+  // スクリーンと印刷のレンダリング差（マージン折り畳み、リスト内のパディング、
+  // break-inside:avoid による要素移動等）で累積的な測定誤差が発生するため、
+  // 3行分の余裕を持たせて判定する
+  var lineRuler = document.createElement('p');
+  lineRuler.style.cssText = 'position:absolute;visibility:hidden;margin:0;padding:0;';
+  lineRuler.textContent = 'x';
+  document.body.appendChild(lineRuler);
+  var safetyBuffer = lineRuler.offsetHeight;
+  document.body.removeChild(lineRuler);
+  var safePageHeight = pageHeight - safetyBuffer * 3;
+
+  // 4. body直下のブロック要素を列挙し、各要素の占有高さを測定
+  //    セクション単位ではなくブロック要素単位で追跡することで、
+  //    break-inside: avoid による段落移動を正確にシミュレーションする
+  //    UL/OL は直接子の LI に展開する（LI は break-inside: avoid だが
+  //    UL/OL 自体はリスト項目間で分割可能なため、LI 単位で追跡する必要がある）
+  var blockTags = {H1:1,H2:1,H3:1,H4:1,H5:1,H6:1,P:1,UL:1,OL:1,PRE:1,BLOCKQUOTE:1,TABLE:1,HR:1,IMG:1,DIV:1};
+  var avoidBreakTags = {P:1,LI:1,PRE:1,BLOCKQUOTE:1,TABLE:1,IMG:1};
+  var items = [];
+  var ch = document.body.children;
+  for (var i = 0; i < ch.length; i++) {
+    var tag = ch[i].tagName;
+    if (tag === 'UL' || tag === 'OL') {
+      var lis = ch[i].children;
+      for (var j = 0; j < lis.length; j++) {
+        if (lis[j].tagName === 'LI') items.push(lis[j]);
+      }
+    } else if (tag in blockTags) {
+      items.push(ch[i]);
+    }
+  }
+  if (items.length === 0) {
+    document.head.removeChild(style);
+    document.body.style.padding = origPadding;
+    document.body.style.width = origWidth;
+    document.body.style.maxWidth = origMaxWidth;
+    return;
+  }
+
+  // 各要素の占有高さ = 次要素のtopまでの距離（マージンを含む）
+  var heights = [];
+  for (var i = 0; i < items.length; i++) {
+    var top = items[i].getBoundingClientRect().top;
+    var nextTop = (i + 1 < items.length)
+      ? items[i + 1].getBoundingClientRect().top
+      : document.body.getBoundingClientRect().bottom;
+    heights.push(Math.max(0, nextTop - top));
+  }
+
+  // 5. ページフローをシミュレーション
+  //    見出し判定: 見出し + 直後コンテンツが現ページに収まるかチェック
+  //    収まらない場合は改ページし見出しを次ページ頭へ移動
+  //    （ページ頭の見出しなら段落が次ページへ溢れてOK）
+  //    pageUsed追跡: break-inside: avoid の要素は分割されず次ページへ移動
+  var pageUsed = 0;
+  var firstTargetHeading = true;
+  for (var i = 0; i < items.length; i++) {
+    var el = items[i];
+    var h = heights[i];
+    var tag = el.tagName;
+    var hMatch = tag.match(/^H([1-6])$/);
+    var isTargetHeading = hMatch && parseInt(hMatch[1]) <= maxLevel;
+
+    if (isTargetHeading) {
+      if (firstTargetHeading) {
+        // 最初の見出し: 常に data-no-break（白紙1ページ目を防ぐ）
+        el.setAttribute('data-no-break', '');
+        firstTargetHeading = false;
+      } else {
+        // 見出し + 直後コンテンツ2ブロック分の最小必要高さを計算
+        // 1ブロックだけだと導入文のみで判定してしまい、見出し+導入文だけが
+        // ページ末尾に残って実際の内容が次ページに行く問題を防ぐ
+        var minNeeded = h;
+        var extra = 0;
+        for (var k = i + 1; k < items.length && extra < 2; k++) {
+          if (items[k].tagName.match(/^H[1-6]$/)) break;
+          minNeeded += heights[k];
+          extra++;
+        }
+
+        if (pageUsed + minNeeded <= safePageHeight) {
+          // 見出し+直後コンテンツが現ページに収まる → 改ページ抑制
+          el.setAttribute('data-no-break', '');
+        } else {
+          // 収まらない → 改ページ（見出しを次ページ頭へ）
+          pageUsed = 0;
+        }
+      }
+    }
+
+    // pageUsedを更新（break-inside: avoid を考慮）
+    var avoidBreak = (tag in avoidBreakTags);
+    if (avoidBreak && pageUsed > 0 && pageUsed + h > pageHeight) {
+      // break-inside: avoid の要素が現ページに収まらない → 次ページへ移動
+      pageUsed = h;
+    } else {
+      pageUsed += h;
+    }
+    while (pageUsed >= pageHeight) {
+      pageUsed -= pageHeight;
+    }
+  }
+
+  // 6. 一時スタイル・レイアウトを復元
+  document.head.removeChild(style);
+  document.body.style.padding = origPadding;
+  document.body.style.width = origWidth;
+  document.body.style.maxWidth = origMaxWidth;
+})();`;
+}
+
 function buildThemeCss(theme: ExportTheme): string {
 	if (theme === "light") {
 		return LIGHT_STYLES;
@@ -187,7 +347,7 @@ ${buildThemeCss(theme)}
   body { padding: 0; }
   pre { white-space: pre-wrap; word-wrap: break-word; }
   h1, h2, h3, h4, h5, h6 { break-after: avoid; }
-  pre, blockquote, table, img { break-inside: avoid; }
+  p, li, pre, blockquote, table, img { break-inside: avoid; }
 ${pageBreak ? `  ${buildPageBreakCss(pageBreak.level, pageBreak.smart).split("\n").join("\n  ")}` : ""}
 }
 </style>
@@ -271,14 +431,18 @@ export async function exportAsPdf(
 
 	const bodyHtml = markdownToHtml(markdown, { breaks: true });
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
+
+	// PDF用: 静的判定を動的スクリプトで上書き
+	if (pageBreak?.smart) {
+		const script = buildDynamicPageBreakScript(pageBreak.level);
+		html = html.replace("</body>", `<script>${script}</script>\n</body>`);
+	}
+
 	if (scaleFactor !== 1) {
 		// Compensate max-width so the content fills the same visual width
 		// regardless of zoom (e.g. zoom 0.5 → max-width 1600px → visual 800px)
 		const maxWidth = Math.round(800 / scaleFactor);
-		html = html.replace(
-			"<body>",
-			`<body style="zoom: ${scaleFactor}; max-width: ${maxWidth}px">`,
-		);
+		html = html.replace("<body>", `<body style="zoom: ${scaleFactor}; max-width: ${maxWidth}px">`);
 	}
 	await exportPdf(html, savePath);
 	return true;

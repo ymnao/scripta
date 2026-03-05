@@ -11,7 +11,13 @@ vi.mock("./commands", () => ({
 
 const { save } = await import("@tauri-apps/plugin-dialog");
 const { writeFile, exportPdf } = await import("./commands");
-const { buildHtmlDocument, exportAsHtml, exportAsPdf, exportAsPrompt } = await import("./export");
+const {
+	buildDynamicPageBreakScript,
+	buildHtmlDocument,
+	exportAsHtml,
+	exportAsPdf,
+	exportAsPrompt,
+} = await import("./export");
 
 const mockedSave = save as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -358,5 +364,67 @@ describe("exportAsPdf zoom", () => {
 		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 150 });
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain('<body style="zoom: 1.5; max-width: 533px">');
+	});
+});
+
+describe("buildDynamicPageBreakScript", () => {
+	it("includes correct maxLevel for h1", () => {
+		const script = buildDynamicPageBreakScript("h1");
+		expect(script).toContain("var maxLevel = 1;");
+	});
+
+	it("includes correct maxLevel for h2", () => {
+		const script = buildDynamicPageBreakScript("h2");
+		expect(script).toContain("var maxLevel = 2;");
+	});
+
+	it("includes correct maxLevel for h3", () => {
+		const script = buildDynamicPageBreakScript("h3");
+		expect(script).toContain("var maxLevel = 3;");
+	});
+});
+
+describe("exportAsPdf dynamic page break script", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("injects script when smart page break is enabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<script>");
+		expect(html).toContain("var maxLevel = 2;");
+		expect(html).toContain("</script>\n</body>");
+	});
+
+	it("does not inject script when smart page break is disabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("does not inject script when pageBreakLevel is none", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "none",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("does not inject script when pageBreak options are not provided", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
 	});
 });
