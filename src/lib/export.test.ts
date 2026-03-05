@@ -468,4 +468,30 @@ describe("exportAsPdf dynamic page break script", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain("var forceLevel = 0;");
 	});
+
+	it("injects script right before the final </body>", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Test\n\nparagraph", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// Script should appear right before </body></html>
+		expect(html).toMatch(/<\/script>\n<\/body>\s*\n<\/html>/);
+		// Only one </body> should exist
+		const bodyCloseCount = html.split("</body>").length - 1;
+		expect(bodyCloseCount).toBe(1);
+	});
+
+	it("applies zoom to the first <body> tag", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Test\n\nparagraph", "/workspace/test.md", {
+			zoom: 80,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toMatch(/<body style="zoom: 0\.8; max-width: 1000px">/);
+		// Only one <body> tag should exist
+		const bodyOpenCount = html.split("<body").length - 1;
+		expect(bodyOpenCount).toBe(1);
+	});
 });
