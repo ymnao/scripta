@@ -299,10 +299,15 @@ function RangeInput({
 	unit: string;
 	onChange: (value: number) => void;
 }) {
-	const handleNumberInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const raw = Number.parseInt(e.target.value, 10);
-		if (!Number.isNaN(raw)) {
-			onChange(Math.min(max, Math.max(min, raw)));
+	const [draft, setDraft] = useState<string | null>(null);
+
+	const handleBlur = () => {
+		if (draft !== null) {
+			const raw = Number.parseInt(draft, 10);
+			if (!Number.isNaN(raw)) {
+				onChange(Math.min(max, Math.max(min, raw)));
+			}
+			setDraft(null);
 		}
 	};
 
@@ -322,15 +327,18 @@ function RangeInput({
 					onChange={(e) => onChange(Number(e.target.value))}
 					className="h-1 w-20 cursor-pointer accent-blue-600"
 				/>
-				<div className="flex items-center">
+				<div className="flex items-center gap-0.5">
 					<input
-						type="number"
-						min={min}
-						max={max}
-						value={value}
-						onChange={handleNumberInput}
+						type="text"
+						inputMode="numeric"
+						value={draft ?? value}
+						onChange={(e) => setDraft(e.target.value)}
+						onBlur={handleBlur}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") e.currentTarget.blur();
+						}}
 						aria-label={`${label}の値`}
-						className="w-10 bg-transparent text-right text-xs tabular-nums text-text-secondary outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+						className="w-10 rounded border border-border bg-bg-primary px-1 py-0.5 text-right text-xs tabular-nums text-text-primary outline-none focus:border-blue-500"
 					/>
 					<span className="text-xs text-text-secondary">{unit}</span>
 				</div>
