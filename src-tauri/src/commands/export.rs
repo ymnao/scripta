@@ -303,7 +303,9 @@ pub async fn export_pdf(
                 Ok(Ok(())) => return Ok(()),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    // Channel dropped — check file one last time below
+                    // Channel dropped — sleep to avoid busy-looping
+                    // (recv_timeout returns Disconnected immediately on subsequent calls)
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                 }
             }
             // Check if the output file has been written
