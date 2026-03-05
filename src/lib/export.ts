@@ -452,16 +452,23 @@ export async function exportAsPdf(
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
 	// PDF用: 静的判定を動的スクリプトで上書き
+	// 本文中に生HTMLの </body> が含まれる可能性があるため、最後の出現を置換する
 	if (pageBreak?.smart) {
 		const script = buildDynamicPageBreakScript(pageBreak.level, options?.forceUpperBreak ?? false);
-		html = html.replace("</body>", `<script>${script}</script>\n</body>`);
+		const idx = html.lastIndexOf("</body>");
+		if (idx !== -1) {
+			html = `${html.slice(0, idx)}<script>${script}</script>\n</body>${html.slice(idx + 7)}`;
+		}
 	}
 
 	if (scaleFactor !== 1) {
 		// Compensate max-width so the content fills the same visual width
 		// regardless of zoom (e.g. zoom 0.5 → max-width 1600px → visual 800px)
 		const maxWidth = Math.round(800 / scaleFactor);
-		html = html.replace("<body>", `<body style="zoom: ${scaleFactor}; max-width: ${maxWidth}px">`);
+		const idx = html.indexOf("<body>");
+		if (idx !== -1) {
+			html = `${html.slice(0, idx)}<body style="zoom: ${scaleFactor}; max-width: ${maxWidth}px">${html.slice(idx + 6)}`;
+		}
 	}
 	await exportPdf(html, savePath);
 	return true;
