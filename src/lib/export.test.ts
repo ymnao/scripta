@@ -14,9 +14,11 @@ const { writeFile, exportPdf } = await import("./commands");
 const {
 	buildDynamicPageBreakScript,
 	buildHtmlDocument,
+	buildPromptFromTemplate,
 	exportAsHtml,
 	exportAsPdf,
 	exportAsPrompt,
+	getDefaultPromptTemplate,
 } = await import("./export");
 
 const mockedSave = save as Mock;
@@ -493,5 +495,86 @@ describe("exportAsPdf dynamic page break script", () => {
 		// Only one <body> tag should exist
 		const bodyOpenCount = html.split("<body").length - 1;
 		expect(bodyOpenCount).toBe(1);
+	});
+});
+
+describe("getDefaultPromptTemplate", () => {
+	it("contains {title} and {content} placeholders", () => {
+		const template = getDefaultPromptTemplate();
+		expect(template).toContain("{title}");
+		expect(template).toContain("{content}");
+	});
+
+	it("contains the HTML conversion prompt header", () => {
+		const template = getDefaultPromptTemplate();
+		expect(template).toContain("# HTML変換プロンプト");
+	});
+});
+
+describe("buildPromptFromTemplate", () => {
+	it("replaces {title} and {content} placeholders", () => {
+		const template = "Title: {title}\n\n{content}";
+		const result = buildPromptFromTemplate(template, "My Doc", "hello world");
+		expect(result).toContain("Title: My Doc");
+		expect(result).toContain("```markdown\nhello world\n```");
+	});
+
+	it("wraps content in a fence block", () => {
+		const template = "{content}";
+		const result = buildPromptFromTemplate(template, "test", "some text");
+		expect(result).toMatch(/^```markdown\nsome text\n```$/);
+	});
+
+	it("uses longer fence when content contains backticks", () => {
+		const template = "{content}";
+		const result = buildPromptFromTemplate(template, "test", "```js\ncode\n```");
+		expect(result).toContain("````markdown");
+	});
+
+	it("replaces multiple {title} occurrences", () => {
+		const template = "{title} - {title}";
+		const result = buildPromptFromTemplate(template, "Doc", "text");
+		expect(result).toContain("Doc - Doc");
+	});
+
+	it("preserves $ and $1 in content without special expansion", () => {
+		const template = "{content}";
+		const result = buildPromptFromTemplate(template, "test", "Price is $100 and $1");
+		expect(result).toContain("Price is $100 and $1");
+	});
+
+	it("preserves $& and $$ in title without special expansion", () => {
+		const template = "Title: {title}";
+		const result = buildPromptFromTemplate(template, "Cost $$ and $&", "text");
+		expect(result).toContain("Cost $$ and $&");
+	});
+});
+
+describe("exportAsPrompt with custom template", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("uses custom template when provided", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const customTemplate = "Custom: {title}\n\n{content}";
+		await exportAsPrompt("# Hello", "/workspace/test.md", customTemplate);
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("Custom: test");
+		expect(output).toContain("# Hello");
+	});
+
+	it("uses default template when customTemplate is null", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		await exportAsPrompt("# Hello", "/workspace/test.md", null);
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("# HTML変換プロンプト");
+	});
+
+	it("uses default template when customTemplate is undefined", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		await exportAsPrompt("# Hello", "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("# HTML変換プロンプト");
 	});
 });
