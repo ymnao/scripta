@@ -15,6 +15,8 @@ vi.mock("../../lib/commands", () => ({
 	createDirectory: vi.fn(),
 	renameEntry: vi.fn(),
 	deleteEntry: vi.fn(),
+	readFile: vi.fn(),
+	writeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 const { FileTree } = await import("./FileTree");

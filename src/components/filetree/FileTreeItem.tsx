@@ -2,6 +2,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
+import { toRelativePath } from "../../stores/workspace-config";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
 
@@ -24,6 +25,8 @@ interface FileTreeItemProps {
 	onCreateConfirm: (name: string) => void;
 	onRenameCancel: () => void;
 	onCreateCancel: () => void;
+	icons?: Record<string, string>;
+	workspacePath?: string;
 }
 
 export function FileTreeItem({
@@ -40,6 +43,8 @@ export function FileTreeItem({
 	onCreateConfirm,
 	onRenameCancel,
 	onCreateCancel,
+	icons,
+	workspacePath,
 }: FileTreeItemProps) {
 	const [expanded, setExpanded] = useState(false);
 	const [children, setChildren] = useState<FileEntry[]>([]);
@@ -173,26 +178,43 @@ export function FileTreeItem({
 				onClick={handleClick}
 				onContextMenu={handleContextMenuEvent}
 			>
-				{entry.isDirectory ? (
-					<>
-						{expanded ? (
-							<ChevronDown size={14} className="shrink-0 text-text-secondary" />
-						) : (
-							<ChevronRight size={14} className="shrink-0 text-text-secondary" />
-						)}
-						<Folder size={14} className="shrink-0 text-text-secondary" />
-					</>
-				) : (
-					(() => {
-						const Icon = getFileIcon(entry.name);
+				{(() => {
+					const rel = workspacePath ? toRelativePath(workspacePath, entry.path) : null;
+					const emoji = rel && icons ? icons[rel] : undefined;
+
+					if (entry.isDirectory) {
 						return (
 							<>
-								<span className="inline-block w-3.5 shrink-0" />
-								<Icon size={14} className="shrink-0 text-text-secondary" />
+								{expanded ? (
+									<ChevronDown size={14} className="shrink-0 text-text-secondary" />
+								) : (
+									<ChevronRight size={14} className="shrink-0 text-text-secondary" />
+								)}
+								{emoji ? (
+									<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+										{emoji}
+									</span>
+								) : (
+									<Folder size={14} className="shrink-0 text-text-secondary" />
+								)}
 							</>
 						);
-					})()
-				)}
+					}
+
+					const Icon = getFileIcon(entry.name);
+					return (
+						<>
+							<span className="inline-block w-3.5 shrink-0" />
+							{emoji ? (
+								<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+									{emoji}
+								</span>
+							) : (
+								<Icon size={14} className="shrink-0 text-text-secondary" />
+							)}
+						</>
+					);
+				})()}
 				<span className="truncate">{entry.name}</span>
 				{loadError && (
 					<AlertTriangle
@@ -231,6 +253,8 @@ export function FileTreeItem({
 								onCreateConfirm={onCreateConfirm}
 								onRenameCancel={onRenameCancel}
 								onCreateCancel={onCreateCancel}
+								icons={icons}
+								workspacePath={workspacePath}
 							/>
 						))}
 					</ul>

@@ -81,6 +81,69 @@ describe("useWorkspaceConfigStore", () => {
 		});
 	});
 
+	describe("renameIcon", () => {
+		it("moves icon from old key to new key", () => {
+			useWorkspaceConfigStore.setState({ icons: { "old.md": "📄", "other.md": "🔧" } });
+			useWorkspaceConfigStore.getState().renameIcon("/workspace", "old.md", "new.md");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({
+				"new.md": "📄",
+				"other.md": "🔧",
+			});
+			expect(mockedSaveIcons).toHaveBeenCalledWith("/workspace", {
+				"new.md": "📄",
+				"other.md": "🔧",
+			});
+		});
+
+		it("does nothing when old key does not exist", () => {
+			useWorkspaceConfigStore.setState({ icons: { "file.md": "📄" } });
+			useWorkspaceConfigStore.getState().renameIcon("/workspace", "missing.md", "new.md");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({ "file.md": "📄" });
+			expect(mockedSaveIcons).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("renameIconsByPrefix", () => {
+		it("renames all keys under the old prefix", () => {
+			useWorkspaceConfigStore.setState({
+				icons: { docs: "📁", "docs/a.md": "📄", "docs/sub/b.md": "📝", "other.md": "🔧" },
+			});
+			useWorkspaceConfigStore.getState().renameIconsByPrefix("/workspace", "docs", "documents");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({
+				documents: "📁",
+				"documents/a.md": "📄",
+				"documents/sub/b.md": "📝",
+				"other.md": "🔧",
+			});
+			expect(mockedSaveIcons).toHaveBeenCalled();
+		});
+
+		it("does nothing when no keys match the prefix", () => {
+			useWorkspaceConfigStore.setState({ icons: { "file.md": "📄" } });
+			useWorkspaceConfigStore.getState().renameIconsByPrefix("/workspace", "docs", "documents");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({ "file.md": "📄" });
+			expect(mockedSaveIcons).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("deleteIconsByPrefix", () => {
+		it("deletes the folder key and all keys under the prefix", () => {
+			useWorkspaceConfigStore.setState({
+				icons: { docs: "📁", "docs/a.md": "📄", "docs/sub/b.md": "📝", "other.md": "🔧" },
+			});
+			useWorkspaceConfigStore.getState().deleteIconsByPrefix("/workspace", "docs");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({ "other.md": "🔧" });
+			expect(mockedSaveIcons).toHaveBeenCalledWith("/workspace", { "other.md": "🔧" });
+		});
+
+		it("does nothing when no keys match the prefix", () => {
+			useWorkspaceConfigStore.setState({ icons: { "file.md": "📄" } });
+			useWorkspaceConfigStore.getState().deleteIconsByPrefix("/workspace", "docs");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({ "file.md": "📄" });
+			expect(mockedSaveIcons).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("setScriptaDirReady", () => {
 		it("sets scriptaDirReady", () => {
 			useWorkspaceConfigStore.getState().setScriptaDirReady(true);

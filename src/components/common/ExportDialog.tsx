@@ -7,7 +7,13 @@ import {
 	exportAsHtml,
 	exportAsPdf,
 	exportAsPrompt,
+	getDefaultPromptTemplate,
 } from "../../lib/export";
+import {
+	getScriptaPromptTemplatePath,
+	loadPromptTemplate,
+	savePromptTemplate,
+} from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
 import { DialogBase } from "./DialogBase";
 
@@ -20,6 +26,8 @@ interface ExportDialogProps {
 	onClose: () => void;
 	markdown: string;
 	filePath: string;
+	workspacePath?: string | null;
+	onOpenFile?: (path: string) => void;
 }
 
 type Section = "html" | "pdf" | "prompt";
@@ -42,7 +50,14 @@ const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: st
 	{ value: "h3", label: "h3まで" },
 ];
 
-export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialogProps) {
+export function ExportDialog({
+	open,
+	onClose,
+	markdown,
+	filePath,
+	workspacePath,
+	onOpenFile,
+}: ExportDialogProps) {
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
@@ -89,7 +104,11 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const handleExportPrompt = async () => {
 		setExporting(true);
 		try {
-			const result = await exportAsPrompt(markdown, filePath);
+			let customTemplate: string | null = null;
+			if (workspacePath) {
+				customTemplate = await loadPromptTemplate(workspacePath);
+			}
+			const result = await exportAsPrompt(markdown, filePath, customTemplate);
 			if (result) onClose();
 		} catch (err: unknown) {
 			useToastStore
@@ -97,6 +116,23 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 				.addToast("error", `プロンプトエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
+		}
+	};
+
+	const handleCustomizeTemplate = async () => {
+		if (!workspacePath || !onOpenFile) return;
+		try {
+			const templatePath = getScriptaPromptTemplatePath(workspacePath);
+			const existing = await loadPromptTemplate(workspacePath);
+			if (existing === null) {
+				await savePromptTemplate(workspacePath, getDefaultPromptTemplate());
+			}
+			onClose();
+			onOpenFile(templatePath);
+		} catch (err: unknown) {
+			useToastStore
+				.getState()
+				.addToast("error", `テンプレートの作成に失敗しました: ${translateError(err)}`);
 		}
 	};
 
@@ -225,6 +261,15 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								生成AIにMarkdownを渡してリッチHTMLを生成するためのプロンプトファイルを書き出します。
 							</p>
+							{workspacePath && onOpenFile && (
+								<button
+									type="button"
+									onClick={handleCustomizeTemplate}
+									className="text-[11px] text-blue-600 hover:underline dark:text-blue-400"
+								>
+									テンプレートをカスタマイズ
+								</button>
+							)}
 							<div className="flex justify-end">
 								<button
 									type="button"
