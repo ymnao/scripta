@@ -511,7 +511,9 @@ export function getDefaultPromptTemplate(): string {
 export function buildPromptFromTemplate(template: string, title: string, content: string): string {
 	const fence = buildFence(content);
 	const fencedContent = `${fence}markdown\n${content}\n${fence}`;
-	return template.replace(/\{title\}/g, () => title).replace(/\{content\}/g, () => fencedContent);
+	return template.replace(/\{(title|content)\}/g, (_match, key: string) =>
+		key === "title" ? title : fencedContent,
+	);
 }
 
 function buildPrompt(title: string, content: string): string {

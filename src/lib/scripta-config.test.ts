@@ -3,19 +3,22 @@ import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./commands", () => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	listDirectory: vi.fn(),
 }));
 
-const { readFile, writeFile } = await import("./commands");
+const { readFile, writeFile, listDirectory } = await import("./commands");
 const {
 	loadIcons,
 	saveIcons,
 	loadPromptTemplate,
 	savePromptTemplate,
 	getScriptaPromptTemplatePath,
+	scriptaDirExists,
 } = await import("./scripta-config");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
+const mockedListDirectory = listDirectory as Mock;
 
 describe("loadIcons", () => {
 	beforeEach(() => {
@@ -118,5 +121,24 @@ describe("getScriptaPromptTemplatePath", () => {
 		expect(getScriptaPromptTemplatePath("/workspace")).toBe(
 			"/workspace/.scripta/prompt-template.md",
 		);
+	});
+});
+
+describe("scriptaDirExists", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns true when .scripta directory exists", async () => {
+		mockedListDirectory.mockResolvedValue([]);
+		const result = await scriptaDirExists("/workspace");
+		expect(result).toBe(true);
+		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace/.scripta");
+	});
+
+	it("returns false when .scripta directory does not exist", async () => {
+		mockedListDirectory.mockRejectedValue(new Error("Not found"));
+		const result = await scriptaDirExists("/workspace");
+		expect(result).toBe(false);
 	});
 });
