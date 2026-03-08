@@ -140,14 +140,14 @@ export function ExportDialog({
 			} else {
 				onScriptaDirConfirm?.();
 			}
+			setShowScriptaDirConfirm(false);
 			onClose();
 			onOpenFile(templatePath);
 		} catch (err: unknown) {
+			setShowScriptaDirConfirm(false);
 			useToastStore
 				.getState()
 				.addToast("error", `テンプレートの作成に失敗しました: ${translateError(err)}`);
-		} finally {
-			setShowScriptaDirConfirm(false);
 		}
 	};
 

@@ -210,6 +210,33 @@ describe("ExportDialog", () => {
 			expect(onClose).toHaveBeenCalled();
 			expect(onOpenFile).toHaveBeenCalledWith("/ws/.scripta/prompt-template.md");
 		});
+
+		it("scriptaDirReady=false でテンプレート未作成時、確認UI→作成クリックで savePromptTemplate → onClose → onOpenFile", async () => {
+			vi.mocked(loadPromptTemplate).mockResolvedValue(null);
+			vi.mocked(savePromptTemplate).mockResolvedValue(undefined);
+			const onOpenFile = vi.fn();
+			const onClose = vi.fn();
+			const onScriptaDirConfirm = vi.fn();
+			renderDialog({
+				onOpenFile,
+				onClose,
+				scriptaDirReady: false,
+				onScriptaDirConfirm,
+			} as Partial<typeof defaultProps>);
+			await switchToPrompt();
+
+			// 1回目のクリックで確認UIが表示される
+			await userEvent.click(screen.getByText("テンプレートをカスタマイズ"));
+			expect(savePromptTemplate).not.toHaveBeenCalled();
+			expect(screen.getByText(/\.scripta\/ フォルダを作成します/)).toBeInTheDocument();
+
+			// 「作成」ボタンをクリック
+			await userEvent.click(screen.getByText("作成", { selector: "button" }));
+			expect(onScriptaDirConfirm).toHaveBeenCalled();
+			expect(savePromptTemplate).toHaveBeenCalledWith("/ws", "default-template");
+			expect(onClose).toHaveBeenCalled();
+			expect(onOpenFile).toHaveBeenCalledWith("/ws/.scripta/prompt-template.md");
+		});
 	});
 
 	describe("エラーハンドリング", () => {

@@ -324,6 +324,12 @@ export function FileTree({
 			setScriptaDirReady(true);
 			if (entry) setEmojiTarget(entry);
 		} catch (err) {
+			const message = String(err);
+			if (message.toLowerCase().includes("already exists")) {
+				setScriptaDirReady(true);
+				if (entry) setEmojiTarget(entry);
+				return;
+			}
 			console.error("Failed to create .scripta directory:", err);
 			useToastStore
 				.getState()
