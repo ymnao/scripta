@@ -27,8 +27,11 @@ export async function loadIcons(workspacePath: string): Promise<Record<string, s
 		const raw = await readFile(joinPath(getScriptaDir(workspacePath), ICONS_FILE));
 		const parsed: unknown = JSON.parse(raw);
 		if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-			const result: Record<string, string> = {};
+			const result: Record<string, string> = Object.create(null);
 			for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+				if (key === "__proto__" || key === "constructor" || key === "prototype") {
+					continue;
+				}
 				if (typeof value === "string") {
 					result[key] = value;
 				}

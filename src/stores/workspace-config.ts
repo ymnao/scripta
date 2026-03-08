@@ -1,6 +1,8 @@
 import { create } from "zustand";
-import { addTrailingSep, replacePrefix } from "../lib/path";
+import { addTrailingSep, replacePrefix, toRelativePath } from "../lib/path";
 import { loadIcons as loadIconsFromDisk, saveIcons, scriptaDirExists } from "../lib/scripta-config";
+
+export { toRelativePath };
 
 interface WorkspaceConfigState {
 	icons: Record<string, string>;
@@ -14,14 +16,6 @@ interface WorkspaceConfigState {
 	deleteIconsByPrefix: (workspacePath: string, prefix: string) => void;
 	setScriptaDirReady: (ready: boolean) => void;
 	reset: () => void;
-}
-
-export function toRelativePath(workspacePath: string, absolutePath: string): string {
-	const prefix = addTrailingSep(workspacePath);
-	const relative = absolutePath.startsWith(prefix)
-		? absolutePath.slice(prefix.length)
-		: absolutePath;
-	return relative.replace(/\\/g, "/");
 }
 
 let loadIconsRequestId = 0;
@@ -70,7 +64,7 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 		const icons = get().icons;
 		const prefixWithSep = addTrailingSep(oldPrefix);
 		let changed = false;
-		const next: Record<string, string> = {};
+		const next: Record<string, string> = Object.create(null);
 		for (const [key, value] of Object.entries(icons)) {
 			if (key === oldPrefix || key.startsWith(prefixWithSep)) {
 				next[replacePrefix(key, oldPrefix, newPrefix)] = value;
@@ -87,7 +81,7 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 	deleteIconsByPrefix: (workspacePath: string, prefix: string) => {
 		const icons = get().icons;
 		const prefixWithSep = addTrailingSep(prefix);
-		const next: Record<string, string> = {};
+		const next: Record<string, string> = Object.create(null);
 		let changed = false;
 		for (const [key, value] of Object.entries(icons)) {
 			if (key === prefix || key.startsWith(prefixWithSep)) {

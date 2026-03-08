@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
-import { toRelativePath } from "../../stores/workspace-config";
+import { toRelativePath } from "../../lib/path";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
 
