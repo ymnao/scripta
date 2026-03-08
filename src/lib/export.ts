@@ -539,9 +539,10 @@ export async function exportAsPrompt(
 
 	if (!savePath) return false;
 
-	const output = customTemplate
-		? buildPromptFromTemplate(customTemplate, title, markdown)
-		: buildPrompt(title, markdown);
+	const output =
+		customTemplate != null
+			? buildPromptFromTemplate(customTemplate, title, markdown)
+			: buildPrompt(title, markdown);
 	await writeFile(savePath, output);
 	return true;
 }
