@@ -326,7 +326,7 @@ export function FileTree({
 			if (entry) setEmojiTarget(entry);
 		} catch (err) {
 			const message = String(err);
-			if (message.toLowerCase().includes("already exists")) {
+			if (message.startsWith("Already exists:")) {
 				setScriptaDirReady(true);
 				if (entry) setEmojiTarget(entry);
 				return;
