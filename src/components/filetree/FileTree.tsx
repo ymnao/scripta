@@ -316,12 +316,20 @@ export function FileTree({
 
 	const handleDeleteCancel = useCallback(() => setDeleteTarget(null), []);
 
-	const handleScriptaDirConfirm = useCallback(() => {
+	const handleScriptaDirConfirm = useCallback(async () => {
 		const entry = scriptaDirConfirmTarget;
 		setScriptaDirConfirmTarget(null);
-		setScriptaDirReady(true);
-		if (entry) setEmojiTarget(entry);
-	}, [scriptaDirConfirmTarget, setScriptaDirReady]);
+		try {
+			await createDirectory(joinPath(workspacePath, ".scripta"));
+			setScriptaDirReady(true);
+			if (entry) setEmojiTarget(entry);
+		} catch (err) {
+			console.error("Failed to create .scripta directory:", err);
+			useToastStore
+				.getState()
+				.addToast("error", `.scripta ディレクトリの作成に失敗しました: ${translateError(err)}`);
+		}
+	}, [scriptaDirConfirmTarget, setScriptaDirReady, workspacePath]);
 
 	const handleScriptaDirCancel = useCallback(() => {
 		setScriptaDirConfirmTarget(null);

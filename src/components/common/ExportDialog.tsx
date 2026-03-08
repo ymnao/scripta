@@ -126,16 +126,19 @@ export function ExportDialog({
 
 	const handleCustomizeTemplate = async () => {
 		if (!workspacePath || !onOpenFile) return;
-		if (!scriptaDirReady && !showScriptaDirConfirm) {
-			setShowScriptaDirConfirm(true);
-			return;
-		}
 		try {
 			const templatePath = getScriptaPromptTemplatePath(workspacePath);
 			const existing = await loadPromptTemplate(workspacePath);
+
 			if (existing === null) {
+				if (!scriptaDirReady && !showScriptaDirConfirm) {
+					setShowScriptaDirConfirm(true);
+					return;
+				}
 				onScriptaDirConfirm?.();
 				await savePromptTemplate(workspacePath, getDefaultPromptTemplate());
+			} else {
+				onScriptaDirConfirm?.();
 			}
 			onClose();
 			onOpenFile(templatePath);
