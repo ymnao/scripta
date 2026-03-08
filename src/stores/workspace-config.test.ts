@@ -180,4 +180,10 @@ describe("toRelativePath", () => {
 	it("handles Windows paths", () => {
 		expect(toRelativePath("C:\\Users\\test", "C:\\Users\\test\\file.md")).toBe("file.md");
 	});
+
+	it("normalizes backslashes to forward slashes in nested Windows paths", () => {
+		expect(toRelativePath("C:\\Users\\test", "C:\\Users\\test\\docs\\readme.md")).toBe(
+			"docs/readme.md",
+		);
+	});
 });

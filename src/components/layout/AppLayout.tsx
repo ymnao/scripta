@@ -56,6 +56,8 @@ export function AppLayout() {
 	const hydrateSettings = useSettingsStore((s) => s.hydrate);
 	const loadIcons = useWorkspaceConfigStore((s) => s.loadIcons);
 	const resetWorkspaceConfig = useWorkspaceConfigStore((s) => s.reset);
+	const scriptaDirReady = useWorkspaceConfigStore((s) => s.scriptaDirReady);
+	const setScriptaDirReady = useWorkspaceConfigStore((s) => s.setScriptaDirReady);
 
 	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
 	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
@@ -998,6 +1000,8 @@ export function AppLayout() {
 					filePath={exportTarget.filePath}
 					workspacePath={workspacePath}
 					onOpenFile={openTab}
+					scriptaDirReady={scriptaDirReady}
+					onScriptaDirConfirm={() => setScriptaDirReady(true)}
 				/>
 			)}
 			<ToastContainer />

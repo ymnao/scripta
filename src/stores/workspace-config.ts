@@ -18,21 +18,25 @@ interface WorkspaceConfigState {
 
 export function toRelativePath(workspacePath: string, absolutePath: string): string {
 	const prefix = addTrailingSep(workspacePath);
-	if (absolutePath.startsWith(prefix)) {
-		return absolutePath.slice(prefix.length);
-	}
-	return absolutePath;
+	const relative = absolutePath.startsWith(prefix)
+		? absolutePath.slice(prefix.length)
+		: absolutePath;
+	return relative.replace(/\\/g, "/");
 }
+
+let loadIconsRequestId = 0;
 
 export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get) => ({
 	icons: {},
 	scriptaDirReady: false,
 
 	loadIcons: async (workspacePath: string) => {
+		const requestId = ++loadIconsRequestId;
 		const [icons, dirExists] = await Promise.all([
 			loadIconsFromDisk(workspacePath),
 			scriptaDirExists(workspacePath),
 		]);
+		if (requestId !== loadIconsRequestId) return;
 		set({ icons, scriptaDirReady: dirExists });
 	},
 

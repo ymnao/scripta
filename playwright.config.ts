@@ -23,7 +23,7 @@ export default defineConfig({
 		reuseExistingServer: !process.env.CI,
 		env: {
 			TAURI_E2E_MOCK: "true",
-			...(process.env.NO_COLOR ? { FORCE_COLOR: undefined } : {}),
+			...(process.env.NO_COLOR ? { FORCE_COLOR: "0" } : {}),
 		},
 	},
 });

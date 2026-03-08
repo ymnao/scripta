@@ -52,6 +52,12 @@ describe("loadIcons", () => {
 		const result = await loadIcons("/workspace");
 		expect(result).toEqual({});
 	});
+
+	it("filters out non-string values", async () => {
+		mockedReadFile.mockResolvedValue('{"valid":"📄","num":42,"obj":{},"arr":[]}');
+		const result = await loadIcons("/workspace");
+		expect(result).toEqual({ valid: "📄" });
+	});
 });
 
 describe("saveIcons", () => {

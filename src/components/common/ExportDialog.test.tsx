@@ -35,6 +35,7 @@ const defaultProps = {
 	filePath: "/path/to/file.md",
 	workspacePath: "/ws",
 	onOpenFile: vi.fn(),
+	scriptaDirReady: true,
 };
 
 function renderDialog(overrides: Partial<typeof defaultProps> = {}) {
@@ -185,7 +186,7 @@ describe("ExportDialog", () => {
 			expect(screen.queryByText("テンプレートをカスタマイズ")).not.toBeInTheDocument();
 		});
 
-		it("カスタマイズクリックでテンプレート未作成時は savePromptTemplate → onOpenFile → onClose", async () => {
+		it("カスタマイズクリックでテンプレート未作成時は savePromptTemplate → onClose → onOpenFile", async () => {
 			vi.mocked(loadPromptTemplate).mockResolvedValue(null);
 			vi.mocked(savePromptTemplate).mockResolvedValue(undefined);
 			const onOpenFile = vi.fn();
@@ -198,7 +199,7 @@ describe("ExportDialog", () => {
 			expect(onOpenFile).toHaveBeenCalledWith("/ws/.scripta/prompt-template.md");
 		});
 
-		it("カスタマイズクリックでテンプレート既存時は savePromptTemplate を呼ばず onOpenFile → onClose", async () => {
+		it("カスタマイズクリックでテンプレート既存時は savePromptTemplate を呼ばず onClose → onOpenFile", async () => {
 			vi.mocked(loadPromptTemplate).mockResolvedValue("existing-template");
 			const onOpenFile = vi.fn();
 			const onClose = vi.fn();

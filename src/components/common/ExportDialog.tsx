@@ -28,6 +28,8 @@ interface ExportDialogProps {
 	filePath: string;
 	workspacePath?: string | null;
 	onOpenFile?: (path: string) => void;
+	scriptaDirReady?: boolean;
+	onScriptaDirConfirm?: () => void;
 }
 
 type Section = "html" | "pdf" | "prompt";
@@ -57,6 +59,8 @@ export function ExportDialog({
 	filePath,
 	workspacePath,
 	onOpenFile,
+	scriptaDirReady,
+	onScriptaDirConfirm,
 }: ExportDialogProps) {
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
@@ -67,6 +71,7 @@ export function ExportDialog({
 	const [forceUpperBreak, setForceUpperBreak] = useState(true);
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
+	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);
 
 	const handleExportHtml = async () => {
 		setExporting(true);
@@ -121,10 +126,15 @@ export function ExportDialog({
 
 	const handleCustomizeTemplate = async () => {
 		if (!workspacePath || !onOpenFile) return;
+		if (!scriptaDirReady && !showScriptaDirConfirm) {
+			setShowScriptaDirConfirm(true);
+			return;
+		}
 		try {
 			const templatePath = getScriptaPromptTemplatePath(workspacePath);
 			const existing = await loadPromptTemplate(workspacePath);
 			if (existing === null) {
+				onScriptaDirConfirm?.();
 				await savePromptTemplate(workspacePath, getDefaultPromptTemplate());
 			}
 			onClose();
@@ -133,6 +143,8 @@ export function ExportDialog({
 			useToastStore
 				.getState()
 				.addToast("error", `テンプレートの作成に失敗しました: ${translateError(err)}`);
+		} finally {
+			setShowScriptaDirConfirm(false);
 		}
 	};
 
@@ -262,13 +274,38 @@ export function ExportDialog({
 								生成AIにMarkdownを渡してリッチHTMLを生成するためのプロンプトファイルを書き出します。
 							</p>
 							{workspacePath && onOpenFile && (
-								<button
-									type="button"
-									onClick={handleCustomizeTemplate}
-									className="text-[11px] text-blue-600 hover:underline dark:text-blue-400"
-								>
-									テンプレートをカスタマイズ
-								</button>
+								<>
+									<button
+										type="button"
+										onClick={handleCustomizeTemplate}
+										className="text-[11px] text-blue-600 hover:underline dark:text-blue-400"
+									>
+										テンプレートをカスタマイズ
+									</button>
+									{showScriptaDirConfirm && (
+										<div className="rounded-md border border-border bg-bg-secondary p-2">
+											<p className="text-[11px] text-text-secondary">
+												テンプレートを保存するため .scripta/ フォルダを作成します。続行しますか？
+											</p>
+											<div className="mt-1.5 flex gap-2">
+												<button
+													type="button"
+													onClick={handleCustomizeTemplate}
+													className="rounded bg-blue-600 px-2 py-0.5 text-[11px] text-white hover:bg-blue-700"
+												>
+													作成
+												</button>
+												<button
+													type="button"
+													onClick={() => setShowScriptaDirConfirm(false)}
+													className="rounded bg-bg-primary px-2 py-0.5 text-[11px] text-text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+												>
+													キャンセル
+												</button>
+											</div>
+										</div>
+									)}
+								</>
 							)}
 							<div className="flex justify-end">
 								<button
