@@ -47,7 +47,9 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 	},
 
 	removeIcon: (workspacePath: string, relativePath: string) => {
-		const { [relativePath]: _, ...rest } = get().icons;
+		const icons = get().icons;
+		if (!(relativePath in icons)) return;
+		const { [relativePath]: _, ...rest } = icons;
 		set({ icons: rest });
 		void saveIcons(workspacePath, rest);
 	},

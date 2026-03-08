@@ -5,7 +5,7 @@ const SCRIPTA_DIR = ".scripta";
 const ICONS_FILE = "icons.json";
 const PROMPT_TEMPLATE_FILE = "prompt-template.md";
 
-function getScriptaDir(workspacePath: string): string {
+export function getScriptaDir(workspacePath: string): string {
 	return joinPath(workspacePath, SCRIPTA_DIR);
 }
 

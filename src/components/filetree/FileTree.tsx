@@ -9,6 +9,7 @@ import {
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
 import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
+import { getScriptaDir } from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { toRelativePath, useWorkspaceConfigStore } from "../../stores/workspace-config";
@@ -320,7 +321,7 @@ export function FileTree({
 		const entry = scriptaDirConfirmTarget;
 		setScriptaDirConfirmTarget(null);
 		try {
-			await createDirectory(joinPath(workspacePath, ".scripta"));
+			await createDirectory(getScriptaDir(workspacePath));
 			setScriptaDirReady(true);
 			if (entry) setEmojiTarget(entry);
 		} catch (err) {

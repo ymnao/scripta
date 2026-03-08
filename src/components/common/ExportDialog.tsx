@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { translateError } from "../../lib/errors";
 import {
 	type ExportTheme,
@@ -73,6 +73,10 @@ export function ExportDialog({
 	const [exporting, setExporting] = useState(false);
 	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);
 
+	useEffect(() => {
+		if (!open) setShowScriptaDirConfirm(false);
+	}, [open]);
+
 	const handleExportHtml = async () => {
 		setExporting(true);
 		try {
@@ -135,11 +139,9 @@ export function ExportDialog({
 					setShowScriptaDirConfirm(true);
 					return;
 				}
-				onScriptaDirConfirm?.();
 				await savePromptTemplate(workspacePath, getDefaultPromptTemplate());
-			} else {
-				onScriptaDirConfirm?.();
 			}
+			onScriptaDirConfirm?.();
 			setShowScriptaDirConfirm(false);
 			onClose();
 			onOpenFile(templatePath);
