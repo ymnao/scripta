@@ -38,9 +38,9 @@ export async function loadIcons(workspacePath: string): Promise<Record<string, s
 			}
 			return result;
 		}
-		return {};
+		return Object.create(null) as Record<string, string>;
 	} catch {
-		return {};
+		return Object.create(null) as Record<string, string>;
 	}
 }
 

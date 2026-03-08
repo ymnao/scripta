@@ -21,7 +21,7 @@ interface WorkspaceConfigState {
 let loadIconsRequestId = 0;
 
 export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get) => ({
-	icons: {},
+	icons: Object.create(null) as Record<string, string>,
 	scriptaDirReady: false,
 
 	loadIcons: async (workspacePath: string) => {
@@ -99,6 +99,6 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 
 	reset: () => {
 		loadIconsRequestId++;
-		set({ icons: {}, scriptaDirReady: false });
+		set({ icons: Object.create(null) as Record<string, string>, scriptaDirReady: false });
 	},
 }));
