@@ -152,15 +152,15 @@ export function AppLayout() {
 		};
 	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings]);
 
-	// Persist workspace path changes (skip the initial restored value)
+	// Persist workspace path changes (skip the initial restored value and new windows)
 	useEffect(() => {
-		if (loading) return;
+		if (loading || isNewWindow) return;
 		if (!userSetWorkspaceRef.current) {
 			userSetWorkspaceRef.current = true;
 			return;
 		}
 		void saveWorkspacePath(workspacePath);
-	}, [workspacePath, loading]);
+	}, [workspacePath, loading, isNewWindow]);
 
 	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
 	useEffect(() => {

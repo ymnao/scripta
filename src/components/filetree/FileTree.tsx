@@ -325,8 +325,8 @@ export function FileTree({
 			setScriptaDirReady(true);
 			if (entry) setEmojiTarget(entry);
 		} catch (err) {
-			const message = String(err);
-			if (message.startsWith("Already exists:")) {
+			const message = err instanceof Error ? err.message : String(err);
+			if (message.includes("Already exists")) {
 				setScriptaDirReady(true);
 				if (entry) setEmojiTarget(entry);
 				return;
@@ -346,7 +346,8 @@ export function FileTree({
 		(emoji: string) => {
 			if (!emojiTarget) return;
 			const rel = toRelativePath(workspacePath, emojiTarget.path);
-			setIcon(workspacePath, rel, emoji);
+			const key = emojiTarget.isDirectory ? `${rel}/` : rel;
+			setIcon(workspacePath, key, emoji);
 			setEmojiTarget(null);
 		},
 		[emojiTarget, workspacePath, setIcon],
@@ -355,7 +356,8 @@ export function FileTree({
 	const handleEmojiRemove = useCallback(() => {
 		if (!emojiTarget) return;
 		const rel = toRelativePath(workspacePath, emojiTarget.path);
-		removeIcon(workspacePath, rel);
+		const key = emojiTarget.isDirectory ? `${rel}/` : rel;
+		removeIcon(workspacePath, key);
 		setEmojiTarget(null);
 	}, [emojiTarget, workspacePath, removeIcon]);
 
