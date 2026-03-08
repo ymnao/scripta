@@ -451,7 +451,15 @@ export function FileTree({
 			<EmojiInputDialog
 				open={emojiTarget !== null}
 				currentEmoji={
-					emojiTarget ? (icons[toRelativePath(workspacePath, emojiTarget.path)] ?? null) : null
+					emojiTarget
+						? (() => {
+								const rel = toRelativePath(workspacePath, emojiTarget.path);
+								if (emojiTarget.isDirectory) {
+									return icons[`${rel}/`] ?? icons[rel] ?? null;
+								}
+								return icons[rel] ?? null;
+							})()
+						: null
 				}
 				entryName={emojiTarget?.name ?? ""}
 				onConfirm={handleEmojiConfirm}

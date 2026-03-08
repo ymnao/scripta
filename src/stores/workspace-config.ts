@@ -98,5 +98,8 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 
 	setScriptaDirReady: (ready: boolean) => set({ scriptaDirReady: ready }),
 
-	reset: () => set({ icons: {}, scriptaDirReady: false }),
+	reset: () => {
+		loadIconsRequestId++;
+		set({ icons: {}, scriptaDirReady: false });
+	},
 }));

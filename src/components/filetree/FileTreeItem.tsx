@@ -180,7 +180,16 @@ export function FileTreeItem({
 			>
 				{(() => {
 					const rel = workspacePath ? toRelativePath(workspacePath, entry.path) : null;
-					const emoji = rel && icons ? icons[rel] : undefined;
+					let emoji: string | undefined;
+					if (rel && icons) {
+						if (entry.isDirectory) {
+							const withSlash = rel.endsWith("/") ? rel : `${rel}/`;
+							const withoutSlash = rel.endsWith("/") ? rel.slice(0, -1) : rel;
+							emoji = icons[withSlash] ?? icons[withoutSlash];
+						} else {
+							emoji = icons[rel];
+						}
+					}
 
 					if (entry.isDirectory) {
 						return (
