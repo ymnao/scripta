@@ -143,25 +143,19 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		// Blank out display math and code ranges so the regex does not
 		// consume $ characters that belong to those regions.
 		let textForInline = text;
-		for (const dr of displayRanges) {
-			const relFrom = Math.max(dr.from - from, 0);
-			const relTo = Math.min(dr.to - from, text.length);
-			if (relFrom < relTo) {
-				textForInline =
-					textForInline.slice(0, relFrom) +
-					" ".repeat(relTo - relFrom) +
-					textForInline.slice(relTo);
+		if (displayRanges.length > 0 || codeRanges.length > 0) {
+			const chars = textForInline.split("");
+			for (const dr of displayRanges) {
+				const relFrom = Math.max(dr.from - from, 0);
+				const relTo = Math.min(dr.to - from, chars.length);
+				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
 			}
-		}
-		for (const cr of codeRanges) {
-			const relFrom = Math.max(cr.from - from, 0);
-			const relTo = Math.min(cr.to - from, text.length);
-			if (relFrom < relTo) {
-				textForInline =
-					textForInline.slice(0, relFrom) +
-					" ".repeat(relTo - relFrom) +
-					textForInline.slice(relTo);
+			for (const cr of codeRanges) {
+				const relFrom = Math.max(cr.from - from, 0);
+				const relTo = Math.min(cr.to - from, chars.length);
+				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
 			}
+			textForInline = chars.join("");
 		}
 
 		for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
