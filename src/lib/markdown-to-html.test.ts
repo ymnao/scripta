@@ -97,6 +97,14 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("preserves backslash in \\$ inside blockquote indented code blocks", () => {
+		const md = ">     \\$HOME";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$HOME");
+		expect(html).not.toContain("katex");
+	});
+
 	it("does not process math inside raw HTML <code> tags", () => {
 		const md = "<code>\\$HOME</code>";
 		const html = markdownToHtml(md);

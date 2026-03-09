@@ -73,8 +73,12 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 		ranges.push([m.index, m.index + m[0].length]);
 	}
 
-	// Indented code blocks: runs of lines indented by 4+ spaces or a tab.
-	const indentedRe = /(?:^|\n)((?:(?:[ ]{4}|\t)[^\n]*(?:\n|$))+)/g;
+	// Indented code blocks: runs of lines indented by 4+ spaces or a tab,
+	// including those inside blockquotes / lists via the container prefix.
+	const indentedRe = new RegExp(
+		`(?:^|\\n)((?:${containerPrefix.source}(?:[ ]{4}|\\t)[^\\n]*(?:\\n|$))+)`,
+		"g",
+	);
 	for (const m of text.matchAll(indentedRe)) {
 		// m[1] is the indented block; offset is m.index + possible leading \n
 		const start = m.index + m[0].indexOf(m[1]);
@@ -149,8 +153,8 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
  * processing. This prevents marked from stripping the backslash,
  * which would make escape detection impossible later.
  *
- * Code spans and fenced code blocks are skipped — their content must
- * be preserved verbatim.
+ * Code spans, fenced / indented code blocks, and raw HTML <code>/<pre>
+ * blocks are skipped — their content must be preserved verbatim.
  */
 function preprocessEscapedDollars(text: string, nonce: string): string {
 	const placeholder = `%%EDOLLAR_${nonce}%%`;
