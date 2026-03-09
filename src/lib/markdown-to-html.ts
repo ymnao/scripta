@@ -73,14 +73,16 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 		ranges.push([m.index, m.index + m[0].length]);
 	}
 
-	// Indented code blocks: runs of lines indented by 4+ spaces or a tab,
-	// separated from surrounding content by blank lines.
+	// Indented code blocks: runs of lines indented by 4+ spaces or a tab.
 	const indentedRe = /(?:^|\n)((?:(?:[ ]{4}|\t)[^\n]*(?:\n|$))+)/g;
 	for (const m of text.matchAll(indentedRe)) {
 		// m[1] is the indented block; offset is m.index + possible leading \n
 		const start = m.index + m[0].indexOf(m[1]);
 		ranges.push([start, start + m[1].length]);
 	}
+
+	// Merge fenced/indented ranges for binary search before scanning inline code.
+	const blockRanges = mergeRanges(ranges);
 
 	// Inline code spans: manually scan for backtick runs to avoid lookbehind
 	// which is unsupported in older WebKit engines used by some Tauri WebViews.
@@ -115,8 +117,8 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 			let m = k;
 			while (m < textLen && text[m] === "`") m++;
 			if (m - k === runLen && (m >= textLen || text[m] !== "`")) {
-				// Skip if inside a fenced/indented block
-				if (!ranges.some(([s, e]) => i >= s && m <= e)) {
+				// Skip if inside a fenced/indented block (binary search)
+				if (!isInsideRanges(i, blockRanges)) {
 					ranges.push([i, m]);
 				}
 				i = m;
@@ -153,12 +155,15 @@ function preprocessEscapedDollars(text: string, nonce: string): string {
 	}
 	if (positions.length === 0) return text;
 
-	let result = text;
-	for (let j = positions.length - 1; j >= 0; j--) {
-		const pos = positions[j];
-		result = result.slice(0, pos - 1) + placeholder + result.slice(pos + 1);
+	const segments: string[] = [];
+	let lastIndex = 0;
+	for (const pos of positions) {
+		segments.push(text.slice(lastIndex, pos - 1));
+		segments.push(placeholder);
+		lastIndex = pos + 1;
 	}
-	return result;
+	segments.push(text.slice(lastIndex));
+	return segments.join("");
 }
 
 /**
