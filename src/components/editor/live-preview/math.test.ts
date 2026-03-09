@@ -190,6 +190,67 @@ describe("buildDecorations", () => {
 		expect(widgets).toHaveLength(2);
 	});
 
+	it("does not treat escaped closing $ as math delimiter", () => {
+		const doc = "text\n\n$100 and also \\$200";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		expect(widgetDecorations(decos)).toHaveLength(0);
+	});
+
+	it("treats \\\\$ as literal backslash followed by math delimiter", () => {
+		const doc = "text\n\n\\\\$x^2$";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(1);
+		const spec = widgets[0].value.spec as { widget: MathWidget };
+		expect(spec.widget.tex).toBe("x^2");
+		expect(spec.widget.displayMode).toBe(false);
+	});
+
+	it("does not treat escaped closing $$ as display math", () => {
+		// $$foo\$$ — the closing $$ has its first $ escaped,
+		// so display math is rejected. The inline regex then picks up
+		// $foo\$ as inline math (starting from the second $ of $$).
+		const doc = "text\n\n$$foo\\$$";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		// No display math, but inline finds $foo\$
+		const display = widgets.filter(
+			(w) => (w.value.spec as { widget: MathWidget }).widget.displayMode,
+		);
+		expect(display).toHaveLength(0);
+	});
+
+	it("renders escaped $ inside inline math as literal dollar", () => {
+		const doc = "text\n\n$ 50 \\$ $";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(1);
+		const spec = widgets[0].value.spec as { widget: MathWidget };
+		expect(spec.widget.tex).toBe(" 50 \\$ ");
+		expect(spec.widget.displayMode).toBe(false);
+	});
+
+	it("detects inline math after display math on same line", () => {
+		const doc = "text\n\n$$a$$ $b$";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(2);
+		const display = widgets.find(
+			(w) => (w.value.spec as { widget: MathWidget }).widget.displayMode,
+		);
+		const inline = widgets.find(
+			(w) => !(w.value.spec as { widget: MathWidget }).widget.displayMode,
+		);
+		expect(display).toBeDefined();
+		expect(inline).toBeDefined();
+		expect((inline?.value.spec as { widget: MathWidget }).widget.tex).toBe("b");
+	});
+
 	it("ignores math outside viewport even in a long document", () => {
 		const doc = "line1\n\n$a$\n\nline3\n\n$b$\n\nline5";
 		// Viewport covers only the middle section (line3)

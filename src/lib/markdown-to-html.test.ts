@@ -51,6 +51,13 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("preserves backslash in \\$ inside inline code", () => {
+		const html = markdownToHtml("Use `\\$HOME` in shell");
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$HOME");
+		expect(html).not.toContain("katex");
+	});
+
 	it("does not process $ inside fenced code blocks", () => {
 		const md = "```\n$x^2$\n```";
 		const html = markdownToHtml(md);
@@ -58,9 +65,79 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("preserves backslash in \\$ inside fenced code blocks", () => {
+		const md = "```\n\\$x^2\n```";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$");
+		expect(html).not.toContain("katex");
+	});
+
+	it("preserves backslash in \\$ inside blockquote fenced code blocks", () => {
+		const md = "> ```\n> \\$x\n> ```";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$");
+		expect(html).not.toContain("katex");
+	});
+
+	it("preserves backslash in \\$ inside list fenced code blocks", () => {
+		const md = "- ```\n  \\$HOME\n  ```";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$");
+		expect(html).not.toContain("katex");
+	});
+
+	it("preserves backslash in \\$ inside indented code blocks", () => {
+		const md = "    \\$HOME";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$HOME");
+		expect(html).not.toContain("katex");
+	});
+
+	it("preserves backslash in \\$ inside blockquote indented code blocks", () => {
+		const md = ">     \\$HOME";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$HOME");
+		expect(html).not.toContain("katex");
+	});
+
+	it("does not process math inside raw HTML <code> tags", () => {
+		const md = "<code>\\$HOME</code>";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).not.toContain("katex");
+	});
+
+	it("preserves backslash in \\$ inside raw HTML <pre> tags", () => {
+		const md = "<pre>\\$VAR</pre>";
+		const html = markdownToHtml(md);
+		expect(html).toContain("\\$VAR");
+		expect(html).not.toContain("katex");
+	});
+
 	it("handles escaped $ signs", () => {
 		const html = markdownToHtml("Price is \\$5");
 		expect(html).not.toContain("katex");
+	});
+
+	it("does not process math when both $ are escaped", () => {
+		const html = markdownToHtml("\\$x^2\\$");
+		expect(html).not.toContain("katex");
+		expect(html).toContain("$x^2$");
+	});
+
+	it("treats \\\\$ as literal backslash followed by math delimiter", () => {
+		const html = markdownToHtml("\\\\$x^2$");
+		expect(html).toContain("katex");
+	});
+
+	it("renders escaped $ inside inline math as literal dollar", () => {
+		const html = markdownToHtml("$ 50 \\$ $");
+		expect(html).toContain("katex");
 	});
 
 	it("handles empty string", () => {

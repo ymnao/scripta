@@ -14,7 +14,7 @@ import katex from "katex";
 import { collectCursorLines } from "./cursor-utils";
 
 const DISPLAY_MATH_RE = /\$\$([\s\S]+?)\$\$/g;
-const INLINE_MATH_RE = /\$([^\n$]+)\$/g;
+const INLINE_MATH_RE = /\$((?:[^\n$\\]|\\.)+)\$/g;
 
 /** Check whether the `$` at position `pos` in `text` is escaped by an odd number of preceding backslashes. */
 export function isEscaped(text: string, pos: number): boolean {
@@ -103,11 +103,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
 	const cursorLines = collectCursorLines(view);
 
 	const ranges: Range<Decoration>[] = [];
-	const displayRanges: CodeRange[] = [];
 
 	for (const { from, to } of view.visibleRanges) {
 		const text = state.doc.sliceString(from, to);
 		const codeRanges = collectCodeRanges(tree, from, to);
+		const localDisplayRanges: CodeRange[] = [];
 
 		// Pass 1: Display math ($$...$$)
 		for (const match of text.matchAll(DISPLAY_MATH_RE)) {
@@ -115,6 +115,8 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			const matchTo = matchFrom + match[0].length;
 
 			if (isEscaped(text, match.index)) continue;
+			const closingDisplayPos = match.index + match[0].length - 2;
+			if (isEscaped(text, closingDisplayPos)) continue;
 			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
 
 			const startLine = state.doc.lineAt(matchFrom).number;
@@ -129,7 +131,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			if (onCursorLine) continue;
 
 			const tex = match[1];
-			displayRanges.push({ from: matchFrom, to: matchTo });
+			localDisplayRanges.push({ from: matchFrom, to: matchTo });
 			ranges.push(
 				Decoration.replace({
 					widget: new MathWidget(tex, true),
@@ -138,22 +140,35 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		}
 
 		// Pass 2: Inline math ($...$)
-		for (const match of text.matchAll(INLINE_MATH_RE)) {
+		// Blank out display math and code ranges so the regex does not
+		// consume $ characters that belong to those regions.
+		let textForInline = text;
+		if (localDisplayRanges.length > 0 || codeRanges.length > 0) {
+			const chars = textForInline.split("");
+			for (const dr of localDisplayRanges) {
+				const relFrom = Math.max(dr.from - from, 0);
+				const relTo = Math.min(dr.to - from, chars.length);
+				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
+			}
+			for (const cr of codeRanges) {
+				const relFrom = Math.max(cr.from - from, 0);
+				const relTo = Math.min(cr.to - from, chars.length);
+				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
+			}
+			textForInline = chars.join("");
+		}
+
+		for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
 			const matchFrom = from + match.index;
 			const matchTo = matchFrom + match[0].length;
 
-			if (isEscaped(text, match.index)) continue;
-			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+			if (isEscaped(textForInline, match.index)) continue;
+			const closingInlinePos = match.index + match[0].length - 1;
+			if (isEscaped(textForInline, closingInlinePos)) continue;
 
-			// Skip if overlapping with a display math range
-			let overlapsDisplay = false;
-			for (const dr of displayRanges) {
-				if (matchFrom < dr.to && matchTo > dr.from) {
-					overlapsDisplay = true;
-					break;
-				}
-			}
-			if (overlapsDisplay) continue;
+			// Ensure the match does not span across blanked-out code/display regions
+			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+			if (localDisplayRanges.some((dr) => !(matchTo <= dr.from || matchFrom >= dr.to))) continue;
 
 			const lineNum = state.doc.lineAt(matchFrom).number;
 			if (cursorLines.has(lineNum)) continue;
