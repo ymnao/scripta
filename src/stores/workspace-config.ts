@@ -81,7 +81,12 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 		const next: Record<string, string> = Object.create(null);
 		for (const [key, value] of Object.entries(icons)) {
 			if (key === oldPrefix || key.startsWith(prefixWithSep)) {
-				next[replacePrefix(key, oldPrefix, newPrefix)] = value;
+				const hadTrailingSep = key.endsWith("/");
+				let newKey = replacePrefix(key, oldPrefix, newPrefix);
+				if (hadTrailingSep && !newKey.endsWith("/")) {
+					newKey += "/";
+				}
+				next[newKey] = value;
 				changed = true;
 			} else {
 				next[key] = value;

@@ -118,6 +118,30 @@ describe("useWorkspaceConfigStore", () => {
 			expect(mockedSaveIcons).toHaveBeenCalled();
 		});
 
+		it("renames folder-style keys with trailing slash and descendants", () => {
+			useWorkspaceConfigStore.setState({
+				icons: {
+					"docs/": "📁",
+					"docs/a.md": "📄",
+					"docs/sub/b.md": "📝",
+					"other.md": "🔧",
+				},
+			});
+			useWorkspaceConfigStore.getState().renameIconsByPrefix("/workspace", "docs/", "documents/");
+			expect(useWorkspaceConfigStore.getState().icons).toEqual({
+				"documents/": "📁",
+				"documents/a.md": "📄",
+				"documents/sub/b.md": "📝",
+				"other.md": "🔧",
+			});
+			expect(mockedSaveIcons).toHaveBeenCalledWith("/workspace", {
+				"documents/": "📁",
+				"documents/a.md": "📄",
+				"documents/sub/b.md": "📝",
+				"other.md": "🔧",
+			});
+		});
+
 		it("does nothing when no keys match the prefix", () => {
 			useWorkspaceConfigStore.setState({ icons: { "file.md": "📄" } });
 			useWorkspaceConfigStore.getState().renameIconsByPrefix("/workspace", "docs", "documents");
