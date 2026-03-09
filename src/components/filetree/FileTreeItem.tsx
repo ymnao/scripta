@@ -185,9 +185,13 @@ export function FileTreeItem({
 						if (entry.isDirectory) {
 							const withSlash = rel.endsWith("/") ? rel : `${rel}/`;
 							const withoutSlash = rel.endsWith("/") ? rel.slice(0, -1) : rel;
-							emoji = icons[withSlash] ?? icons[withoutSlash];
+							emoji = Object.hasOwn(icons, withSlash)
+								? icons[withSlash]
+								: Object.hasOwn(icons, withoutSlash)
+									? icons[withoutSlash]
+									: undefined;
 						} else {
-							emoji = icons[rel];
+							emoji = Object.hasOwn(icons, rel) ? icons[rel] : undefined;
 						}
 					}
 

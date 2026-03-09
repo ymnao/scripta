@@ -44,7 +44,11 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 		const icons = get().icons;
 		const withSlash = relativePath.endsWith("/") ? relativePath : `${relativePath}/`;
 		const withoutSlash = relativePath.endsWith("/") ? relativePath.slice(0, -1) : relativePath;
-		const key = withSlash in icons ? withSlash : withoutSlash in icons ? withoutSlash : null;
+		const key = Object.hasOwn(icons, withSlash)
+			? withSlash
+			: Object.hasOwn(icons, withoutSlash)
+				? withoutSlash
+				: null;
 		if (!key) return;
 		const { [key]: _, ...rest } = icons;
 		set({ icons: rest });
@@ -53,7 +57,7 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 
 	renameIcon: (workspacePath: string, oldRelPath: string, newRelPath: string) => {
 		const icons = get().icons;
-		if (!(oldRelPath in icons)) return;
+		if (!Object.hasOwn(icons, oldRelPath)) return;
 		const { [oldRelPath]: emoji, ...rest } = icons;
 		const next = { ...rest, [newRelPath]: emoji };
 		set({ icons: next });

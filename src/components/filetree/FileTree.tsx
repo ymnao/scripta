@@ -9,7 +9,7 @@ import {
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
 import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
-import { getScriptaDir } from "../../lib/scripta-config";
+import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { toRelativePath, useWorkspaceConfigStore } from "../../stores/workspace-config";
@@ -321,16 +321,13 @@ export function FileTree({
 		const entry = scriptaDirConfirmTarget;
 		setScriptaDirConfirmTarget(null);
 		try {
-			await createDirectory(getScriptaDir(workspacePath));
+			const exists = await scriptaDirExists(workspacePath);
+			if (!exists) {
+				await createDirectory(getScriptaDir(workspacePath));
+			}
 			setScriptaDirReady(true);
 			if (entry) setEmojiTarget(entry);
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			if (message.includes("Already exists")) {
-				setScriptaDirReady(true);
-				if (entry) setEmojiTarget(entry);
-				return;
-			}
 			console.error("Failed to create .scripta directory:", err);
 			useToastStore
 				.getState()
