@@ -101,7 +101,6 @@ function createDynamicEditorTheme(fontSize: number, fontFamily: FontFamily) {
 		".cm-line": {
 			padding: "1px 0",
 			overflowWrap: "break-word",
-			wordBreak: "break-word",
 		},
 	});
 }
