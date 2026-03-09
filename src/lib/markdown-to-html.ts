@@ -100,11 +100,6 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 		let j = i;
 		while (j < textLen && text[j] === "`") j++;
 		const runLen = j - i;
-		// Must not be followed by another `
-		if (j < textLen && text[j] === "`") {
-			i = j;
-			continue;
-		}
 		// Search for matching closing run
 		let k = j;
 		let found = false;
@@ -205,9 +200,15 @@ function preprocessDisplayMath(
 			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
 				return match;
 			}
-			if (isEscaped(markdown, offset)) return match;
-			// Check closing $$ escape: find position of closing $$ (end of match minus trailing whitespace)
-			const closingPos = offset + match.trimEnd().length - 2;
+			// Determine the actual position of the opening $$ within the match
+			const openingRelPos = match.indexOf("$$");
+			if (openingRelPos === -1) return match;
+			const openingPos = offset + openingRelPos;
+			if (isEscaped(markdown, openingPos)) return match;
+			// Determine the actual position of the closing $$
+			const closingRelPos = match.trimEnd().lastIndexOf("$$");
+			if (closingRelPos === -1 || closingRelPos === openingRelPos) return match;
+			const closingPos = offset + closingRelPos;
 			if (isEscaped(markdown, closingPos)) return match;
 
 			// Strip only the container prefix captured on the opening $$ line.

@@ -172,6 +172,10 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			const closingInlinePos = match.index + match[0].length - 1;
 			if (isEscaped(textForInline, closingInlinePos)) continue;
 
+			// Ensure the match does not span across blanked-out code/display regions
+			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+			if (displayRanges.some((dr) => !(matchTo <= dr.from || matchFrom >= dr.to))) continue;
+
 			const lineNum = state.doc.lineAt(matchFrom).number;
 			if (cursorLines.has(lineNum)) continue;
 
