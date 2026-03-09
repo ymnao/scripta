@@ -89,6 +89,14 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("preserves backslash in \\$ inside indented code blocks", () => {
+		const md = "    \\$HOME";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).toContain("\\$HOME");
+		expect(html).not.toContain("katex");
+	});
+
 	it("handles escaped $ signs", () => {
 		const html = markdownToHtml("Price is \\$5");
 		expect(html).not.toContain("katex");

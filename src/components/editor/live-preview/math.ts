@@ -144,10 +144,14 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		// consume $ characters that belong to those regions.
 		let textForInline = text;
 		for (const dr of displayRanges) {
-			const relFrom = dr.from - from;
-			const relTo = dr.to - from;
-			textForInline =
-				textForInline.slice(0, relFrom) + " ".repeat(relTo - relFrom) + textForInline.slice(relTo);
+			const relFrom = Math.max(dr.from - from, 0);
+			const relTo = Math.min(dr.to - from, text.length);
+			if (relFrom < relTo) {
+				textForInline =
+					textForInline.slice(0, relFrom) +
+					" ".repeat(relTo - relFrom) +
+					textForInline.slice(relTo);
+			}
 		}
 		for (const cr of codeRanges) {
 			const relFrom = Math.max(cr.from - from, 0);
