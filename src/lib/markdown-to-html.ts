@@ -98,6 +98,11 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 			i++;
 			continue;
 		}
+		// Skip escaped backticks (\`)
+		if (isEscaped(text, i)) {
+			i++;
+			continue;
+		}
 		// Count opening backtick run
 		let j = i;
 		while (j < textLen && text[j] === "`") j++;
