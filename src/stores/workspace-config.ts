@@ -35,7 +35,8 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 	},
 
 	setIcon: (workspacePath: string, relativePath: string, emoji: string) => {
-		const next = { ...get().icons, [relativePath]: emoji };
+		const next: Record<string, string> = Object.create(null);
+		Object.assign(next, get().icons, { [relativePath]: emoji });
 		set({ icons: next, scriptaDirReady: true });
 		void saveIcons(workspacePath, next);
 	},
@@ -50,16 +51,25 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 				? withoutSlash
 				: null;
 		if (!key) return;
-		const { [key]: _, ...rest } = icons;
-		set({ icons: rest });
-		void saveIcons(workspacePath, rest);
+		const next: Record<string, string> = Object.create(null);
+		for (const [k, v] of Object.entries(icons)) {
+			if (k !== key) next[k] = v;
+		}
+		set({ icons: next });
+		void saveIcons(workspacePath, next);
 	},
 
 	renameIcon: (workspacePath: string, oldRelPath: string, newRelPath: string) => {
 		const icons = get().icons;
 		if (!Object.hasOwn(icons, oldRelPath)) return;
-		const { [oldRelPath]: emoji, ...rest } = icons;
-		const next = { ...rest, [newRelPath]: emoji };
+		const next: Record<string, string> = Object.create(null);
+		for (const [k, v] of Object.entries(icons)) {
+			if (k === oldRelPath) {
+				next[newRelPath] = v;
+			} else {
+				next[k] = v;
+			}
+		}
 		set({ icons: next });
 		void saveIcons(workspacePath, next);
 	},

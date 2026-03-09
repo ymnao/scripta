@@ -109,7 +109,7 @@ export function AppLayout() {
 	const userSetWorkspaceRef = useRef(false);
 
 	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
-	// restore the workspace path — only theme and sidebar are restored.
+	// restore or persist the workspace path — only theme and sidebar are restored.
 	const [isNewWindow] = useState(() =>
 		new URLSearchParams(window.location.search).has("newWindow"),
 	);
