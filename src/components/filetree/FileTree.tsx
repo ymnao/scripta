@@ -190,11 +190,17 @@ export function FileTree({
 			items.push({
 				id: "set-icon",
 				label: "アイコンを設定...",
-				onClick: () => {
+				onClick: async () => {
 					if (scriptaDirReady) {
 						setEmojiTarget(entry);
 					} else {
-						setScriptaDirConfirmTarget(entry);
+						const exists = await scriptaDirExists(workspacePath);
+						if (exists) {
+							setScriptaDirReady(true);
+							setEmojiTarget(entry);
+						} else {
+							setScriptaDirConfirmTarget(entry);
+						}
 					}
 				},
 			});
@@ -223,7 +229,7 @@ export function FileTree({
 		}
 
 		return items;
-	}, [contextMenu, workspacePath, onFileOpenNewTab, onExport, scriptaDirReady]);
+	}, [contextMenu, workspacePath, onFileOpenNewTab, onExport, scriptaDirReady, setScriptaDirReady]);
 
 	const handleCreateConfirm = useCallback(
 		async (name: string) => {
@@ -321,18 +327,19 @@ export function FileTree({
 		const entry = scriptaDirConfirmTarget;
 		setScriptaDirConfirmTarget(null);
 		try {
-			const exists = await scriptaDirExists(workspacePath);
-			if (!exists) {
-				await createDirectory(getScriptaDir(workspacePath));
-			}
-			setScriptaDirReady(true);
-			if (entry) setEmojiTarget(entry);
+			await createDirectory(getScriptaDir(workspacePath));
 		} catch (err) {
-			console.error("Failed to create .scripta directory:", err);
-			useToastStore
-				.getState()
-				.addToast("error", `.scripta ディレクトリの作成に失敗しました: ${translateError(err)}`);
+			const msg = err instanceof Error ? err.message : String(err);
+			if (!msg.includes("Already exists")) {
+				console.error("Failed to create .scripta directory:", err);
+				useToastStore
+					.getState()
+					.addToast("error", `.scripta ディレクトリの作成に失敗しました: ${translateError(err)}`);
+				return;
+			}
 		}
+		setScriptaDirReady(true);
+		if (entry) setEmojiTarget(entry);
 	}, [scriptaDirConfirmTarget, setScriptaDirReady, workspacePath]);
 
 	const handleScriptaDirCancel = useCallback(() => {
