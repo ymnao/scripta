@@ -94,11 +94,13 @@ function createDynamicEditorTheme(fontSize: number, fontFamily: FontFamily) {
 		},
 		".cm-content": {
 			caretColor: "var(--color-text-primary)",
-			padding: "8px 16px",
+			padding: "8px 48px",
 			fontSynthesis: "style",
+			overflowWrap: "break-word",
 		},
 		".cm-line": {
 			padding: "1px 0",
+			overflowWrap: "break-word",
 		},
 	});
 }
