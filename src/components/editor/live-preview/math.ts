@@ -103,11 +103,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
 	const cursorLines = collectCursorLines(view);
 
 	const ranges: Range<Decoration>[] = [];
-	const displayRanges: CodeRange[] = [];
 
 	for (const { from, to } of view.visibleRanges) {
 		const text = state.doc.sliceString(from, to);
 		const codeRanges = collectCodeRanges(tree, from, to);
+		const localDisplayRanges: CodeRange[] = [];
 
 		// Pass 1: Display math ($$...$$)
 		for (const match of text.matchAll(DISPLAY_MATH_RE)) {
@@ -131,7 +131,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			if (onCursorLine) continue;
 
 			const tex = match[1];
-			displayRanges.push({ from: matchFrom, to: matchTo });
+			localDisplayRanges.push({ from: matchFrom, to: matchTo });
 			ranges.push(
 				Decoration.replace({
 					widget: new MathWidget(tex, true),
@@ -143,9 +143,9 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		// Blank out display math and code ranges so the regex does not
 		// consume $ characters that belong to those regions.
 		let textForInline = text;
-		if (displayRanges.length > 0 || codeRanges.length > 0) {
+		if (localDisplayRanges.length > 0 || codeRanges.length > 0) {
 			const chars = textForInline.split("");
-			for (const dr of displayRanges) {
+			for (const dr of localDisplayRanges) {
 				const relFrom = Math.max(dr.from - from, 0);
 				const relTo = Math.min(dr.to - from, chars.length);
 				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
@@ -168,7 +168,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 			// Ensure the match does not span across blanked-out code/display regions
 			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
-			if (displayRanges.some((dr) => !(matchTo <= dr.from || matchFrom >= dr.to))) continue;
+			if (localDisplayRanges.some((dr) => !(matchTo <= dr.from || matchFrom >= dr.to))) continue;
 
 			const lineNum = state.doc.lineAt(matchFrom).number;
 			if (cursorLines.has(lineNum)) continue;
