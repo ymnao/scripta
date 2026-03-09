@@ -97,6 +97,20 @@ describe("markdownToHtml", () => {
 		expect(html).not.toContain("katex");
 	});
 
+	it("does not process math inside raw HTML <code> tags", () => {
+		const md = "<code>\\$HOME</code>";
+		const html = markdownToHtml(md);
+		expect(html).toContain("<code>");
+		expect(html).not.toContain("katex");
+	});
+
+	it("preserves backslash in \\$ inside raw HTML <pre> tags", () => {
+		const md = "<pre>\\$VAR</pre>";
+		const html = markdownToHtml(md);
+		expect(html).toContain("\\$VAR");
+		expect(html).not.toContain("katex");
+	});
+
 	it("handles escaped $ signs", () => {
 		const html = markdownToHtml("Price is \\$5");
 		expect(html).not.toContain("katex");

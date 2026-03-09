@@ -81,7 +81,13 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 		ranges.push([start, start + m[1].length]);
 	}
 
-	// Merge fenced/indented ranges for binary search before scanning inline code.
+	// Raw HTML <code>...</code> and <pre>...</pre> blocks.
+	const htmlCodeRe = /<(code|pre)\b[^>]*>[\s\S]*?<\/\1>/gi;
+	for (const m of text.matchAll(htmlCodeRe)) {
+		ranges.push([m.index, m.index + m[0].length]);
+	}
+
+	// Merge fenced/indented/HTML ranges for binary search before scanning inline code.
 	const blockRanges = mergeRanges(ranges);
 
 	// Inline code spans: manually scan for backtick runs to avoid lookbehind
