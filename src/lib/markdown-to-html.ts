@@ -25,6 +25,65 @@ interface MathPlaceholder {
 	html: string;
 }
 
+/** Collect ranges of fenced code blocks and inline code spans in raw markdown. */
+function collectRawCodeRanges(text: string): Array<[number, number]> {
+	const ranges: Array<[number, number]> = [];
+
+	// Fenced code blocks (``` or ~~~), including those nested inside
+	// blockquotes / lists via the container prefix pattern.
+	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
+	const fenceRe = new RegExp(
+		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
+		"gm",
+	);
+	for (const m of text.matchAll(fenceRe)) {
+		ranges.push([m.index, m.index + m[0].length]);
+	}
+
+	// Inline code spans: opening backticks matched by equal-length closing backticks
+	const inlineCodeRe = /(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g;
+	for (const m of text.matchAll(inlineCodeRe)) {
+		// Skip if inside a fenced block
+		const start = m.index;
+		const end = start + m[0].length;
+		if (!ranges.some(([s, e]) => start >= s && end <= e)) {
+			ranges.push([start, end]);
+		}
+	}
+
+	return ranges;
+}
+
+/**
+ * Replace escaped dollar signs (\$) with placeholders before markdown
+ * processing. This prevents marked from stripping the backslash,
+ * which would make escape detection impossible later.
+ *
+ * Code spans and fenced code blocks are skipped — their content must
+ * be preserved verbatim.
+ */
+function preprocessEscapedDollars(text: string, nonce: string): string {
+	const placeholder = `%%EDOLLAR_${nonce}%%`;
+	const codeRanges = collectRawCodeRanges(text);
+
+	const positions: number[] = [];
+	for (let i = 0; i < text.length; i++) {
+		if (text[i] === "$" && isEscaped(text, i)) {
+			// Skip if inside a code range
+			if (codeRanges.some(([s, e]) => i >= s && i < e)) continue;
+			positions.push(i);
+		}
+	}
+	if (positions.length === 0) return text;
+
+	let result = text;
+	for (let j = positions.length - 1; j >= 0; j--) {
+		const pos = positions[j];
+		result = result.slice(0, pos - 1) + placeholder + result.slice(pos + 1);
+	}
+	return result;
+}
+
 /**
  * Replace multi-line display math ($$...\n...\n$$) in raw markdown
  * before lexing. With `breaks: true`, newlines inside display math
@@ -71,10 +130,12 @@ function preprocessDisplayMath(
 			// incorrectly strip leading -, +, * etc. from normal TeX content.
 			const escapedPrefix = prefix ? prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
 			const stripRe = escapedPrefix ? new RegExp(`^${escapedPrefix}`) : null;
+			const dollarPh = `%%EDOLLAR_${nonce}%%`;
 			const tex = rawTex
 				.split("\n")
 				.map((line) => (stripRe ? line.replace(stripRe, "") : line))
-				.join("\n");
+				.join("\n")
+				.replaceAll(dollarPh, "\\$");
 
 			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
 			try {
@@ -97,6 +158,7 @@ function preprocessDisplayMath(
 
 function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
 	let processed = text;
+	const dollarPh = `%%EDOLLAR_${nonce}%%`;
 
 	// Pass 1: Display math ($$...$$) — handles remaining $$...$$ after
 	// preprocessDisplayMath has replaced multi-line instances.
@@ -104,15 +166,21 @@ function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: strin
 		/\$\$((?:(?!\$\$)[^\n])+)\$\$/g,
 		(match, tex: string, offset: number) => {
 			if (isEscaped(processed, offset)) return match;
+			const closingDisplayPos = offset + match.length - 2;
+			if (isEscaped(processed, closingDisplayPos)) return match;
 
+			const texForKatex = tex.replaceAll(dollarPh, "\\$");
 			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
 			try {
-				const html = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+				const html = katex.renderToString(texForKatex.trim(), {
+					displayMode: true,
+					throwOnError: false,
+				});
 				placeholders.push({ placeholder, html });
 			} catch {
 				placeholders.push({
 					placeholder,
-					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+					html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
 				});
 			}
 			return placeholder;
@@ -120,21 +188,30 @@ function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: strin
 	);
 
 	// Pass 2: Inline math ($...$)
-	processed = processed.replace(/\$([^\n$]+)\$/g, (match, tex: string, offset: number) => {
-		if (isEscaped(processed, offset)) return match;
+	processed = processed.replace(
+		/\$((?:[^\n$\\]|\\.)+)\$/g,
+		(match, tex: string, offset: number) => {
+			if (isEscaped(processed, offset)) return match;
+			const closingInlinePos = offset + match.length - 1;
+			if (isEscaped(processed, closingInlinePos)) return match;
 
-		const placeholder = `%%MATH_I_${nonce}_${placeholders.length}%%`;
-		try {
-			const html = katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
-			placeholders.push({ placeholder, html });
-		} catch {
-			placeholders.push({
-				placeholder,
-				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
-			});
-		}
-		return placeholder;
-	});
+			const texForKatex = tex.replaceAll(dollarPh, "\\$");
+			const placeholder = `%%MATH_I_${nonce}_${placeholders.length}%%`;
+			try {
+				const html = katex.renderToString(texForKatex.trim(), {
+					displayMode: false,
+					throwOnError: false,
+				});
+				placeholders.push({ placeholder, html });
+			} catch {
+				placeholders.push({
+					placeholder,
+					html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
+				});
+			}
+			return placeholder;
+		},
+	);
 
 	return processed;
 }
@@ -194,9 +271,14 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	// marked requires content after [ ]/[x] to detect task lists.
 	const withTasks = normalized.replace(/^(\s*(?:[-*+]|\d+\.)\s+\[[ xX]\])\s*$/gm, "$1 \u200B");
 
+	// Replace escaped $ with placeholders before markdown processing.
+	// marked strips backslashes from \$, making escape detection impossible later.
+	const dollarPlaceholder = `%%EDOLLAR_${nonce}%%`;
+	const withEscapedDollars = preprocessEscapedDollars(withTasks, nonce);
+
 	// Replace multi-line display math before lexing to prevent
 	// `breaks: true` (when enabled) from inserting <br> inside math blocks.
-	const preprocessed = preprocessDisplayMath(withTasks, placeholders, nonce);
+	const preprocessed = preprocessDisplayMath(withEscapedDollars, placeholders, nonce);
 
 	const breaks = options?.breaks ?? false;
 	const marked = new Marked({ gfm: true, breaks });
@@ -216,6 +298,9 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	for (const { placeholder, html: mathHtml } of placeholders) {
 		html = html.replace(placeholder, mathHtml);
 	}
+
+	// Restore escaped dollar placeholders to literal $
+	html = html.replaceAll(dollarPlaceholder, "$");
 
 	return html;
 }

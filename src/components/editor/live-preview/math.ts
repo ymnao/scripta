@@ -14,7 +14,7 @@ import katex from "katex";
 import { collectCursorLines } from "./cursor-utils";
 
 const DISPLAY_MATH_RE = /\$\$([\s\S]+?)\$\$/g;
-const INLINE_MATH_RE = /\$([^\n$]+)\$/g;
+const INLINE_MATH_RE = /\$((?:[^\n$\\]|\\.)+)\$/g;
 
 /** Check whether the `$` at position `pos` in `text` is escaped by an odd number of preceding backslashes. */
 export function isEscaped(text: string, pos: number): boolean {
@@ -115,6 +115,8 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			const matchTo = matchFrom + match[0].length;
 
 			if (isEscaped(text, match.index)) continue;
+			const closingDisplayPos = match.index + match[0].length - 2;
+			if (isEscaped(text, closingDisplayPos)) continue;
 			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
 
 			const startLine = state.doc.lineAt(matchFrom).number;
@@ -138,22 +140,33 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		}
 
 		// Pass 2: Inline math ($...$)
-		for (const match of text.matchAll(INLINE_MATH_RE)) {
+		// Blank out display math and code ranges so the regex does not
+		// consume $ characters that belong to those regions.
+		let textForInline = text;
+		for (const dr of displayRanges) {
+			const relFrom = dr.from - from;
+			const relTo = dr.to - from;
+			textForInline =
+				textForInline.slice(0, relFrom) + " ".repeat(relTo - relFrom) + textForInline.slice(relTo);
+		}
+		for (const cr of codeRanges) {
+			const relFrom = Math.max(cr.from - from, 0);
+			const relTo = Math.min(cr.to - from, text.length);
+			if (relFrom < relTo) {
+				textForInline =
+					textForInline.slice(0, relFrom) +
+					" ".repeat(relTo - relFrom) +
+					textForInline.slice(relTo);
+			}
+		}
+
+		for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
 			const matchFrom = from + match.index;
 			const matchTo = matchFrom + match[0].length;
 
-			if (isEscaped(text, match.index)) continue;
-			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
-
-			// Skip if overlapping with a display math range
-			let overlapsDisplay = false;
-			for (const dr of displayRanges) {
-				if (matchFrom < dr.to && matchTo > dr.from) {
-					overlapsDisplay = true;
-					break;
-				}
-			}
-			if (overlapsDisplay) continue;
+			if (isEscaped(textForInline, match.index)) continue;
+			const closingInlinePos = match.index + match[0].length - 1;
+			if (isEscaped(textForInline, closingInlinePos)) continue;
 
 			const lineNum = state.doc.lineAt(matchFrom).number;
 			if (cursorLines.has(lineNum)) continue;
