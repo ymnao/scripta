@@ -75,6 +75,46 @@ test.describe("workspace", () => {
 		expect(calls[0]).toEqual({ path: "/workspace/hello.md" });
 	});
 
+	test("creates a folder via context menu", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(
+			{
+				files: {
+					"/workspace/hello.md": "# Hello",
+				},
+				directories: {
+					"/workspace": [{ name: "hello.md", path: "/workspace/hello.md", isDirectory: false }],
+				},
+			},
+			"/workspace",
+		);
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await expect(page.getByLabel("hello.md file")).toBeVisible();
+
+		// Right-click on the file tree root area
+		await page.getByLabel("hello.md file").click({ button: "right" });
+		await page.getByText("New Folder").click();
+
+		// Type folder name and confirm
+		const input = page.getByRole("textbox", { name: "New folder name" });
+		await expect(input).toBeVisible();
+		await input.fill("my-folder");
+		await input.press("Enter");
+
+		// Verify create_directory was called (not create_file)
+		const dirCalls = await mock.getCalls("create_directory");
+		expect(dirCalls).toHaveLength(1);
+		expect(dirCalls[0]).toEqual({ path: "/workspace/my-folder" });
+
+		const fileCalls = await mock.getCalls("create_file");
+		expect(fileCalls).toHaveLength(0);
+
+		// Verify the folder appears in the tree
+		await expect(page.getByLabel("my-folder folder")).toBeVisible();
+	});
+
 	test("shows empty state when no workspace is selected", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup({ files: {}, directories: {} }, null);

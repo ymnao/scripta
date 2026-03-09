@@ -155,6 +155,100 @@ export class TauriMock {
 					}
 				};
 
+				store.handlers.create_directory = (args: Record<string, unknown>) => {
+					const path = args.path as string;
+					if (path in parsedDirs) {
+						throw new Error(`Already exists: ${path}`);
+					}
+					parsedDirs[path] = [];
+					// Add to parent directory listing
+					const parts = path.split("/");
+					const name = parts[parts.length - 1];
+					const parentPath = parts.slice(0, -1).join("/");
+					if (parentPath in parsedDirs) {
+						parsedDirs[parentPath].push({
+							name,
+							path,
+							isDirectory: true,
+						});
+					}
+				};
+
+				store.handlers.rename_entry = (args: Record<string, unknown>) => {
+					const oldPath = args.oldPath as string;
+					const newPath = args.newPath as string;
+					const oldPrefix = `${oldPath}/`;
+					// Rename descendant files
+					for (const key of Object.keys(parsedFiles)) {
+						if (key.startsWith(oldPrefix)) {
+							parsedFiles[newPath + key.slice(oldPath.length)] = parsedFiles[key];
+							delete parsedFiles[key];
+						}
+					}
+					// Rename file itself
+					if (oldPath in parsedFiles) {
+						parsedFiles[newPath] = parsedFiles[oldPath];
+						delete parsedFiles[oldPath];
+					}
+					// Rename descendant directories and update their children's paths
+					for (const key of Object.keys(parsedDirs)) {
+						if (key.startsWith(oldPrefix)) {
+							const newKey = newPath + key.slice(oldPath.length);
+							parsedDirs[newKey] = parsedDirs[key].map((e) => ({
+								...e,
+								path: newPath + e.path.slice(oldPath.length),
+							}));
+							delete parsedDirs[key];
+						}
+					}
+					// Rename directory itself and update children's paths
+					if (oldPath in parsedDirs) {
+						parsedDirs[newPath] = parsedDirs[oldPath].map((e) => ({
+							...e,
+							path: newPath + e.path.slice(oldPath.length),
+						}));
+						delete parsedDirs[oldPath];
+					}
+					// Update parent directory entry
+					const oldParts = oldPath.split("/");
+					const parentPath = oldParts.slice(0, -1).join("/");
+					if (parentPath in parsedDirs) {
+						const entry = parsedDirs[parentPath].find((e) => e.path === oldPath);
+						if (entry) {
+							const newParts = newPath.split("/");
+							entry.name = newParts[newParts.length - 1];
+							entry.path = newPath;
+						}
+					}
+				};
+
+				store.handlers.delete_entry = (args: Record<string, unknown>) => {
+					const path = args.path as string;
+					const prefix = `${path}/`;
+					// Delete descendant files
+					for (const key of Object.keys(parsedFiles)) {
+						if (key.startsWith(prefix)) {
+							delete parsedFiles[key];
+						}
+					}
+					// Delete file itself
+					delete parsedFiles[path];
+					// Delete descendant directories
+					for (const key of Object.keys(parsedDirs)) {
+						if (key.startsWith(prefix)) {
+							delete parsedDirs[key];
+						}
+					}
+					// Delete directory listing
+					delete parsedDirs[path];
+					// Remove from parent directory
+					const parts = path.split("/");
+					const parentPath = parts.slice(0, -1).join("/");
+					if (parentPath in parsedDirs) {
+						parsedDirs[parentPath] = parsedDirs[parentPath].filter((e) => e.path !== path);
+					}
+				};
+
 				store.handlers.show_in_folder = () => {
 					// no-op: just record the call
 					return undefined;

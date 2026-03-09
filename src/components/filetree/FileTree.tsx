@@ -9,10 +9,13 @@ import {
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
 import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
+import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
+import { toRelativePath, useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FileEntry } from "../../types/workspace";
 import { Dialog } from "../common/Dialog";
+import { EmojiInputDialog } from "../common/EmojiInputDialog";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FileTreeItem } from "./FileTreeItem";
 import { InlineInput } from "./InlineInput";
@@ -61,6 +64,18 @@ export function FileTree({
 	const [creating, setCreating] = useState<CreatingState | null>(null);
 	const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+
+	const [emojiTarget, setEmojiTarget] = useState<FileEntry | null>(null);
+	const [scriptaDirConfirmTarget, setScriptaDirConfirmTarget] = useState<FileEntry | null>(null);
+
+	const icons = useWorkspaceConfigStore((s) => s.icons);
+	const scriptaDirReady = useWorkspaceConfigStore((s) => s.scriptaDirReady);
+	const setIcon = useWorkspaceConfigStore((s) => s.setIcon);
+	const removeIcon = useWorkspaceConfigStore((s) => s.removeIcon);
+	const renameIcon = useWorkspaceConfigStore((s) => s.renameIcon);
+	const renameIconsByPrefix = useWorkspaceConfigStore((s) => s.renameIconsByPrefix);
+	const deleteIconsByPrefix = useWorkspaceConfigStore((s) => s.deleteIconsByPrefix);
+	const setScriptaDirReady = useWorkspaceConfigStore((s) => s.setScriptaDirReady);
 
 	const loadIdRef = useRef(0);
 
@@ -173,6 +188,23 @@ export function FileTree({
 				onClick: () => {},
 			});
 			items.push({
+				id: "set-icon",
+				label: "アイコンを設定...",
+				onClick: async () => {
+					if (scriptaDirReady) {
+						setEmojiTarget(entry);
+					} else {
+						const exists = await scriptaDirExists(workspacePath);
+						if (exists) {
+							setScriptaDirReady(true);
+							setEmojiTarget(entry);
+						} else {
+							setScriptaDirConfirmTarget(entry);
+						}
+					}
+				},
+			});
+			items.push({
 				id: "show-in-folder",
 				label: "フォルダで表示",
 				onClick: () => {
@@ -197,7 +229,7 @@ export function FileTree({
 		}
 
 		return items;
-	}, [contextMenu, workspacePath, onFileOpenNewTab, onExport]);
+	}, [contextMenu, workspacePath, onFileOpenNewTab, onExport, scriptaDirReady, setScriptaDirReady]);
 
 	const handleCreateConfirm = useCallback(
 		async (name: string) => {
@@ -248,6 +280,13 @@ export function FileTree({
 
 			try {
 				await renameEntry(oldPath, newPath);
+				const oldRel = toRelativePath(workspacePath, oldPath);
+				const newRel = toRelativePath(workspacePath, newPath);
+				if (renamingEntry.isDirectory) {
+					renameIconsByPrefix(workspacePath, oldRel, newRel);
+				} else {
+					renameIcon(workspacePath, oldRel, newRel);
+				}
 				refresh();
 				onFileRenamed?.(oldPath, newPath, renamingEntry.isDirectory);
 			} catch (err) {
@@ -258,7 +297,7 @@ export function FileTree({
 			}
 			setRenamingEntry(null);
 		},
-		[renamingEntry, onFileRenamed, refresh],
+		[renamingEntry, onFileRenamed, refresh, workspacePath, renameIcon, renameIconsByPrefix],
 	);
 
 	const handleRenameCancel = useCallback(() => setRenamingEntry(null), []);
@@ -267,6 +306,12 @@ export function FileTree({
 		if (!deleteTarget) return;
 		try {
 			await deleteEntry(deleteTarget.path);
+			const rel = toRelativePath(workspacePath, deleteTarget.path);
+			if (deleteTarget.isDirectory) {
+				deleteIconsByPrefix(workspacePath, rel);
+			} else {
+				removeIcon(workspacePath, rel);
+			}
 			refresh();
 			onFileDeleted?.(deleteTarget.path, deleteTarget.isDirectory);
 		} catch (err) {
@@ -274,9 +319,55 @@ export function FileTree({
 			useToastStore.getState().addToast("error", `削除に失敗しました: ${translateError(err)}`);
 		}
 		setDeleteTarget(null);
-	}, [deleteTarget, onFileDeleted, refresh]);
+	}, [deleteTarget, onFileDeleted, refresh, workspacePath, removeIcon, deleteIconsByPrefix]);
 
 	const handleDeleteCancel = useCallback(() => setDeleteTarget(null), []);
+
+	const handleScriptaDirConfirm = useCallback(async () => {
+		const entry = scriptaDirConfirmTarget;
+		setScriptaDirConfirmTarget(null);
+		try {
+			await createDirectory(getScriptaDir(workspacePath));
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (!msg.includes("Already exists")) {
+				console.error("Failed to create .scripta directory:", err);
+				useToastStore
+					.getState()
+					.addToast("error", `.scripta ディレクトリの作成に失敗しました: ${translateError(err)}`);
+				return;
+			}
+		}
+		setScriptaDirReady(true);
+		if (entry) setEmojiTarget(entry);
+	}, [scriptaDirConfirmTarget, setScriptaDirReady, workspacePath]);
+
+	const handleScriptaDirCancel = useCallback(() => {
+		setScriptaDirConfirmTarget(null);
+	}, []);
+
+	const handleEmojiConfirm = useCallback(
+		(emoji: string) => {
+			if (!emojiTarget) return;
+			const rel = toRelativePath(workspacePath, emojiTarget.path);
+			const key = emojiTarget.isDirectory ? `${rel}/` : rel;
+			setIcon(workspacePath, key, emoji);
+			setEmojiTarget(null);
+		},
+		[emojiTarget, workspacePath, setIcon],
+	);
+
+	const handleEmojiRemove = useCallback(() => {
+		if (!emojiTarget) return;
+		const rel = toRelativePath(workspacePath, emojiTarget.path);
+		const key = emojiTarget.isDirectory ? `${rel}/` : rel;
+		removeIcon(workspacePath, key);
+		setEmojiTarget(null);
+	}, [emojiTarget, workspacePath, removeIcon]);
+
+	const handleEmojiCancel = useCallback(() => {
+		setEmojiTarget(null);
+	}, []);
 
 	const handleRootContextMenu = useCallback(
 		(e: React.MouseEvent) => {
@@ -326,6 +417,8 @@ export function FileTree({
 						onCreateConfirm={handleCreateConfirm}
 						onRenameCancel={handleRenameCancel}
 						onCreateCancel={handleCreateCancel}
+						icons={icons}
+						workspacePath={workspacePath}
 					/>
 				))}
 				{entries.length === 0 && !showRootCreating && (
@@ -350,6 +443,35 @@ export function FileTree({
 				variant="danger"
 				onConfirm={handleDeleteConfirm}
 				onCancel={handleDeleteCancel}
+			/>
+
+			<Dialog
+				open={scriptaDirConfirmTarget !== null}
+				title="ワークスペース設定フォルダを作成"
+				description="アイコン設定を保存するため、ワークスペース内に .scripta/ フォルダを作成します。よろしいですか？"
+				confirmLabel="作成"
+				cancelLabel="キャンセル"
+				onConfirm={handleScriptaDirConfirm}
+				onCancel={handleScriptaDirCancel}
+			/>
+
+			<EmojiInputDialog
+				open={emojiTarget !== null}
+				currentEmoji={
+					emojiTarget
+						? (() => {
+								const rel = toRelativePath(workspacePath, emojiTarget.path);
+								if (emojiTarget.isDirectory) {
+									return icons[`${rel}/`] ?? icons[rel] ?? null;
+								}
+								return icons[rel] ?? null;
+							})()
+						: null
+				}
+				entryName={emojiTarget?.name ?? ""}
+				onConfirm={handleEmojiConfirm}
+				onRemove={handleEmojiRemove}
+				onCancel={handleEmojiCancel}
 			/>
 		</>
 	);

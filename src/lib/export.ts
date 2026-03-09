@@ -482,8 +482,7 @@ function buildFence(content: string): string {
 	return "`".repeat(max + 1);
 }
 
-function buildPrompt(title: string, content: string): string {
-	const fence = buildFence(content);
+export function getDefaultPromptTemplate(): string {
 	return `# HTML変換プロンプト
 
 以下のMarkdownコンテンツを、美しく整形されたHTMLファイルに変換してください。
@@ -501,21 +500,35 @@ function buildPrompt(title: string, content: string): string {
 
 ## ドキュメントタイトル
 
-${title}
+{title}
 
 ## Markdownコンテンツ
 
-${fence}markdown
-${content}
-${fence}
+{content}
 `;
+}
+
+export function buildPromptFromTemplate(template: string, title: string, content: string): string {
+	const fence = buildFence(content);
+	const fencedContent = `${fence}markdown\n${content}\n${fence}`;
+	return template.replace(/\{(title|content)\}/g, (_match, key: string) =>
+		key === "title" ? title : fencedContent,
+	);
+}
+
+function buildPrompt(title: string, content: string): string {
+	return buildPromptFromTemplate(getDefaultPromptTemplate(), title, content);
 }
 
 /**
  * Markdown をプロンプト形式で .md ファイルにエクスポートする。
  * @returns save ダイアログでキャンセルされた場合は false
  */
-export async function exportAsPrompt(markdown: string, filePath: string): Promise<boolean> {
+export async function exportAsPrompt(
+	markdown: string,
+	filePath: string,
+	customTemplate?: string | null,
+): Promise<boolean> {
 	const title = extractTitle(filePath);
 	const defaultName = `${title}-prompt.md`;
 
@@ -526,7 +539,10 @@ export async function exportAsPrompt(markdown: string, filePath: string): Promis
 
 	if (!savePath) return false;
 
-	const output = buildPrompt(title, markdown);
+	const output =
+		customTemplate != null
+			? buildPromptFromTemplate(customTemplate, title, markdown)
+			: buildPrompt(title, markdown);
 	await writeFile(savePath, output);
 	return true;
 }

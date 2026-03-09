@@ -13,6 +13,7 @@ import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
+import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import { Dialog } from "../common/Dialog";
 import { ExportDialog } from "../common/ExportDialog";
 import { HelpDialog } from "../common/HelpDialog";
@@ -53,6 +54,10 @@ export function AppLayout() {
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
 	const hydratePreference = useThemeStore((s) => s.hydratePreference);
 	const hydrateSettings = useSettingsStore((s) => s.hydrate);
+	const loadIcons = useWorkspaceConfigStore((s) => s.loadIcons);
+	const resetWorkspaceConfig = useWorkspaceConfigStore((s) => s.reset);
+	const scriptaDirReady = useWorkspaceConfigStore((s) => s.scriptaDirReady);
+	const setScriptaDirReady = useWorkspaceConfigStore((s) => s.setScriptaDirReady);
 
 	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
 	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
@@ -101,6 +106,7 @@ export function AppLayout() {
 	saveNowRef.current = saveNow;
 	const prevWorkspacePathRef = useRef(workspacePath);
 	const justSwitchedRef = useRef(false);
+	const userSetWorkspaceRef = useRef(false);
 
 	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
 	// restore or persist the workspace path — only theme and sidebar are restored.
@@ -146,9 +152,13 @@ export function AppLayout() {
 		};
 	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings]);
 
-	// Persist workspace path changes (skip while loading and in new windows)
+	// Persist workspace path changes (skip the initial restored value and new windows)
 	useEffect(() => {
 		if (loading || isNewWindow) return;
+		if (!userSetWorkspaceRef.current) {
+			userSetWorkspaceRef.current = true;
+			return;
+		}
 		void saveWorkspacePath(workspacePath);
 	}, [workspacePath, loading, isNewWindow]);
 
@@ -157,6 +167,15 @@ export function AppLayout() {
 		if (loading) return;
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible, loading]);
+
+	// Load workspace config (icons) when workspace changes
+	useEffect(() => {
+		if (workspacePath) {
+			void loadIcons(workspacePath);
+		} else {
+			resetWorkspaceConfig();
+		}
+	}, [workspacePath, loadIcons, resetWorkspaceConfig]);
 
 	const handleExport = useCallback((path: string) => {
 		// Prefer in-memory content so unsaved edits are included
@@ -979,6 +998,10 @@ export function AppLayout() {
 					onClose={() => setExportOpen(false)}
 					markdown={exportTarget.markdown}
 					filePath={exportTarget.filePath}
+					workspacePath={workspacePath}
+					onOpenFile={openTab}
+					scriptaDirReady={scriptaDirReady}
+					onScriptaDirConfirm={() => setScriptaDirReady(true)}
 				/>
 			)}
 			<ToastContainer />

@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { translateError } from "../../lib/errors";
 import {
 	type ExportTheme,
@@ -7,7 +7,13 @@ import {
 	exportAsHtml,
 	exportAsPdf,
 	exportAsPrompt,
+	getDefaultPromptTemplate,
 } from "../../lib/export";
+import {
+	getScriptaPromptTemplatePath,
+	loadPromptTemplate,
+	savePromptTemplate,
+} from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
 import { DialogBase } from "./DialogBase";
 
@@ -20,6 +26,10 @@ interface ExportDialogProps {
 	onClose: () => void;
 	markdown: string;
 	filePath: string;
+	workspacePath?: string | null;
+	onOpenFile?: (path: string) => void;
+	scriptaDirReady?: boolean;
+	onScriptaDirConfirm?: () => void;
 }
 
 type Section = "html" | "pdf" | "prompt";
@@ -42,7 +52,16 @@ const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: st
 	{ value: "h3", label: "h3まで" },
 ];
 
-export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialogProps) {
+export function ExportDialog({
+	open,
+	onClose,
+	markdown,
+	filePath,
+	workspacePath,
+	onOpenFile,
+	scriptaDirReady,
+	onScriptaDirConfirm,
+}: ExportDialogProps) {
 	const titleId = useId();
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
@@ -52,6 +71,11 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const [forceUpperBreak, setForceUpperBreak] = useState(true);
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
+	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);
+
+	useEffect(() => {
+		if (!open) setShowScriptaDirConfirm(false);
+	}, [open]);
 
 	const handleExportHtml = async () => {
 		setExporting(true);
@@ -89,7 +113,11 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 	const handleExportPrompt = async () => {
 		setExporting(true);
 		try {
-			const result = await exportAsPrompt(markdown, filePath);
+			let customTemplate: string | null = null;
+			if (workspacePath) {
+				customTemplate = await loadPromptTemplate(workspacePath);
+			}
+			const result = await exportAsPrompt(markdown, filePath, customTemplate);
 			if (result) onClose();
 		} catch (err: unknown) {
 			useToastStore
@@ -97,6 +125,31 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 				.addToast("error", `プロンプトエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
+		}
+	};
+
+	const handleCustomizeTemplate = async () => {
+		if (!workspacePath || !onOpenFile) return;
+		try {
+			const templatePath = getScriptaPromptTemplatePath(workspacePath);
+			const existing = await loadPromptTemplate(workspacePath);
+
+			if (existing === null) {
+				if (!scriptaDirReady && !showScriptaDirConfirm) {
+					setShowScriptaDirConfirm(true);
+					return;
+				}
+				await savePromptTemplate(workspacePath, getDefaultPromptTemplate());
+			}
+			onScriptaDirConfirm?.();
+			setShowScriptaDirConfirm(false);
+			onClose();
+			onOpenFile(templatePath);
+		} catch (err: unknown) {
+			setShowScriptaDirConfirm(false);
+			useToastStore
+				.getState()
+				.addToast("error", `テンプレートの作成に失敗しました: ${translateError(err)}`);
 		}
 	};
 
@@ -225,6 +278,40 @@ export function ExportDialog({ open, onClose, markdown, filePath }: ExportDialog
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								生成AIにMarkdownを渡してリッチHTMLを生成するためのプロンプトファイルを書き出します。
 							</p>
+							{workspacePath && onOpenFile && (
+								<>
+									<button
+										type="button"
+										onClick={handleCustomizeTemplate}
+										className="text-[11px] text-blue-600 hover:underline dark:text-blue-400"
+									>
+										テンプレートをカスタマイズ
+									</button>
+									{showScriptaDirConfirm && (
+										<div className="rounded-md border border-border bg-bg-secondary p-2">
+											<p className="text-[11px] text-text-secondary">
+												テンプレートを保存するため .scripta/ フォルダを作成します。続行しますか？
+											</p>
+											<div className="mt-1.5 flex gap-2">
+												<button
+													type="button"
+													onClick={handleCustomizeTemplate}
+													className="rounded bg-blue-600 px-2 py-0.5 text-[11px] text-white hover:bg-blue-700"
+												>
+													作成
+												</button>
+												<button
+													type="button"
+													onClick={() => setShowScriptaDirConfirm(false)}
+													className="rounded bg-bg-primary px-2 py-0.5 text-[11px] text-text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+												>
+													キャンセル
+												</button>
+											</div>
+										</div>
+									)}
+								</>
+							)}
 							<div className="flex justify-end">
 								<button
 									type="button"

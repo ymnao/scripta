@@ -41,6 +41,14 @@ export function addTrailingSep(path: string): string {
 	return path.endsWith(sep) ? path : path + sep;
 }
 
+export function toRelativePath(workspacePath: string, absolutePath: string): string {
+	const prefix = addTrailingSep(workspacePath);
+	const relative = absolutePath.startsWith(prefix)
+		? absolutePath.slice(prefix.length)
+		: absolutePath;
+	return relative.replace(/\\/g, "/");
+}
+
 export function replacePrefix(path: string, oldPrefix: string, newPrefix: string): string {
 	if (path === oldPrefix) return newPrefix;
 	const oldWithSep = addTrailingSep(oldPrefix);
