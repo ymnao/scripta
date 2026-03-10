@@ -46,12 +46,24 @@ interface TableData {
 
 // ── Parsing ───────────────────────────────────────────
 
+/** エスケープされていない `|` の位置を返す。見つからなければ -1。 */
+function findUnescapedPipe(text: string, start: number): number {
+	for (let j = start; j < text.length; j++) {
+		if (text[j] === "|") {
+			let bs = 0;
+			for (let k = j - 1; k >= 0 && text[k] === "\\"; k--) bs++;
+			if (bs % 2 === 0) return j;
+		}
+	}
+	return -1;
+}
+
 function parseRowCells(text: string): string[] {
 	const cells: string[] = [];
 	let i = 0;
 	if (text[0] === "|") i = 1;
 	while (i < text.length) {
-		const pipeIdx = text.indexOf("|", i);
+		const pipeIdx = findUnescapedPipe(text, i);
 		const segEnd = pipeIdx === -1 ? text.length : pipeIdx;
 		cells.push(text.slice(i, segEnd).trim());
 		if (pipeIdx === -1) break;
@@ -166,6 +178,12 @@ function setCellContent(el: HTMLElement, content: string): void {
 	}
 }
 
+/** セル表示幅を計算する。`<br>` は改行なので各セグメントの最大幅を返す。 */
+function cellDisplayWidth(content: string): number {
+	if (!content.includes("<br>")) return getStringWidth(content);
+	return Math.max(...content.split("<br>").map(getStringWidth));
+}
+
 /** Map widget row index → doc line offset (skip delimiter at doc index 1). */
 function widgetRowToLineOffset(widgetRow: number): number {
 	return widgetRow >= 1 ? widgetRow + 1 : widgetRow;
@@ -190,7 +208,7 @@ function formatTableLines(container: HTMLElement, data: TableData): string[] {
 	const colWidths: number[] = new Array(colCount).fill(3);
 	for (const cellRow of domRows) {
 		for (let c = 0; c < cellRow.length; c++) {
-			colWidths[c] = Math.max(colWidths[c], getStringWidth(cellRow[c]));
+			colWidths[c] = Math.max(colWidths[c], cellDisplayWidth(cellRow[c]));
 		}
 	}
 
@@ -213,7 +231,7 @@ function formatTableLines(container: HTMLElement, data: TableData): string[] {
 		for (let c = 0; c < colCount; c++) {
 			const content =
 				domRowIdx < domRows.length && c < domRows[domRowIdx].length ? domRows[domRowIdx][c] : "";
-			const displayWidth = getStringWidth(content);
+			const displayWidth = cellDisplayWidth(content);
 			const padding = colWidths[c] - displayWidth;
 			parts.push(content + " ".repeat(Math.max(0, padding)));
 		}

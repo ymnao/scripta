@@ -9,6 +9,10 @@ export function isEastAsianFullwidth(cp: number): boolean {
 	if (cp >= 0x3400 && cp <= 0x4dbf) return true;
 	// CJK Unified Ideographs Extension B–F
 	if (cp >= 0x20000 && cp <= 0x2fa1f) return true;
+	// CJK Unified Ideographs Extension G
+	if (cp >= 0x30000 && cp <= 0x3134f) return true;
+	// CJK Unified Ideographs Extension H
+	if (cp >= 0x31350 && cp <= 0x323af) return true;
 	// CJK Compatibility Ideographs
 	if (cp >= 0xf900 && cp <= 0xfaff) return true;
 	// Hiragana

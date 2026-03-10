@@ -27,6 +27,18 @@ export interface TableInfo {
 
 const DELIMITER_RE = /^\s*:?-{1,}:?\s*$/;
 
+/** エスケープされていない `|` の位置を返す。見つからなければ -1。 */
+function findUnescapedPipe(text: string, start: number): number {
+	for (let j = start; j < text.length; j++) {
+		if (text[j] === "|") {
+			let bs = 0;
+			for (let k = j - 1; k >= 0 && text[k] === "\\"; k--) bs++;
+			if (bs % 2 === 0) return j;
+		}
+	}
+	return -1;
+}
+
 function parseRowCells(lineText: string, lineFrom: number): CellInfo[] {
 	const cells: CellInfo[] = [];
 	let i = 0;
@@ -34,7 +46,7 @@ function parseRowCells(lineText: string, lineFrom: number): CellInfo[] {
 	if (lineText[0] === "|") i = 1;
 
 	while (i < lineText.length) {
-		const pipeIdx = lineText.indexOf("|", i);
+		const pipeIdx = findUnescapedPipe(lineText, i);
 		const segEnd = pipeIdx === -1 ? lineText.length : pipeIdx;
 		const raw = lineText.slice(i, segEnd);
 		const trimmed = raw.trim();
