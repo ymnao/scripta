@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { exportPdf, writeFile } from "./commands";
 import { markdownToHtml } from "./markdown-to-html";
+import { renderMermaid } from "./mermaid";
 import { basename } from "./path";
 
 export type ExportTheme = "system" | "light" | "dark";
@@ -25,6 +26,38 @@ th { background: #222; }
 a { color: #60a5fa; }
 hr { border-top-color: #333; }
 li::marker { color: #777; }`;
+
+const MERMAID_BLOCK_RE = /```mermaid\s*\n([\s\S]*?)```/g;
+
+/**
+ * Mermaid コードブロックを SVG に変換する。
+ * エラー時は元のコードブロックをそのまま残す。
+ */
+export async function preprocessMermaidBlocks(
+	markdown: string,
+	theme: "light" | "dark" = "light",
+): Promise<string> {
+	const matches = [...markdown.matchAll(MERMAID_BLOCK_RE)];
+	if (matches.length === 0) return markdown;
+
+	let result = markdown;
+	// Process in reverse order to preserve offsets
+	for (let i = matches.length - 1; i >= 0; i--) {
+		const match = matches[i];
+		const source = match[1].trim();
+		if (!source) continue;
+		try {
+			const svg = await renderMermaid(source, theme);
+			const replacement = `<div class="mermaid-diagram">${svg}</div>`;
+			result =
+				result.slice(0, match.index) + replacement + result.slice(match.index + match[0].length);
+		} catch {
+			// Keep original code block on error
+		}
+	}
+
+	return result;
+}
 
 function buildPageBreakCss(level: PageBreakLevel, smart: boolean): string {
 	if (level === "none") return "";
@@ -346,6 +379,8 @@ th, td {
 }
 th { font-weight: 600; }
 img { max-width: 100%; height: auto; }
+.mermaid-diagram { text-align: center; margin: 1em 0; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
 hr { border: none; border-top: 1px solid; margin: 1em 0; }
 ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
@@ -410,7 +445,8 @@ export async function exportAsHtml(
 
 	if (!savePath) return false;
 
-	const bodyHtml = markdownToHtml(markdown);
+	const preprocessed = await preprocessMermaidBlocks(markdown);
+	const bodyHtml = markdownToHtml(preprocessed);
 	const html = buildHtmlDocument(bodyHtml, title, options?.theme);
 	await writeFile(savePath, html);
 	return true;
@@ -448,7 +484,8 @@ export async function exportAsPdf(
 			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
 			: undefined;
 
-	const bodyHtml = markdownToHtml(markdown, { breaks: true });
+	const preprocessed = await preprocessMermaidBlocks(markdown);
+	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
 	// PDF用: 静的判定を動的スクリプトで上書き

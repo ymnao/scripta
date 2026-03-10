@@ -15,6 +15,8 @@ const codeBlockLineDecoration = Decoration.line({
 });
 const replaceDecoration = Decoration.replace({});
 
+const MERMAID_FENCE_RE = /^`{3,}\s*mermaid\s*$/;
+
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
@@ -31,6 +33,21 @@ export function buildDecorations(view: EditorView): DecorationSet {
 				if (node.name !== "FencedCode") return;
 
 				const startLine = state.doc.lineAt(node.from);
+
+				// Skip mermaid blocks when cursor is outside — handled by mermaid decoration
+				if (MERMAID_FENCE_RE.test(startLine.text.trim())) {
+					const endLine = state.doc.lineAt(node.to);
+					const startLineNum = startLine.number;
+					const endLineNum = endLine.number;
+					let cursorInBlock = false;
+					for (let l = startLineNum; l <= endLineNum; l++) {
+						if (cursorLines.has(l)) {
+							cursorInBlock = true;
+							break;
+						}
+					}
+					if (!cursorInBlock) return;
+				}
 				const endLine = state.doc.lineAt(node.to);
 
 				// Clamp decoration target lines to the current visible range
