@@ -126,6 +126,7 @@ export function focusCell(container: HTMLElement, row: number, col: number): voi
 		cell.focus();
 		const range = document.createRange();
 		range.selectNodeContents(cell);
+		range.collapse(false);
 		const sel = window.getSelection();
 		sel?.removeAllRanges();
 		sel?.addRange(range);
@@ -134,10 +135,37 @@ export function focusCell(container: HTMLElement, row: number, col: number): voi
 
 function applyCellStyle(el: HTMLElement, isHeader: boolean): void {
 	el.style.border = "1px solid var(--color-border)";
-	el.style.padding = "4px 8px";
-	el.style.minWidth = "3em";
+	el.style.padding = "6px 12px";
+	el.style.minWidth = "6em";
 	el.style.outline = "none";
 	if (isHeader) el.style.fontWeight = "700";
+}
+
+/** セル内の <br> を `<br>` テキストとして読み取る。ゼロ幅スペースは除去する。 */
+function getCellTextContent(el: HTMLElement): string {
+	const parts: string[] = [];
+	for (const node of el.childNodes) {
+		if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR") {
+			parts.push("<br>");
+		} else {
+			parts.push((node.textContent || "").replace(/\u200B/g, ""));
+		}
+	}
+	return parts.join("");
+}
+
+/** セル内容をセットする。`<br>` テキストを <br> 要素に復元する。 */
+function setCellContent(el: HTMLElement, content: string): void {
+	if (!content.includes("<br>")) {
+		el.textContent = content;
+		return;
+	}
+	el.textContent = "";
+	const segments = content.split("<br>");
+	for (let i = 0; i < segments.length; i++) {
+		if (i > 0) el.appendChild(document.createElement("br"));
+		if (segments[i]) el.appendChild(document.createTextNode(segments[i]));
+	}
 }
 
 /** Map widget row index → doc line offset (skip delimiter at doc index 1). */
@@ -156,7 +184,7 @@ function formatTableLines(container: HTMLElement, data: TableData): string[] {
 			const cell = container.querySelector(
 				`[data-row="${r}"][data-col="${c}"]`,
 			) as HTMLElement | null;
-			cells.push(cell?.textContent || "");
+			cells.push(cell ? getCellTextContent(cell) : "");
 		}
 		domRows.push(cells);
 	}
@@ -207,6 +235,13 @@ const widgetPositions = new WeakMap<HTMLElement, number>();
 const widgetDataMap = new WeakMap<HTMLElement, TableData>();
 let pendingFocus: { row: number; col: number } | null = null;
 
+/** IME 状態追跡。compositionActive はコンポジション中に true。
+ *  isComposing は compositionstart で true になり、compositionend 後の
+ *  最初の keyup で false になる。これにより確定 Enter の keydown を
+ *  確実にスキップできる。 */
+let compositionActive = false;
+let isComposing = false;
+
 function getDataFor(wrapperEl: HTMLElement): TableData | null {
 	return widgetDataMap.get(wrapperEl) ?? null;
 }
@@ -255,13 +290,17 @@ class EditableTableWidget extends WidgetType {
 
 	eq(other: EditableTableWidget): boolean {
 		if (this.tableFrom !== other.tableFrom) return false;
-		const a = this.data.rows;
-		const b = other.data.rows;
-		if (a.length !== b.length) return false;
-		for (let r = 0; r < a.length; r++) {
-			if (a[r].cells.length !== b[r].cells.length) return false;
-			for (let c = 0; c < a[r].cells.length; c++) {
-				if (a[r].cells[c].content !== b[r].cells[c].content) return false;
+		const a = this.data;
+		const b = other.data;
+		if (a.alignments.length !== b.alignments.length) return false;
+		for (let i = 0; i < a.alignments.length; i++) {
+			if (a.alignments[i] !== b.alignments[i]) return false;
+		}
+		if (a.rows.length !== b.rows.length) return false;
+		for (let r = 0; r < a.rows.length; r++) {
+			if (a.rows[r].cells.length !== b.rows[r].cells.length) return false;
+			for (let c = 0; c < a.rows[r].cells.length; c++) {
+				if (a.rows[r].cells[c].content !== b.rows[r].cells[c].content) return false;
 			}
 		}
 		return true;
@@ -345,10 +384,12 @@ class EditableTableWidget extends WidgetType {
 				const cell = cells[c];
 				cell.dataset.row = String(r);
 				cell.dataset.col = String(c);
+				const align = c < alignments.length ? alignments[c] : "left";
+				if (cell.style.textAlign !== align) cell.style.textAlign = align;
 				if (!structuralChange && focusedRow === String(r) && focusedCol === String(c)) continue;
 				const content = c < row.cells.length ? row.cells[c].content : "";
-				if (cell.textContent !== content) {
-					cell.textContent = content;
+				if (getCellTextContent(cell) !== content) {
+					setCellContent(cell, content);
 				}
 			}
 		}
@@ -387,7 +428,7 @@ class EditableTableWidget extends WidgetType {
 			for (let c = 0; c < colCount; c++) {
 				const cell = document.createElement(isHeader ? "th" : "td");
 				cell.className = "cm-table-cell";
-				cell.textContent = c < rowData.cells.length ? rowData.cells[c].content : "";
+				setCellContent(cell, c < rowData.cells.length ? rowData.cells[c].content : "");
 				cell.contentEditable = "true";
 				cell.dataset.row = String(r);
 				cell.dataset.col = String(c);
@@ -404,6 +445,21 @@ class EditableTableWidget extends WidgetType {
 		wrapper.addEventListener("keydown", (e) => handleKeydown(e, view, wrapper));
 		wrapper.addEventListener("focusout", (e) => handleFocusOut(e as FocusEvent, view, wrapper));
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
+		wrapper.addEventListener("compositionstart", () => {
+			compositionActive = true;
+			isComposing = true;
+		});
+		wrapper.addEventListener("compositionend", () => {
+			compositionActive = false;
+			// isComposing は true のまま。次の keyup で解除する。
+		});
+		wrapper.addEventListener("keyup", () => {
+			// コンポジション終了後の keyup でのみフラグを解除する。
+			// コンポジション中の keyup では解除しない。
+			if (isComposing && !compositionActive) {
+				isComposing = false;
+			}
+		});
 
 		return wrapper;
 	}
@@ -429,7 +485,7 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 
 	const cellContents: string[] = [];
 	for (const td of tr.querySelectorAll("th, td")) {
-		cellContents.push(td.textContent || "");
+		cellContents.push(getCellTextContent(td as HTMLElement));
 	}
 
 	const newLine = `| ${cellContents.join(" | ")} |`;
@@ -441,6 +497,9 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 }
 
 function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElement): void {
+	// IME コンポジション中はすべてのキー処理をスキップする
+	if (e.isComposing || isComposing) return;
+
 	const target = e.target as HTMLElement;
 	if (!target.dataset.row || !target.dataset.col) return;
 
@@ -489,6 +548,29 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 		return;
 	}
 
+	if (e.key === "Enter" && e.shiftKey) {
+		e.preventDefault();
+		e.stopPropagation();
+		const sel = window.getSelection();
+		if (sel && sel.rangeCount > 0) {
+			const range = sel.getRangeAt(0);
+			range.deleteContents();
+			const br = document.createElement("br");
+			range.insertNode(br);
+			// 末尾の <br> はブラウザに折りたたまれるため、
+			// ゼロ幅スペースをカーソル用プレースホルダーとして挿入
+			const placeholder = document.createTextNode("\u200B");
+			br.after(placeholder);
+			range.setStart(placeholder, 1);
+			range.collapse(true);
+			sel.removeAllRanges();
+			sel.addRange(range);
+			// マークダウンに同期
+			handleInput(e, view, wrapperEl);
+		}
+		return;
+	}
+
 	if (e.key === "Enter" && !e.shiftKey) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -531,12 +613,19 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 		return;
 	}
 
+	// Mod+key はエディタのショートカット (Mod-s, Mod-b 等) に委譲する
+	if (e.metaKey || e.ctrlKey) return;
+
 	e.stopPropagation();
 }
 
 function handleFocusOut(e: FocusEvent, view: EditorView, wrapperEl: HTMLElement): void {
 	const related = e.relatedTarget as HTMLElement | null;
 	if (related && wrapperEl.contains(related)) return;
+
+	// フォーカスがテーブル外に移動したら IME フラグをリセット
+	compositionActive = false;
+	isComposing = false;
 
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (!tableNode) return;

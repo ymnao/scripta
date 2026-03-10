@@ -11,7 +11,7 @@ import {
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -48,6 +48,33 @@ const customHighlightStyle = syntaxHighlighting(
 		{ tag: tags.heading, fontWeight: "bold" },
 		{ tag: tags.link, textDecoration: "none" },
 	]),
+);
+
+/**
+ * IME コンポジション中にエディタへ cm-composing クラスを付与する。
+ * drawSelection 有効時でも WKWebView 上の CJK IME で
+ * .cm-selectionBackground が残る場合があるため、CSS で抑制する。
+ */
+const composingClass = ViewPlugin.fromClass(
+	class {
+		private view: EditorView;
+		constructor(view: EditorView) {
+			this.view = view;
+			view.contentDOM.addEventListener("compositionstart", this.onStart);
+			view.contentDOM.addEventListener("compositionend", this.onEnd);
+		}
+		private onStart = () => {
+			this.view.dom.classList.add("cm-composing");
+		};
+		private onEnd = () => {
+			this.view.dom.classList.remove("cm-composing");
+		};
+		destroy() {
+			this.view.contentDOM.removeEventListener("compositionstart", this.onStart);
+			this.view.contentDOM.removeEventListener("compositionend", this.onEnd);
+			this.view.dom.classList.remove("cm-composing");
+		}
+	},
 );
 
 const FONT_FAMILY_MAP: Record<FontFamily, string> = {
@@ -115,6 +142,9 @@ const staticEditorTheme = EditorView.theme({
 	},
 	".cm-selectionBackground": {
 		background: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent) !important",
+	},
+	"&.cm-composing .cm-selectionBackground": {
+		background: "transparent !important",
 	},
 	".cm-heading-1": {
 		fontSize: "1.8em",
@@ -216,12 +246,12 @@ const staticEditorTheme = EditorView.theme({
 	},
 	".cm-table-widget": {
 		borderCollapse: "collapse",
-		margin: "4px 0",
+		margin: "8px 0",
 	},
 	".cm-table-cell": {
 		border: "1px solid var(--color-border)",
-		padding: "4px 8px",
-		minWidth: "3em",
+		padding: "6px 12px",
+		minWidth: "6em",
 		outline: "none",
 	},
 	".cm-table-cell:focus": {
@@ -458,6 +488,7 @@ export function MarkdownEditor({
 		() => [
 			listKeymap,
 			tableKeymap,
+			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, fontFamily),

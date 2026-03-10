@@ -55,10 +55,14 @@ function findWidgetForTable(view: EditorView, tableFrom: number): HTMLElement | 
 }
 
 function arrowDownIntoTable(view: EditorView): boolean {
-	const pos = view.state.selection.main.head;
-	const line = view.state.doc.lineAt(pos);
+	const sel = view.state.selection.main;
+	const line = view.state.doc.lineAt(sel.head);
 	const tableNode = findTableNodeAt(view, line.number + 1);
 	if (!tableNode) return false;
+
+	// On wrapped lines, only intercept when cursor is on the last visual line
+	const moved = view.moveVertically(sel, true);
+	if (view.state.doc.lineAt(moved.head).number === line.number) return false;
 
 	const widget = findWidgetForTable(view, tableNode.from);
 	if (!widget) return false;
@@ -68,10 +72,14 @@ function arrowDownIntoTable(view: EditorView): boolean {
 }
 
 function arrowUpIntoTable(view: EditorView): boolean {
-	const pos = view.state.selection.main.head;
-	const line = view.state.doc.lineAt(pos);
+	const sel = view.state.selection.main;
+	const line = view.state.doc.lineAt(sel.head);
 	const tableNode = findTableNodeAt(view, line.number - 1);
 	if (!tableNode) return false;
+
+	// On wrapped lines, only intercept when cursor is on the first visual line
+	const moved = view.moveVertically(sel, false);
+	if (view.state.doc.lineAt(moved.head).number === line.number) return false;
 
 	const widget = findWidgetForTable(view, tableNode.from);
 	if (!widget) return false;

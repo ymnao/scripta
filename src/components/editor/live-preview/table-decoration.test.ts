@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildTableDecorations } from "./table-decoration";
-import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
+import {
+	collectDecorations,
+	createTestState,
+	replaceDecorations,
+	widgetDecorations,
+} from "./test-helper";
 
 const simpleTable = `| A | B |
 | --- | --- |
@@ -35,5 +40,42 @@ describe("buildTableDecorations", () => {
 		const decos = collectDecorations(buildTableDecorations(state));
 		const replaces = replaceDecorations(decos);
 		expect(replaces.length).toBe(2);
+	});
+
+	it("アライメントが異なるテーブルは異なるウィジェットを生成する", () => {
+		const leftTable = "| A | B |\n| :--- | :--- |\n| 1 | 2 |";
+		const rightTable = "| A | B |\n| ---: | ---: |\n| 1 | 2 |";
+		const centerTable = "| A | B |\n| :---: | :---: |\n| 1 | 2 |";
+
+		const stateL = createTestState(leftTable);
+		const stateR = createTestState(rightTable);
+		const stateC = createTestState(centerTable);
+
+		const widgetL = widgetDecorations(collectDecorations(buildTableDecorations(stateL)));
+		const widgetR = widgetDecorations(collectDecorations(buildTableDecorations(stateR)));
+		const widgetC = widgetDecorations(collectDecorations(buildTableDecorations(stateC)));
+
+		expect(widgetL.length).toBe(1);
+		expect(widgetR.length).toBe(1);
+		expect(widgetC.length).toBe(1);
+
+		// eq() should return false for different alignments
+		const wL = widgetL[0].value.spec.widget;
+		const wR = widgetR[0].value.spec.widget;
+		const wC = widgetC[0].value.spec.widget;
+		expect(wL.eq(wR)).toBe(false);
+		expect(wL.eq(wC)).toBe(false);
+		expect(wR.eq(wC)).toBe(false);
+	});
+
+	it("同じアライメント・内容のテーブルは eq() が true を返す", () => {
+		const table = "| A | B |\n| :---: | --- |\n| 1 | 2 |";
+		const state1 = createTestState(table);
+		const state2 = createTestState(table);
+
+		const w1 = widgetDecorations(collectDecorations(buildTableDecorations(state1)));
+		const w2 = widgetDecorations(collectDecorations(buildTableDecorations(state2)));
+
+		expect(w1[0].value.spec.widget.eq(w2[0].value.spec.widget)).toBe(true);
 	});
 });
