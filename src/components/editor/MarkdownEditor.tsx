@@ -37,6 +37,8 @@ import {
 	listKeymap,
 	mathDecoration,
 	strikethroughDecoration,
+	tableDecoration,
+	tableKeymap,
 	wikilinkCompletion,
 	wikilinkDecoration,
 } from "./live-preview";
@@ -50,8 +52,8 @@ const customHighlightStyle = syntaxHighlighting(
 
 /**
  * IME コンポジション中にエディタへ cm-composing クラスを付与する。
- * WKWebView では ::selection の背景色がコンポジションテキストに
- * 不正に適用される (WebKit Bug 37788) ため、このクラスで抑制する。
+ * drawSelection 有効時でも WKWebView 上の CJK IME で
+ * .cm-selectionBackground が残る場合があるため、CSS で抑制する。
  */
 const composingClass = ViewPlugin.fromClass(
 	class {
@@ -93,7 +95,6 @@ function createDynamicEditorTheme(fontSize: number, fontFamily: FontFamily) {
 			fontFamily: FONT_FAMILY_MAP[fontFamily],
 		},
 		".cm-content": {
-			caretColor: "var(--color-text-primary)",
 			padding: "8px 48px",
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
@@ -139,11 +140,11 @@ const staticEditorTheme = EditorView.theme({
 	".cm-foldPlaceholder": {
 		display: "none",
 	},
-	".cm-content ::selection": {
-		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent)",
+	".cm-selectionBackground": {
+		background: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent) !important",
 	},
-	"&.cm-composing .cm-content ::selection": {
-		backgroundColor: "transparent",
+	"&.cm-composing .cm-selectionBackground": {
+		background: "transparent !important",
 	},
 	".cm-heading-1": {
 		fontSize: "1.8em",
@@ -242,6 +243,24 @@ const staticEditorTheme = EditorView.theme({
 	".cm-task-checkmark": {
 		width: "0.6em",
 		height: "0.6em",
+	},
+	".cm-table-widget": {
+		margin: "8px 0",
+	},
+	".cm-table-widget table": {
+		borderCollapse: "collapse",
+	},
+	".cm-table-cell": {
+		border: "1px solid var(--color-border)",
+		padding: "6px 12px",
+		minWidth: "6em",
+		outline: "none",
+	},
+	".cm-table-cell:focus": {
+		boxShadow: "inset 0 0 0 2px var(--color-text-link)",
+	},
+	".cm-table-widget th": {
+		fontWeight: "700",
 	},
 	".cm-blockquote-line": {
 		borderLeft: "3px solid var(--color-border)",
@@ -470,6 +489,7 @@ export function MarkdownEditor({
 	const extensions = useMemo(
 		() => [
 			listKeymap,
+			tableKeymap,
 			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
@@ -493,6 +513,7 @@ export function MarkdownEditor({
 			blockquoteDecoration,
 			horizontalRuleDecoration,
 			mathDecoration,
+			tableDecoration,
 			...(showLinkCards ? [linkCardDecoration] : []),
 			wikilinkCompletion,
 			keymap.of([
@@ -556,8 +577,7 @@ export function MarkdownEditor({
 					basicSetup={{
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
-						// ::selection CSS で選択範囲スタイルを制御するため標準の描画を無効化
-						drawSelection: false,
+						drawSelection: true,
 						// 検索ハイライトは highlightQueryExtension で制御するため無効化
 						highlightSelectionMatches: false,
 						// Markdown エディタとしてシンプルな入力体験を優先するため無効化
