@@ -120,23 +120,23 @@ export function getCellAt(table: TableInfo, pos: number): CellCoord | null {
 	for (let r = 0; r < table.rows.length; r++) {
 		const row = table.rows[r];
 		if (pos < row.from || pos > row.to) continue;
+		// Find the cell whose content range is closest
+		let bestCol = 0;
+		let bestDist = Number.POSITIVE_INFINITY;
 		for (let c = 0; c < row.cells.length; c++) {
 			const cell = row.cells[c];
-			// Allow cursor to be at cell boundaries
-			if (c === row.cells.length - 1) {
-				if (pos >= cell.from - 2 && pos <= row.to) {
-					return { row: r, col: c, cell };
-				}
-			} else {
-				const nextCell = row.cells[c + 1];
-				if (pos >= cell.from - 2 && pos < nextCell.from - 2) {
-					return { row: r, col: c, cell };
-				}
+			if (pos >= cell.from && pos <= cell.to) {
+				return { row: r, col: c, cell };
+			}
+			// pos is in separator region; pick nearest cell
+			const dist = Math.min(Math.abs(pos - cell.from), Math.abs(pos - cell.to));
+			if (dist < bestDist) {
+				bestDist = dist;
+				bestCol = c;
 			}
 		}
-		// Fallback: return first cell of the row
 		if (row.cells.length > 0) {
-			return { row: r, col: 0, cell: row.cells[0] };
+			return { row: r, col: bestCol, cell: row.cells[bestCol] };
 		}
 	}
 	return null;
@@ -236,7 +236,7 @@ export function formatTable(table: TableInfo, state: EditorState): string {
 				} else if (align === "right") {
 					parts.push(`${"-".repeat(w)}:`);
 				} else {
-					parts.push(`:${"-".repeat(w)}`);
+					parts.push("-".repeat(w + 1));
 				}
 			}
 			lines.push(`| ${parts.join(" | ")} |`);

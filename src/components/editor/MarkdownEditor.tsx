@@ -245,8 +245,10 @@ const staticEditorTheme = EditorView.theme({
 		height: "0.6em",
 	},
 	".cm-table-widget": {
-		borderCollapse: "collapse",
 		margin: "8px 0",
+	},
+	".cm-table-widget table": {
+		borderCollapse: "collapse",
 	},
 	".cm-table-cell": {
 		border: "1px solid var(--color-border)",

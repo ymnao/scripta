@@ -133,14 +133,6 @@ export function focusCell(container: HTMLElement, row: number, col: number): voi
 	}
 }
 
-function applyCellStyle(el: HTMLElement, isHeader: boolean): void {
-	el.style.border = "1px solid var(--color-border)";
-	el.style.padding = "6px 12px";
-	el.style.minWidth = "6em";
-	el.style.outline = "none";
-	if (isHeader) el.style.fontWeight = "700";
-}
-
 /** セル内の <br> を `<br>` テキストとして読み取る。ゼロ幅スペースは除去する。 */
 function getCellTextContent(el: HTMLElement): string {
 	const parts: string[] = [];
@@ -235,12 +227,15 @@ const widgetPositions = new WeakMap<HTMLElement, number>();
 const widgetDataMap = new WeakMap<HTMLElement, TableData>();
 let pendingFocus: { row: number; col: number } | null = null;
 
-/** IME 状態追跡。compositionActive はコンポジション中に true。
- *  isComposing は compositionstart で true になり、compositionend 後の
+/** IME 状態追跡（ウィジェット単位）。compositionActive はコンポジション中に true。
+ *  composing は compositionstart で true になり、compositionend 後の
  *  最初の keyup で false になる。これにより確定 Enter の keydown を
  *  確実にスキップできる。 */
-let compositionActive = false;
-let isComposing = false;
+const compositionState = new WeakMap<HTMLElement, { active: boolean; composing: boolean }>();
+
+function getCompositionState(el: HTMLElement) {
+	return compositionState.get(el) ?? { active: false, composing: false };
+}
 
 function getDataFor(wrapperEl: HTMLElement): TableData | null {
 	return widgetDataMap.get(wrapperEl) ?? null;
@@ -348,7 +343,6 @@ class EditableTableWidget extends WidgetType {
 				cell.contentEditable = "true";
 				cell.dataset.row = String(idx);
 				cell.dataset.col = String(c);
-				applyCellStyle(cell, isHeader);
 				if (c < alignments.length) cell.style.textAlign = alignments[c];
 				tr.appendChild(cell);
 			}
@@ -371,7 +365,6 @@ class EditableTableWidget extends WidgetType {
 				cell.contentEditable = "true";
 				cell.dataset.row = String(r);
 				cell.dataset.col = String(cells.length);
-				applyCellStyle(cell, isHeader);
 				if (cells.length < alignments.length) cell.style.textAlign = alignments[cells.length];
 				tr.appendChild(cell);
 				cells.push(cell);
@@ -403,7 +396,10 @@ class EditableTableWidget extends WidgetType {
 		return true;
 	}
 
-	ignoreEvent(): boolean {
+	ignoreEvent(e: Event): boolean {
+		if (e instanceof KeyboardEvent && (e.metaKey || e.ctrlKey)) {
+			return false;
+		}
 		return true;
 	}
 
@@ -411,11 +407,9 @@ class EditableTableWidget extends WidgetType {
 		const wrapper = document.createElement("div");
 		wrapper.className = "cm-table-widget";
 		wrapper.contentEditable = "false";
-		wrapper.style.margin = "4px 0";
 		wrapper.dataset.tableFrom = String(this.tableFrom);
 
 		const table = document.createElement("table");
-		table.style.borderCollapse = "collapse";
 
 		const { rows, alignments } = this.data;
 		const colCount = Math.max(...rows.map((r) => r.cells.length), alignments.length);
@@ -432,7 +426,6 @@ class EditableTableWidget extends WidgetType {
 				cell.contentEditable = "true";
 				cell.dataset.row = String(r);
 				cell.dataset.col = String(c);
-				applyCellStyle(cell, isHeader);
 				if (c < alignments.length) cell.style.textAlign = alignments[c];
 				tr.appendChild(cell);
 			}
@@ -446,18 +439,16 @@ class EditableTableWidget extends WidgetType {
 		wrapper.addEventListener("focusout", (e) => handleFocusOut(e as FocusEvent, view, wrapper));
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
 		wrapper.addEventListener("compositionstart", () => {
-			compositionActive = true;
-			isComposing = true;
+			compositionState.set(wrapper, { active: true, composing: true });
 		});
 		wrapper.addEventListener("compositionend", () => {
-			compositionActive = false;
-			// isComposing は true のまま。次の keyup で解除する。
+			const state = getCompositionState(wrapper);
+			compositionState.set(wrapper, { active: false, composing: state.composing });
 		});
 		wrapper.addEventListener("keyup", () => {
-			// コンポジション終了後の keyup でのみフラグを解除する。
-			// コンポジション中の keyup では解除しない。
-			if (isComposing && !compositionActive) {
-				isComposing = false;
+			const state = getCompositionState(wrapper);
+			if (state.composing && !state.active) {
+				compositionState.delete(wrapper);
 			}
 		});
 
@@ -498,7 +489,8 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 
 function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElement): void {
 	// IME コンポジション中はすべてのキー処理をスキップする
-	if (e.isComposing || isComposing) return;
+	const imeState = getCompositionState(wrapperEl);
+	if (e.isComposing || imeState.composing) return;
 
 	const target = e.target as HTMLElement;
 	if (!target.dataset.row || !target.dataset.col) return;
@@ -614,7 +606,12 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	}
 
 	// Mod+key はエディタのショートカット (Mod-s, Mod-b 等) に委譲する
-	if (e.metaKey || e.ctrlKey) return;
+	// contentEditable のリッチテキストコマンド（太字・斜体等）を抑止しつつ、
+	// stopPropagation しないことで CM6 のキーマップに処理を委譲する
+	if (e.metaKey || e.ctrlKey) {
+		e.preventDefault();
+		return;
+	}
 
 	e.stopPropagation();
 }
@@ -624,8 +621,7 @@ function handleFocusOut(e: FocusEvent, view: EditorView, wrapperEl: HTMLElement)
 	if (related && wrapperEl.contains(related)) return;
 
 	// フォーカスがテーブル外に移動したら IME フラグをリセット
-	compositionActive = false;
-	isComposing = false;
+	compositionState.delete(wrapperEl);
 
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (!tableNode) return;
