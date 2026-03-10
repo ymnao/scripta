@@ -468,7 +468,7 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 			nextRow++;
 		}
 		if (nextRow >= rows.length) {
-			insertRowAfter(view, wrapperEl, rows.length - 1, 0);
+			exitTableDown(view, wrapperEl);
 			return;
 		}
 		focusCell(wrapperEl, nextRow, nextCol);
