@@ -118,7 +118,7 @@ function findTableNode(
 	return null;
 }
 
-function focusCell(container: HTMLElement, row: number, col: number): void {
+export function focusCell(container: HTMLElement, row: number, col: number): void {
 	const cell = container.querySelector(
 		`[data-row="${row}"][data-col="${col}"]`,
 	) as HTMLElement | null;
@@ -201,7 +201,49 @@ function formatTableLines(container: HTMLElement, data: TableData): string[] {
 // ── Widget ────────────────────────────────────────────
 
 const widgetPositions = new WeakMap<HTMLElement, number>();
+/** Stores current TableData per wrapper element so event handlers always
+ *  read up-to-date data (updateDOM is called on a NEW widget instance,
+ *  but the event listeners were attached by the OLD instance's buildDOM). */
+const widgetDataMap = new WeakMap<HTMLElement, TableData>();
 let pendingFocus: { row: number; col: number } | null = null;
+
+function getDataFor(wrapperEl: HTMLElement): TableData | null {
+	return widgetDataMap.get(wrapperEl) ?? null;
+}
+
+function colCountOf(data: TableData): number {
+	return Math.max(...data.rows.map((r) => r.cells.length), data.alignments.length);
+}
+
+function emptyRow(data: TableData): string {
+	return `| ${new Array(colCountOf(data)).fill("  ").join(" | ")} |`;
+}
+
+function getTableNodeFor(view: EditorView, wrapperEl: HTMLElement) {
+	const pos = widgetPositions.get(wrapperEl);
+	if (pos === undefined) return null;
+	return findTableNode(view.state, pos);
+}
+
+function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
+	(document.activeElement as HTMLElement)?.blur();
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (tableNode) {
+		const after = Math.min(tableNode.to + 1, view.state.doc.length);
+		view.dispatch({ selection: { anchor: after } });
+		view.focus();
+	}
+}
+
+function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
+	(document.activeElement as HTMLElement)?.blur();
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (tableNode) {
+		const before = Math.max(tableNode.from - 1, 0);
+		view.dispatch({ selection: { anchor: before } });
+		view.focus();
+	}
+}
 
 class EditableTableWidget extends WidgetType {
 	constructor(
@@ -228,6 +270,7 @@ class EditableTableWidget extends WidgetType {
 	toDOM(view: EditorView): HTMLElement {
 		const wrapper = this.buildDOM(view);
 		widgetPositions.set(wrapper, this.tableFrom);
+		widgetDataMap.set(wrapper, this.data);
 
 		if (pendingFocus) {
 			const focus = pendingFocus;
@@ -240,9 +283,13 @@ class EditableTableWidget extends WidgetType {
 
 	updateDOM(dom: HTMLElement, view: EditorView): boolean {
 		widgetPositions.set(dom, this.tableFrom);
+		widgetDataMap.set(dom, this.data);
+		dom.dataset.tableFrom = String(this.tableFrom);
 
 		const tableEl = dom.querySelector("table");
 		if (!tableEl) return false;
+
+		const structuralChange = pendingFocus !== null;
 
 		const focused = dom.querySelector(":focus") as HTMLElement | null;
 		const focusedRow = focused?.dataset.row;
@@ -298,7 +345,7 @@ class EditableTableWidget extends WidgetType {
 				const cell = cells[c];
 				cell.dataset.row = String(r);
 				cell.dataset.col = String(c);
-				if (focusedRow === String(r) && focusedCol === String(c)) continue;
+				if (!structuralChange && focusedRow === String(r) && focusedCol === String(c)) continue;
 				const content = c < row.cells.length ? row.cells[c].content : "";
 				if (cell.textContent !== content) {
 					cell.textContent = content;
@@ -324,6 +371,7 @@ class EditableTableWidget extends WidgetType {
 		wrapper.className = "cm-table-widget";
 		wrapper.contentEditable = "false";
 		wrapper.style.margin = "4px 0";
+		wrapper.dataset.tableFrom = String(this.tableFrom);
 
 		const table = document.createElement("table");
 		table.style.borderCollapse = "collapse";
@@ -352,235 +400,445 @@ class EditableTableWidget extends WidgetType {
 
 		wrapper.appendChild(table);
 
-		wrapper.addEventListener("input", (e) => this.handleInput(e, view, wrapper));
-		wrapper.addEventListener("keydown", (e) => this.handleKeydown(e, view, wrapper));
-		wrapper.addEventListener("focusout", (e) =>
-			this.handleFocusOut(e as FocusEvent, view, wrapper),
-		);
+		wrapper.addEventListener("input", (e) => handleInput(e, view, wrapper));
+		wrapper.addEventListener("keydown", (e) => handleKeydown(e, view, wrapper));
+		wrapper.addEventListener("focusout", (e) => handleFocusOut(e as FocusEvent, view, wrapper));
+		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
 
 		return wrapper;
 	}
+}
 
-	private handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
-		const target = e.target as HTMLElement;
-		const rowIdx = Number(target.dataset.row);
-		if (Number.isNaN(rowIdx)) return;
+// ── Event handlers (module-level, read data from widgetDataMap) ──
 
-		const pos = widgetPositions.get(wrapperEl);
-		if (pos === undefined) return;
+function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
+	const target = e.target as HTMLElement;
+	const rowIdx = Number(target.dataset.row);
+	if (Number.isNaN(rowIdx)) return;
 
-		const tableNode = findTableNode(view.state, pos);
-		if (!tableNode) return;
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
 
-		const lineOffset = widgetRowToLineOffset(rowIdx);
-		const lineNum = tableNode.startLine + lineOffset;
-		if (lineNum > view.state.doc.lines) return;
+	const lineOffset = widgetRowToLineOffset(rowIdx);
+	const lineNum = tableNode.startLine + lineOffset;
+	if (lineNum > view.state.doc.lines) return;
 
-		const docLine = view.state.doc.line(lineNum);
-		const tr = target.closest("tr");
-		if (!tr) return;
+	const docLine = view.state.doc.line(lineNum);
+	const tr = target.closest("tr");
+	if (!tr) return;
 
-		const cellContents: string[] = [];
-		for (const td of tr.querySelectorAll("th, td")) {
-			cellContents.push(td.textContent || "");
-		}
-
-		const newLine = `| ${cellContents.join(" | ")} |`;
-		if (newLine === view.state.doc.sliceString(docLine.from, docLine.to)) return;
-
-		view.dispatch({
-			changes: { from: docLine.from, to: docLine.to, insert: newLine },
-		});
+	const cellContents: string[] = [];
+	for (const td of tr.querySelectorAll("th, td")) {
+		cellContents.push(td.textContent || "");
 	}
 
-	private handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElement): void {
-		const target = e.target as HTMLElement;
-		if (!target.dataset.row || !target.dataset.col) return;
+	const newLine = `| ${cellContents.join(" | ")} |`;
+	if (newLine === view.state.doc.sliceString(docLine.from, docLine.to)) return;
 
-		const rowIdx = Number(target.dataset.row);
-		const colIdx = Number(target.dataset.col);
-		const { rows, alignments } = this.data;
-		const colCount = Math.max(...rows.map((r) => r.cells.length), alignments.length);
+	view.dispatch({
+		changes: { from: docLine.from, to: docLine.to, insert: newLine },
+	});
+}
 
-		if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
-			(document.activeElement as HTMLElement)?.blur();
-			view.focus();
-			return;
-		}
+function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElement): void {
+	const target = e.target as HTMLElement;
+	if (!target.dataset.row || !target.dataset.col) return;
 
-		if (e.key === "Tab" && !e.shiftKey) {
-			e.preventDefault();
-			e.stopPropagation();
-			let nextRow = rowIdx;
-			let nextCol = colIdx + 1;
-			if (nextCol >= colCount) {
-				nextCol = 0;
-				nextRow++;
-			}
-			if (nextRow >= rows.length) {
-				this.addRowAtEnd(view, wrapperEl, rows.length, 0);
-				return;
-			}
-			focusCell(wrapperEl, nextRow, nextCol);
-			return;
-		}
+	const data = getDataFor(wrapperEl);
+	if (!data) return;
 
-		if (e.key === "Tab" && e.shiftKey) {
-			e.preventDefault();
-			e.stopPropagation();
-			let prevRow = rowIdx;
-			let prevCol = colIdx - 1;
-			if (prevCol < 0) {
-				prevRow--;
-				prevCol = colCount - 1;
-			}
-			if (prevRow < 0) return;
-			focusCell(wrapperEl, prevRow, prevCol);
-			return;
-		}
+	const rowIdx = Number(target.dataset.row);
+	const colIdx = Number(target.dataset.col);
+	const { rows } = data;
+	const colCount = colCountOf(data);
 
-		if (e.key === "Enter" && !e.shiftKey) {
-			e.preventDefault();
-			e.stopPropagation();
-			this.insertRowAfter(view, wrapperEl, rowIdx, 0);
-			return;
-		}
+	if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
+		(document.activeElement as HTMLElement)?.blur();
+		view.focus();
+		return;
+	}
 
-		if (e.key === "Backspace" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
-			e.preventDefault();
-			e.stopPropagation();
-			this.deleteRowAt(view, wrapperEl, rowIdx);
-			return;
-		}
-
-		if (e.key === "Escape") {
-			e.preventDefault();
-			(document.activeElement as HTMLElement)?.blur();
-			const pos = widgetPositions.get(wrapperEl);
-			if (pos !== undefined) {
-				const tableNode = findTableNode(view.state, pos);
-				if (tableNode) {
-					const after = Math.min(tableNode.to + 1, view.state.doc.length);
-					view.dispatch({ selection: { anchor: after } });
-					view.focus();
-				}
-			}
-			return;
-		}
-
-		if (e.key === "|") {
-			e.preventDefault();
-			return;
-		}
-
+	if (e.key === "Tab" && !e.shiftKey) {
+		e.preventDefault();
 		e.stopPropagation();
+		let nextRow = rowIdx;
+		let nextCol = colIdx + 1;
+		if (nextCol >= colCount) {
+			nextCol = 0;
+			nextRow++;
+		}
+		if (nextRow >= rows.length) {
+			insertRowAfter(view, wrapperEl, rows.length - 1, 0);
+			return;
+		}
+		focusCell(wrapperEl, nextRow, nextCol);
+		return;
 	}
 
-	private handleFocusOut(e: FocusEvent, view: EditorView, wrapperEl: HTMLElement): void {
-		const related = e.relatedTarget as HTMLElement | null;
-		if (related && wrapperEl.contains(related)) return;
+	if (e.key === "Tab" && e.shiftKey) {
+		e.preventDefault();
+		e.stopPropagation();
+		let prevRow = rowIdx;
+		let prevCol = colIdx - 1;
+		if (prevCol < 0) {
+			prevRow--;
+			prevCol = colCount - 1;
+		}
+		if (prevRow < 0) return;
+		focusCell(wrapperEl, prevRow, prevCol);
+		return;
+	}
 
-		const pos = widgetPositions.get(wrapperEl);
-		if (pos === undefined) return;
+	if (e.key === "Enter" && !e.shiftKey) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (rowIdx + 1 < rows.length) {
+			focusCell(wrapperEl, rowIdx + 1, colIdx);
+		}
+		return;
+	}
 
-		const tableNode = findTableNode(view.state, pos);
-		if (!tableNode) return;
+	if (e.key === "ArrowDown") {
+		e.preventDefault();
+		e.stopPropagation();
+		if (rowIdx + 1 < rows.length) {
+			focusCell(wrapperEl, rowIdx + 1, colIdx);
+		} else {
+			exitTableDown(view, wrapperEl);
+		}
+		return;
+	}
 
-		const formatted = formatTableLines(wrapperEl, this.data);
-		const original: string[] = [];
-		for (let l = tableNode.startLine; l <= tableNode.endLine; l++) {
-			original.push(view.state.doc.line(l).text);
+	if (e.key === "ArrowUp") {
+		e.preventDefault();
+		e.stopPropagation();
+		if (rowIdx - 1 >= 0) {
+			focusCell(wrapperEl, rowIdx - 1, colIdx);
+		} else {
+			exitTableUp(view, wrapperEl);
+		}
+		return;
+	}
+
+	if (e.key === "Escape") {
+		e.preventDefault();
+		exitTableDown(view, wrapperEl);
+		return;
+	}
+
+	if (e.key === "|") {
+		e.preventDefault();
+		return;
+	}
+
+	e.stopPropagation();
+}
+
+function handleFocusOut(e: FocusEvent, view: EditorView, wrapperEl: HTMLElement): void {
+	const related = e.relatedTarget as HTMLElement | null;
+	if (related && wrapperEl.contains(related)) return;
+
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const lines: string[] = [];
+	for (let l = tableNode.startLine; l <= tableNode.endLine; l++) {
+		lines.push(view.state.doc.line(l).text);
+	}
+	const currentData = parseTableFromLines(lines);
+	if (!currentData) return;
+
+	const formatted = formatTableLines(wrapperEl, currentData);
+	if (formatted.join("\n") === lines.join("\n")) return;
+
+	const from = view.state.doc.line(tableNode.startLine).from;
+	const to = view.state.doc.line(tableNode.endLine).to;
+	view.dispatch({
+		changes: { from, to, insert: formatted.join("\n") },
+	});
+}
+
+// ── Row operations ───────────────────────────────────
+
+function insertRowAfter(
+	view: EditorView,
+	wrapperEl: HTMLElement,
+	widgetRowIdx: number,
+	focusCol: number,
+): void {
+	const data = getDataFor(wrapperEl);
+	if (!data) return;
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const lineOffset = widgetRowIdx === 0 ? 1 : widgetRowToLineOffset(widgetRowIdx);
+	const lineNum = tableNode.startLine + lineOffset;
+	const docLine = view.state.doc.line(lineNum);
+
+	pendingFocus = { row: widgetRowIdx + 1, col: focusCol };
+	view.dispatch({
+		changes: { from: docLine.to, to: docLine.to, insert: `\n${emptyRow(data)}` },
+	});
+}
+
+function insertRowBefore(
+	view: EditorView,
+	wrapperEl: HTMLElement,
+	widgetRowIdx: number,
+	focusCol: number,
+): void {
+	if (widgetRowIdx === 0) return;
+	const data = getDataFor(wrapperEl);
+	if (!data) return;
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const lineOffset = widgetRowToLineOffset(widgetRowIdx);
+	const lineNum = tableNode.startLine + lineOffset;
+	const docLine = view.state.doc.line(lineNum);
+
+	// Focus stays on the original cell (which shifts down by 1)
+	pendingFocus = { row: widgetRowIdx + 1, col: focusCol };
+	view.dispatch({
+		changes: { from: docLine.from - 1, to: docLine.from - 1, insert: `\n${emptyRow(data)}` },
+	});
+}
+
+function deleteRowAt(view: EditorView, wrapperEl: HTMLElement, widgetRowIdx: number): void {
+	const data = getDataFor(wrapperEl);
+	if (!data) return;
+	if (data.rows[widgetRowIdx]?.kind === "header") return;
+	const dataRows = data.rows.filter((r) => r.kind === "data");
+	if (dataRows.length <= 1) return;
+
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const lineOffset = widgetRowToLineOffset(widgetRowIdx);
+	const lineNum = tableNode.startLine + lineOffset;
+	const docLine = view.state.doc.line(lineNum);
+
+	pendingFocus = { row: Math.min(widgetRowIdx, data.rows.length - 2), col: 0 };
+	view.dispatch({
+		changes: { from: docLine.from - 1, to: docLine.to },
+	});
+}
+
+// ── Column operations ────────────────────────────────
+
+function insertColumnAt(
+	view: EditorView,
+	wrapperEl: HTMLElement,
+	beforeCol: number,
+	focusRow: number,
+	focusCol: number,
+): void {
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const newLines: string[] = [];
+	for (let l = tableNode.startLine; l <= tableNode.endLine; l++) {
+		const text = view.state.doc.line(l).text;
+		const cells = parseRowCells(text);
+		const isDelimiter = delimiterRowRe.test(text);
+		cells.splice(beforeCol, 0, isDelimiter ? "---" : "");
+		newLines.push(`| ${cells.join(" | ")} |`);
+	}
+
+	const from = view.state.doc.line(tableNode.startLine).from;
+	const to = view.state.doc.line(tableNode.endLine).to;
+	pendingFocus = { row: focusRow, col: focusCol };
+	view.dispatch({ changes: { from, to, insert: newLines.join("\n") } });
+}
+
+function deleteColumnAt(
+	view: EditorView,
+	wrapperEl: HTMLElement,
+	col: number,
+	focusRow: number,
+): void {
+	const data = getDataFor(wrapperEl);
+	if (!data) return;
+	const cc = colCountOf(data);
+	if (cc <= 2) return;
+
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const newLines: string[] = [];
+	for (let l = tableNode.startLine; l <= tableNode.endLine; l++) {
+		const text = view.state.doc.line(l).text;
+		const cells = parseRowCells(text);
+		cells.splice(col, 1);
+		newLines.push(`| ${cells.join(" | ")} |`);
+	}
+
+	const from = view.state.doc.line(tableNode.startLine).from;
+	const to = view.state.doc.line(tableNode.endLine).to;
+	pendingFocus = { row: focusRow, col: Math.min(col, cc - 2) };
+	view.dispatch({ changes: { from, to, insert: newLines.join("\n") } });
+}
+
+// ── Table deletion ───────────────────────────────────
+
+function deleteTable(view: EditorView, wrapperEl: HTMLElement): void {
+	const tableNode = getTableNodeFor(view, wrapperEl);
+	if (!tableNode) return;
+
+	const from = view.state.doc.line(tableNode.startLine).from;
+	const to = view.state.doc.line(tableNode.endLine).to;
+	const deleteTo = to < view.state.doc.length ? to + 1 : to;
+	const deleteFrom = from > 0 ? from - 1 : from;
+
+	view.dispatch({
+		changes: { from: deleteFrom, to: deleteTo, insert: "" },
+		selection: { anchor: Math.min(deleteFrom, view.state.doc.length) },
+	});
+	view.focus();
+}
+
+// ── Context menu ─────────────────────────────────────
+
+function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement): void {
+	e.preventDefault();
+	e.stopPropagation();
+
+	document.querySelector(".cm-table-context-menu")?.remove();
+
+	const target = (e.target as HTMLElement).closest("[data-row][data-col]") as HTMLElement | null;
+	if (!target) return;
+
+	const data = getDataFor(wrapperEl);
+	if (!data) return;
+
+	const rowIdx = Number(target.dataset.row);
+	const colIdx = Number(target.dataset.col);
+	const { rows } = data;
+	const colCount = colCountOf(data);
+	const dataRows = rows.filter((r) => r.kind === "data");
+	const isHeader = rows[rowIdx]?.kind === "header";
+
+	type MenuItem = { label: string; action: () => void; disabled?: boolean } | null;
+	const items: MenuItem[] = [
+		{
+			label: "上に行を追加",
+			action: () => insertRowBefore(view, wrapperEl, rowIdx, colIdx),
+			disabled: isHeader,
+		},
+		{ label: "下に行を追加", action: () => insertRowAfter(view, wrapperEl, rowIdx, colIdx) },
+		{
+			label: "行を削除",
+			action: () => deleteRowAt(view, wrapperEl, rowIdx),
+			disabled: isHeader || dataRows.length <= 1,
+		},
+		null,
+		{
+			label: "左に列を追加",
+			// Focus stays on original column (shifts right)
+			action: () => insertColumnAt(view, wrapperEl, colIdx, rowIdx, colIdx + 1),
+		},
+		{
+			label: "右に列を追加",
+			// Focus stays on original column
+			action: () => insertColumnAt(view, wrapperEl, colIdx + 1, rowIdx, colIdx),
+		},
+		{
+			label: "列を削除",
+			action: () => deleteColumnAt(view, wrapperEl, colIdx, rowIdx),
+			disabled: colCount <= 2,
+		},
+		null,
+		{ label: "テーブルを削除", action: () => deleteTable(view, wrapperEl) },
+	];
+
+	const menu = document.createElement("div");
+	menu.className = "cm-table-context-menu";
+	Object.assign(menu.style, {
+		position: "fixed",
+		zIndex: "10000",
+		left: `${e.clientX}px`,
+		top: `${e.clientY}px`,
+		backgroundColor: "var(--color-bg-primary)",
+		color: "var(--color-text-primary)",
+		border: "1px solid var(--color-border)",
+		borderRadius: "6px",
+		padding: "4px 0",
+		boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+		minWidth: "160px",
+		fontSize: "13px",
+	});
+
+	const close = () => {
+		menu.remove();
+		document.removeEventListener("mousedown", onOutside);
+		document.removeEventListener("keydown", onEsc);
+	};
+	const onOutside = (ev: MouseEvent) => {
+		if (!menu.contains(ev.target as Node)) close();
+	};
+	const onEsc = (ev: KeyboardEvent) => {
+		if (ev.key === "Escape") {
+			ev.preventDefault();
+			close();
+		}
+	};
+
+	for (const item of items) {
+		if (item === null) {
+			const sep = document.createElement("div");
+			Object.assign(sep.style, {
+				height: "1px",
+				backgroundColor: "var(--color-border)",
+				margin: "4px 0",
+			});
+			menu.appendChild(sep);
+			continue;
 		}
 
-		if (formatted.join("\n") === original.join("\n")) return;
-
-		const from = view.state.doc.line(tableNode.startLine).from;
-		const to = view.state.doc.line(tableNode.endLine).to;
-		view.dispatch({
-			changes: { from, to, insert: formatted.join("\n") },
+		const el = document.createElement("div");
+		el.textContent = item.label;
+		Object.assign(el.style, {
+			padding: "6px 12px",
+			cursor: item.disabled ? "default" : "pointer",
+			opacity: item.disabled ? "0.4" : "1",
+			whiteSpace: "nowrap",
 		});
+
+		if (!item.disabled) {
+			el.addEventListener("mouseenter", () => {
+				el.style.backgroundColor =
+					"color-mix(in srgb, var(--color-text-secondary) 10%, transparent)";
+			});
+			el.addEventListener("mouseleave", () => {
+				el.style.backgroundColor = "";
+			});
+			el.addEventListener("mousedown", (ev) => {
+				ev.preventDefault();
+				ev.stopPropagation();
+				close();
+				item.action();
+			});
+		}
+
+		menu.appendChild(el);
 	}
 
-	private addRowAtEnd(
-		view: EditorView,
-		wrapperEl: HTMLElement,
-		focusRow: number,
-		focusCol: number,
-	): void {
-		const pos = widgetPositions.get(wrapperEl);
-		if (pos === undefined) return;
-		const tableNode = findTableNode(view.state, pos);
-		if (!tableNode) return;
+	document.body.appendChild(menu);
 
-		const lastLine = view.state.doc.line(tableNode.endLine);
-		const colCount = Math.max(
-			...this.data.rows.map((r) => r.cells.length),
-			this.data.alignments.length,
-		);
-		const newRow = `| ${new Array(colCount).fill("  ").join(" | ")} |`;
+	requestAnimationFrame(() => {
+		const rect = menu.getBoundingClientRect();
+		if (rect.right > window.innerWidth) {
+			menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+		}
+		if (rect.bottom > window.innerHeight) {
+			menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+		}
+	});
 
-		pendingFocus = { row: focusRow, col: focusCol };
-		view.dispatch({
-			changes: {
-				from: lastLine.to,
-				to: lastLine.to,
-				insert: `\n${newRow}`,
-			},
-		});
-	}
-
-	private insertRowAfter(
-		view: EditorView,
-		wrapperEl: HTMLElement,
-		widgetRowIdx: number,
-		focusCol: number,
-	): void {
-		const pos = widgetPositions.get(wrapperEl);
-		if (pos === undefined) return;
-		const tableNode = findTableNode(view.state, pos);
-		if (!tableNode) return;
-
-		const lineOffset = widgetRowToLineOffset(widgetRowIdx);
-		const lineNum = tableNode.startLine + lineOffset;
-		const docLine = view.state.doc.line(lineNum);
-		const colCount = Math.max(
-			...this.data.rows.map((r) => r.cells.length),
-			this.data.alignments.length,
-		);
-		const newRow = `| ${new Array(colCount).fill("  ").join(" | ")} |`;
-
-		pendingFocus = { row: widgetRowIdx + 1, col: focusCol };
-		view.dispatch({
-			changes: {
-				from: docLine.to,
-				to: docLine.to,
-				insert: `\n${newRow}`,
-			},
-		});
-	}
-
-	private deleteRowAt(view: EditorView, wrapperEl: HTMLElement, widgetRowIdx: number): void {
-		if (this.data.rows[widgetRowIdx].kind === "header") return;
-		const dataRows = this.data.rows.filter((r) => r.kind === "data");
-		if (dataRows.length <= 1) return;
-
-		const pos = widgetPositions.get(wrapperEl);
-		if (pos === undefined) return;
-		const tableNode = findTableNode(view.state, pos);
-		if (!tableNode) return;
-
-		const lineOffset = widgetRowToLineOffset(widgetRowIdx);
-		const lineNum = tableNode.startLine + lineOffset;
-		const docLine = view.state.doc.line(lineNum);
-
-		pendingFocus = {
-			row: Math.min(widgetRowIdx, this.data.rows.length - 2),
-			col: 0,
-		};
-		view.dispatch({
-			changes: { from: docLine.from - 1, to: docLine.to },
-		});
-	}
+	setTimeout(() => {
+		document.addEventListener("mousedown", onOutside);
+		document.addEventListener("keydown", onEsc);
+	});
 }
 
 // ── Decoration builder (takes EditorState, not EditorView) ──
@@ -594,7 +852,14 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 			if (node.name !== "Table") return;
 
 			const startLine = state.doc.lineAt(node.from).number;
-			const endLine = state.doc.lineAt(node.to).number;
+			let endLine = state.doc.lineAt(node.to).number;
+
+			// Trim trailing non-table lines (parser may include adjacent text)
+			while (endLine > startLine) {
+				const text = state.doc.line(endLine).text.trim();
+				if (text.startsWith("|") || delimiterRowRe.test(text)) break;
+				endLine--;
+			}
 
 			const lines: string[] = [];
 			for (let l = startLine; l <= endLine; l++) {
@@ -607,11 +872,14 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 			const minCols = Math.min(...tableData.rows.map((r) => r.cells.length));
 			if (minCols < 2) return;
 
+			const from = state.doc.line(startLine).from;
+			const to = state.doc.line(endLine).to;
+
 			ranges.push(
 				Decoration.replace({
-					widget: new EditableTableWidget(tableData, node.from),
+					widget: new EditableTableWidget(tableData, from),
 					block: true,
-				}).range(node.from, node.to),
+				}).range(from, to),
 			);
 
 			return false;
