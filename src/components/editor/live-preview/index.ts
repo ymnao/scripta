@@ -10,4 +10,6 @@ export { listDecoration, listKeymap } from "./lists";
 export { mathDecoration } from "./math";
 export { strikethroughDecoration } from "./strikethrough";
 export { wikilinkDecoration } from "./wikilinks";
+export { tableDecoration } from "./table-decoration";
+export { insertTable, tableKeymap } from "./tables";
 export { wikilinkCompletion } from "./wikilink-completion";

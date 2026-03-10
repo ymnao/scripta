@@ -37,6 +37,8 @@ import {
 	listKeymap,
 	mathDecoration,
 	strikethroughDecoration,
+	tableDecoration,
+	tableKeymap,
 	wikilinkCompletion,
 	wikilinkDecoration,
 } from "./live-preview";
@@ -242,6 +244,22 @@ const staticEditorTheme = EditorView.theme({
 	".cm-task-checkmark": {
 		width: "0.6em",
 		height: "0.6em",
+	},
+	".cm-table-widget": {
+		borderCollapse: "collapse",
+		margin: "4px 0",
+	},
+	".cm-table-cell": {
+		border: "1px solid var(--color-border)",
+		padding: "4px 8px",
+		minWidth: "3em",
+		outline: "none",
+	},
+	".cm-table-cell:focus": {
+		boxShadow: "inset 0 0 0 2px var(--color-text-link)",
+	},
+	".cm-table-widget th": {
+		fontWeight: "700",
 	},
 	".cm-blockquote-line": {
 		borderLeft: "3px solid var(--color-border)",
@@ -470,6 +488,7 @@ export function MarkdownEditor({
 	const extensions = useMemo(
 		() => [
 			listKeymap,
+			tableKeymap,
 			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
@@ -493,6 +512,7 @@ export function MarkdownEditor({
 			blockquoteDecoration,
 			horizontalRuleDecoration,
 			mathDecoration,
+			tableDecoration,
 			...(showLinkCards ? [linkCardDecoration] : []),
 			wikilinkCompletion,
 			keymap.of([
