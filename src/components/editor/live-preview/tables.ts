@@ -45,7 +45,7 @@ function findTableNodeAt(view: EditorView, lineNum: number): { from: number } | 
 	const tree = syntaxTree(view.state);
 	let node = tree.resolve(lineFrom, 1);
 	while (node) {
-		if (node.name === "Table") return { from: node.from };
+		if (node.name === "Table") return { from: view.state.doc.lineAt(node.from).from };
 		if (!node.parent) break;
 		node = node.parent;
 	}

@@ -283,7 +283,8 @@ function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
 	(document.activeElement as HTMLElement)?.blur();
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (tableNode) {
-		const after = Math.min(tableNode.to + 1, view.state.doc.length);
+		const endLinePos = view.state.doc.line(tableNode.endLine).to;
+		const after = Math.min(endLinePos + 1, view.state.doc.length);
 		view.dispatch({ selection: { anchor: after } });
 		view.focus();
 	}
@@ -293,7 +294,8 @@ function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
 	(document.activeElement as HTMLElement)?.blur();
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (tableNode) {
-		const before = Math.max(tableNode.from - 1, 0);
+		const startLinePos = view.state.doc.line(tableNode.startLine).from;
+		const before = Math.max(startLinePos - 1, 0);
 		view.dispatch({ selection: { anchor: before } });
 		view.focus();
 	}
@@ -347,7 +349,7 @@ class EditableTableWidget extends WidgetType {
 		const tableEl = dom.querySelector("table");
 		if (!tableEl) return false;
 
-		const structuralChange = pendingFocus !== null;
+		const structuralChange = pendingFocus !== null && pendingFocus.tableFrom === this.tableFrom;
 
 		const focused = dom.querySelector(":focus") as HTMLElement | null;
 		const focusedRow = focused?.dataset.row;
@@ -834,11 +836,18 @@ function deleteTable(view: EditorView, wrapperEl: HTMLElement): void {
 
 // ── Context menu ─────────────────────────────────────
 
+/** 前回のコンテキストメニューを閉じてリスナーも解除する */
+let activeMenuCleanup: (() => void) | null = null;
+
 function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement): void {
 	e.preventDefault();
 	e.stopPropagation();
 
-	document.querySelector(".cm-table-context-menu")?.remove();
+	// 前回のメニューが残っていればリスナーごと確実に除去
+	if (activeMenuCleanup) {
+		activeMenuCleanup();
+		activeMenuCleanup = null;
+	}
 
 	const target = (e.target as HTMLElement).closest("[data-row][data-col]") as HTMLElement | null;
 	if (!target) return;
@@ -907,6 +916,7 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 		menu.remove();
 		document.removeEventListener("mousedown", onOutside);
 		document.removeEventListener("keydown", onEsc);
+		activeMenuCleanup = null;
 	};
 	const onOutside = (ev: MouseEvent) => {
 		if (!menu.contains(ev.target as Node)) close();
@@ -917,6 +927,7 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 			close();
 		}
 	};
+	activeMenuCleanup = close;
 
 	for (const item of items) {
 		if (item === null) {
