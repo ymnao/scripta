@@ -146,7 +146,7 @@ describe("formatTable", () => {
 		const formatted = formatTable(table, state);
 		const lines = formatted.split("\n");
 		expect(lines[0]).toBe("| A            | BB  | CCC |");
-		expect(lines[1]).toBe("| ------------- | ---- | ---- |");
+		expect(lines[1]).toBe("| ------------ | --- | --- |");
 		expect(lines[2]).toBe("| long content | x   | y   |");
 	});
 
@@ -161,7 +161,7 @@ describe("formatTable", () => {
 		const formatted = formatTable(t, state);
 		const lines = formatted.split("\n");
 		expect(lines[0]).toBe("| 名前 | Age |");
-		expect(lines[1]).toBe("| ----- | ---- |");
+		expect(lines[1]).toBe("| ---- | --- |");
 		expect(lines[2]).toBe("| 太郎 | 20  |");
 	});
 
@@ -176,7 +176,7 @@ describe("formatTable", () => {
 		const formatted = formatTable(t, state);
 		const lines = formatted.split("\n");
 		expect(lines[0]).toBe("| Left | Center | Right |");
-		expect(lines[1]).toBe("| ----- | :------: | -----: |");
+		expect(lines[1]).toBe("| ---- | :----: | ----: |");
 		expect(lines[2]).toBe("| a    | b      | c     |");
 	});
 });

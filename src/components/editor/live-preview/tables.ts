@@ -22,13 +22,17 @@ export function insertTable(view: EditorView): boolean {
 		insertFrom = line.from;
 	}
 
+	// After the transaction, the table starts at insertFrom (empty line)
+	// or at insertFrom + 1 (non-empty line, due to prepended \n)
+	const tableFrom = line.text.trim().length > 0 ? insertFrom + 1 : insertFrom;
+
 	view.dispatch({
 		changes: {
 			from: insertFrom,
 			to: insertFrom === line.from ? line.to : insertFrom,
 			insert,
 		},
-		effects: [focusTableCellEffect.of({ row: 0, col: 0 })],
+		effects: [focusTableCellEffect.of({ tableFrom, row: 0, col: 0 })],
 	});
 	return true;
 }

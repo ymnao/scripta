@@ -232,11 +232,11 @@ export function formatTable(table: TableInfo, state: EditorState): string {
 				const w = colWidths[c];
 				const align = c < alignments.length ? alignments[c] : "left";
 				if (align === "center") {
-					parts.push(`:${"-".repeat(w)}:`);
+					parts.push(`:${"-".repeat(w - 2)}:`);
 				} else if (align === "right") {
-					parts.push(`${"-".repeat(w)}:`);
+					parts.push(`${"-".repeat(w - 1)}:`);
 				} else {
-					parts.push("-".repeat(w + 1));
+					parts.push("-".repeat(w));
 				}
 			}
 			lines.push(`| ${parts.join(" | ")} |`);

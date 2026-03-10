@@ -19,6 +19,7 @@ import { getStringWidth } from "../../../lib/east-asian-width";
 // ── Effects ───────────────────────────────────────────
 
 export const focusTableCellEffect = StateEffect.define<{
+	tableFrom: number;
 	row: number;
 	col: number;
 }>();
@@ -196,9 +197,9 @@ function formatTableLines(container: HTMLElement, data: TableData): string[] {
 			for (let c = 0; c < colCount; c++) {
 				const w = colWidths[c];
 				const align = c < alignments.length ? alignments[c] : "left";
-				if (align === "center") parts.push(`:${"-".repeat(w)}:`);
-				else if (align === "right") parts.push(`${"-".repeat(w)}:`);
-				else parts.push(`:${"-".repeat(w)}`);
+				if (align === "center") parts.push(`:${"-".repeat(w - 2)}:`);
+				else if (align === "right") parts.push(`${"-".repeat(w - 1)}:`);
+				else parts.push("-".repeat(w));
 			}
 			lines.push(`| ${parts.join(" | ")} |`);
 		}
@@ -225,7 +226,7 @@ const widgetPositions = new WeakMap<HTMLElement, number>();
  *  read up-to-date data (updateDOM is called on a NEW widget instance,
  *  but the event listeners were attached by the OLD instance's buildDOM). */
 const widgetDataMap = new WeakMap<HTMLElement, TableData>();
-let pendingFocus: { row: number; col: number } | null = null;
+let pendingFocus: { tableFrom: number; row: number; col: number } | null = null;
 
 /** IME 状態追跡（ウィジェット単位）。compositionActive はコンポジション中に true。
  *  composing は compositionstart で true になり、compositionend 後の
@@ -306,7 +307,7 @@ class EditableTableWidget extends WidgetType {
 		widgetPositions.set(wrapper, this.tableFrom);
 		widgetDataMap.set(wrapper, this.data);
 
-		if (pendingFocus) {
+		if (pendingFocus && pendingFocus.tableFrom === this.tableFrom) {
 			const focus = pendingFocus;
 			pendingFocus = null;
 			requestAnimationFrame(() => focusCell(wrapper, focus.row, focus.col));
@@ -387,7 +388,7 @@ class EditableTableWidget extends WidgetType {
 			}
 		}
 
-		if (pendingFocus) {
+		if (pendingFocus && pendingFocus.tableFrom === this.tableFrom) {
 			const focus = pendingFocus;
 			pendingFocus = null;
 			requestAnimationFrame(() => focusCell(dom, focus.row, focus.col));
@@ -660,7 +661,11 @@ function insertRowAfter(
 	const lineNum = tableNode.startLine + lineOffset;
 	const docLine = view.state.doc.line(lineNum);
 
-	pendingFocus = { row: widgetRowIdx + 1, col: focusCol };
+	pendingFocus = {
+		tableFrom: widgetPositions.get(wrapperEl) ?? 0,
+		row: widgetRowIdx + 1,
+		col: focusCol,
+	};
 	view.dispatch({
 		changes: { from: docLine.to, to: docLine.to, insert: `\n${emptyRow(data)}` },
 	});
@@ -683,7 +688,11 @@ function insertRowBefore(
 	const docLine = view.state.doc.line(lineNum);
 
 	// Focus stays on the original cell (which shifts down by 1)
-	pendingFocus = { row: widgetRowIdx + 1, col: focusCol };
+	pendingFocus = {
+		tableFrom: widgetPositions.get(wrapperEl) ?? 0,
+		row: widgetRowIdx + 1,
+		col: focusCol,
+	};
 	view.dispatch({
 		changes: { from: docLine.from - 1, to: docLine.from - 1, insert: `\n${emptyRow(data)}` },
 	});
@@ -703,7 +712,11 @@ function deleteRowAt(view: EditorView, wrapperEl: HTMLElement, widgetRowIdx: num
 	const lineNum = tableNode.startLine + lineOffset;
 	const docLine = view.state.doc.line(lineNum);
 
-	pendingFocus = { row: Math.min(widgetRowIdx, data.rows.length - 2), col: 0 };
+	pendingFocus = {
+		tableFrom: widgetPositions.get(wrapperEl) ?? 0,
+		row: Math.min(widgetRowIdx, data.rows.length - 2),
+		col: 0,
+	};
 	view.dispatch({
 		changes: { from: docLine.from - 1, to: docLine.to },
 	});
@@ -732,7 +745,7 @@ function insertColumnAt(
 
 	const from = view.state.doc.line(tableNode.startLine).from;
 	const to = view.state.doc.line(tableNode.endLine).to;
-	pendingFocus = { row: focusRow, col: focusCol };
+	pendingFocus = { tableFrom: widgetPositions.get(wrapperEl) ?? 0, row: focusRow, col: focusCol };
 	view.dispatch({ changes: { from, to, insert: newLines.join("\n") } });
 }
 
@@ -760,7 +773,11 @@ function deleteColumnAt(
 
 	const from = view.state.doc.line(tableNode.startLine).from;
 	const to = view.state.doc.line(tableNode.endLine).to;
-	pendingFocus = { row: focusRow, col: Math.min(col, cc - 2) };
+	pendingFocus = {
+		tableFrom: widgetPositions.get(wrapperEl) ?? 0,
+		row: focusRow,
+		col: Math.min(col, cc - 2),
+	};
 	view.dispatch({ changes: { from, to, insert: newLines.join("\n") } });
 }
 
@@ -942,7 +959,7 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 			// Trim trailing non-table lines (parser may include adjacent text)
 			while (endLine > startLine) {
 				const text = state.doc.line(endLine).text.trim();
-				if (text.startsWith("|") || delimiterRowRe.test(text)) break;
+				if (text.includes("|")) break;
 				endLine--;
 			}
 
@@ -983,7 +1000,11 @@ const tableDecorationField = StateField.define<DecorationSet>({
 	update(decos, tr) {
 		for (const effect of tr.effects) {
 			if (effect.is(focusTableCellEffect)) {
-				pendingFocus = effect.value;
+				pendingFocus = {
+					tableFrom: effect.value.tableFrom,
+					row: effect.value.row,
+					col: effect.value.col,
+				};
 			}
 		}
 
