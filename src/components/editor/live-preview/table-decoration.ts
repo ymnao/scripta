@@ -134,6 +134,11 @@ export function focusCell(container: HTMLElement, row: number, col: number): voi
 	}
 }
 
+/** セル内容を正規化する。`|` をエスケープし改行を除去する。 */
+function sanitizeCellText(text: string): string {
+	return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
 /** セル内の <br> を `<br>` テキストとして読み取る。ゼロ幅スペースは除去する。 */
 function getCellTextContent(el: HTMLElement): string {
 	const parts: string[] = [];
@@ -439,6 +444,22 @@ class EditableTableWidget extends WidgetType {
 		wrapper.addEventListener("keydown", (e) => handleKeydown(e, view, wrapper));
 		wrapper.addEventListener("focusout", (e) => handleFocusOut(e as FocusEvent, view, wrapper));
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
+		wrapper.addEventListener("paste", (e) => {
+			e.preventDefault();
+			const text = e.clipboardData?.getData("text/plain") ?? "";
+			// `|` と改行を除去してプレーンテキストとして挿入
+			const sanitized = text.replace(/\|/g, "").replace(/\n/g, " ");
+			const sel = window.getSelection();
+			if (sel && sel.rangeCount > 0) {
+				const range = sel.getRangeAt(0);
+				range.deleteContents();
+				range.insertNode(document.createTextNode(sanitized));
+				range.collapse(false);
+				sel.removeAllRanges();
+				sel.addRange(range);
+			}
+			handleInput(e, view, wrapper);
+		});
 		wrapper.addEventListener("compositionstart", () => {
 			compositionState.set(wrapper, { active: true, composing: true });
 		});
@@ -477,7 +498,7 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 
 	const cellContents: string[] = [];
 	for (const td of tr.querySelectorAll("th, td")) {
-		cellContents.push(getCellTextContent(td as HTMLElement));
+		cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
 	}
 
 	const newLine = `| ${cellContents.join(" | ")} |`;
@@ -503,12 +524,6 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	const colIdx = Number(target.dataset.col);
 	const { rows } = data;
 	const colCount = colCountOf(data);
-
-	if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
-		(document.activeElement as HTMLElement)?.blur();
-		view.focus();
-		return;
-	}
 
 	if (e.key === "Tab" && !e.shiftKey) {
 		e.preventDefault();
