@@ -11,7 +11,7 @@ import {
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -50,33 +50,6 @@ const customHighlightStyle = syntaxHighlighting(
 	]),
 );
 
-/**
- * IME コンポジション中にエディタへ cm-composing クラスを付与する。
- * WKWebView では ::selection の背景色がコンポジションテキストに
- * 不正に適用される (WebKit Bug 37788) ため、このクラスで抑制する。
- */
-const composingClass = ViewPlugin.fromClass(
-	class {
-		private view: EditorView;
-		constructor(view: EditorView) {
-			this.view = view;
-			view.contentDOM.addEventListener("compositionstart", this.onStart);
-			view.contentDOM.addEventListener("compositionend", this.onEnd);
-		}
-		private onStart = () => {
-			this.view.dom.classList.add("cm-composing");
-		};
-		private onEnd = () => {
-			this.view.dom.classList.remove("cm-composing");
-		};
-		destroy() {
-			this.view.contentDOM.removeEventListener("compositionstart", this.onStart);
-			this.view.contentDOM.removeEventListener("compositionend", this.onEnd);
-			this.view.dom.classList.remove("cm-composing");
-		}
-	},
-);
-
 const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	monospace: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	"sans-serif": "system-ui, -apple-system, sans-serif",
@@ -95,7 +68,6 @@ function createDynamicEditorTheme(fontSize: number, fontFamily: FontFamily) {
 			fontFamily: FONT_FAMILY_MAP[fontFamily],
 		},
 		".cm-content": {
-			caretColor: "var(--color-text-primary)",
 			padding: "8px 48px",
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
@@ -141,11 +113,8 @@ const staticEditorTheme = EditorView.theme({
 	".cm-foldPlaceholder": {
 		display: "none",
 	},
-	".cm-content ::selection": {
-		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent)",
-	},
-	"&.cm-composing .cm-content ::selection": {
-		backgroundColor: "transparent",
+	".cm-selectionBackground": {
+		background: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent) !important",
 	},
 	".cm-heading-1": {
 		fontSize: "1.8em",
@@ -489,7 +458,6 @@ export function MarkdownEditor({
 		() => [
 			listKeymap,
 			tableKeymap,
-			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, fontFamily),
@@ -576,8 +544,7 @@ export function MarkdownEditor({
 					basicSetup={{
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
-						// ::selection CSS で選択範囲スタイルを制御するため標準の描画を無効化
-						drawSelection: false,
+						drawSelection: true,
 						// 検索ハイライトは highlightQueryExtension で制御するため無効化
 						highlightSelectionMatches: false,
 						// Markdown エディタとしてシンプルな入力体験を優先するため無効化
