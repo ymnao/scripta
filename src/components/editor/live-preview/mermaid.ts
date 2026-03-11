@@ -315,7 +315,11 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 
 			// ツリーが初回の StateField 更新時に不完全だった場合に備え、
 			// デコレーション再構築を保証する（例: Undo 後）
-			this.scheduleRebuild();
+			// ただし、ビューポート内に Mermaid ブロックが存在しない場合は
+			// 不要なトランザクションを避けるためスキップする
+			if (visibleBlocks.length > 0) {
+				this.scheduleRebuild();
+			}
 		}
 
 		destroy() {
