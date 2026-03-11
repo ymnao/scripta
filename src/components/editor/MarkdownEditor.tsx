@@ -645,11 +645,14 @@ export function MarkdownEditor({
 		(newSource: string) => {
 			const view = editorRef.current?.view;
 			if (view && mermaidInsertPos !== null && newSource.trim()) {
-				const pos = Math.min(mermaidInsertPos, view.state.doc.length);
-				const line = view.state.doc.lineAt(pos);
+				const doc = view.state.doc;
+				const pos = Math.min(mermaidInsertPos, doc.length);
+				const line = doc.lineAt(pos);
 				const insertAt = line.to;
 				const before = insertAt > 0 ? "\n\n" : "";
-				const after = insertAt < view.state.doc.length ? "\n" : "";
+				const hasTrailingNewline =
+					insertAt < doc.length && doc.sliceString(insertAt, insertAt + 1) === "\n";
+				const after = insertAt < doc.length && !hasTrailingNewline ? "\n" : "";
 				const fence = buildMermaidFence(newSource);
 				const newText = `${before}${fence}mermaid\n${newSource}\n${fence}${after}`;
 				view.dispatch({ changes: { from: insertAt, to: insertAt, insert: newText } });

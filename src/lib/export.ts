@@ -42,6 +42,7 @@ interface MermaidMatch {
 	index: number;
 	length: number;
 	source: string;
+	indent: string;
 }
 
 /**
@@ -98,6 +99,7 @@ export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
 					index: offset,
 					length: endOffset - offset,
 					source,
+					indent: openMatch[1],
 				});
 			}
 			i++;
@@ -124,7 +126,14 @@ export async function preprocessMermaidBlocks(
 		const match = matches[i];
 		try {
 			const svg = await renderMermaid(match.source, theme);
-			const replacement = `<div class="mermaid-diagram">${svg}</div>`;
+			const raw = `<div class="mermaid-diagram">${svg}</div>`;
+			// 元のフェンスのインデントを保持する（リスト・引用内の構造維持）
+			const replacement = match.indent
+				? raw
+						.split("\n")
+						.map((line) => (line.length > 0 ? match.indent + line : line))
+						.join("\n")
+				: raw;
 			result =
 				result.slice(0, match.index) + replacement + result.slice(match.index + match.length);
 		} catch {

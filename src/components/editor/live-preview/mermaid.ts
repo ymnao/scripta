@@ -22,6 +22,20 @@ import { useThemeStore } from "../../../stores/theme";
 /** hasFocus の実値を運ぶ Effect。推定ではなく view.hasFocus を渡す。 */
 const rebuildMermaidDecos = StateEffect.define<boolean>();
 
+/** エディタのフォーカス状態を追跡する StateField。
+ *  docChanged/selectionSet 時に推定ではなく実フォーカス値を参照するために使用。 */
+const hasFocusField = StateField.define<boolean>({
+	create() {
+		return false;
+	},
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(rebuildMermaidDecos)) return e.value;
+		}
+		return value;
+	},
+});
+
 // ── Types ─────────────────────────────────────────────
 
 interface MermaidBlock {
@@ -215,8 +229,8 @@ const mermaidDecorationField = StateField.define<DecorationSet>({
 			}
 		}
 		if (tr.docChanged || tr.selectionSet) {
-			// doc/selection 変更時はユーザー操作中なので必ずフォーカスあり
-			return buildMermaidDecorations(tr.state, true);
+			// hasFocusField から実フォーカス値を参照（プログラム的な変更にも対応）
+			return buildMermaidDecorations(tr.state, tr.state.field(hasFocusField));
 		}
 		return decos;
 	},
@@ -432,6 +446,7 @@ const focusChangeHandler = ViewPlugin.fromClass(
 // ── Extension ─────────────────────────────────────────
 
 export const mermaidDecoration: Extension = [
+	hasFocusField,
 	mermaidDecorationField,
 	mermaidRenderPlugin,
 	treeChangeDetector,

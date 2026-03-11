@@ -7,6 +7,8 @@ type CacheEntry =
 
 const MAX_CACHE_SIZE = 128;
 const cache = new Map<string, CacheEntry>();
+/** clearMermaidCache 呼び出しごとにインクリメントし、古い世代のレンダリング結果を無視する */
+let cacheGeneration = 0;
 
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
@@ -105,8 +107,14 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 	if (cached?.status === "error") throw new Error(cached.message);
 	if (cached?.status === "rendering") return cached.promise;
 
+	const gen = cacheGeneration;
 	const promise = new Promise<string>((resolve, reject) => {
 		renderQueue = renderQueue.then(async () => {
+			// キャッシュがクリアされていたら結果を書き戻さない
+			if (gen !== cacheGeneration) {
+				reject(new Error("Cache generation mismatch"));
+				return;
+			}
 			// キュー待ち中に別の呼び出しで完了済みになっている可能性
 			const entry = cache.get(key);
 			if (entry?.status === "rendered") {
@@ -126,11 +134,18 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				const svg = DOMPurify.sanitize(rawSvg, {
 					USE_PROFILES: { svg: true, svgFilters: true },
 				});
+				// レンダリング中にキャッシュがクリアされていたら書き戻さない
+				if (gen !== cacheGeneration) {
+					reject(new Error("Cache generation mismatch"));
+					return;
+				}
 				cache.set(key, { status: "rendered", svg });
 				resolve(svg);
 			} catch (e) {
-				const message = e instanceof Error ? e.message : String(e);
-				cache.set(key, { status: "error", message });
+				if (gen === cacheGeneration) {
+					const message = e instanceof Error ? e.message : String(e);
+					cache.set(key, { status: "error", message });
+				}
 				reject(e);
 			}
 		});
@@ -152,5 +167,6 @@ export function getCacheEntry(source: string, theme: "light" | "dark"): CacheEnt
  * テーマ変更時にキャッシュをクリアする。
  */
 export function clearMermaidCache(): void {
+	cacheGeneration++;
 	cache.clear();
 }
