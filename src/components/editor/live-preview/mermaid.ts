@@ -203,8 +203,9 @@ export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): 
 
 const mermaidDecorationField = StateField.define<DecorationSet>({
 	create(state) {
-		// 初期生成時は安全側に「フォーカスあり」とみなしてデコレーションを構築する
-		return buildMermaidDecorations(state, true);
+		// 初期生成時は「フォーカスなし」とみなし、すべてのブロックをプレビュー表示する。
+		// エディタがフォーカスを得ると focusChangeHandler が実際の hasFocus で再構築する。
+		return buildMermaidDecorations(state, false);
 	},
 	update(decos, tr) {
 		// Effect 経由の場合は実際の hasFocus 値を使用

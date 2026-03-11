@@ -1,3 +1,5 @@
+import DOMPurify from "dompurify";
+
 type CacheEntry =
 	| { status: "rendering"; promise: Promise<string> }
 	| { status: "rendered"; svg: string }
@@ -119,7 +121,12 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				await ensureInitialized(theme);
 				const id = `mermaid-${idCounter++}`;
 				const result = await mermaidModule?.default.render(id, source);
-				const svg = result?.svg ?? "";
+				const rawSvg = result?.svg ?? "";
+				// securityLevel: "strict" に加え、DOMPurify で SVG をサニタイズ
+				const svg = DOMPurify.sanitize(rawSvg, {
+					USE_PROFILES: { svg: true, svgFilters: true },
+					ADD_TAGS: ["foreignObject"],
+				});
 				cache.set(key, { status: "rendered", svg });
 				resolve(svg);
 			} catch (e) {

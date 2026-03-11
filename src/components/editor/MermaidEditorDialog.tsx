@@ -94,7 +94,7 @@ export function MermaidEditorDialog({
 						{preview.svg ? (
 							<div
 								className="w-full [&_svg]:mx-auto [&_svg]:block"
-								// biome-ignore lint/security/noDangerouslySetInnerHtml: Mermaid SVG output with securityLevel: 'strict'
+								// biome-ignore lint/security/noDangerouslySetInnerHtml: renderMermaid が DOMPurify でサニタイズ済み
 								dangerouslySetInnerHTML={{ __html: preview.svg }}
 							/>
 						) : preview.error ? (
