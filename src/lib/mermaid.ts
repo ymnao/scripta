@@ -36,6 +36,41 @@ function getThemeCss(theme: "light" | "dark"): string {
 	return `${THEME_CSS} text.messageText, text.noteText, text.labelText, text.loopText { stroke: ${strokeColor}; }`;
 }
 
+/**
+ * Mermaid SVG をサニタイズする。
+ * DOMPurify は SVG 内の <foreignObject> の HTML コンテンツを削除してしまうため、
+ * SVG 部分と foreignObject 内の HTML を分離してそれぞれサニタイズし、再結合する。
+ */
+export function sanitizeMermaidSvg(rawSvg: string): string {
+	const parser = new DOMParser();
+	const originalDoc = parser.parseFromString(rawSvg, "text/html");
+	const originalFOs = originalDoc.querySelectorAll("foreignObject");
+
+	// SVG 構造を DOMPurify でサニタイズ（foreignObject の中身は失われる）
+	const sanitized = DOMPurify.sanitize(rawSvg, {
+		USE_PROFILES: { svg: true, svgFilters: true },
+		ADD_TAGS: ["foreignObject"],
+	});
+
+	if (originalFOs.length === 0) return sanitized;
+
+	// サニタイズ済み SVG をパースし、foreignObject 内の HTML を個別にサニタイズして再注入
+	const sanitizedDoc = parser.parseFromString(sanitized, "text/html");
+	const sanitizedFOs = sanitizedDoc.querySelectorAll("foreignObject");
+
+	for (let i = 0; i < sanitizedFOs.length && i < originalFOs.length; i++) {
+		const foContent = DOMPurify.sanitize(originalFOs[i].innerHTML, {
+			USE_PROFILES: { html: true },
+			FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "input"],
+			FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],
+		});
+		sanitizedFOs[i].innerHTML = foContent;
+	}
+
+	const svgEl = sanitizedDoc.querySelector("svg");
+	return svgEl?.outerHTML ?? sanitized;
+}
+
 function buildConfig(theme: "light" | "dark") {
 	return {
 		startOnLoad: false,
@@ -130,12 +165,7 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				const id = `mermaid-${idCounter++}`;
 				const result = await mermaidModule?.default.render(id, source);
 				const rawSvg = result?.svg ?? "";
-				// securityLevel: "strict" に加え、DOMPurify で SVG をサニタイズ。
-				// Mermaid v11 は <foreignObject> 内に HTML (<div>, <span> 等) で
-				// テキストを描画するため、html プロファイルも許可する。
-				const svg = DOMPurify.sanitize(rawSvg, {
-					USE_PROFILES: { html: true, svg: true, svgFilters: true },
-				});
+				const svg = sanitizeMermaidSvg(rawSvg);
 				// レンダリング中にキャッシュがクリア/エビクトされていたら書き戻さない
 				if (gen !== cacheGeneration || !cache.has(key)) {
 					resolve(svg);
