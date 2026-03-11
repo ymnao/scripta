@@ -19,7 +19,8 @@ import { useThemeStore } from "../../../stores/theme";
 
 // ── Effects ───────────────────────────────────────────
 
-const rebuildMermaidDecos = StateEffect.define<null>();
+/** hasFocus の実値を運ぶ Effect。推定ではなく view.hasFocus を渡す。 */
+const rebuildMermaidDecos = StateEffect.define<boolean>();
 
 // ── Types ─────────────────────────────────────────────
 
@@ -197,13 +198,19 @@ export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): 
 
 const mermaidDecorationField = StateField.define<DecorationSet>({
 	create(state) {
-		return buildMermaidDecorations(state, false);
+		// 初期生成時は安全側に「フォーカスあり」とみなしてデコレーションを構築する
+		return buildMermaidDecorations(state, true);
 	},
 	update(decos, tr) {
-		if (tr.docChanged || tr.selectionSet || tr.effects.some((e) => e.is(rebuildMermaidDecos))) {
-			// We need hasFocus — use a heuristic: if selection changed, likely focused
-			const hasFocus = tr.selectionSet || tr.docChanged;
-			return buildMermaidDecorations(tr.state, hasFocus);
+		// Effect 経由の場合は実際の hasFocus 値を使用
+		for (const e of tr.effects) {
+			if (e.is(rebuildMermaidDecos)) {
+				return buildMermaidDecorations(tr.state, e.value);
+			}
+		}
+		if (tr.docChanged || tr.selectionSet) {
+			// doc/selection 変更時はユーザー操作中なので必ずフォーカスあり
+			return buildMermaidDecorations(tr.state, true);
 		}
 		return decos;
 	},
@@ -268,8 +275,14 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 			const state = this.view.state;
 			const blocks = findMermaidBlocks(state);
 			const theme = useThemeStore.getState().theme;
+			const visibleRanges = this.view.visibleRanges;
 
-			for (const block of blocks) {
+			// ビューポートに重なるブロックのみレンダリング（重い処理の軽減）
+			const visibleBlocks = blocks.filter((block) =>
+				visibleRanges.some((range) => range.from <= block.to && range.to >= block.from),
+			);
+
+			for (const block of visibleBlocks) {
 				const entry = getCacheEntry(block.source, theme);
 				if (entry) continue; // Already cached (rendered, error, or rendering)
 
@@ -278,14 +291,14 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 						if (this.destroyed) return;
 						this.pendingRender = true;
 						this.view.dispatch({
-							effects: rebuildMermaidDecos.of(null),
+							effects: rebuildMermaidDecos.of(this.view.hasFocus),
 						});
 					})
 					.catch(() => {
 						if (this.destroyed) return;
 						this.pendingRender = true;
 						this.view.dispatch({
-							effects: rebuildMermaidDecos.of(null),
+							effects: rebuildMermaidDecos.of(this.view.hasFocus),
 						});
 					});
 			}
@@ -293,7 +306,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 			// ツリーが初回の StateField 更新時に不完全だった場合に備え、
 			// デコレーション再構築を保証する（例: Undo 後）
 			if (this.destroyed) return;
-			this.view.dispatch({ effects: rebuildMermaidDecos.of(null) });
+			this.view.dispatch({ effects: rebuildMermaidDecos.of(this.view.hasFocus) });
 		}
 
 		destroy() {
@@ -312,7 +325,7 @@ const treeChangeDetector = ViewPlugin.fromClass(
 			if (!update.docChanged && syntaxTree(update.state) !== syntaxTree(update.startState)) {
 				const { view } = update;
 				queueMicrotask(() => {
-					view.dispatch({ effects: rebuildMermaidDecos.of(null) });
+					view.dispatch({ effects: rebuildMermaidDecos.of(view.hasFocus) });
 				});
 			}
 		}
@@ -396,7 +409,7 @@ const focusChangeHandler = ViewPlugin.fromClass(
 			if (update.focusChanged) {
 				const { view } = update;
 				queueMicrotask(() => {
-					view.dispatch({ effects: rebuildMermaidDecos.of(null) });
+					view.dispatch({ effects: rebuildMermaidDecos.of(view.hasFocus) });
 				});
 			}
 		}

@@ -35,7 +35,7 @@ a { color: #60a5fa; }
 hr { border-top-color: #333; }
 li::marker { color: #777; }`;
 
-const MERMAID_BLOCK_RE = /```mermaid\s*\n([\s\S]*?)```/g;
+const MERMAID_BLOCK_RE = /```mermaid\s*\r?\n([\s\S]*?)```/g;
 
 /**
  * Mermaid コードブロックを SVG に変換する。

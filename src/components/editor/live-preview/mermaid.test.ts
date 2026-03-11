@@ -18,7 +18,6 @@ vi.mock("../../../stores/theme", () => ({
 import { MermaidWidget, buildMermaidDecorations, findMermaidBlocks } from "./mermaid";
 import {
 	collectDecorations,
-	createMockView,
 	createTestState,
 	replaceDecorations,
 	widgetDecorations,

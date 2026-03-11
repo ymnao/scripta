@@ -1,5 +1,5 @@
 type CacheEntry =
-	| { status: "rendering" }
+	| { status: "rendering"; promise: Promise<string> }
 	| { status: "rendered"; svg: string }
 	| { status: "error"; message: string };
 
@@ -8,6 +8,8 @@ const cache = new Map<string, CacheEntry>();
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
 let idCounter = 0;
+/** initialize+render をアトミックに直列化するキュー */
+let renderQueue: Promise<void> = Promise.resolve();
 
 function getMermaidTheme(theme: "light" | "dark"): string {
 	return theme === "dark" ? "dark" : "default";
@@ -77,27 +79,45 @@ function cacheKey(source: string, theme: "light" | "dark"): string {
 /**
  * Mermaid ソースコードを SVG 文字列にレンダリングする。
  * 動的 import でバンドルサイズを軽減し、結果をキャッシュする。
+ * 同一 (source, theme) の重複呼び出しは Promise を共有し、
+ * initialize+render は排他キューで直列化してテーマ競合を防ぐ。
  */
 export async function renderMermaid(source: string, theme: "light" | "dark"): Promise<string> {
 	const key = cacheKey(source, theme);
 	const cached = cache.get(key);
 	if (cached?.status === "rendered") return cached.svg;
 	if (cached?.status === "error") throw new Error(cached.message);
+	if (cached?.status === "rendering") return cached.promise;
 
-	cache.set(key, { status: "rendering" });
+	const promise = new Promise<string>((resolve, reject) => {
+		renderQueue = renderQueue.then(async () => {
+			// キュー待ち中に別の呼び出しで完了済みになっている可能性
+			const entry = cache.get(key);
+			if (entry?.status === "rendered") {
+				resolve(entry.svg);
+				return;
+			}
+			if (entry?.status === "error") {
+				reject(new Error(entry.message));
+				return;
+			}
+			try {
+				await ensureInitialized(theme);
+				const id = `mermaid-${idCounter++}`;
+				const result = await mermaidModule?.default.render(id, source);
+				const svg = result?.svg ?? "";
+				cache.set(key, { status: "rendered", svg });
+				resolve(svg);
+			} catch (e) {
+				const message = e instanceof Error ? e.message : String(e);
+				cache.set(key, { status: "error", message });
+				reject(e);
+			}
+		});
+	});
 
-	try {
-		await ensureInitialized(theme);
-		const id = `mermaid-${idCounter++}`;
-		const result = await mermaidModule?.default.render(id, source);
-		const svg = result?.svg ?? "";
-		cache.set(key, { status: "rendered", svg });
-		return svg;
-	} catch (e) {
-		const message = e instanceof Error ? e.message : String(e);
-		cache.set(key, { status: "error", message });
-		throw e;
-	}
+	cache.set(key, { status: "rendering", promise });
+	return promise;
 }
 
 /**
