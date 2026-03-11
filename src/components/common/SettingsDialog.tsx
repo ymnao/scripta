@@ -261,6 +261,12 @@ function WorkspaceSection({
 	const handleCreate = useCallback(
 		async (file: TemplateFileStatus) => {
 			try {
+				// 書き込み直前に再確認し、外部で作成された場合の上書きを防ぐ
+				if (await fileExists(file.path)) {
+					setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
+					return;
+				}
+
 				if (file.needsScriptaDir) {
 					try {
 						await createDirectory(getScriptaDir(workspacePath));

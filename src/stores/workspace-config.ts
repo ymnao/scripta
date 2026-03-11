@@ -36,6 +36,10 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 
 	loadIcons: async (workspacePath: string) => {
 		const requestId = ++loadIconsRequestId;
+		// 新しいワークスペースの読み込み開始時に前回の状態をリセットする。
+		// これにより、切り替え中に古い configLoaded=true が残り
+		// セットアップウィザードが誤表示される問題を防ぐ。
+		set({ configLoaded: false });
 		const [icons, dirExists, initialized] = await Promise.all([
 			loadIconsFromDisk(workspacePath),
 			scriptaDirExists(workspacePath),

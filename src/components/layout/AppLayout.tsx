@@ -182,10 +182,15 @@ export function AppLayout() {
 		}
 	}, [workspacePath, loadIcons, resetWorkspaceConfig]);
 
-	// Show setup wizard for uninitialized workspaces
+	// Show setup wizard for uninitialized workspaces.
+	// configLoaded が true かつ workspaceInitialized が false のときだけ開く。
+	// ワークスペース切り替え時は loadIcons() が configLoaded をリセットするので
+	// 一度閉じてから新しい結果で再評価される。
 	useEffect(() => {
 		if (workspacePath && configLoaded && !workspaceInitialized) {
 			setSetupWizardOpen(true);
+		} else {
+			setSetupWizardOpen(false);
 		}
 	}, [workspacePath, configLoaded, workspaceInitialized]);
 

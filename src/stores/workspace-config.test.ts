@@ -48,6 +48,31 @@ describe("useWorkspaceConfigStore", () => {
 	});
 
 	describe("loadIcons", () => {
+		it("resets configLoaded to false at the start of loading", async () => {
+			// 前回のロード完了状態をシミュレート
+			useWorkspaceConfigStore.setState({ configLoaded: true, workspaceInitialized: true });
+
+			let resolveIcons!: (v: Record<string, string>) => void;
+			mockedLoadIcons.mockReturnValue(
+				new Promise<Record<string, string>>((r) => {
+					resolveIcons = r;
+				}),
+			);
+			mockedScriptaDirExists.mockResolvedValue(true);
+			mockedIsWorkspaceInitialized.mockResolvedValue(false);
+
+			const promise = useWorkspaceConfigStore.getState().loadIcons("/new-workspace");
+
+			// loadIcons 開始直後に configLoaded が false にリセットされる
+			expect(useWorkspaceConfigStore.getState().configLoaded).toBe(false);
+
+			resolveIcons({});
+			await promise;
+
+			// 完了後に configLoaded が true に戻る
+			expect(useWorkspaceConfigStore.getState().configLoaded).toBe(true);
+		});
+
 		it("loads icons from disk and sets scriptaDirReady when dir exists", async () => {
 			mockedLoadIcons.mockResolvedValue({ "file.md": "📄" });
 			mockedScriptaDirExists.mockResolvedValue(true);

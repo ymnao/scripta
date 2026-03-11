@@ -2,6 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFile, writeFile } from "../../lib/commands";
 import { useWorkspaceStore } from "../../stores/workspace";
+import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
 
 vi.mock("../../lib/commands", () => ({
@@ -126,6 +127,7 @@ describe("AppLayout", () => {
 			activeTabId: null,
 			_nextTabId: 1,
 		});
+		useWorkspaceConfigStore.getState().reset();
 	});
 
 	afterEach(() => {
@@ -891,5 +893,61 @@ describe("AppLayout", () => {
 
 		expect(preventDefault).toHaveBeenCalled();
 		expect(mockDestroy).not.toHaveBeenCalled();
+	});
+
+	it("closes setup wizard when workspace becomes initialized", async () => {
+		// initialized.json が存在しない = 未初期化ワークスペース
+		mockedReadFile.mockImplementation(async (path: string) => {
+			if (path.endsWith("initialized.json")) throw new Error("Not found");
+			if (path.endsWith("icons.json")) throw new Error("Not found");
+			return "# Hello";
+		});
+
+		useWorkspaceStore.setState({ workspacePath: "/uninit-ws" });
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// loadIcons 完了後: configLoaded=true, workspaceInitialized=false → ウィザード表示
+		expect(screen.getByText("ワークスペースのセットアップ")).toBeInTheDocument();
+
+		// workspaceInitialized が true になるとウィザードが閉じる
+		await act(async () => {
+			useWorkspaceConfigStore.setState({ workspaceInitialized: true });
+		});
+
+		expect(screen.queryByText("ワークスペースのセットアップ")).not.toBeInTheDocument();
+	});
+
+	it("does not show wizard when switching to initialized workspace", async () => {
+		// 最初は未初期化
+		mockedReadFile.mockImplementation(async (path: string) => {
+			if (path.endsWith("initialized.json")) throw new Error("Not found");
+			if (path.endsWith("icons.json")) throw new Error("Not found");
+			return "# Hello";
+		});
+
+		useWorkspaceStore.setState({ workspacePath: "/uninit-ws" });
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		expect(screen.getByText("ワークスペースのセットアップ")).toBeInTheDocument();
+
+		// 初期化済みワークスペースに切り替え（readFile が initialized.json で成功する）
+		mockedReadFile.mockImplementation(async (path: string) => {
+			if (path.endsWith("icons.json")) throw new Error("Not found");
+			return "content";
+		});
+
+		await act(async () => {
+			useWorkspaceStore.setState({ workspacePath: "/init-ws" });
+		});
+
+		// loadIcons が configLoaded=false → true、workspaceInitialized=true とセットする
+		// ウィザードは閉じているべき
+		expect(screen.queryByText("ワークスペースのセットアップ")).not.toBeInTheDocument();
 	});
 });
