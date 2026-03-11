@@ -1,13 +1,32 @@
-import { X } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { ExternalLink, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { createDirectory, writeFile } from "../../lib/commands";
+import { getDefaultPromptTemplate } from "../../lib/export";
+import {
+	CLAUDE_MD_TEMPLATE,
+	GITIGNORE_TEMPLATE,
+	README_TEMPLATE,
+	SYNTAX_GUIDE_TEMPLATE,
+	fileExists,
+	getClaudeMdTemplatePath,
+	getGitignorePath,
+	getReadmeTemplatePath,
+	getScriptaDir,
+	getScriptaPromptTemplatePath,
+	getSyntaxGuidePath,
+} from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
+import { useToastStore } from "../../stores/toast";
+import { useWorkspaceStore } from "../../stores/workspace";
 import { DialogBase } from "./DialogBase";
 
 interface SettingsDialogProps {
 	open: boolean;
 	onClose: () => void;
+	workspacePath?: string | null;
+	onOpenFile?: (path: string) => void;
 }
 
 const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -22,9 +41,9 @@ const fontFamilyOptions: { value: FontFamily; label: string }[] = [
 	{ value: "serif", label: "明朝 (Serif)" },
 ];
 
-type Section = "appearance" | "editor" | "save";
+type Section = "appearance" | "editor" | "save" | "workspace";
 
-const sections: { key: Section; label: string }[] = [
+const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
 	{ key: "editor", label: "エディタ" },
 	{ key: "save", label: "保存" },
@@ -165,8 +184,158 @@ function SelectInput<T extends string | number>({
 	);
 }
 
-export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+interface TemplateFileStatus {
+	name: string;
+	path: string;
+	exists: boolean;
+	getContent: () => string;
+	needsScriptaDir?: boolean;
+}
+
+function WorkspaceSection({
+	workspacePath,
+	onOpenFile,
+	onClose,
+}: {
+	workspacePath: string;
+	onOpenFile?: (path: string) => void;
+	onClose: () => void;
+}) {
+	const [files, setFiles] = useState<TemplateFileStatus[]>([]);
+	const [loading, setLoading] = useState(true);
+	const addToast = useToastStore.getState().addToast;
+	const bumpFileTreeVersion = useWorkspaceStore.getState().bumpFileTreeVersion;
+
+	useEffect(() => {
+		let cancelled = false;
+
+		(async () => {
+			const templates = [
+				{
+					name: "README.md",
+					path: getReadmeTemplatePath(workspacePath),
+					getContent: () => README_TEMPLATE,
+				},
+				{
+					name: "CLAUDE.md",
+					path: getClaudeMdTemplatePath(workspacePath),
+					getContent: () => CLAUDE_MD_TEMPLATE,
+				},
+				{
+					name: ".gitignore",
+					path: getGitignorePath(workspacePath),
+					getContent: () => GITIGNORE_TEMPLATE,
+				},
+				{
+					name: "syntax-guide.md",
+					path: getSyntaxGuidePath(workspacePath),
+					getContent: () => SYNTAX_GUIDE_TEMPLATE,
+					needsScriptaDir: true,
+				},
+				{
+					name: "prompt-template.md",
+					path: getScriptaPromptTemplatePath(workspacePath),
+					getContent: () => getDefaultPromptTemplate(),
+					needsScriptaDir: true,
+				},
+			];
+
+			const results = await Promise.all(
+				templates.map(async (t) => ({
+					...t,
+					exists: await fileExists(t.path),
+				})),
+			);
+
+			if (!cancelled) {
+				setFiles(results);
+				setLoading(false);
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [workspacePath]);
+
+	const handleCreate = useCallback(
+		async (file: TemplateFileStatus) => {
+			try {
+				if (file.needsScriptaDir) {
+					try {
+						await createDirectory(getScriptaDir(workspacePath));
+					} catch {
+						// directory may already exist
+					}
+				}
+
+				await writeFile(file.path, file.getContent());
+				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
+				bumpFileTreeVersion();
+			} catch (err) {
+				addToast(
+					"error",
+					`ファイルの作成に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		},
+		[workspacePath, addToast, bumpFileTreeVersion],
+	);
+
+	const handleOpen = useCallback(
+		(path: string) => {
+			onOpenFile?.(path);
+			onClose();
+		},
+		[onOpenFile, onClose],
+	);
+
+	if (loading) {
+		return <p className="text-xs text-text-secondary">読み込み中...</p>;
+	}
+
+	return (
+		<div className="space-y-2">
+			<p className="text-[11px] text-text-secondary">テンプレートファイル</p>
+			{files.map((file) => (
+				<div
+					key={file.path}
+					className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2"
+				>
+					<div className="min-w-0 flex-1">
+						<p className="text-xs font-medium text-text-primary">{file.name}</p>
+						<p className="text-[10px] text-text-secondary">{file.exists ? "作成済み" : "未作成"}</p>
+					</div>
+					{file.exists ? (
+						<button
+							type="button"
+							onClick={() => handleOpen(file.path)}
+							className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+						>
+							<ExternalLink size={12} />
+							開く
+						</button>
+					) : (
+						<button
+							type="button"
+							onClick={() => void handleCreate(file)}
+							className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+						>
+							<Plus size={12} />
+							作成
+						</button>
+					)}
+				</div>
+			))}
+		</div>
+	);
+}
+
+export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: SettingsDialogProps) {
 	const titleId = useId();
+	const sections = workspacePath
+		? [...baseSections, { key: "workspace" as Section, label: "ワークスペース" }]
+		: baseSections;
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
 	const preference = useThemeStore((s) => s.preference);
 	const setPreference = useThemeStore((s) => s.setPreference);
@@ -293,6 +462,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 								onChange={setTrimTrailingWhitespace}
 							/>
 						</>
+					)}
+
+					{activeSection === "workspace" && workspacePath && (
+						<WorkspaceSection
+							workspacePath={workspacePath}
+							onOpenFile={onOpenFile}
+							onClose={onClose}
+						/>
 					)}
 				</div>
 			</div>

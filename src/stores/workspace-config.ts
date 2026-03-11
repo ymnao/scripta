@@ -1,12 +1,19 @@
 import { create } from "zustand";
 import { addTrailingSep, replacePrefix, toRelativePath } from "../lib/path";
-import { loadIcons as loadIconsFromDisk, saveIcons, scriptaDirExists } from "../lib/scripta-config";
+import {
+	isWorkspaceInitialized,
+	loadIcons as loadIconsFromDisk,
+	saveIcons,
+	scriptaDirExists,
+} from "../lib/scripta-config";
 
 export { toRelativePath };
 
 interface WorkspaceConfigState {
 	icons: Record<string, string>;
 	scriptaDirReady: boolean;
+	workspaceInitialized: boolean;
+	configLoaded: boolean;
 
 	loadIcons: (workspacePath: string) => Promise<void>;
 	setIcon: (workspacePath: string, relativePath: string, emoji: string) => void;
@@ -15,6 +22,7 @@ interface WorkspaceConfigState {
 	renameIconsByPrefix: (workspacePath: string, oldPrefix: string, newPrefix: string) => void;
 	deleteIconsByPrefix: (workspacePath: string, prefix: string) => void;
 	setScriptaDirReady: (ready: boolean) => void;
+	setWorkspaceInitialized: (initialized: boolean) => void;
 	reset: () => void;
 }
 
@@ -23,15 +31,23 @@ let loadIconsRequestId = 0;
 export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get) => ({
 	icons: Object.create(null) as Record<string, string>,
 	scriptaDirReady: false,
+	workspaceInitialized: false,
+	configLoaded: false,
 
 	loadIcons: async (workspacePath: string) => {
 		const requestId = ++loadIconsRequestId;
-		const [icons, dirExists] = await Promise.all([
+		const [icons, dirExists, initialized] = await Promise.all([
 			loadIconsFromDisk(workspacePath),
 			scriptaDirExists(workspacePath),
+			isWorkspaceInitialized(workspacePath),
 		]);
 		if (requestId !== loadIconsRequestId) return;
-		set({ icons, scriptaDirReady: dirExists });
+		set({
+			icons,
+			scriptaDirReady: dirExists,
+			workspaceInitialized: initialized,
+			configLoaded: true,
+		});
 	},
 
 	setIcon: (workspacePath: string, relativePath: string, emoji: string) => {
@@ -115,9 +131,15 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 	},
 
 	setScriptaDirReady: (ready: boolean) => set({ scriptaDirReady: ready }),
+	setWorkspaceInitialized: (initialized: boolean) => set({ workspaceInitialized: initialized }),
 
 	reset: () => {
 		loadIconsRequestId++;
-		set({ icons: Object.create(null) as Record<string, string>, scriptaDirReady: false });
+		set({
+			icons: Object.create(null) as Record<string, string>,
+			scriptaDirReady: false,
+			workspaceInitialized: false,
+			configLoaded: false,
+		});
 	},
 }));

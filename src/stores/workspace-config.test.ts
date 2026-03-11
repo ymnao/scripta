@@ -4,23 +4,31 @@ vi.mock("../lib/scripta-config", () => ({
 	loadIcons: vi.fn(),
 	saveIcons: vi.fn().mockResolvedValue(undefined),
 	scriptaDirExists: vi.fn(),
+	isWorkspaceInitialized: vi.fn(),
 }));
 
 const {
 	loadIcons: loadIconsFromDisk,
 	saveIcons,
 	scriptaDirExists,
+	isWorkspaceInitialized,
 } = await import("../lib/scripta-config");
 const { useWorkspaceConfigStore, toRelativePath } = await import("./workspace-config");
 
 const mockedLoadIcons = loadIconsFromDisk as Mock;
 const mockedSaveIcons = saveIcons as Mock;
 const mockedScriptaDirExists = scriptaDirExists as Mock;
+const mockedIsWorkspaceInitialized = isWorkspaceInitialized as Mock;
 
 describe("useWorkspaceConfigStore", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		useWorkspaceConfigStore.setState({ icons: {}, scriptaDirReady: false });
+		useWorkspaceConfigStore.setState({
+			icons: {},
+			scriptaDirReady: false,
+			workspaceInitialized: false,
+			configLoaded: false,
+		});
 	});
 
 	it("has empty icons by default", () => {
@@ -31,29 +39,45 @@ describe("useWorkspaceConfigStore", () => {
 		expect(useWorkspaceConfigStore.getState().scriptaDirReady).toBe(false);
 	});
 
+	it("has workspaceInitialized false by default", () => {
+		expect(useWorkspaceConfigStore.getState().workspaceInitialized).toBe(false);
+	});
+
+	it("has configLoaded false by default", () => {
+		expect(useWorkspaceConfigStore.getState().configLoaded).toBe(false);
+	});
+
 	describe("loadIcons", () => {
 		it("loads icons from disk and sets scriptaDirReady when dir exists", async () => {
 			mockedLoadIcons.mockResolvedValue({ "file.md": "📄" });
 			mockedScriptaDirExists.mockResolvedValue(true);
+			mockedIsWorkspaceInitialized.mockResolvedValue(true);
 			await useWorkspaceConfigStore.getState().loadIcons("/workspace");
 			expect(useWorkspaceConfigStore.getState().icons).toEqual({ "file.md": "📄" });
 			expect(useWorkspaceConfigStore.getState().scriptaDirReady).toBe(true);
+			expect(useWorkspaceConfigStore.getState().workspaceInitialized).toBe(true);
+			expect(useWorkspaceConfigStore.getState().configLoaded).toBe(true);
 		});
 
 		it("sets scriptaDirReady true when dir exists but icons are empty", async () => {
 			mockedLoadIcons.mockResolvedValue({});
 			mockedScriptaDirExists.mockResolvedValue(true);
+			mockedIsWorkspaceInitialized.mockResolvedValue(false);
 			await useWorkspaceConfigStore.getState().loadIcons("/workspace");
 			expect(useWorkspaceConfigStore.getState().icons).toEqual({});
 			expect(useWorkspaceConfigStore.getState().scriptaDirReady).toBe(true);
+			expect(useWorkspaceConfigStore.getState().workspaceInitialized).toBe(false);
+			expect(useWorkspaceConfigStore.getState().configLoaded).toBe(true);
 		});
 
 		it("sets scriptaDirReady false when dir does not exist", async () => {
 			mockedLoadIcons.mockResolvedValue({});
 			mockedScriptaDirExists.mockResolvedValue(false);
+			mockedIsWorkspaceInitialized.mockResolvedValue(false);
 			await useWorkspaceConfigStore.getState().loadIcons("/workspace");
 			expect(useWorkspaceConfigStore.getState().icons).toEqual({});
 			expect(useWorkspaceConfigStore.getState().scriptaDirReady).toBe(false);
+			expect(useWorkspaceConfigStore.getState().configLoaded).toBe(true);
 		});
 	});
 
@@ -175,15 +199,26 @@ describe("useWorkspaceConfigStore", () => {
 		});
 	});
 
+	describe("setWorkspaceInitialized", () => {
+		it("sets workspaceInitialized", () => {
+			useWorkspaceConfigStore.getState().setWorkspaceInitialized(true);
+			expect(useWorkspaceConfigStore.getState().workspaceInitialized).toBe(true);
+		});
+	});
+
 	describe("reset", () => {
-		it("resets icons and scriptaDirReady", () => {
+		it("resets icons, scriptaDirReady, workspaceInitialized, and configLoaded", () => {
 			useWorkspaceConfigStore.setState({
 				icons: { "file.md": "📄" },
 				scriptaDirReady: true,
+				workspaceInitialized: true,
+				configLoaded: true,
 			});
 			useWorkspaceConfigStore.getState().reset();
 			expect(useWorkspaceConfigStore.getState().icons).toEqual({});
 			expect(useWorkspaceConfigStore.getState().scriptaDirReady).toBe(false);
+			expect(useWorkspaceConfigStore.getState().workspaceInitialized).toBe(false);
+			expect(useWorkspaceConfigStore.getState().configLoaded).toBe(false);
 		});
 	});
 });
