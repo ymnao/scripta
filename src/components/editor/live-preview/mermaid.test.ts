@@ -15,7 +15,7 @@ vi.mock("../../../stores/theme", () => ({
 	},
 }));
 
-import { buildMermaidDecorations, findMermaidBlocks } from "./mermaid";
+import { MermaidWidget, buildMermaidDecorations, findMermaidBlocks } from "./mermaid";
 import {
 	collectDecorations,
 	createMockView,
@@ -62,6 +62,52 @@ describe("findMermaidBlocks", () => {
 		const blocks = findMermaidBlocks(state);
 		expect(blocks).toHaveLength(1);
 		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+	});
+});
+
+describe("MermaidWidget", () => {
+	it("eq: 同じ source/svg/error なら true", () => {
+		const a = new MermaidWidget("graph TD", "<svg/>", null);
+		const b = new MermaidWidget("graph TD", "<svg/>", null);
+		expect(a.eq(b)).toBe(true);
+	});
+
+	it("eq: source が異なれば false", () => {
+		const a = new MermaidWidget("graph TD", "<svg/>", null);
+		const b = new MermaidWidget("graph LR", "<svg/>", null);
+		expect(a.eq(b)).toBe(false);
+	});
+
+	it("eq: svg が異なれば false", () => {
+		const a = new MermaidWidget("graph TD", "<svg>1</svg>", null);
+		const b = new MermaidWidget("graph TD", "<svg>2</svg>", null);
+		expect(a.eq(b)).toBe(false);
+	});
+
+	it("eq: error が異なれば false", () => {
+		const a = new MermaidWidget("bad", null, "parse error");
+		const b = new MermaidWidget("bad", null, "other error");
+		expect(a.eq(b)).toBe(false);
+	});
+
+	it("toDOM: SVG ありの場合 cm-mermaid-inner を含む", () => {
+		const w = new MermaidWidget("graph TD", "<svg><text>hello</text></svg>", null);
+		const el = w.toDOM();
+		expect(el.className).toBe("cm-mermaid-widget");
+		expect(el.querySelector(".cm-mermaid-inner")).not.toBeNull();
+		expect(el.querySelector("svg")).not.toBeNull();
+	});
+
+	it("toDOM: エラーの場合 cm-mermaid-error を含む", () => {
+		const w = new MermaidWidget("bad", null, "Syntax error");
+		const el = w.toDOM();
+		expect(el.querySelector(".cm-mermaid-error")?.textContent).toBe("Syntax error");
+	});
+
+	it("toDOM: ローディング状態の場合 cm-mermaid-loading を含む", () => {
+		const w = new MermaidWidget("graph TD", null, null);
+		const el = w.toDOM();
+		expect(el.querySelector(".cm-mermaid-loading")).not.toBeNull();
 	});
 });
 

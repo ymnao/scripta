@@ -14,9 +14,11 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FontFamily } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
+import { ContextMenu } from "../filetree/ContextMenu";
+import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import {
 	toggleBold,
 	toggleHeading,
@@ -467,10 +469,35 @@ export function MarkdownEditor({
 	const onStatisticsRef = useRef(onStatistics);
 	onStatisticsRef.current = onStatistics;
 	const statsRafIdRef = useRef(0);
+	const containerRef = useRef<HTMLDivElement>(null);
+	const [mermaidContextMenu, setMermaidContextMenu] = useState<{
+		position: { x: number; y: number };
+		source: string;
+		from: number;
+		to: number;
+	} | null>(null);
+	const [mermaidEditor, setMermaidEditor] = useState<{
+		source: string;
+		from: number;
+		to: number;
+	} | null>(null);
+	const [mermaidInsertPos, setMermaidInsertPos] = useState<number | null>(null);
 
 	// Cancel any pending statistics RAF on unmount
 	useEffect(() => {
 		return () => cancelAnimationFrame(statsRafIdRef.current);
+	}, []);
+
+	// Listen for mermaid right-click context menu events from CM extension
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+		const onMermaidMenu = (e: Event) => {
+			const { source, from, to, clientX, clientY } = (e as CustomEvent).detail;
+			setMermaidContextMenu({ position: { x: clientX, y: clientY }, source, from, to });
+		};
+		el.addEventListener("mermaid-context-menu", onMermaidMenu);
+		return () => el.removeEventListener("mermaid-context-menu", onMermaidMenu);
 	}, []);
 
 	useEffect(() => {
@@ -590,8 +617,39 @@ export function MarkdownEditor({
 		[fontSize, fontFamily, showLinkCards],
 	);
 
+	const handleMermaidSave = useCallback(
+		(newSource: string) => {
+			const view = editorRef.current?.view;
+			if (view && mermaidEditor && newSource !== mermaidEditor.source) {
+				const newText = `\`\`\`mermaid\n${newSource}\n\`\`\``;
+				view.dispatch({
+					changes: { from: mermaidEditor.from, to: mermaidEditor.to, insert: newText },
+				});
+			}
+			setMermaidEditor(null);
+		},
+		[mermaidEditor],
+	);
+
+	const handleMermaidInsert = useCallback(
+		(newSource: string) => {
+			const view = editorRef.current?.view;
+			if (view && mermaidInsertPos !== null && newSource.trim()) {
+				const pos = Math.min(mermaidInsertPos, view.state.doc.length);
+				const line = view.state.doc.lineAt(pos);
+				const insertAt = line.to;
+				const before = insertAt > 0 ? "\n\n" : "";
+				const after = insertAt < view.state.doc.length ? "\n" : "";
+				const newText = `${before}\`\`\`mermaid\n${newSource}\n\`\`\`${after}`;
+				view.dispatch({ changes: { from: insertAt, to: insertAt, insert: newText } });
+			}
+			setMermaidInsertPos(null);
+		},
+		[mermaidInsertPos],
+	);
+
 	return (
-		<div className="relative min-h-0 min-w-0 flex-1">
+		<div ref={containerRef} className="relative min-h-0 min-w-0 flex-1">
 			<div className="absolute inset-0">
 				<CodeMirror
 					ref={editorRef}
@@ -623,6 +681,62 @@ export function MarkdownEditor({
 					}}
 				/>
 			</div>
+			{mermaidContextMenu && (
+				<ContextMenu
+					position={mermaidContextMenu.position}
+					items={[
+						{
+							id: "edit-mermaid",
+							label: "Mermaid を編集",
+							onClick: () => {
+								setMermaidEditor({
+									source: mermaidContextMenu.source,
+									from: mermaidContextMenu.from,
+									to: mermaidContextMenu.to,
+								});
+							},
+						},
+						{
+							id: "insert-mermaid",
+							label: "Mermaid 図を挿入",
+							onClick: () => {
+								setMermaidInsertPos(mermaidContextMenu.to);
+							},
+						},
+						{
+							id: "delete-mermaid-sep",
+							label: "",
+							separator: true,
+							onClick: () => {},
+						},
+						{
+							id: "delete-mermaid",
+							label: "Mermaid を削除",
+							danger: true,
+							onClick: () => {
+								const view = editorRef.current?.view;
+								if (!view) return;
+								const { from, to } = mermaidContextMenu;
+								view.dispatch({ changes: { from, to, insert: "" } });
+							},
+						},
+					]}
+					onClose={() => setMermaidContextMenu(null)}
+				/>
+			)}
+			<MermaidEditorDialog
+				open={mermaidEditor !== null}
+				source={mermaidEditor?.source ?? ""}
+				onSave={handleMermaidSave}
+				onCancel={() => setMermaidEditor(null)}
+			/>
+			<MermaidEditorDialog
+				open={mermaidInsertPos !== null}
+				source=""
+				mode="insert"
+				onSave={handleMermaidInsert}
+				onCancel={() => setMermaidInsertPos(null)}
+			/>
 		</div>
 	);
 }

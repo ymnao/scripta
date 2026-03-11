@@ -289,6 +289,11 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 						});
 					});
 			}
+
+			// ツリーが初回の StateField 更新時に不完全だった場合に備え、
+			// デコレーション再構築を保証する（例: Undo 後）
+			if (this.destroyed) return;
+			this.view.dispatch({ effects: rebuildMermaidDecos.of(null) });
 		}
 
 		destroy() {
@@ -316,6 +321,24 @@ const treeChangeDetector = ViewPlugin.fromClass(
 
 // ── Click handler ─────────────────────────────────────
 
+/** Find the FencedCode block surrounding `pos`. */
+function findFencedCodeBlock(view: EditorView, pos: number): { from: number; to: number } | null {
+	const line = view.state.doc.lineAt(pos);
+	const tree = syntaxTree(view.state);
+	let result: { from: number; to: number } | null = null;
+	tree.iterate({
+		from: line.from,
+		to: Math.min(line.from + 10000, view.state.doc.length),
+		enter(node) {
+			if (node.name === "FencedCode" && node.from <= pos && node.to >= pos) {
+				result = { from: node.from, to: node.to };
+				return false;
+			}
+		},
+	});
+	return result;
+}
+
 function createMermaidClickHandler() {
 	return EditorView.domEventHandlers({
 		mousedown(event: MouseEvent, view: EditorView) {
@@ -323,30 +346,44 @@ function createMermaidClickHandler() {
 			const mermaidEl = target.closest(".cm-mermaid-widget");
 			if (!mermaidEl) return false;
 
-			// Find the decoration range
 			const pos = view.posAtDOM(mermaidEl);
-			const line = view.state.doc.lineAt(pos);
-
-			// Find the end of the mermaid block
-			const tree = syntaxTree(view.state);
-			let blockEnd = line.to;
-			tree.iterate({
-				from: line.from,
-				to: Math.min(line.from + 10000, view.state.doc.length),
-				enter(node) {
-					if (node.name === "FencedCode" && node.from <= pos && node.to >= pos) {
-						blockEnd = node.to;
-						return false;
-					}
-				},
-			});
+			const block = findFencedCodeBlock(view, pos);
 
 			event.preventDefault();
 			view.dispatch({
-				selection: { anchor: blockEnd },
+				selection: { anchor: block?.to ?? view.state.doc.lineAt(pos).to },
 			});
 			view.focus();
 			return true;
+		},
+		contextmenu(event: MouseEvent, view: EditorView) {
+			const target = event.target as HTMLElement;
+			const mermaidEl = target.closest(".cm-mermaid-widget");
+
+			if (mermaidEl) {
+				const pos = view.posAtDOM(mermaidEl);
+				const blocks = findMermaidBlocks(view.state);
+				const block = blocks.find((b) => b.from <= pos && b.to >= pos);
+				if (!block) return false;
+
+				event.preventDefault();
+				view.dom.dispatchEvent(
+					new CustomEvent("mermaid-context-menu", {
+						bubbles: true,
+						detail: {
+							source: block.source,
+							from: block.from,
+							to: block.to,
+							clientX: event.clientX,
+							clientY: event.clientY,
+						},
+					}),
+				);
+				return true;
+			}
+
+			// Mermaid 以外の領域ではネイティブコンテキストメニューを維持
+			return false;
 		},
 	});
 }

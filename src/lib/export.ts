@@ -7,6 +7,14 @@ import { basename } from "./path";
 export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
 
+/** ExportTheme を Mermaid 用の "light" | "dark" に解決する。system の場合は OS 設定を参照。 */
+function resolveMermaidTheme(theme?: ExportTheme): "light" | "dark" {
+	if (theme === "dark") return "dark";
+	if (theme === "light") return "light";
+	// system or undefined: OS のカラースキームを参照
+	return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 const LIGHT_STYLES = `body { color: #333; background: #fff; }
 code { background: #f8f8f8; }
 pre { background: #f8f8f8; }
@@ -445,7 +453,8 @@ export async function exportAsHtml(
 
 	if (!savePath) return false;
 
-	const preprocessed = await preprocessMermaidBlocks(markdown);
+	const mermaidTheme = resolveMermaidTheme(options?.theme);
+	const preprocessed = await preprocessMermaidBlocks(markdown, mermaidTheme);
 	const bodyHtml = markdownToHtml(preprocessed);
 	const html = buildHtmlDocument(bodyHtml, title, options?.theme);
 	await writeFile(savePath, html);
@@ -484,7 +493,7 @@ export async function exportAsPdf(
 			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
 			: undefined;
 
-	const preprocessed = await preprocessMermaidBlocks(markdown);
+	const preprocessed = await preprocessMermaidBlocks(markdown, "light");
 	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
