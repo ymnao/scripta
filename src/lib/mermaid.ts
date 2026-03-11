@@ -3,6 +3,7 @@ type CacheEntry =
 	| { status: "rendered"; svg: string }
 	| { status: "error"; message: string };
 
+const MAX_CACHE_SIZE = 128;
 const cache = new Map<string, CacheEntry>();
 
 let mermaidModule: typeof import("mermaid") | null = null;
@@ -56,24 +57,31 @@ function buildConfig(theme: "light" | "dark") {
 }
 
 async function ensureInitialized(theme: "light" | "dark"): Promise<void> {
-	if (mermaidModule && !initPromise) {
-		mermaidModule.default.initialize(buildConfig(theme));
-		return;
-	}
-	if (initPromise) {
+	if (!mermaidModule) {
+		if (!initPromise) {
+			initPromise = import("mermaid").then((m) => {
+				mermaidModule = m;
+			});
+		}
 		await initPromise;
-		mermaidModule?.default.initialize(buildConfig(theme));
-		return;
 	}
-	initPromise = (async () => {
-		mermaidModule = await import("mermaid");
-		mermaidModule.default.initialize(buildConfig(theme));
-	})();
-	await initPromise;
+	mermaidModule.default.initialize(buildConfig(theme));
 }
 
 function cacheKey(source: string, theme: "light" | "dark"): string {
 	return `${theme}:${source}`;
+}
+
+/** キャッシュが上限を超えた場合、古い完了済みエントリを削除する */
+function evictIfNeeded(): void {
+	if (cache.size < MAX_CACHE_SIZE) return;
+	// Map はinsert順を保持するので、先頭の完了済みエントリを削除
+	for (const [key, entry] of cache) {
+		if (entry.status !== "rendering") {
+			cache.delete(key);
+			if (cache.size < MAX_CACHE_SIZE) break;
+		}
+	}
 }
 
 /**
@@ -116,6 +124,7 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 		});
 	});
 
+	evictIfNeeded();
 	cache.set(key, { status: "rendering", promise });
 	return promise;
 }

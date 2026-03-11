@@ -12,7 +12,10 @@ function resolveMermaidTheme(theme?: ExportTheme): "light" | "dark" {
 	if (theme === "dark") return "dark";
 	if (theme === "light") return "light";
 	// system or undefined: OS のカラースキームを参照
-	return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+	if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+		return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+	}
+	return "light";
 }
 
 const LIGHT_STYLES = `body { color: #333; background: #fff; }
@@ -35,7 +38,67 @@ a { color: #60a5fa; }
 hr { border-top-color: #333; }
 li::marker { color: #777; }`;
 
-const MERMAID_BLOCK_RE = /```mermaid\s*\r?\n([\s\S]*?)```/g;
+interface MermaidMatch {
+	index: number;
+	length: number;
+	source: string;
+}
+
+/**
+ * Mermaid fenced code blocks を検出する。
+ * 3文字以上のバッククォートに対応し、開始と同じ長さ以上の閉じフェンスを要求する。
+ * インデントされたフェンスにも対応。
+ */
+export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
+	const matches: MermaidMatch[] = [];
+	const lines = markdown.split("\n");
+	let i = 0;
+
+	while (i < lines.length) {
+		const openMatch = lines[i].match(/^(\s*)(`{3,})\s*mermaid\s*$/);
+		if (!openMatch) {
+			i++;
+			continue;
+		}
+
+		const fenceLen = openMatch[2].length;
+		const closeRe = new RegExp(`^\\s*\`{${fenceLen},}\\s*$`);
+		const startLineIdx = i;
+		const contentLines: string[] = [];
+		i++;
+
+		while (i < lines.length && !closeRe.test(lines[i])) {
+			contentLines.push(lines[i]);
+			i++;
+		}
+
+		if (i < lines.length) {
+			// 閉じフェンスが見つかった
+			const source = contentLines.join("\n").trim();
+			if (source) {
+				// 開始行のオフセットを計算
+				let offset = 0;
+				for (let j = 0; j < startLineIdx; j++) {
+					offset += lines[j].length + 1; // +1 for \n
+				}
+				// 閉じフェンス行の末尾までの長さ
+				let endOffset = 0;
+				for (let j = 0; j <= i; j++) {
+					endOffset += lines[j].length + 1;
+				}
+				endOffset--; // 最後の \n を除く（ない場合もあるため）
+				matches.push({
+					index: offset,
+					length: endOffset - offset,
+					source,
+				});
+			}
+			i++;
+		}
+	}
+
+	return matches;
+}
 
 /**
  * Mermaid コードブロックを SVG に変換する。
@@ -45,20 +108,18 @@ export async function preprocessMermaidBlocks(
 	markdown: string,
 	theme: "light" | "dark" = "light",
 ): Promise<string> {
-	const matches = [...markdown.matchAll(MERMAID_BLOCK_RE)];
+	const matches = findMermaidCodeBlocks(markdown);
 	if (matches.length === 0) return markdown;
 
 	let result = markdown;
 	// Process in reverse order to preserve offsets
 	for (let i = matches.length - 1; i >= 0; i--) {
 		const match = matches[i];
-		const source = match[1].trim();
-		if (!source) continue;
 		try {
-			const svg = await renderMermaid(source, theme);
+			const svg = await renderMermaid(match.source, theme);
 			const replacement = `<div class="mermaid-diagram">${svg}</div>`;
 			result =
-				result.slice(0, match.index) + replacement + result.slice(match.index + match[0].length);
+				result.slice(0, match.index) + replacement + result.slice(match.index + match.length);
 		} catch {
 			// Keep original code block on error
 		}

@@ -54,12 +54,18 @@ function cursorInBlock(cursorLines: Set<number>, startLine: number, endLine: num
 	return false;
 }
 
-/** Find all mermaid fenced code blocks in the document. */
-export function findMermaidBlocks(state: EditorState): MermaidBlock[] {
+/** Find mermaid fenced code blocks in the document.
+ *  Optional `range` limits tree iteration to the given span. */
+export function findMermaidBlocks(
+	state: EditorState,
+	range?: { from: number; to: number },
+): MermaidBlock[] {
 	const tree = syntaxTree(state);
 	const blocks: MermaidBlock[] = [];
 
 	tree.iterate({
+		from: range?.from,
+		to: range?.to,
 		enter(node) {
 			if (node.name !== "FencedCode") return;
 
@@ -112,9 +118,8 @@ export class MermaidWidget extends WidgetType {
 		if (this.svg) {
 			// useMaxWidth: true (デフォルト) により Mermaid は SVG に
 			// width="100%" + style="max-width: Xpx" を設定する。
-			// この max-width を 0.75 倍に縮小することで、
-			// シンプルな図の自然な幅を抑えつつ viewBox による
-			// 比例スケーリングでノード・文字・矢印すべてが縮小される。
+			// この max-width を 1.35 倍に拡大することで、
+			// エディタ幅に合った自然なサイズで表示する。
 			// コンテナ (.cm-mermaid-inner) の max-width が最終的な上限。
 			const inner = document.createElement("div");
 			inner.className = "cm-mermaid-inner";
@@ -123,7 +128,7 @@ export class MermaidWidget extends WidgetType {
 			if (svgEl) {
 				const mw = svgEl.style.maxWidth;
 				if (mw) {
-					// flowchart, sequence 等: max-width を 1.5 倍に拡大
+					// flowchart, sequence 等: max-width を 1.35 倍に拡大
 					const natural = Number.parseFloat(mw);
 					if (!Number.isNaN(natural)) {
 						svgEl.style.maxWidth = `${natural * 1.35}px`;
@@ -227,6 +232,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 		private destroyed = false;
 		private unsubscribeTheme: (() => void) | null = null;
 		private lastTheme: string;
+		private rebuildScheduled = false;
 
 		constructor(view: EditorView) {
 			this.view = view;
@@ -271,42 +277,45 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 			}, 300);
 		}
 
+		/** RAF で複数の dispatch 要求を 1 フレームに集約する */
+		private scheduleRebuild() {
+			if (this.rebuildScheduled || this.destroyed) return;
+			this.rebuildScheduled = true;
+			requestAnimationFrame(() => {
+				this.rebuildScheduled = false;
+				if (this.destroyed) return;
+				this.pendingRender = true;
+				this.view.dispatch({
+					effects: rebuildMermaidDecos.of(this.view.hasFocus),
+				});
+			});
+		}
+
 		private renderMissing() {
 			const state = this.view.state;
-			const blocks = findMermaidBlocks(state);
 			const theme = useThemeStore.getState().theme;
 			const visibleRanges = this.view.visibleRanges;
 
-			// ビューポートに重なるブロックのみレンダリング（重い処理の軽減）
-			const visibleBlocks = blocks.filter((block) =>
-				visibleRanges.some((range) => range.from <= block.to && range.to >= block.from),
-			);
+			// ビューポート範囲に限定してツリーを走査する
+			const visibleBlocks: MermaidBlock[] = [];
+			for (const range of visibleRanges) {
+				for (const block of findMermaidBlocks(state, range)) {
+					visibleBlocks.push(block);
+				}
+			}
 
 			for (const block of visibleBlocks) {
 				const entry = getCacheEntry(block.source, theme);
 				if (entry) continue; // Already cached (rendered, error, or rendering)
 
 				renderMermaid(block.source, theme)
-					.then(() => {
-						if (this.destroyed) return;
-						this.pendingRender = true;
-						this.view.dispatch({
-							effects: rebuildMermaidDecos.of(this.view.hasFocus),
-						});
-					})
-					.catch(() => {
-						if (this.destroyed) return;
-						this.pendingRender = true;
-						this.view.dispatch({
-							effects: rebuildMermaidDecos.of(this.view.hasFocus),
-						});
-					});
+					.then(() => this.scheduleRebuild())
+					.catch(() => this.scheduleRebuild());
 			}
 
 			// ツリーが初回の StateField 更新時に不完全だった場合に備え、
 			// デコレーション再構築を保証する（例: Undo 後）
-			if (this.destroyed) return;
-			this.view.dispatch({ effects: rebuildMermaidDecos.of(this.view.hasFocus) });
+			this.scheduleRebuild();
 		}
 
 		destroy() {
