@@ -99,6 +99,16 @@ describe("exportAsHtml", () => {
 		expect(html).toContain("color-scheme: light");
 		expect(html).not.toContain("prefers-color-scheme");
 	});
+
+	it("includes Mermaid SVG in final HTML output", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsHtml(md, "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("```mermaid");
+	});
 });
 
 describe("exportAsPrompt", () => {
@@ -220,6 +230,16 @@ describe("exportAsPdf", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain("katex");
 		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("includes Mermaid SVG in final PDF HTML output", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsPdf(md, "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("```mermaid");
 	});
 
 	it("includes page break CSS when pageBreakLevel is set", async () => {
