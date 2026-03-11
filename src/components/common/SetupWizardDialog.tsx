@@ -89,6 +89,23 @@ export function SetupWizardDialog({
 	const [processing, setProcessing] = useState(false);
 	const [selectedOption, setSelectedOption] = useState<SetupOption | null>(null);
 
+	// X ボタン・Escape・オーバーレイクリック: スキップと同じ扱いにする。
+	// 初期化マーカーを書き込み、設定 > ワークスペースからテンプレートを後で追加可能。
+	const handleDismiss = useCallback(async () => {
+		if (processing) return;
+		setProcessing(true);
+		try {
+			await markWorkspaceInitialized(workspacePath);
+			onComplete();
+			onClose();
+		} catch {
+			// マーカー書き込み失敗時はダイアログを閉じるだけ
+			onClose();
+		} finally {
+			setProcessing(false);
+		}
+	}, [processing, workspacePath, onComplete, onClose]);
+
 	const handleSetup = useCallback(
 		async (option: SetupOption) => {
 			setSelectedOption(option);
@@ -159,10 +176,11 @@ export function SetupWizardDialog({
 	return (
 		<DialogBase
 			open={open}
-			onClose={onClose}
+			onClose={handleDismiss}
 			ariaLabelledBy={titleId}
 			ariaDescribedBy={descId}
 			className="max-w-md"
+			preventClose={processing}
 		>
 			<div className="flex items-center justify-between">
 				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
@@ -170,9 +188,10 @@ export function SetupWizardDialog({
 				</h2>
 				<button
 					type="button"
-					onClick={onClose}
+					onClick={() => void handleDismiss()}
+					disabled={processing}
 					aria-label="閉じる"
-					className="rounded p-0.5 text-text-secondary hover:bg-black/10 hover:text-text-primary dark:hover:bg-white/10"
+					className="rounded p-0.5 text-text-secondary hover:bg-black/10 hover:text-text-primary disabled:opacity-50 dark:hover:bg-white/10"
 				>
 					<X size={16} />
 				</button>

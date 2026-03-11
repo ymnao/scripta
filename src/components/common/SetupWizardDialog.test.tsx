@@ -137,14 +137,27 @@ describe("SetupWizardDialog", () => {
 		expect(mockedMarkInitialized).toHaveBeenCalled();
 	});
 
-	it("X ボタンで onClose が呼ばれる", async () => {
+	it("X ボタンで markWorkspaceInitialized → onComplete → onClose が呼ばれる", async () => {
+		const onComplete = vi.fn();
 		const onClose = vi.fn();
-		renderDialog({ onClose });
+		renderDialog({ onComplete, onClose });
 		await userEvent.click(screen.getByLabelText("閉じる"));
+		expect(mockedMarkInitialized).toHaveBeenCalledWith("/workspace");
+		expect(onComplete).toHaveBeenCalled();
 		expect(onClose).toHaveBeenCalled();
 	});
 
-	it("エラー時にトースト表示", async () => {
+	it("X ボタンで markWorkspaceInitialized が失敗しても onClose は呼ばれる", async () => {
+		mockedMarkInitialized.mockRejectedValueOnce(new Error("disk full"));
+		const onComplete = vi.fn();
+		const onClose = vi.fn();
+		renderDialog({ onComplete, onClose });
+		await userEvent.click(screen.getByLabelText("閉じる"));
+		expect(onComplete).not.toHaveBeenCalled();
+		expect(onClose).toHaveBeenCalled();
+	});
+
+	it("オプション選択のエラー時にトースト表示", async () => {
 		mockedMarkInitialized.mockRejectedValueOnce(new Error("disk full"));
 		renderDialog();
 
@@ -154,5 +167,25 @@ describe("SetupWizardDialog", () => {
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0].type).toBe("error");
 		expect(toasts[0].message).toContain("セットアップに失敗しました");
+	});
+
+	it("処理中は X ボタンが無効化される", async () => {
+		// markWorkspaceInitialized を遅延させて処理中状態を保つ
+		let resolveInit!: () => void;
+		mockedMarkInitialized.mockReturnValueOnce(
+			new Promise<void>((r) => {
+				resolveInit = r;
+			}),
+		);
+		renderDialog();
+
+		// スキップをクリックして処理中にする
+		await userEvent.click(screen.getByText("スキップ"));
+
+		// 処理中は X ボタンが disabled
+		expect(screen.getByLabelText("閉じる")).toBeDisabled();
+
+		// 処理完了
+		resolveInit();
 	});
 });
