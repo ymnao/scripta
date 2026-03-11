@@ -134,15 +134,15 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				const svg = DOMPurify.sanitize(rawSvg, {
 					USE_PROFILES: { svg: true, svgFilters: true },
 				});
-				// レンダリング中にキャッシュがクリアされていたら書き戻さない
-				if (gen !== cacheGeneration) {
-					reject(new Error("Cache generation mismatch"));
+				// レンダリング中にキャッシュがクリア/エビクトされていたら書き戻さない
+				if (gen !== cacheGeneration || !cache.has(key)) {
+					resolve(svg);
 					return;
 				}
 				cache.set(key, { status: "rendered", svg });
 				resolve(svg);
 			} catch (e) {
-				if (gen === cacheGeneration) {
+				if (gen === cacheGeneration && cache.has(key)) {
 					const message = e instanceof Error ? e.message : String(e);
 					cache.set(key, { status: "error", message });
 				}
