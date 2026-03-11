@@ -88,6 +88,7 @@ export function MermaidEditorDialog({
 							onKeyDown={handleKeyDown}
 							className="h-full w-full resize-none rounded-md border border-border bg-bg-secondary p-3 font-mono text-sm text-text-primary outline-none focus:ring-1 focus:ring-blue-500"
 							spellCheck={false}
+							aria-label="Mermaid ソースコード"
 						/>
 					</div>
 					<div className="flex flex-1 items-start justify-center overflow-auto rounded-md border border-border p-4">

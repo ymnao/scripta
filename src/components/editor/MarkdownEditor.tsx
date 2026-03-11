@@ -53,6 +53,15 @@ const customHighlightStyle = syntaxHighlighting(
 	]),
 );
 
+/** 内容に含まれるバッククォート数に応じて十分長いフェンスを生成する */
+function buildMermaidFence(content: string): string {
+	let max = 2;
+	for (const m of content.matchAll(/`{3,}/g)) {
+		if (m[0].length > max) max = m[0].length;
+	}
+	return "`".repeat(max + 1);
+}
+
 /**
  * IME コンポジション中にエディタへ cm-composing クラスを付与する。
  * drawSelection 有効時でも WKWebView 上の CJK IME で
@@ -621,7 +630,8 @@ export function MarkdownEditor({
 		(newSource: string) => {
 			const view = editorRef.current?.view;
 			if (view && mermaidEditor && newSource !== mermaidEditor.source) {
-				const newText = `\`\`\`mermaid\n${newSource}\n\`\`\``;
+				const fence = buildMermaidFence(newSource);
+				const newText = `${fence}mermaid\n${newSource}\n${fence}`;
 				view.dispatch({
 					changes: { from: mermaidEditor.from, to: mermaidEditor.to, insert: newText },
 				});
@@ -640,7 +650,8 @@ export function MarkdownEditor({
 				const insertAt = line.to;
 				const before = insertAt > 0 ? "\n\n" : "";
 				const after = insertAt < view.state.doc.length ? "\n" : "";
-				const newText = `${before}\`\`\`mermaid\n${newSource}\n\`\`\`${after}`;
+				const fence = buildMermaidFence(newSource);
+				const newText = `${before}${fence}mermaid\n${newSource}\n${fence}${after}`;
 				view.dispatch({ changes: { from: insertAt, to: insertAt, insert: newText } });
 			}
 			setMermaidInsertPos(null);

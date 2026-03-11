@@ -125,7 +125,6 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				// securityLevel: "strict" に加え、DOMPurify で SVG をサニタイズ
 				const svg = DOMPurify.sanitize(rawSvg, {
 					USE_PROFILES: { svg: true, svgFilters: true },
-					ADD_TAGS: ["foreignObject"],
 				});
 				cache.set(key, { status: "rendered", svg });
 				resolve(svg);
