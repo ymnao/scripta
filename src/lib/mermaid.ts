@@ -130,9 +130,11 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				const id = `mermaid-${idCounter++}`;
 				const result = await mermaidModule?.default.render(id, source);
 				const rawSvg = result?.svg ?? "";
-				// securityLevel: "strict" に加え、DOMPurify で SVG をサニタイズ
+				// securityLevel: "strict" に加え、DOMPurify で SVG をサニタイズ。
+				// Mermaid v11 は <foreignObject> 内に HTML (<div>, <span> 等) で
+				// テキストを描画するため、html プロファイルも許可する。
 				const svg = DOMPurify.sanitize(rawSvg, {
-					USE_PROFILES: { svg: true, svgFilters: true },
+					USE_PROFILES: { html: true, svg: true, svgFilters: true },
 				});
 				// レンダリング中にキャッシュがクリア/エビクトされていたら書き戻さない
 				if (gen !== cacheGeneration || !cache.has(key)) {
