@@ -51,13 +51,21 @@ interface MermaidMatch {
  */
 export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
 	const matches: MermaidMatch[] = [];
-	const lines = markdown.split("\n");
+	// LF / CRLF どちらも行区切りとして扱う
+	const lines = markdown.split(/\r\n|\n/);
 
-	// 行頭オフセットの累積配列を事前計算し O(1) で参照する
+	// 元文字列上の改行位置を検索して行頭オフセットを事前計算（CRLF 安全）
 	const lineOffsets = new Array<number>(lines.length + 1);
 	lineOffsets[0] = 0;
+	let searchPos = 0;
 	for (let k = 0; k < lines.length; k++) {
-		lineOffsets[k + 1] = lineOffsets[k] + lines[k].length + 1; // +1 for \n
+		if (k === lines.length - 1) {
+			lineOffsets[k + 1] = markdown.length + 1;
+		} else {
+			const nlIndex = markdown.indexOf("\n", searchPos);
+			lineOffsets[k + 1] = nlIndex === -1 ? markdown.length + 1 : nlIndex + 1;
+			searchPos = nlIndex === -1 ? markdown.length : nlIndex + 1;
+		}
 	}
 
 	let i = 0;
@@ -84,8 +92,8 @@ export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
 			const source = contentLines.join("\n").trim();
 			if (source) {
 				const offset = lineOffsets[startLineIdx];
-				// 閉じフェンス行の末尾まで（末尾 \n は含めない）
-				const endOffset = lineOffsets[i + 1] - 1;
+				// 閉じフェンス行のテキスト末尾まで（改行文字は含めない）
+				const endOffset = lineOffsets[i] + lines[i].length;
 				matches.push({
 					index: offset,
 					length: endOffset - offset,

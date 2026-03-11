@@ -304,20 +304,21 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 				}
 			}
 
+			let needsRebuild = false;
 			for (const block of visibleBlocks) {
 				const entry = getCacheEntry(block.source, theme);
 				if (entry) continue; // Already cached (rendered, error, or rendering)
 
+				needsRebuild = true;
 				renderMermaid(block.source, theme)
 					.then(() => this.scheduleRebuild())
 					.catch(() => this.scheduleRebuild());
 			}
 
-			// ツリーが初回の StateField 更新時に不完全だった場合に備え、
+			// 未キャッシュのレンダリングを開始した場合、または
+			// ツリーが初回の StateField 更新時に不完全だった可能性がある場合に
 			// デコレーション再構築を保証する（例: Undo 後）
-			// ただし、ビューポート内に Mermaid ブロックが存在しない場合は
-			// 不要なトランザクションを避けるためスキップする
-			if (visibleBlocks.length > 0) {
+			if (needsRebuild) {
 				this.scheduleRebuild();
 			}
 		}

@@ -640,6 +640,17 @@ describe("findMermaidCodeBlocks", () => {
 		const md = "```mermaid\r\ngraph TD\r\n  A-->B\r\n```";
 		const blocks = findMermaidCodeBlocks(md);
 		expect(blocks).toHaveLength(1);
+		// offset/length で元文字列を正確にスライスできることを検証
+		const sliced = md.slice(blocks[0].index, blocks[0].index + blocks[0].length);
+		expect(sliced).toBe(md);
+	});
+
+	it("CRLF 混在のオフセットが正確である", () => {
+		const md = "text\r\n\r\n```mermaid\r\ngraph TD\r\n```\r\nmore";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		const sliced = md.slice(blocks[0].index, blocks[0].index + blocks[0].length);
+		expect(sliced).toBe("```mermaid\r\ngraph TD\r\n```");
 	});
 });
 
@@ -674,5 +685,14 @@ describe("preprocessMermaidBlocks", () => {
 		const md = "```mermaid\nINVALID\n```";
 		const result = await preprocessMermaidBlocks(md, "light");
 		expect(result).toBe(md);
+	});
+
+	it("CRLF 改行でも正しく変換する", async () => {
+		const md = "text\r\n\r\n```mermaid\r\ngraph TD\r\n```\r\n\r\nmore";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toContain('<div class="mermaid-diagram">');
+		expect(result).not.toContain("```mermaid");
+		expect(result).toContain("text\r\n\r\n");
+		expect(result).toContain("\r\n\r\nmore");
 	});
 });
