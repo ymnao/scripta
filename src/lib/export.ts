@@ -52,8 +52,15 @@ interface MermaidMatch {
 export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
 	const matches: MermaidMatch[] = [];
 	const lines = markdown.split("\n");
-	let i = 0;
 
+	// 行頭オフセットの累積配列を事前計算し O(1) で参照する
+	const lineOffsets = new Array<number>(lines.length + 1);
+	lineOffsets[0] = 0;
+	for (let k = 0; k < lines.length; k++) {
+		lineOffsets[k + 1] = lineOffsets[k] + lines[k].length + 1; // +1 for \n
+	}
+
+	let i = 0;
 	while (i < lines.length) {
 		const openMatch = lines[i].match(/^(\s*)(`{3,})\s*mermaid\s*$/);
 		if (!openMatch) {
@@ -76,17 +83,9 @@ export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
 			// 閉じフェンスが見つかった
 			const source = contentLines.join("\n").trim();
 			if (source) {
-				// 開始行のオフセットを計算
-				let offset = 0;
-				for (let j = 0; j < startLineIdx; j++) {
-					offset += lines[j].length + 1; // +1 for \n
-				}
-				// 閉じフェンス行の末尾までの長さ
-				let endOffset = 0;
-				for (let j = 0; j <= i; j++) {
-					endOffset += lines[j].length + 1;
-				}
-				endOffset--; // 最後の \n を除く（ない場合もあるため）
+				const offset = lineOffsets[startLineIdx];
+				// 閉じフェンス行の末尾まで（末尾 \n は含めない）
+				const endOffset = lineOffsets[i + 1] - 1;
 				matches.push({
 					index: offset,
 					length: endOffset - offset,
@@ -517,7 +516,10 @@ export async function exportAsHtml(
 	const mermaidTheme = resolveMermaidTheme(options?.theme);
 	const preprocessed = await preprocessMermaidBlocks(markdown, mermaidTheme);
 	const bodyHtml = markdownToHtml(preprocessed);
-	const html = buildHtmlDocument(bodyHtml, title, options?.theme);
+	// Mermaid SVG は固定テーマでレンダリングされるため、
+	// system の場合も解決済みテーマで HTML 全体を統一する
+	const htmlTheme = options?.theme === "system" || !options?.theme ? mermaidTheme : options.theme;
+	const html = buildHtmlDocument(bodyHtml, title, htmlTheme);
 	await writeFile(savePath, html);
 	return true;
 }

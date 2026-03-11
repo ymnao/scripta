@@ -72,15 +72,21 @@ function cacheKey(source: string, theme: "light" | "dark"): string {
 	return `${theme}:${source}`;
 }
 
-/** キャッシュが上限を超えた場合、古い完了済みエントリを削除する */
+/** キャッシュが上限を超えた場合、古いエントリを削除する。
+ *  まず完了済みエントリを優先的に削除し、それでも不足する場合は rendering 中も含めて削除する。 */
 function evictIfNeeded(): void {
 	if (cache.size < MAX_CACHE_SIZE) return;
-	// Map はinsert順を保持するので、先頭の完了済みエントリを削除
+	// Map は insert 順を保持するので、先頭の完了済みエントリから削除する
 	for (const [key, entry] of cache) {
 		if (entry.status !== "rendering") {
 			cache.delete(key);
-			if (cache.size < MAX_CACHE_SIZE) break;
+			if (cache.size < MAX_CACHE_SIZE) return;
 		}
+	}
+	// 完了済みだけでは足りない場合、rendering 中も含めて削除する
+	for (const [key] of cache) {
+		cache.delete(key);
+		if (cache.size < MAX_CACHE_SIZE) break;
 	}
 }
 

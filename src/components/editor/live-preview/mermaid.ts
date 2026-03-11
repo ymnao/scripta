@@ -345,20 +345,18 @@ const treeChangeDetector = ViewPlugin.fromClass(
 
 /** Find the FencedCode block surrounding `pos`. */
 function findFencedCodeBlock(view: EditorView, pos: number): { from: number; to: number } | null {
-	const line = view.state.doc.lineAt(pos);
 	const tree = syntaxTree(view.state);
-	let result: { from: number; to: number } | null = null;
-	tree.iterate({
-		from: line.from,
-		to: Math.min(line.from + 10000, view.state.doc.length),
-		enter(node) {
-			if (node.name === "FencedCode" && node.from <= pos && node.to >= pos) {
-				result = { from: node.from, to: node.to };
-				return false;
-			}
-		},
-	});
-	return result;
+	let node = tree.resolve(pos, -1);
+
+	while (node) {
+		if (node.name === "FencedCode") {
+			return { from: node.from, to: node.to };
+		}
+		if (!node.parent) break;
+		node = node.parent;
+	}
+
+	return null;
 }
 
 function createMermaidClickHandler() {

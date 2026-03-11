@@ -91,12 +91,13 @@ describe("exportAsHtml", () => {
 		expect(html).not.toContain("prefers-color-scheme");
 	});
 
-	it("uses system theme with media query by default", async () => {
+	it("resolves system theme to light/dark for consistent Mermaid rendering", async () => {
 		mockedSave.mockResolvedValue("/output/test.html");
 		await exportAsHtml("# Hello", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
-		expect(html).toContain("color-scheme: light dark");
-		expect(html).toContain("prefers-color-scheme");
+		// system テーマは Mermaid SVG と合わせるため解決済みテーマ（light）で固定される
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
 	});
 });
 
