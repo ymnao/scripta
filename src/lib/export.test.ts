@@ -9,6 +9,10 @@ vi.mock("./commands", () => ({
 	exportPdf: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("./mermaid", () => ({
+	renderMermaid: vi.fn(async (source: string) => `<svg>${source}</svg>`),
+}));
+
 const { save } = await import("@tauri-apps/plugin-dialog");
 const { writeFile, exportPdf } = await import("./commands");
 const {
@@ -18,7 +22,9 @@ const {
 	exportAsHtml,
 	exportAsPdf,
 	exportAsPrompt,
+	findMermaidCodeBlocks,
 	getDefaultPromptTemplate,
+	preprocessMermaidBlocks,
 } = await import("./export");
 
 const mockedSave = save as Mock;
@@ -85,12 +91,23 @@ describe("exportAsHtml", () => {
 		expect(html).not.toContain("prefers-color-scheme");
 	});
 
-	it("uses system theme with media query by default", async () => {
+	it("resolves system theme to light/dark for consistent Mermaid rendering", async () => {
 		mockedSave.mockResolvedValue("/output/test.html");
 		await exportAsHtml("# Hello", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
-		expect(html).toContain("color-scheme: light dark");
-		expect(html).toContain("prefers-color-scheme");
+		// system テーマは Mermaid SVG と合わせるため解決済みテーマ（light）で固定される
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("includes Mermaid SVG in final HTML output", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsHtml(md, "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("```mermaid");
 	});
 });
 
@@ -213,6 +230,16 @@ describe("exportAsPdf", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain("katex");
 		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("includes Mermaid SVG in final PDF HTML output", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsPdf(md, "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("```mermaid");
 	});
 
 	it("includes page break CSS when pageBreakLevel is set", async () => {
@@ -576,5 +603,116 @@ describe("exportAsPrompt with custom template", () => {
 		await exportAsPrompt("# Hello", "/workspace/test.md");
 		const output = mockedWriteFile.mock.calls[0][1] as string;
 		expect(output).toContain("# HTML変換プロンプト");
+	});
+});
+
+describe("findMermaidCodeBlocks", () => {
+	it("標準的な mermaid ブロックを検出する", () => {
+		const md = "text\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nmore";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+	});
+
+	it("4文字以上のバッククォートに対応する", () => {
+		const md = "````mermaid\ngraph TD\n  A-->B\n````";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+	});
+
+	it("閉じフェンスが開始より短い場合はマッチしない", () => {
+		const md = "````mermaid\ngraph TD\n```\nmore\n````";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		// ``` は閉じフェンスとして無視され、```` で閉じる
+		expect(blocks[0].source).toBe("graph TD\n```\nmore");
+	});
+
+	it("空のブロックはスキップする", () => {
+		const md = "```mermaid\n\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(0);
+	});
+
+	it("通常のコードブロックは無視する", () => {
+		const md = "```js\nconst x = 1;\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(0);
+	});
+
+	it("複数の mermaid ブロックを検出する", () => {
+		const md =
+			"```mermaid\ngraph TD\n  A-->B\n```\n\n```mermaid\nsequenceDiagram\n  A->>B: Hi\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(2);
+		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+		expect(blocks[1].source).toBe("sequenceDiagram\n  A->>B: Hi");
+	});
+
+	it("インデントされたフェンスに対応する", () => {
+		const md = "  ```mermaid\n  graph TD\n    A-->B\n  ```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+	});
+
+	it("CRLF 改行に対応する", () => {
+		const md = "```mermaid\r\ngraph TD\r\n  A-->B\r\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		// offset/length で元文字列を正確にスライスできることを検証
+		const sliced = md.slice(blocks[0].index, blocks[0].index + blocks[0].length);
+		expect(sliced).toBe(md);
+	});
+
+	it("CRLF 混在のオフセットが正確である", () => {
+		const md = "text\r\n\r\n```mermaid\r\ngraph TD\r\n```\r\nmore";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		const sliced = md.slice(blocks[0].index, blocks[0].index + blocks[0].length);
+		expect(sliced).toBe("```mermaid\r\ngraph TD\r\n```");
+	});
+});
+
+describe("preprocessMermaidBlocks", () => {
+	it("mermaid ブロックを SVG に変換する", async () => {
+		const md = "text\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nmore";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toContain('<div class="mermaid-diagram">');
+		expect(result).toContain("<svg>");
+		expect(result).not.toContain("```mermaid");
+		expect(result).toContain("text\n\n");
+		expect(result).toContain("\n\nmore");
+	});
+
+	it("mermaid ブロックがなければそのまま返す", async () => {
+		const md = "# Hello\n\nWorld";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toBe(md);
+	});
+
+	it("複数の mermaid ブロックをすべて変換する", async () => {
+		const md = "```mermaid\ngraph TD\n```\n\n```mermaid\nsequenceDiagram\n```";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).not.toContain("```mermaid");
+		const svgCount = (result.match(/<svg>/g) || []).length;
+		expect(svgCount).toBe(2);
+	});
+
+	it("エラー時は元のコードブロックを残す", async () => {
+		const { renderMermaid } = await import("./mermaid");
+		(renderMermaid as Mock).mockRejectedValueOnce(new Error("Parse error"));
+		const md = "```mermaid\nINVALID\n```";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toBe(md);
+	});
+
+	it("CRLF 改行でも正しく変換する", async () => {
+		const md = "text\r\n\r\n```mermaid\r\ngraph TD\r\n```\r\n\r\nmore";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toContain('<div class="mermaid-diagram">');
+		expect(result).not.toContain("```mermaid");
+		expect(result).toContain("text\r\n\r\n");
+		expect(result).toContain("\r\n\r\nmore");
 	});
 });

@@ -1,10 +1,22 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { exportPdf, writeFile } from "./commands";
 import { markdownToHtml } from "./markdown-to-html";
+import { renderMermaid } from "./mermaid";
 import { basename } from "./path";
 
 export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
+
+/** ExportTheme を Mermaid 用の "light" | "dark" に解決する。system の場合は OS 設定を参照。 */
+function resolveMermaidTheme(theme?: ExportTheme): "light" | "dark" {
+	if (theme === "dark") return "dark";
+	if (theme === "light") return "light";
+	// system or undefined: OS のカラースキームを参照
+	if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+		return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+	}
+	return "light";
+}
 
 const LIGHT_STYLES = `body { color: #333; background: #fff; }
 code { background: #f8f8f8; }
@@ -25,6 +37,112 @@ th { background: #222; }
 a { color: #60a5fa; }
 hr { border-top-color: #333; }
 li::marker { color: #777; }`;
+
+interface MermaidMatch {
+	index: number;
+	length: number;
+	source: string;
+	indent: string;
+}
+
+/**
+ * Mermaid fenced code blocks を検出する。
+ * 3文字以上のバッククォートに対応し、開始と同じ長さ以上の閉じフェンスを要求する。
+ * インデントされたフェンスにも対応。
+ */
+export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
+	const matches: MermaidMatch[] = [];
+	// LF / CRLF どちらも行区切りとして扱う
+	const lines = markdown.split(/\r\n|\n/);
+
+	// 元文字列上の改行位置を検索して行頭オフセットを事前計算（CRLF 安全）
+	const lineOffsets = new Array<number>(lines.length + 1);
+	lineOffsets[0] = 0;
+	let searchPos = 0;
+	for (let k = 0; k < lines.length; k++) {
+		if (k === lines.length - 1) {
+			lineOffsets[k + 1] = markdown.length + 1;
+		} else {
+			const nlIndex = markdown.indexOf("\n", searchPos);
+			lineOffsets[k + 1] = nlIndex === -1 ? markdown.length + 1 : nlIndex + 1;
+			searchPos = nlIndex === -1 ? markdown.length : nlIndex + 1;
+		}
+	}
+
+	let i = 0;
+	while (i < lines.length) {
+		const openMatch = lines[i].match(/^(\s*)(`{3,})\s*mermaid\s*$/);
+		if (!openMatch) {
+			i++;
+			continue;
+		}
+
+		const fenceLen = openMatch[2].length;
+		const closeRe = new RegExp(`^\\s*\`{${fenceLen},}\\s*$`);
+		const startLineIdx = i;
+		const contentLines: string[] = [];
+		i++;
+
+		while (i < lines.length && !closeRe.test(lines[i])) {
+			contentLines.push(lines[i]);
+			i++;
+		}
+
+		if (i < lines.length) {
+			// 閉じフェンスが見つかった
+			const source = contentLines.join("\n").trim();
+			if (source) {
+				const offset = lineOffsets[startLineIdx];
+				// 閉じフェンス行のテキスト末尾まで（改行文字は含めない）
+				const endOffset = lineOffsets[i] + lines[i].length;
+				matches.push({
+					index: offset,
+					length: endOffset - offset,
+					source,
+					indent: openMatch[1],
+				});
+			}
+			i++;
+		}
+	}
+
+	return matches;
+}
+
+/**
+ * Mermaid コードブロックを SVG に変換する。
+ * エラー時は元のコードブロックをそのまま残す。
+ */
+export async function preprocessMermaidBlocks(
+	markdown: string,
+	theme: "light" | "dark" = "light",
+): Promise<string> {
+	const matches = findMermaidCodeBlocks(markdown);
+	if (matches.length === 0) return markdown;
+
+	let result = markdown;
+	// Process in reverse order to preserve offsets
+	for (let i = matches.length - 1; i >= 0; i--) {
+		const match = matches[i];
+		try {
+			const svg = await renderMermaid(match.source, theme);
+			const raw = `<div class="mermaid-diagram">${svg}</div>`;
+			// 元のフェンスのインデントを保持する（リスト・引用内の構造維持）
+			const replacement = match.indent
+				? raw
+						.split("\n")
+						.map((line) => (line.length > 0 ? match.indent + line : line))
+						.join("\n")
+				: raw;
+			result =
+				result.slice(0, match.index) + replacement + result.slice(match.index + match.length);
+		} catch {
+			// Keep original code block on error
+		}
+	}
+
+	return result;
+}
 
 function buildPageBreakCss(level: PageBreakLevel, smart: boolean): string {
 	if (level === "none") return "";
@@ -346,6 +464,8 @@ th, td {
 }
 th { font-weight: 600; }
 img { max-width: 100%; height: auto; }
+.mermaid-diagram { text-align: center; margin: 1em 0; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
 hr { border: none; border-top: 1px solid; margin: 1em 0; }
 ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
@@ -410,8 +530,13 @@ export async function exportAsHtml(
 
 	if (!savePath) return false;
 
-	const bodyHtml = markdownToHtml(markdown);
-	const html = buildHtmlDocument(bodyHtml, title, options?.theme);
+	const mermaidTheme = resolveMermaidTheme(options?.theme);
+	const preprocessed = await preprocessMermaidBlocks(markdown, mermaidTheme);
+	const bodyHtml = markdownToHtml(preprocessed);
+	// Mermaid SVG は固定テーマでレンダリングされるため、
+	// system の場合も解決済みテーマで HTML 全体を統一する
+	const htmlTheme = options?.theme === "system" || !options?.theme ? mermaidTheme : options.theme;
+	const html = buildHtmlDocument(bodyHtml, title, htmlTheme);
 	await writeFile(savePath, html);
 	return true;
 }
@@ -448,7 +573,8 @@ export async function exportAsPdf(
 			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
 			: undefined;
 
-	const bodyHtml = markdownToHtml(markdown, { breaks: true });
+	const preprocessed = await preprocessMermaidBlocks(markdown, "light");
+	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
 	// PDF用: 静的判定を動的スクリプトで上書き

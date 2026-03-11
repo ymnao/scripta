@@ -8,6 +8,7 @@ export { linkCardDecoration } from "./link-cards";
 export { linkDecoration } from "./links";
 export { listDecoration, listKeymap } from "./lists";
 export { mathDecoration } from "./math";
+export { mermaidDecoration } from "./mermaid";
 export { strikethroughDecoration } from "./strikethrough";
 export { wikilinkDecoration } from "./wikilinks";
 export { tableDecoration } from "./table-decoration";

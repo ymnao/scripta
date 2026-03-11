@@ -14,9 +14,11 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FontFamily } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
+import { ContextMenu } from "../filetree/ContextMenu";
+import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import {
 	toggleBold,
 	toggleHeading,
@@ -36,6 +38,7 @@ import {
 	listDecoration,
 	listKeymap,
 	mathDecoration,
+	mermaidDecoration,
 	strikethroughDecoration,
 	tableDecoration,
 	tableKeymap,
@@ -49,6 +52,15 @@ const customHighlightStyle = syntaxHighlighting(
 		{ tag: tags.link, textDecoration: "none" },
 	]),
 );
+
+/** 内容に含まれるバッククォート数に応じて十分長いフェンスを生成する */
+function buildMermaidFence(content: string): string {
+	let max = 2;
+	for (const m of content.matchAll(/`{3,}/g)) {
+		if (m[0].length > max) max = m[0].length;
+	}
+	return "`".repeat(max + 1);
+}
 
 /**
  * IME コンポジション中にエディタへ cm-composing クラスを付与する。
@@ -312,6 +324,34 @@ const staticEditorTheme = EditorView.theme({
 		opacity: "0.6",
 		textDecoration: "underline dashed",
 	},
+	".cm-mermaid-widget": {
+		display: "flex",
+		justifyContent: "center",
+		padding: "8px 0",
+		margin: "4px 0",
+		overflow: "hidden",
+	},
+	".cm-mermaid-inner": {
+		width: "100%",
+		textAlign: "center",
+	},
+	".cm-mermaid-inner svg": {
+		display: "inline-block",
+	},
+	".cm-mermaid-loading": {
+		color: "var(--color-text-secondary)",
+		fontSize: "0.85em",
+		padding: "12px 0",
+	},
+	".cm-mermaid-error": {
+		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+		fontSize: "0.85em",
+		color: "#dc2626",
+		backgroundColor: "color-mix(in srgb, #dc2626 8%, transparent)",
+		padding: "8px 12px",
+		borderRadius: "4px",
+		whiteSpace: "pre-wrap",
+	},
 	".cm-link-card": {
 		display: "block",
 		border: "1px solid var(--color-border)",
@@ -438,10 +478,35 @@ export function MarkdownEditor({
 	const onStatisticsRef = useRef(onStatistics);
 	onStatisticsRef.current = onStatistics;
 	const statsRafIdRef = useRef(0);
+	const containerRef = useRef<HTMLDivElement>(null);
+	const [mermaidContextMenu, setMermaidContextMenu] = useState<{
+		position: { x: number; y: number };
+		source: string;
+		from: number;
+		to: number;
+	} | null>(null);
+	const [mermaidEditor, setMermaidEditor] = useState<{
+		source: string;
+		from: number;
+		to: number;
+	} | null>(null);
+	const [mermaidInsertPos, setMermaidInsertPos] = useState<number | null>(null);
 
 	// Cancel any pending statistics RAF on unmount
 	useEffect(() => {
 		return () => cancelAnimationFrame(statsRafIdRef.current);
+	}, []);
+
+	// Listen for mermaid right-click context menu events from CM extension
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+		const onMermaidMenu = (e: Event) => {
+			const { source, from, to, clientX, clientY } = (e as CustomEvent).detail;
+			setMermaidContextMenu({ position: { x: clientX, y: clientY }, source, from, to });
+		};
+		el.addEventListener("mermaid-context-menu", onMermaidMenu);
+		return () => el.removeEventListener("mermaid-context-menu", onMermaidMenu);
 	}, []);
 
 	useEffect(() => {
@@ -509,6 +574,7 @@ export function MarkdownEditor({
 			linkDecoration,
 			imageDecoration,
 			codeBlockDecoration,
+			mermaidDecoration,
 			listDecoration,
 			blockquoteDecoration,
 			horizontalRuleDecoration,
@@ -560,8 +626,44 @@ export function MarkdownEditor({
 		[fontSize, fontFamily, showLinkCards],
 	);
 
+	const handleMermaidSave = useCallback(
+		(newSource: string) => {
+			const view = editorRef.current?.view;
+			if (view && mermaidEditor && newSource !== mermaidEditor.source) {
+				const fence = buildMermaidFence(newSource);
+				const newText = `${fence}mermaid\n${newSource}\n${fence}`;
+				view.dispatch({
+					changes: { from: mermaidEditor.from, to: mermaidEditor.to, insert: newText },
+				});
+			}
+			setMermaidEditor(null);
+		},
+		[mermaidEditor],
+	);
+
+	const handleMermaidInsert = useCallback(
+		(newSource: string) => {
+			const view = editorRef.current?.view;
+			if (view && mermaidInsertPos !== null && newSource.trim()) {
+				const doc = view.state.doc;
+				const pos = Math.min(mermaidInsertPos, doc.length);
+				const line = doc.lineAt(pos);
+				const insertAt = line.to;
+				const before = insertAt > 0 ? "\n\n" : "";
+				const hasTrailingNewline =
+					insertAt < doc.length && doc.sliceString(insertAt, insertAt + 1) === "\n";
+				const after = insertAt < doc.length && !hasTrailingNewline ? "\n" : "";
+				const fence = buildMermaidFence(newSource);
+				const newText = `${before}${fence}mermaid\n${newSource}\n${fence}${after}`;
+				view.dispatch({ changes: { from: insertAt, to: insertAt, insert: newText } });
+			}
+			setMermaidInsertPos(null);
+		},
+		[mermaidInsertPos],
+	);
+
 	return (
-		<div className="relative min-h-0 min-w-0 flex-1">
+		<div ref={containerRef} className="relative min-h-0 min-w-0 flex-1">
 			<div className="absolute inset-0">
 				<CodeMirror
 					ref={editorRef}
@@ -593,6 +695,62 @@ export function MarkdownEditor({
 					}}
 				/>
 			</div>
+			{mermaidContextMenu && (
+				<ContextMenu
+					position={mermaidContextMenu.position}
+					items={[
+						{
+							id: "edit-mermaid",
+							label: "Mermaid を編集",
+							onClick: () => {
+								setMermaidEditor({
+									source: mermaidContextMenu.source,
+									from: mermaidContextMenu.from,
+									to: mermaidContextMenu.to,
+								});
+							},
+						},
+						{
+							id: "insert-mermaid",
+							label: "Mermaid 図を挿入",
+							onClick: () => {
+								setMermaidInsertPos(mermaidContextMenu.to);
+							},
+						},
+						{
+							id: "delete-mermaid-sep",
+							label: "",
+							separator: true,
+							onClick: () => {},
+						},
+						{
+							id: "delete-mermaid",
+							label: "Mermaid を削除",
+							danger: true,
+							onClick: () => {
+								const view = editorRef.current?.view;
+								if (!view) return;
+								const { from, to } = mermaidContextMenu;
+								view.dispatch({ changes: { from, to, insert: "" } });
+							},
+						},
+					]}
+					onClose={() => setMermaidContextMenu(null)}
+				/>
+			)}
+			<MermaidEditorDialog
+				open={mermaidEditor !== null}
+				source={mermaidEditor?.source ?? ""}
+				onSave={handleMermaidSave}
+				onCancel={() => setMermaidEditor(null)}
+			/>
+			<MermaidEditorDialog
+				open={mermaidInsertPos !== null}
+				source=""
+				mode="insert"
+				onSave={handleMermaidInsert}
+				onCancel={() => setMermaidInsertPos(null)}
+			/>
 		</div>
 	);
 }
