@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, Settings, X } from "lucide-react";
-import { type ReactNode, useCallback, useId, useState } from "react";
+import { type ReactNode, useCallback, useId, useRef, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
@@ -79,12 +79,14 @@ export function SetupWizardDialog({
 	const titleId = useId();
 	const descId = useId();
 	const [processing, setProcessing] = useState(false);
+	const processingRef = useRef(false);
 	const [selectedOption, setSelectedOption] = useState<SetupOption | null>(null);
 
 	// X ボタン・Escape・オーバーレイクリック: スキップと同じ扱いにする。
 	// 初期化マーカーを書き込み、設定 > ワークスペースからテンプレートを後で追加可能。
 	const handleDismiss = useCallback(async () => {
-		if (processing) return;
+		if (processingRef.current) return;
+		processingRef.current = true;
 		setProcessing(true);
 		try {
 			await markWorkspaceInitialized(workspacePath);
@@ -99,13 +101,15 @@ export function SetupWizardDialog({
 					`初期化に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
 				);
 		} finally {
+			processingRef.current = false;
 			setProcessing(false);
 		}
-	}, [processing, workspacePath, onComplete, onClose]);
+	}, [workspacePath, onComplete, onClose]);
 
 	const handleSetup = useCallback(
 		async (option: SetupOption) => {
-			if (processing) return;
+			if (processingRef.current) return;
+			processingRef.current = true;
 			setSelectedOption(option);
 			setProcessing(true);
 			const addToast = useToastStore.getState().addToast;
@@ -160,11 +164,12 @@ export function SetupWizardDialog({
 					`セットアップに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			} finally {
+				processingRef.current = false;
 				setProcessing(false);
 				setSelectedOption(null);
 			}
 		},
-		[processing, workspacePath, onComplete, onClose],
+		[workspacePath, onComplete, onClose],
 	);
 
 	return (
