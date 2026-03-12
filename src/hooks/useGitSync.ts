@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 import {
 	gitAddAll,
@@ -277,18 +278,15 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			}
 		};
 
-		// Tauri event listener
 		let unlisten: (() => void) | null = null;
 		let cancelled = false;
 
-		import("@tauri-apps/api/event").then(({ listen }) => {
-			void listen("conflict-resolved", handleConflictResolved).then((fn) => {
-				if (cancelled) {
-					fn();
-				} else {
-					unlisten = fn;
-				}
-			});
+		void listen("conflict-resolved", handleConflictResolved).then((fn) => {
+			if (cancelled) {
+				fn();
+			} else {
+				unlisten = fn;
+			}
 		});
 
 		return () => {

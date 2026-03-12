@@ -29,6 +29,15 @@ vi.mock("../../lib/store", () => ({
 		highlightActiveLine: false,
 		fontFamily: "monospace",
 		trimTrailingWhitespace: true,
+		showLinkCards: true,
+		gitSyncEnabled: false,
+		autoCommitInterval: 10,
+		autoPullInterval: 10,
+		autoPushInterval: 10,
+		pullBeforePush: true,
+		syncMethod: "merge",
+		commitMessage: "vault backup: {{date}}",
+		autoPullOnStartup: false,
 	}),
 	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
 	saveThemePreference: vi.fn().mockResolvedValue(undefined),
@@ -39,17 +48,40 @@ vi.mock("../../lib/store", () => ({
 	saveHighlightActiveLine: vi.fn().mockResolvedValue(undefined),
 	saveFontFamily: vi.fn().mockResolvedValue(undefined),
 	saveTrimTrailingWhitespace: vi.fn().mockResolvedValue(undefined),
+	saveShowLinkCards: vi.fn().mockResolvedValue(undefined),
+	saveGitSyncEnabled: vi.fn().mockResolvedValue(undefined),
+	saveAutoCommitInterval: vi.fn().mockResolvedValue(undefined),
+	saveAutoPullInterval: vi.fn().mockResolvedValue(undefined),
+	saveAutoPushInterval: vi.fn().mockResolvedValue(undefined),
+	savePullBeforePush: vi.fn().mockResolvedValue(undefined),
+	saveSyncMethod: vi.fn().mockResolvedValue(undefined),
+	saveCommitMessage: vi.fn().mockResolvedValue(undefined),
+	saveAutoPullOnStartup: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock("../../hooks/useGitSync", () => ({
+	useGitSync: () => ({ manualSync: vi.fn() }),
+}));
+
+vi.mock("@tauri-apps/api/webviewWindow", () => {
+	function WebviewWindow() {}
+	WebviewWindow.getByLabel = () => null;
+	return { WebviewWindow };
+});
 
 // Capture the fs-change listener callback so tests can emit events
 type FsChangeCallback = (event: { payload: FsChangeEvent[] }) => void;
 let fsChangeCallback: FsChangeCallback | null = null;
 
 vi.mock("@tauri-apps/api/event", () => ({
-	listen: vi.fn().mockImplementation((_name: string, cb: FsChangeCallback) => {
-		fsChangeCallback = cb;
+	listen: vi.fn().mockImplementation((name: string, cb: FsChangeCallback) => {
+		if (name === "fs-change") {
+			fsChangeCallback = cb;
+		}
 		return Promise.resolve(() => {
-			fsChangeCallback = null;
+			if (name === "fs-change") {
+				fsChangeCallback = null;
+			}
 		});
 	}),
 }));
