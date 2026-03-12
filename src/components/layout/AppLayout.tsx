@@ -118,6 +118,8 @@ export function AppLayout() {
 	const contentRef = useRef(content);
 	contentRef.current = content;
 	const savedContentRef = useRef("");
+	const manualSyncRef = useRef(manualSync);
+	manualSyncRef.current = manualSync;
 	const saveNowRef = useRef(saveNow);
 	saveNowRef.current = saveNow;
 	const prevWorkspacePathRef = useRef(workspacePath);
@@ -281,7 +283,7 @@ export function AppLayout() {
 
 		addListener("menu-open-settings", () => setSettingsOpen(true));
 		addListener("menu-open-help", () => setHelpOpen(true));
-		addListener("menu-git-sync", () => manualSync());
+		addListener("menu-git-sync", () => manualSyncRef.current());
 
 		addListener("menu-export", () => {
 			const path = useWorkspaceStore.getState().activeTabPath;
@@ -293,7 +295,7 @@ export function AppLayout() {
 			cancelled = true;
 			for (const u of unlisteners) u();
 		};
-	}, [handleExport, manualSync]);
+	}, [handleExport]);
 
 	// Save all dirty tabs before window closes
 	useEffect(() => {
