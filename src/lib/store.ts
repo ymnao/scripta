@@ -1,4 +1,6 @@
 import { type Store, load } from "@tauri-apps/plugin-store";
+import type { SyncMethod } from "../types/git-sync";
+import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
 
 export type ThemePreference = "system" | "light" | "dark";
 export type FontFamily = "monospace" | "sans-serif" | "serif";
@@ -13,6 +15,14 @@ interface AppSettings {
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
 	showLinkCards: boolean;
+	gitSyncEnabled: boolean;
+	autoCommitInterval: number;
+	autoPullInterval: number;
+	autoPushInterval: number;
+	pullBeforePush: boolean;
+	syncMethod: SyncMethod;
+	commitMessage: string;
+	autoPullOnStartup: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -26,6 +36,14 @@ const DEFAULTS: AppSettings = {
 	fontFamily: "monospace",
 	trimTrailingWhitespace: true,
 	showLinkCards: true,
+	gitSyncEnabled: GIT_SYNC_DEFAULTS.gitSyncEnabled,
+	autoCommitInterval: GIT_SYNC_DEFAULTS.autoCommitInterval,
+	autoPullInterval: GIT_SYNC_DEFAULTS.autoPullInterval,
+	autoPushInterval: GIT_SYNC_DEFAULTS.autoPushInterval,
+	pullBeforePush: GIT_SYNC_DEFAULTS.pullBeforePush,
+	syncMethod: GIT_SYNC_DEFAULTS.syncMethod,
+	commitMessage: GIT_SYNC_DEFAULTS.commitMessage,
+	autoPullOnStartup: GIT_SYNC_DEFAULTS.autoPullOnStartup,
 };
 
 let storePromise: Promise<Store> | null = null;
@@ -109,6 +127,52 @@ export async function loadSettings(): Promise<AppSettings> {
 		const showLinkCards: boolean =
 			typeof rawShowLinkCards === "boolean" ? rawShowLinkCards : DEFAULTS.showLinkCards;
 
+		const rawGitSyncEnabled = await store.get<unknown>("gitSyncEnabled");
+		const gitSyncEnabled: boolean =
+			typeof rawGitSyncEnabled === "boolean" ? rawGitSyncEnabled : DEFAULTS.gitSyncEnabled;
+
+		const rawAutoCommitInterval = await store.get<unknown>("autoCommitInterval");
+		const autoCommitInterval: number =
+			typeof rawAutoCommitInterval === "number" &&
+			rawAutoCommitInterval >= 0 &&
+			rawAutoCommitInterval <= 1440
+				? rawAutoCommitInterval
+				: DEFAULTS.autoCommitInterval;
+
+		const rawAutoPullInterval = await store.get<unknown>("autoPullInterval");
+		const autoPullInterval: number =
+			typeof rawAutoPullInterval === "number" &&
+			rawAutoPullInterval >= 0 &&
+			rawAutoPullInterval <= 1440
+				? rawAutoPullInterval
+				: DEFAULTS.autoPullInterval;
+
+		const rawAutoPushInterval = await store.get<unknown>("autoPushInterval");
+		const autoPushInterval: number =
+			typeof rawAutoPushInterval === "number" &&
+			rawAutoPushInterval >= 0 &&
+			rawAutoPushInterval <= 1440
+				? rawAutoPushInterval
+				: DEFAULTS.autoPushInterval;
+
+		const rawPullBeforePush = await store.get<unknown>("pullBeforePush");
+		const pullBeforePush: boolean =
+			typeof rawPullBeforePush === "boolean" ? rawPullBeforePush : DEFAULTS.pullBeforePush;
+
+		const rawSyncMethod = await store.get<unknown>("syncMethod");
+		const syncMethod: SyncMethod =
+			rawSyncMethod === "merge" || rawSyncMethod === "rebase" ? rawSyncMethod : DEFAULTS.syncMethod;
+
+		const rawCommitMessage = await store.get<unknown>("commitMessage");
+		const commitMessage: string =
+			typeof rawCommitMessage === "string" && rawCommitMessage.length > 0
+				? rawCommitMessage
+				: DEFAULTS.commitMessage;
+
+		const rawAutoPullOnStartup = await store.get<unknown>("autoPullOnStartup");
+		const autoPullOnStartup: boolean =
+			typeof rawAutoPullOnStartup === "boolean" ? rawAutoPullOnStartup : DEFAULTS.autoPullOnStartup;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -120,6 +184,14 @@ export async function loadSettings(): Promise<AppSettings> {
 			fontFamily,
 			trimTrailingWhitespace,
 			showLinkCards,
+			gitSyncEnabled,
+			autoCommitInterval,
+			autoPullInterval,
+			autoPushInterval,
+			pullBeforePush,
+			syncMethod,
+			commitMessage,
+			autoPullOnStartup,
 		};
 	} catch {
 		return { ...DEFAULTS };
@@ -220,6 +292,86 @@ export async function saveShowLinkCards(show: boolean): Promise<void> {
 	try {
 		const store = await getStore();
 		await store.set("showLinkCards", show);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveGitSyncEnabled(enabled: boolean): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("gitSyncEnabled", enabled);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveAutoCommitInterval(interval: number): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("autoCommitInterval", interval);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveAutoPullInterval(interval: number): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("autoPullInterval", interval);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveAutoPushInterval(interval: number): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("autoPushInterval", interval);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function savePullBeforePush(pull: boolean): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("pullBeforePush", pull);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveSyncMethod(method: SyncMethod): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("syncMethod", method);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveCommitMessage(message: string): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("commitMessage", message);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveAutoPullOnStartup(pull: boolean): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("autoPullOnStartup", pull);
 		await store.save();
 	} catch {
 		// Ignore save errors
