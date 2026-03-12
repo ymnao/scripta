@@ -43,6 +43,7 @@ function OptionCard({
 			type="button"
 			onClick={onClick}
 			disabled={disabled}
+			aria-pressed={selected}
 			className={`w-full rounded-lg border p-3 text-left transition-colors ${
 				selected
 					? "border-blue-500 bg-blue-50 dark:bg-blue-950/30"

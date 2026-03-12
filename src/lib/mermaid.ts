@@ -43,7 +43,17 @@ function getThemeCss(theme: "light" | "dark"): string {
  */
 export function sanitizeMermaidSvg(rawSvg: string): string {
 	const parser = new DOMParser();
-	const originalDoc = parser.parseFromString(rawSvg, "text/html");
+	const serializer = new XMLSerializer();
+	const originalDoc = parser.parseFromString(rawSvg, "image/svg+xml");
+
+	// パースエラーの場合は文字列ベースでサニタイズして返す
+	if (originalDoc.querySelector("parsererror")) {
+		return DOMPurify.sanitize(rawSvg, {
+			USE_PROFILES: { svg: true, svgFilters: true },
+			ADD_TAGS: ["foreignObject"],
+		});
+	}
+
 	const originalFOs = originalDoc.querySelectorAll("foreignObject");
 
 	// foreignObject が無い場合は単純にサニタイズ結果を返す
@@ -62,16 +72,16 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 		originalFoMap.set(id, fo);
 	});
 
-	// data-fo-id を埋め込んだ SVG を DOMPurify でサニタイズ（foreignObject の中身は失われる）
-	const svgWithIds = originalDoc.body.innerHTML;
+	// data-fo-id を埋め込んだ SVG を XMLSerializer で文字列化し DOMPurify でサニタイズ
+	const svgWithIds = serializer.serializeToString(originalDoc.documentElement);
 	const sanitized = DOMPurify.sanitize(svgWithIds, {
 		USE_PROFILES: { svg: true, svgFilters: true },
 		ADD_TAGS: ["foreignObject"],
 		ADD_ATTR: ["data-fo-id"],
 	});
 
-	// サニタイズ済み SVG をパースし、foreignObject 内の HTML を個別にサニタイズして再注入
-	const sanitizedDoc = parser.parseFromString(sanitized, "text/html");
+	// サニタイズ済み SVG を再パースし、foreignObject 内の HTML を個別にサニタイズして再注入
+	const sanitizedDoc = parser.parseFromString(sanitized, "image/svg+xml");
 	const sanitizedFOs = sanitizedDoc.querySelectorAll("foreignObject");
 
 	for (const fo of sanitizedFOs) {
@@ -88,8 +98,7 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 		fo.removeAttribute("data-fo-id");
 	}
 
-	const svgEl = sanitizedDoc.querySelector("svg");
-	return svgEl?.outerHTML ?? sanitized;
+	return serializer.serializeToString(sanitizedDoc.documentElement);
 }
 
 function buildConfig(theme: "light" | "dark") {

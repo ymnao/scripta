@@ -190,6 +190,7 @@ function WorkspaceSection({
 }) {
 	const [files, setFiles] = useState<TemplateFileStatus[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [creatingPaths, setCreatingPaths] = useState<Set<string>>(new Set());
 	const bumpFileTreeVersion = useWorkspaceStore.getState().bumpFileTreeVersion;
 
 	useEffect(() => {
@@ -235,6 +236,8 @@ function WorkspaceSection({
 
 	const handleCreate = useCallback(
 		async (file: TemplateFileStatus) => {
+			if (creatingPaths.has(file.path)) return;
+			setCreatingPaths((prev) => new Set(prev).add(file.path));
 			try {
 				// writeNewFile は Rust 側で create_new(true) を使い、既存ファイルがあれば
 				// 原子的に失敗する。TOCTOU レースなしで「上書きしない」を保証。
@@ -255,9 +258,15 @@ function WorkspaceSection({
 						.getState()
 						.addToast("error", `${file.name} の作成に失敗しました（存在確認に失敗）`);
 				}
+			} finally {
+				setCreatingPaths((prev) => {
+					const next = new Set(prev);
+					next.delete(file.path);
+					return next;
+				});
 			}
 		},
-		[bumpFileTreeVersion],
+		[bumpFileTreeVersion, creatingPaths],
 	);
 
 	const handleOpen = useCallback(
@@ -297,7 +306,8 @@ function WorkspaceSection({
 						<button
 							type="button"
 							onClick={() => void handleCreate(file)}
-							className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+							disabled={creatingPaths.has(file.path)}
+							className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
 						>
 							<Plus size={12} />
 							作成
