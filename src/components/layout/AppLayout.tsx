@@ -1032,6 +1032,8 @@ export function AppLayout() {
 					onClose={() => setSetupWizardOpen(false)}
 					workspacePath={workspacePath}
 					onComplete={() => {
+						// ワークスペース切替中に古い非同期処理が完了した場合を防ぐ
+						if (useWorkspaceStore.getState().workspacePath !== workspacePath) return;
 						setScriptaDirReady(true);
 						setWorkspaceInitialized(true);
 						bumpFileTreeVersion();
