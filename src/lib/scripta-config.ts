@@ -1,4 +1,4 @@
-import { listDirectory, pathExists, readFile, writeFile } from "./commands";
+import { fileExists as fileExistsCmd, listDirectory, readFile, writeFile } from "./commands";
 import { joinPath } from "./path";
 
 const SCRIPTA_DIR = ".scripta";
@@ -68,7 +68,7 @@ export async function savePromptTemplate(workspacePath: string, content: string)
 // --- Workspace initialization ---
 
 export function fileExists(path: string): Promise<boolean> {
-	return pathExists(path);
+	return fileExistsCmd(path);
 }
 
 export async function isWorkspaceInitialized(workspacePath: string): Promise<boolean> {

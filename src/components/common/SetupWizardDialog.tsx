@@ -123,11 +123,13 @@ export function SetupWizardDialog({
 					try {
 						await writeNewFile(path, content);
 						return true;
-					} catch {
+					} catch (err) {
 						// ファイルが既に存在する場合はスキップ。
 						// 権限不足やディスクフル等で本当に作成できなかった場合は再送出。
 						if (await fileExists(path)) return false;
-						throw new Error(`ファイルの作成に失敗しました: ${path}`);
+						throw new Error(
+							`ファイルの作成に失敗しました: ${path}: ${err instanceof Error ? err.message : String(err)}`,
+						);
 					}
 				};
 

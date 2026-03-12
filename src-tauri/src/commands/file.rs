@@ -153,6 +153,12 @@ pub fn path_exists(path: String) -> Result<bool, String> {
     Ok(resolved.exists())
 }
 
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn file_exists(path: String) -> Result<bool, String> {
+    let resolved = resolve_path(&path)?;
+    Ok(resolved.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +390,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_string_lossy().to_string();
         assert!(path_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_file_exists_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.md").to_string_lossy().to_string();
+        fs::write(&path, "content").unwrap();
+        assert!(file_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_file_exists_false_for_nonexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+        assert!(!file_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_file_exists_false_for_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        assert!(!file_exists(path).unwrap());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pathExists, readFile, writeFile } from "../../lib/commands";
+import { fileExists, readFile, writeFile } from "../../lib/commands";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
@@ -8,7 +8,7 @@ import type { FsChangeEvent } from "../../types/workspace";
 vi.mock("../../lib/commands", () => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn(),
-	pathExists: vi.fn().mockResolvedValue(false),
+	fileExists: vi.fn().mockResolvedValue(false),
 	listDirectory: vi.fn().mockResolvedValue([]),
 	startWatcher: vi.fn().mockResolvedValue(undefined),
 	stopWatcher: vi.fn().mockResolvedValue(undefined),
@@ -99,7 +99,7 @@ const { AppLayout } = await import("./AppLayout");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
-const mockedPathExists = pathExists as Mock;
+const mockedFileExists = fileExists as Mock;
 
 let nextId = 1;
 function openFileInStore(workspacePath: string, filePath: string) {
@@ -899,7 +899,7 @@ describe("AppLayout", () => {
 
 	it("closes setup wizard when workspace becomes initialized", async () => {
 		// initialized.json が存在しない = 未初期化ワークスペース
-		mockedPathExists.mockResolvedValue(false);
+		mockedFileExists.mockResolvedValue(false);
 		mockedReadFile.mockImplementation(async (path: string) => {
 			if (path.endsWith("icons.json")) throw new Error("Not found");
 			return "# Hello";
@@ -924,7 +924,7 @@ describe("AppLayout", () => {
 
 	it("does not show wizard when switching to initialized workspace", async () => {
 		// 最初は未初期化
-		mockedPathExists.mockResolvedValue(false);
+		mockedFileExists.mockResolvedValue(false);
 		mockedReadFile.mockImplementation(async (path: string) => {
 			if (path.endsWith("icons.json")) throw new Error("Not found");
 			return "# Hello";
@@ -938,8 +938,8 @@ describe("AppLayout", () => {
 
 		expect(screen.getByText("ワークスペースのセットアップ")).toBeInTheDocument();
 
-		// 初期化済みワークスペースに切り替え（pathExists が true を返す）
-		mockedPathExists.mockResolvedValue(true);
+		// 初期化済みワークスペースに切り替え（fileExists が true を返す）
+		mockedFileExists.mockResolvedValue(true);
 		mockedReadFile.mockImplementation(async (path: string) => {
 			if (path.endsWith("icons.json")) throw new Error("Not found");
 			return "content";

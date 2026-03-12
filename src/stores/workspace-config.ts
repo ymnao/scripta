@@ -43,7 +43,7 @@ export const useWorkspaceConfigStore = create<WorkspaceConfigState>()((set, get)
 		const [icons, dirExists, initialized] = await Promise.all([
 			loadIconsFromDisk(workspacePath),
 			scriptaDirExists(workspacePath),
-			isWorkspaceInitialized(workspacePath),
+			isWorkspaceInitialized(workspacePath).catch(() => false),
 		]);
 		if (requestId !== loadIconsRequestId) return;
 		set({

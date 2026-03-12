@@ -4,10 +4,15 @@ vi.mock("./commands", () => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	listDirectory: vi.fn(),
-	pathExists: vi.fn(),
+	fileExists: vi.fn(),
 }));
 
-const { readFile, writeFile, listDirectory, pathExists } = await import("./commands");
+const {
+	readFile,
+	writeFile,
+	listDirectory,
+	fileExists: fileExistsCmd,
+} = await import("./commands");
 const {
 	loadIcons,
 	saveIcons,
@@ -31,7 +36,7 @@ const {
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
 const mockedListDirectory = listDirectory as Mock;
-const mockedPathExists = pathExists as Mock;
+const mockedFileExistsCmd = fileExistsCmd as Mock;
 
 describe("loadIcons", () => {
 	beforeEach(() => {
@@ -162,14 +167,14 @@ describe("fileExists", () => {
 	});
 
 	it("returns true when file exists", async () => {
-		mockedPathExists.mockResolvedValue(true);
+		mockedFileExistsCmd.mockResolvedValue(true);
 		const result = await fileExists("/workspace/file.md");
 		expect(result).toBe(true);
-		expect(mockedPathExists).toHaveBeenCalledWith("/workspace/file.md");
+		expect(mockedFileExistsCmd).toHaveBeenCalledWith("/workspace/file.md");
 	});
 
 	it("returns false when file does not exist", async () => {
-		mockedPathExists.mockResolvedValue(false);
+		mockedFileExistsCmd.mockResolvedValue(false);
 		const result = await fileExists("/workspace/file.md");
 		expect(result).toBe(false);
 	});
@@ -181,14 +186,14 @@ describe("isWorkspaceInitialized", () => {
 	});
 
 	it("returns true when initialized.json exists", async () => {
-		mockedPathExists.mockResolvedValue(true);
+		mockedFileExistsCmd.mockResolvedValue(true);
 		const result = await isWorkspaceInitialized("/workspace");
 		expect(result).toBe(true);
-		expect(mockedPathExists).toHaveBeenCalledWith("/workspace/.scripta/initialized.json");
+		expect(mockedFileExistsCmd).toHaveBeenCalledWith("/workspace/.scripta/initialized.json");
 	});
 
 	it("returns false when initialized.json does not exist", async () => {
-		mockedPathExists.mockResolvedValue(false);
+		mockedFileExistsCmd.mockResolvedValue(false);
 		const result = await isWorkspaceInitialized("/workspace");
 		expect(result).toBe(false);
 	});

@@ -44,6 +44,10 @@ export function pathExists(path: string): Promise<boolean> {
 	return invoke<boolean>("path_exists", { path });
 }
 
+export function fileExists(path: string): Promise<boolean> {
+	return invoke<boolean>("file_exists", { path });
+}
+
 export function renameEntry(oldPath: string, newPath: string): Promise<void> {
 	return invoke<void>("rename_entry", { oldPath, newPath });
 }

@@ -37,6 +37,7 @@ pub fn run() {
             commands::file::delete_entry,
             commands::file::show_in_folder,
             commands::file::path_exists,
+            commands::file::file_exists,
             commands::workspace::list_directory,
             commands::watcher::start_watcher,
             commands::watcher::stop_watcher,
