@@ -107,7 +107,10 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 					store.setOfflineMode(true);
 				} else {
 					store.setErrorMessage(String(e));
+					// Refresh status so conflict detection works even after pull failure
+					await refreshStatus(path);
 				}
+				throw e;
 			} finally {
 				store.setGitAction("idle");
 			}
@@ -136,9 +139,9 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	}, []);
 
 	const doCommitAndSync = useCallback(
-		async (path: string) => {
+		async (path: string): Promise<"done" | "skipped"> => {
 			const store = useGitSyncStore.getState();
-			if (pausedRef.current) return;
+			if (pausedRef.current) return "skipped";
 
 			try {
 				store.setGitAction("add");
@@ -149,9 +152,15 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				await gitCommit(path, message);
 
 				if (store.pullBeforePush && store.hasRemote) {
-					await doPull(path);
+					try {
+						await doPull(path);
+					} catch {
+						// doPull already set errorMessage and refreshed status.
+						// Stop here — do not proceed to push after a failed pull.
+						return "done";
+					}
 				}
-				if (store.hasRemote && !store.offlineMode) {
+				if (store.hasRemote && !store.offlineMode && !pausedRef.current) {
 					await doPush(path);
 				}
 
@@ -168,6 +177,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			} finally {
 				store.setGitAction("idle");
 			}
+			return "done";
 		},
 		[doPull, doPush, refreshStatus],
 	);
@@ -199,7 +209,11 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 
 			const store = useGitSyncStore.getState();
 			if (store.autoPullOnStartup && store.hasRemote && store.gitSyncEnabled) {
-				await queueRef.current.enqueue(() => doPull(path));
+				try {
+					await queueRef.current.enqueue(() => doPull(path));
+				} catch {
+					// Startup pull failure is non-fatal; doPull already updated state.
+				}
 			}
 			// Timers are scheduled by the separate settings-reactive useEffect below
 		})();
@@ -235,7 +249,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		if (commitMs > 0) {
 			const tick = () => {
 				commitTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => doCommitAndSync(path)).then(tick);
+					void queueRef.current.enqueue(() => doCommitAndSync(path)).then(tick, tick);
 				}, commitMs);
 			};
 			tick();
@@ -243,7 +257,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		if (pullMs > 0) {
 			const tick = () => {
 				pullTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => doPull(path)).then(tick);
+					void queueRef.current.enqueue(() => doPull(path)).then(tick, tick);
 				}, pullMs);
 			};
 			tick();
@@ -251,7 +265,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		if (pushMs > 0) {
 			const tick = () => {
 				pushTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => doPush(path)).then(tick);
+					void queueRef.current.enqueue(() => doPush(path)).then(tick, tick);
 				}, pushMs);
 			};
 			tick();
@@ -309,19 +323,23 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			useToastStore.getState().addToast("info", "Git リポジトリが検出されませんでした。");
 			return;
 		}
+		if (store.conflictFiles.length > 0) {
+			useToastStore.getState().addToast("warning", "コンフリクトを解消してから同期してください。");
+			return;
+		}
 		const path = workspacePath;
 		const toast = useToastStore.getState();
 		toast.addToast("info", "同期を開始しています...");
-		void queueRef.current
-			.enqueue(() => doCommitAndSync(path))
-			.then(() => {
-				const s = useGitSyncStore.getState();
-				if (s.errorMessage) {
-					toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
-				} else {
-					toast.addToast("success", "同期が完了しました");
-				}
-			});
+		void queueRef.current.enqueue(async () => {
+			const result = await doCommitAndSync(path);
+			if (result === "skipped") return;
+			const s = useGitSyncStore.getState();
+			if (s.errorMessage) {
+				toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
+			} else {
+				toast.addToast("success", "同期が完了しました");
+			}
+		});
 	}, [workspacePath, doCommitAndSync]);
 
 	return { manualSync };

@@ -2,11 +2,13 @@ interface ConflictDiffViewProps {
 	filePath: string;
 	ours: string;
 	theirs: string;
-	onResolve: (content: string) => void;
+	onResolve: (content: string, resolution: "modify" | "delete") => void;
 }
 
 export function ConflictDiffView({ filePath, ours, theirs, onResolve }: ConflictDiffViewProps) {
 	const fileName = filePath.split("/").pop() ?? filePath;
+	const oursDeleted = ours === "";
+	const theirsDeleted = theirs === "";
 
 	return (
 		<div className="flex h-full flex-col">
@@ -15,17 +17,17 @@ export function ConflictDiffView({ filePath, ours, theirs, onResolve }: Conflict
 				<div className="flex gap-2">
 					<button
 						type="button"
-						onClick={() => onResolve(ours)}
+						onClick={() => onResolve(ours, oursDeleted ? "delete" : "modify")}
 						className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700"
 					>
-						Ours を採用
+						{oursDeleted ? "Ours を採用 (削除)" : "Ours を採用"}
 					</button>
 					<button
 						type="button"
-						onClick={() => onResolve(theirs)}
+						onClick={() => onResolve(theirs, theirsDeleted ? "delete" : "modify")}
 						className="rounded bg-orange-600 px-3 py-1 text-sm font-medium text-white hover:bg-orange-700"
 					>
-						Theirs を採用
+						{theirsDeleted ? "Theirs を採用 (削除)" : "Theirs を採用"}
 					</button>
 				</div>
 			</div>
@@ -35,7 +37,13 @@ export function ConflictDiffView({ filePath, ours, theirs, onResolve }: Conflict
 						<div className="mb-2 text-xs font-semibold text-blue-600 dark:text-blue-400">
 							Ours (ローカル)
 						</div>
-						<pre className="whitespace-pre-wrap break-words text-sm text-text-primary">{ours}</pre>
+						{oursDeleted ? (
+							<p className="text-sm italic text-text-secondary">(削除済み)</p>
+						) : (
+							<pre className="whitespace-pre-wrap break-words text-sm text-text-primary">
+								{ours}
+							</pre>
+						)}
 					</div>
 				</div>
 				<div className="flex-1 overflow-auto">
@@ -43,9 +51,13 @@ export function ConflictDiffView({ filePath, ours, theirs, onResolve }: Conflict
 						<div className="mb-2 text-xs font-semibold text-orange-600 dark:text-orange-400">
 							Theirs (リモート)
 						</div>
-						<pre className="whitespace-pre-wrap break-words text-sm text-text-primary">
-							{theirs}
-						</pre>
+						{theirsDeleted ? (
+							<p className="text-sm italic text-text-secondary">(削除済み)</p>
+						) : (
+							<pre className="whitespace-pre-wrap break-words text-sm text-text-primary">
+								{theirs}
+							</pre>
+						)}
 					</div>
 				</div>
 			</div>

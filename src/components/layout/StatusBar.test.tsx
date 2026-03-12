@@ -85,4 +85,34 @@ describe("StatusBar", () => {
 		expect(screen.getByText("5 行, 10 列")).toBeInTheDocument();
 		expect(screen.queryByTestId("selection-info")).not.toBeInTheDocument();
 	});
+
+	it("disables git sync button during conflicts", () => {
+		const onGitSync = vi.fn();
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={true}
+				offlineMode={false}
+				onGitSync={onGitSync}
+			/>,
+		);
+		const button = screen.getByTitle("コンフリクトを解消してください");
+		expect(button).toBeDisabled();
+	});
+
+	it("enables git sync button when no conflicts", () => {
+		const onGitSync = vi.fn();
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={false}
+				offlineMode={false}
+				onGitSync={onGitSync}
+			/>,
+		);
+		const button = screen.getByTitle("手動同期");
+		expect(button).not.toBeDisabled();
+	});
 });

@@ -59,11 +59,11 @@ export function ConflictWindow() {
 	}, [workspacePath, selectedFile, resolvedFiles]);
 
 	const handleResolve = useCallback(
-		async (content: string) => {
+		async (content: string, resolution: "modify" | "delete") => {
 			if (!workspacePath || !selectedFile) return;
 
 			try {
-				await gitResolveConflict(workspacePath, selectedFile, content);
+				await gitResolveConflict(workspacePath, selectedFile, content, resolution);
 				setResolvedFiles((prev) => new Set(prev).add(selectedFile));
 			} catch (err) {
 				setError(String(err));

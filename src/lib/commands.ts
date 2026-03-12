@@ -131,8 +131,13 @@ export function gitGetConflictContent(path: string, filePath: string): Promise<C
 	return invoke<ConflictContent>("git_get_conflict_content", { path, filePath });
 }
 
-export function gitResolveConflict(path: string, filePath: string, content: string): Promise<void> {
-	return invoke<void>("git_resolve_conflict", { path, filePath, content });
+export function gitResolveConflict(
+	path: string,
+	filePath: string,
+	content: string,
+	resolution: "modify" | "delete",
+): Promise<void> {
+	return invoke<void>("git_resolve_conflict", { path, filePath, content, resolution });
 }
 
 export function gitGetLastCommitTime(path: string): Promise<string | null> {

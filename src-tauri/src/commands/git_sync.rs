@@ -182,8 +182,9 @@ pub async fn git_get_conflict_content(
     tokio::task::spawn_blocking(move || {
         let ours_ref = format!(":2:{file_path}");
         let theirs_ref = format!(":3:{file_path}");
-        let ours = run_git(&path, &["show", &ours_ref])?;
-        let theirs = run_git(&path, &["show", &theirs_ref])?;
+        // For modify/delete conflicts (DU/UD), one side may not exist in the index.
+        let ours = run_git(&path, &["show", &ours_ref]).unwrap_or_default();
+        let theirs = run_git(&path, &["show", &theirs_ref]).unwrap_or_default();
         Ok(ConflictContentResult { ours, theirs })
     })
     .await
@@ -195,12 +196,19 @@ pub async fn git_resolve_conflict(
     path: String,
     file_path: String,
     content: String,
+    resolution: String,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let resolved = resolve_path(&path)?;
-        let full_path = resolved.join(&file_path);
-        std::fs::write(&full_path, &content).map_err(|e| e.to_string())?;
-        run_git(&path, &["add", &file_path])?;
+        if resolution == "delete" {
+            // For modify/delete conflicts: adopt the "deleted" side
+            run_git(&path, &["rm", "-f", &file_path])?;
+        } else {
+            // For normal conflicts or adopting the "modified" side
+            let resolved = resolve_path(&path)?;
+            let full_path = resolved.join(&file_path);
+            std::fs::write(&full_path, &content).map_err(|e| e.to_string())?;
+            run_git(&path, &["add", &file_path])?;
+        }
         Ok(())
     })
     .await
@@ -300,5 +308,68 @@ mod tests {
     async fn test_git_check_available() {
         let result = git_check_available().await.unwrap();
         assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_git_get_conflict_content_missing_stage() {
+        // Simulate calling git_get_conflict_content for a file that has no
+        // stage 2/3 entries (e.g. modify/delete conflict). The function should
+        // return empty strings instead of failing.
+        let dir = init_test_repo();
+        let path = dir.path().to_string_lossy().to_string();
+
+        // Create an initial commit so we have a valid repo
+        fs::write(dir.path().join("test.md"), "hello").unwrap();
+        git_add_all(path.clone()).await.unwrap();
+        git_commit(path.clone(), "initial".to_string()).await.unwrap();
+
+        // Ask for conflict content of a file with no conflict stages.
+        // This must not fail — it should return empty strings.
+        let result = git_get_conflict_content(path, "test.md".to_string()).await.unwrap();
+        assert!(result.ours.is_empty());
+        assert!(result.theirs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_git_resolve_conflict_delete() {
+        let dir = init_test_repo();
+        let path = dir.path().to_string_lossy().to_string();
+
+        fs::write(dir.path().join("delete-me.md"), "content").unwrap();
+        git_add_all(path.clone()).await.unwrap();
+        git_commit(path.clone(), "add file".to_string()).await.unwrap();
+
+        // "delete" resolution should remove the file via git rm
+        let result = git_resolve_conflict(
+            path.clone(),
+            "delete-me.md".to_string(),
+            String::new(),
+            "delete".to_string(),
+        )
+        .await;
+        assert!(result.is_ok());
+        assert!(!dir.path().join("delete-me.md").exists());
+    }
+
+    #[tokio::test]
+    async fn test_git_resolve_conflict_modify() {
+        let dir = init_test_repo();
+        let path = dir.path().to_string_lossy().to_string();
+
+        fs::write(dir.path().join("keep.md"), "original").unwrap();
+        git_add_all(path.clone()).await.unwrap();
+        git_commit(path.clone(), "add file".to_string()).await.unwrap();
+
+        // "modify" resolution should write the content and git add
+        let result = git_resolve_conflict(
+            path.clone(),
+            "keep.md".to_string(),
+            "resolved content".to_string(),
+            "modify".to_string(),
+        )
+        .await;
+        assert!(result.is_ok());
+        let content = fs::read_to_string(dir.path().join("keep.md")).unwrap();
+        assert_eq!(content, "resolved content");
     }
 }

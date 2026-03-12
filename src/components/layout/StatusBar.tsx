@@ -68,12 +68,15 @@ function GitSyncStatus({
 		label = lastCommitTime ? lastCommitTime.slice(0, 16) : "";
 	}
 
+	const disabled = hasConflicts;
+
 	return (
 		<button
 			type="button"
-			onClick={onGitSync}
-			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
-			title="手動同期"
+			onClick={disabled ? undefined : onGitSync}
+			disabled={disabled}
+			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
+			title={hasConflicts ? "コンフリクトを解消してください" : "手動同期"}
 		>
 			{icon}
 			{label && <span>{label}</span>}
