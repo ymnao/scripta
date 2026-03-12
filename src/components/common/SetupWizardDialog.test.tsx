@@ -12,6 +12,7 @@ vi.mock("../../lib/export", () => ({
 }));
 
 vi.mock("../../lib/scripta-config", () => ({
+	fileExists: vi.fn().mockResolvedValue(true),
 	getReadmeTemplatePath: vi.fn((ws: string) => `${ws}/README.md`),
 	getClaudeMdTemplatePath: vi.fn((ws: string) => `${ws}/CLAUDE.md`),
 	getGitignorePath: vi.fn((ws: string) => `${ws}/.gitignore`),
@@ -25,10 +26,11 @@ vi.mock("../../lib/scripta-config", () => ({
 }));
 
 const { writeNewFile } = await import("../../lib/commands");
-const { markWorkspaceInitialized } = await import("../../lib/scripta-config");
+const { fileExists, markWorkspaceInitialized } = await import("../../lib/scripta-config");
 const { SetupWizardDialog } = await import("./SetupWizardDialog");
 
 const mockedWriteNewFile = writeNewFile as Mock;
+const mockedFileExists = fileExists as Mock;
 const mockedMarkInitialized = markWorkspaceInitialized as Mock;
 
 const defaultProps = {
@@ -46,6 +48,8 @@ function renderDialog(overrides: Partial<typeof defaultProps> = {}) {
 beforeEach(() => {
 	vi.clearAllMocks();
 	useToastStore.setState({ toasts: [] });
+	// デフォルト: writeNewFile 失敗時の fileExists はファイル既存と判定
+	mockedFileExists.mockResolvedValue(true);
 });
 
 describe("SetupWizardDialog", () => {
@@ -153,6 +157,20 @@ describe("SetupWizardDialog", () => {
 		const { toasts } = useToastStore.getState();
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0].message).toBe("2 件のテンプレートファイルを作成しました");
+	});
+
+	it("権限エラー等でファイルが実際に作成されなかった場合はエラートースト表示", async () => {
+		// writeNewFile が失敗し、fileExists も false（ファイルが存在しない＝本当のエラー）
+		mockedWriteNewFile.mockRejectedValue(new Error("Permission denied"));
+		mockedFileExists.mockResolvedValue(false);
+		renderDialog();
+
+		await userEvent.click(screen.getByText("基本"));
+
+		const { toasts } = useToastStore.getState();
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].type).toBe("error");
+		expect(toasts[0].message).toContain("セットアップに失敗しました");
 	});
 
 	it("X ボタンで markWorkspaceInitialized → onComplete → onClose が呼ばれる", async () => {

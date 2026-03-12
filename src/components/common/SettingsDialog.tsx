@@ -201,7 +201,6 @@ function WorkspaceSection({
 }) {
 	const [files, setFiles] = useState<TemplateFileStatus[]>([]);
 	const [loading, setLoading] = useState(true);
-	const addToast = useToastStore.getState().addToast;
 	const bumpFileTreeVersion = useWorkspaceStore.getState().bumpFileTreeVersion;
 
 	useEffect(() => {
@@ -275,9 +274,13 @@ function WorkspaceSection({
 				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
 				bumpFileTreeVersion();
 			} catch {
-				// ファイルが既に存在する場合（またはその他のエラー）
-				// 最新の存在状態を反映
-				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
+				// ファイルが既に存在する場合や権限エラー・ディスクフルなど、
+				// いずれのエラーでも実際の存在状態を確認してから UI を更新する
+				const exists = await fileExists(file.path);
+				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists } : f)));
+				if (!exists) {
+					useToastStore.getState().addToast("error", `${file.name} の作成に失敗しました`);
+				}
 			}
 		},
 		[bumpFileTreeVersion],

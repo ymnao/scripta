@@ -73,13 +73,41 @@ describe("SettingsDialog workspace section", () => {
 			expect(screen.getByText("README.md")).toBeInTheDocument();
 		});
 
+		// handleCreate 内の fileExists は true を返す（ファイルは既に存在する）
+		mockedFileExists.mockResolvedValue(true);
+
 		// README.md の「作成」ボタンをクリック
 		const createButtons = screen.getAllByText("作成");
 		await userEvent.click(createButtons[0]);
 
-		// writeNewFile は呼ばれたが失敗し、エラーは握りつぶされる
+		// writeNewFile は呼ばれたが失敗し、fileExists で確認して exists: true に更新
 		await waitFor(() => {
 			expect(mockedWriteNewFile).toHaveBeenCalledWith("/workspace/README.md", expect.any(String));
+		});
+	});
+
+	it("権限エラー等で作成失敗した場合はトーストでエラー通知", async () => {
+		// writeNewFile が失敗するケース
+		mockedWriteNewFile.mockRejectedValue(new Error("Permission denied"));
+
+		await act(async () => {
+			render(<SettingsDialog {...defaultProps} />);
+		});
+
+		await userEvent.click(screen.getByText("ワークスペース"));
+
+		await waitFor(() => {
+			expect(screen.getByText("README.md")).toBeInTheDocument();
+		});
+
+		// handleCreate 内の fileExists は false を返す（本当にファイルが存在しない）
+		mockedFileExists.mockResolvedValue(false);
+
+		const createButtons = screen.getAllByText("作成");
+		await userEvent.click(createButtons[0]);
+
+		await waitFor(() => {
+			expect(mockedWriteNewFile).toHaveBeenCalled();
 		});
 	});
 

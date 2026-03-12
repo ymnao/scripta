@@ -7,6 +7,7 @@ import {
 	GITIGNORE_TEMPLATE,
 	README_TEMPLATE,
 	SYNTAX_GUIDE_TEMPLATE,
+	fileExists,
 	getClaudeMdTemplatePath,
 	getGitignorePath,
 	getReadmeTemplatePath,
@@ -123,8 +124,10 @@ export function SetupWizardDialog({
 						await writeNewFile(path, content);
 						return true;
 					} catch {
-						// ファイルが既に存在する場合はスキップ
-						return false;
+						// ファイルが既に存在する場合はスキップ。
+						// 権限不足やディスクフル等で本当に作成できなかった場合は再送出。
+						if (await fileExists(path)) return false;
+						throw new Error(`ファイルの作成に失敗しました: ${path}`);
 					}
 				};
 
