@@ -383,10 +383,11 @@ export function SettingsDialog({
 	onManualSync,
 }: SettingsDialogProps) {
 	const titleId = useId();
+	const gitAvailable = useGitSyncStore((s) => s.gitAvailable);
 	const gitReady = useGitSyncStore((s) => s.gitReady);
 	const allSections: { key: Section; label: string }[] = [
 		...baseSections,
-		...(gitReady ? [{ key: "git-sync" as Section, label: "Git 同期" }] : []),
+		...(gitAvailable ? [{ key: "git-sync" as Section, label: "Git 同期" }] : []),
 		...(workspacePath ? [{ key: "workspace" as Section, label: "ワークスペース" }] : []),
 	];
 	const sections = allSections;
@@ -539,82 +540,115 @@ export function SettingsDialog({
 						</>
 					)}
 
-					{validSection === "git-sync" && (
-						<>
-							<Toggle
-								id="git-sync-enabled-toggle"
-								label="Git 同期を有効化"
-								checked={gitSyncEnabled}
-								onChange={setGitSyncEnabled}
-							/>
-							<NumberInput
-								id="auto-commit-interval-input"
-								label="自動コミット間隔"
-								value={autoCommitInterval}
-								min={0}
-								max={1440}
-								step={1}
-								unit="分"
-								onChange={setAutoCommitInterval}
-							/>
-							<NumberInput
-								id="auto-pull-interval-input"
-								label="自動 Pull 間隔"
-								value={autoPullInterval}
-								min={0}
-								max={1440}
-								step={1}
-								unit="分"
-								onChange={setAutoPullInterval}
-							/>
-							<NumberInput
-								id="auto-push-interval-input"
-								label="自動 Push 間隔"
-								value={autoPushInterval}
-								min={0}
-								max={1440}
-								step={1}
-								unit="分"
-								onChange={setAutoPushInterval}
-							/>
-							<Toggle
-								id="pull-before-push-toggle"
-								label="Push 前に Pull"
-								checked={pullBeforePush}
-								onChange={setPullBeforePush}
-							/>
-							<SelectInput
-								id="sync-method-select"
-								label="同期方法"
-								value={syncMethod}
-								options={syncMethodOptions}
-								onChange={setSyncMethod}
-							/>
-							<TextInput
-								id="commit-message-input"
-								label="コミットメッセージ"
-								value={commitMessage}
-								onChange={setCommitMessage}
-								disabled={!gitSyncEnabled}
-							/>
-							<Toggle
-								id="auto-pull-on-startup-toggle"
-								label="起動時に自動 Pull"
-								checked={autoPullOnStartup}
-								onChange={setAutoPullOnStartup}
-							/>
-							{onManualSync && (
-								<button
-									type="button"
-									onClick={onManualSync}
+					{validSection === "git-sync" &&
+						(gitReady ? (
+							<>
+								<Toggle
+									id="git-sync-enabled-toggle"
+									label="Git 同期を有効化"
+									checked={gitSyncEnabled}
+									onChange={setGitSyncEnabled}
+								/>
+								<NumberInput
+									id="auto-commit-interval-input"
+									label="自動コミット間隔"
+									value={autoCommitInterval}
+									min={0}
+									max={1440}
+									step={1}
+									unit="分"
+									onChange={setAutoCommitInterval}
+								/>
+								<NumberInput
+									id="auto-pull-interval-input"
+									label="自動 Pull 間隔"
+									value={autoPullInterval}
+									min={0}
+									max={1440}
+									step={1}
+									unit="分"
+									onChange={setAutoPullInterval}
+								/>
+								<NumberInput
+									id="auto-push-interval-input"
+									label="自動 Push 間隔"
+									value={autoPushInterval}
+									min={0}
+									max={1440}
+									step={1}
+									unit="分"
+									onChange={setAutoPushInterval}
+								/>
+								<Toggle
+									id="pull-before-push-toggle"
+									label="Push 前に Pull"
+									checked={pullBeforePush}
+									onChange={setPullBeforePush}
+								/>
+								<SelectInput
+									id="sync-method-select"
+									label="同期方法"
+									value={syncMethod}
+									options={syncMethodOptions}
+									onChange={setSyncMethod}
+								/>
+								<TextInput
+									id="commit-message-input"
+									label="コミットメッセージ"
+									value={commitMessage}
+									onChange={setCommitMessage}
 									disabled={!gitSyncEnabled}
-									className="w-full rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-								>
-									手動同期を実行
-								</button>
-							)}
-						</>
-					)}
+								/>
+								<Toggle
+									id="auto-pull-on-startup-toggle"
+									label="起動時に自動 Pull"
+									checked={autoPullOnStartup}
+									onChange={setAutoPullOnStartup}
+								/>
+								{onManualSync && (
+									<button
+										type="button"
+										onClick={onManualSync}
+										disabled={!gitSyncEnabled}
+										className="w-full rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+									>
+										手動同期を実行
+									</button>
+								)}
+							</>
+						) : (
+							<div className="space-y-3 rounded-md bg-bg-secondary px-4 py-3">
+								<p className="text-xs font-medium text-text-primary">
+									Git リポジトリが見つかりません
+								</p>
+								<p className="text-[11px] leading-relaxed text-text-secondary">
+									Git 同期を使用するには、ワークスペースを Git リポジトリとして初期化し、GitHub
+									リモートを設定してください。
+								</p>
+								<div className="space-y-1.5 text-[11px] text-text-secondary">
+									<p className="font-medium text-text-primary">セットアップ手順:</p>
+									<ol className="list-inside list-decimal space-y-1">
+										<li>ターミナルでワークスペースを開く</li>
+										<li>
+											<code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">
+												git init
+											</code>{" "}
+											を実行
+										</li>
+										<li>GitHub でリポジトリを作成</li>
+										<li>
+											<code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">
+												git remote add origin &lt;URL&gt;
+											</code>{" "}
+											を実行
+										</li>
+									</ol>
+								</div>
+								<p className="text-[11px] text-text-secondary">
+									設定完了後、アプリを再起動すると Git 同期の設定が表示されます。
+								</p>
+							</div>
+						))}
 
 					{validSection === "workspace" && workspacePath && (
 						<WorkspaceSection

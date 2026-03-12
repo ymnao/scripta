@@ -95,6 +95,7 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-window-state",
  "tempfile",
+ "tokio",
  "trash",
  "ureq",
  "webview2-com",

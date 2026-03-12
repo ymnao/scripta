@@ -73,7 +73,7 @@ function GitSyncStatus({
 			type="button"
 			onClick={onGitSync}
 			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
-			title="手動同期 (Cmd+Shift+S)"
+			title="手動同期"
 		>
 			{icon}
 			{label && <span>{label}</span>}

@@ -118,8 +118,6 @@ export function AppLayout() {
 	const contentRef = useRef(content);
 	contentRef.current = content;
 	const savedContentRef = useRef("");
-	const manualSyncRef = useRef(manualSync);
-	manualSyncRef.current = manualSync;
 	const saveNowRef = useRef(saveNow);
 	saveNowRef.current = saveNow;
 	const prevWorkspacePathRef = useRef(workspacePath);
@@ -272,18 +270,21 @@ export function AppLayout() {
 		const unlisteners: Array<() => void> = [];
 
 		const addListener = (event: string, handler: () => void) => {
-			void listen(event, handler).then((u) => {
-				if (cancelled) {
-					u();
-					return;
-				}
-				unlisteners.push(u);
-			});
+			listen(event, handler)
+				.then((u) => {
+					if (cancelled) {
+						u();
+						return;
+					}
+					unlisteners.push(u);
+				})
+				.catch((err) => {
+					console.error(`Failed to register menu listener for ${event}:`, err);
+				});
 		};
 
 		addListener("menu-open-settings", () => setSettingsOpen(true));
 		addListener("menu-open-help", () => setHelpOpen(true));
-		addListener("menu-git-sync", () => manualSyncRef.current());
 
 		addListener("menu-export", () => {
 			const path = useWorkspaceStore.getState().activeTabPath;

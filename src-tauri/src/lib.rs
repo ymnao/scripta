@@ -101,16 +101,10 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .accelerator("CmdOrCtrl+Shift+E")
         .build(handle)?;
 
-    let git_sync_item = MenuItemBuilder::new("Git 同期")
-        .id("git-sync")
-        .accelerator("CmdOrCtrl+Shift+S")
-        .build(handle)?;
-
     let file_menu = SubmenuBuilder::new(handle, "File")
         .item(&new_window)
         .separator()
         .item(&export_item)
-        .item(&git_sync_item)
         .build()?;
 
     let edit_menu = SubmenuBuilder::new(handle, "Edit")
@@ -160,7 +154,6 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "open-settings" => emit_to_focused("menu-open-settings"),
             "open-help" => emit_to_focused("menu-open-help"),
             "export" => emit_to_focused("menu-export"),
-            "git-sync" => emit_to_focused("menu-git-sync"),
             "new-window" => {
                 let label = format!("window-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
 

@@ -12,6 +12,7 @@ import {
 } from "../lib/commands";
 import { isNetworkError } from "../lib/errors";
 import { useGitSyncStore } from "../stores/git-sync";
+import { useToastStore } from "../stores/toast";
 
 class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
@@ -81,10 +82,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			store.setBranch(status.branch);
 			store.setHasRemote(status.hasRemote);
 			store.setConflictFiles(status.conflictFiles);
-
-			if (status.conflictFiles.length > 0) {
-				pausedRef.current = true;
-			}
+			pausedRef.current = status.conflictFiles.length > 0;
 
 			const time = await gitGetLastCommitTime(path);
 			store.setLastCommitTime(time);
@@ -102,6 +100,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				store.setGitAction("pull");
 				await gitPull(path, store.syncMethod);
 				store.setOfflineMode(false);
+				store.setErrorMessage(null);
 				await refreshStatus(path);
 			} catch (e) {
 				if (isNetworkError(e)) {
@@ -124,6 +123,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			store.setGitAction("push");
 			await gitPush(path);
 			store.setOfflineMode(false);
+			store.setErrorMessage(null);
 		} catch (e) {
 			if (isNetworkError(e)) {
 				store.setOfflineMode(true);
@@ -155,12 +155,15 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 					await doPush(path);
 				}
 
+				store.setErrorMessage(null);
 				await refreshStatus(path);
 			} catch (e) {
 				const msg = String(e);
 				// "nothing to commit" is not an error
 				if (!msg.includes("nothing to commit")) {
 					store.setErrorMessage(msg);
+				} else {
+					store.setErrorMessage(null);
 				}
 			} finally {
 				store.setGitAction("idle");
@@ -297,8 +300,28 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 
 	const manualSync = useCallback(() => {
 		if (!workspacePath) return;
+		const store = useGitSyncStore.getState();
+		if (!store.gitSyncEnabled) {
+			useToastStore.getState().addToast("info", "Git 同期が無効です。設定から有効にしてください。");
+			return;
+		}
+		if (!store.gitReady) {
+			useToastStore.getState().addToast("info", "Git リポジトリが検出されませんでした。");
+			return;
+		}
 		const path = workspacePath;
-		void queueRef.current.enqueue(() => doCommitAndSync(path));
+		const toast = useToastStore.getState();
+		toast.addToast("info", "同期を開始しています...");
+		void queueRef.current
+			.enqueue(() => doCommitAndSync(path))
+			.then(() => {
+				const s = useGitSyncStore.getState();
+				if (s.errorMessage) {
+					toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
+				} else {
+					toast.addToast("success", "同期が完了しました");
+				}
+			});
 	}, [workspacePath, doCommitAndSync]);
 
 	return { manualSync };
