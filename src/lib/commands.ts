@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ConflictContent, GitStatus } from "../types/git-sync";
+import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
 import type { FileEntry } from "../types/workspace";
@@ -111,7 +111,7 @@ export function gitCommit(path: string, message: string): Promise<string> {
 	return invoke<string>("git_commit", { path, message });
 }
 
-export function gitPull(path: string, syncMethod: string): Promise<string> {
+export function gitPull(path: string, syncMethod: SyncMethod): Promise<string> {
 	return invoke<string>("git_pull", { path, syncMethod });
 }
 

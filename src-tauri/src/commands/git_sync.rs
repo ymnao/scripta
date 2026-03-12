@@ -1,7 +1,21 @@
 use serde::Serialize;
+use std::path::Path;
 use std::process::Command;
 
 use super::file::resolve_path;
+
+fn validate_relative_path(file_path: &str) -> Result<(), String> {
+    let p = Path::new(file_path);
+    if p.is_absolute() {
+        return Err("file_path must be relative".to_string());
+    }
+    for component in p.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("file_path must not contain '..'".to_string());
+        }
+    }
+    Ok(())
+}
 
 fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
     let resolved = resolve_path(path)?;
@@ -14,7 +28,16 @@ fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let message = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("git command failed with status: {}", output.status)
+        };
+        Err(message)
     }
 }
 
@@ -180,11 +203,13 @@ pub async fn git_get_conflict_content(
     file_path: String,
 ) -> Result<ConflictContentResult, String> {
     tokio::task::spawn_blocking(move || {
+        validate_relative_path(&file_path)?;
         let ours_ref = format!(":2:{file_path}");
         let theirs_ref = format!(":3:{file_path}");
         // For modify/delete conflicts (DU/UD), one side may not exist in the index.
-        let ours = run_git(&path, &["show", &ours_ref]).unwrap_or_default();
-        let theirs = run_git(&path, &["show", &theirs_ref]).unwrap_or_default();
+        // Use "--" to prevent file_path starting with "-" from being interpreted as an option.
+        let ours = run_git(&path, &["show", "--", &ours_ref]).unwrap_or_default();
+        let theirs = run_git(&path, &["show", "--", &theirs_ref]).unwrap_or_default();
         Ok(ConflictContentResult { ours, theirs })
     })
     .await
@@ -199,15 +224,32 @@ pub async fn git_resolve_conflict(
     resolution: String,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
+        validate_relative_path(&file_path)?;
+        let resolved = resolve_path(&path)?;
+        // Canonicalize the repo root for consistent comparison (handles symlinks like /var → /private/var)
+        let canonical_root = resolved.canonicalize().map_err(|e| e.to_string())?;
+        // Verify the target path is within the repository
+        let full_path = canonical_root.join(&file_path);
+        let canonical = full_path
+            .canonicalize()
+            .or_else(|_| {
+                // File may not exist yet (e.g. for modify resolution); check parent
+                if let Some(parent) = full_path.parent() {
+                    parent.canonicalize().map(|p| p.join(full_path.file_name().unwrap_or_default()))
+                } else {
+                    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no parent"))
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err("file_path escapes repository directory".to_string());
+        }
+
         if resolution == "delete" {
-            // For modify/delete conflicts: adopt the "deleted" side
-            run_git(&path, &["rm", "-f", &file_path])?;
+            run_git(&path, &["rm", "-f", "--", &file_path])?;
         } else {
-            // For normal conflicts or adopting the "modified" side
-            let resolved = resolve_path(&path)?;
-            let full_path = resolved.join(&file_path);
-            std::fs::write(&full_path, &content).map_err(|e| e.to_string())?;
-            run_git(&path, &["add", &file_path])?;
+            std::fs::write(&canonical, &content).map_err(|e| e.to_string())?;
+            run_git(&path, &["add", "--", &file_path])?;
         }
         Ok(())
     })

@@ -9,7 +9,7 @@ import {
 	Settings,
 	WifiOff,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { GitAction } from "../../types/git-sync";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
@@ -45,7 +45,7 @@ function GitSyncStatus({
 	onGitSync?: () => void;
 	onOpenConflictResolver?: () => void;
 }) {
-	let icon: React.ReactNode;
+	let icon: ReactNode;
 	let label: string;
 
 	if (hasConflicts) {

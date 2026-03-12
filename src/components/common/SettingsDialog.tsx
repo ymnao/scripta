@@ -1,5 +1,5 @@
 import { ExternalLink, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
@@ -194,10 +194,26 @@ function TextInput({
 	disabled?: boolean;
 }) {
 	const [draft, setDraft] = useState(value);
+	const draftRef = useRef(draft);
+	const valueRef = useRef(value);
 
 	useEffect(() => {
 		setDraft(value);
+		valueRef.current = value;
 	}, [value]);
+
+	useEffect(() => {
+		draftRef.current = draft;
+	}, [draft]);
+
+	// Commit unsaved draft on unmount (e.g. dialog closed via Esc)
+	useEffect(() => {
+		return () => {
+			if (draftRef.current !== valueRef.current) {
+				onChange(draftRef.current);
+			}
+		};
+	}, [onChange]);
 
 	const commit = () => {
 		if (draft !== value) {

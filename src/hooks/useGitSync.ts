@@ -159,31 +159,37 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 
 				store.setGitAction("commit");
 				const message = expandCommitMessage(store.commitMessage);
-				await gitCommit(path, message);
-
-				if (store.pullBeforePush && store.hasRemote) {
-					try {
-						await doPull(path);
-					} catch {
-						// doPull already set errorMessage and refreshed status.
-						// Stop here — do not proceed to push after a failed pull.
-						return "done";
+				let committed = true;
+				try {
+					await gitCommit(path, message);
+				} catch (e) {
+					const msg = String(e);
+					if (msg.includes("nothing to commit")) {
+						committed = false;
+					} else {
+						throw e;
 					}
 				}
-				if (store.hasRemote && !store.offlineMode && !pausedRef.current) {
-					await doPush(path);
+
+				if (committed || store.hasRemote) {
+					if (store.pullBeforePush && store.hasRemote) {
+						try {
+							await doPull(path);
+						} catch {
+							// doPull already set errorMessage and refreshed status.
+							// Stop here — do not proceed to push after a failed pull.
+							return "done";
+						}
+					}
+					if (store.hasRemote && !store.offlineMode && !pausedRef.current) {
+						await doPush(path);
+					}
 				}
 
 				store.setErrorMessage(null);
 				await refreshStatus(path);
 			} catch (e) {
-				const msg = String(e);
-				// "nothing to commit" is not an error
-				if (!msg.includes("nothing to commit")) {
-					store.setErrorMessage(msg);
-				} else {
-					store.setErrorMessage(null);
-				}
+				store.setErrorMessage(String(e));
 			} finally {
 				store.setGitAction("idle");
 			}

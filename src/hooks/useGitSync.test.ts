@@ -68,6 +68,8 @@ describe("useGitSync", () => {
 		mockedGitGetLastCommitTime.mockResolvedValue("2024-01-01 00:00:00");
 		mockedGitAddAll.mockResolvedValue(undefined);
 		mockedGitCommit.mockResolvedValue("committed");
+		mockedGitPull.mockResolvedValue("");
+		mockedGitPush.mockResolvedValue("");
 	});
 
 	afterEach(() => {
@@ -138,6 +140,32 @@ describe("useGitSync", () => {
 		expect(mockedGitCommit).toHaveBeenCalled();
 	});
 
+	it("continues pull/push when nothing to commit", async () => {
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 0,
+			conflictFiles: [],
+			hasRemote: true,
+		});
+		mockedGitCommit.mockRejectedValue(new Error("nothing to commit, working tree clean"));
+		mockedGitPull.mockResolvedValue("");
+		mockedGitPush.mockResolvedValue("");
+
+		useGitSyncStore.setState({ gitSyncEnabled: true, pullBeforePush: true });
+
+		const { result } = renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		mockedGitPull.mockClear();
+		mockedGitPush.mockClear();
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Commit failed with "nothing to commit" but pull/push should still run
+		expect(mockedGitPull).toHaveBeenCalled();
+		expect(mockedGitPush).toHaveBeenCalled();
+	});
+
 	it("doPull failure refreshes status and detects conflicts", async () => {
 		// Setup: repo with remote, pullBeforePush enabled
 		mockedGitStatus
@@ -164,6 +192,11 @@ describe("useGitSync", () => {
 
 		const { result } = renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
 		await vi.advanceTimersByTimeAsync(0);
+
+		// Clear call counts accumulated during init to isolate manualSync behaviour
+		mockedGitPull.mockClear();
+		mockedGitPull.mockRejectedValue(new Error("CONFLICT (content): Merge conflict in file1.md"));
+		mockedGitPush.mockClear();
 
 		// Trigger manual sync which does commit → pull → push
 		result.current.manualSync();

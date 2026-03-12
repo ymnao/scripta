@@ -85,14 +85,15 @@ export function ConflictWindow() {
 		}
 	}, [workspacePath]);
 
-	// If conflicts are already resolved (e.g. externally via CLI), emit and auto-close
+	// If conflicts are already resolved (e.g. externally via CLI), emit and auto-close.
+	// Do NOT auto-close when an error occurred (files may be empty due to fetch failure).
 	useEffect(() => {
-		if (loading || files.length > 0) return;
+		if (loading || error || files.length > 0) return;
 		void (async () => {
 			await emit("conflict-resolved");
 			await getCurrentWindow().close();
 		})();
-	}, [loading, files]);
+	}, [loading, error, files]);
 
 	const allResolved = files.length > 0 && files.every((f) => resolvedFiles.has(f));
 
@@ -106,8 +107,14 @@ export function ConflictWindow() {
 
 	if (files.length === 0) {
 		return (
-			<div className="flex h-screen items-center justify-center bg-bg-primary text-text-secondary">
-				<p className="text-sm">コンフリクトファイルはありません</p>
+			<div className="flex h-screen flex-col items-center justify-center gap-2 bg-bg-primary text-text-secondary">
+				{error ? (
+					<p className="max-w-md px-4 text-center text-sm text-red-600 dark:text-red-400">
+						{error}
+					</p>
+				) : (
+					<p className="text-sm">コンフリクトファイルはありません</p>
+				)}
 			</div>
 		);
 	}

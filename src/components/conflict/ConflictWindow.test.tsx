@@ -89,4 +89,17 @@ describe("ConflictWindow", () => {
 		expect(screen.getByTestId("conflict-file-list")).toBeInTheDocument();
 		expect(screen.getByTestId("conflict-diff-view")).toBeInTheDocument();
 	});
+
+	it("does not auto-close when gitGetConflictedFiles fails", async () => {
+		mockedGitGetConflictedFiles.mockRejectedValue(new Error("git not found"));
+
+		await act(async () => {
+			render(<ConflictWindow />);
+		});
+
+		// Should show the error message, NOT auto-close
+		expect(screen.getByText("Error: git not found")).toBeInTheDocument();
+		expect(mockEmit).not.toHaveBeenCalled();
+		expect(mockClose).not.toHaveBeenCalled();
+	});
 });
