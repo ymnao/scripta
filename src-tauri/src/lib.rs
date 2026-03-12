@@ -45,6 +45,18 @@ pub fn run() {
             commands::search::search_filenames,
             commands::ogp::fetch_ogp,
             commands::export::export_pdf,
+            commands::git_sync::git_check_available,
+            commands::git_sync::git_check_repo,
+            commands::git_sync::git_status,
+            commands::git_sync::git_add_all,
+            commands::git_sync::git_commit,
+            commands::git_sync::git_pull,
+            commands::git_sync::git_push,
+            commands::git_sync::git_unpushed_count,
+            commands::git_sync::git_get_conflicted_files,
+            commands::git_sync::git_get_conflict_content,
+            commands::git_sync::git_resolve_conflict,
+            commands::git_sync::git_get_last_commit_time,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -89,10 +101,16 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .accelerator("CmdOrCtrl+Shift+E")
         .build(handle)?;
 
+    let git_sync_item = MenuItemBuilder::new("Git 同期")
+        .id("git-sync")
+        .accelerator("CmdOrCtrl+Shift+S")
+        .build(handle)?;
+
     let file_menu = SubmenuBuilder::new(handle, "File")
         .item(&new_window)
         .separator()
         .item(&export_item)
+        .item(&git_sync_item)
         .build()?;
 
     let edit_menu = SubmenuBuilder::new(handle, "Edit")
@@ -142,6 +160,7 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "open-settings" => emit_to_focused("menu-open-settings"),
             "open-help" => emit_to_focused("menu-open-help"),
             "export" => emit_to_focused("menu-export"),
+            "git-sync" => emit_to_focused("menu-git-sync"),
             "new-window" => {
                 let label = format!("window-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
 

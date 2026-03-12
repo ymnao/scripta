@@ -2,7 +2,7 @@
 	"$schema": "../gen/schemas/desktop-schema.json",
 	"identifier": "default",
 	"description": "enables the default permissions",
-	"windows": ["main", "window-*", "pdf-export-*"],
+	"windows": ["main", "window-*", "pdf-export-*", "conflict-*"],
 	"permissions": [
 		"core:default",
 		"core:window:allow-close",
