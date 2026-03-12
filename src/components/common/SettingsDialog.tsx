@@ -1,13 +1,20 @@
-import { X } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { ExternalLink, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { writeNewFile } from "../../lib/commands";
+import { getDefaultPromptTemplate } from "../../lib/export";
+import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
+import { useToastStore } from "../../stores/toast";
+import { useWorkspaceStore } from "../../stores/workspace";
 import { DialogBase } from "./DialogBase";
 
 interface SettingsDialogProps {
 	open: boolean;
 	onClose: () => void;
+	workspacePath?: string | null;
+	onOpenFile?: (path: string) => void;
 }
 
 const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -22,9 +29,9 @@ const fontFamilyOptions: { value: FontFamily; label: string }[] = [
 	{ value: "serif", label: "明朝 (Serif)" },
 ];
 
-type Section = "appearance" | "editor" | "save";
+type Section = "appearance" | "editor" | "save" | "workspace";
 
-const sections: { key: Section; label: string }[] = [
+const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
 	{ key: "editor", label: "エディタ" },
 	{ key: "save", label: "保存" },
@@ -165,9 +172,163 @@ function SelectInput<T extends string | number>({
 	);
 }
 
-export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+interface TemplateFileStatus {
+	name: string;
+	path: string;
+	exists: boolean;
+	getContent: () => string;
+}
+
+function WorkspaceSection({
+	workspacePath,
+	onOpenFile,
+	onClose,
+}: {
+	workspacePath: string;
+	onOpenFile?: (path: string) => void;
+	onClose: () => void;
+}) {
+	const [files, setFiles] = useState<TemplateFileStatus[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [creatingPaths, setCreatingPaths] = useState<Set<string>>(new Set());
+	const bumpFileTreeVersion = useWorkspaceStore.getState().bumpFileTreeVersion;
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoading(true);
+		setFiles([]);
+
+		(async () => {
+			const definitions = getTemplateDefinitions(getDefaultPromptTemplate);
+			const templates = definitions.map((def) => ({
+				name: def.name,
+				path: def.getPath(workspacePath),
+				getContent: def.getContent,
+			}));
+
+			try {
+				const results = await Promise.all(
+					templates.map(async (t) => ({
+						...t,
+						exists: await fileExists(t.path),
+					})),
+				);
+
+				if (!cancelled) {
+					setFiles(results);
+					setLoading(false);
+				}
+			} catch {
+				if (!cancelled) {
+					useToastStore
+						.getState()
+						.addToast("error", "テンプレートファイルの存在確認に失敗しました");
+					setFiles(templates.map((t) => ({ ...t, exists: false })));
+					setLoading(false);
+				}
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [workspacePath]);
+
+	const handleCreate = useCallback(
+		async (file: TemplateFileStatus) => {
+			if (creatingPaths.has(file.path)) return;
+			setCreatingPaths((prev) => new Set(prev).add(file.path));
+			try {
+				// writeNewFile は Rust 側で create_new(true) を使い、既存ファイルがあれば
+				// 原子的に失敗する。TOCTOU レースなしで「上書きしない」を保証。
+				await writeNewFile(file.path, file.getContent());
+				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
+				bumpFileTreeVersion();
+			} catch {
+				// いずれのエラーでも実際の存在状態を確認してから UI を更新する。
+				// fileExists 自体の失敗はこのハンドラ全体を reject させないよう内部で処理する。
+				try {
+					const exists = await fileExists(file.path);
+					setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists } : f)));
+					if (!exists) {
+						useToastStore.getState().addToast("error", `${file.name} の作成に失敗しました`);
+					}
+				} catch {
+					useToastStore
+						.getState()
+						.addToast("error", `${file.name} の作成に失敗しました（存在確認に失敗）`);
+				}
+			} finally {
+				setCreatingPaths((prev) => {
+					const next = new Set(prev);
+					next.delete(file.path);
+					return next;
+				});
+			}
+		},
+		[bumpFileTreeVersion, creatingPaths],
+	);
+
+	const handleOpen = useCallback(
+		(path: string) => {
+			onOpenFile?.(path);
+			onClose();
+		},
+		[onOpenFile, onClose],
+	);
+
+	if (loading) {
+		return <p className="text-xs text-text-secondary">読み込み中...</p>;
+	}
+
+	return (
+		<div className="space-y-2">
+			<p className="text-[11px] text-text-secondary">テンプレートファイル</p>
+			{files.map((file) => (
+				<div
+					key={file.path}
+					className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2"
+				>
+					<div className="min-w-0 flex-1">
+						<p className="text-xs font-medium text-text-primary">{file.name}</p>
+						<p className="text-[10px] text-text-secondary">{file.exists ? "作成済み" : "未作成"}</p>
+					</div>
+					{file.exists ? (
+						<button
+							type="button"
+							onClick={() => handleOpen(file.path)}
+							className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+						>
+							<ExternalLink size={12} />
+							開く
+						</button>
+					) : (
+						<button
+							type="button"
+							onClick={() => void handleCreate(file)}
+							disabled={creatingPaths.has(file.path)}
+							className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+						>
+							<Plus size={12} />
+							作成
+						</button>
+					)}
+				</div>
+			))}
+		</div>
+	);
+}
+
+export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: SettingsDialogProps) {
 	const titleId = useId();
+	const sections = workspacePath
+		? [...baseSections, { key: "workspace" as Section, label: "ワークスペース" }]
+		: baseSections;
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
+
+	// workspacePath が消えて sections から "workspace" が外れた場合のフォールバック
+	const validSection = sections.some((s) => s.key === activeSection) ? activeSection : "appearance";
+
 	const preference = useThemeStore((s) => s.preference);
 	const setPreference = useThemeStore((s) => s.setPreference);
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
@@ -210,7 +371,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 							type="button"
 							onClick={() => setActiveSection(s.key)}
 							className={`w-full rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
-								activeSection === s.key
+								validSection === s.key
 									? "bg-blue-600 text-white"
 									: "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
 							}`}
@@ -222,7 +383,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
 				{/* 右カラム: 設定内容 */}
 				<div className="min-h-[10rem] min-w-0 flex-1 space-y-2">
-					{activeSection === "appearance" && (
+					{validSection === "appearance" && (
 						<>
 							<SelectInput
 								id="theme-select"
@@ -246,7 +407,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 						</>
 					)}
 
-					{activeSection === "editor" && (
+					{validSection === "editor" && (
 						<>
 							<NumberInput
 								id="font-size-input"
@@ -274,7 +435,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 						</>
 					)}
 
-					{activeSection === "save" && (
+					{validSection === "save" && (
 						<>
 							<NumberInput
 								id="auto-save-delay-input"
@@ -293,6 +454,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 								onChange={setTrimTrailingWhitespace}
 							/>
 						</>
+					)}
+
+					{validSection === "workspace" && workspacePath && (
+						<WorkspaceSection
+							workspacePath={workspacePath}
+							onOpenFile={onOpenFile}
+							onClose={onClose}
+						/>
 					)}
 				</div>
 			</div>

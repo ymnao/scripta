@@ -7,6 +7,8 @@ interface DialogBaseProps {
 	ariaLabelledBy?: string;
 	ariaDescribedBy?: string;
 	className?: string;
+	/** true の間は Escape キーやオーバーレイクリックによる閉じ操作を無効にする */
+	preventClose?: boolean;
 	children: ReactNode;
 }
 
@@ -16,6 +18,7 @@ export function DialogBase({
 	ariaLabelledBy,
 	ariaDescribedBy,
 	className,
+	preventClose,
 	children,
 }: DialogBaseProps) {
 	const dialogRef = useRef<HTMLDialogElement>(null);
@@ -31,7 +34,8 @@ export function DialogBase({
 		const handler = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
 				e.stopPropagation();
-				onClose();
+				e.preventDefault();
+				if (!preventClose) onClose();
 			}
 			if (e.key === "Tab") {
 				const dialog = dialogRef.current;
@@ -57,7 +61,7 @@ export function DialogBase({
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [open, onClose]);
+	}, [open, onClose, preventClose]);
 
 	if (!open) return null;
 
@@ -65,7 +69,7 @@ export function DialogBase({
 		<div
 			role="presentation"
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-			onMouseDown={onClose}
+			onMouseDown={preventClose ? undefined : onClose}
 		>
 			<dialog
 				ref={dialogRef}
@@ -75,6 +79,10 @@ export function DialogBase({
 				aria-describedby={ariaDescribedBy}
 				className={`relative mx-4 w-full rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${className ?? "max-w-sm"}`}
 				onMouseDown={(e) => e.stopPropagation()}
+				onCancel={(e) => {
+					e.preventDefault();
+					if (!preventClose) onClose();
+				}}
 				tabIndex={-1}
 			>
 				{children}

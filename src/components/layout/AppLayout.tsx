@@ -18,6 +18,7 @@ import { Dialog } from "../common/Dialog";
 import { ExportDialog } from "../common/ExportDialog";
 import { HelpDialog } from "../common/HelpDialog";
 import { SettingsDialog } from "../common/SettingsDialog";
+import { SetupWizardDialog } from "../common/SetupWizardDialog";
 import { ToastContainer } from "../common/Toast";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
@@ -58,12 +59,16 @@ export function AppLayout() {
 	const resetWorkspaceConfig = useWorkspaceConfigStore((s) => s.reset);
 	const scriptaDirReady = useWorkspaceConfigStore((s) => s.scriptaDirReady);
 	const setScriptaDirReady = useWorkspaceConfigStore((s) => s.setScriptaDirReady);
+	const workspaceInitialized = useWorkspaceConfigStore((s) => s.workspaceInitialized);
+	const configLoaded = useWorkspaceConfigStore((s) => s.configLoaded);
+	const setWorkspaceInitialized = useWorkspaceConfigStore((s) => s.setWorkspaceInitialized);
 
 	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
 	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
 	const canGoForward = activeTab ? activeTab.historyIndex < activeTab.history.length - 1 : false;
 
 	const [loading, setLoading] = useState(true);
+	const [setupWizardOpen, setSetupWizardOpen] = useState(false);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
@@ -176,6 +181,18 @@ export function AppLayout() {
 			resetWorkspaceConfig();
 		}
 	}, [workspacePath, loadIcons, resetWorkspaceConfig]);
+
+	// Show setup wizard for uninitialized workspaces.
+	// configLoaded が true かつ workspaceInitialized が false のときだけ開く。
+	// ワークスペース切り替え時は loadIcons() が configLoaded をリセットするので
+	// 一度閉じてから新しい結果で再評価される。
+	useEffect(() => {
+		if (workspacePath && configLoaded && !workspaceInitialized) {
+			setSetupWizardOpen(true);
+		} else {
+			setSetupWizardOpen(false);
+		}
+	}, [workspacePath, configLoaded, workspaceInitialized]);
 
 	const handleExport = useCallback((path: string) => {
 		// Prefer in-memory content so unsaved edits are included
@@ -990,7 +1007,12 @@ export function AppLayout() {
 				/>
 			)}
 
-			<SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+			<SettingsDialog
+				open={settingsOpen}
+				onClose={() => setSettingsOpen(false)}
+				workspacePath={workspacePath}
+				onOpenFile={openTab}
+			/>
 			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
 			{exportTarget && (
 				<ExportDialog
@@ -1002,6 +1024,20 @@ export function AppLayout() {
 					onOpenFile={openTab}
 					scriptaDirReady={scriptaDirReady}
 					onScriptaDirConfirm={() => setScriptaDirReady(true)}
+				/>
+			)}
+			{workspacePath && (
+				<SetupWizardDialog
+					open={setupWizardOpen}
+					onClose={() => setSetupWizardOpen(false)}
+					workspacePath={workspacePath}
+					onComplete={() => {
+						// ワークスペース切替中に古い非同期処理が完了した場合を防ぐ
+						if (useWorkspaceStore.getState().workspacePath !== workspacePath) return;
+						setScriptaDirReady(true);
+						setWorkspaceInitialized(true);
+						bumpFileTreeVersion();
+					}}
 				/>
 			)}
 			<ToastContainer />

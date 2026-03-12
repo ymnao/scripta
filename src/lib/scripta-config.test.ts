@@ -4,9 +4,15 @@ vi.mock("./commands", () => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	listDirectory: vi.fn(),
+	fileExists: vi.fn(),
 }));
 
-const { readFile, writeFile, listDirectory } = await import("./commands");
+const {
+	readFile,
+	writeFile,
+	listDirectory,
+	fileExists: fileExistsCmd,
+} = await import("./commands");
 const {
 	loadIcons,
 	saveIcons,
@@ -14,11 +20,24 @@ const {
 	savePromptTemplate,
 	getScriptaPromptTemplatePath,
 	scriptaDirExists,
+	fileExists,
+	isWorkspaceInitialized,
+	markWorkspaceInitialized,
+	getReadmeTemplatePath,
+	getClaudeMdTemplatePath,
+	getGitignorePath,
+	getSyntaxGuidePath,
+	README_TEMPLATE,
+	CLAUDE_MD_TEMPLATE,
+	GITIGNORE_TEMPLATE,
+	SYNTAX_GUIDE_TEMPLATE,
+	getTemplateDefinitions,
 } = await import("./scripta-config");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
 const mockedListDirectory = listDirectory as Mock;
+const mockedFileExistsCmd = fileExistsCmd as Mock;
 
 describe("loadIcons", () => {
 	beforeEach(() => {
@@ -140,5 +159,127 @@ describe("scriptaDirExists", () => {
 		mockedListDirectory.mockRejectedValue(new Error("Not found"));
 		const result = await scriptaDirExists("/workspace");
 		expect(result).toBe(false);
+	});
+});
+
+describe("fileExists", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns true when file exists", async () => {
+		mockedFileExistsCmd.mockResolvedValue(true);
+		const result = await fileExists("/workspace/file.md");
+		expect(result).toBe(true);
+		expect(mockedFileExistsCmd).toHaveBeenCalledWith("/workspace/file.md");
+	});
+
+	it("returns false when file does not exist", async () => {
+		mockedFileExistsCmd.mockResolvedValue(false);
+		const result = await fileExists("/workspace/file.md");
+		expect(result).toBe(false);
+	});
+});
+
+describe("isWorkspaceInitialized", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns true when initialized.json exists", async () => {
+		mockedFileExistsCmd.mockResolvedValue(true);
+		const result = await isWorkspaceInitialized("/workspace");
+		expect(result).toBe(true);
+		expect(mockedFileExistsCmd).toHaveBeenCalledWith("/workspace/.scripta/initialized.json");
+	});
+
+	it("returns false when initialized.json does not exist", async () => {
+		mockedFileExistsCmd.mockResolvedValue(false);
+		const result = await isWorkspaceInitialized("/workspace");
+		expect(result).toBe(false);
+	});
+});
+
+describe("markWorkspaceInitialized", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("writes initialized.json (parent dirs created by writeFile)", async () => {
+		await markWorkspaceInitialized("/workspace");
+		expect(mockedWriteFile).toHaveBeenCalledWith(
+			"/workspace/.scripta/initialized.json",
+			expect.stringContaining("initializedAt"),
+		);
+	});
+});
+
+describe("template paths", () => {
+	it("getReadmeTemplatePath returns correct path", () => {
+		expect(getReadmeTemplatePath("/workspace")).toBe("/workspace/README.md");
+	});
+
+	it("getClaudeMdTemplatePath returns correct path", () => {
+		expect(getClaudeMdTemplatePath("/workspace")).toBe("/workspace/CLAUDE.md");
+	});
+
+	it("getGitignorePath returns correct path", () => {
+		expect(getGitignorePath("/workspace")).toBe("/workspace/.gitignore");
+	});
+
+	it("getSyntaxGuidePath returns correct path", () => {
+		expect(getSyntaxGuidePath("/workspace")).toBe("/workspace/.scripta/syntax-guide.md");
+	});
+});
+
+describe("template contents", () => {
+	it("README_TEMPLATE contains expected sections", () => {
+		expect(README_TEMPLATE).toContain("## 概要");
+		expect(README_TEMPLATE).toContain("## セットアップ");
+		expect(README_TEMPLATE).toContain("syntax-guide.md");
+	});
+
+	it("CLAUDE_MD_TEMPLATE contains expected sections", () => {
+		expect(CLAUDE_MD_TEMPLATE).toContain("## プロジェクト概要");
+		expect(CLAUDE_MD_TEMPLATE).toContain("## コーディング規約");
+	});
+
+	it("GITIGNORE_TEMPLATE contains .scripta/", () => {
+		expect(GITIGNORE_TEMPLATE).toContain(".scripta/");
+		expect(GITIGNORE_TEMPLATE).toContain(".DS_Store");
+	});
+
+	it("SYNTAX_GUIDE_TEMPLATE contains scripta features", () => {
+		expect(SYNTAX_GUIDE_TEMPLATE).toContain("Wiki Links");
+		expect(SYNTAX_GUIDE_TEMPLATE).toContain("KaTeX");
+		expect(SYNTAX_GUIDE_TEMPLATE).toContain("Mermaid");
+		expect(SYNTAX_GUIDE_TEMPLATE).toContain("エクスポート");
+	});
+});
+
+describe("getTemplateDefinitions", () => {
+	it("returns all 5 template definitions", () => {
+		const defs = getTemplateDefinitions(() => "prompt-content");
+		expect(defs).toHaveLength(5);
+		const names = defs.map((d) => d.name);
+		expect(names).toContain("README.md");
+		expect(names).toContain("CLAUDE.md");
+		expect(names).toContain(".gitignore");
+		expect(names).toContain("syntax-guide.md");
+		expect(names).toContain("prompt-template.md");
+	});
+
+	it("uses provided getPromptContent for prompt-template", () => {
+		const defs = getTemplateDefinitions(() => "my-prompt");
+		const promptDef = defs.find((d) => d.name === "prompt-template.md");
+		expect(promptDef?.getContent()).toBe("my-prompt");
+	});
+
+	it("getPath returns correct paths", () => {
+		const defs = getTemplateDefinitions(() => "");
+		const readmeDef = defs.find((d) => d.name === "README.md");
+		expect(readmeDef?.getPath("/workspace")).toBe("/workspace/README.md");
+		const syntaxDef = defs.find((d) => d.name === "syntax-guide.md");
+		expect(syntaxDef?.getPath("/workspace")).toBe("/workspace/.scripta/syntax-guide.md");
 	});
 });

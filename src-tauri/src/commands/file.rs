@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(super) fn resolve_path(path: &str) -> Result<PathBuf, String> {
@@ -25,6 +26,24 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     fs::write(&resolved, &content).map_err(|e| e.to_string())
+}
+
+/// Creates a new file that does not already exist and writes content.
+/// The file creation is atomic (fails if the file already exists), but the write itself
+/// is not guaranteed to be atomic and may leave a partially written file on failure.
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn write_new_file(path: String, content: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&resolved)
+        .map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
@@ -130,6 +149,18 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn path_exists(path: String) -> Result<bool, String> {
+    let resolved = resolve_path(&path)?;
+    Ok(resolved.exists())
+}
+
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn file_exists(path: String) -> Result<bool, String> {
+    let resolved = resolve_path(&path)?;
+    Ok(resolved.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +173,41 @@ mod tests {
         write_file(path.clone(), "hello".to_string()).unwrap();
         let content = read_file(path).unwrap();
         assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn test_write_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.md").to_string_lossy().to_string();
+
+        write_new_file(path.clone(), "content".to_string()).unwrap();
+        let content = read_file(path).unwrap();
+        assert_eq!(content, "content");
+    }
+
+    #[test]
+    fn test_write_new_file_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exist.md").to_string_lossy().to_string();
+
+        fs::write(&path, "original").unwrap();
+        let result = write_new_file(path.clone(), "overwrite".to_string());
+        assert!(result.is_err());
+        // Original content should be preserved
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original");
+    }
+
+    #[test]
+    fn test_write_new_file_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("a/b/new.md")
+            .to_string_lossy()
+            .to_string();
+
+        write_new_file(path.clone(), "nested".to_string()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "nested");
     }
 
     #[test]
@@ -300,6 +366,58 @@ mod tests {
         let result = delete_entry(path);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not found"));
+    }
+
+    #[test]
+    fn test_path_exists_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exist.md").to_string_lossy().to_string();
+        fs::write(&path, "content").unwrap();
+        assert!(path_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_path_exists_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+        assert!(!path_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_path_exists_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        assert!(path_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_file_exists_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.md").to_string_lossy().to_string();
+        fs::write(&path, "content").unwrap();
+        assert!(file_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_file_exists_false_for_nonexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+        assert!(!file_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_file_exists_false_for_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        assert!(!file_exists(path).unwrap());
     }
 
     #[test]
