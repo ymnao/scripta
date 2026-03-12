@@ -1,5 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
@@ -206,18 +207,16 @@ export function AppLayout() {
 	// Open (or re-focus) the conflict resolution window
 	const openConflictResolver = useCallback(() => {
 		if (!workspacePath) return;
-		void import("@tauri-apps/api/webviewWindow").then(({ WebviewWindow }) => {
-			const existing = WebviewWindow.getByLabel("conflict-resolver");
-			if (existing) {
-				void existing.setFocus();
-				return;
-			}
-			new WebviewWindow("conflict-resolver", {
-				url: `/?conflict=true&workspacePath=${encodeURIComponent(workspacePath)}`,
-				title: "コンフリクト解消",
-				width: 900,
-				height: 600,
-			});
+		const existing = WebviewWindow.getByLabel("conflict-resolver");
+		if (existing) {
+			void existing.setFocus();
+			return;
+		}
+		new WebviewWindow("conflict-resolver", {
+			url: `/?conflict=true&workspacePath=${encodeURIComponent(workspacePath)}`,
+			title: "コンフリクト解消",
+			width: 900,
+			height: 600,
 		});
 	}, [workspacePath]);
 

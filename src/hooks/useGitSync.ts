@@ -94,12 +94,13 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	const doPull = useCallback(
 		async (path: string) => {
 			const store = useGitSyncStore.getState();
-			if (!store.hasRemote) return;
 			if (pausedRef.current) {
 				// Still refresh status to detect external conflict resolution
+				// (even for local-only repos without remote)
 				await refreshStatus(path);
 				return;
 			}
+			if (!store.hasRemote) return;
 
 			try {
 				store.setGitAction("pull");
@@ -333,7 +334,29 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			return;
 		}
 		if (store.conflictFiles.length > 0) {
-			useToastStore.getState().addToast("warning", "コンフリクトを解消してから同期してください。");
+			// Re-check status — conflicts may have been resolved externally (CLI, etc.)
+			const path = workspacePath;
+			void queueRef.current.enqueue(async () => {
+				await refreshStatus(path);
+				const updated = useGitSyncStore.getState();
+				if (updated.conflictFiles.length > 0) {
+					useToastStore
+						.getState()
+						.addToast("warning", "コンフリクトを解消してから同期してください。");
+				} else {
+					useToastStore
+						.getState()
+						.addToast("info", "コンフリクトが解消されました。同期を開始しています...");
+					const result = await doCommitAndSync(path);
+					if (result === "skipped") return;
+					const s = useGitSyncStore.getState();
+					if (s.errorMessage) {
+						useToastStore.getState().addToast("error", `同期に失敗しました: ${s.errorMessage}`);
+					} else {
+						useToastStore.getState().addToast("success", "同期が完了しました");
+					}
+				}
+			});
 			return;
 		}
 		const path = workspacePath;
@@ -349,7 +372,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				toast.addToast("success", "同期が完了しました");
 			}
 		});
-	}, [workspacePath, doCommitAndSync]);
+	}, [workspacePath, doCommitAndSync, refreshStatus]);
 
 	return { manualSync };
 }

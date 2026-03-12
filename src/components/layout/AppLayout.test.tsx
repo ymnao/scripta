@@ -1003,12 +1003,7 @@ describe("AppLayout", () => {
 			useGitSyncStore.setState({ conflictFiles: ["file1.md"] });
 		});
 
-		// Flush the dynamic import microtask inside openConflictResolver
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(0);
-		});
-
-		// Conflict window should have been opened once
+		// Conflict window should have been opened once (static import, no async flush needed)
 		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
 
 		// Update conflictFiles with a different array reference but still >0
@@ -1017,9 +1012,6 @@ describe("AppLayout", () => {
 		MockWebviewWindowConstructor.mockClear();
 		await act(async () => {
 			useGitSyncStore.setState({ conflictFiles: ["file1.md", "file2.md"] });
-		});
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(0);
 		});
 
 		// Should NOT open a new window (prev > 0, current > 0)
@@ -1032,9 +1024,6 @@ describe("AppLayout", () => {
 		});
 		await act(async () => {
 			useGitSyncStore.setState({ conflictFiles: ["file3.md"] });
-		});
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(0);
 		});
 
 		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);

@@ -329,4 +329,77 @@ describe("useGitSync", () => {
 		// Conflicts should now be cleared
 		expect(useGitSyncStore.getState().conflictFiles).toEqual([]);
 	});
+
+	it("hasRemote=false conflict is detected as resolved via periodic pull timer", async () => {
+		// Init: conflicts present, NO remote
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 1,
+			conflictFiles: ["file.md"],
+			hasRemote: false,
+		});
+
+		useGitSyncStore.setState({
+			gitSyncEnabled: true,
+			autoPullInterval: 1, // 1 minute
+			autoCommitInterval: 0,
+			autoPushInterval: 0,
+		});
+
+		renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Verify conflicts are detected
+		expect(useGitSyncStore.getState().conflictFiles).toEqual(["file.md"]);
+
+		// Simulate external conflict resolution via CLI
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 0,
+			conflictFiles: [],
+			hasRemote: false,
+		});
+
+		// Advance to pull timer — doPull should still refreshStatus even
+		// without remote because pausedRef check is before hasRemote check
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		// Conflicts should now be cleared
+		expect(useGitSyncStore.getState().conflictFiles).toEqual([]);
+	});
+
+	it("manualSync re-checks conflicts and proceeds when resolved externally", async () => {
+		// Init: conflicts present
+		mockedGitStatus
+			.mockResolvedValueOnce({
+				branch: "main",
+				changedFilesCount: 1,
+				conflictFiles: ["file.md"],
+				hasRemote: false,
+			})
+			// Second call (from manualSync refreshStatus): conflicts resolved
+			.mockResolvedValue({
+				branch: "main",
+				changedFilesCount: 0,
+				conflictFiles: [],
+				hasRemote: false,
+			});
+
+		useGitSyncStore.setState({ gitSyncEnabled: true });
+
+		const { result } = renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Conflicts detected
+		expect(useGitSyncStore.getState().conflictFiles).toEqual(["file.md"]);
+
+		// User clicks manual sync — should re-check and discover conflicts are gone
+		mockedGitAddAll.mockClear();
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Should proceed to sync after re-check cleared conflicts
+		expect(useGitSyncStore.getState().conflictFiles).toEqual([]);
+		expect(mockedGitAddAll).toHaveBeenCalledWith("/test/workspace");
+	});
 });
