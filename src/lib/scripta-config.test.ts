@@ -4,10 +4,10 @@ vi.mock("./commands", () => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	listDirectory: vi.fn(),
-	createDirectory: vi.fn().mockResolvedValue(undefined),
+	pathExists: vi.fn(),
 }));
 
-const { readFile, writeFile, listDirectory, createDirectory } = await import("./commands");
+const { readFile, writeFile, listDirectory, pathExists } = await import("./commands");
 const {
 	loadIcons,
 	saveIcons,
@@ -31,7 +31,7 @@ const {
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
 const mockedListDirectory = listDirectory as Mock;
-const mockedCreateDirectory = createDirectory as Mock;
+const mockedPathExists = pathExists as Mock;
 
 describe("loadIcons", () => {
 	beforeEach(() => {
@@ -162,14 +162,14 @@ describe("fileExists", () => {
 	});
 
 	it("returns true when file exists", async () => {
-		mockedReadFile.mockResolvedValue("content");
+		mockedPathExists.mockResolvedValue(true);
 		const result = await fileExists("/workspace/file.md");
 		expect(result).toBe(true);
-		expect(mockedReadFile).toHaveBeenCalledWith("/workspace/file.md");
+		expect(mockedPathExists).toHaveBeenCalledWith("/workspace/file.md");
 	});
 
 	it("returns false when file does not exist", async () => {
-		mockedReadFile.mockRejectedValue(new Error("Not found"));
+		mockedPathExists.mockResolvedValue(false);
 		const result = await fileExists("/workspace/file.md");
 		expect(result).toBe(false);
 	});
@@ -181,14 +181,14 @@ describe("isWorkspaceInitialized", () => {
 	});
 
 	it("returns true when initialized.json exists", async () => {
-		mockedReadFile.mockResolvedValue('{"initializedAt":"2026-01-01"}');
+		mockedPathExists.mockResolvedValue(true);
 		const result = await isWorkspaceInitialized("/workspace");
 		expect(result).toBe(true);
-		expect(mockedReadFile).toHaveBeenCalledWith("/workspace/.scripta/initialized.json");
+		expect(mockedPathExists).toHaveBeenCalledWith("/workspace/.scripta/initialized.json");
 	});
 
 	it("returns false when initialized.json does not exist", async () => {
-		mockedReadFile.mockRejectedValue(new Error("Not found"));
+		mockedPathExists.mockResolvedValue(false);
 		const result = await isWorkspaceInitialized("/workspace");
 		expect(result).toBe(false);
 	});
@@ -199,19 +199,12 @@ describe("markWorkspaceInitialized", () => {
 		vi.clearAllMocks();
 	});
 
-	it("creates .scripta/ directory and writes initialized.json", async () => {
+	it("writes initialized.json (parent dirs created by writeFile)", async () => {
 		await markWorkspaceInitialized("/workspace");
-		expect(mockedCreateDirectory).toHaveBeenCalledWith("/workspace/.scripta");
 		expect(mockedWriteFile).toHaveBeenCalledWith(
 			"/workspace/.scripta/initialized.json",
 			expect.stringContaining("initializedAt"),
 		);
-	});
-
-	it("ignores error when .scripta/ directory already exists", async () => {
-		mockedCreateDirectory.mockRejectedValueOnce(new Error("already exists"));
-		await expect(markWorkspaceInitialized("/workspace")).resolves.toBeUndefined();
-		expect(mockedWriteFile).toHaveBeenCalled();
 	});
 });
 

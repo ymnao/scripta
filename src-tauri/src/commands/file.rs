@@ -130,6 +130,12 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn path_exists(path: String) -> Result<bool, String> {
+    let resolved = resolve_path(&path)?;
+    Ok(resolved.exists())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +306,32 @@ mod tests {
         let result = delete_entry(path);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not found"));
+    }
+
+    #[test]
+    fn test_path_exists_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exist.md").to_string_lossy().to_string();
+        fs::write(&path, "content").unwrap();
+        assert!(path_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_path_exists_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("nonexistent.md")
+            .to_string_lossy()
+            .to_string();
+        assert!(!path_exists(path).unwrap());
+    }
+
+    #[test]
+    fn test_path_exists_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        assert!(path_exists(path).unwrap());
     }
 
     #[test]

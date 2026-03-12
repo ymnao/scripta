@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/commands", () => ({
-	createDirectory: vi.fn().mockResolvedValue(undefined),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -13,7 +12,6 @@ vi.mock("../../lib/export", () => ({
 
 vi.mock("../../lib/scripta-config", () => ({
 	fileExists: vi.fn(),
-	getScriptaDir: vi.fn((ws: string) => `${ws}/.scripta`),
 	getReadmeTemplatePath: vi.fn((ws: string) => `${ws}/README.md`),
 	getClaudeMdTemplatePath: vi.fn((ws: string) => `${ws}/CLAUDE.md`),
 	getGitignorePath: vi.fn((ws: string) => `${ws}/.gitignore`),

@@ -4,9 +4,7 @@ import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "../../stores/toast";
 
 vi.mock("../../lib/commands", () => ({
-	createDirectory: vi.fn().mockResolvedValue(undefined),
 	writeFile: vi.fn().mockResolvedValue(undefined),
-	readFile: vi.fn(),
 }));
 
 vi.mock("../../lib/export", () => ({
@@ -15,7 +13,6 @@ vi.mock("../../lib/export", () => ({
 
 vi.mock("../../lib/scripta-config", () => ({
 	fileExists: vi.fn(),
-	getScriptaDir: vi.fn((ws: string) => `${ws}/.scripta`),
 	getReadmeTemplatePath: vi.fn((ws: string) => `${ws}/README.md`),
 	getClaudeMdTemplatePath: vi.fn((ws: string) => `${ws}/CLAUDE.md`),
 	getGitignorePath: vi.fn((ws: string) => `${ws}/.gitignore`),

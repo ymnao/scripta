@@ -1,6 +1,6 @@
 import { FileText, FolderOpen, Settings, X } from "lucide-react";
 import { useCallback, useId, useState } from "react";
-import { createDirectory, writeFile } from "../../lib/commands";
+import { writeFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
 	CLAUDE_MD_TEMPLATE,
@@ -11,7 +11,6 @@ import {
 	getClaudeMdTemplatePath,
 	getGitignorePath,
 	getReadmeTemplatePath,
-	getScriptaDir,
 	getScriptaPromptTemplatePath,
 	getSyntaxGuidePath,
 	markWorkspaceInitialized,
@@ -118,16 +117,8 @@ export function SetupWizardDialog({
 			const addToast = useToastStore.getState().addToast;
 
 			try {
-				// Helper: ensure .scripta/ exists
-				const ensureScriptaDir = async () => {
-					try {
-						await createDirectory(getScriptaDir(workspacePath));
-					} catch {
-						// directory may already exist
-					}
-				};
-
 				// Helper: write file only if it doesn't already exist. Returns true if written.
+				// writeFile は Rust 側で親ディレクトリを自動作成する（create_dir_all）。
 				const writeIfNotExists = async (path: string, content: string) => {
 					if (!(await fileExists(path))) {
 						await writeFile(path, content);
@@ -139,8 +130,6 @@ export function SetupWizardDialog({
 				let createdCount = 0;
 
 				if (option === "basic" || option === "engineer") {
-					await ensureScriptaDir();
-
 					if (await writeIfNotExists(getReadmeTemplatePath(workspacePath), README_TEMPLATE))
 						createdCount++;
 					if (await writeIfNotExists(getGitignorePath(workspacePath), GITIGNORE_TEMPLATE))
@@ -150,8 +139,6 @@ export function SetupWizardDialog({
 				}
 
 				if (option === "engineer") {
-					await ensureScriptaDir();
-
 					if (await writeIfNotExists(getClaudeMdTemplatePath(workspacePath), CLAUDE_MD_TEMPLATE))
 						createdCount++;
 					if (

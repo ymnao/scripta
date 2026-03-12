@@ -1,6 +1,6 @@
 import { ExternalLink, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
-import { createDirectory, writeFile } from "../../lib/commands";
+import { writeFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
 	CLAUDE_MD_TEMPLATE,
@@ -11,7 +11,6 @@ import {
 	getClaudeMdTemplatePath,
 	getGitignorePath,
 	getReadmeTemplatePath,
-	getScriptaDir,
 	getScriptaPromptTemplatePath,
 	getSyntaxGuidePath,
 } from "../../lib/scripta-config";
@@ -189,7 +188,6 @@ interface TemplateFileStatus {
 	path: string;
 	exists: boolean;
 	getContent: () => string;
-	needsScriptaDir?: boolean;
 }
 
 function WorkspaceSection({
@@ -230,13 +228,11 @@ function WorkspaceSection({
 					name: "syntax-guide.md",
 					path: getSyntaxGuidePath(workspacePath),
 					getContent: () => SYNTAX_GUIDE_TEMPLATE,
-					needsScriptaDir: true,
 				},
 				{
 					name: "prompt-template.md",
 					path: getScriptaPromptTemplatePath(workspacePath),
 					getContent: () => getDefaultPromptTemplate(),
-					needsScriptaDir: true,
 				},
 			];
 
@@ -267,14 +263,7 @@ function WorkspaceSection({
 					return;
 				}
 
-				if (file.needsScriptaDir) {
-					try {
-						await createDirectory(getScriptaDir(workspacePath));
-					} catch {
-						// directory may already exist
-					}
-				}
-
+				// writeFile は Rust 側で親ディレクトリを自動作成する（create_dir_all）
 				await writeFile(file.path, file.getContent());
 				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
 				bumpFileTreeVersion();
@@ -285,7 +274,7 @@ function WorkspaceSection({
 				);
 			}
 		},
-		[workspacePath, addToast, bumpFileTreeVersion],
+		[addToast, bumpFileTreeVersion],
 	);
 
 	const handleOpen = useCallback(
@@ -343,6 +332,10 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 		? [...baseSections, { key: "workspace" as Section, label: "ワークスペース" }]
 		: baseSections;
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
+
+	// workspacePath が消えて sections から "workspace" が外れた場合のフォールバック
+	const validSection = sections.some((s) => s.key === activeSection) ? activeSection : "appearance";
+
 	const preference = useThemeStore((s) => s.preference);
 	const setPreference = useThemeStore((s) => s.setPreference);
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
@@ -385,7 +378,7 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 							type="button"
 							onClick={() => setActiveSection(s.key)}
 							className={`w-full rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
-								activeSection === s.key
+								validSection === s.key
 									? "bg-blue-600 text-white"
 									: "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
 							}`}
@@ -397,7 +390,7 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 
 				{/* 右カラム: 設定内容 */}
 				<div className="min-h-[10rem] min-w-0 flex-1 space-y-2">
-					{activeSection === "appearance" && (
+					{validSection === "appearance" && (
 						<>
 							<SelectInput
 								id="theme-select"
@@ -421,7 +414,7 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 						</>
 					)}
 
-					{activeSection === "editor" && (
+					{validSection === "editor" && (
 						<>
 							<NumberInput
 								id="font-size-input"
@@ -449,7 +442,7 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 						</>
 					)}
 
-					{activeSection === "save" && (
+					{validSection === "save" && (
 						<>
 							<NumberInput
 								id="auto-save-delay-input"
@@ -470,7 +463,7 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 						</>
 					)}
 
-					{activeSection === "workspace" && workspacePath && (
+					{validSection === "workspace" && workspacePath && (
 						<WorkspaceSection
 							workspacePath={workspacePath}
 							onOpenFile={onOpenFile}

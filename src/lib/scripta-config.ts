@@ -1,4 +1,4 @@
-import { createDirectory, listDirectory, readFile, writeFile } from "./commands";
+import { listDirectory, pathExists, readFile, writeFile } from "./commands";
 import { joinPath } from "./path";
 
 const SCRIPTA_DIR = ".scripta";
@@ -67,13 +67,8 @@ export async function savePromptTemplate(workspacePath: string, content: string)
 
 // --- Workspace initialization ---
 
-export async function fileExists(path: string): Promise<boolean> {
-	try {
-		await readFile(path);
-		return true;
-	} catch {
-		return false;
-	}
+export function fileExists(path: string): Promise<boolean> {
+	return pathExists(path);
 }
 
 export async function isWorkspaceInitialized(workspacePath: string): Promise<boolean> {
@@ -81,14 +76,8 @@ export async function isWorkspaceInitialized(workspacePath: string): Promise<boo
 }
 
 export async function markWorkspaceInitialized(workspacePath: string): Promise<void> {
-	const scriptaDir = getScriptaDir(workspacePath);
-	try {
-		await createDirectory(scriptaDir);
-	} catch {
-		// directory may already exist
-	}
 	await writeFile(
-		joinPath(scriptaDir, INITIALIZED_FILE),
+		joinPath(getScriptaDir(workspacePath), INITIALIZED_FILE),
 		JSON.stringify({ initializedAt: new Date().toISOString() }, null, "\t"),
 	);
 }
