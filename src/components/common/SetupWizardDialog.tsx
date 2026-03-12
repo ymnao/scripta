@@ -127,29 +127,40 @@ export function SetupWizardDialog({
 					}
 				};
 
-				// Helper: write file only if it doesn't already exist
+				// Helper: write file only if it doesn't already exist. Returns true if written.
 				const writeIfNotExists = async (path: string, content: string) => {
 					if (!(await fileExists(path))) {
 						await writeFile(path, content);
+						return true;
 					}
+					return false;
 				};
+
+				let createdCount = 0;
 
 				if (option === "basic" || option === "engineer") {
 					await ensureScriptaDir();
 
-					await writeIfNotExists(getReadmeTemplatePath(workspacePath), README_TEMPLATE);
-					await writeIfNotExists(getGitignorePath(workspacePath), GITIGNORE_TEMPLATE);
-					await writeIfNotExists(getSyntaxGuidePath(workspacePath), SYNTAX_GUIDE_TEMPLATE);
+					if (await writeIfNotExists(getReadmeTemplatePath(workspacePath), README_TEMPLATE))
+						createdCount++;
+					if (await writeIfNotExists(getGitignorePath(workspacePath), GITIGNORE_TEMPLATE))
+						createdCount++;
+					if (await writeIfNotExists(getSyntaxGuidePath(workspacePath), SYNTAX_GUIDE_TEMPLATE))
+						createdCount++;
 				}
 
 				if (option === "engineer") {
 					await ensureScriptaDir();
 
-					await writeIfNotExists(getClaudeMdTemplatePath(workspacePath), CLAUDE_MD_TEMPLATE);
-					await writeIfNotExists(
-						getScriptaPromptTemplatePath(workspacePath),
-						getDefaultPromptTemplate(),
-					);
+					if (await writeIfNotExists(getClaudeMdTemplatePath(workspacePath), CLAUDE_MD_TEMPLATE))
+						createdCount++;
+					if (
+						await writeIfNotExists(
+							getScriptaPromptTemplatePath(workspacePath),
+							getDefaultPromptTemplate(),
+						)
+					)
+						createdCount++;
 				}
 
 				// Mark as initialized
@@ -157,12 +168,11 @@ export function SetupWizardDialog({
 
 				onComplete();
 
-				const messages: Record<SetupOption, string> = {
-					skip: "ワークスペースを初期化しました",
-					basic: "テンプレートファイルを作成しました",
-					engineer: "テンプレートファイルを作成しました",
-				};
-				addToast("warning", messages[option]);
+				if (option === "skip" || createdCount === 0) {
+					addToast("warning", "ワークスペースを初期化しました");
+				} else {
+					addToast("warning", `${createdCount} 件のテンプレートファイルを作成しました`);
+				}
 
 				onClose();
 			} catch (err) {

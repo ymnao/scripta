@@ -137,6 +137,29 @@ describe("SetupWizardDialog", () => {
 		expect(mockedMarkInitialized).toHaveBeenCalled();
 	});
 
+	it("全ファイルが既存の場合、トーストに作成件数ではなく初期化メッセージを表示", async () => {
+		mockedFileExists.mockResolvedValue(true);
+		renderDialog();
+
+		await userEvent.click(screen.getByText("基本"));
+
+		const { toasts } = useToastStore.getState();
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].message).toBe("ワークスペースを初期化しました");
+	});
+
+	it("一部ファイルのみ新規作成の場合、作成件数をトーストに表示", async () => {
+		// README.md だけ既存、他は未作成
+		mockedFileExists.mockImplementation(async (path: string) => path === "/workspace/README.md");
+		renderDialog();
+
+		await userEvent.click(screen.getByText("基本"));
+
+		const { toasts } = useToastStore.getState();
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].message).toBe("2 件のテンプレートファイルを作成しました");
+	});
+
 	it("X ボタンで markWorkspaceInitialized → onComplete → onClose が呼ばれる", async () => {
 		const onComplete = vi.fn();
 		const onClose = vi.fn();
