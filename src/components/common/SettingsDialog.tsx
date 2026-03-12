@@ -4,10 +4,12 @@ import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
+import { useGitSyncStore } from "../../stores/git-sync";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
+import type { SyncMethod } from "../../types/git-sync";
 import { DialogBase } from "./DialogBase";
 
 interface SettingsDialogProps {
@@ -15,6 +17,7 @@ interface SettingsDialogProps {
 	onClose: () => void;
 	workspacePath?: string | null;
 	onOpenFile?: (path: string) => void;
+	onManualSync?: () => void;
 }
 
 const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -29,7 +32,12 @@ const fontFamilyOptions: { value: FontFamily; label: string }[] = [
 	{ value: "serif", label: "明朝 (Serif)" },
 ];
 
-type Section = "appearance" | "editor" | "save" | "workspace";
+const syncMethodOptions: { value: SyncMethod; label: string }[] = [
+	{ value: "merge", label: "Merge" },
+	{ value: "rebase", label: "Rebase" },
+];
+
+type Section = "appearance" | "editor" | "save" | "git-sync" | "workspace";
 
 const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
@@ -168,6 +176,54 @@ function SelectInput<T extends string | number>({
 					</option>
 				))}
 			</select>
+		</div>
+	);
+}
+
+function TextInput({
+	id,
+	label,
+	value,
+	onChange,
+	disabled,
+}: {
+	id: string;
+	label: string;
+	value: string;
+	onChange: (value: string) => void;
+	disabled?: boolean;
+}) {
+	const [draft, setDraft] = useState(value);
+
+	useEffect(() => {
+		setDraft(value);
+	}, [value]);
+
+	const commit = () => {
+		if (draft !== value) {
+			onChange(draft);
+		}
+	};
+
+	return (
+		<div className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2">
+			<label htmlFor={id} className="shrink-0 text-xs font-medium text-text-primary">
+				{label}
+			</label>
+			<input
+				id={id}
+				type="text"
+				value={draft}
+				onChange={(e) => setDraft(e.target.value)}
+				onBlur={commit}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") {
+						e.currentTarget.blur();
+					}
+				}}
+				disabled={disabled}
+				className="ml-2 min-w-0 flex-1 rounded border border-border bg-bg-primary px-2 py-0.5 text-xs text-text-primary outline-none focus:border-blue-500 disabled:opacity-50"
+			/>
 		</div>
 	);
 }
@@ -319,11 +375,21 @@ function WorkspaceSection({
 	);
 }
 
-export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: SettingsDialogProps) {
+export function SettingsDialog({
+	open,
+	onClose,
+	workspacePath,
+	onOpenFile,
+	onManualSync,
+}: SettingsDialogProps) {
 	const titleId = useId();
-	const sections = workspacePath
-		? [...baseSections, { key: "workspace" as Section, label: "ワークスペース" }]
-		: baseSections;
+	const gitReady = useGitSyncStore((s) => s.gitReady);
+	const allSections: { key: Section; label: string }[] = [
+		...baseSections,
+		...(gitReady ? [{ key: "git-sync" as Section, label: "Git 同期" }] : []),
+		...(workspacePath ? [{ key: "workspace" as Section, label: "ワークスペース" }] : []),
+	];
+	const sections = allSections;
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
 
 	// workspacePath が消えて sections から "workspace" が外れた場合のフォールバック
@@ -345,6 +411,23 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 	const setTrimTrailingWhitespace = useSettingsStore((s) => s.setTrimTrailingWhitespace);
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const setShowLinkCards = useSettingsStore((s) => s.setShowLinkCards);
+
+	const gitSyncEnabled = useGitSyncStore((s) => s.gitSyncEnabled);
+	const setGitSyncEnabled = useGitSyncStore((s) => s.setGitSyncEnabled);
+	const autoCommitInterval = useGitSyncStore((s) => s.autoCommitInterval);
+	const setAutoCommitInterval = useGitSyncStore((s) => s.setAutoCommitInterval);
+	const autoPullInterval = useGitSyncStore((s) => s.autoPullInterval);
+	const setAutoPullInterval = useGitSyncStore((s) => s.setAutoPullInterval);
+	const autoPushInterval = useGitSyncStore((s) => s.autoPushInterval);
+	const setAutoPushInterval = useGitSyncStore((s) => s.setAutoPushInterval);
+	const pullBeforePush = useGitSyncStore((s) => s.pullBeforePush);
+	const setPullBeforePush = useGitSyncStore((s) => s.setPullBeforePush);
+	const syncMethod = useGitSyncStore((s) => s.syncMethod);
+	const setSyncMethod = useGitSyncStore((s) => s.setSyncMethod);
+	const commitMessage = useGitSyncStore((s) => s.commitMessage);
+	const setCommitMessage = useGitSyncStore((s) => s.setCommitMessage);
+	const autoPullOnStartup = useGitSyncStore((s) => s.autoPullOnStartup);
+	const setAutoPullOnStartup = useGitSyncStore((s) => s.setAutoPullOnStartup);
 
 	return (
 		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} className="max-w-lg">
@@ -453,6 +536,83 @@ export function SettingsDialog({ open, onClose, workspacePath, onOpenFile }: Set
 								checked={trimTrailingWhitespace}
 								onChange={setTrimTrailingWhitespace}
 							/>
+						</>
+					)}
+
+					{validSection === "git-sync" && (
+						<>
+							<Toggle
+								id="git-sync-enabled-toggle"
+								label="Git 同期を有効化"
+								checked={gitSyncEnabled}
+								onChange={setGitSyncEnabled}
+							/>
+							<NumberInput
+								id="auto-commit-interval-input"
+								label="自動コミット間隔"
+								value={autoCommitInterval}
+								min={0}
+								max={1440}
+								step={1}
+								unit="分"
+								onChange={setAutoCommitInterval}
+							/>
+							<NumberInput
+								id="auto-pull-interval-input"
+								label="自動 Pull 間隔"
+								value={autoPullInterval}
+								min={0}
+								max={1440}
+								step={1}
+								unit="分"
+								onChange={setAutoPullInterval}
+							/>
+							<NumberInput
+								id="auto-push-interval-input"
+								label="自動 Push 間隔"
+								value={autoPushInterval}
+								min={0}
+								max={1440}
+								step={1}
+								unit="分"
+								onChange={setAutoPushInterval}
+							/>
+							<Toggle
+								id="pull-before-push-toggle"
+								label="Push 前に Pull"
+								checked={pullBeforePush}
+								onChange={setPullBeforePush}
+							/>
+							<SelectInput
+								id="sync-method-select"
+								label="同期方法"
+								value={syncMethod}
+								options={syncMethodOptions}
+								onChange={setSyncMethod}
+							/>
+							<TextInput
+								id="commit-message-input"
+								label="コミットメッセージ"
+								value={commitMessage}
+								onChange={setCommitMessage}
+								disabled={!gitSyncEnabled}
+							/>
+							<Toggle
+								id="auto-pull-on-startup-toggle"
+								label="起動時に自動 Pull"
+								checked={autoPullOnStartup}
+								onChange={setAutoPullOnStartup}
+							/>
+							{onManualSync && (
+								<button
+									type="button"
+									onClick={onManualSync}
+									disabled={!gitSyncEnabled}
+									className="w-full rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+								>
+									手動同期を実行
+								</button>
+							)}
 						</>
 					)}
 
