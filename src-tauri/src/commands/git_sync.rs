@@ -4,6 +4,14 @@ use std::process::Command;
 
 use super::file::resolve_path;
 
+fn is_stage_not_found(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("does not exist")
+        || lower.contains("not at stage")
+        || lower.contains("invalid object name")
+        || lower.contains("not a valid object name")
+}
+
 fn validate_relative_path(file_path: &str) -> Result<(), String> {
     let p = Path::new(file_path);
     if p.is_absolute() {
@@ -207,9 +215,19 @@ pub async fn git_get_conflict_content(
         let ours_ref = format!(":2:{file_path}");
         let theirs_ref = format!(":3:{file_path}");
         // For modify/delete conflicts (DU/UD), one side may not exist in the index.
-        // Use "--" to prevent file_path starting with "-" from being interpreted as an option.
-        let ours = run_git(&path, &["show", "--", &ours_ref]).unwrap_or_default();
-        let theirs = run_git(&path, &["show", "--", &theirs_ref]).unwrap_or_default();
+        // Stage references (:2:, :3:) are rev-specs, not paths — do not use "--" here
+        // as it would cause git to interpret the ref as a pathspec.
+        // Only stage-not-found errors are tolerated; other failures propagate.
+        let ours = match run_git(&path, &["show", &ours_ref]) {
+            Ok(content) => content,
+            Err(e) if is_stage_not_found(&e) => String::new(),
+            Err(e) => return Err(e),
+        };
+        let theirs = match run_git(&path, &["show", &theirs_ref]) {
+            Ok(content) => content,
+            Err(e) if is_stage_not_found(&e) => String::new(),
+            Err(e) => return Err(e),
+        };
         Ok(ConflictContentResult { ours, theirs })
     })
     .await

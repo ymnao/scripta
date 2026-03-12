@@ -139,6 +139,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			} else {
 				store.setErrorMessage(String(e));
 			}
+			throw e;
 		} finally {
 			store.setGitAction("idle");
 		}
@@ -182,7 +183,14 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 						}
 					}
 					if (store.hasRemote && !store.offlineMode && !pausedRef.current) {
-						await doPush(path);
+						try {
+							await doPush(path);
+						} catch {
+							// doPush already set state (offlineMode/errorMessage).
+							// Stop the success path — do not clear errorMessage.
+							await refreshStatus(path);
+							return "done";
+						}
 					}
 				}
 

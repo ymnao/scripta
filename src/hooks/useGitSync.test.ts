@@ -166,6 +166,29 @@ describe("useGitSync", () => {
 		expect(mockedGitPush).toHaveBeenCalled();
 	});
 
+	it("manualSync shows error toast when push fails", async () => {
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 0,
+			conflictFiles: [],
+			hasRemote: true,
+		});
+		mockedGitCommit.mockRejectedValue(new Error("nothing to commit, working tree clean"));
+		mockedGitPush.mockRejectedValue(new Error("remote: Permission denied"));
+
+		useGitSyncStore.setState({ gitSyncEnabled: true, pullBeforePush: false });
+
+		const { result } = renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		const addToast = vi.spyOn(useToastStore.getState(), "addToast");
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Should show error toast, not success toast
+		expect(addToast).toHaveBeenCalledWith("error", expect.stringContaining("同期に失敗しました"));
+	});
+
 	it("doPull failure refreshes status and detects conflicts", async () => {
 		// Setup: repo with remote, pullBeforePush enabled
 		mockedGitStatus
