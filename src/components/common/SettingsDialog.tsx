@@ -236,16 +236,26 @@ function WorkspaceSection({
 				},
 			];
 
-			const results = await Promise.all(
-				templates.map(async (t) => ({
-					...t,
-					exists: await fileExists(t.path),
-				})),
-			);
+			try {
+				const results = await Promise.all(
+					templates.map(async (t) => ({
+						...t,
+						exists: await fileExists(t.path),
+					})),
+				);
 
-			if (!cancelled) {
-				setFiles(results);
-				setLoading(false);
+				if (!cancelled) {
+					setFiles(results);
+					setLoading(false);
+				}
+			} catch {
+				if (!cancelled) {
+					useToastStore
+						.getState()
+						.addToast("error", "テンプレートファイルの存在確認に失敗しました");
+					setFiles(templates.map((t) => ({ ...t, exists: false })));
+					setLoading(false);
+				}
 			}
 		})();
 
