@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ConflictContent, GitStatus } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
 import type { FileEntry } from "../types/workspace";
@@ -86,4 +87,54 @@ export function fetchOgp(url: string): Promise<OgpData> {
 
 export function exportPdf(html: string, outputPath: string): Promise<void> {
 	return invoke<void>("export_pdf", { html, outputPath });
+}
+
+// Git sync commands (no retry — git operations should not be retried)
+
+export function gitCheckAvailable(): Promise<boolean> {
+	return invoke<boolean>("git_check_available");
+}
+
+export function gitCheckRepo(path: string): Promise<boolean> {
+	return invoke<boolean>("git_check_repo", { path });
+}
+
+export function gitStatus(path: string): Promise<GitStatus> {
+	return invoke<GitStatus>("git_status", { path });
+}
+
+export function gitAddAll(path: string): Promise<void> {
+	return invoke<void>("git_add_all", { path });
+}
+
+export function gitCommit(path: string, message: string): Promise<string> {
+	return invoke<string>("git_commit", { path, message });
+}
+
+export function gitPull(path: string, syncMethod: string): Promise<string> {
+	return invoke<string>("git_pull", { path, syncMethod });
+}
+
+export function gitPush(path: string): Promise<string> {
+	return invoke<string>("git_push", { path });
+}
+
+export function gitUnpushedCount(path: string): Promise<number> {
+	return invoke<number>("git_unpushed_count", { path });
+}
+
+export function gitGetConflictedFiles(path: string): Promise<string[]> {
+	return invoke<string[]>("git_get_conflicted_files", { path });
+}
+
+export function gitGetConflictContent(path: string, filePath: string): Promise<ConflictContent> {
+	return invoke<ConflictContent>("git_get_conflict_content", { path, filePath });
+}
+
+export function gitResolveConflict(path: string, filePath: string, content: string): Promise<void> {
+	return invoke<void>("git_resolve_conflict", { path, filePath, content });
+}
+
+export function gitGetLastCommitTime(path: string): Promise<string | null> {
+	return invoke<string | null>("git_get_last_commit_time", { path });
 }
