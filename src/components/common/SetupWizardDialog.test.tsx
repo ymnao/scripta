@@ -147,14 +147,21 @@ describe("SetupWizardDialog", () => {
 		expect(onClose).toHaveBeenCalled();
 	});
 
-	it("X ボタンで markWorkspaceInitialized が失敗しても onClose は呼ばれる", async () => {
+	it("X ボタンで markWorkspaceInitialized が失敗するとダイアログは閉じずトースト表示", async () => {
 		mockedMarkInitialized.mockRejectedValueOnce(new Error("disk full"));
 		const onComplete = vi.fn();
 		const onClose = vi.fn();
 		renderDialog({ onComplete, onClose });
 		await userEvent.click(screen.getByLabelText("閉じる"));
 		expect(onComplete).not.toHaveBeenCalled();
-		expect(onClose).toHaveBeenCalled();
+		expect(onClose).not.toHaveBeenCalled();
+		// ダイアログは開いたまま
+		expect(screen.getByText("ワークスペースのセットアップ")).toBeInTheDocument();
+		// エラートーストが表示される
+		const { toasts } = useToastStore.getState();
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].type).toBe("error");
+		expect(toasts[0].message).toContain("初期化に失敗しました");
 	});
 
 	it("オプション選択のエラー時にトースト表示", async () => {

@@ -98,9 +98,14 @@ export function SetupWizardDialog({
 			await markWorkspaceInitialized(workspacePath);
 			onComplete();
 			onClose();
-		} catch {
-			// マーカー書き込み失敗時はダイアログを閉じるだけ
-			onClose();
+		} catch (err) {
+			// マーカー書き込み失敗時はダイアログを閉じず、リトライ可能にする
+			useToastStore
+				.getState()
+				.addToast(
+					"error",
+					`初期化に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+				);
 		} finally {
 			setProcessing(false);
 		}
