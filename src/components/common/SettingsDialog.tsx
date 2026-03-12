@@ -1,6 +1,6 @@
 import { ExternalLink, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
-import { writeFile } from "../../lib/commands";
+import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
 	CLAUDE_MD_TEMPLATE,
@@ -206,6 +206,8 @@ function WorkspaceSection({
 
 	useEffect(() => {
 		let cancelled = false;
+		setLoading(true);
+		setFiles([]);
 
 		(async () => {
 			const templates = [
@@ -267,24 +269,18 @@ function WorkspaceSection({
 	const handleCreate = useCallback(
 		async (file: TemplateFileStatus) => {
 			try {
-				// 書き込み直前に再確認し、外部で作成された場合の上書きを防ぐ
-				if (await fileExists(file.path)) {
-					setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
-					return;
-				}
-
-				// writeFile は Rust 側で親ディレクトリを自動作成する（create_dir_all）
-				await writeFile(file.path, file.getContent());
+				// writeNewFile は Rust 側で create_new(true) を使い、既存ファイルがあれば
+				// 原子的に失敗する。TOCTOU レースなしで「上書きしない」を保証。
+				await writeNewFile(file.path, file.getContent());
 				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
 				bumpFileTreeVersion();
-			} catch (err) {
-				addToast(
-					"error",
-					`ファイルの作成に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-				);
+			} catch {
+				// ファイルが既に存在する場合（またはその他のエラー）
+				// 最新の存在状態を反映
+				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
 			}
 		},
-		[addToast, bumpFileTreeVersion],
+		[bumpFileTreeVersion],
 	);
 
 	const handleOpen = useCallback(

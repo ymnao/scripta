@@ -4,7 +4,7 @@ import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "../../stores/toast";
 
 vi.mock("../../lib/commands", () => ({
-	writeFile: vi.fn().mockResolvedValue(undefined),
+	writeNewFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../lib/export", () => ({
@@ -12,7 +12,6 @@ vi.mock("../../lib/export", () => ({
 }));
 
 vi.mock("../../lib/scripta-config", () => ({
-	fileExists: vi.fn(),
 	getReadmeTemplatePath: vi.fn((ws: string) => `${ws}/README.md`),
 	getClaudeMdTemplatePath: vi.fn((ws: string) => `${ws}/CLAUDE.md`),
 	getGitignorePath: vi.fn((ws: string) => `${ws}/.gitignore`),
@@ -25,12 +24,11 @@ vi.mock("../../lib/scripta-config", () => ({
 	SYNTAX_GUIDE_TEMPLATE: "# syntax guide",
 }));
 
-const { writeFile } = await import("../../lib/commands");
-const { fileExists, markWorkspaceInitialized } = await import("../../lib/scripta-config");
+const { writeNewFile } = await import("../../lib/commands");
+const { markWorkspaceInitialized } = await import("../../lib/scripta-config");
 const { SetupWizardDialog } = await import("./SetupWizardDialog");
 
-const mockedWriteFile = writeFile as Mock;
-const mockedFileExists = fileExists as Mock;
+const mockedWriteNewFile = writeNewFile as Mock;
 const mockedMarkInitialized = markWorkspaceInitialized as Mock;
 
 const defaultProps = {
@@ -48,7 +46,6 @@ function renderDialog(overrides: Partial<typeof defaultProps> = {}) {
 beforeEach(() => {
 	vi.clearAllMocks();
 	useToastStore.setState({ toasts: [] });
-	mockedFileExists.mockResolvedValue(false);
 });
 
 describe("SetupWizardDialog", () => {
@@ -80,7 +77,7 @@ describe("SetupWizardDialog", () => {
 		await userEvent.click(screen.getByText("スキップ"));
 
 		expect(mockedMarkInitialized).toHaveBeenCalledWith("/workspace");
-		expect(mockedWriteFile).not.toHaveBeenCalled();
+		expect(mockedWriteNewFile).not.toHaveBeenCalled();
 		expect(onComplete).toHaveBeenCalled();
 		expect(onClose).toHaveBeenCalled();
 	});
@@ -92,9 +89,9 @@ describe("SetupWizardDialog", () => {
 
 		await userEvent.click(screen.getByText("基本"));
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/README.md", "# README");
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/.gitignore", ".scripta/\n");
-		expect(mockedWriteFile).toHaveBeenCalledWith(
+		expect(mockedWriteNewFile).toHaveBeenCalledWith("/workspace/README.md", "# README");
+		expect(mockedWriteNewFile).toHaveBeenCalledWith("/workspace/.gitignore", ".scripta/\n");
+		expect(mockedWriteNewFile).toHaveBeenCalledWith(
 			"/workspace/.scripta/syntax-guide.md",
 			"# syntax guide",
 		);
@@ -110,9 +107,9 @@ describe("SetupWizardDialog", () => {
 
 		await userEvent.click(screen.getByText("エンジニア向け"));
 
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/README.md", expect.any(String));
-		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/CLAUDE.md", "# CLAUDE.md");
-		expect(mockedWriteFile).toHaveBeenCalledWith(
+		expect(mockedWriteNewFile).toHaveBeenCalledWith("/workspace/README.md", expect.any(String));
+		expect(mockedWriteNewFile).toHaveBeenCalledWith("/workspace/CLAUDE.md", "# CLAUDE.md");
+		expect(mockedWriteNewFile).toHaveBeenCalledWith(
 			"/workspace/.scripta/prompt-template.md",
 			"default-prompt-template",
 		);
@@ -121,21 +118,20 @@ describe("SetupWizardDialog", () => {
 		expect(onClose).toHaveBeenCalled();
 	});
 
-	it("既存ファイルは上書きしない", async () => {
-		mockedFileExists.mockResolvedValue(true);
+	it("既存ファイルは上書きせず正常完了する", async () => {
+		// writeNewFile が全て失敗（既存ファイル）
+		mockedWriteNewFile.mockRejectedValue(new Error("File exists"));
 		renderDialog();
 
 		await userEvent.click(screen.getByText("エンジニア向け"));
 
-		// writeFile should not be called for existing files
-		expect(mockedWriteFile).not.toHaveBeenCalledWith("/workspace/README.md", expect.any(String));
-		expect(mockedWriteFile).not.toHaveBeenCalledWith("/workspace/CLAUDE.md", expect.any(String));
 		// markWorkspaceInitialized should still be called
 		expect(mockedMarkInitialized).toHaveBeenCalled();
 	});
 
 	it("全ファイルが既存の場合、トーストに作成件数ではなく初期化メッセージを表示", async () => {
-		mockedFileExists.mockResolvedValue(true);
+		// writeNewFile が全て失敗（既存ファイル）
+		mockedWriteNewFile.mockRejectedValue(new Error("File exists"));
 		renderDialog();
 
 		await userEvent.click(screen.getByText("基本"));
@@ -146,8 +142,10 @@ describe("SetupWizardDialog", () => {
 	});
 
 	it("一部ファイルのみ新規作成の場合、作成件数をトーストに表示", async () => {
-		// README.md だけ既存、他は未作成
-		mockedFileExists.mockImplementation(async (path: string) => path === "/workspace/README.md");
+		// README.md だけ既存（writeNewFile が失敗）、他は成功
+		mockedWriteNewFile.mockImplementation(async (path: string) => {
+			if (path === "/workspace/README.md") throw new Error("File exists");
+		});
 		renderDialog();
 
 		await userEvent.click(screen.getByText("基本"));

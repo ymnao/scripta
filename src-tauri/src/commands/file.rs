@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(super) fn resolve_path(path: &str) -> Result<PathBuf, String> {
@@ -25,6 +26,22 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     fs::write(&resolved, &content).map_err(|e| e.to_string())
+}
+
+/// Atomically creates a new file and writes content. Fails if the file already exists.
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn write_new_file(path: String, content: String) -> Result<(), String> {
+    let resolved = resolve_path(&path)?;
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&resolved)
+        .map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
@@ -148,6 +165,41 @@ mod tests {
         write_file(path.clone(), "hello".to_string()).unwrap();
         let content = read_file(path).unwrap();
         assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn test_write_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.md").to_string_lossy().to_string();
+
+        write_new_file(path.clone(), "content".to_string()).unwrap();
+        let content = read_file(path).unwrap();
+        assert_eq!(content, "content");
+    }
+
+    #[test]
+    fn test_write_new_file_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exist.md").to_string_lossy().to_string();
+
+        fs::write(&path, "original").unwrap();
+        let result = write_new_file(path.clone(), "overwrite".to_string());
+        assert!(result.is_err());
+        // Original content should be preserved
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original");
+    }
+
+    #[test]
+    fn test_write_new_file_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("a/b/new.md")
+            .to_string_lossy()
+            .to_string();
+
+        write_new_file(path.clone(), "nested".to_string()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "nested");
     }
 
     #[test]

@@ -1,13 +1,12 @@
 import { FileText, FolderOpen, Settings, X } from "lucide-react";
 import { useCallback, useId, useState } from "react";
-import { writeFile } from "../../lib/commands";
+import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
 	CLAUDE_MD_TEMPLATE,
 	GITIGNORE_TEMPLATE,
 	README_TEMPLATE,
 	SYNTAX_GUIDE_TEMPLATE,
-	fileExists,
 	getClaudeMdTemplatePath,
 	getGitignorePath,
 	getReadmeTemplatePath,
@@ -117,32 +116,34 @@ export function SetupWizardDialog({
 			const addToast = useToastStore.getState().addToast;
 
 			try {
-				// Helper: write file only if it doesn't already exist. Returns true if written.
-				// writeFile は Rust 側で親ディレクトリを自動作成する（create_dir_all）。
-				const writeIfNotExists = async (path: string, content: string) => {
-					if (!(await fileExists(path))) {
-						await writeFile(path, content);
+				// writeNewFile は Rust 側で create_new(true) を使い、既存ファイルがあれば
+				// 原子的に失敗する。TOCTOU レースなしで「上書きしない」を保証。
+				const tryWriteNew = async (path: string, content: string) => {
+					try {
+						await writeNewFile(path, content);
 						return true;
+					} catch {
+						// ファイルが既に存在する場合はスキップ
+						return false;
 					}
-					return false;
 				};
 
 				let createdCount = 0;
 
 				if (option === "basic" || option === "engineer") {
-					if (await writeIfNotExists(getReadmeTemplatePath(workspacePath), README_TEMPLATE))
+					if (await tryWriteNew(getReadmeTemplatePath(workspacePath), README_TEMPLATE))
 						createdCount++;
-					if (await writeIfNotExists(getGitignorePath(workspacePath), GITIGNORE_TEMPLATE))
+					if (await tryWriteNew(getGitignorePath(workspacePath), GITIGNORE_TEMPLATE))
 						createdCount++;
-					if (await writeIfNotExists(getSyntaxGuidePath(workspacePath), SYNTAX_GUIDE_TEMPLATE))
+					if (await tryWriteNew(getSyntaxGuidePath(workspacePath), SYNTAX_GUIDE_TEMPLATE))
 						createdCount++;
 				}
 
 				if (option === "engineer") {
-					if (await writeIfNotExists(getClaudeMdTemplatePath(workspacePath), CLAUDE_MD_TEMPLATE))
+					if (await tryWriteNew(getClaudeMdTemplatePath(workspacePath), CLAUDE_MD_TEMPLATE))
 						createdCount++;
 					if (
-						await writeIfNotExists(
+						await tryWriteNew(
 							getScriptaPromptTemplatePath(workspacePath),
 							getDefaultPromptTemplate(),
 						)

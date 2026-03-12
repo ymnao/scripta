@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/commands", () => ({
-	writeFile: vi.fn().mockResolvedValue(undefined),
+	writeNewFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../lib/export", () => ({
@@ -23,11 +23,11 @@ vi.mock("../../lib/scripta-config", () => ({
 	SYNTAX_GUIDE_TEMPLATE: "# syntax guide",
 }));
 
-const { writeFile } = await import("../../lib/commands");
+const { writeNewFile } = await import("../../lib/commands");
 const { fileExists } = await import("../../lib/scripta-config");
 const { SettingsDialog } = await import("./SettingsDialog");
 
-const mockedWriteFile = writeFile as Mock;
+const mockedWriteNewFile = writeNewFile as Mock;
 const mockedFileExists = fileExists as Mock;
 
 const defaultProps = {
@@ -59,17 +59,9 @@ describe("SettingsDialog workspace section", () => {
 		expect(screen.getByText(".gitignore")).toBeInTheDocument();
 	});
 
-	it("作成ボタンクリック前に fileExists を再確認し、既存なら上書きしない", async () => {
-		// 初回チェック時は未作成、作成ボタンクリック時は既存
-		let callCount = 0;
-		mockedFileExists.mockImplementation(async (path: string) => {
-			if (path === "/workspace/README.md") {
-				callCount++;
-				// 初回（一覧表示時）は false、2回目（作成クリック時）は true
-				return callCount > 1;
-			}
-			return false;
-		});
+	it("既存ファイルに対する作成は writeNewFile の原子的失敗で安全にスキップ", async () => {
+		// writeNewFile が失敗するケース（ファイルが既存）
+		mockedWriteNewFile.mockRejectedValue(new Error("File exists (os error 17)"));
 
 		await act(async () => {
 			render(<SettingsDialog {...defaultProps} />);
@@ -85,14 +77,10 @@ describe("SettingsDialog workspace section", () => {
 		const createButtons = screen.getAllByText("作成");
 		await userEvent.click(createButtons[0]);
 
-		// fileExists が再チェックされた
+		// writeNewFile は呼ばれたが失敗し、エラーは握りつぶされる
 		await waitFor(() => {
-			// 初回（一覧表示）+ 2回目（作成クリック時）で 2回以上呼ばれる
-			expect(mockedFileExists).toHaveBeenCalledWith("/workspace/README.md");
+			expect(mockedWriteNewFile).toHaveBeenCalledWith("/workspace/README.md", expect.any(String));
 		});
-
-		// writeFile は呼ばれない（既存ファイルなので上書きしない）
-		expect(mockedWriteFile).not.toHaveBeenCalledWith("/workspace/README.md", expect.any(String));
 	});
 
 	it("workspacePath がない場合はワークスペースセクションが表示されない", async () => {
