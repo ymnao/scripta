@@ -274,12 +274,18 @@ function WorkspaceSection({
 				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));
 				bumpFileTreeVersion();
 			} catch {
-				// ファイルが既に存在する場合や権限エラー・ディスクフルなど、
-				// いずれのエラーでも実際の存在状態を確認してから UI を更新する
-				const exists = await fileExists(file.path);
-				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists } : f)));
-				if (!exists) {
-					useToastStore.getState().addToast("error", `${file.name} の作成に失敗しました`);
+				// いずれのエラーでも実際の存在状態を確認してから UI を更新する。
+				// fileExists 自体の失敗はこのハンドラ全体を reject させないよう内部で処理する。
+				try {
+					const exists = await fileExists(file.path);
+					setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists } : f)));
+					if (!exists) {
+						useToastStore.getState().addToast("error", `${file.name} の作成に失敗しました`);
+					}
+				} catch {
+					useToastStore
+						.getState()
+						.addToast("error", `${file.name} の作成に失敗しました（存在確認に失敗）`);
 				}
 			}
 		},

@@ -46,25 +46,46 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 	const originalDoc = parser.parseFromString(rawSvg, "text/html");
 	const originalFOs = originalDoc.querySelectorAll("foreignObject");
 
-	// SVG 構造を DOMPurify でサニタイズ（foreignObject の中身は失われる）
-	const sanitized = DOMPurify.sanitize(rawSvg, {
-		USE_PROFILES: { svg: true, svgFilters: true },
-		ADD_TAGS: ["foreignObject"],
+	// foreignObject が無い場合は単純にサニタイズ結果を返す
+	if (originalFOs.length === 0) {
+		return DOMPurify.sanitize(rawSvg, {
+			USE_PROFILES: { svg: true, svgFilters: true },
+			ADD_TAGS: ["foreignObject"],
+		});
+	}
+
+	// 各 foreignObject に一意な data 属性を付与し、安定した対応付けを行う
+	const originalFoMap = new Map<string, Element>();
+	originalFOs.forEach((fo, index) => {
+		const id = `fo-${index}`;
+		fo.setAttribute("data-fo-id", id);
+		originalFoMap.set(id, fo);
 	});
 
-	if (originalFOs.length === 0) return sanitized;
+	// data-fo-id を埋め込んだ SVG を DOMPurify でサニタイズ（foreignObject の中身は失われる）
+	const svgWithIds = originalDoc.body.innerHTML;
+	const sanitized = DOMPurify.sanitize(svgWithIds, {
+		USE_PROFILES: { svg: true, svgFilters: true },
+		ADD_TAGS: ["foreignObject"],
+		ADD_ATTR: ["data-fo-id"],
+	});
 
 	// サニタイズ済み SVG をパースし、foreignObject 内の HTML を個別にサニタイズして再注入
 	const sanitizedDoc = parser.parseFromString(sanitized, "text/html");
 	const sanitizedFOs = sanitizedDoc.querySelectorAll("foreignObject");
 
-	for (let i = 0; i < sanitizedFOs.length && i < originalFOs.length; i++) {
-		const foContent = DOMPurify.sanitize(originalFOs[i].innerHTML, {
+	for (const fo of sanitizedFOs) {
+		const id = fo.getAttribute("data-fo-id");
+		if (!id) continue;
+		const originalFO = originalFoMap.get(id);
+		if (!originalFO) continue;
+		const foContent = DOMPurify.sanitize(originalFO.innerHTML, {
 			USE_PROFILES: { html: true },
 			FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "input"],
 			FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],
 		});
-		sanitizedFOs[i].innerHTML = foContent;
+		fo.innerHTML = foContent;
+		fo.removeAttribute("data-fo-id");
 	}
 
 	const svgEl = sanitizedDoc.querySelector("svg");

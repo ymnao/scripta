@@ -52,4 +52,27 @@ describe("sanitizeMermaidSvg", () => {
 		expect(result).not.toContain("onerror");
 		expect(result).toContain("Hello World");
 	});
+
+	it("複数の foreignObject を data-fo-id で安定的に対応付ける", () => {
+		const multiSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+<g>
+<foreignObject x="0" y="0" width="180" height="40">
+<div xmlns="http://www.w3.org/1999/xhtml"><span>First</span></div>
+</foreignObject>
+<foreignObject x="200" y="0" width="180" height="40">
+<div xmlns="http://www.w3.org/1999/xhtml"><span>Second</span></div>
+</foreignObject>
+</g>
+</svg>`;
+		const result = sanitizeMermaidSvg(multiSvg);
+		expect(result).toContain("First");
+		expect(result).toContain("Second");
+		// data-fo-id はサニタイズ後に除去される
+		expect(result).not.toContain("data-fo-id");
+	});
+
+	it("サニタイズ後に data-fo-id 属性が残らない", () => {
+		const result = sanitizeMermaidSvg(MERMAID_SVG);
+		expect(result).not.toContain("data-fo-id");
+	});
 });

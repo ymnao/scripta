@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, Settings, X } from "lucide-react";
-import { useCallback, useId, useState } from "react";
+import { type ReactNode, useCallback, useId, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
@@ -28,7 +28,7 @@ interface SetupWizardDialogProps {
 type SetupOption = "skip" | "basic" | "engineer";
 
 interface OptionCardProps {
-	icon: React.ReactNode;
+	icon: ReactNode;
 	title: string;
 	description: string;
 	files: string[];
