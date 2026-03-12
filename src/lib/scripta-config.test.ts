@@ -31,6 +31,7 @@ const {
 	CLAUDE_MD_TEMPLATE,
 	GITIGNORE_TEMPLATE,
 	SYNTAX_GUIDE_TEMPLATE,
+	getTemplateDefinitions,
 } = await import("./scripta-config");
 
 const mockedReadFile = readFile as Mock;
@@ -253,5 +254,32 @@ describe("template contents", () => {
 		expect(SYNTAX_GUIDE_TEMPLATE).toContain("KaTeX");
 		expect(SYNTAX_GUIDE_TEMPLATE).toContain("Mermaid");
 		expect(SYNTAX_GUIDE_TEMPLATE).toContain("エクスポート");
+	});
+});
+
+describe("getTemplateDefinitions", () => {
+	it("returns all 5 template definitions", () => {
+		const defs = getTemplateDefinitions(() => "prompt-content");
+		expect(defs).toHaveLength(5);
+		const names = defs.map((d) => d.name);
+		expect(names).toContain("README.md");
+		expect(names).toContain("CLAUDE.md");
+		expect(names).toContain(".gitignore");
+		expect(names).toContain("syntax-guide.md");
+		expect(names).toContain("prompt-template.md");
+	});
+
+	it("uses provided getPromptContent for prompt-template", () => {
+		const defs = getTemplateDefinitions(() => "my-prompt");
+		const promptDef = defs.find((d) => d.name === "prompt-template.md");
+		expect(promptDef?.getContent()).toBe("my-prompt");
+	});
+
+	it("getPath returns correct paths", () => {
+		const defs = getTemplateDefinitions(() => "");
+		const readmeDef = defs.find((d) => d.name === "README.md");
+		expect(readmeDef?.getPath("/workspace")).toBe("/workspace/README.md");
+		const syntaxDef = defs.find((d) => d.name === "syntax-guide.md");
+		expect(syntaxDef?.getPath("/workspace")).toBe("/workspace/.scripta/syntax-guide.md");
 	});
 });

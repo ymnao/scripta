@@ -296,3 +296,34 @@ graph LR
 | \`Cmd+Shift+E\` | エクスポート |
 | \`F1\` | ヘルプ |
 `;
+
+// --- Template definitions ---
+
+export interface TemplateDefinition {
+	name: string;
+	getPath: (workspacePath: string) => string;
+	getContent: () => string;
+}
+
+/**
+ * テンプレートファイルの定義一覧を返す。
+ * SetupWizardDialog / SettingsDialog 両方から参照し、定義の重複を防ぐ。
+ * getDefaultPromptTemplate は循環参照を避けるため引数で受け取る。
+ */
+export function getTemplateDefinitions(getPromptContent: () => string): TemplateDefinition[] {
+	return [
+		{ name: "README.md", getPath: getReadmeTemplatePath, getContent: () => README_TEMPLATE },
+		{ name: "CLAUDE.md", getPath: getClaudeMdTemplatePath, getContent: () => CLAUDE_MD_TEMPLATE },
+		{ name: ".gitignore", getPath: getGitignorePath, getContent: () => GITIGNORE_TEMPLATE },
+		{
+			name: "syntax-guide.md",
+			getPath: getSyntaxGuidePath,
+			getContent: () => SYNTAX_GUIDE_TEMPLATE,
+		},
+		{
+			name: "prompt-template.md",
+			getPath: getScriptaPromptTemplatePath,
+			getContent: getPromptContent,
+		},
+	];
+}

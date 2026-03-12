@@ -28,7 +28,9 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
     fs::write(&resolved, &content).map_err(|e| e.to_string())
 }
 
-/// Atomically creates a new file and writes content. Fails if the file already exists.
+/// Creates a new file that does not already exist and writes content.
+/// The file creation is atomic (fails if the file already exists), but the write itself
+/// is not guaranteed to be atomic and may leave a partially written file on failure.
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub fn write_new_file(path: String, content: String) -> Result<(), String> {
     let resolved = resolve_path(&path)?;

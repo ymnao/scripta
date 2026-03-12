@@ -3,16 +3,8 @@ import { type ReactNode, useCallback, useId, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
-	CLAUDE_MD_TEMPLATE,
-	GITIGNORE_TEMPLATE,
-	README_TEMPLATE,
-	SYNTAX_GUIDE_TEMPLATE,
 	fileExists,
-	getClaudeMdTemplatePath,
-	getGitignorePath,
-	getReadmeTemplatePath,
-	getScriptaPromptTemplatePath,
-	getSyntaxGuidePath,
+	getTemplateDefinitions,
 	markWorkspaceInitialized,
 } from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
@@ -136,25 +128,17 @@ export function SetupWizardDialog({
 
 				let createdCount = 0;
 
-				if (option === "basic" || option === "engineer") {
-					if (await tryWriteNew(getReadmeTemplatePath(workspacePath), README_TEMPLATE))
-						createdCount++;
-					if (await tryWriteNew(getGitignorePath(workspacePath), GITIGNORE_TEMPLATE))
-						createdCount++;
-					if (await tryWriteNew(getSyntaxGuidePath(workspacePath), SYNTAX_GUIDE_TEMPLATE))
-						createdCount++;
-				}
+				const allDefinitions = getTemplateDefinitions(getDefaultPromptTemplate);
+				const basicNames = new Set(["README.md", ".gitignore", "syntax-guide.md"]);
+				const targets =
+					option === "engineer"
+						? allDefinitions
+						: option === "basic"
+							? allDefinitions.filter((d) => basicNames.has(d.name))
+							: [];
 
-				if (option === "engineer") {
-					if (await tryWriteNew(getClaudeMdTemplatePath(workspacePath), CLAUDE_MD_TEMPLATE))
-						createdCount++;
-					if (
-						await tryWriteNew(
-							getScriptaPromptTemplatePath(workspacePath),
-							getDefaultPromptTemplate(),
-						)
-					)
-						createdCount++;
+				for (const def of targets) {
+					if (await tryWriteNew(def.getPath(workspacePath), def.getContent())) createdCount++;
 				}
 
 				// Mark as initialized
@@ -223,7 +207,7 @@ export function SetupWizardDialog({
 				<OptionCard
 					icon={<FileText size={16} />}
 					title="基本"
-					description="README と記法ガイドを作成します"
+					description="README、.gitignore、記法ガイドを作成します"
 					files={["README.md", ".gitignore", ".scripta/syntax-guide.md"]}
 					selected={selectedOption === "basic"}
 					onClick={() => void handleSetup("basic")}

@@ -13,16 +13,30 @@ vi.mock("../../lib/export", () => ({
 
 vi.mock("../../lib/scripta-config", () => ({
 	fileExists: vi.fn().mockResolvedValue(true),
-	getReadmeTemplatePath: vi.fn((ws: string) => `${ws}/README.md`),
-	getClaudeMdTemplatePath: vi.fn((ws: string) => `${ws}/CLAUDE.md`),
-	getGitignorePath: vi.fn((ws: string) => `${ws}/.gitignore`),
-	getSyntaxGuidePath: vi.fn((ws: string) => `${ws}/.scripta/syntax-guide.md`),
-	getScriptaPromptTemplatePath: vi.fn((ws: string) => `${ws}/.scripta/prompt-template.md`),
 	markWorkspaceInitialized: vi.fn().mockResolvedValue(undefined),
-	README_TEMPLATE: "# README",
-	CLAUDE_MD_TEMPLATE: "# CLAUDE.md",
-	GITIGNORE_TEMPLATE: ".scripta/\n",
-	SYNTAX_GUIDE_TEMPLATE: "# syntax guide",
+	getTemplateDefinitions: vi.fn((getPromptContent: () => string) => [
+		{ name: "README.md", getPath: (ws: string) => `${ws}/README.md`, getContent: () => "# README" },
+		{
+			name: "CLAUDE.md",
+			getPath: (ws: string) => `${ws}/CLAUDE.md`,
+			getContent: () => "# CLAUDE.md",
+		},
+		{
+			name: ".gitignore",
+			getPath: (ws: string) => `${ws}/.gitignore`,
+			getContent: () => ".scripta/\n",
+		},
+		{
+			name: "syntax-guide.md",
+			getPath: (ws: string) => `${ws}/.scripta/syntax-guide.md`,
+			getContent: () => "# syntax guide",
+		},
+		{
+			name: "prompt-template.md",
+			getPath: (ws: string) => `${ws}/.scripta/prompt-template.md`,
+			getContent: getPromptContent,
+		},
+	]),
 }));
 
 const { writeNewFile } = await import("../../lib/commands");

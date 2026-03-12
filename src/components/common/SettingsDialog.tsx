@@ -2,18 +2,7 @@ import { ExternalLink, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
-import {
-	CLAUDE_MD_TEMPLATE,
-	GITIGNORE_TEMPLATE,
-	README_TEMPLATE,
-	SYNTAX_GUIDE_TEMPLATE,
-	fileExists,
-	getClaudeMdTemplatePath,
-	getGitignorePath,
-	getReadmeTemplatePath,
-	getScriptaPromptTemplatePath,
-	getSyntaxGuidePath,
-} from "../../lib/scripta-config";
+import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
@@ -209,33 +198,12 @@ function WorkspaceSection({
 		setFiles([]);
 
 		(async () => {
-			const templates = [
-				{
-					name: "README.md",
-					path: getReadmeTemplatePath(workspacePath),
-					getContent: () => README_TEMPLATE,
-				},
-				{
-					name: "CLAUDE.md",
-					path: getClaudeMdTemplatePath(workspacePath),
-					getContent: () => CLAUDE_MD_TEMPLATE,
-				},
-				{
-					name: ".gitignore",
-					path: getGitignorePath(workspacePath),
-					getContent: () => GITIGNORE_TEMPLATE,
-				},
-				{
-					name: "syntax-guide.md",
-					path: getSyntaxGuidePath(workspacePath),
-					getContent: () => SYNTAX_GUIDE_TEMPLATE,
-				},
-				{
-					name: "prompt-template.md",
-					path: getScriptaPromptTemplatePath(workspacePath),
-					getContent: () => getDefaultPromptTemplate(),
-				},
-			];
+			const definitions = getTemplateDefinitions(getDefaultPromptTemplate);
+			const templates = definitions.map((def) => ({
+				name: def.name,
+				path: def.getPath(workspacePath),
+				getContent: def.getContent,
+			}));
 
 			try {
 				const results = await Promise.all(
