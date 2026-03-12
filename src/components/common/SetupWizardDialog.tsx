@@ -112,6 +112,7 @@ export function SetupWizardDialog({
 
 	const handleSetup = useCallback(
 		async (option: SetupOption) => {
+			if (processing) return;
 			setSelectedOption(option);
 			setProcessing(true);
 			const addToast = useToastStore.getState().addToast;
@@ -178,7 +179,7 @@ export function SetupWizardDialog({
 				setSelectedOption(null);
 			}
 		},
-		[workspacePath, onComplete, onClose],
+		[processing, workspacePath, onComplete, onClose],
 	);
 
 	return (

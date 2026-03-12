@@ -34,6 +34,7 @@ export function DialogBase({
 		const handler = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
 				e.stopPropagation();
+				e.preventDefault();
 				if (!preventClose) onClose();
 			}
 			if (e.key === "Tab") {
@@ -78,6 +79,10 @@ export function DialogBase({
 				aria-describedby={ariaDescribedBy}
 				className={`relative mx-4 w-full rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${className ?? "max-w-sm"}`}
 				onMouseDown={(e) => e.stopPropagation()}
+				onCancel={(e) => {
+					e.preventDefault();
+					if (!preventClose) onClose();
+				}}
 				tabIndex={-1}
 			>
 				{children}
