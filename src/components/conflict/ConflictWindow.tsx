@@ -85,6 +85,15 @@ export function ConflictWindow() {
 		}
 	}, [workspacePath]);
 
+	// If conflicts are already resolved (e.g. externally via CLI), emit and auto-close
+	useEffect(() => {
+		if (loading || files.length > 0) return;
+		void (async () => {
+			await emit("conflict-resolved");
+			await getCurrentWindow().close();
+		})();
+	}, [loading, files]);
+
 	const allResolved = files.length > 0 && files.every((f) => resolvedFiles.has(f));
 
 	if (loading) {
@@ -94,15 +103,6 @@ export function ConflictWindow() {
 			</div>
 		);
 	}
-
-	// If conflicts are already resolved (e.g. externally via CLI), emit and auto-close
-	useEffect(() => {
-		if (loading || files.length > 0) return;
-		void (async () => {
-			await emit("conflict-resolved");
-			await getCurrentWindow().close();
-		})();
-	}, [loading, files]);
 
 	if (files.length === 0) {
 		return (

@@ -221,10 +221,14 @@ export function AppLayout() {
 		});
 	}, [workspacePath]);
 
-	// Auto-open conflict resolution window when conflicts are first detected
+	// Auto-open conflict resolution window only on 0 → >0 transition
+	const prevConflictCountRef = useRef(0);
 	useEffect(() => {
-		if (conflictFiles.length === 0 || !workspacePath) return;
-		openConflictResolver();
+		const prev = prevConflictCountRef.current;
+		prevConflictCountRef.current = conflictFiles.length;
+		if (prev === 0 && conflictFiles.length > 0 && workspacePath) {
+			openConflictResolver();
+		}
 	}, [conflictFiles, workspacePath, openConflictResolver]);
 
 	// Show setup wizard for uninitialized workspaces.
