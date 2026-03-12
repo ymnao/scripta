@@ -25,27 +25,48 @@ fn validate_relative_path(file_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
+fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String> {
     let resolved = resolve_path(path)?;
-    let output = Command::new("git")
+    Command::new("git")
         .current_dir(&resolved)
+        // Prevent interactive prompts (auth, passphrase) from hanging the process
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
         .args(args)
         .output()
-        .map_err(|e| format!("Failed to execute git: {e}"))?;
+        .map_err(|e| format!("Failed to execute git: {e}"))
+}
 
+fn format_git_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("git command failed with status: {}", output.status)
+    }
+}
+
+fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
+    let output = git_command(path, args)?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let message = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("git command failed with status: {}", output.status)
-        };
-        Err(message)
+        Err(format_git_error(&output))
+    }
+}
+
+/// Like `run_git` but does not trim stdout, preserving original content.
+/// Use for commands where the output content matters (e.g. `git show`).
+fn run_git_raw(path: &str, args: &[&str]) -> Result<String, String> {
+    let output = git_command(path, args)?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(format_git_error(&output))
     }
 }
 
@@ -218,12 +239,12 @@ pub async fn git_get_conflict_content(
         // Stage references (:2:, :3:) are rev-specs, not paths — do not use "--" here
         // as it would cause git to interpret the ref as a pathspec.
         // Only stage-not-found errors are tolerated; other failures propagate.
-        let ours = match run_git(&path, &["show", &ours_ref]) {
+        let ours = match run_git_raw(&path, &["show", &ours_ref]) {
             Ok(content) => content,
             Err(e) if is_stage_not_found(&e) => String::new(),
             Err(e) => return Err(e),
         };
-        let theirs = match run_git(&path, &["show", &theirs_ref]) {
+        let theirs = match run_git_raw(&path, &["show", &theirs_ref]) {
             Ok(content) => content,
             Err(e) if is_stage_not_found(&e) => String::new(),
             Err(e) => return Err(e),

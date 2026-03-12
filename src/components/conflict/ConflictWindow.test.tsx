@@ -90,6 +90,22 @@ describe("ConflictWindow", () => {
 		expect(screen.getByTestId("conflict-diff-view")).toBeInTheDocument();
 	});
 
+	it("shows error when workspacePath is missing", async () => {
+		vi.stubGlobal("location", { search: "?conflict=true" });
+
+		await act(async () => {
+			render(<ConflictWindow />);
+		});
+
+		// Should show error, not hang on loading
+		expect(
+			screen.getByText("workspacePath が URL パラメータに指定されていません。"),
+		).toBeInTheDocument();
+		expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument();
+		expect(mockEmit).not.toHaveBeenCalled();
+		expect(mockClose).not.toHaveBeenCalled();
+	});
+
 	it("does not auto-close when gitGetConflictedFiles fails", async () => {
 		mockedGitGetConflictedFiles.mockRejectedValue(new Error("git not found"));
 

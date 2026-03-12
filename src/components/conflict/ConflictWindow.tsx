@@ -24,7 +24,11 @@ export function ConflictWindow() {
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (!workspacePath) return;
+		if (!workspacePath) {
+			setError("workspacePath が URL パラメータに指定されていません。");
+			setLoading(false);
+			return;
+		}
 
 		gitGetConflictedFiles(workspacePath)
 			.then((conflictFiles) => {
