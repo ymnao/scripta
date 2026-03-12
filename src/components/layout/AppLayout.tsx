@@ -203,12 +203,15 @@ export function AppLayout() {
 		}
 	}, [workspacePath, loadIcons, resetWorkspaceConfig]);
 
-	// Open conflict resolution window when conflicts are detected
-	useEffect(() => {
-		if (conflictFiles.length === 0 || !workspacePath) return;
-		import("@tauri-apps/api/webviewWindow").then(({ WebviewWindow }) => {
+	// Open (or re-focus) the conflict resolution window
+	const openConflictResolver = useCallback(() => {
+		if (!workspacePath) return;
+		void import("@tauri-apps/api/webviewWindow").then(({ WebviewWindow }) => {
 			const existing = WebviewWindow.getByLabel("conflict-resolver");
-			if (existing) return;
+			if (existing) {
+				void existing.setFocus();
+				return;
+			}
 			new WebviewWindow("conflict-resolver", {
 				url: `/?conflict=true&workspacePath=${encodeURIComponent(workspacePath)}`,
 				title: "コンフリクト解消",
@@ -216,7 +219,13 @@ export function AppLayout() {
 				height: 600,
 			});
 		});
-	}, [conflictFiles, workspacePath]);
+	}, [workspacePath]);
+
+	// Auto-open conflict resolution window when conflicts are first detected
+	useEffect(() => {
+		if (conflictFiles.length === 0 || !workspacePath) return;
+		openConflictResolver();
+	}, [conflictFiles, workspacePath, openConflictResolver]);
 
 	// Show setup wizard for uninitialized workspaces.
 	// configLoaded が true かつ workspaceInitialized が false のときだけ開く。
@@ -1041,6 +1050,7 @@ export function AppLayout() {
 				hasConflicts={conflictFiles.length > 0}
 				offlineMode={offlineMode}
 				onGitSync={manualSync}
+				onOpenConflictResolver={openConflictResolver}
 				gitReady={gitReady}
 			/>
 

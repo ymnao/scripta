@@ -86,8 +86,9 @@ describe("StatusBar", () => {
 		expect(screen.queryByTestId("selection-info")).not.toBeInTheDocument();
 	});
 
-	it("disables git sync button during conflicts", () => {
+	it("clicking conflict status opens conflict resolver instead of syncing", async () => {
 		const onGitSync = vi.fn();
+		const onOpenConflictResolver = vi.fn();
 		render(
 			<StatusBar
 				gitReady={true}
@@ -95,14 +96,18 @@ describe("StatusBar", () => {
 				hasConflicts={true}
 				offlineMode={false}
 				onGitSync={onGitSync}
+				onOpenConflictResolver={onOpenConflictResolver}
 			/>,
 		);
-		const button = screen.getByTitle("コンフリクトを解消してください");
-		expect(button).toBeDisabled();
+		const button = screen.getByTitle("コンフリクト解消ウィンドウを開く");
+		await userEvent.click(button);
+		expect(onOpenConflictResolver).toHaveBeenCalledTimes(1);
+		expect(onGitSync).not.toHaveBeenCalled();
 	});
 
-	it("enables git sync button when no conflicts", () => {
+	it("clicking sync status calls onGitSync when no conflicts", async () => {
 		const onGitSync = vi.fn();
+		const onOpenConflictResolver = vi.fn();
 		render(
 			<StatusBar
 				gitReady={true}
@@ -110,9 +115,12 @@ describe("StatusBar", () => {
 				hasConflicts={false}
 				offlineMode={false}
 				onGitSync={onGitSync}
+				onOpenConflictResolver={onOpenConflictResolver}
 			/>,
 		);
 		const button = screen.getByTitle("手動同期");
-		expect(button).not.toBeDisabled();
+		await userEvent.click(button);
+		expect(onGitSync).toHaveBeenCalledTimes(1);
+		expect(onOpenConflictResolver).not.toHaveBeenCalled();
 	});
 });

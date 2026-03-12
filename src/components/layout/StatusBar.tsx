@@ -26,6 +26,7 @@ interface StatusBarProps {
 	hasConflicts?: boolean;
 	offlineMode?: boolean;
 	onGitSync?: () => void;
+	onOpenConflictResolver?: () => void;
 	gitReady?: boolean;
 }
 
@@ -35,12 +36,14 @@ function GitSyncStatus({
 	hasConflicts,
 	offlineMode,
 	onGitSync,
+	onOpenConflictResolver,
 }: {
 	gitAction: GitAction;
 	lastCommitTime?: string | null;
 	hasConflicts: boolean;
 	offlineMode: boolean;
 	onGitSync?: () => void;
+	onOpenConflictResolver?: () => void;
 }) {
 	let icon: React.ReactNode;
 	let label: string;
@@ -68,15 +71,12 @@ function GitSyncStatus({
 		label = lastCommitTime ? lastCommitTime.slice(0, 16) : "";
 	}
 
-	const disabled = hasConflicts;
-
 	return (
 		<button
 			type="button"
-			onClick={disabled ? undefined : onGitSync}
-			disabled={disabled}
-			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
-			title={hasConflicts ? "コンフリクトを解消してください" : "手動同期"}
+			onClick={hasConflicts ? onOpenConflictResolver : onGitSync}
+			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
+			title={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}
 		>
 			{icon}
 			{label && <span>{label}</span>}
@@ -95,6 +95,7 @@ export function StatusBar({
 	hasConflicts,
 	offlineMode,
 	onGitSync,
+	onOpenConflictResolver,
 	gitReady,
 }: StatusBarProps) {
 	const [copied, setCopied] = useState(false);
@@ -126,6 +127,7 @@ export function StatusBar({
 						hasConflicts={hasConflicts ?? false}
 						offlineMode={offlineMode ?? false}
 						onGitSync={onGitSync}
+						onOpenConflictResolver={onOpenConflictResolver}
 					/>
 				)}
 				{filePath && (

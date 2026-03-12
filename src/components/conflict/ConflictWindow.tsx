@@ -95,6 +95,15 @@ export function ConflictWindow() {
 		);
 	}
 
+	// If conflicts are already resolved (e.g. externally via CLI), emit and auto-close
+	useEffect(() => {
+		if (loading || files.length > 0) return;
+		void (async () => {
+			await emit("conflict-resolved");
+			await getCurrentWindow().close();
+		})();
+	}, [loading, files]);
+
 	if (files.length === 0) {
 		return (
 			<div className="flex h-screen items-center justify-center bg-bg-primary text-text-secondary">

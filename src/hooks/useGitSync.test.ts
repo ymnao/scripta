@@ -292,4 +292,41 @@ describe("useGitSync", () => {
 
 		expect(mockedGitAddAll).toHaveBeenCalled();
 	});
+
+	it("periodic pull refreshes status during conflict pause to detect external resolution", async () => {
+		// Init: conflicts present, remote available
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 1,
+			conflictFiles: ["file.md"],
+			hasRemote: true,
+		});
+
+		useGitSyncStore.setState({
+			gitSyncEnabled: true,
+			autoPullInterval: 1, // 1 minute
+			autoCommitInterval: 0,
+			autoPushInterval: 0,
+		});
+
+		renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Verify conflicts are detected and pause is active
+		expect(useGitSyncStore.getState().conflictFiles).toEqual(["file.md"]);
+
+		// Simulate external conflict resolution: next refreshStatus returns no conflicts
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 0,
+			conflictFiles: [],
+			hasRemote: true,
+		});
+
+		// Advance to pull timer — doPull is paused but should still call refreshStatus
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		// Conflicts should now be cleared
+		expect(useGitSyncStore.getState().conflictFiles).toEqual([]);
+	});
 });

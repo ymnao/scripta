@@ -94,7 +94,12 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	const doPull = useCallback(
 		async (path: string) => {
 			const store = useGitSyncStore.getState();
-			if (!store.hasRemote || pausedRef.current) return;
+			if (!store.hasRemote) return;
+			if (pausedRef.current) {
+				// Still refresh status to detect external conflict resolution
+				await refreshStatus(path);
+				return;
+			}
 
 			try {
 				store.setGitAction("pull");
@@ -141,7 +146,11 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	const doCommitAndSync = useCallback(
 		async (path: string): Promise<"done" | "skipped"> => {
 			const store = useGitSyncStore.getState();
-			if (pausedRef.current) return "skipped";
+			if (pausedRef.current) {
+				// Still refresh status to detect external conflict resolution
+				await refreshStatus(path);
+				return "skipped";
+			}
 
 			try {
 				store.setGitAction("add");
