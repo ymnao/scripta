@@ -63,11 +63,13 @@ vi.mock("../../hooks/useGitSync", () => ({
 	useGitSync: () => ({ manualSync: vi.fn() }),
 }));
 
-vi.mock("@tauri-apps/api/webviewWindow", () => {
-	function WebviewWindow() {}
-	WebviewWindow.getByLabel = () => null;
-	return { WebviewWindow };
-});
+const MockWebviewWindowConstructor = vi.fn();
+// Assign static method so TypeScript is happy with `WebviewWindow.getByLabel()`
+MockWebviewWindowConstructor.getByLabel = vi.fn().mockReturnValue(null);
+
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+	WebviewWindow: MockWebviewWindowConstructor,
+}));
 
 // Capture the fs-change listener callback so tests can emit events
 type FsChangeCallback = (event: { payload: FsChangeEvent[] }) => void;
@@ -128,6 +130,7 @@ vi.mock("../editor/MarkdownEditor", () => ({
 }));
 
 const { AppLayout } = await import("./AppLayout");
+const { useGitSyncStore } = await import("../../stores/git-sync");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -151,6 +154,8 @@ describe("AppLayout", () => {
 		fsChangeCallback = null;
 		closeHandler = null;
 		mockDestroy.mockClear();
+		MockWebviewWindowConstructor.mockClear();
+		(MockWebviewWindowConstructor.getByLabel as Mock).mockReturnValue(null);
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
 		nextId = 1;
@@ -162,6 +167,7 @@ describe("AppLayout", () => {
 			_nextTabId: 1,
 		});
 		useWorkspaceConfigStore.getState().reset();
+		useGitSyncStore.getState().resetRuntime();
 	});
 
 	afterEach(() => {
@@ -984,5 +990,53 @@ describe("AppLayout", () => {
 		// loadIcons が configLoaded=false → true、workspaceInitialized=true とセットする
 		// ウィザードは閉じているべき
 		expect(screen.queryByText("ワークスペースのセットアップ")).not.toBeInTheDocument();
+	});
+
+	it("opens conflict resolver only on 0→>0 transition, not on repeated updates", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Initial state: no conflicts. Trigger 0→>0 transition.
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: ["file1.md"] });
+		});
+
+		// Flush the dynamic import microtask inside openConflictResolver
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(0);
+		});
+
+		// Conflict window should have been opened once
+		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
+
+		// Update conflictFiles with a different array reference but still >0
+		// Before the fix, this would trigger openConflictResolver again
+		// because zustand returned a new array reference on every update.
+		MockWebviewWindowConstructor.mockClear();
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: ["file1.md", "file2.md"] });
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(0);
+		});
+
+		// Should NOT open a new window (prev > 0, current > 0)
+		expect(MockWebviewWindowConstructor).not.toHaveBeenCalled();
+
+		// Reset to 0, then back to >0 should open again
+		MockWebviewWindowConstructor.mockClear();
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: [] });
+		});
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: ["file3.md"] });
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(0);
+		});
+
+		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
 	});
 });
