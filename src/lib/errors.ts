@@ -19,11 +19,11 @@ const PATTERNS: ErrorPattern[] = [
 	{ test: /\(os error 17\)/, message: "ファイルが既に存在します" },
 	{ test: /\(os error 28\)/, message: "ディスク容量が不足しています" },
 	{ test: /\(os error 30\)/, message: "読み取り専用のファイルシステムです" },
-	{ test: /Authentication failed/, message: "Git 認証に失敗しました" },
+	{ test: /authentication failed/i, message: "Git 認証に失敗しました" },
 	{ test: /could not resolve host/i, message: "ネットワークに接続できません" },
 	{ test: /unable to access/i, message: "リモートリポジトリにアクセスできません" },
-	{ test: /CONFLICT/, message: "マージコンフリクトが発生しました" },
-	{ test: /nothing to commit/, message: "コミットする変更がありません" },
+	{ test: /conflict/i, message: "マージコンフリクトが発生しました" },
+	{ test: /nothing to commit/i, message: "コミットする変更がありません" },
 ];
 
 export function translateError(error: unknown): string {
@@ -44,10 +44,10 @@ export function isTransientError(error: unknown): boolean {
 const NETWORK_PATTERNS = [
 	/could not resolve host/i,
 	/unable to access/i,
-	/Connection refused/i,
-	/Network is unreachable/i,
-	/Connection timed out/i,
-	/Failed to connect/i,
+	/connection refused/i,
+	/network is unreachable/i,
+	/connection timed out/i,
+	/failed to connect/i,
 ];
 
 export function isNetworkError(error: unknown): boolean {

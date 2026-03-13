@@ -281,29 +281,36 @@ pub async fn git_resolve_conflict(
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         validate_relative_path(&file_path)?;
-        let resolved = resolve_path(&path)?;
-        // Canonicalize the repo root for consistent comparison (handles symlinks like /var → /private/var)
-        let canonical_root = resolved.canonicalize().map_err(|e| e.to_string())?;
-        // Verify the target path is within the repository
-        let full_path = canonical_root.join(&file_path);
-        let canonical = full_path
-            .canonicalize()
-            .or_else(|_| {
-                // File may not exist yet (e.g. for modify resolution); check parent
-                if let Some(parent) = full_path.parent() {
-                    parent.canonicalize().map(|p| p.join(full_path.file_name().unwrap_or_default()))
-                } else {
-                    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no parent"))
-                }
-            })
-            .map_err(|e| e.to_string())?;
-        if !canonical.starts_with(&canonical_root) {
-            return Err("file_path escapes repository directory".to_string());
-        }
 
         if resolution == "delete" {
+            // Delete resolution only removes from the index; no need to canonicalize
+            // the file path (the file may not exist on disk).
             run_git(&path, &["rm", "-f", "--", &file_path])?;
         } else {
+            let resolved = resolve_path(&path)?;
+            // Canonicalize the repo root for consistent comparison (handles symlinks like /var → /private/var)
+            let canonical_root = resolved.canonicalize().map_err(|e| e.to_string())?;
+            // Verify the target path is within the repository
+            let full_path = canonical_root.join(&file_path);
+            let canonical = full_path
+                .canonicalize()
+                .or_else(|_| {
+                    // File may not exist yet (e.g. for modify resolution); check parent
+                    if let Some(parent) = full_path.parent() {
+                        parent
+                            .canonicalize()
+                            .map(|p| p.join(full_path.file_name().unwrap_or_default()))
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "no parent",
+                        ))
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            if !canonical.starts_with(&canonical_root) {
+                return Err("file_path escapes repository directory".to_string());
+            }
             std::fs::write(&canonical, &content).map_err(|e| e.to_string())?;
             run_git(&path, &["add", "--", &file_path])?;
         }

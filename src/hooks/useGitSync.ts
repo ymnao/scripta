@@ -18,12 +18,11 @@ class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
 	private running = false;
 
-	async enqueue(fn: () => Promise<void>): Promise<void> {
-		return new Promise<void>((resolve, reject) => {
+	async enqueue<T>(fn: () => Promise<T>): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
 			this.queue.push(async () => {
 				try {
-					await fn();
-					resolve();
+					resolve(await fn());
 				} catch (e) {
 					reject(e);
 				}
@@ -333,13 +332,17 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		let unlisten: (() => void) | null = null;
 		let cancelled = false;
 
-		void listen("conflict-resolved", handleConflictResolved).then((fn) => {
-			if (cancelled) {
-				fn();
-			} else {
-				unlisten = fn;
-			}
-		});
+		void listen("conflict-resolved", handleConflictResolved)
+			.then((fn) => {
+				if (cancelled) {
+					fn();
+				} else {
+					unlisten = fn;
+				}
+			})
+			.catch(() => {
+				// Event listener registration failure is non-fatal
+			});
 
 		return () => {
 			cancelled = true;
