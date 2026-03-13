@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::file::resolve_path;
@@ -8,6 +8,10 @@ use super::file::resolve_path;
 use tauri::async_runtime::spawn_blocking;
 #[cfg(not(feature = "tauri-app"))]
 use tokio::task::spawn_blocking;
+
+/// Maximum size (in bytes) for conflict content returned to the frontend.
+/// Prevents OOM when a large binary file is in conflict.
+const MAX_CONFLICT_CONTENT_SIZE: usize = 10 * 1024 * 1024; // 10 MB
 
 fn is_stage_not_found(error: &str) -> bool {
     let lower = error.to_lowercase();
@@ -20,6 +24,10 @@ fn is_stage_not_found(error: &str) -> bool {
 fn validate_relative_path(file_path: &str) -> Result<(), String> {
     if file_path.is_empty() {
         return Err("file_path must not be empty".to_string());
+    }
+    // Reject control characters (NUL, newlines, etc.) that could confuse git or filesystem
+    if file_path.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err("file_path must not contain control characters".to_string());
     }
     let p = Path::new(file_path);
     if p.is_absolute() {
@@ -43,6 +51,67 @@ fn validate_relative_path(file_path: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Validates that a git ref name (branch/remote) contains only safe characters.
+/// Rejects control characters, spaces, and special git metacharacters.
+fn validate_ref_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("ref name must not be empty".to_string());
+    }
+    if name.contains("..") || name.contains("~") || name.contains("^") || name.contains(":") {
+        return Err(format!("ref name contains invalid characters: {name}"));
+    }
+    if name.bytes().any(|b| b < 0x20 || b == 0x7f || b == b' ' || b == b'\\') {
+        return Err(format!("ref name contains control characters or spaces: {name}"));
+    }
+    if name.starts_with('-') || name.starts_with('.') || name.ends_with('.') || name.ends_with(".lock") {
+        return Err(format!("ref name has invalid prefix/suffix: {name}"));
+    }
+    Ok(())
+}
+
+/// Resolves the `.git` directory for a repository, handling both standard
+/// repos and worktrees.
+fn resolve_git_dir(path: &str) -> Result<PathBuf, String> {
+    let git_dir = run_git(path, &["rev-parse", "--git-dir"])?;
+    let resolved = resolve_path(path)?;
+    Ok(if Path::new(&git_dir).is_relative() {
+        resolved.join(&git_dir)
+    } else {
+        PathBuf::from(&git_dir)
+    })
+}
+
+/// Returns `true` when the repository is in the middle of a rebase operation.
+fn is_rebasing(git_path: &Path) -> bool {
+    git_path.join("rebase-merge").exists() || git_path.join("rebase-apply").exists()
+}
+
+/// Returns `true` when the repository is in the middle of a merge or rebase.
+fn is_merging_or_rebasing(git_path: &Path) -> bool {
+    git_path.join("MERGE_HEAD").exists() || is_rebasing(git_path)
+}
+
+/// Verifies that `target` is not a symlink and that it resides within `root`.
+/// This prevents TOCTOU attacks where a symlink could be swapped in between
+/// path validation and file write.
+fn safe_write_in_repo(target: &Path, root: &Path, content: &str) -> Result<(), String> {
+    // Re-check that target is within root immediately before write
+    // (defends against race where a symlink replaces the path after canonicalize)
+    if target.is_symlink() {
+        return Err("file_path is a symlink; refusing to write".to_string());
+    }
+    // Verify the parent also isn't a symlink that appeared after canonicalization
+    if let Some(parent) = target.parent() {
+        if parent != root && parent.is_symlink() {
+            return Err("parent directory is a symlink; refusing to write".to_string());
+        }
+    }
+    if !target.starts_with(root) {
+        return Err("file_path escapes repository directory".to_string());
+    }
+    std::fs::write(target, content).map_err(|e| e.to_string())
 }
 
 fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String> {
@@ -220,11 +289,13 @@ pub async fn git_push(path: String) -> Result<String, String> {
                 if branch.is_empty() {
                     return Err(e);
                 }
+                validate_ref_name(&branch)?;
                 // Use the first configured remote (usually "origin")
                 let remote = run_git(&path, &["remote"])
                     .ok()
                     .and_then(|r| r.lines().next().map(|l| l.to_string()))
                     .unwrap_or_else(|| "origin".to_string());
+                validate_ref_name(&remote)?;
                 run_git(&path, &["push", "-u", &remote, &branch])
             }
             Err(e) => Err(e),
@@ -263,12 +334,30 @@ pub async fn git_get_conflict_content(
         // as it would cause git to interpret the ref as a pathspec.
         // Only stage-not-found errors are tolerated; other failures propagate.
         let ours = match run_git_raw(&path, &["show", &ours_ref]) {
-            Ok(content) => content,
+            Ok(content) => {
+                if content.len() > MAX_CONFLICT_CONTENT_SIZE {
+                    return Err(format!(
+                        "Conflict content for ours ({} bytes) exceeds {} byte limit",
+                        content.len(),
+                        MAX_CONFLICT_CONTENT_SIZE
+                    ));
+                }
+                content
+            }
             Err(e) if is_stage_not_found(&e) => String::new(),
             Err(e) => return Err(e),
         };
         let theirs = match run_git_raw(&path, &["show", &theirs_ref]) {
-            Ok(content) => content,
+            Ok(content) => {
+                if content.len() > MAX_CONFLICT_CONTENT_SIZE {
+                    return Err(format!(
+                        "Conflict content for theirs ({} bytes) exceeds {} byte limit",
+                        content.len(),
+                        MAX_CONFLICT_CONTENT_SIZE
+                    ));
+                }
+                content
+            }
             Err(e) if is_stage_not_found(&e) => String::new(),
             Err(e) => return Err(e),
         };
@@ -325,7 +414,7 @@ pub async fn git_resolve_conflict(
             if let Some(parent) = canonical.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            std::fs::write(&canonical, &content).map_err(|e| e.to_string())?;
+            safe_write_in_repo(&canonical, &canonical_root, &content)?;
             run_git(&path, &["add", "--", &file_path])?;
         }
         Ok(())
@@ -339,15 +428,13 @@ pub async fn git_resolve_conflict(
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_finish_conflict_resolution(path: String) -> Result<String, String> {
     spawn_blocking(move || {
-        let git_dir = run_git(&path, &["rev-parse", "--git-dir"])?;
-        let resolved = resolve_path(&path)?;
-        let git_path = if Path::new(&git_dir).is_relative() {
-            resolved.join(&git_dir)
-        } else {
-            Path::new(&git_dir).to_path_buf()
-        };
+        let git_path = resolve_git_dir(&path)?;
 
-        if git_path.join("rebase-merge").exists() || git_path.join("rebase-apply").exists() {
+        if !is_merging_or_rebasing(&git_path) {
+            return Err("Not in a merge or rebase state".to_string());
+        }
+
+        if is_rebasing(&git_path) {
             run_git(&path, &["rebase", "--continue"])
         } else {
             // For merge conflicts, use --no-edit to keep the auto-generated merge message
@@ -492,6 +579,62 @@ mod tests {
         .await;
         assert!(result.is_ok());
         assert!(!dir.path().join("delete-me.md").exists());
+    }
+
+    #[test]
+    fn test_validate_relative_path_rejects_absolute() {
+        assert!(validate_relative_path("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_relative_path_rejects_parent_traversal() {
+        assert!(validate_relative_path("../secret.md").is_err());
+        assert!(validate_relative_path("subdir/../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_relative_path_rejects_control_chars() {
+        assert!(validate_relative_path("file\x00.md").is_err());
+        assert!(validate_relative_path("file\n.md").is_err());
+        assert!(validate_relative_path("file\x7f.md").is_err());
+    }
+
+    #[test]
+    fn test_validate_relative_path_accepts_valid() {
+        assert!(validate_relative_path("notes/hello.md").is_ok());
+        assert!(validate_relative_path("日本語ファイル.md").is_ok());
+    }
+
+    #[test]
+    fn test_validate_ref_name_rejects_invalid() {
+        assert!(validate_ref_name("").is_err());
+        assert!(validate_ref_name("main..dev").is_err());
+        assert!(validate_ref_name("refs~1").is_err());
+        assert!(validate_ref_name("refs^1").is_err());
+        assert!(validate_ref_name("refs:heads").is_err());
+        assert!(validate_ref_name("-start").is_err());
+        assert!(validate_ref_name(".hidden").is_err());
+        assert!(validate_ref_name("branch.lock").is_err());
+        assert!(validate_ref_name("branch name").is_err());
+        assert!(validate_ref_name("branch\t").is_err());
+    }
+
+    #[test]
+    fn test_validate_ref_name_accepts_valid() {
+        assert!(validate_ref_name("main").is_ok());
+        assert!(validate_ref_name("feature/my-branch").is_ok());
+        assert!(validate_ref_name("origin").is_ok());
+        assert!(validate_ref_name("v1.0.0").is_ok());
+    }
+
+    #[test]
+    fn test_safe_write_in_repo_rejects_outside_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let outside = std::env::temp_dir().join("outside.txt");
+        let result = safe_write_in_repo(&outside, root, "data");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("escapes repository"));
     }
 
     #[tokio::test]
