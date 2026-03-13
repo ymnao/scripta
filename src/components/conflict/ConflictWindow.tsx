@@ -106,8 +106,12 @@ export function ConflictWindow() {
 	useEffect(() => {
 		if (loading || error || files.length > 0) return;
 		void (async () => {
-			await emit("conflict-resolved");
-			await getCurrentWindow().close();
+			try {
+				await emit("conflict-resolved");
+				await getCurrentWindow().close();
+			} catch {
+				// Auto-close failure is non-fatal
+			}
 		})();
 	}, [loading, error, files]);
 
