@@ -17,8 +17,12 @@ import { useToastStore } from "../stores/toast";
 class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
 	private running = false;
+	private cancelled = false;
 
 	async enqueue<T>(fn: () => Promise<T>): Promise<T> {
+		if (this.cancelled) {
+			return Promise.reject(new Error("Queue cancelled"));
+		}
 		return new Promise<T>((resolve, reject) => {
 			this.queue.push(async () => {
 				try {
@@ -33,9 +37,14 @@ class GitOperationQueue {
 		});
 	}
 
+	cancel(): void {
+		this.cancelled = true;
+		this.queue.length = 0;
+	}
+
 	private async process(): Promise<void> {
 		this.running = true;
-		while (this.queue.length > 0) {
+		while (this.queue.length > 0 && !this.cancelled) {
 			const task = this.queue.shift();
 			if (task) {
 				await task();
@@ -207,6 +216,10 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 
 	// Initialize on workspace change
 	useEffect(() => {
+		// Cancel the old queue and create a new one for the new workspace
+		queueRef.current.cancel();
+		queueRef.current = new GitOperationQueue();
+
 		if (!workspacePath) {
 			useGitSyncStore.getState().resetRuntime();
 			clearTimers();

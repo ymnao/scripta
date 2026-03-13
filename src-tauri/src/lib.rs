@@ -52,7 +52,6 @@ pub fn run() {
             commands::git_sync::git_commit,
             commands::git_sync::git_pull,
             commands::git_sync::git_push,
-            commands::git_sync::git_unpushed_count,
             commands::git_sync::git_get_conflicted_files,
             commands::git_sync::git_get_conflict_content,
             commands::git_sync::git_resolve_conflict,

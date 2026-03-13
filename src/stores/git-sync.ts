@@ -22,7 +22,6 @@ interface GitSyncRuntimeState {
 	errorMessage: string | null;
 	hasRemote: boolean;
 	branch: string;
-	unpushedCount: number;
 }
 
 interface GitSyncState extends GitSyncRuntimeState, GitSyncSettings {
@@ -35,7 +34,6 @@ interface GitSyncState extends GitSyncRuntimeState, GitSyncSettings {
 	setErrorMessage: (message: string | null) => void;
 	setHasRemote: (hasRemote: boolean) => void;
 	setBranch: (branch: string) => void;
-	setUnpushedCount: (count: number) => void;
 
 	setGitSyncEnabled: (enabled: boolean) => void;
 	setAutoCommitInterval: (interval: number) => void;
@@ -60,7 +58,6 @@ const RUNTIME_DEFAULTS: GitSyncRuntimeState = {
 	errorMessage: null,
 	hasRemote: false,
 	branch: "",
-	unpushedCount: 0,
 };
 
 export const useGitSyncStore = create<GitSyncState>()((set) => ({
@@ -76,7 +73,6 @@ export const useGitSyncStore = create<GitSyncState>()((set) => ({
 	setErrorMessage: (message: string | null) => set({ errorMessage: message }),
 	setHasRemote: (hasRemote: boolean) => set({ hasRemote }),
 	setBranch: (branch: string) => set({ branch }),
-	setUnpushedCount: (count: number) => set({ unpushedCount: count }),
 
 	setGitSyncEnabled: (enabled: boolean) => {
 		void saveGitSyncEnabled(enabled);

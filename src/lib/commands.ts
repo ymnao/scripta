@@ -119,10 +119,6 @@ export function gitPush(path: string): Promise<string> {
 	return invoke<string>("git_push", { path });
 }
 
-export function gitUnpushedCount(path: string): Promise<number> {
-	return invoke<number>("git_unpushed_count", { path });
-}
-
 export function gitGetConflictedFiles(path: string): Promise<string[]> {
 	return invoke<string[]>("git_get_conflicted_files", { path });
 }

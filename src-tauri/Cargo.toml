@@ -40,7 +40,6 @@ notify = "6"
 ureq = { version = "2", features = ["tls"] }
 tauri-plugin-store = { version = "2", optional = true }
 tauri-plugin-window-state = { version = "2", optional = true }
-tokio = { version = "1", features = ["rt"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

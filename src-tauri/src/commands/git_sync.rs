@@ -4,6 +4,11 @@ use std::process::Command;
 
 use super::file::resolve_path;
 
+#[cfg(feature = "tauri-app")]
+use tauri::async_runtime::spawn_blocking;
+#[cfg(not(feature = "tauri-app"))]
+use spawn_blocking;
+
 fn is_stage_not_found(error: &str) -> bool {
     let lower = error.to_lowercase();
     lower.contains("does not exist")
@@ -50,6 +55,9 @@ fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
         .env("SSH_ASKPASS", "")
+        // Disable git hooks to prevent arbitrary code execution from auto-sync
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
         .args(args)
         .output()
         .map_err(|e| format!("Failed to execute git: {e}"))
@@ -104,7 +112,7 @@ pub struct ConflictContentResult {
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_check_available() -> Result<bool, String> {
-    tokio::task::spawn_blocking(|| match Command::new("git").arg("--version").output() {
+    spawn_blocking(|| match Command::new("git").arg("--version").output() {
         Ok(output) => Ok(output.status.success()),
         Err(_) => Ok(false),
     })
@@ -114,7 +122,7 @@ pub async fn git_check_available() -> Result<bool, String> {
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_check_repo(path: String) -> Result<bool, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         match run_git(&path, &["rev-parse", "--is-inside-work-tree"]) {
             Ok(output) => Ok(output == "true"),
             Err(_) => Ok(false),
@@ -126,7 +134,7 @@ pub async fn git_check_repo(path: String) -> Result<bool, String> {
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_status(path: String) -> Result<GitStatusResult, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         let branch =
             run_git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
 
@@ -159,7 +167,7 @@ pub async fn git_status(path: String) -> Result<GitStatusResult, String> {
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_add_all(path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         run_git(&path, &["add", "-A"])?;
         Ok(())
     })
@@ -169,14 +177,14 @@ pub async fn git_add_all(path: String) -> Result<(), String> {
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_commit(path: String, message: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || run_git(&path, &["commit", "-m", &message]))
+    spawn_blocking(move || run_git(&path, &["commit", "-m", &message]))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_pull(path: String, sync_method: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         let args = if sync_method == "rebase" {
             vec!["pull", "--rebase"]
         } else {
@@ -194,7 +202,7 @@ pub async fn git_pull(path: String, sync_method: String) -> Result<String, Strin
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_push(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         match run_git(&path, &["push"]) {
             Ok(output) => Ok(output),
             Err(e) if e.contains("no upstream branch") || e.contains("has no upstream") => {
@@ -217,21 +225,10 @@ pub async fn git_push(path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-#[cfg_attr(feature = "tauri-app", tauri::command)]
-pub async fn git_unpushed_count(path: String) -> Result<u32, String> {
-    tokio::task::spawn_blocking(move || {
-        match run_git(&path, &["rev-list", "@{u}..HEAD", "--count"]) {
-            Ok(output) => output.parse::<u32>().map_err(|e| e.to_string()),
-            Err(_) => Ok(0),
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_get_conflicted_files(path: String) -> Result<Vec<String>, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         let output = run_git(&path, &["diff", "--name-only", "--diff-filter=U"])?;
         Ok(output
             .lines()
@@ -248,7 +245,7 @@ pub async fn git_get_conflict_content(
     path: String,
     file_path: String,
 ) -> Result<ConflictContentResult, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         validate_relative_path(&file_path)?;
         let ours_ref = format!(":2:{file_path}");
         let theirs_ref = format!(":3:{file_path}");
@@ -279,7 +276,7 @@ pub async fn git_resolve_conflict(
     content: String,
     resolution: String,
 ) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         validate_relative_path(&file_path)?;
 
         if resolution == "delete" {
@@ -322,7 +319,7 @@ pub async fn git_resolve_conflict(
 
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_get_last_commit_time(path: String) -> Result<Option<String>, String> {
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking(move || {
         match run_git(&path, &["log", "-1", "--format=%ci"]) {
             Ok(output) if !output.is_empty() => Ok(Some(output)),
             Ok(_) => Ok(None),
