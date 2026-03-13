@@ -7,7 +7,7 @@ use super::file::resolve_path;
 #[cfg(feature = "tauri-app")]
 use tauri::async_runtime::spawn_blocking;
 #[cfg(not(feature = "tauri-app"))]
-use spawn_blocking;
+use tokio::task::spawn_blocking;
 
 fn is_stage_not_found(error: &str) -> bool {
     let lower = error.to_lowercase();

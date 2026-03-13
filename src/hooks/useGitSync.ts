@@ -16,6 +16,7 @@ import { useToastStore } from "../stores/toast";
 
 class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
+	private rejecters: Array<(reason: Error) => void> = [];
 	private running = false;
 	private cancelled = false;
 
@@ -24,7 +25,12 @@ class GitOperationQueue {
 			return Promise.reject(new Error("Queue cancelled"));
 		}
 		return new Promise<T>((resolve, reject) => {
+			const rejectEntry = reject as (reason: Error) => void;
+			this.rejecters.push(rejectEntry);
 			this.queue.push(async () => {
+				// Remove from rejecters — this task is now executing, not pending
+				const idx = this.rejecters.indexOf(rejectEntry);
+				if (idx !== -1) this.rejecters.splice(idx, 1);
 				try {
 					resolve(await fn());
 				} catch (e) {
@@ -39,7 +45,12 @@ class GitOperationQueue {
 
 	cancel(): void {
 		this.cancelled = true;
+		const cancelError = new Error("Queue cancelled");
+		for (const reject of this.rejecters) {
+			reject(cancelError);
+		}
 		this.queue.length = 0;
+		this.rejecters.length = 0;
 	}
 
 	private async process(): Promise<void> {
