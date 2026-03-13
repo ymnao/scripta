@@ -55,6 +55,7 @@ pub fn run() {
             commands::git_sync::git_get_conflicted_files,
             commands::git_sync::git_get_conflict_content,
             commands::git_sync::git_resolve_conflict,
+            commands::git_sync::git_finish_conflict_resolution,
             commands::git_sync::git_get_last_commit_time,
         ])
         .run(tauri::generate_context!())

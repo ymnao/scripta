@@ -47,6 +47,9 @@ fn validate_relative_path(file_path: &str) -> Result<(), String> {
 
 fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String> {
     let resolved = resolve_path(path)?;
+    // Use a platform-appropriate non-existent path to disable git hooks.
+    // /dev/null (Unix) and NUL (Windows) are not directories, so git finds no hooks there.
+    let null_hooks_path = if cfg!(windows) { "NUL" } else { "/dev/null" };
     Command::new("git")
         .current_dir(&resolved)
         // Force English output so error-message parsing is locale-independent
@@ -57,7 +60,7 @@ fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String
         .env("SSH_ASKPASS", "")
         // Disable git hooks to prevent arbitrary code execution from auto-sync
         .arg("-c")
-        .arg("core.hooksPath=/dev/null")
+        .arg(format!("core.hooksPath={null_hooks_path}"))
         // Prevent quoting of non-ASCII filenames (e.g. Japanese characters)
         .arg("-c")
         .arg("core.quotepath=false")
@@ -188,10 +191,10 @@ pub async fn git_commit(path: String, message: String) -> Result<String, String>
 #[cfg_attr(feature = "tauri-app", tauri::command)]
 pub async fn git_pull(path: String, sync_method: String) -> Result<String, String> {
     spawn_blocking(move || {
-        let args = if sync_method == "rebase" {
-            vec!["pull", "--rebase"]
-        } else {
-            vec!["pull"]
+        let args = match sync_method.as_str() {
+            "rebase" => vec!["pull", "--rebase"],
+            "merge" => vec!["pull"],
+            _ => return Err(format!("Invalid sync_method: {sync_method}. Expected \"merge\" or \"rebase\".")),
         };
         match run_git(&path, &args) {
             Ok(output) => Ok(output),
@@ -282,6 +285,10 @@ pub async fn git_resolve_conflict(
     spawn_blocking(move || {
         validate_relative_path(&file_path)?;
 
+        if resolution != "modify" && resolution != "delete" {
+            return Err(format!("Invalid resolution: {resolution}. Expected \"modify\" or \"delete\"."));
+        }
+
         if resolution == "delete" {
             // Delete resolution only removes from the index; no need to canonicalize
             // the file path (the file may not exist on disk).
@@ -311,10 +318,38 @@ pub async fn git_resolve_conflict(
             if !canonical.starts_with(&canonical_root) {
                 return Err("file_path escapes repository directory".to_string());
             }
+            // Ensure parent directories exist (e.g. "newdir/file.md" during conflict resolution)
+            if let Some(parent) = canonical.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
             std::fs::write(&canonical, &content).map_err(|e| e.to_string())?;
             run_git(&path, &["add", "--", &file_path])?;
         }
         Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Finishes conflict resolution by detecting whether we are in a rebase or merge
+/// and running the appropriate command (`git rebase --continue` or `git commit --no-edit`).
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub async fn git_finish_conflict_resolution(path: String) -> Result<String, String> {
+    spawn_blocking(move || {
+        let git_dir = run_git(&path, &["rev-parse", "--git-dir"])?;
+        let resolved = resolve_path(&path)?;
+        let git_path = if Path::new(&git_dir).is_relative() {
+            resolved.join(&git_dir)
+        } else {
+            Path::new(&git_dir).to_path_buf()
+        };
+
+        if git_path.join("rebase-merge").exists() || git_path.join("rebase-apply").exists() {
+            run_git(&path, &["rebase", "--continue"])
+        } else {
+            // For merge conflicts, use --no-edit to keep the auto-generated merge message
+            run_git(&path, &["commit", "--no-edit"])
+        }
     })
     .await
     .map_err(|e| e.to_string())?

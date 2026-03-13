@@ -3,7 +3,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useState } from "react";
 import {
 	gitAddAll,
-	gitCommit,
+	gitCheckRepo,
+	gitFinishConflictResolution,
 	gitGetConflictContent,
 	gitGetConflictedFiles,
 	gitResolveConflict,
@@ -30,13 +31,22 @@ export function ConflictWindow() {
 			return;
 		}
 
-		gitGetConflictedFiles(workspacePath)
-			.then((conflictFiles) => {
-				setFiles(conflictFiles);
-				if (conflictFiles.length > 0) {
-					setSelectedFile(conflictFiles[0]);
+		// Validate that the path points to an actual git repository
+		// (defense-in-depth against crafted URL parameters)
+		gitCheckRepo(workspacePath)
+			.then((isRepo) => {
+				if (!isRepo) {
+					setError("指定されたパスは Git リポジトリではありません。");
+					setLoading(false);
+					return;
 				}
-				setLoading(false);
+				return gitGetConflictedFiles(workspacePath).then((conflictFiles) => {
+					setFiles(conflictFiles);
+					if (conflictFiles.length > 0) {
+						setSelectedFile(conflictFiles[0]);
+					}
+					setLoading(false);
+				});
 			})
 			.catch((err) => {
 				setError(String(err));
@@ -81,7 +91,9 @@ export function ConflictWindow() {
 
 		try {
 			await gitAddAll(workspacePath);
-			await gitCommit(workspacePath, "resolve: コンフリクトを解消");
+			// Use git_finish_conflict_resolution which detects whether we're in a
+			// rebase (→ git rebase --continue) or merge (→ git commit --no-edit).
+			await gitFinishConflictResolution(workspacePath);
 			await emit("conflict-resolved");
 			await getCurrentWindow().close();
 		} catch (err) {

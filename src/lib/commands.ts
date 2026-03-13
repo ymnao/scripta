@@ -136,6 +136,10 @@ export function gitResolveConflict(
 	return invoke<void>("git_resolve_conflict", { path, filePath, content, resolution });
 }
 
+export function gitFinishConflictResolution(path: string): Promise<string> {
+	return invoke<string>("git_finish_conflict_resolution", { path });
+}
+
 export function gitGetLastCommitTime(path: string): Promise<string | null> {
 	return invoke<string | null>("git_get_last_commit_time", { path });
 }

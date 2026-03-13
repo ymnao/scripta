@@ -13,11 +13,12 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("../../lib/commands", () => ({
+	gitCheckRepo: vi.fn().mockResolvedValue(true),
 	gitGetConflictedFiles: vi.fn(),
 	gitGetConflictContent: vi.fn(),
 	gitResolveConflict: vi.fn(),
 	gitAddAll: vi.fn(),
-	gitCommit: vi.fn(),
+	gitFinishConflictResolution: vi.fn(),
 }));
 
 vi.mock("./ConflictDiffView", () => ({
