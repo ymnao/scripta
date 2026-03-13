@@ -13,6 +13,9 @@ fn is_stage_not_found(error: &str) -> bool {
 }
 
 fn validate_relative_path(file_path: &str) -> Result<(), String> {
+    if file_path.is_empty() {
+        return Err("file_path must not be empty".to_string());
+    }
     let p = Path::new(file_path);
     if p.is_absolute() {
         return Err("file_path must be relative".to_string());

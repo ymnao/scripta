@@ -1,13 +1,18 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from "lucide-react";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { type ToastItem, useToastStore } from "../../stores/toast";
+import { type ToastItem, type ToastType, useToastStore } from "../../stores/toast";
 
 const AUTO_DISMISS_MS = 5000;
 
 const TOAST_STYLES: Record<
-	string,
-	{ className: string; icon: typeof XCircle; role: string; live: string }
+	ToastType,
+	{
+		className: string;
+		icon: typeof XCircle;
+		role: "alert" | "status";
+		live: "assertive" | "polite";
+	}
 > = {
 	error: {
 		className:
@@ -53,7 +58,7 @@ function ToastMessage({ toast }: { toast: ToastItem }) {
 	return (
 		<div
 			role={style.role}
-			aria-live={style.live as "assertive" | "polite"}
+			aria-live={style.live}
 			className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 shadow-lg ${style.className}`}
 		>
 			<Icon size={16} className="mt-0.5 shrink-0" />

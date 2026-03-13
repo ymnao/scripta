@@ -10,7 +10,7 @@ import {
 	gitPush,
 	gitStatus,
 } from "../lib/commands";
-import { isNetworkError } from "../lib/errors";
+import { isNetworkError, translateError } from "../lib/errors";
 import { useGitSyncStore } from "../stores/git-sync";
 import { useToastStore } from "../stores/toast";
 
@@ -365,7 +365,9 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 					if (result === "skipped") return;
 					const s = useGitSyncStore.getState();
 					if (s.errorMessage) {
-						useToastStore.getState().addToast("error", `同期に失敗しました: ${s.errorMessage}`);
+						useToastStore
+							.getState()
+							.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
 					} else {
 						useToastStore.getState().addToast("success", "同期が完了しました");
 					}

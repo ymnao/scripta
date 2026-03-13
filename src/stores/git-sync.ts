@@ -103,8 +103,9 @@ export const useGitSyncStore = create<GitSyncState>()((set) => ({
 		set({ syncMethod: method });
 	},
 	setCommitMessage: (message: string) => {
-		void saveCommitMessage(message);
-		set({ commitMessage: message });
+		const normalized = message.trim() || GIT_SYNC_DEFAULTS.commitMessage;
+		void saveCommitMessage(normalized);
+		set({ commitMessage: normalized });
 	},
 	setAutoPullOnStartup: (pull: boolean) => {
 		void saveAutoPullOnStartup(pull);
