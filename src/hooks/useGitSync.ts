@@ -235,6 +235,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			} catch (e) {
 				if (workspacePathRef.current === path) {
 					store.setErrorMessage(String(e));
+					await refreshStatus(path);
 				}
 			} finally {
 				if (workspacePathRef.current === path) {
@@ -409,53 +410,64 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		if (store.conflictFiles.length > 0) {
 			// Re-check status — conflicts may have been resolved externally (CLI, etc.)
 			const path = workspacePath;
-			void queueRef.current.enqueue(async () => {
-				await refreshStatus(path);
-				const updated = useGitSyncStore.getState();
-				if (updated.conflictFiles.length > 0) {
-					useToastStore
-						.getState()
-						.addToast("warning", "コンフリクトを解消してから同期してください。");
-				} else {
-					useToastStore
-						.getState()
-						.addToast("info", "コンフリクトが解消されました。同期を開始しています...");
-					const result = await doCommitAndSync(path);
-					if (result === "skipped") return;
-					const s = useGitSyncStore.getState();
-					if (s.errorMessage) {
+			void queueRef.current
+				.enqueue(async () => {
+					await refreshStatus(path);
+					const updated = useGitSyncStore.getState();
+					if (updated.conflictFiles.length > 0) {
 						useToastStore
 							.getState()
-							.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
-					} else if (s.offlineMode) {
-						useToastStore
-							.getState()
-							.addToast(
-								"warning",
-								"ネットワークに接続できません。ローカル変更のみ保存されました。",
-							);
+							.addToast("warning", "コンフリクトを解消してから同期してください。");
 					} else {
-						useToastStore.getState().addToast("success", "同期が完了しました");
+						useToastStore
+							.getState()
+							.addToast("info", "コンフリクトが解消されました。同期を開始しています...");
+						const result = await doCommitAndSync(path);
+						if (result === "skipped") return;
+						const s = useGitSyncStore.getState();
+						if (s.errorMessage) {
+							useToastStore
+								.getState()
+								.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
+						} else if (s.offlineMode) {
+							useToastStore
+								.getState()
+								.addToast(
+									"warning",
+									"ネットワークに接続できません。ローカル変更のみ保存されました。",
+								);
+						} else {
+							useToastStore.getState().addToast("success", "同期が完了しました");
+						}
 					}
-				}
-			});
+				})
+				.catch(() => {
+					// Queue cancelled (e.g. workspace switch) — ignore silently
+				});
 			return;
 		}
 		const path = workspacePath;
 		const toast = useToastStore.getState();
 		toast.addToast("info", "同期を開始しています...");
-		void queueRef.current.enqueue(async () => {
-			const result = await doCommitAndSync(path);
-			if (result === "skipped") return;
-			const s = useGitSyncStore.getState();
-			if (s.errorMessage) {
-				toast.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
-			} else if (s.offlineMode) {
-				toast.addToast("warning", "ネットワークに接続できません。ローカル変更のみ保存されました。");
-			} else {
-				toast.addToast("success", "同期が完了しました");
-			}
-		});
+		void queueRef.current
+			.enqueue(async () => {
+				const result = await doCommitAndSync(path);
+				if (result === "skipped") return;
+				const s = useGitSyncStore.getState();
+				if (s.errorMessage) {
+					toast.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
+				} else if (s.offlineMode) {
+					toast.addToast(
+						"warning",
+						"ネットワークに接続できません。ローカル変更のみ保存されました。",
+					);
+				} else {
+					toast.addToast("success", "同期が完了しました");
+				}
+			})
+			.catch(() => {
+				// Queue cancelled (e.g. workspace switch) — ignore silently
+			});
 	}, [workspacePath, doCommitAndSync, refreshStatus]);
 
 	return { manualSync };
