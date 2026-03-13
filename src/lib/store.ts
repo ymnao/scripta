@@ -164,10 +164,10 @@ export async function loadSettings(): Promise<AppSettings> {
 			rawSyncMethod === "merge" || rawSyncMethod === "rebase" ? rawSyncMethod : DEFAULTS.syncMethod;
 
 		const rawCommitMessage = await store.get<unknown>("commitMessage");
+		const trimmedCommitMessage =
+			typeof rawCommitMessage === "string" ? rawCommitMessage.trim() : "";
 		const commitMessage: string =
-			typeof rawCommitMessage === "string" && rawCommitMessage.length > 0
-				? rawCommitMessage
-				: DEFAULTS.commitMessage;
+			trimmedCommitMessage.length > 0 ? trimmedCommitMessage : DEFAULTS.commitMessage;
 
 		const rawAutoPullOnStartup = await store.get<unknown>("autoPullOnStartup");
 		const autoPullOnStartup: boolean =

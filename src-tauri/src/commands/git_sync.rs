@@ -20,9 +20,21 @@ fn validate_relative_path(file_path: &str) -> Result<(), String> {
     if p.is_absolute() {
         return Err("file_path must be relative".to_string());
     }
+    if p.file_name().is_none() {
+        return Err("file_path must point to a file, not a directory".to_string());
+    }
     for component in p.components() {
-        if let std::path::Component::ParentDir = component {
-            return Err("file_path must not contain '..'".to_string());
+        match component {
+            std::path::Component::ParentDir => {
+                return Err("file_path must not contain '..'".to_string());
+            }
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                return Err("file_path must be relative".to_string());
+            }
+            std::path::Component::CurDir => {
+                return Err("file_path must not contain '.'".to_string());
+            }
+            std::path::Component::Normal(_) => {}
         }
     }
     Ok(())
@@ -32,6 +44,8 @@ fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String
     let resolved = resolve_path(path)?;
     Command::new("git")
         .current_dir(&resolved)
+        // Force English output so error-message parsing is locale-independent
+        .env("LC_ALL", "C")
         // Prevent interactive prompts (auth, passphrase) from hanging the process
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")

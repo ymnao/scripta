@@ -379,6 +379,13 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 						useToastStore
 							.getState()
 							.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
+					} else if (s.offlineMode) {
+						useToastStore
+							.getState()
+							.addToast(
+								"warning",
+								"ネットワークに接続できません。ローカル変更のみ保存されました。",
+							);
 					} else {
 						useToastStore.getState().addToast("success", "同期が完了しました");
 					}
@@ -394,7 +401,9 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			if (result === "skipped") return;
 			const s = useGitSyncStore.getState();
 			if (s.errorMessage) {
-				toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
+				toast.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
+			} else if (s.offlineMode) {
+				toast.addToast("warning", "ネットワークに接続できません。ローカル変更のみ保存されました。");
 			} else {
 				toast.addToast("success", "同期が完了しました");
 			}
