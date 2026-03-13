@@ -34,7 +34,20 @@ export function translateError(error: unknown): string {
 	return `エラーが発生しました: ${raw}`;
 }
 
-const NON_TRANSIENT = PATTERNS.map(({ test }) => test);
+// Non-transient patterns for file I/O retry logic (withRetry).
+// Only includes file operation errors — Git/network patterns are excluded
+// so that DNS/connection errors remain retryable by withRetry.
+const NON_TRANSIENT = [
+	/^Already exists:/,
+	/^Source not found:/,
+	/^Target already exists:/,
+	/^Not found:/,
+	/\(os error 2\)/,
+	/\(os error 13\)/,
+	/\(os error 17\)/,
+	/\(os error 28\)/,
+	/\(os error 30\)/,
+];
 
 export function isTransientError(error: unknown): boolean {
 	const raw = extractMessage(error);
@@ -43,7 +56,9 @@ export function isTransientError(error: unknown): boolean {
 
 const NETWORK_PATTERNS = [
 	/could not resolve host/i,
-	/unable to access/i,
+	// Match "unable to access" only when followed by a network-specific cause,
+	// not for HTTP 401/403 authentication/permission failures.
+	/unable to access.*(?:could not resolve|connection refused|timed out|network is unreachable|failed to connect)/i,
 	/connection refused/i,
 	/network is unreachable/i,
 	/connection timed out/i,

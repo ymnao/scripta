@@ -106,8 +106,24 @@ describe("isNetworkError", () => {
 		).toBe(true);
 	});
 
-	it("detects 'unable to access'", () => {
-		expect(isNetworkError("fatal: unable to access 'https://github.com/repo.git/'")).toBe(true);
+	it("detects 'unable to access' with network cause", () => {
+		expect(
+			isNetworkError(
+				"fatal: unable to access 'https://github.com/repo.git/': Failed to connect to github.com port 443",
+			),
+		).toBe(true);
+	});
+
+	it("returns false for 'unable to access' without network cause (e.g. auth)", () => {
+		expect(isNetworkError("fatal: unable to access 'https://github.com/repo.git/'")).toBe(false);
+	});
+
+	it("returns false for 'unable to access' with HTTP 403", () => {
+		expect(
+			isNetworkError(
+				"fatal: unable to access 'https://github.com/repo.git/': The requested URL returned error: 403",
+			),
+		).toBe(false);
 	});
 
 	it("detects 'connection refused'", () => {
