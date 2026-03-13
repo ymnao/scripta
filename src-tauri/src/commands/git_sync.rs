@@ -58,6 +58,9 @@ fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
         .env("SSH_ASKPASS", "")
+        // Treat all pathspec arguments as literal strings, preventing pathspec
+        // magic (e.g. ":(glob)", ":(exclude)") from matching unintended files.
+        .env("GIT_LITERAL_PATHSPECS", "1")
         // Disable git hooks to prevent arbitrary code execution from auto-sync
         .arg("-c")
         .arg(format!("core.hooksPath={null_hooks_path}"))
