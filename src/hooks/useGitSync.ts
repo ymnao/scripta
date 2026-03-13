@@ -218,28 +218,32 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		const path = workspacePath;
 
 		(async () => {
-			const available = await gitCheckAvailable();
-			if (cancelled) return;
-			useGitSyncStore.getState().setGitAvailable(available);
-			if (!available) return;
+			try {
+				const available = await gitCheckAvailable();
+				if (cancelled) return;
+				useGitSyncStore.getState().setGitAvailable(available);
+				if (!available) return;
 
-			const isRepo = await gitCheckRepo(path);
-			if (cancelled) return;
-			useGitSyncStore.getState().setGitReady(isRepo);
-			if (!isRepo) return;
+				const isRepo = await gitCheckRepo(path);
+				if (cancelled) return;
+				useGitSyncStore.getState().setGitReady(isRepo);
+				if (!isRepo) return;
 
-			await refreshStatus(path);
-			if (cancelled) return;
+				await refreshStatus(path);
+				if (cancelled) return;
 
-			const store = useGitSyncStore.getState();
-			if (store.autoPullOnStartup && store.hasRemote && store.gitSyncEnabled) {
-				try {
-					await queueRef.current.enqueue(() => doPull(path));
-				} catch {
-					// Startup pull failure is non-fatal; doPull already updated state.
+				const store = useGitSyncStore.getState();
+				if (store.autoPullOnStartup && store.hasRemote && store.gitSyncEnabled) {
+					try {
+						await queueRef.current.enqueue(() => doPull(path));
+					} catch {
+						// Startup pull failure is non-fatal; doPull already updated state.
+					}
 				}
+				// Timers are scheduled by the separate settings-reactive useEffect below
+			} catch {
+				// Initialization failure is non-fatal; state remains at defaults.
 			}
-			// Timers are scheduled by the separate settings-reactive useEffect below
 		})();
 
 		return () => {
@@ -269,9 +273,11 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		const pullMs = autoPullInterval > 0 ? autoPullInterval * 60 * 1000 : 0;
 		const pushMs = autoPushInterval > 0 ? autoPushInterval * 60 * 1000 : 0;
 		const path = workspacePath;
+		let cancelled = false;
 
 		if (commitMs > 0) {
 			const tick = () => {
+				if (cancelled) return;
 				commitTimerRef.current = window.setTimeout(() => {
 					void queueRef.current.enqueue(() => doCommitAndSync(path)).then(tick, tick);
 				}, commitMs);
@@ -280,6 +286,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		}
 		if (pullMs > 0) {
 			const tick = () => {
+				if (cancelled) return;
 				pullTimerRef.current = window.setTimeout(() => {
 					void queueRef.current.enqueue(() => doPull(path)).then(tick, tick);
 				}, pullMs);
@@ -288,6 +295,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		}
 		if (pushMs > 0) {
 			const tick = () => {
+				if (cancelled) return;
 				pushTimerRef.current = window.setTimeout(() => {
 					void queueRef.current.enqueue(() => doPush(path)).then(tick, tick);
 				}, pushMs);
@@ -295,7 +303,10 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			tick();
 		}
 
-		return () => clearTimers();
+		return () => {
+			cancelled = true;
+			clearTimers();
+		};
 	}, [
 		workspacePath,
 		gitReady,
