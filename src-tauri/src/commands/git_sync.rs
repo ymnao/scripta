@@ -58,6 +58,9 @@ fn git_command(path: &str, args: &[&str]) -> Result<std::process::Output, String
         // Disable git hooks to prevent arbitrary code execution from auto-sync
         .arg("-c")
         .arg("core.hooksPath=/dev/null")
+        // Prevent quoting of non-ASCII filenames (e.g. Japanese characters)
+        .arg("-c")
+        .arg("core.quotepath=false")
         .args(args)
         .output()
         .map_err(|e| format!("Failed to execute git: {e}"))

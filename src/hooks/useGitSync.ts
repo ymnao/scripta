@@ -84,6 +84,8 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	const pullTimerRef = useRef(0);
 	const pushTimerRef = useRef(0);
 	const pausedRef = useRef(false);
+	const workspacePathRef = useRef(workspacePath);
+	workspacePathRef.current = workspacePath;
 
 	const clearTimers = useCallback(() => {
 		clearTimeout(commitTimerRef.current);
@@ -97,6 +99,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	const refreshStatus = useCallback(async (path: string) => {
 		try {
 			const status = await gitStatus(path);
+			if (workspacePathRef.current !== path) return;
 			const store = useGitSyncStore.getState();
 			store.setBranch(status.branch);
 			store.setHasRemote(status.hasRemote);
@@ -104,6 +107,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			pausedRef.current = status.conflictFiles.length > 0;
 
 			const time = await gitGetLastCommitTime(path);
+			if (workspacePathRef.current !== path) return;
 			store.setLastCommitTime(time);
 		} catch {
 			// status check failure is non-fatal
@@ -124,12 +128,15 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			try {
 				store.setGitAction("pull");
 				await gitPull(path, store.syncMethod);
+				if (workspacePathRef.current !== path) return;
 				store.setOfflineMode(false);
 				store.setErrorMessage(null);
 				await refreshStatus(path);
 			} catch (e) {
+				if (workspacePathRef.current !== path) throw e;
 				if (isNetworkError(e)) {
 					store.setOfflineMode(true);
+					store.setErrorMessage(null);
 				} else {
 					store.setErrorMessage(String(e));
 					// Refresh status so conflict detection works even after pull failure
@@ -137,7 +144,9 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				}
 				throw e;
 			} finally {
-				store.setGitAction("idle");
+				if (workspacePathRef.current === path) {
+					store.setGitAction("idle");
+				}
 			}
 		},
 		[refreshStatus],
@@ -150,17 +159,22 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		try {
 			store.setGitAction("push");
 			await gitPush(path);
+			if (workspacePathRef.current !== path) return;
 			store.setOfflineMode(false);
 			store.setErrorMessage(null);
 		} catch (e) {
+			if (workspacePathRef.current !== path) throw e;
 			if (isNetworkError(e)) {
 				store.setOfflineMode(true);
+				store.setErrorMessage(null);
 			} else {
 				store.setErrorMessage(String(e));
 			}
 			throw e;
 		} finally {
-			store.setGitAction("idle");
+			if (workspacePathRef.current === path) {
+				store.setGitAction("idle");
+			}
 		}
 	}, []);
 
@@ -176,6 +190,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			try {
 				store.setGitAction("add");
 				await gitAddAll(path);
+				if (workspacePathRef.current !== path) return "done";
 
 				store.setGitAction("commit");
 				const message = expandCommitMessage(store.commitMessage);
@@ -190,6 +205,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 						throw e;
 					}
 				}
+				if (workspacePathRef.current !== path) return "done";
 
 				if (committed || store.hasRemote) {
 					if (store.pullBeforePush && store.hasRemote) {
@@ -213,12 +229,17 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 					}
 				}
 
+				if (workspacePathRef.current !== path) return "done";
 				store.setErrorMessage(null);
 				await refreshStatus(path);
 			} catch (e) {
-				store.setErrorMessage(String(e));
+				if (workspacePathRef.current === path) {
+					store.setErrorMessage(String(e));
+				}
 			} finally {
-				store.setGitAction("idle");
+				if (workspacePathRef.current === path) {
+					store.setGitAction("idle");
+				}
 			}
 			return "done";
 		},
