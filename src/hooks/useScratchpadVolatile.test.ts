@@ -13,6 +13,7 @@ vi.mock("../lib/store", () => ({
 const { readFile, writeFile } = await import("../lib/commands");
 const { useSettingsStore } = await import("../stores/settings");
 const { useScratchpadVolatile } = await import("./useScratchpadVolatile");
+const { scratchpadContentCache } = await import("../components/editor/ScratchpadPanel");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -21,11 +22,13 @@ describe("useScratchpadVolatile", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		localStorage.clear();
+		scratchpadContentCache.clear();
 		useSettingsStore.setState({ scratchpadVolatile: true });
 	});
 
 	afterEach(() => {
 		localStorage.clear();
+		scratchpadContentCache.clear();
 	});
 
 	it("sets last-active-date on first run", async () => {
@@ -129,5 +132,23 @@ describe("useScratchpadVolatile", () => {
 		});
 
 		expect(mockedReadFile).not.toHaveBeenCalled();
+	});
+
+	it("deletes scratchpadContentCache entry when clearing scratchpad", async () => {
+		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
+		scratchpadContentCache.set("/workspace/.scripta/scratchpad.md", {
+			content: "old notes",
+			savedContent: "old notes",
+		});
+		mockedReadFile.mockImplementation(async (path: string) => {
+			if (path.endsWith("scratchpad.md")) return "old notes";
+			throw new Error("Not found");
+		});
+
+		await act(async () => {
+			renderHook(() => useScratchpadVolatile("/workspace"));
+		});
+
+		expect(scratchpadContentCache.has("/workspace/.scripta/scratchpad.md")).toBe(false);
 	});
 });

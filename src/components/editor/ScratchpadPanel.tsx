@@ -83,21 +83,32 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 
 	const scratchpadPath = getScratchpadPath(workspacePath);
 
-	// Keep content cache in sync on every change
+	const { saveStatus, saveNow, markSaved, getLastSavedContent } = useAutoSave(
+		scratchpadPath,
+		content,
+	);
+
+	// Ref so handleChange can read the latest savedContent without a dep on getLastSavedContent
+	const getLastSavedContentRef = useRef(getLastSavedContent);
+	getLastSavedContentRef.current = getLastSavedContent;
+
+	// Keep content cache in sync on every change.
+	// If the entry was deleted (e.g. by volatile archive clearing the cache),
+	// re-create it so a subsequent close→reopen still finds the latest content.
 	const handleChange = useCallback(
 		(value: string) => {
 			setContent(value);
 			const entry = scratchpadContentCache.get(scratchpadPath);
 			if (entry) {
 				entry.content = value;
+			} else {
+				scratchpadContentCache.set(scratchpadPath, {
+					content: value,
+					savedContent: getLastSavedContentRef.current(),
+				});
 			}
 		},
 		[scratchpadPath],
-	);
-
-	const { saveStatus, saveNow, markSaved, getLastSavedContent } = useAutoSave(
-		scratchpadPath,
-		content,
 	);
 
 	// Expose saveNow to parent via ref (for window close handling)
