@@ -66,6 +66,15 @@ export function ScratchpadPanel({ workspacePath, onClose, mainEditorView }: Scra
 
 	const { saveNow, markSaved } = useAutoSave(scratchpadPath, content);
 
+	// Save content on unmount (covers all close paths: button, Cmd+J, workspace switch)
+	const saveNowRef = useRef(saveNow);
+	saveNowRef.current = saveNow;
+	useEffect(() => {
+		return () => {
+			void saveNowRef.current();
+		};
+	}, []);
+
 	// Load scratchpad content on mount
 	useEffect(() => {
 		let cancelled = false;
