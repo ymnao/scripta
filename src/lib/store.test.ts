@@ -59,6 +59,7 @@ describe("store", () => {
 				syncMethod: "merge",
 				commitMessage: "vault backup: {{date}}",
 				autoPullOnStartup: false,
+				scratchpadVolatile: true,
 			});
 		});
 
@@ -99,6 +100,7 @@ describe("store", () => {
 				syncMethod: "merge",
 				commitMessage: "vault backup: {{date}}",
 				autoPullOnStartup: false,
+				scratchpadVolatile: true,
 			});
 		});
 

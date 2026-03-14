@@ -159,6 +159,7 @@ export function AppLayout() {
 				fontFamily: settings.fontFamily,
 				trimTrailingWhitespace: settings.trimTrailingWhitespace,
 				showLinkCards: settings.showLinkCards,
+				scratchpadVolatile: settings.scratchpadVolatile,
 			});
 			hydrateGitSync({
 				gitSyncEnabled: settings.gitSyncEnabled,
