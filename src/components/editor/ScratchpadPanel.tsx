@@ -38,10 +38,18 @@ const DEFAULT_HEIGHT = 200;
  * Module-level cache to bridge unmount→remount race.
  * When the panel unmounts, the async save may still be in-flight.
  * If the panel remounts before that save completes, readFile() would
- * return stale disk content. This cache ensures the new mount always
- * gets the latest in-memory content.
+ * return stale disk content.
+ *
+ * `content` is the latest editor text (what the user sees).
+ * `savedContent` is the last content confirmed on disk (from getLastSavedContent).
+ * On remount we restore content for the editor but tell useAutoSave
+ * only about savedContent, so a failed save is retried automatically.
  */
-export const scratchpadContentCache = new Map<string, string>();
+interface ScratchpadCacheEntry {
+	content: string;
+	savedContent: string;
+}
+export const scratchpadContentCache = new Map<string, ScratchpadCacheEntry>();
 
 const customHighlightStyle = syntaxHighlighting(
 	HighlightStyle.define([
@@ -79,12 +87,18 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	const handleChange = useCallback(
 		(value: string) => {
 			setContent(value);
-			scratchpadContentCache.set(scratchpadPath, value);
+			const entry = scratchpadContentCache.get(scratchpadPath);
+			if (entry) {
+				entry.content = value;
+			}
 		},
 		[scratchpadPath],
 	);
 
-	const { saveNow, markSaved } = useAutoSave(scratchpadPath, content);
+	const { saveStatus, saveNow, markSaved, getLastSavedContent } = useAutoSave(
+		scratchpadPath,
+		content,
+	);
 
 	// Expose saveNow to parent via ref (for window close handling)
 	const saveNowRef = useRef(saveNow);
@@ -103,15 +117,29 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 		};
 	}, [saveRef]);
 
+	// Keep cache savedContent in sync when saves succeed.
+	// getLastSavedContent() reads a ref directly so it always returns
+	// the actual processed content on disk, regardless of render timing.
+	useEffect(() => {
+		if (saveStatus === "saved") {
+			const entry = scratchpadContentCache.get(scratchpadPath);
+			if (entry) {
+				entry.savedContent = getLastSavedContent();
+			}
+		}
+	}, [saveStatus, scratchpadPath, getLastSavedContent]);
+
 	// Load scratchpad content on mount.
 	// Prefer in-memory cache to avoid reading stale disk content
 	// when the panel is closed and immediately reopened (the previous
 	// unmount's async save may still be in-flight).
+	// markSaved receives savedContent (confirmed on disk), NOT content,
+	// so a failed previous save is detected as a diff and retried.
 	useEffect(() => {
 		const cached = scratchpadContentCache.get(scratchpadPath);
 		if (cached !== undefined) {
-			setContent(cached);
-			markSaved(cached);
+			setContent(cached.content);
+			markSaved(cached.savedContent);
 			setLoaded(true);
 			return;
 		}
@@ -121,14 +149,14 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 			.then((loaded) => {
 				if (cancelled) return;
 				setContent(loaded);
-				scratchpadContentCache.set(scratchpadPath, loaded);
+				scratchpadContentCache.set(scratchpadPath, { content: loaded, savedContent: loaded });
 				markSaved(loaded);
 				setLoaded(true);
 			})
 			.catch(() => {
 				if (cancelled) return;
 				setContent("");
-				scratchpadContentCache.set(scratchpadPath, "");
+				scratchpadContentCache.set(scratchpadPath, { content: "", savedContent: "" });
 				markSaved("");
 				setLoaded(true);
 			});
