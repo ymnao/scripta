@@ -34,6 +34,15 @@ const MIN_HEIGHT = 100;
 const MAX_HEIGHT = 600;
 const DEFAULT_HEIGHT = 200;
 
+/**
+ * Module-level cache to bridge unmount→remount race.
+ * When the panel unmounts, the async save may still be in-flight.
+ * If the panel remounts before that save completes, readFile() would
+ * return stale disk content. This cache ensures the new mount always
+ * gets the latest in-memory content.
+ */
+export const scratchpadContentCache = new Map<string, string>();
+
 const customHighlightStyle = syntaxHighlighting(
 	HighlightStyle.define([
 		{ tag: tags.heading, fontWeight: "bold" },
@@ -66,6 +75,15 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 
 	const scratchpadPath = getScratchpadPath(workspacePath);
 
+	// Keep content cache in sync on every change
+	const handleChange = useCallback(
+		(value: string) => {
+			setContent(value);
+			scratchpadContentCache.set(scratchpadPath, value);
+		},
+		[scratchpadPath],
+	);
+
 	const { saveNow, markSaved } = useAutoSave(scratchpadPath, content);
 
 	// Expose saveNow to parent via ref (for window close handling)
@@ -85,19 +103,32 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 		};
 	}, [saveRef]);
 
-	// Load scratchpad content on mount
+	// Load scratchpad content on mount.
+	// Prefer in-memory cache to avoid reading stale disk content
+	// when the panel is closed and immediately reopened (the previous
+	// unmount's async save may still be in-flight).
 	useEffect(() => {
+		const cached = scratchpadContentCache.get(scratchpadPath);
+		if (cached !== undefined) {
+			setContent(cached);
+			markSaved(cached);
+			setLoaded(true);
+			return;
+		}
+
 		let cancelled = false;
 		readFile(scratchpadPath)
 			.then((loaded) => {
 				if (cancelled) return;
 				setContent(loaded);
+				scratchpadContentCache.set(scratchpadPath, loaded);
 				markSaved(loaded);
 				setLoaded(true);
 			})
 			.catch(() => {
 				if (cancelled) return;
 				setContent("");
+				scratchpadContentCache.set(scratchpadPath, "");
 				markSaved("");
 				setLoaded(true);
 			});
@@ -210,7 +241,7 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 					ref={editorRef}
 					className="h-full"
 					value={content}
-					onChange={setContent}
+					onChange={handleChange}
 					extensions={extensions}
 					height="100%"
 					theme="none"

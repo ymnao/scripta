@@ -371,9 +371,11 @@ export function AppLayout() {
 
 				if (hasFailed) return;
 
-				// Save scratchpad if open
+				// Save scratchpad (ref survives panel unmount)
 				if (scratchpadSaveRef.current) {
-					await scratchpadSaveRef.current();
+					const scratchpadSaved = await scratchpadSaveRef.current();
+					if (cancelled) return;
+					if (!scratchpadSaved) return;
 				}
 
 				await getCurrentWindow().destroy();

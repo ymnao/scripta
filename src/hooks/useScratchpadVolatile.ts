@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { scratchpadContentCache } from "../components/editor/ScratchpadPanel";
 import { readFile, writeFile } from "../lib/commands";
 import { getScratchpadArchivePath, getScratchpadPath } from "../lib/scripta-config";
 import { useSettingsStore } from "../stores/settings";
@@ -55,6 +56,7 @@ export function useScratchpadVolatile(workspacePath: string | null) {
 			if (trimmed.length > 0) {
 				// Clear scratchpad
 				await writeFile(scratchpadPath, "");
+				scratchpadContentCache.delete(scratchpadPath);
 			}
 		} catch {
 			// Scratchpad file doesn't exist — nothing to archive
