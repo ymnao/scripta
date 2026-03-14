@@ -27,7 +27,7 @@ import { SetupWizardDialog } from "../common/SetupWizardDialog";
 import { ToastContainer } from "../common/Toast";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
-import { ScratchpadPanel } from "../editor/ScratchpadPanel";
+import { ScratchpadPanel, type ScratchpadSaveHandle } from "../editor/ScratchpadPanel";
 import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
@@ -109,6 +109,7 @@ export function AppLayout() {
 	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
 	const [editorView, setEditorView] = useState<EditorView | null>(null);
+	const scratchpadSaveRef = useRef<ScratchpadSaveHandle | null>(null);
 	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
 	const searchBarOpenRef = useRef(false);
 	searchBarOpenRef.current = searchBarOpen;
@@ -369,6 +370,12 @@ export function AppLayout() {
 				}
 
 				if (hasFailed) return;
+
+				// Save scratchpad if open
+				if (scratchpadSaveRef.current) {
+					await scratchpadSaveRef.current();
+				}
+
 				await getCurrentWindow().destroy();
 			})
 			.then((fn) => {
@@ -1044,6 +1051,7 @@ export function AppLayout() {
 						<ScratchpadPanel
 							workspacePath={workspacePath}
 							onClose={() => setScratchpadOpen(false)}
+							saveRef={scratchpadSaveRef}
 						/>
 					)}
 					{searchBarOpen && editorView && (

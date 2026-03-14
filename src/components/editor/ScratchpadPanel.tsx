@@ -43,12 +43,15 @@ const customHighlightStyle = syntaxHighlighting(
 
 const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
 
+export type ScratchpadSaveHandle = () => Promise<boolean>;
+
 interface ScratchpadPanelProps {
 	workspacePath: string;
 	onClose: () => void;
+	saveRef?: React.RefObject<ScratchpadSaveHandle | null>;
 }
 
-export function ScratchpadPanel({ workspacePath, onClose }: ScratchpadPanelProps) {
+export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadPanelProps) {
 	const fontSize = useSettingsStore((s) => s.fontSize);
 	const fontFamily = useSettingsStore((s) => s.fontFamily);
 
@@ -65,14 +68,20 @@ export function ScratchpadPanel({ workspacePath, onClose }: ScratchpadPanelProps
 
 	const { saveNow, markSaved } = useAutoSave(scratchpadPath, content);
 
-	// Save content on unmount (covers all close paths: button, Cmd+J, workspace switch)
+	// Expose saveNow to parent via ref (for window close handling)
 	const saveNowRef = useRef(saveNow);
 	saveNowRef.current = saveNow;
 	useEffect(() => {
+		if (saveRef) {
+			saveRef.current = () => saveNowRef.current();
+		}
 		return () => {
+			if (saveRef) {
+				saveRef.current = null;
+			}
 			void saveNowRef.current();
 		};
-	}, []);
+	}, [saveRef]);
 
 	// Load scratchpad content on mount
 	useEffect(() => {
