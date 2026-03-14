@@ -6,12 +6,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { useGitSync } from "../../hooks/useGitSync";
+import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
 import { useGitSyncStore } from "../../stores/git-sync";
+import { useScratchpadStore } from "../../stores/scratchpad";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
@@ -25,6 +27,7 @@ import { SetupWizardDialog } from "../common/SetupWizardDialog";
 import { ToastContainer } from "../common/Toast";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
+import { ScratchpadPanel } from "../editor/ScratchpadPanel";
 import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
@@ -73,7 +76,13 @@ export function AppLayout() {
 	const offlineMode = useGitSyncStore((s) => s.offlineMode);
 	const gitReady = useGitSyncStore((s) => s.gitReady);
 
+	const scratchpadOpen = useScratchpadStore((s) => s.open);
+	const toggleScratchpad = useScratchpadStore((s) => s.toggle);
+	const setScratchpadOpen = useScratchpadStore((s) => s.setOpen);
+
 	const { manualSync } = useGitSync({ workspacePath });
+
+	useScratchpadVolatile(workspacePath);
 
 	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
 	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
@@ -951,6 +960,11 @@ export function AppLayout() {
 					}
 				}
 			}
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
+				e.preventDefault();
+				toggleScratchpad();
+				return;
+			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
 				e.preventDefault();
 				setCommandPaletteOpen((prev) => !prev);
@@ -966,7 +980,7 @@ export function AppLayout() {
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [activeTabId, handleCloseTab, handleExport, handleGoBack, handleGoForward]);
+	}, [activeTabId, handleCloseTab, handleExport, handleGoBack, handleGoForward, toggleScratchpad]);
 
 	if (loading) {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
@@ -1026,6 +1040,13 @@ export function AppLayout() {
 							<p className="text-sm italic text-text-secondary/60">Verba volant, scripta manent.</p>
 						</div>
 					)}
+					{scratchpadOpen && workspacePath && (
+						<ScratchpadPanel
+							workspacePath={workspacePath}
+							onClose={() => setScratchpadOpen(false)}
+							mainEditorView={editorView}
+						/>
+					)}
 					{searchBarOpen && editorView && (
 						<SearchBar
 							view={editorView}
@@ -1056,6 +1077,8 @@ export function AppLayout() {
 				onGitSync={manualSync}
 				onOpenConflictResolver={openConflictResolver}
 				gitReady={gitReady}
+				onToggleScratchpad={workspacePath ? toggleScratchpad : undefined}
+				scratchpadOpen={scratchpadOpen}
 			/>
 
 			{workspacePath && (

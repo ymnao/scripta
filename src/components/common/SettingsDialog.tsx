@@ -37,12 +37,13 @@ const syncMethodOptions: { value: SyncMethod; label: string }[] = [
 	{ value: "rebase", label: "Rebase" },
 ];
 
-type Section = "appearance" | "editor" | "save" | "git-sync" | "workspace";
+type Section = "appearance" | "editor" | "save" | "scratchpad" | "git-sync" | "workspace";
 
 const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
 	{ key: "editor", label: "エディタ" },
 	{ key: "save", label: "保存" },
+	{ key: "scratchpad", label: "スクラッチパッド" },
 ];
 
 function Toggle({
@@ -428,6 +429,8 @@ export function SettingsDialog({
 	const setTrimTrailingWhitespace = useSettingsStore((s) => s.setTrimTrailingWhitespace);
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const setShowLinkCards = useSettingsStore((s) => s.setShowLinkCards);
+	const scratchpadVolatile = useSettingsStore((s) => s.scratchpadVolatile);
+	const setScratchpadVolatile = useSettingsStore((s) => s.setScratchpadVolatile);
 
 	const gitSyncEnabled = useGitSyncStore((s) => s.gitSyncEnabled);
 	const setGitSyncEnabled = useGitSyncStore((s) => s.setGitSyncEnabled);
@@ -553,6 +556,20 @@ export function SettingsDialog({
 								checked={trimTrailingWhitespace}
 								onChange={setTrimTrailingWhitespace}
 							/>
+						</>
+					)}
+
+					{validSection === "scratchpad" && (
+						<>
+							<Toggle
+								id="scratchpad-volatile-toggle"
+								label="日替わりでクリア"
+								checked={scratchpadVolatile}
+								onChange={setScratchpadVolatile}
+							/>
+							<p className="px-1 text-[10px] leading-relaxed text-text-secondary">
+								有効にすると、日付が変わったときにスクラッチパッドの内容を自動的にアーカイブしてクリアします。
+							</p>
 						</>
 					)}
 
