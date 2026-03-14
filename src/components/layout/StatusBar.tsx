@@ -149,19 +149,6 @@ export function StatusBar({
 				)}
 			</div>
 			<div className="flex items-center gap-3 text-xs">
-				{onToggleScratchpad && (
-					<button
-						type="button"
-						onClick={onToggleScratchpad}
-						aria-label="スクラッチパッド"
-						title="スクラッチパッド"
-						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
-							scratchpadOpen ? "text-text-primary" : ""
-						}`}
-					>
-						<StickyNote size={15} />
-					</button>
-				)}
 				{cursorInfo && (
 					<>
 						{cursorInfo.selectedChars != null && cursorInfo.selectedLines != null ? (
@@ -182,6 +169,19 @@ export function StatusBar({
 					{saveStatus === "saved" && "保存済み"}
 					{saveStatus === "error" && "保存失敗"}
 				</output>
+				{onToggleScratchpad && (
+					<button
+						type="button"
+						onClick={onToggleScratchpad}
+						aria-label="スクラッチパッド"
+						title="スクラッチパッド"
+						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+							scratchpadOpen ? "text-text-primary" : ""
+						}`}
+					>
+						<StickyNote size={15} />
+					</button>
+				)}
 				<button
 					type="button"
 					onClick={onOpenSettings}
