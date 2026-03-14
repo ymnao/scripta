@@ -31,6 +31,10 @@ export default defineConfig({
 					"@tauri-apps/api/event": path.resolve(__dirname, "e2e/mocks/tauri-api-event.ts"),
 					"@tauri-apps/api/window": path.resolve(__dirname, "e2e/mocks/tauri-api-window.ts"),
 					"@tauri-apps/plugin-store": path.resolve(__dirname, "e2e/mocks/tauri-plugin-store.ts"),
+					"@tauri-apps/api/webviewWindow": path.resolve(
+						__dirname,
+						"e2e/mocks/tauri-api-webview-window.ts",
+					),
 				}
 			: undefined,
 	},

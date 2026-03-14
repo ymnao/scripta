@@ -1,4 +1,5 @@
 pub mod file;
+pub mod git_sync;
 #[cfg(feature = "tauri-app")]
 pub mod export;
 pub mod ogp;

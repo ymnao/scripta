@@ -22,6 +22,15 @@ win.__TAURI_EVENT__ = {
 	},
 };
 
+export async function emit(event: string, payload?: unknown): Promise<void> {
+	const handlers = listeners.get(event);
+	if (handlers) {
+		for (const handler of handlers) {
+			handler({ payload });
+		}
+	}
+}
+
 export async function listen<T>(
 	event: string,
 	handler: (event: { payload: T }) => void,

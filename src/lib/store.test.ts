@@ -51,6 +51,14 @@ describe("store", () => {
 				fontFamily: "monospace",
 				trimTrailingWhitespace: true,
 				showLinkCards: true,
+				gitSyncEnabled: false,
+				autoCommitInterval: 10,
+				autoPullInterval: 10,
+				autoPushInterval: 10,
+				pullBeforePush: true,
+				syncMethod: "merge",
+				commitMessage: "vault backup: {{date}}",
+				autoPullOnStartup: false,
 			});
 		});
 
@@ -83,6 +91,14 @@ describe("store", () => {
 				fontFamily: "serif",
 				trimTrailingWhitespace: false,
 				showLinkCards: false,
+				gitSyncEnabled: false,
+				autoCommitInterval: 10,
+				autoPullInterval: 10,
+				autoPushInterval: 10,
+				pullBeforePush: true,
+				syncMethod: "merge",
+				commitMessage: "vault backup: {{date}}",
+				autoPullOnStartup: false,
 			});
 		});
 

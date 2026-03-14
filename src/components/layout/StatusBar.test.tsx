@@ -85,4 +85,42 @@ describe("StatusBar", () => {
 		expect(screen.getByText("5 行, 10 列")).toBeInTheDocument();
 		expect(screen.queryByTestId("selection-info")).not.toBeInTheDocument();
 	});
+
+	it("clicking conflict status opens conflict resolver instead of syncing", async () => {
+		const onGitSync = vi.fn();
+		const onOpenConflictResolver = vi.fn();
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={true}
+				offlineMode={false}
+				onGitSync={onGitSync}
+				onOpenConflictResolver={onOpenConflictResolver}
+			/>,
+		);
+		const button = screen.getByTitle("コンフリクト解消ウィンドウを開く");
+		await userEvent.click(button);
+		expect(onOpenConflictResolver).toHaveBeenCalledTimes(1);
+		expect(onGitSync).not.toHaveBeenCalled();
+	});
+
+	it("clicking sync status calls onGitSync when no conflicts", async () => {
+		const onGitSync = vi.fn();
+		const onOpenConflictResolver = vi.fn();
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={false}
+				offlineMode={false}
+				onGitSync={onGitSync}
+				onOpenConflictResolver={onOpenConflictResolver}
+			/>,
+		);
+		const button = screen.getByTitle("手動同期");
+		await userEvent.click(button);
+		expect(onGitSync).toHaveBeenCalledTimes(1);
+		expect(onOpenConflictResolver).not.toHaveBeenCalled();
+	});
 });

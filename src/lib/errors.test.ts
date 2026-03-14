@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTransientError, translateError } from "./errors";
+import { isNetworkError, isTransientError, translateError } from "./errors";
 
 describe("translateError", () => {
 	it("translates Already exists error", () => {
@@ -96,5 +96,69 @@ describe("isTransientError", () => {
 
 	it("returns true for generic Error objects", () => {
 		expect(isTransientError(new Error("network failure"))).toBe(true);
+	});
+});
+
+describe("isNetworkError", () => {
+	it("detects 'could not resolve host'", () => {
+		expect(
+			isNetworkError("fatal: unable to access 'https://...': Could not resolve host: github.com"),
+		).toBe(true);
+	});
+
+	it("detects 'unable to access' with network cause", () => {
+		expect(
+			isNetworkError(
+				"fatal: unable to access 'https://github.com/repo.git/': Failed to connect to github.com port 443",
+			),
+		).toBe(true);
+	});
+
+	it("returns false for 'unable to access' without network cause (e.g. auth)", () => {
+		expect(isNetworkError("fatal: unable to access 'https://github.com/repo.git/'")).toBe(false);
+	});
+
+	it("returns false for 'unable to access' with HTTP 403", () => {
+		expect(
+			isNetworkError(
+				"fatal: unable to access 'https://github.com/repo.git/': The requested URL returned error: 403",
+			),
+		).toBe(false);
+	});
+
+	it("detects 'connection refused'", () => {
+		expect(isNetworkError("fatal: Connection refused")).toBe(true);
+	});
+
+	it("detects 'network is unreachable'", () => {
+		expect(isNetworkError("fatal: network is unreachable")).toBe(true);
+	});
+
+	it("detects 'connection timed out'", () => {
+		expect(isNetworkError("Connection timed out")).toBe(true);
+	});
+
+	it("detects 'failed to connect'", () => {
+		expect(isNetworkError("Failed to connect to github.com port 443")).toBe(true);
+	});
+
+	it("returns false for authentication errors", () => {
+		expect(isNetworkError("fatal: Authentication failed for 'https://...'")).toBe(false);
+	});
+
+	it("returns false for merge conflict errors", () => {
+		expect(isNetworkError("CONFLICT (content): Merge conflict in file.md")).toBe(false);
+	});
+
+	it("returns false for nothing to commit", () => {
+		expect(isNetworkError("nothing to commit, working tree clean")).toBe(false);
+	});
+
+	it("handles Error objects", () => {
+		expect(isNetworkError(new Error("could not resolve host: example.com"))).toBe(true);
+	});
+
+	it("handles non-string non-Error values", () => {
+		expect(isNetworkError(42)).toBe(false);
 	});
 });

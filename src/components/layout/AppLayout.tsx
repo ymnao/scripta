@@ -1,14 +1,17 @@
 import type { EditorView } from "@codemirror/view";
 import { listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
+import { useGitSync } from "../../hooks/useGitSync";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
+import { useGitSyncStore } from "../../stores/git-sync";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
@@ -62,6 +65,15 @@ export function AppLayout() {
 	const workspaceInitialized = useWorkspaceConfigStore((s) => s.workspaceInitialized);
 	const configLoaded = useWorkspaceConfigStore((s) => s.configLoaded);
 	const setWorkspaceInitialized = useWorkspaceConfigStore((s) => s.setWorkspaceInitialized);
+
+	const hydrateGitSync = useGitSyncStore((s) => s.hydrate);
+	const gitAction = useGitSyncStore((s) => s.gitAction);
+	const lastCommitTime = useGitSyncStore((s) => s.lastCommitTime);
+	const conflictFiles = useGitSyncStore((s) => s.conflictFiles);
+	const offlineMode = useGitSyncStore((s) => s.offlineMode);
+	const gitReady = useGitSyncStore((s) => s.gitReady);
+
+	const { manualSync } = useGitSync({ workspacePath });
 
 	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
 	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
@@ -148,6 +160,16 @@ export function AppLayout() {
 				trimTrailingWhitespace: settings.trimTrailingWhitespace,
 				showLinkCards: settings.showLinkCards,
 			});
+			hydrateGitSync({
+				gitSyncEnabled: settings.gitSyncEnabled,
+				autoCommitInterval: settings.autoCommitInterval,
+				autoPullInterval: settings.autoPullInterval,
+				autoPushInterval: settings.autoPushInterval,
+				pullBeforePush: settings.pullBeforePush,
+				syncMethod: settings.syncMethod,
+				commitMessage: settings.commitMessage,
+				autoPullOnStartup: settings.autoPullOnStartup,
+			});
 			setSidebarVisible(settings.sidebarVisible);
 			setLoading(false);
 		})();
@@ -155,7 +177,7 @@ export function AppLayout() {
 		return () => {
 			cancelled = true;
 		};
-	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings]);
+	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings, hydrateGitSync]);
 
 	// Persist workspace path changes (skip the initial restored value and new windows)
 	useEffect(() => {
@@ -181,6 +203,32 @@ export function AppLayout() {
 			resetWorkspaceConfig();
 		}
 	}, [workspacePath, loadIcons, resetWorkspaceConfig]);
+
+	// Open (or re-focus) the conflict resolution window
+	const openConflictResolver = useCallback(() => {
+		if (!workspacePath) return;
+		const existing = WebviewWindow.getByLabel("conflict-resolver");
+		if (existing) {
+			void existing.setFocus();
+			return;
+		}
+		new WebviewWindow("conflict-resolver", {
+			url: `/?conflict=true&workspacePath=${encodeURIComponent(workspacePath)}`,
+			title: "コンフリクト解消",
+			width: 900,
+			height: 600,
+		});
+	}, [workspacePath]);
+
+	// Auto-open conflict resolution window only on 0 → >0 transition
+	const prevConflictCountRef = useRef(0);
+	useEffect(() => {
+		const prev = prevConflictCountRef.current;
+		prevConflictCountRef.current = conflictFiles.length;
+		if (prev === 0 && conflictFiles.length > 0 && workspacePath) {
+			openConflictResolver();
+		}
+	}, [conflictFiles, workspacePath, openConflictResolver]);
 
 	// Show setup wizard for uninitialized workspaces.
 	// configLoaded が true かつ workspaceInitialized が false のときだけ開く。
@@ -234,13 +282,17 @@ export function AppLayout() {
 		const unlisteners: Array<() => void> = [];
 
 		const addListener = (event: string, handler: () => void) => {
-			void listen(event, handler).then((u) => {
-				if (cancelled) {
-					u();
-					return;
-				}
-				unlisteners.push(u);
-			});
+			listen(event, handler)
+				.then((u) => {
+					if (cancelled) {
+						u();
+						return;
+					}
+					unlisteners.push(u);
+				})
+				.catch((err) => {
+					console.error(`Failed to register menu listener for ${event}:`, err);
+				});
 		};
 
 		addListener("menu-open-settings", () => setSettingsOpen(true));
@@ -996,6 +1048,13 @@ export function AppLayout() {
 				}
 				onOpenSettings={() => setSettingsOpen(true)}
 				onOpenHelp={() => setHelpOpen(true)}
+				gitAction={gitAction}
+				lastCommitTime={lastCommitTime}
+				hasConflicts={conflictFiles.length > 0}
+				offlineMode={offlineMode}
+				onGitSync={manualSync}
+				onOpenConflictResolver={openConflictResolver}
+				gitReady={gitReady}
 			/>
 
 			{workspacePath && (
@@ -1012,6 +1071,7 @@ export function AppLayout() {
 				onClose={() => setSettingsOpen(false)}
 				workspacePath={workspacePath}
 				onOpenFile={openTab}
+				onManualSync={manualSync}
 			/>
 			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
 			{exportTarget && (

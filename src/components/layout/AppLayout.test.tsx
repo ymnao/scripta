@@ -29,6 +29,15 @@ vi.mock("../../lib/store", () => ({
 		highlightActiveLine: false,
 		fontFamily: "monospace",
 		trimTrailingWhitespace: true,
+		showLinkCards: true,
+		gitSyncEnabled: false,
+		autoCommitInterval: 10,
+		autoPullInterval: 10,
+		autoPushInterval: 10,
+		pullBeforePush: true,
+		syncMethod: "merge",
+		commitMessage: "vault backup: {{date}}",
+		autoPullOnStartup: false,
 	}),
 	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
 	saveThemePreference: vi.fn().mockResolvedValue(undefined),
@@ -39,6 +48,27 @@ vi.mock("../../lib/store", () => ({
 	saveHighlightActiveLine: vi.fn().mockResolvedValue(undefined),
 	saveFontFamily: vi.fn().mockResolvedValue(undefined),
 	saveTrimTrailingWhitespace: vi.fn().mockResolvedValue(undefined),
+	saveShowLinkCards: vi.fn().mockResolvedValue(undefined),
+	saveGitSyncEnabled: vi.fn().mockResolvedValue(undefined),
+	saveAutoCommitInterval: vi.fn().mockResolvedValue(undefined),
+	saveAutoPullInterval: vi.fn().mockResolvedValue(undefined),
+	saveAutoPushInterval: vi.fn().mockResolvedValue(undefined),
+	savePullBeforePush: vi.fn().mockResolvedValue(undefined),
+	saveSyncMethod: vi.fn().mockResolvedValue(undefined),
+	saveCommitMessage: vi.fn().mockResolvedValue(undefined),
+	saveAutoPullOnStartup: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../hooks/useGitSync", () => ({
+	useGitSync: () => ({ manualSync: vi.fn() }),
+}));
+
+const MockWebviewWindowConstructor = vi.fn();
+// Assign static method so TypeScript is happy with `WebviewWindow.getByLabel()`
+MockWebviewWindowConstructor.getByLabel = vi.fn().mockReturnValue(null);
+
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+	WebviewWindow: MockWebviewWindowConstructor,
 }));
 
 // Capture the fs-change listener callback so tests can emit events
@@ -46,10 +76,14 @@ type FsChangeCallback = (event: { payload: FsChangeEvent[] }) => void;
 let fsChangeCallback: FsChangeCallback | null = null;
 
 vi.mock("@tauri-apps/api/event", () => ({
-	listen: vi.fn().mockImplementation((_name: string, cb: FsChangeCallback) => {
-		fsChangeCallback = cb;
+	listen: vi.fn().mockImplementation((name: string, cb: FsChangeCallback) => {
+		if (name === "fs-change") {
+			fsChangeCallback = cb;
+		}
 		return Promise.resolve(() => {
-			fsChangeCallback = null;
+			if (name === "fs-change") {
+				fsChangeCallback = null;
+			}
 		});
 	}),
 }));
@@ -96,6 +130,7 @@ vi.mock("../editor/MarkdownEditor", () => ({
 }));
 
 const { AppLayout } = await import("./AppLayout");
+const { useGitSyncStore } = await import("../../stores/git-sync");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -119,6 +154,8 @@ describe("AppLayout", () => {
 		fsChangeCallback = null;
 		closeHandler = null;
 		mockDestroy.mockClear();
+		MockWebviewWindowConstructor.mockClear();
+		(MockWebviewWindowConstructor.getByLabel as Mock).mockReturnValue(null);
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
 		nextId = 1;
@@ -130,6 +167,7 @@ describe("AppLayout", () => {
 			_nextTabId: 1,
 		});
 		useWorkspaceConfigStore.getState().reset();
+		useGitSyncStore.getState().resetRuntime();
 	});
 
 	afterEach(() => {
@@ -952,5 +990,42 @@ describe("AppLayout", () => {
 		// loadIcons が configLoaded=false → true、workspaceInitialized=true とセットする
 		// ウィザードは閉じているべき
 		expect(screen.queryByText("ワークスペースのセットアップ")).not.toBeInTheDocument();
+	});
+
+	it("opens conflict resolver only on 0→>0 transition, not on repeated updates", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Initial state: no conflicts. Trigger 0→>0 transition.
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: ["file1.md"] });
+		});
+
+		// Conflict window should have been opened once (static import, no async flush needed)
+		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
+
+		// Update conflictFiles with a different array reference but still >0
+		// Before the fix, this would trigger openConflictResolver again
+		// because zustand returned a new array reference on every update.
+		MockWebviewWindowConstructor.mockClear();
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: ["file1.md", "file2.md"] });
+		});
+
+		// Should NOT open a new window (prev > 0, current > 0)
+		expect(MockWebviewWindowConstructor).not.toHaveBeenCalled();
+
+		// Reset to 0, then back to >0 should open again
+		MockWebviewWindowConstructor.mockClear();
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: [] });
+		});
+		await act(async () => {
+			useGitSyncStore.setState({ conflictFiles: ["file3.md"] });
+		});
+
+		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
 	});
 });

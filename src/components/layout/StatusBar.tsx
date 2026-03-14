@@ -1,5 +1,16 @@
-import { CircleHelp, Settings } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	AlertTriangle,
+	ArrowDown,
+	ArrowUp,
+	CircleHelp,
+	GitBranch,
+	GitCommitHorizontal,
+	Plus,
+	Settings,
+	WifiOff,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import type { GitAction } from "../../types/git-sync";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
 export type SaveStatus = "saved" | "unsaved" | "saving" | "error";
@@ -10,6 +21,68 @@ interface StatusBarProps {
 	filePath?: string;
 	onOpenSettings?: () => void;
 	onOpenHelp?: () => void;
+	gitAction?: GitAction;
+	lastCommitTime?: string | null;
+	hasConflicts?: boolean;
+	offlineMode?: boolean;
+	onGitSync?: () => void;
+	onOpenConflictResolver?: () => void;
+	gitReady?: boolean;
+}
+
+function GitSyncStatus({
+	gitAction,
+	lastCommitTime,
+	hasConflicts,
+	offlineMode,
+	onGitSync,
+	onOpenConflictResolver,
+}: {
+	gitAction: GitAction;
+	lastCommitTime?: string | null;
+	hasConflicts: boolean;
+	offlineMode: boolean;
+	onGitSync?: () => void;
+	onOpenConflictResolver?: () => void;
+}) {
+	let icon: ReactNode;
+	let label: string;
+
+	if (hasConflicts) {
+		icon = <AlertTriangle size={13} className="text-yellow-500" />;
+		label = "コンフリクト";
+	} else if (offlineMode) {
+		icon = <WifiOff size={13} className="text-text-secondary" />;
+		label = "オフライン";
+	} else if (gitAction === "pull") {
+		icon = <ArrowDown size={13} className="animate-pulse" />;
+		label = "Pull 中...";
+	} else if (gitAction === "push") {
+		icon = <ArrowUp size={13} className="animate-pulse" />;
+		label = "Push 中...";
+	} else if (gitAction === "commit") {
+		icon = <GitCommitHorizontal size={13} />;
+		label = "コミット中...";
+	} else if (gitAction === "add") {
+		icon = <Plus size={13} />;
+		label = "ステージング...";
+	} else {
+		icon = <GitBranch size={13} />;
+		label = lastCommitTime ? lastCommitTime.slice(0, 16) : "";
+	}
+
+	return (
+		<button
+			type="button"
+			onClick={hasConflicts ? onOpenConflictResolver : onGitSync}
+			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
+			title={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}
+			aria-label={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}
+		>
+			{icon}
+			{label && <span>{label}</span>}
+		</button>
+	);
 }
 
 export function StatusBar({
@@ -18,6 +91,13 @@ export function StatusBar({
 	filePath,
 	onOpenSettings,
 	onOpenHelp,
+	gitAction,
+	lastCommitTime,
+	hasConflicts,
+	offlineMode,
+	onGitSync,
+	onOpenConflictResolver,
+	gitReady,
 }: StatusBarProps) {
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef(0);
@@ -41,6 +121,16 @@ export function StatusBar({
 	return (
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary pl-2 pr-3 text-text-secondary">
 			<div className="flex min-w-0 items-center gap-3 text-xs">
+				{gitReady && gitAction != null && (
+					<GitSyncStatus
+						gitAction={gitAction}
+						lastCommitTime={lastCommitTime}
+						hasConflicts={hasConflicts ?? false}
+						offlineMode={offlineMode ?? false}
+						onGitSync={onGitSync}
+						onOpenConflictResolver={onOpenConflictResolver}
+					/>
+				)}
 				{filePath && (
 					<button
 						type="button"
