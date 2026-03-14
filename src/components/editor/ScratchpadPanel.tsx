@@ -10,7 +10,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { ArrowUpFromLine, GripHorizontal, X } from "lucide-react";
+import { GripHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { readFile } from "../../lib/commands";
@@ -46,10 +46,9 @@ const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: lang
 interface ScratchpadPanelProps {
 	workspacePath: string;
 	onClose: () => void;
-	mainEditorView: EditorView | null;
 }
 
-export function ScratchpadPanel({ workspacePath, onClose, mainEditorView }: ScratchpadPanelProps) {
+export function ScratchpadPanel({ workspacePath, onClose }: ScratchpadPanelProps) {
 	const fontSize = useSettingsStore((s) => s.fontSize);
 	const fontFamily = useSettingsStore((s) => s.fontFamily);
 
@@ -116,29 +115,17 @@ export function ScratchpadPanel({ workspacePath, onClose, mainEditorView }: Scra
 		draggingRef.current = false;
 	}, []);
 
-	// Insert selected text into main editor
-	const handleInsertToMain = useCallback(() => {
-		if (!mainEditorView) return;
-		const view = editorRef.current?.view;
-		if (!view) return;
-
-		const sel = view.state.selection.main;
-		if (sel.empty) return;
-
-		const selectedText = view.state.sliceDoc(sel.from, sel.to);
-		const mainSel = mainEditorView.state.selection.main;
-
-		mainEditorView.dispatch({
-			changes: { from: mainSel.from, to: mainSel.to, insert: selectedText },
+	// Focus editor and move cursor to end of document after load
+	useEffect(() => {
+		if (!loaded) return;
+		requestAnimationFrame(() => {
+			const view = editorRef.current?.view;
+			if (!view) return;
+			const end = view.state.doc.length;
+			view.dispatch({ selection: { anchor: end } });
+			view.focus();
 		});
-
-		// Remove from scratchpad
-		view.dispatch({
-			changes: { from: sel.from, to: sel.to, insert: "" },
-		});
-
-		mainEditorView.focus();
-	}, [mainEditorView]);
+	}, [loaded]);
 
 	const extensions = useMemo(
 		() => [
@@ -196,26 +183,14 @@ export function ScratchpadPanel({ workspacePath, onClose, mainEditorView }: Scra
 			{/* Header */}
 			<div className="flex shrink-0 items-center justify-between px-3 pb-1">
 				<span className="text-xs font-medium text-text-secondary">スクラッチパッド</span>
-				<div className="flex items-center gap-1">
-					<button
-						type="button"
-						onClick={handleInsertToMain}
-						disabled={!mainEditorView}
-						className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-secondary hover:bg-black/10 disabled:opacity-30 dark:hover:bg-white/10"
-						title="選択テキストをメインエディタに挿入"
-						aria-label="メインエディタに挿入"
-					>
-						<ArrowUpFromLine size={12} />
-					</button>
-					<button
-						type="button"
-						onClick={onClose}
-						className="rounded p-0.5 text-text-secondary hover:bg-black/10 dark:hover:bg-white/10"
-						aria-label="スクラッチパッドを閉じる"
-					>
-						<X size={14} />
-					</button>
-				</div>
+				<button
+					type="button"
+					onClick={onClose}
+					className="rounded p-0.5 text-text-secondary hover:bg-black/10 dark:hover:bg-white/10"
+					aria-label="スクラッチパッドを閉じる"
+				>
+					<X size={14} />
+				</button>
 			</div>
 
 			{/* Editor */}

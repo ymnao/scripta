@@ -1044,7 +1044,6 @@ export function AppLayout() {
 						<ScratchpadPanel
 							workspacePath={workspacePath}
 							onClose={() => setScratchpadOpen(false)}
-							mainEditorView={editorView}
 						/>
 					)}
 					{searchBarOpen && editorView && (
