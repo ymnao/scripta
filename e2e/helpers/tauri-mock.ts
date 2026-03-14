@@ -269,6 +269,11 @@ export class TauriMock {
 					return undefined;
 				};
 
+				store.handlers.file_exists = (args: Record<string, unknown>) => {
+					const path = args.path as string;
+					return path in parsedFiles || path in parsedDirs;
+				};
+
 				store.handlers.search_filenames = (args: Record<string, unknown>) => {
 					const workspacePath = args.workspacePath as string;
 					const query = (args.query as string).toLowerCase();
