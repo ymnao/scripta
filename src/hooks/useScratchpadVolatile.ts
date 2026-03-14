@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { readFile, writeFile } from "../lib/commands";
 import { getScratchpadArchivePath, getScratchpadPath } from "../lib/scripta-config";
 import { useSettingsStore } from "../stores/settings";
 
-const LAST_ACTIVE_KEY = "scratchpad-last-active-date";
+const LAST_ACTIVE_KEY_PREFIX = "scratchpad-last-active-date:";
+
+function lastActiveKey(workspacePath: string): string {
+	return `${LAST_ACTIVE_KEY_PREFIX}${workspacePath}`;
+}
 
 function todayString(): string {
 	const d = new Date();
@@ -14,8 +18,6 @@ function todayString(): string {
 }
 
 export function useScratchpadVolatile(workspacePath: string | null) {
-	const processedRef = useRef(false);
-
 	const archive = useCallback(async () => {
 		if (!workspacePath) return;
 
@@ -23,7 +25,8 @@ export function useScratchpadVolatile(workspacePath: string | null) {
 		if (!volatile) return;
 
 		const today = todayString();
-		const lastDate = localStorage.getItem(LAST_ACTIVE_KEY);
+		const key = lastActiveKey(workspacePath);
+		const lastDate = localStorage.getItem(key);
 
 		if (lastDate === today) return;
 
@@ -57,13 +60,11 @@ export function useScratchpadVolatile(workspacePath: string | null) {
 			// Scratchpad file doesn't exist — nothing to archive
 		}
 
-		localStorage.setItem(LAST_ACTIVE_KEY, today);
+		localStorage.setItem(key, today);
 	}, [workspacePath]);
 
-	// Run on mount
+	// Run on mount and when workspace changes
 	useEffect(() => {
-		if (processedRef.current) return;
-		processedRef.current = true;
 		void archive();
 	}, [archive]);
 

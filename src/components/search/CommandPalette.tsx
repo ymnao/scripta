@@ -27,9 +27,16 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 			setFiles([]);
 			setSelectedIndex(0);
 			setIsScratchpadMode(false);
+			const id = ++requestIdRef.current;
 			searchFilenames(workspacePath, "")
-				.then(setFiles)
-				.catch(() => setFiles([]));
+				.then((res) => {
+					if (requestIdRef.current !== id) return;
+					setFiles(res);
+				})
+				.catch(() => {
+					if (requestIdRef.current !== id) return;
+					setFiles([]);
+				});
 		}
 	}, [open, workspacePath]);
 

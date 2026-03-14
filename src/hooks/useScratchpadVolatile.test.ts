@@ -35,12 +35,12 @@ describe("useScratchpadVolatile", () => {
 			renderHook(() => useScratchpadVolatile("/workspace"));
 		});
 
-		expect(localStorage.getItem("scratchpad-last-active-date")).toBeTruthy();
+		expect(localStorage.getItem("scratchpad-last-active-date:/workspace")).toBeTruthy();
 	});
 
 	it("does not archive when scratchpadVolatile is false", async () => {
 		useSettingsStore.setState({ scratchpadVolatile: false });
-		localStorage.setItem("scratchpad-last-active-date", "2026-01-01");
+		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
 
 		await act(async () => {
 			renderHook(() => useScratchpadVolatile("/workspace"));
@@ -54,7 +54,7 @@ describe("useScratchpadVolatile", () => {
 		const y = today.getFullYear();
 		const m = String(today.getMonth() + 1).padStart(2, "0");
 		const d = String(today.getDate()).padStart(2, "0");
-		localStorage.setItem("scratchpad-last-active-date", `${y}-${m}-${d}`);
+		localStorage.setItem("scratchpad-last-active-date:/workspace", `${y}-${m}-${d}`);
 
 		await act(async () => {
 			renderHook(() => useScratchpadVolatile("/workspace"));
@@ -64,7 +64,7 @@ describe("useScratchpadVolatile", () => {
 	});
 
 	it("archives content when date has changed", async () => {
-		localStorage.setItem("scratchpad-last-active-date", "2026-01-01");
+		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
 		mockedReadFile.mockImplementation(async (path: string) => {
 			if (path.endsWith("scratchpad.md")) return "old notes";
 			throw new Error("Not found");
@@ -84,7 +84,7 @@ describe("useScratchpadVolatile", () => {
 	});
 
 	it("appends to existing archive with separator", async () => {
-		localStorage.setItem("scratchpad-last-active-date", "2026-01-01");
+		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
 		mockedReadFile.mockImplementation(async (path: string) => {
 			if (path.endsWith("scratchpad.md")) return "new notes";
 			if (path.endsWith("2026-01-01.md")) return "previous archive";
@@ -102,7 +102,7 @@ describe("useScratchpadVolatile", () => {
 	});
 
 	it("does not archive empty scratchpad", async () => {
-		localStorage.setItem("scratchpad-last-active-date", "2026-01-01");
+		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
 		mockedReadFile.mockImplementation(async (path: string) => {
 			if (path.endsWith("scratchpad.md")) return "  \n  ";
 			throw new Error("Not found");
@@ -122,7 +122,7 @@ describe("useScratchpadVolatile", () => {
 	});
 
 	it("does nothing when workspacePath is null", async () => {
-		localStorage.setItem("scratchpad-last-active-date", "2026-01-01");
+		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
 
 		await act(async () => {
 			renderHook(() => useScratchpadVolatile(null));

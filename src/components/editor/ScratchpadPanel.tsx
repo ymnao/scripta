@@ -76,10 +76,12 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 			saveRef.current = () => saveNowRef.current();
 		}
 		return () => {
+			// Start save and keep saveRef pointing to the pending promise
+			// so onCloseRequested can await it even after unmount.
+			const promise = saveNowRef.current();
 			if (saveRef) {
-				saveRef.current = null;
+				saveRef.current = () => promise;
 			}
-			void saveNowRef.current();
 		};
 	}, [saveRef]);
 
