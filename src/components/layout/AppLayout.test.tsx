@@ -133,6 +133,7 @@ vi.mock("../editor/MarkdownEditor", () => ({
 
 const { AppLayout } = await import("./AppLayout");
 const { useGitSyncStore } = await import("../../stores/git-sync");
+const { useScratchpadStore } = await import("../../stores/scratchpad");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -170,6 +171,7 @@ describe("AppLayout", () => {
 		});
 		useWorkspaceConfigStore.getState().reset();
 		useGitSyncStore.getState().resetRuntime();
+		useScratchpadStore.setState({ open: false });
 	});
 
 	afterEach(() => {
@@ -992,6 +994,35 @@ describe("AppLayout", () => {
 		// loadIcons が configLoaded=false → true、workspaceInitialized=true とセットする
 		// ウィザードは閉じているべき
 		expect(screen.queryByText("ワークスペースのセットアップ")).not.toBeInTheDocument();
+	});
+
+	it("Cmd+J does not toggle scratchpad when no workspace is open", async () => {
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(false);
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", metaKey: true }));
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(false);
+	});
+
+	it("Cmd+J toggles scratchpad when workspace is open", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(false);
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", metaKey: true }));
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(true);
 	});
 
 	it("opens conflict resolver only on 0→>0 transition, not on repeated updates", async () => {

@@ -971,7 +971,7 @@ export function AppLayout() {
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
 				e.preventDefault();
-				toggleScratchpad();
+				if (workspacePath) toggleScratchpad();
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
@@ -989,7 +989,15 @@ export function AppLayout() {
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [activeTabId, handleCloseTab, handleExport, handleGoBack, handleGoForward, toggleScratchpad]);
+	}, [
+		activeTabId,
+		handleCloseTab,
+		handleExport,
+		handleGoBack,
+		handleGoForward,
+		toggleScratchpad,
+		workspacePath,
+	]);
 
 	if (loading) {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
