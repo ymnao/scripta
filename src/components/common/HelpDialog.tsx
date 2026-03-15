@@ -26,6 +26,7 @@ const groups: ShortcutGroup[] = [
 			{ keys: [[mod, "1\u20136"]], action: "見出し 1\u20136" },
 			{ keys: [[mod, "L"]], action: "リストの切り替え" },
 			{ keys: [[mod, shift, "L"]], action: "チェックボックスの切り替え" },
+			{ keys: [[mod, "\u21A9"]], action: "チェック / チェック解除" },
 		],
 	},
 	{

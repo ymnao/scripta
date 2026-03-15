@@ -22,6 +22,7 @@ import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
 	toggleBold,
+	toggleCheckState,
 	toggleCheckbox,
 	toggleHeading,
 	toggleItalic,
@@ -241,6 +242,7 @@ export function MarkdownEditor({
 				keymap.of([
 					{ key: "Mod-l", run: toggleList },
 					{ key: "Mod-Shift-l", run: toggleCheckbox },
+					{ key: "Mod-Enter", run: toggleCheckState },
 				]),
 			),
 			keymap.of([

@@ -3,6 +3,7 @@ import { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import {
 	toggleBold,
+	toggleCheckState,
 	toggleCheckbox,
 	toggleHeading,
 	toggleItalic,
@@ -153,26 +154,26 @@ describe("toggleList", () => {
 });
 
 describe("toggleCheckbox", () => {
-	it("checks unchecked checkbox", () => {
+	it("adds checkbox to plain line", () => {
+		const view = createView("hello", 0);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("- [ ] hello");
+	});
+
+	it("removes checkbox from unchecked task", () => {
 		const view = createView("- [ ] hello", 6);
 		toggleCheckbox(view);
-		expect(getDoc(view)).toBe("- [x] hello");
+		expect(getDoc(view)).toBe("hello");
 	});
 
-	it("unchecks checked checkbox", () => {
+	it("removes checkbox from checked task", () => {
 		const view = createView("- [x] hello", 6);
 		toggleCheckbox(view);
-		expect(getDoc(view)).toBe("- [ ] hello");
+		expect(getDoc(view)).toBe("hello");
 	});
 
-	it("adds checkbox to list item", () => {
+	it("replaces list marker with checkbox", () => {
 		const view = createView("- hello", 2);
-		toggleCheckbox(view);
-		expect(getDoc(view)).toBe("- [ ] hello");
-	});
-
-	it("adds list marker and checkbox to plain line", () => {
-		const view = createView("hello", 0);
 		toggleCheckbox(view);
 		expect(getDoc(view)).toBe("- [ ] hello");
 	});
@@ -181,5 +182,33 @@ describe("toggleCheckbox", () => {
 		const view = createView("  hello", 2);
 		toggleCheckbox(view);
 		expect(getDoc(view)).toBe("  - [ ] hello");
+	});
+});
+
+describe("toggleCheckState", () => {
+	it("checks unchecked checkbox", () => {
+		const view = createView("- [ ] hello", 6);
+		toggleCheckState(view);
+		expect(getDoc(view)).toBe("- [x] hello");
+	});
+
+	it("unchecks checked checkbox", () => {
+		const view = createView("- [x] hello", 6);
+		toggleCheckState(view);
+		expect(getDoc(view)).toBe("- [ ] hello");
+	});
+
+	it("returns false on non-checkbox line", () => {
+		const view = createView("- hello", 2);
+		const result = toggleCheckState(view);
+		expect(result).toBe(false);
+		expect(getDoc(view)).toBe("- hello");
+	});
+
+	it("returns false on plain line", () => {
+		const view = createView("hello", 0);
+		const result = toggleCheckState(view);
+		expect(result).toBe(false);
+		expect(getDoc(view)).toBe("hello");
 	});
 });
