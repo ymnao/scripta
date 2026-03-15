@@ -1,3 +1,5 @@
+import { Kbd } from "../common/Kbd";
+
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 const mod = isMac ? "\u2318" : "Ctrl";
 const shift = isMac ? "\u21E7" : "Shift";
@@ -28,14 +30,6 @@ const shortcuts = [
 	{ keys: [mod, "B"], label: "サイドバー" },
 	{ keys: [mod, "L"], label: "リスト切り替え" },
 ] as const;
-
-function Kbd({ children }: { children: string }) {
-	return (
-		<kbd className="inline-flex min-w-[18px] items-center justify-center rounded border border-border bg-bg-secondary px-1 py-0.5 font-mono text-[10px] leading-none text-text-secondary shadow-[0_1px_0_0_var(--color-border)]">
-			{children}
-		</kbd>
-	);
-}
 
 interface NewTabContentProps {
 	onAction: (action: "commandPalette" | "workspaceSearch" | "help") => void;

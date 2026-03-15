@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useId } from "react";
 import { DialogBase } from "./DialogBase";
+import { Kbd } from "./Kbd";
 
 interface HelpDialogProps {
 	open: boolean;
@@ -80,14 +81,6 @@ const groups: ShortcutGroup[] = [
 		],
 	},
 ];
-
-function Kbd({ children }: { children: string }) {
-	return (
-		<kbd className="inline-flex min-w-[20px] items-center justify-center rounded border border-border bg-bg-secondary px-1.5 py-0.5 font-mono text-[10px] leading-none text-text-primary shadow-[0_1px_0_0_var(--color-border)]">
-			{children}
-		</kbd>
-	);
-}
 
 function KeyCombo({ keys }: { keys: string[][] }) {
 	return (
