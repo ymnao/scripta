@@ -170,15 +170,15 @@ export function MarkdownEditor({
 			const lineNum = Math.min(goToLine.line, view.state.doc.lines);
 			const lineInfo = view.state.doc.line(lineNum);
 
+			const pos = goToLine.query ? lineInfo.from : lineInfo.to;
+
 			view.dispatch({
-				selection: EditorSelection.cursor(goToLine.query ? lineInfo.from : lineInfo.to),
+				selection: EditorSelection.cursor(pos),
 				effects: goToLine.query ? [setHighlightQuery.of(goToLine.query)] : [],
 			});
 
 			view.dispatch({
-				effects: EditorView.scrollIntoView(goToLine.query ? lineInfo.from : lineInfo.to, {
-					y: "center",
-				}),
+				effects: EditorView.scrollIntoView(pos, { y: "center" }),
 			});
 
 			view.focus();

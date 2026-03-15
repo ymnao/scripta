@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface GoToLineDialogProps {
 	open: boolean;
@@ -10,6 +10,10 @@ interface GoToLineDialogProps {
 export function GoToLineDialog({ open, totalLines, onGoToLine, onClose }: GoToLineDialogProps) {
 	const [value, setValue] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
+	const onCloseRef = useRef(onClose);
+	onCloseRef.current = onClose;
+	const onGoToLineRef = useRef(onGoToLine);
+	onGoToLineRef.current = onGoToLine;
 
 	useEffect(() => {
 		if (open) {
@@ -24,21 +28,21 @@ export function GoToLineDialog({ open, totalLines, onGoToLine, onClose }: GoToLi
 			if (e.key === "Escape") {
 				e.stopPropagation();
 				e.preventDefault();
-				onClose();
+				onCloseRef.current();
 			}
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
-	}, [open, onClose]);
-
-	const handleSubmit = useCallback(() => {
-		const line = Number.parseInt(value, 10);
-		if (Number.isNaN(line) || line < 1) return;
-		onGoToLine(Math.min(line, totalLines));
-		onClose();
-	}, [value, totalLines, onGoToLine, onClose]);
+	}, [open]);
 
 	if (!open) return null;
+
+	const handleSubmit = () => {
+		const line = Number.parseInt(value, 10);
+		if (Number.isNaN(line) || line < 1) return;
+		onGoToLineRef.current(Math.min(line, totalLines));
+		onCloseRef.current();
+	};
 
 	return (
 		<div className="absolute top-0 right-0 left-0 z-20 flex justify-center pt-2">
@@ -59,7 +63,7 @@ export function GoToLineDialog({ open, totalLines, onGoToLine, onClose }: GoToLi
 							handleSubmit();
 						}
 					}}
-					placeholder={`1–${totalLines}`}
+					placeholder={`1\u2013${totalLines}`}
 					className="w-20 rounded border border-border bg-bg-secondary px-2 py-1 text-xs text-text-primary outline-none focus:border-blue-500"
 				/>
 				<span className="text-[10px] text-text-secondary/60">/ {totalLines}</span>
