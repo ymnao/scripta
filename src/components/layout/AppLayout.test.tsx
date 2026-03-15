@@ -1114,4 +1114,28 @@ describe("AppLayout", () => {
 		// it was closed (state reset) so it won't reappear on next file open
 		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
+
+	it("replaces newtab with file when navigating via sidebar", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		const state = useWorkspaceStore.getState();
+		const newTabId = state.activeTabId;
+		expect(state.tabs).toHaveLength(1);
+
+		// Simulate sidebar file select (uses navigateInTab)
+		await act(async () => {
+			useWorkspaceStore.getState().navigateInTab("/workspace/test.md");
+		});
+
+		// newtab should be replaced, not a new tab created
+		const after = useWorkspaceStore.getState();
+		expect(after.tabs).toHaveLength(1);
+		expect(after.activeTabId).toBe(newTabId);
+		expect(after.activeTabPath).toBe("/workspace/test.md");
+	});
 });

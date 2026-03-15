@@ -885,9 +885,15 @@ export function AppLayout() {
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
-			openTab(filePath);
+			// newtab ページ上ではタブ内ナビゲーションで置き換える（Chrome の新しいタブと同じ挙動）
+			const state = useWorkspaceStore.getState();
+			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
+				navigateInTab(filePath);
+			} else {
+				openTab(filePath);
+			}
 		},
-		[openTab],
+		[openTab, navigateInTab],
 	);
 
 	const handleShowFiles = useCallback(() => {
