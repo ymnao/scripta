@@ -1073,7 +1073,8 @@ export function AppLayout() {
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "g") {
-				if (editorViewRef.current) {
+				const view = editorViewRef.current;
+				if (view?.hasFocus) {
 					e.preventDefault();
 					setGoToLineOpen((prev) => !prev);
 				}
