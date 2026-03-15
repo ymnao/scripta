@@ -114,6 +114,14 @@ vi.mock("@tauri-apps/api/window", () => ({
 	}),
 }));
 
+let capturedOnFileSelect: ((path: string) => void) | null = null;
+vi.mock("./Sidebar", () => ({
+	Sidebar: (props: { onFileSelect: (path: string) => void }) => {
+		capturedOnFileSelect = props.onFileSelect;
+		return <div data-testid="mock-sidebar" />;
+	},
+}));
+
 vi.mock("../editor/MarkdownEditor", () => ({
 	MarkdownEditor: ({
 		value,
@@ -157,6 +165,7 @@ describe("AppLayout", () => {
 		vi.useFakeTimers();
 		fsChangeCallback = null;
 		closeHandler = null;
+		capturedOnFileSelect = null;
 		mockDestroy.mockClear();
 		MockWebviewWindowConstructor.mockClear();
 		(MockWebviewWindowConstructor.getByLabel as Mock).mockReturnValue(null);
@@ -1116,7 +1125,7 @@ describe("AppLayout", () => {
 		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
 
-	it("replaces newtab with file when navigating via sidebar", async () => {
+	it("replaces newtab with file when selecting via sidebar", async () => {
 		useWorkspaceStore.setState({ workspacePath: "/workspace" });
 		useWorkspaceStore.getState().openNewTab();
 
@@ -1127,21 +1136,21 @@ describe("AppLayout", () => {
 		const state = useWorkspaceStore.getState();
 		const newTabId = state.activeTabId;
 		expect(state.tabs).toHaveLength(1);
+		expect(capturedOnFileSelect).not.toBeNull();
 
-		// Simulate sidebar file select (uses navigateInTab)
+		// Trigger file selection via the sidebar's onFileSelect callback
 		await act(async () => {
-			useWorkspaceStore.getState().navigateInTab("/workspace/test.md");
+			capturedOnFileSelect?.("/workspace/test.md");
 		});
 
-		// newtab should be replaced, not a new tab created
+		// newtab should be replaced in the same tab
 		const after = useWorkspaceStore.getState();
 		expect(after.tabs).toHaveLength(1);
 		expect(after.activeTabId).toBe(newTabId);
 		expect(after.activeTabPath).toBe("/workspace/test.md");
 	});
 
-	it("closes newtab and switches to existing tab when file is already open", async () => {
-		// Open a file first, then open a newtab
+	it("closes newtab when selecting already-open file via sidebar", async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 		useWorkspaceStore.getState().openNewTab();
 
@@ -1152,16 +1161,15 @@ describe("AppLayout", () => {
 		const state = useWorkspaceStore.getState();
 		expect(state.tabs).toHaveLength(2);
 		expect(state.activeTabPath && isNewTabPath(state.activeTabPath)).toBe(true);
+		expect(capturedOnFileSelect).not.toBeNull();
 
-		// navigateInTab to already-open file — newtab should be closed
+		// Select already-open file via sidebar → newtab should be closed
 		await act(async () => {
-			useWorkspaceStore.getState().navigateInTab("/workspace/test.md");
+			capturedOnFileSelect?.("/workspace/test.md");
 		});
 
 		const after = useWorkspaceStore.getState();
-		// navigateInTab switches to existing tab; newtab remains (store-level behavior).
-		// The newtab cleanup for already-open files is handled at the AppLayout level
-		// via openFileFromNewTab (used by command palette and search navigate).
+		expect(after.tabs).toHaveLength(1);
 		expect(after.activeTabPath).toBe("/workspace/test.md");
 	});
 });

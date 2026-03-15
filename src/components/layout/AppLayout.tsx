@@ -1073,9 +1073,8 @@ export function AppLayout() {
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "g") {
-				e.preventDefault();
-				const currentPath = useWorkspaceStore.getState().activeTabPath;
-				if (currentPath && !isNewTabPath(currentPath)) {
+				if (editorViewRef.current) {
+					e.preventDefault();
 					setGoToLineOpen((prev) => !prev);
 				}
 				return;
