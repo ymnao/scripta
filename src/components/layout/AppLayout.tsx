@@ -213,16 +213,13 @@ export function AppLayout() {
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible, loading]);
 
-	// Open new tab on startup when workspace has no tabs
-	const didStartupTabRef = useRef(false);
+	// Open new tab when workspace has no tabs (startup and workspace switch)
 	useEffect(() => {
-		if (loading || didStartupTabRef.current) return;
-		didStartupTabRef.current = true;
-		const state = useWorkspaceStore.getState();
-		if (state.workspacePath && state.tabs.length === 0) {
+		if (loading) return;
+		if (workspacePath && useWorkspaceStore.getState().tabs.length === 0) {
 			openNewTab();
 		}
-	}, [loading, openNewTab]);
+	}, [loading, workspacePath, openNewTab]);
 
 	// Load workspace config (icons) when workspace changes
 	useEffect(() => {
@@ -840,6 +837,25 @@ export function AppLayout() {
 		setEditorView(view);
 	}, []);
 
+	// newtab ページ上でファイルを開く共通処理。
+	// navigateInTab は「既に別タブで開いているファイル」だとそちらに切り替えるだけで
+	// newtab が残るため、その場合は newtab を閉じてから切り替える。
+	const openFileFromNewTab = useCallback(
+		(filePath: string) => {
+			const state = useWorkspaceStore.getState();
+			const existing = state.tabs.find((t) => t.path === filePath);
+			if (existing) {
+				// 既に開いているファイル → newtab を閉じてそのタブに切り替え
+				const newTabId = state.activeTabId;
+				if (newTabId != null) closeTabById(newTabId);
+				setActiveTabById(existing.id);
+			} else {
+				navigateInTab(filePath);
+			}
+		},
+		[closeTabById, setActiveTabById, navigateInTab],
+	);
+
 	// Navigation handlers
 	const handleFileSelect = useCallback(
 		async (path: string) => {
@@ -848,9 +864,14 @@ export function AppLayout() {
 				const saved = await saveNow();
 				if (!saved) return;
 			}
-			navigateInTab(path);
+			const state = useWorkspaceStore.getState();
+			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
+				openFileFromNewTab(path);
+			} else {
+				navigateInTab(path);
+			}
 		},
-		[activeTabPath, navigateInTab, saveNow],
+		[activeTabPath, navigateInTab, openFileFromNewTab, saveNow],
 	);
 
 	const handleFileOpenNewTab = useCallback(
@@ -884,25 +905,6 @@ export function AppLayout() {
 		}
 		goForwardInTab();
 	}, [activeTabPath, goForwardInTab, saveNow]);
-
-	// newtab ページ上でファイルを開く共通処理。
-	// navigateInTab は「既に別タブで開いているファイル」だとそちらに切り替えるだけで
-	// newtab が残るため、その場合は newtab を閉じてから切り替える。
-	const openFileFromNewTab = useCallback(
-		(filePath: string) => {
-			const state = useWorkspaceStore.getState();
-			const existing = state.tabs.find((t) => t.path === filePath);
-			if (existing) {
-				// 既に開いているファイル → newtab を閉じてそのタブに切り替え
-				const newTabId = state.activeTabId;
-				if (newTabId != null) closeTabById(newTabId);
-				setActiveTabById(existing.id);
-			} else {
-				navigateInTab(filePath);
-			}
-		},
-		[closeTabById, setActiveTabById, navigateInTab],
-	);
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
@@ -953,9 +955,12 @@ export function AppLayout() {
 		setCursorInfo(info);
 	}, []);
 
-	// Close search bar when switching away from a file
+	// Close search bar and go-to-line dialog when switching away from a file
 	useEffect(() => {
-		if (!activeTabPath || isNewTabPath(activeTabPath)) setSearchBarOpen(false);
+		if (!activeTabPath || isNewTabPath(activeTabPath)) {
+			setSearchBarOpen(false);
+			setGoToLineOpen(false);
+		}
 	}, [activeTabPath]);
 
 	// Keyboard shortcuts
