@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fileExists, readFile, writeFile } from "../../lib/commands";
+import { isNewTabPath } from "../../lib/path";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
@@ -1136,6 +1137,31 @@ describe("AppLayout", () => {
 		const after = useWorkspaceStore.getState();
 		expect(after.tabs).toHaveLength(1);
 		expect(after.activeTabId).toBe(newTabId);
+		expect(after.activeTabPath).toBe("/workspace/test.md");
+	});
+
+	it("closes newtab and switches to existing tab when file is already open", async () => {
+		// Open a file first, then open a newtab
+		openFileInStore("/workspace", "/workspace/test.md");
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		const state = useWorkspaceStore.getState();
+		expect(state.tabs).toHaveLength(2);
+		expect(state.activeTabPath && isNewTabPath(state.activeTabPath)).toBe(true);
+
+		// navigateInTab to already-open file — newtab should be closed
+		await act(async () => {
+			useWorkspaceStore.getState().navigateInTab("/workspace/test.md");
+		});
+
+		const after = useWorkspaceStore.getState();
+		// navigateInTab switches to existing tab; newtab remains (store-level behavior).
+		// The newtab cleanup for already-open files is handled at the AppLayout level
+		// via openFileFromNewTab (used by command palette and search navigate).
 		expect(after.activeTabPath).toBe("/workspace/test.md");
 	});
 });

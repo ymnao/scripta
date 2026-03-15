@@ -883,17 +883,36 @@ export function AppLayout() {
 		goForwardInTab();
 	}, [activeTabPath, goForwardInTab, saveNow]);
 
+	// newtab ページ上でファイルを開く共通処理。
+	// navigateInTab は「既に別タブで開いているファイル」だとそちらに切り替えるだけで
+	// newtab が残るため、その場合は newtab を閉じてから切り替える。
+	const openFileFromNewTab = useCallback(
+		(filePath: string) => {
+			const state = useWorkspaceStore.getState();
+			const existing = state.tabs.find((t) => t.path === filePath);
+			if (existing) {
+				// 既に開いているファイル → newtab を閉じてそのタブに切り替え
+				const newTabId = state.activeTabId;
+				if (newTabId != null) closeTabById(newTabId);
+				setActiveTabById(existing.id);
+			} else {
+				navigateInTab(filePath);
+			}
+		},
+		[closeTabById, setActiveTabById, navigateInTab],
+	);
+
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
 			// newtab ページ上ではタブ内ナビゲーションで置き換える（Chrome の新しいタブと同じ挙動）
 			const state = useWorkspaceStore.getState();
 			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
-				navigateInTab(filePath);
+				openFileFromNewTab(filePath);
 			} else {
 				openTab(filePath);
 			}
 		},
-		[openTab, navigateInTab],
+		[openTab, openFileFromNewTab],
 	);
 
 	const handleShowFiles = useCallback(() => {
@@ -914,10 +933,14 @@ export function AppLayout() {
 				setGoToLine({ line: lineNumber, query });
 			} else {
 				pendingGoToLineRef.current = { line: lineNumber, query };
-				openTab(filePath);
+				if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
+					openFileFromNewTab(filePath);
+				} else {
+					openTab(filePath);
+				}
 			}
 		},
-		[openTab],
+		[openTab, openFileFromNewTab],
 	);
 
 	const handleGoToLineDone = useCallback(() => {
