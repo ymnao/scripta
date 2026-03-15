@@ -43,6 +43,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 
 	const save = useCallback(
 		(contentToSave: string): Promise<void> => {
+			if (!filePath) return Promise.resolve();
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
 			if (processed === lastSavedContentRef.current) {
@@ -145,6 +146,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		if (awaitingNewFileRef.current) {
 			return;
 		}
+		if (!filePath) return;
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
 		if (processContent(content, trimTrailingWhitespace) === lastSavedContentRef.current) {
 			return;
@@ -165,7 +167,7 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 				clearTimeout(debounceTimerRef.current);
 			}
 		};
-	}, [content, save, autoSaveDelay, clearRetryState]);
+	}, [content, filePath, save, autoSaveDelay, clearRetryState]);
 
 	useEffect(() => {
 		isMountedRef.current = true;

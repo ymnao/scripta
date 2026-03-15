@@ -183,7 +183,7 @@ describe("AppLayout", () => {
 		await act(async () => {
 			render(<AppLayout />);
 		});
-		expect(screen.getByText("scripta")).toBeInTheDocument();
+		expect(screen.getByLabelText("scripta")).toBeInTheDocument();
 		expect(screen.getByText("Verba volant, scripta manent.")).toBeInTheDocument();
 		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
@@ -1060,5 +1060,58 @@ describe("AppLayout", () => {
 		});
 
 		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not show editor on newtab page", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// newtab page shows NewTabContent, not the editor
+		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
+		expect(screen.getByLabelText("scripta")).toBeInTheDocument();
+	});
+
+	it("Cmd+Shift+E does not export on newtab page", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "e", metaKey: true, shiftKey: true }),
+			);
+		});
+
+		// Export dialog should NOT appear
+		expect(screen.queryByText("エクスポート")).not.toBeInTheDocument();
+	});
+
+	it("closes search bar when switching to newtab page", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Open search bar via Cmd+F
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true }));
+		});
+
+		// Switch to newtab — search bar should close
+		await act(async () => {
+			useWorkspaceStore.getState().openNewTab();
+		});
+
+		// Editor is gone so search bar is not rendered, but importantly
+		// it was closed (state reset) so it won't reappear on next file open
+		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
 });

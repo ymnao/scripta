@@ -9,8 +9,9 @@ import {
 	syntaxTree,
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { search } from "@codemirror/search";
+import { gotoLine, search } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
+import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -21,8 +22,10 @@ import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
 	toggleBold,
+	toggleCheckbox,
 	toggleHeading,
 	toggleItalic,
+	toggleList,
 	toggleStrikethrough,
 } from "./formatting-commands";
 import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
@@ -232,6 +235,12 @@ export function MarkdownEditor({
 			tableDecoration,
 			...(showLinkCards ? [linkCardDecoration] : []),
 			wikilinkCompletion,
+			Prec.high(
+				keymap.of([
+					{ key: "Mod-l", run: toggleList },
+					{ key: "Mod-Shift-l", run: toggleCheckbox },
+				]),
+			),
 			keymap.of([
 				{
 					key: "Mod-s",
@@ -249,6 +258,7 @@ export function MarkdownEditor({
 				{ key: "Mod-4", run: toggleHeading(4) },
 				{ key: "Mod-5", run: toggleHeading(5) },
 				{ key: "Mod-6", run: toggleHeading(6) },
+				{ key: "Mod-g", run: gotoLine },
 			]),
 			EditorView.updateListener.of((update) => {
 				if (!(update.docChanged || update.selectionSet)) return;

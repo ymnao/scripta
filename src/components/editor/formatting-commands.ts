@@ -31,6 +31,73 @@ function toggleWrap(view: EditorView, marker: string): boolean {
 	return true;
 }
 
+export const toggleList: Command = (view) => {
+	const { head } = view.state.selection.main;
+	const line = view.state.doc.lineAt(head);
+	const text = line.text;
+
+	// Match list markers (with optional checkbox)
+	const listMatch = text.match(/^(\s*)([-*+])\s(\[[ xX]\]\s)?/);
+	if (listMatch) {
+		const wsLen = listMatch[1].length;
+		const markerEnd = line.from + listMatch[0].length;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: markerEnd, insert: "" },
+		});
+	} else {
+		const wsMatch = text.match(/^(\s*)/);
+		const wsLen = wsMatch ? wsMatch[1].length : 0;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: line.from + wsLen, insert: "- " },
+		});
+	}
+	return true;
+};
+
+export const toggleCheckbox: Command = (view) => {
+	const { head } = view.state.selection.main;
+	const line = view.state.doc.lineAt(head);
+	const text = line.text;
+
+	// Unchecked checkbox: [ ] → [x]
+	const uncheckedMatch = text.match(/^(\s*[-*+]\s)\[ \]\s/);
+	if (uncheckedMatch) {
+		const pos = line.from + uncheckedMatch[1].length;
+		view.dispatch({
+			changes: { from: pos, to: pos + 3, insert: "[x]" },
+		});
+		return true;
+	}
+
+	// Checked checkbox: [x] → [ ]
+	const checkedMatch = text.match(/^(\s*[-*+]\s)\[[xX]\]\s/);
+	if (checkedMatch) {
+		const pos = line.from + checkedMatch[1].length;
+		view.dispatch({
+			changes: { from: pos, to: pos + 3, insert: "[ ]" },
+		});
+		return true;
+	}
+
+	// List item without checkbox: add [ ]
+	const listMatch = text.match(/^(\s*[-*+]\s)/);
+	if (listMatch) {
+		const pos = line.from + listMatch[0].length;
+		view.dispatch({
+			changes: { from: pos, to: pos, insert: "[ ] " },
+		});
+		return true;
+	}
+
+	// Plain line: add - [ ]
+	const wsMatch = text.match(/^(\s*)/);
+	const wsLen = wsMatch ? wsMatch[1].length : 0;
+	view.dispatch({
+		changes: { from: line.from + wsLen, to: line.from + wsLen, insert: "- [ ] " },
+	});
+	return true;
+};
+
 export const toggleBold: Command = (view) => toggleWrap(view, "**");
 
 export const toggleItalic: Command = (view) => toggleWrap(view, "*");

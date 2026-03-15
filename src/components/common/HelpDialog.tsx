@@ -24,12 +24,15 @@ const groups: ShortcutGroup[] = [
 			{ keys: [[mod, "I"]], action: "斜体" },
 			{ keys: [[mod, shift, "X"]], action: "取り消し線" },
 			{ keys: [[mod, "1\u20136"]], action: "見出し 1\u20136" },
+			{ keys: [[mod, "L"]], action: "リストの切り替え" },
+			{ keys: [[mod, shift, "L"]], action: "チェックボックスの切り替え" },
 		],
 	},
 	{
 		title: "ファイル",
 		shortcuts: [
 			{ keys: [[mod, "S"]], action: "保存" },
+			{ keys: [[mod, "T"]], action: "新しいタブ" },
 			{ keys: [[mod, "W"]], action: "タブを閉じる" },
 			{
 				keys: [
@@ -45,6 +48,14 @@ const groups: ShortcutGroup[] = [
 				],
 				action: "進む",
 			},
+		],
+	},
+	{
+		title: "ナビゲーション",
+		shortcuts: [
+			{ keys: [[mod, shift, "["]], action: "前のタブ" },
+			{ keys: [[mod, shift, "]"]], action: "次のタブ" },
+			{ keys: [[mod, "G"]], action: "指定行へジャンプ" },
 		],
 	},
 	{

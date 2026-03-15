@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createNewTabPath } from "../lib/path";
 
 const MAX_HISTORY = 100;
 
@@ -33,6 +34,9 @@ interface WorkspaceState {
 	goBackInTab: () => void;
 	goForwardInTab: () => void;
 	reorderTab: (fromIndex: number, toIndex: number) => void;
+	openNewTab: () => void;
+	activateNextTab: () => void;
+	activatePrevTab: () => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
@@ -255,6 +259,36 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 			const [moved] = newTabs.splice(fromIndex, 1);
 			newTabs.splice(toIndex, 0, moved);
 			return { tabs: newTabs };
+		}),
+
+	openNewTab: () =>
+		set((state) => {
+			const id = state._nextTabId;
+			const path = createNewTabPath(id);
+			return {
+				tabs: [...state.tabs, { id, path, dirty: false, history: [path], historyIndex: 0 }],
+				activeTabPath: path,
+				activeTabId: id,
+				_nextTabId: id + 1,
+			};
+		}),
+
+	activateNextTab: () =>
+		set((state) => {
+			if (state.tabs.length <= 1) return state;
+			const index = state.tabs.findIndex((t) => t.id === state.activeTabId);
+			const nextIndex = (index + 1) % state.tabs.length;
+			const next = state.tabs[nextIndex];
+			return { activeTabPath: next.path, activeTabId: next.id };
+		}),
+
+	activatePrevTab: () =>
+		set((state) => {
+			if (state.tabs.length <= 1) return state;
+			const index = state.tabs.findIndex((t) => t.id === state.activeTabId);
+			const prevIndex = (index - 1 + state.tabs.length) % state.tabs.length;
+			const prev = state.tabs[prevIndex];
+			return { activeTabPath: prev.path, activeTabId: prev.id };
 		}),
 
 	closeTabsByPrefix: (prefix) =>

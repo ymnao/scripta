@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getFileIcon } from "../../lib/file-icon";
+import { isNewTabPath } from "../../lib/path";
 import { useWorkspaceStore } from "../../stores/workspace";
 
 const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
@@ -177,16 +178,17 @@ export function TabBar({
 			>
 				{tabs.map((tab, index) => {
 					const isActive = tab.id === activeTabId;
-					const fileName = tab.path.split(/[\\/]/).pop() ?? tab.path;
+					const isNewTab = isNewTabPath(tab.path);
+					const fileName = isNewTab ? "新しいタブ" : (tab.path.split(/[\\/]/).pop() ?? tab.path);
 					const isDragging = dragState?.fromIndex === index;
 					const isOver = dragState?.overIndex === index;
 					const overSide = dragState?.overSide;
-					const FileIcon = getFileIcon(fileName);
+					const FileIcon = getFileIcon(isNewTab ? "Untitled.md" : fileName);
 
 					return (
 						<div
 							key={tab.id}
-							title={tab.path}
+							title={isNewTab ? "新しいタブ" : tab.path}
 							data-tab-id={tab.id}
 							data-index={index}
 							role="tab"

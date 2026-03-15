@@ -3,8 +3,10 @@ import { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import {
 	toggleBold,
+	toggleCheckbox,
 	toggleHeading,
 	toggleItalic,
+	toggleList,
 	toggleStrikethrough,
 } from "./formatting-commands";
 
@@ -109,5 +111,75 @@ describe("toggleHeading", () => {
 		const view = createView("### hello", 4);
 		toggleHeading(1)(view);
 		expect(getDoc(view)).toBe("# hello");
+	});
+});
+
+describe("toggleList", () => {
+	it("adds list marker to plain line", () => {
+		const view = createView("hello", 0);
+		toggleList(view);
+		expect(getDoc(view)).toBe("- hello");
+	});
+
+	it("removes list marker from list item", () => {
+		const view = createView("- hello", 2);
+		toggleList(view);
+		expect(getDoc(view)).toBe("hello");
+	});
+
+	it("removes list marker and checkbox from task item", () => {
+		const view = createView("- [ ] hello", 6);
+		toggleList(view);
+		expect(getDoc(view)).toBe("hello");
+	});
+
+	it("removes checked task marker", () => {
+		const view = createView("- [x] hello", 6);
+		toggleList(view);
+		expect(getDoc(view)).toBe("hello");
+	});
+
+	it("preserves leading whitespace when adding", () => {
+		const view = createView("  hello", 2);
+		toggleList(view);
+		expect(getDoc(view)).toBe("  - hello");
+	});
+
+	it("preserves leading whitespace when removing", () => {
+		const view = createView("  - hello", 4);
+		toggleList(view);
+		expect(getDoc(view)).toBe("  hello");
+	});
+});
+
+describe("toggleCheckbox", () => {
+	it("checks unchecked checkbox", () => {
+		const view = createView("- [ ] hello", 6);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("- [x] hello");
+	});
+
+	it("unchecks checked checkbox", () => {
+		const view = createView("- [x] hello", 6);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("- [ ] hello");
+	});
+
+	it("adds checkbox to list item", () => {
+		const view = createView("- hello", 2);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("- [ ] hello");
+	});
+
+	it("adds list marker and checkbox to plain line", () => {
+		const view = createView("hello", 0);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("- [ ] hello");
+	});
+
+	it("preserves indentation when adding to plain line", () => {
+		const view = createView("  hello", 2);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("  - [ ] hello");
 	});
 });
