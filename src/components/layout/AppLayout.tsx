@@ -30,6 +30,7 @@ import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { ScratchpadPanel, type ScratchpadSaveHandle } from "../editor/ScratchpadPanel";
 import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
+import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
 import { NewTabContent } from "./NewTabContent";
 import { Sidebar } from "./Sidebar";
@@ -103,6 +104,7 @@ export function AppLayout() {
 		filePath: string;
 	} | null>(null);
 	const exportRequestIdRef = useRef(0);
+	const [goToLineOpen, setGoToLineOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
@@ -1065,6 +1067,14 @@ export function AppLayout() {
 				if (workspacePath) toggleScratchpad();
 				return;
 			}
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "g") {
+				e.preventDefault();
+				const currentPath = useWorkspaceStore.getState().activeTabPath;
+				if (currentPath && !isNewTabPath(currentPath)) {
+					setGoToLineOpen((prev) => !prev);
+				}
+				return;
+			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
 				e.preventDefault();
 				setCommandPaletteOpen((prev) => !prev);
@@ -1170,6 +1180,12 @@ export function AppLayout() {
 							handleRef={searchBarHandleRef}
 						/>
 					)}
+					<GoToLineDialog
+						open={goToLineOpen}
+						totalLines={editorView?.state.doc.lines ?? 0}
+						onGoToLine={(line) => setGoToLine({ line })}
+						onClose={() => setGoToLineOpen(false)}
+					/>
 				</main>
 			</div>
 			<StatusBar

@@ -9,7 +9,7 @@ import {
 	syntaxTree,
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { gotoLine, search } from "@codemirror/search";
+import { search } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -171,12 +171,14 @@ export function MarkdownEditor({
 			const lineInfo = view.state.doc.line(lineNum);
 
 			view.dispatch({
-				selection: EditorSelection.cursor(lineInfo.from),
+				selection: EditorSelection.cursor(goToLine.query ? lineInfo.from : lineInfo.to),
 				effects: goToLine.query ? [setHighlightQuery.of(goToLine.query)] : [],
 			});
 
 			view.dispatch({
-				effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
+				effects: EditorView.scrollIntoView(goToLine.query ? lineInfo.from : lineInfo.to, {
+					y: "center",
+				}),
 			});
 
 			view.focus();
@@ -258,7 +260,6 @@ export function MarkdownEditor({
 				{ key: "Mod-4", run: toggleHeading(4) },
 				{ key: "Mod-5", run: toggleHeading(5) },
 				{ key: "Mod-6", run: toggleHeading(6) },
-				{ key: "Mod-g", run: gotoLine },
 			]),
 			EditorView.updateListener.of((update) => {
 				if (!(update.docChanged || update.selectionSet)) return;
