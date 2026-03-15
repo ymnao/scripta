@@ -23,6 +23,7 @@ interface AppSettings {
 	syncMethod: SyncMethod;
 	commitMessage: string;
 	autoPullOnStartup: boolean;
+	scratchpadVolatile: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -44,6 +45,7 @@ const DEFAULTS: AppSettings = {
 	syncMethod: GIT_SYNC_DEFAULTS.syncMethod,
 	commitMessage: GIT_SYNC_DEFAULTS.commitMessage,
 	autoPullOnStartup: GIT_SYNC_DEFAULTS.autoPullOnStartup,
+	scratchpadVolatile: true,
 };
 
 let storePromise: Promise<Store> | null = null;
@@ -173,6 +175,12 @@ export async function loadSettings(): Promise<AppSettings> {
 		const autoPullOnStartup: boolean =
 			typeof rawAutoPullOnStartup === "boolean" ? rawAutoPullOnStartup : DEFAULTS.autoPullOnStartup;
 
+		const rawScratchpadVolatile = await store.get<unknown>("scratchpadVolatile");
+		const scratchpadVolatile: boolean =
+			typeof rawScratchpadVolatile === "boolean"
+				? rawScratchpadVolatile
+				: DEFAULTS.scratchpadVolatile;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -192,6 +200,7 @@ export async function loadSettings(): Promise<AppSettings> {
 			syncMethod,
 			commitMessage,
 			autoPullOnStartup,
+			scratchpadVolatile,
 		};
 	} catch {
 		return { ...DEFAULTS };
@@ -372,6 +381,16 @@ export async function saveAutoPullOnStartup(pull: boolean): Promise<void> {
 	try {
 		const store = await getStore();
 		await store.set("autoPullOnStartup", pull);
+		await store.save();
+	} catch {
+		// Ignore save errors
+	}
+}
+
+export async function saveScratchpadVolatile(volatile: boolean): Promise<void> {
+	try {
+		const store = await getStore();
+		await store.set("scratchpadVolatile", volatile);
 		await store.save();
 	} catch {
 		// Ignore save errors

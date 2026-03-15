@@ -5,6 +5,7 @@ import {
 	saveFontFamily,
 	saveFontSize,
 	saveHighlightActiveLine,
+	saveScratchpadVolatile,
 	saveShowLineNumbers,
 	saveShowLinkCards,
 	saveTrimTrailingWhitespace,
@@ -18,6 +19,7 @@ interface SettingsValues {
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
 	showLinkCards: boolean;
+	scratchpadVolatile: boolean;
 }
 
 interface SettingsState extends SettingsValues {
@@ -28,6 +30,7 @@ interface SettingsState extends SettingsValues {
 	setFontFamily: (family: FontFamily) => void;
 	setTrimTrailingWhitespace: (trim: boolean) => void;
 	setShowLinkCards: (show: boolean) => void;
+	setScratchpadVolatile: (volatile: boolean) => void;
 	/** Set state without persisting — used for initial hydration from store */
 	hydrate: (values: Partial<SettingsValues>) => void;
 }
@@ -40,6 +43,7 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	fontFamily: "monospace",
 	trimTrailingWhitespace: true,
 	showLinkCards: true,
+	scratchpadVolatile: true,
 	setShowLineNumbers: (show: boolean) => {
 		void saveShowLineNumbers(show);
 		set({ showLineNumbers: show });
@@ -67,6 +71,10 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	setShowLinkCards: (show: boolean) => {
 		void saveShowLinkCards(show);
 		set({ showLinkCards: show });
+	},
+	setScratchpadVolatile: (volatile: boolean) => {
+		void saveScratchpadVolatile(volatile);
+		set({ scratchpadVolatile: volatile });
 	},
 	hydrate: (values: Partial<SettingsValues>) => {
 		set(values);

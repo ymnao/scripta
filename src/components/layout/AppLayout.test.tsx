@@ -38,6 +38,7 @@ vi.mock("../../lib/store", () => ({
 		syncMethod: "merge",
 		commitMessage: "vault backup: {{date}}",
 		autoPullOnStartup: false,
+		scratchpadVolatile: true,
 	}),
 	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
 	saveThemePreference: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +50,7 @@ vi.mock("../../lib/store", () => ({
 	saveFontFamily: vi.fn().mockResolvedValue(undefined),
 	saveTrimTrailingWhitespace: vi.fn().mockResolvedValue(undefined),
 	saveShowLinkCards: vi.fn().mockResolvedValue(undefined),
+	saveScratchpadVolatile: vi.fn().mockResolvedValue(undefined),
 	saveGitSyncEnabled: vi.fn().mockResolvedValue(undefined),
 	saveAutoCommitInterval: vi.fn().mockResolvedValue(undefined),
 	saveAutoPullInterval: vi.fn().mockResolvedValue(undefined),
@@ -131,6 +133,7 @@ vi.mock("../editor/MarkdownEditor", () => ({
 
 const { AppLayout } = await import("./AppLayout");
 const { useGitSyncStore } = await import("../../stores/git-sync");
+const { useScratchpadStore } = await import("../../stores/scratchpad");
 
 const mockedReadFile = readFile as Mock;
 const mockedWriteFile = writeFile as Mock;
@@ -168,6 +171,7 @@ describe("AppLayout", () => {
 		});
 		useWorkspaceConfigStore.getState().reset();
 		useGitSyncStore.getState().resetRuntime();
+		useScratchpadStore.setState({ open: false });
 	});
 
 	afterEach(() => {
@@ -990,6 +994,35 @@ describe("AppLayout", () => {
 		// loadIcons が configLoaded=false → true、workspaceInitialized=true とセットする
 		// ウィザードは閉じているべき
 		expect(screen.queryByText("ワークスペースのセットアップ")).not.toBeInTheDocument();
+	});
+
+	it("Cmd+J does not toggle scratchpad when no workspace is open", async () => {
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(false);
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", metaKey: true }));
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(false);
+	});
+
+	it("Cmd+J toggles scratchpad when workspace is open", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(false);
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", metaKey: true }));
+		});
+
+		expect(useScratchpadStore.getState().open).toBe(true);
 	});
 
 	it("opens conflict resolver only on 0→>0 transition, not on repeated updates", async () => {

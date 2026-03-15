@@ -1,8 +1,9 @@
-import { FileText } from "lucide-react";
+import { Archive, FileText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { searchFilenames } from "../../lib/commands";
+import { listDirectory, searchFilenames } from "../../lib/commands";
 import { basename } from "../../lib/path";
+import { getScratchpadArchiveDir } from "../../lib/scripta-config";
 
 interface CommandPaletteProps {
 	open: boolean;
@@ -25,9 +26,17 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 			setQuery("");
 			setFiles([]);
 			setSelectedIndex(0);
+			setIsScratchpadMode(false);
+			const id = ++requestIdRef.current;
 			searchFilenames(workspacePath, "")
-				.then(setFiles)
-				.catch(() => setFiles([]));
+				.then((res) => {
+					if (requestIdRef.current !== id) return;
+					setFiles(res);
+				})
+				.catch(() => {
+					if (requestIdRef.current !== id) return;
+					setFiles([]);
+				});
 		}
 	}, [open, workspacePath]);
 
@@ -39,9 +48,36 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 		}
 	}, [open]);
 
+	const [isScratchpadMode, setIsScratchpadMode] = useState(false);
+
 	const doSearch = useCallback(
 		(q: string) => {
 			const id = ++requestIdRef.current;
+
+			if (q.startsWith("scratchpad:")) {
+				setIsScratchpadMode(true);
+				const archiveDir = getScratchpadArchiveDir(workspacePath);
+				listDirectory(archiveDir)
+					.then((entries) => {
+						if (requestIdRef.current !== id) return;
+						const filter = q.slice("scratchpad:".length).trim().toLowerCase();
+						const paths = entries
+							.filter((e) => !e.isDirectory && e.name.endsWith(".md"))
+							.map((e) => e.path)
+							.filter((p) => !filter || basename(p).toLowerCase().includes(filter))
+							.reverse();
+						setFiles(paths);
+						setSelectedIndex(0);
+					})
+					.catch(() => {
+						if (requestIdRef.current !== id) return;
+						setFiles([]);
+						setSelectedIndex(0);
+					});
+				return;
+			}
+
+			setIsScratchpadMode(false);
 			searchFilenames(workspacePath, q)
 				.then((res) => {
 					if (requestIdRef.current !== id) return;
@@ -150,7 +186,11 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 								onClose();
 							}}
 						>
-							<FileText size={14} className="shrink-0 text-text-secondary" />
+							{isScratchpadMode ? (
+								<Archive size={14} className="shrink-0 text-text-secondary" />
+							) : (
+								<FileText size={14} className="shrink-0 text-text-secondary" />
+							)}
 							<span className="min-w-0 truncate">{basename(filePath)}</span>
 							<span className="ml-auto min-w-0 truncate text-xs text-text-secondary">
 								{filePath}

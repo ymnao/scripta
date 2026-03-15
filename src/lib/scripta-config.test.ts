@@ -27,6 +27,9 @@ const {
 	getClaudeMdTemplatePath,
 	getGitignorePath,
 	getSyntaxGuidePath,
+	getScratchpadPath,
+	getScratchpadArchiveDir,
+	getScratchpadArchivePath,
 	README_TEMPLATE,
 	CLAUDE_MD_TEMPLATE,
 	GITIGNORE_TEMPLATE,
@@ -229,6 +232,22 @@ describe("template paths", () => {
 
 	it("getSyntaxGuidePath returns correct path", () => {
 		expect(getSyntaxGuidePath("/workspace")).toBe("/workspace/.scripta/syntax-guide.md");
+	});
+});
+
+describe("scratchpad paths", () => {
+	it("getScratchpadPath returns correct path", () => {
+		expect(getScratchpadPath("/workspace")).toBe("/workspace/.scripta/scratchpad.md");
+	});
+
+	it("getScratchpadArchiveDir returns correct path", () => {
+		expect(getScratchpadArchiveDir("/workspace")).toBe("/workspace/.scripta/scratchpad-archive");
+	});
+
+	it("getScratchpadArchivePath returns correct path with date", () => {
+		expect(getScratchpadArchivePath("/workspace", "2026-03-14")).toBe(
+			"/workspace/.scripta/scratchpad-archive/2026-03-14.md",
+		);
 	});
 });
 

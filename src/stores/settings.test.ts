@@ -7,6 +7,7 @@ vi.mock("../lib/store", () => ({
 	saveHighlightActiveLine: vi.fn(),
 	saveFontFamily: vi.fn(),
 	saveTrimTrailingWhitespace: vi.fn(),
+	saveScratchpadVolatile: vi.fn(),
 }));
 
 import { saveAutoSaveDelay, saveFontSize } from "../lib/store";
@@ -21,6 +22,7 @@ describe("useSettingsStore", () => {
 			highlightActiveLine: false,
 			fontFamily: "monospace",
 			trimTrailingWhitespace: true,
+			scratchpadVolatile: true,
 		});
 	});
 

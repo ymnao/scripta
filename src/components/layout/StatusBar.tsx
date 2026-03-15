@@ -7,6 +7,7 @@ import {
 	GitCommitHorizontal,
 	Plus,
 	Settings,
+	StickyNote,
 	WifiOff,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +29,8 @@ interface StatusBarProps {
 	onGitSync?: () => void;
 	onOpenConflictResolver?: () => void;
 	gitReady?: boolean;
+	onToggleScratchpad?: () => void;
+	scratchpadOpen?: boolean;
 }
 
 function GitSyncStatus({
@@ -98,6 +101,8 @@ export function StatusBar({
 	onGitSync,
 	onOpenConflictResolver,
 	gitReady,
+	onToggleScratchpad,
+	scratchpadOpen,
 }: StatusBarProps) {
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef(0);
@@ -164,6 +169,19 @@ export function StatusBar({
 					{saveStatus === "saved" && "保存済み"}
 					{saveStatus === "error" && "保存失敗"}
 				</output>
+				{onToggleScratchpad && (
+					<button
+						type="button"
+						onClick={onToggleScratchpad}
+						aria-label="スクラッチパッド"
+						title="スクラッチパッド"
+						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+							scratchpadOpen ? "text-text-primary" : ""
+						}`}
+					>
+						<StickyNote size={15} />
+					</button>
+				)}
 				<button
 					type="button"
 					onClick={onOpenSettings}

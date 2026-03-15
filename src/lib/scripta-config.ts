@@ -5,6 +5,8 @@ const SCRIPTA_DIR = ".scripta";
 const ICONS_FILE = "icons.json";
 const PROMPT_TEMPLATE_FILE = "prompt-template.md";
 const INITIALIZED_FILE = "initialized.json";
+const SCRATCHPAD_FILE = "scratchpad.md";
+const SCRATCHPAD_ARCHIVE_DIR = "scratchpad-archive";
 
 export function getScriptaDir(workspacePath: string): string {
 	return joinPath(workspacePath, SCRIPTA_DIR);
@@ -63,6 +65,20 @@ export async function loadPromptTemplate(workspacePath: string): Promise<string 
 
 export async function savePromptTemplate(workspacePath: string, content: string): Promise<void> {
 	await writeFile(getScriptaPromptTemplatePath(workspacePath), content);
+}
+
+// --- Scratchpad paths ---
+
+export function getScratchpadPath(workspacePath: string): string {
+	return joinPath(getScriptaDir(workspacePath), SCRATCHPAD_FILE);
+}
+
+export function getScratchpadArchiveDir(workspacePath: string): string {
+	return joinPath(getScriptaDir(workspacePath), SCRATCHPAD_ARCHIVE_DIR);
+}
+
+export function getScratchpadArchivePath(workspacePath: string, date: string): string {
+	return joinPath(getScratchpadArchiveDir(workspacePath), `${date}.md`);
 }
 
 // --- Workspace initialization ---
