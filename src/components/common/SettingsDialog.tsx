@@ -402,12 +402,11 @@ export function SettingsDialog({
 	const titleId = useId();
 	const gitAvailable = useGitSyncStore((s) => s.gitAvailable);
 	const gitReady = useGitSyncStore((s) => s.gitReady);
-	const allSections: { key: Section; label: string }[] = [
+	const sections: { key: Section; label: string }[] = [
 		...baseSections,
 		...(gitAvailable ? [{ key: "git-sync" as Section, label: "Git 同期" }] : []),
 		...(workspacePath ? [{ key: "workspace" as Section, label: "ワークスペース" }] : []),
 	];
-	const sections = allSections;
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
 
 	// workspacePath が消えて sections から "workspace" が外れた場合のフォールバック

@@ -16,6 +16,7 @@ import {
 } from "@codemirror/view";
 import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
 import { useThemeStore } from "../../../stores/theme";
+import { collectCursorLines } from "./cursor-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -45,20 +46,6 @@ interface MermaidBlock {
 }
 
 // ── Helpers ───────────────────────────────────────────
-
-/** Collect cursor line numbers. Returns empty set when unfocused. */
-function collectCursorLines(state: EditorState, hasFocus: boolean): Set<number> {
-	const lines = new Set<number>();
-	if (!hasFocus) return lines;
-	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			lines.add(l);
-		}
-	}
-	return lines;
-}
 
 /** Check if any cursor line falls within the given line range (inclusive). */
 function cursorInBlock(cursorLines: Set<number>, startLine: number, endLine: number): boolean {

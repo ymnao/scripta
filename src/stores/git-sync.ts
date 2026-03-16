@@ -64,15 +64,20 @@ export const useGitSyncStore = create<GitSyncState>()((set) => ({
 	...RUNTIME_DEFAULTS,
 	...GIT_SYNC_DEFAULTS,
 
-	setGitAvailable: (available: boolean) => set({ gitAvailable: available }),
-	setGitReady: (ready: boolean) => set({ gitReady: ready }),
-	setGitAction: (action: GitAction) => set({ gitAction: action }),
-	setLastCommitTime: (time: string | null) => set({ lastCommitTime: time }),
+	setGitAvailable: (available: boolean) =>
+		set((s) => (s.gitAvailable === available ? s : { gitAvailable: available })),
+	setGitReady: (ready: boolean) => set((s) => (s.gitReady === ready ? s : { gitReady: ready })),
+	setGitAction: (action: GitAction) =>
+		set((s) => (s.gitAction === action ? s : { gitAction: action })),
+	setLastCommitTime: (time: string | null) =>
+		set((s) => (s.lastCommitTime === time ? s : { lastCommitTime: time })),
 	setConflictFiles: (files: string[]) => set({ conflictFiles: files }),
-	setOfflineMode: (offline: boolean) => set({ offlineMode: offline }),
-	setErrorMessage: (message: string | null) => set({ errorMessage: message }),
-	setHasRemote: (hasRemote: boolean) => set({ hasRemote }),
-	setBranch: (branch: string) => set({ branch }),
+	setOfflineMode: (offline: boolean) =>
+		set((s) => (s.offlineMode === offline ? s : { offlineMode: offline })),
+	setErrorMessage: (message: string | null) =>
+		set((s) => (s.errorMessage === message ? s : { errorMessage: message })),
+	setHasRemote: (hasRemote: boolean) => set((s) => (s.hasRemote === hasRemote ? s : { hasRemote })),
+	setBranch: (branch: string) => set((s) => (s.branch === branch ? s : { branch })),
 
 	setGitSyncEnabled: (enabled: boolean) => {
 		void saveGitSyncEnabled(enabled);

@@ -14,7 +14,7 @@ import { fetchOgp } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl } from "./links";
-import { collectCodeRanges } from "./math";
+import { collectCodeRanges, overlapsCodeBlock } from "./math";
 
 const STANDALONE_URL_RE = /^https?:\/\/[^\s]+$/i;
 
@@ -193,17 +193,6 @@ export class LinkCardWidget extends WidgetType {
 	}
 }
 
-function isInsideCodeBlock(
-	lineFrom: number,
-	lineTo: number,
-	codeRanges: { from: number; to: number }[],
-): boolean {
-	for (const range of codeRanges) {
-		if (lineFrom < range.to && lineTo > range.from) return true;
-	}
-	return false;
-}
-
 interface StandaloneUrlInfo {
 	line: { from: number; to: number };
 	url: string;
@@ -226,7 +215,7 @@ function forEachStandaloneUrl(view: EditorView, cb: (info: StandaloneUrlInfo) =>
 			const url = isStandaloneUrlLine(line.text);
 			if (!url) continue;
 
-			if (isInsideCodeBlock(line.from, line.to, codeRanges)) continue;
+			if (overlapsCodeBlock(line.from, line.to, codeRanges)) continue;
 
 			cb({ line: { from: line.from, to: line.to }, url });
 		}
@@ -266,6 +255,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 	}
 
 	private fetchMissingOgp(view: EditorView) {
+		let evicted = false;
 		forEachStandaloneUrl(view, ({ url }) => {
 			if (this.fetchingUrls.has(url)) return;
 			const cached = ogpCache.get(url);
@@ -277,7 +267,10 @@ class LinkCardDecorationPlugin implements PluginValue {
 				}
 			}
 
-			evictStaleCache();
+			if (!evicted) {
+				evictStaleCache();
+				evicted = true;
+			}
 			ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
 			this.fetchingUrls.add(url);
 

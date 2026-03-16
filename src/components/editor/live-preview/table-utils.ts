@@ -28,7 +28,7 @@ export interface TableInfo {
 const DELIMITER_RE = /^\s*:?-{1,}:?\s*$/;
 
 /** エスケープされていない `|` の位置を返す。見つからなければ -1。 */
-function findUnescapedPipe(text: string, start: number): number {
+export function findUnescapedPipe(text: string, start: number): number {
 	for (let j = start; j < text.length; j++) {
 		if (text[j] === "|") {
 			let bs = 0;

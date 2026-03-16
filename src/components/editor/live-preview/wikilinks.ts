@@ -9,10 +9,10 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { createFile, searchFilenames } from "../../../lib/commands";
-import { SEP_RE, joinPath } from "../../../lib/path";
+import { SEP_RE, basename, joinPath } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines } from "./cursor-utils";
-import { collectCodeRanges, isEscaped } from "./math";
+import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
 
 const WIKILINK_RE = /\[\[([^\[\]\n\r]+)\]\]/g;
 
@@ -44,8 +44,8 @@ export function resolveWikilinkPath(pageName: string): string | null {
 export function buildFileMap(files: string[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const filePath of files) {
-		const basename = filePath.split(/[/\\]/).pop()?.replace(/\.md$/i, "") ?? "";
-		const key = basename.normalize("NFC");
+		const name = basename(filePath).replace(/\.md$/i, "");
+		const key = name.normalize("NFC");
 		if (!key) continue;
 		const existing = map.get(key);
 		if (!existing || filePath < existing) {
@@ -53,17 +53,6 @@ export function buildFileMap(files: string[]): Map<string, string> {
 		}
 	}
 	return map;
-}
-
-function overlapsCodeBlock(
-	from: number,
-	to: number,
-	codeRanges: { from: number; to: number }[],
-): boolean {
-	for (const range of codeRanges) {
-		if (from < range.to && to > range.from) return true;
-	}
-	return false;
 }
 
 export function buildDecorations(

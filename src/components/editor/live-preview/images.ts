@@ -13,6 +13,9 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines } from "./cursor-utils";
 
+/** dirname/getSep (path.ts) は最初のセパレータを基準にするが、
+ *  mixed separator ("C:/Users\\docs\\note.md") では最後のセパレータを
+ *  基準にする必要があるため、独自実装を維持する。 */
 export function parentDir(filePath: string): string {
 	const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
 	if (lastSep === -1) return "";

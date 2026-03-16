@@ -1,5 +1,6 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { exportPdf, writeFile } from "./commands";
+import { escapeHtml } from "./content";
 import { markdownToHtml } from "./markdown-to-html";
 import { renderMermaid } from "./mermaid";
 import { basename } from "./path";
@@ -498,14 +499,6 @@ function addTaskListClass(html: string): string {
 	return html.replace(/<li><input /g, '<li class="task-list-item"><input ');
 }
 
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
-
 function extractTitle(filePath: string): string {
 	const name = basename(filePath);
 	return name.replace(/\.md$/, "");
@@ -600,7 +593,7 @@ export async function exportAsPdf(
 	return true;
 }
 
-function buildFence(content: string): string {
+export function buildFence(content: string): string {
 	let max = 2;
 	for (const m of content.matchAll(/`{3,}/g)) {
 		if (m[0].length > max) max = m[0].length;

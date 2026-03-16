@@ -15,6 +15,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { getStringWidth } from "../../../lib/east-asian-width";
+import { findUnescapedPipe } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -45,18 +46,6 @@ interface TableData {
 }
 
 // ── Parsing ───────────────────────────────────────────
-
-/** エスケープされていない `|` の位置を返す。見つからなければ -1。 */
-function findUnescapedPipe(text: string, start: number): number {
-	for (let j = start; j < text.length; j++) {
-		if (text[j] === "|") {
-			let bs = 0;
-			for (let k = j - 1; k >= 0 && text[k] === "\\"; k--) bs++;
-			if (bs % 2 === 0) return j;
-		}
-	}
-	return -1;
-}
 
 function parseRowCells(text: string): string[] {
 	const cells: string[] = [];

@@ -15,6 +15,7 @@ import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
 import { ContextMenu } from "../filetree/ContextMenu";
 import { MermaidEditorDialog } from "./MermaidEditorDialog";
@@ -55,15 +56,6 @@ const customHighlightStyle = syntaxHighlighting(
 		{ tag: tags.link, textDecoration: "none" },
 	]),
 );
-
-/** 内容に含まれるバッククォート数に応じて十分長いフェンスを生成する */
-function buildMermaidFence(content: string): string {
-	let max = 2;
-	for (const m of content.matchAll(/`{3,}/g)) {
-		if (m[0].length > max) max = m[0].length;
-	}
-	return "`".repeat(max + 1);
-}
 
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
 	const tree = syntaxTree(state);
@@ -292,7 +284,7 @@ export function MarkdownEditor({
 		(newSource: string) => {
 			const view = editorRef.current?.view;
 			if (view && mermaidEditor && newSource !== mermaidEditor.source) {
-				const fence = buildMermaidFence(newSource);
+				const fence = buildFence(newSource);
 				const newText = `${fence}mermaid\n${newSource}\n${fence}`;
 				view.dispatch({
 					changes: { from: mermaidEditor.from, to: mermaidEditor.to, insert: newText },
@@ -315,7 +307,7 @@ export function MarkdownEditor({
 				const hasTrailingNewline =
 					insertAt < doc.length && doc.sliceString(insertAt, insertAt + 1) === "\n";
 				const after = insertAt < doc.length && !hasTrailingNewline ? "\n" : "";
-				const fence = buildMermaidFence(newSource);
+				const fence = buildFence(newSource);
 				const newText = `${before}${fence}mermaid\n${newSource}\n${fence}${after}`;
 				view.dispatch({ changes: { from: insertAt, to: insertAt, insert: newText } });
 			}
