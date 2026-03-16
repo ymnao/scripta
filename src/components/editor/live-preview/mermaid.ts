@@ -373,6 +373,14 @@ function createMermaidClickHandler() {
 			const mermaidEl = target.closest(".cm-mermaid-widget");
 			if (!mermaidEl) return false;
 
+			// 右クリックではカーソルを移動しない。
+			// カーソル移動するとデコレーションが崩れてウィジェットが消失し、
+			// 後続の contextmenu ハンドラが Mermaid メニューを表示できなくなる
+			if (event.button === 2) {
+				event.preventDefault();
+				return true;
+			}
+
 			const pos = view.posAtDOM(mermaidEl);
 			const block = findFencedCodeBlock(view, pos);
 
