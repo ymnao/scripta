@@ -838,8 +838,9 @@ export function AppLayout() {
 	}, []);
 
 	// newtab ページ上でファイルを開く共通処理。
-	// 未オープンのファイル → navigateInTab でタブ内に開く
-	// 既にオープン済み → そのタブに切り替え（newtab はそのまま残す）
+	// navigateInTab に委譲する。未オープンのファイルは newtab を置き換え、
+	// 既にオープン済みのファイルはそのタブへ切り替える（newtab は残る）。
+	// newtab の重複は openNewTab 側で防いでいるため溜まらない。
 	const openFileFromNewTab = useCallback(
 		(filePath: string) => {
 			navigateInTab(filePath);
@@ -899,7 +900,7 @@ export function AppLayout() {
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
-			// newtab ページ上ではタブ内ナビゲーションで置き換える（Chrome の新しいタブと同じ挙動）
+			// newtab ページ上では openFileFromNewTab で処理
 			const state = useWorkspaceStore.getState();
 			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
 				openFileFromNewTab(filePath);
