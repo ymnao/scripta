@@ -111,4 +111,10 @@ describe("wikilinkCompletion", () => {
 		const result = await wikilinkCompletionSource(createContext("[[", 2));
 		expect(result).toBeNull();
 	});
+
+	it("handles mixed separator paths correctly", async () => {
+		mockSearchFilenames.mockResolvedValueOnce(["C:/Users\\docs\\my-note.md"]);
+		const result = await wikilinkCompletionSource(createContext("[[", 2));
+		expect(result?.options[0].label).toBe("my-note");
+	});
 });
