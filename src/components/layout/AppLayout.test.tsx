@@ -1164,7 +1164,7 @@ describe("AppLayout", () => {
 		expect(after.activeTabPath).toBe("/workspace/test.md");
 	});
 
-	it("closes newtab when selecting already-open file via sidebar", async () => {
+	it("switches to existing tab when selecting already-open file from newtab", async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 		useWorkspaceStore.getState().openNewTab();
 
@@ -1177,13 +1177,13 @@ describe("AppLayout", () => {
 		expect(state.activeTabPath && isNewTabPath(state.activeTabPath)).toBe(true);
 		expect(capturedOnFileSelect).not.toBeNull();
 
-		// Select already-open file via sidebar → newtab should be closed
+		// Select already-open file via sidebar → switches to that tab, newtab remains
 		await act(async () => {
 			capturedOnFileSelect?.("/workspace/test.md");
 		});
 
 		const after = useWorkspaceStore.getState();
-		expect(after.tabs).toHaveLength(1);
+		expect(after.tabs).toHaveLength(2);
 		expect(after.activeTabPath).toBe("/workspace/test.md");
 	});
 

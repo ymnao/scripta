@@ -838,22 +838,13 @@ export function AppLayout() {
 	}, []);
 
 	// newtab ページ上でファイルを開く共通処理。
-	// navigateInTab は「既に別タブで開いているファイル」だとそちらに切り替えるだけで
-	// newtab が残るため、その場合は newtab を閉じてから切り替える。
+	// 未オープンのファイル → navigateInTab でタブ内に開く
+	// 既にオープン済み → そのタブに切り替え（newtab はそのまま残す）
 	const openFileFromNewTab = useCallback(
 		(filePath: string) => {
-			const state = useWorkspaceStore.getState();
-			const existing = state.tabs.find((t) => t.path === filePath);
-			if (existing) {
-				// 既に開いているファイル → newtab を閉じてそのタブに切り替え
-				const newTabId = state.activeTabId;
-				if (newTabId != null) closeTabById(newTabId);
-				setActiveTabById(existing.id);
-			} else {
-				navigateInTab(filePath);
-			}
+			navigateInTab(filePath);
 		},
-		[closeTabById, setActiveTabById, navigateInTab],
+		[navigateInTab],
 	);
 
 	// Navigation handlers
