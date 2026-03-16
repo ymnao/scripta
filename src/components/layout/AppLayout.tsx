@@ -955,11 +955,11 @@ export function AppLayout() {
 		setCursorInfo(info);
 	}, []);
 
-	// Close search bar and go-to-line dialog when switching away from a file
+	// Close search bar when switching to non-file tab, close go-to-line on any tab switch
 	useEffect(() => {
+		setGoToLineOpen(false);
 		if (!activeTabPath || isNewTabPath(activeTabPath)) {
 			setSearchBarOpen(false);
-			setGoToLineOpen(false);
 		}
 	}, [activeTabPath]);
 

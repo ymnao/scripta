@@ -1226,4 +1226,30 @@ describe("AppLayout", () => {
 
 		expect(screen.getByLabelText("行番号:")).toBeInTheDocument();
 	});
+
+	it("closes go-to-line dialog when switching between file tabs", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		useWorkspaceStore.getState().openTab("/workspace/b.md");
+		useWorkspaceStore.getState().setActiveTab("/workspace/a.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Open go-to-line dialog
+		mockEditorView.hasFocus = true;
+		await act(async () => {
+			capturedOnEditorView?.(mockEditorView);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+		});
+		expect(screen.getByLabelText("行番号:")).toBeInTheDocument();
+
+		// Switch to another file tab → dialog should close
+		await act(async () => {
+			useWorkspaceStore.getState().setActiveTab("/workspace/b.md");
+		});
+		expect(screen.queryByLabelText("行番号:")).not.toBeInTheDocument();
+	});
 });
