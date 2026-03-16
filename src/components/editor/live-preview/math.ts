@@ -11,21 +11,13 @@ import {
 	keymap,
 } from "@codemirror/view";
 import katex from "katex";
+import { isEscaped } from "../../../lib/content";
 import { collectCursorLines } from "./cursor-utils";
+
+export { isEscaped };
 
 const DISPLAY_MATH_RE = /\$\$([\s\S]+?)\$\$/g;
 const INLINE_MATH_RE = /\$((?:[^\n$\\]|\\.)+)\$/g;
-
-/** Check whether the `$` at position `pos` in `text` is escaped by an odd number of preceding backslashes. */
-export function isEscaped(text: string, pos: number): boolean {
-	let count = 0;
-	let i = pos - 1;
-	while (i >= 0 && text[i] === "\\") {
-		count++;
-		i--;
-	}
-	return count % 2 === 1;
-}
 
 interface CodeRange {
 	from: number;
@@ -57,7 +49,7 @@ export function collectCodeRanges(
 	return ranges;
 }
 
-function overlapsCodeBlock(from: number, to: number, codeRanges: CodeRange[]): boolean {
+export function overlapsCodeBlock(from: number, to: number, codeRanges: CodeRange[]): boolean {
 	for (const range of codeRanges) {
 		if (from < range.to && to > range.from) return true;
 	}

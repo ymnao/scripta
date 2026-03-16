@@ -96,6 +96,12 @@ describe("buildFileMap", () => {
 		expect(map.get("日記")).toBe("/workspace/日記.md");
 		expect(map.get("メモ")).toBe("/workspace/メモ.md");
 	});
+
+	it("handles mixed separator paths correctly", () => {
+		const map = buildFileMap(["C:/Users\\docs\\note.md", "C:\\workspace/todo.md"]);
+		expect(map.get("note")).toBe("C:/Users\\docs\\note.md");
+		expect(map.get("todo")).toBe("C:\\workspace/todo.md");
+	});
 });
 
 describe("buildDecorations", () => {

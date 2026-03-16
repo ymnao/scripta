@@ -1,24 +1,7 @@
 import DOMPurify from "dompurify";
 import katex from "katex";
 import { Marked, type Token, type Tokens } from "marked";
-
-function isEscaped(text: string, pos: number): boolean {
-	let count = 0;
-	let i = pos - 1;
-	while (i >= 0 && text[i] === "\\") {
-		count++;
-		i--;
-	}
-	return count % 2 === 1;
-}
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
+import { escapeHtml, isEscaped } from "./content";
 
 interface MathPlaceholder {
 	placeholder: string;

@@ -39,6 +39,45 @@ interface WorkspaceState {
 	activatePrevTab: () => void;
 }
 
+function closeTabAt(state: WorkspaceState, index: number): Partial<WorkspaceState> {
+	const newTabs = state.tabs.filter((_, i) => i !== index);
+	const closedTab = state.tabs[index];
+	if (state.activeTabId !== closedTab.id) {
+		return { tabs: newTabs };
+	}
+	let newActive: Tab | null = null;
+	if (newTabs.length > 0) {
+		newActive = index < newTabs.length ? newTabs[index] : newTabs[newTabs.length - 1];
+	}
+	return {
+		tabs: newTabs,
+		activeTabPath: newActive?.path ?? null,
+		activeTabId: newActive?.id ?? null,
+	};
+}
+
+function navigateHistory(state: WorkspaceState, direction: -1 | 1): Partial<WorkspaceState> {
+	const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+	if (!activeTab) return state;
+	const newIndex = activeTab.historyIndex + direction;
+	if (newIndex < 0 || newIndex >= activeTab.history.length) return state;
+	const newPath = activeTab.history[newIndex];
+	return {
+		tabs: state.tabs.map((t) =>
+			t.id === activeTab.id ? { ...t, path: newPath, historyIndex: newIndex } : t,
+		),
+		activeTabPath: newPath,
+	};
+}
+
+function activateTabByOffset(state: WorkspaceState, offset: number): Partial<WorkspaceState> {
+	if (state.tabs.length <= 1) return state;
+	const index = state.tabs.findIndex((t) => t.id === state.activeTabId);
+	const nextIndex = (index + offset + state.tabs.length) % state.tabs.length;
+	const next = state.tabs[nextIndex];
+	return { activeTabPath: next.path, activeTabId: next.id };
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	workspacePath: null,
 	tabs: [],
@@ -78,46 +117,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 		set((state) => {
 			const index = state.tabs.findIndex((t) => t.path === path);
 			if (index === -1) return state;
-
-			const newTabs = state.tabs.filter((t) => t.path !== path);
-
-			if (state.activeTabPath !== path) {
-				return { tabs: newTabs };
-			}
-
-			let newActive: Tab | null = null;
-			if (newTabs.length > 0) {
-				newActive = index < newTabs.length ? newTabs[index] : newTabs[newTabs.length - 1];
-			}
-
-			return {
-				tabs: newTabs,
-				activeTabPath: newActive?.path ?? null,
-				activeTabId: newActive?.id ?? null,
-			};
+			return closeTabAt(state, index);
 		}),
 
 	closeTabById: (id) =>
 		set((state) => {
 			const index = state.tabs.findIndex((t) => t.id === id);
 			if (index === -1) return state;
-
-			const newTabs = state.tabs.filter((t) => t.id !== id);
-
-			if (state.activeTabId !== id) {
-				return { tabs: newTabs };
-			}
-
-			let newActive: Tab | null = null;
-			if (newTabs.length > 0) {
-				newActive = index < newTabs.length ? newTabs[index] : newTabs[newTabs.length - 1];
-			}
-
-			return {
-				tabs: newTabs,
-				activeTabPath: newActive?.path ?? null,
-				activeTabId: newActive?.id ?? null,
-			};
+			return closeTabAt(state, index);
 		}),
 
 	setActiveTab: (path) =>
@@ -135,9 +142,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 		}),
 
 	setTabDirty: (path, dirty) =>
-		set((state) => ({
-			tabs: state.tabs.map((t) => (t.path === path ? { ...t, dirty } : t)),
-		})),
+		set((state) => {
+			const tab = state.tabs.find((t) => t.path === path);
+			if (!tab || tab.dirty === dirty) return state;
+			return { tabs: state.tabs.map((t) => (t.path === path ? { ...t, dirty } : t)) };
+		}),
 
 	renameTab: (oldPath, newPath) =>
 		set((state) => ({
@@ -212,37 +221,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 			};
 		}),
 
-	goBackInTab: () =>
-		set((state) => {
-			const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
-			if (!activeTab || activeTab.historyIndex <= 0) return state;
+	goBackInTab: () => set((state) => navigateHistory(state, -1)),
 
-			const newIndex = activeTab.historyIndex - 1;
-			const newPath = activeTab.history[newIndex];
-
-			return {
-				tabs: state.tabs.map((t) =>
-					t.id === activeTab.id ? { ...t, path: newPath, historyIndex: newIndex } : t,
-				),
-				activeTabPath: newPath,
-			};
-		}),
-
-	goForwardInTab: () =>
-		set((state) => {
-			const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
-			if (!activeTab || activeTab.historyIndex >= activeTab.history.length - 1) return state;
-
-			const newIndex = activeTab.historyIndex + 1;
-			const newPath = activeTab.history[newIndex];
-
-			return {
-				tabs: state.tabs.map((t) =>
-					t.id === activeTab.id ? { ...t, path: newPath, historyIndex: newIndex } : t,
-				),
-				activeTabPath: newPath,
-			};
-		}),
+	goForwardInTab: () => set((state) => navigateHistory(state, 1)),
 
 	reorderTab: (fromIndex, toIndex) =>
 		set((state) => {
@@ -278,23 +259,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 			};
 		}),
 
-	activateNextTab: () =>
-		set((state) => {
-			if (state.tabs.length <= 1) return state;
-			const index = state.tabs.findIndex((t) => t.id === state.activeTabId);
-			const nextIndex = (index + 1) % state.tabs.length;
-			const next = state.tabs[nextIndex];
-			return { activeTabPath: next.path, activeTabId: next.id };
-		}),
+	activateNextTab: () => set((state) => activateTabByOffset(state, 1)),
 
-	activatePrevTab: () =>
-		set((state) => {
-			if (state.tabs.length <= 1) return state;
-			const index = state.tabs.findIndex((t) => t.id === state.activeTabId);
-			const prevIndex = (index - 1 + state.tabs.length) % state.tabs.length;
-			const prev = state.tabs[prevIndex];
-			return { activeTabPath: prev.path, activeTabId: prev.id };
-		}),
+	activatePrevTab: () => set((state) => activateTabByOffset(state, -1)),
 
 	closeTabsByPrefix: (prefix) =>
 		set((state) => {

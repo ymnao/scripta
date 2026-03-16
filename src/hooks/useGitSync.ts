@@ -98,16 +98,13 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 
 	const refreshStatus = useCallback(async (path: string) => {
 		try {
-			const status = await gitStatus(path);
+			const [status, time] = await Promise.all([gitStatus(path), gitGetLastCommitTime(path)]);
 			if (workspacePathRef.current !== path) return;
 			const store = useGitSyncStore.getState();
 			store.setBranch(status.branch);
 			store.setHasRemote(status.hasRemote);
 			store.setConflictFiles(status.conflictFiles);
 			pausedRef.current = status.conflictFiles.length > 0;
-
-			const time = await gitGetLastCommitTime(path);
-			if (workspacePathRef.current !== path) return;
 			store.setLastCommitTime(time);
 		} catch {
 			// status check failure is non-fatal
