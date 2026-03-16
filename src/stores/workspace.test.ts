@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { isNewTabPath } from "../lib/path";
 import { useWorkspaceStore } from "./workspace";
 
 function resetStore() {
@@ -559,6 +560,92 @@ describe("useWorkspaceStore", () => {
 			expect(useWorkspaceStore.getState().fileTreeVersion).toBe(1);
 			useWorkspaceStore.getState().bumpFileTreeVersion();
 			expect(useWorkspaceStore.getState().fileTreeVersion).toBe(2);
+		});
+	});
+
+	describe("openNewTab", () => {
+		it("creates a new-tab page with newtab:// path", () => {
+			useWorkspaceStore.getState().openNewTab();
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs).toHaveLength(1);
+			expect(isNewTabPath(state.tabs[0].path)).toBe(true);
+			expect(state.tabs[0].path).toBe("newtab://1");
+			expect(state.tabs[0].dirty).toBe(false);
+			expect(state.activeTabPath).toBe("newtab://1");
+			expect(state.activeTabId).toBe(1);
+		});
+
+		it("reuses existing newtab instead of creating a new one", () => {
+			useWorkspaceStore.getState().openNewTab();
+			const firstPath = useWorkspaceStore.getState().activeTabPath;
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().openNewTab();
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs).toHaveLength(2);
+			expect(state.activeTabPath).toBe(firstPath);
+		});
+
+		it("coexists with regular file tabs", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().openNewTab();
+			const state = useWorkspaceStore.getState();
+			expect(state.tabs).toHaveLength(2);
+			expect(state.tabs[0].path).toBe("/a.md");
+			expect(isNewTabPath(state.tabs[1].path)).toBe(true);
+		});
+	});
+
+	describe("activateNextTab", () => {
+		it("activates the next tab", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().openTab("/b.md");
+			useWorkspaceStore.getState().openTab("/c.md");
+			useWorkspaceStore.getState().setActiveTab("/a.md");
+
+			useWorkspaceStore.getState().activateNextTab();
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/b.md");
+		});
+
+		it("wraps around to the first tab", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().openTab("/b.md");
+			// activeTab is /b.md (last opened)
+
+			useWorkspaceStore.getState().activateNextTab();
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/a.md");
+		});
+
+		it("does nothing with a single tab", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().activateNextTab();
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/a.md");
+		});
+	});
+
+	describe("activatePrevTab", () => {
+		it("activates the previous tab", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().openTab("/b.md");
+			useWorkspaceStore.getState().openTab("/c.md");
+			// activeTab is /c.md
+
+			useWorkspaceStore.getState().activatePrevTab();
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/b.md");
+		});
+
+		it("wraps around to the last tab", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().openTab("/b.md");
+			useWorkspaceStore.getState().setActiveTab("/a.md");
+
+			useWorkspaceStore.getState().activatePrevTab();
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/b.md");
+		});
+
+		it("does nothing with a single tab", () => {
+			useWorkspaceStore.getState().openTab("/a.md");
+			useWorkspaceStore.getState().activatePrevTab();
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/a.md");
 		});
 	});
 

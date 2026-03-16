@@ -13,7 +13,7 @@ test.describe("help dialog", () => {
 		await expect(page.getByText("キーボードショートカット")).toBeVisible();
 		await expect(page.getByText("太字")).toBeVisible();
 		await expect(page.getByText("斜体")).toBeVisible();
-		await expect(page.getByText("保存")).toBeVisible();
+		await expect(page.getByLabel("キーボードショートカット").getByText("保存")).toBeVisible();
 	});
 
 	test("closes help dialog with Escape", async ({ page }) => {

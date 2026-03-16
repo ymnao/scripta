@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { addTrailingSep, basename, dirname, joinPath, replaceName, replacePrefix } from "./path";
+import {
+	addTrailingSep,
+	basename,
+	createNewTabPath,
+	dirname,
+	isNewTabPath,
+	joinPath,
+	replaceName,
+	replacePrefix,
+} from "./path";
 
 describe("dirname", () => {
 	it("returns parent directory for a file path", () => {
@@ -136,5 +145,24 @@ describe("replacePrefix", () => {
 		expect(replacePrefix("C:\\old\\dir\\file.md", "C:\\old\\dir", "C:\\new\\dir")).toBe(
 			"C:\\new\\dir\\file.md",
 		);
+	});
+});
+
+describe("isNewTabPath", () => {
+	it("returns true for newtab:// paths", () => {
+		expect(isNewTabPath("newtab://1")).toBe(true);
+		expect(isNewTabPath("newtab://42")).toBe(true);
+	});
+
+	it("returns false for regular file paths", () => {
+		expect(isNewTabPath("/workspace/file.md")).toBe(false);
+		expect(isNewTabPath("file.md")).toBe(false);
+	});
+});
+
+describe("createNewTabPath", () => {
+	it("creates a newtab:// path with the given id", () => {
+		expect(createNewTabPath(1)).toBe("newtab://1");
+		expect(createNewTabPath(99)).toBe("newtab://99");
 	});
 });

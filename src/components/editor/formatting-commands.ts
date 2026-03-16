@@ -31,6 +31,93 @@ function toggleWrap(view: EditorView, marker: string): boolean {
 	return true;
 }
 
+export const toggleList: Command = (view) => {
+	const { head } = view.state.selection.main;
+	const line = view.state.doc.lineAt(head);
+	const text = line.text;
+
+	// Match list markers (with optional checkbox)
+	const listMatch = text.match(/^(\s*)([-*+])\s(\[[ xX]\]\s)?/);
+	if (listMatch) {
+		const wsLen = listMatch[1].length;
+		const markerEnd = line.from + listMatch[0].length;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: markerEnd, insert: "" },
+		});
+	} else {
+		const wsMatch = text.match(/^(\s*)/);
+		const wsLen = wsMatch ? wsMatch[1].length : 0;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: line.from + wsLen, insert: "- " },
+		});
+	}
+	return true;
+};
+
+export const toggleCheckbox: Command = (view) => {
+	const { head } = view.state.selection.main;
+	const line = view.state.doc.lineAt(head);
+	const text = line.text;
+
+	// Already has checkbox → remove it (strip entire list + checkbox)
+	const checkboxMatch = text.match(/^(\s*)([-*+])\s\[[ xX]\]\s/);
+	if (checkboxMatch) {
+		const wsLen = checkboxMatch[1].length;
+		const markerEnd = line.from + checkboxMatch[0].length;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: markerEnd, insert: "" },
+		});
+		return true;
+	}
+
+	// Plain line (or list without checkbox) → add - [ ]
+	// First strip existing list marker if present
+	const listMatch = text.match(/^(\s*)([-*+])\s/);
+	if (listMatch) {
+		const wsLen = listMatch[1].length;
+		const markerEnd = line.from + listMatch[0].length;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: markerEnd, insert: "- [ ] " },
+		});
+	} else {
+		const wsMatch = text.match(/^(\s*)/);
+		const wsLen = wsMatch ? wsMatch[1].length : 0;
+		view.dispatch({
+			changes: { from: line.from + wsLen, to: line.from + wsLen, insert: "- [ ] " },
+		});
+	}
+	return true;
+};
+
+export const toggleCheckState: Command = (view) => {
+	const { head } = view.state.selection.main;
+	const line = view.state.doc.lineAt(head);
+	const text = line.text;
+
+	// Unchecked: [ ] → [x]
+	const uncheckedMatch = text.match(/^(\s*[-*+]\s)\[ \]/);
+	if (uncheckedMatch) {
+		const pos = line.from + uncheckedMatch[1].length;
+		view.dispatch({
+			changes: { from: pos, to: pos + 3, insert: "[x]" },
+		});
+		return true;
+	}
+
+	// Checked: [x] → [ ]
+	const checkedMatch = text.match(/^(\s*[-*+]\s)\[[xX]\]/);
+	if (checkedMatch) {
+		const pos = line.from + checkedMatch[1].length;
+		view.dispatch({
+			changes: { from: pos, to: pos + 3, insert: "[ ]" },
+		});
+		return true;
+	}
+
+	// Not a checkbox line — don't consume the event
+	return false;
+};
+
 export const toggleBold: Command = (view) => toggleWrap(view, "**");
 
 export const toggleItalic: Command = (view) => toggleWrap(view, "*");

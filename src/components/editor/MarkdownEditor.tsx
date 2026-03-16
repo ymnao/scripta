@@ -10,7 +10,7 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -21,8 +21,11 @@ import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
 	toggleBold,
+	toggleCheckState,
+	toggleCheckbox,
 	toggleHeading,
 	toggleItalic,
+	toggleList,
 	toggleStrikethrough,
 } from "./formatting-commands";
 import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
@@ -167,13 +170,15 @@ export function MarkdownEditor({
 			const lineNum = Math.min(goToLine.line, view.state.doc.lines);
 			const lineInfo = view.state.doc.line(lineNum);
 
+			const pos = goToLine.query ? lineInfo.from : lineInfo.to;
+
 			view.dispatch({
-				selection: EditorSelection.cursor(lineInfo.from),
+				selection: EditorSelection.cursor(pos),
 				effects: goToLine.query ? [setHighlightQuery.of(goToLine.query)] : [],
 			});
 
 			view.dispatch({
-				effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
+				effects: EditorView.scrollIntoView(pos, { y: "center" }),
 			});
 
 			view.focus();
@@ -232,6 +237,13 @@ export function MarkdownEditor({
 			tableDecoration,
 			...(showLinkCards ? [linkCardDecoration] : []),
 			wikilinkCompletion,
+			Prec.high(
+				keymap.of([
+					{ key: "Mod-l", run: toggleList },
+					{ key: "Mod-Shift-l", run: toggleCheckbox },
+					{ key: "Mod-Enter", run: toggleCheckState },
+				]),
+			),
 			keymap.of([
 				{
 					key: "Mod-s",

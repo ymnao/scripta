@@ -1,3 +1,13 @@
+const NEW_TAB_PREFIX = "newtab://";
+
+export function isNewTabPath(path: string): boolean {
+	return path.startsWith(NEW_TAB_PREFIX);
+}
+
+export function createNewTabPath(id: number): string {
+	return `${NEW_TAB_PREFIX}${id}`;
+}
+
 export const SEP_RE = /[\\/]/;
 
 function getSep(path: string): string {

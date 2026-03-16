@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useId } from "react";
 import { DialogBase } from "./DialogBase";
+import { Kbd } from "./Kbd";
 
 interface HelpDialogProps {
 	open: boolean;
@@ -24,12 +25,16 @@ const groups: ShortcutGroup[] = [
 			{ keys: [[mod, "I"]], action: "斜体" },
 			{ keys: [[mod, shift, "X"]], action: "取り消し線" },
 			{ keys: [[mod, "1\u20136"]], action: "見出し 1\u20136" },
+			{ keys: [[mod, "L"]], action: "リストの切り替え" },
+			{ keys: [[mod, shift, "L"]], action: "チェックボックスの切り替え" },
+			{ keys: [[mod, "\u21A9"]], action: "チェック / チェック解除" },
 		],
 	},
 	{
 		title: "ファイル",
 		shortcuts: [
 			{ keys: [[mod, "S"]], action: "保存" },
+			{ keys: [[mod, "T"]], action: "新しいタブ" },
 			{ keys: [[mod, "W"]], action: "タブを閉じる" },
 			{
 				keys: [
@@ -45,6 +50,14 @@ const groups: ShortcutGroup[] = [
 				],
 				action: "進む",
 			},
+		],
+	},
+	{
+		title: "ナビゲーション",
+		shortcuts: [
+			{ keys: [[mod, shift, "["]], action: "前のタブ" },
+			{ keys: [[mod, shift, "]"]], action: "次のタブ" },
+			{ keys: [[mod, "G"]], action: "指定行へジャンプ" },
 		],
 	},
 	{
@@ -68,14 +81,6 @@ const groups: ShortcutGroup[] = [
 		],
 	},
 ];
-
-function Kbd({ children }: { children: string }) {
-	return (
-		<kbd className="inline-flex min-w-[20px] items-center justify-center rounded border border-border bg-bg-secondary px-1.5 py-0.5 font-mono text-[10px] leading-none text-text-primary shadow-[0_1px_0_0_var(--color-border)]">
-			{children}
-		</kbd>
-	);
-}
 
 function KeyCombo({ keys }: { keys: string[][] }) {
 	return (

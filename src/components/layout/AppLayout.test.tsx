@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fileExists, readFile, writeFile } from "../../lib/commands";
+import { isNewTabPath } from "../../lib/path";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
@@ -113,22 +114,42 @@ vi.mock("@tauri-apps/api/window", () => ({
 	}),
 }));
 
+let capturedOnFileSelect: ((path: string) => void) | null = null;
+vi.mock("./Sidebar", () => ({
+	Sidebar: (props: { onFileSelect: (path: string) => void }) => {
+		capturedOnFileSelect = props.onFileSelect;
+		return <div data-testid="mock-sidebar" />;
+	},
+}));
+
+const mockEditorView = { hasFocus: false, state: { doc: { lines: 100 } } };
+let capturedOnEditorView: ((view: unknown) => void) | null = null;
+
 vi.mock("../editor/MarkdownEditor", () => ({
 	MarkdownEditor: ({
 		value,
 		onChange,
 		onSave,
-	}: { value: string; onChange: (v: string) => void; onSave: () => void }) => (
-		<div data-testid="mock-editor">
-			<span data-testid="editor-value">{value}</span>
-			<button type="button" data-testid="editor-change" onClick={() => onChange("new content")}>
-				change
-			</button>
-			<button type="button" data-testid="editor-save" onClick={onSave}>
-				save
-			</button>
-		</div>
-	),
+		onEditorView,
+	}: {
+		value: string;
+		onChange: (v: string) => void;
+		onSave: () => void;
+		onEditorView?: (view: unknown) => void;
+	}) => {
+		capturedOnEditorView = onEditorView ?? null;
+		return (
+			<div data-testid="mock-editor">
+				<span data-testid="editor-value">{value}</span>
+				<button type="button" data-testid="editor-change" onClick={() => onChange("new content")}>
+					change
+				</button>
+				<button type="button" data-testid="editor-save" onClick={onSave}>
+					save
+				</button>
+			</div>
+		);
+	},
 }));
 
 const { AppLayout } = await import("./AppLayout");
@@ -156,6 +177,9 @@ describe("AppLayout", () => {
 		vi.useFakeTimers();
 		fsChangeCallback = null;
 		closeHandler = null;
+		capturedOnFileSelect = null;
+		capturedOnEditorView = null;
+		mockEditorView.hasFocus = false;
 		mockDestroy.mockClear();
 		MockWebviewWindowConstructor.mockClear();
 		(MockWebviewWindowConstructor.getByLabel as Mock).mockReturnValue(null);
@@ -183,7 +207,7 @@ describe("AppLayout", () => {
 		await act(async () => {
 			render(<AppLayout />);
 		});
-		expect(screen.getByText("scripta")).toBeInTheDocument();
+		expect(screen.getByLabelText("scripta")).toBeInTheDocument();
 		expect(screen.getByText("Verba volant, scripta manent.")).toBeInTheDocument();
 		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
 	});
@@ -1060,5 +1084,172 @@ describe("AppLayout", () => {
 		});
 
 		expect(MockWebviewWindowConstructor).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not show editor on newtab page", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// newtab page shows NewTabContent, not the editor
+		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
+		expect(screen.getByLabelText("scripta")).toBeInTheDocument();
+	});
+
+	it("Cmd+Shift+E does not export on newtab page", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "e", metaKey: true, shiftKey: true }),
+			);
+		});
+
+		// Export dialog should NOT appear
+		expect(screen.queryByText("エクスポート")).not.toBeInTheDocument();
+	});
+
+	it("closes search bar when switching to newtab page", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Open search bar via Cmd+F
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true }));
+		});
+
+		// Switch to newtab — search bar should close
+		await act(async () => {
+			useWorkspaceStore.getState().openNewTab();
+		});
+
+		// Editor is gone so search bar is not rendered, but importantly
+		// it was closed (state reset) so it won't reappear on next file open
+		expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
+	});
+
+	it("replaces newtab with file when selecting via sidebar", async () => {
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		const state = useWorkspaceStore.getState();
+		const newTabId = state.activeTabId;
+		expect(state.tabs).toHaveLength(1);
+		expect(capturedOnFileSelect).not.toBeNull();
+
+		// Trigger file selection via the sidebar's onFileSelect callback
+		await act(async () => {
+			capturedOnFileSelect?.("/workspace/test.md");
+		});
+
+		// newtab should be replaced in the same tab
+		const after = useWorkspaceStore.getState();
+		expect(after.tabs).toHaveLength(1);
+		expect(after.activeTabId).toBe(newTabId);
+		expect(after.activeTabPath).toBe("/workspace/test.md");
+	});
+
+	it("switches to existing tab when selecting already-open file from newtab", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+		useWorkspaceStore.getState().openNewTab();
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		const state = useWorkspaceStore.getState();
+		expect(state.tabs).toHaveLength(2);
+		expect(state.activeTabPath && isNewTabPath(state.activeTabPath)).toBe(true);
+		expect(capturedOnFileSelect).not.toBeNull();
+
+		// Select already-open file via sidebar → switches to that tab, newtab remains
+		await act(async () => {
+			capturedOnFileSelect?.("/workspace/test.md");
+		});
+
+		const after = useWorkspaceStore.getState();
+		expect(after.tabs).toHaveLength(2);
+		expect(after.activeTabPath).toBe("/workspace/test.md");
+	});
+
+	it("Cmd+G does not open go-to-line dialog when editor is not focused", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Set editorView with hasFocus=false
+		mockEditorView.hasFocus = false;
+		await act(async () => {
+			capturedOnEditorView?.(mockEditorView);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+		});
+
+		expect(screen.queryByLabelText("行番号:")).not.toBeInTheDocument();
+	});
+
+	it("Cmd+G opens go-to-line dialog when editor is focused", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Set editorView with hasFocus=true
+		mockEditorView.hasFocus = true;
+		await act(async () => {
+			capturedOnEditorView?.(mockEditorView);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+		});
+
+		expect(screen.getByLabelText("行番号:")).toBeInTheDocument();
+	});
+
+	it("closes go-to-line dialog when switching between file tabs", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		useWorkspaceStore.getState().openTab("/workspace/b.md");
+		useWorkspaceStore.getState().setActiveTab("/workspace/a.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Open go-to-line dialog
+		mockEditorView.hasFocus = true;
+		await act(async () => {
+			capturedOnEditorView?.(mockEditorView);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+		});
+		expect(screen.getByLabelText("行番号:")).toBeInTheDocument();
+
+		// Switch to another file tab → dialog should close
+		await act(async () => {
+			useWorkspaceStore.getState().setActiveTab("/workspace/b.md");
+		});
+		expect(screen.queryByLabelText("行番号:")).not.toBeInTheDocument();
 	});
 });

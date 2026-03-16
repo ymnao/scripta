@@ -10,7 +10,7 @@ import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
-import { addTrailingSep, basename, replacePrefix } from "../../lib/path";
+import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
 import { useGitSyncStore } from "../../stores/git-sync";
 import { useScratchpadStore } from "../../stores/scratchpad";
@@ -30,7 +30,9 @@ import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { ScratchpadPanel, type ScratchpadSaveHandle } from "../editor/ScratchpadPanel";
 import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
+import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
+import { NewTabContent } from "./NewTabContent";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
@@ -58,6 +60,9 @@ export function AppLayout() {
 	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
 	const renameTabsByPrefix = useWorkspaceStore((s) => s.renameTabsByPrefix);
 	const reorderTab = useWorkspaceStore((s) => s.reorderTab);
+	const openNewTab = useWorkspaceStore((s) => s.openNewTab);
+	const activateNextTab = useWorkspaceStore((s) => s.activateNextTab);
+	const activatePrevTab = useWorkspaceStore((s) => s.activatePrevTab);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
 	const hydratePreference = useThemeStore((s) => s.hydratePreference);
 	const hydrateSettings = useSettingsStore((s) => s.hydrate);
@@ -99,6 +104,7 @@ export function AppLayout() {
 		filePath: string;
 	} | null>(null);
 	const exportRequestIdRef = useRef(0);
+	const [goToLineOpen, setGoToLineOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
@@ -118,8 +124,9 @@ export function AppLayout() {
 
 	const [content, setContent] = useState("");
 	const [editorKey, setEditorKey] = useState(0);
+	const isNewTab = activeTabPath ? isNewTabPath(activeTabPath) : false;
 	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent } = useAutoSave(
-		activeTabPath ?? "",
+		isNewTab ? "" : (activeTabPath ?? ""),
 		content,
 	);
 
@@ -205,6 +212,14 @@ export function AppLayout() {
 		if (loading) return;
 		void saveSidebarVisible(sidebarVisible);
 	}, [sidebarVisible, loading]);
+
+	// Open new tab when workspace has no tabs (startup and workspace switch)
+	useEffect(() => {
+		if (loading) return;
+		if (workspacePath && useWorkspaceStore.getState().tabs.length === 0) {
+			openNewTab();
+		}
+	}, [loading, workspacePath, openNewTab]);
 
 	// Load workspace config (icons) when workspace changes
 	useEffect(() => {
@@ -311,7 +326,7 @@ export function AppLayout() {
 
 		addListener("menu-export", () => {
 			const path = useWorkspaceStore.getState().activeTabPath;
-			if (!path) return;
+			if (!path || isNewTabPath(path)) return;
 			handleExport(path);
 		});
 
@@ -334,8 +349,12 @@ export function AppLayout() {
 				const currentActiveTab = useWorkspaceStore.getState().activeTabPath;
 				const { trimTrailingWhitespace } = useSettingsStore.getState();
 
-				// Save active tab if dirty
-				if (currentActiveTab && contentRef.current !== savedContentRef.current) {
+				// Save active tab if dirty (skip new-tab pages)
+				if (
+					currentActiveTab &&
+					!isNewTabPath(currentActiveTab) &&
+					contentRef.current !== savedContentRef.current
+				) {
 					const saved = await saveNowRef.current();
 					if (cancelled) return;
 					if (!saved) hasFailed = true;
@@ -344,7 +363,11 @@ export function AppLayout() {
 				// Save all dirty cached non-active tabs with content normalization
 				const saves: Promise<{ path: string; ok: boolean; content: string }>[] = [];
 				for (const [path, cached] of tabCacheRef.current) {
-					if (path !== currentActiveTab && cached.content !== cached.savedContent) {
+					if (
+						path !== currentActiveTab &&
+						!isNewTabPath(path) &&
+						cached.content !== cached.savedContent
+					) {
 						const normalized = processContent(cached.content, trimTrailingWhitespace);
 						saves.push(
 							writeFile(path, normalized).then(
@@ -410,8 +433,14 @@ export function AppLayout() {
 		}
 
 		// Save previous tab to cache (only if content was actually loaded for it
-		// and the tab still exists — navigateInTab may change the tab's path)
-		if (!workspaceChanged && prevPath && contentLoadedForPathRef.current === prevPath) {
+		// and the tab still exists — navigateInTab may change the tab's path).
+		// Skip new-tab pages — they have no file content to cache.
+		if (
+			!workspaceChanged &&
+			prevPath &&
+			!isNewTabPath(prevPath) &&
+			contentLoadedForPathRef.current === prevPath
+		) {
 			const tabStillExists = useWorkspaceStore
 				.getState()
 				.tabs.some((t) => t.path === prevPath || t.history.includes(prevPath));
@@ -430,6 +459,15 @@ export function AppLayout() {
 		justSwitchedRef.current = true;
 
 		if (!activeTabPath) {
+			contentLoadedForPathRef.current = null;
+			setContent("");
+			savedContentRef.current = "";
+			markSaved("");
+			return;
+		}
+
+		// New-tab page — no editor, no content to load
+		if (isNewTabPath(activeTabPath)) {
 			contentLoadedForPathRef.current = null;
 			setContent("");
 			savedContentRef.current = "";
@@ -675,6 +713,13 @@ export function AppLayout() {
 				if (!tab) return;
 				const path = tab.path;
 
+				// New-tab pages: close without saving
+				if (isNewTabPath(path)) {
+					tabCacheRef.current.delete(path);
+					closeTabById(id);
+					return;
+				}
+
 				if (id === state.activeTabId) {
 					if (contentRef.current !== savedContentRef.current) {
 						const saved = await saveNow();
@@ -792,6 +837,17 @@ export function AppLayout() {
 		setEditorView(view);
 	}, []);
 
+	// newtab ページ上でファイルを開く共通処理。
+	// navigateInTab に委譲する。未オープンのファイルは newtab を置き換え、
+	// 既にオープン済みのファイルはそのタブへ切り替える（newtab は残る）。
+	// newtab の重複は openNewTab 側で防いでいるため溜まらない。
+	const openFileFromNewTab = useCallback(
+		(filePath: string) => {
+			navigateInTab(filePath);
+		},
+		[navigateInTab],
+	);
+
 	// Navigation handlers
 	const handleFileSelect = useCallback(
 		async (path: string) => {
@@ -800,9 +856,14 @@ export function AppLayout() {
 				const saved = await saveNow();
 				if (!saved) return;
 			}
-			navigateInTab(path);
+			const state = useWorkspaceStore.getState();
+			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
+				openFileFromNewTab(path);
+			} else {
+				navigateInTab(path);
+			}
 		},
-		[activeTabPath, navigateInTab, saveNow],
+		[activeTabPath, navigateInTab, openFileFromNewTab, saveNow],
 	);
 
 	const handleFileOpenNewTab = useCallback(
@@ -839,9 +900,15 @@ export function AppLayout() {
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
-			openTab(filePath);
+			// newtab ページ上では openFileFromNewTab で処理
+			const state = useWorkspaceStore.getState();
+			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
+				openFileFromNewTab(filePath);
+			} else {
+				openTab(filePath);
+			}
 		},
-		[openTab],
+		[openTab, openFileFromNewTab],
 	);
 
 	const handleShowFiles = useCallback(() => {
@@ -862,10 +929,14 @@ export function AppLayout() {
 				setGoToLine({ line: lineNumber, query });
 			} else {
 				pendingGoToLineRef.current = { line: lineNumber, query };
-				openTab(filePath);
+				if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
+					openFileFromNewTab(filePath);
+				} else {
+					openTab(filePath);
+				}
 			}
 		},
-		[openTab],
+		[openTab, openFileFromNewTab],
 	);
 
 	const handleGoToLineDone = useCallback(() => {
@@ -876,14 +947,28 @@ export function AppLayout() {
 		setCursorInfo(info);
 	}, []);
 
-	// Close search bar when switching away from a file
+	// Close search bar when switching to non-file tab, close go-to-line on any tab switch
 	useEffect(() => {
-		if (!activeTabPath) setSearchBarOpen(false);
+		setGoToLineOpen(false);
+		if (!activeTabPath || isNewTabPath(activeTabPath)) {
+			setSearchBarOpen(false);
+		}
 	}, [activeTabPath]);
 
-	// Keyboard shortcuts: Cmd+W, Cmd+B, Cmd+F, Cmd+H, Cmd+Shift+F, Cmd+P, Cmd+,, F1, Cmd+[/], Alt+Left/Right
+	// Keyboard shortcuts
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
+			// Tab switching: Cmd+Shift+[ / Cmd+Shift+] (must be checked before non-shift variants)
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "{" || e.key === "[")) {
+				e.preventDefault();
+				activatePrevTab();
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "}" || e.key === "]")) {
+				e.preventDefault();
+				activateNextTab();
+				return;
+			}
 			// Navigation: Cmd+[ / Alt+Left = back, Cmd+] / Alt+Right = forward
 			if ((e.metaKey || e.ctrlKey) && e.key === "[") {
 				e.preventDefault();
@@ -935,7 +1020,7 @@ export function AppLayout() {
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
 				e.preventDefault();
 				const path = useWorkspaceStore.getState().activeTabPath;
-				if (!path) return;
+				if (!path || isNewTabPath(path)) return;
 				handleExport(path);
 				return;
 			}
@@ -969,9 +1054,22 @@ export function AppLayout() {
 					}
 				}
 			}
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "t") {
+				e.preventDefault();
+				if (workspacePath) openNewTab();
+				return;
+			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
 				e.preventDefault();
 				if (workspacePath) toggleScratchpad();
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "g") {
+				const view = editorViewRef.current;
+				if (view?.hasFocus) {
+					e.preventDefault();
+					setGoToLineOpen((prev) => !prev);
+				}
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
@@ -991,10 +1089,13 @@ export function AppLayout() {
 		return () => document.removeEventListener("keydown", handler);
 	}, [
 		activeTabId,
+		activateNextTab,
+		activatePrevTab,
 		handleCloseTab,
 		handleExport,
 		handleGoBack,
 		handleGoForward,
+		openNewTab,
 		toggleScratchpad,
 		workspacePath,
 	]);
@@ -1030,7 +1131,7 @@ export function AppLayout() {
 					/>
 				)}
 				<main className="relative min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
-					{activeTabPath ? (
+					{activeTabPath && !isNewTab ? (
 						editorError ? (
 							<div className="editor-error">
 								<p>{editorError}</p>
@@ -1047,15 +1148,18 @@ export function AppLayout() {
 								onStatistics={handleStatistics}
 							/>
 						)
-					) : workspacePath ? (
-						<div className="flex h-full items-center justify-center text-text-secondary">
-							<p className="text-sm">Select a file to start editing</p>
-						</div>
 					) : (
-						<div className="flex h-full flex-col items-center justify-center gap-2">
-							<p className="text-2xl font-light text-text-primary">scripta</p>
-							<p className="text-sm italic text-text-secondary/60">Verba volant, scripta manent.</p>
-						</div>
+						<NewTabContent
+							hasWorkspace={!!workspacePath}
+							onAction={(action) => {
+								if (action === "commandPalette") setCommandPaletteOpen(true);
+								if (action === "workspaceSearch") {
+									setSidebarSearchActive(true);
+									requestAnimationFrame(() => searchInputRef.current?.focus());
+								}
+								if (action === "help") setHelpOpen(true);
+							}}
+						/>
 					)}
 					{scratchpadOpen && workspacePath && (
 						<ScratchpadPanel
@@ -1073,13 +1177,21 @@ export function AppLayout() {
 							handleRef={searchBarHandleRef}
 						/>
 					)}
+					<GoToLineDialog
+						open={goToLineOpen}
+						totalLines={editorView?.state.doc.lines ?? 0}
+						onGoToLine={(line) => setGoToLine({ line })}
+						onClose={() => setGoToLineOpen(false)}
+					/>
 				</main>
 			</div>
 			<StatusBar
-				saveStatus={activeTabPath ? saveStatus : undefined}
-				cursorInfo={activeTabPath && !editorError ? (cursorInfo ?? undefined) : undefined}
+				saveStatus={activeTabPath && !isNewTab ? saveStatus : undefined}
+				cursorInfo={
+					activeTabPath && !isNewTab && !editorError ? (cursorInfo ?? undefined) : undefined
+				}
 				filePath={
-					activeTabPath
+					activeTabPath && !isNewTab
 						? ((workspacePath
 								? activeTabPath.replace(addTrailingSep(workspacePath), "")
 								: activeTabPath) ?? undefined)
