@@ -122,22 +122,34 @@ vi.mock("./Sidebar", () => ({
 	},
 }));
 
+const mockEditorView = { hasFocus: false, state: { doc: { lines: 100 } } };
+let capturedOnEditorView: ((view: unknown) => void) | null = null;
+
 vi.mock("../editor/MarkdownEditor", () => ({
 	MarkdownEditor: ({
 		value,
 		onChange,
 		onSave,
-	}: { value: string; onChange: (v: string) => void; onSave: () => void }) => (
-		<div data-testid="mock-editor">
-			<span data-testid="editor-value">{value}</span>
-			<button type="button" data-testid="editor-change" onClick={() => onChange("new content")}>
-				change
-			</button>
-			<button type="button" data-testid="editor-save" onClick={onSave}>
-				save
-			</button>
-		</div>
-	),
+		onEditorView,
+	}: {
+		value: string;
+		onChange: (v: string) => void;
+		onSave: () => void;
+		onEditorView?: (view: unknown) => void;
+	}) => {
+		capturedOnEditorView = onEditorView ?? null;
+		return (
+			<div data-testid="mock-editor">
+				<span data-testid="editor-value">{value}</span>
+				<button type="button" data-testid="editor-change" onClick={() => onChange("new content")}>
+					change
+				</button>
+				<button type="button" data-testid="editor-save" onClick={onSave}>
+					save
+				</button>
+			</div>
+		);
+	},
 }));
 
 const { AppLayout } = await import("./AppLayout");
@@ -166,6 +178,8 @@ describe("AppLayout", () => {
 		fsChangeCallback = null;
 		closeHandler = null;
 		capturedOnFileSelect = null;
+		capturedOnEditorView = null;
+		mockEditorView.hasFocus = false;
 		mockDestroy.mockClear();
 		MockWebviewWindowConstructor.mockClear();
 		(MockWebviewWindowConstructor.getByLabel as Mock).mockReturnValue(null);
@@ -1171,5 +1185,45 @@ describe("AppLayout", () => {
 		const after = useWorkspaceStore.getState();
 		expect(after.tabs).toHaveLength(1);
 		expect(after.activeTabPath).toBe("/workspace/test.md");
+	});
+
+	it("Cmd+G does not open go-to-line dialog when editor is not focused", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Set editorView with hasFocus=false
+		mockEditorView.hasFocus = false;
+		await act(async () => {
+			capturedOnEditorView?.(mockEditorView);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+		});
+
+		expect(screen.queryByLabelText("行番号:")).not.toBeInTheDocument();
+	});
+
+	it("Cmd+G opens go-to-line dialog when editor is focused", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Set editorView with hasFocus=true
+		mockEditorView.hasFocus = true;
+		await act(async () => {
+			capturedOnEditorView?.(mockEditorView);
+		});
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+		});
+
+		expect(screen.getByLabelText("行番号:")).toBeInTheDocument();
 	});
 });
