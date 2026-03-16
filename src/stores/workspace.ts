@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { createNewTabPath } from "../lib/path";
+import { createNewTabPath, isNewTabPath } from "../lib/path";
 
 const MAX_HISTORY = 100;
 
@@ -263,6 +263,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 
 	openNewTab: () =>
 		set((state) => {
+			// 既存の newtab があればそちらに切り替え
+			const existing = state.tabs.find((t) => isNewTabPath(t.path));
+			if (existing) {
+				return { activeTabPath: existing.path, activeTabId: existing.id };
+			}
 			const id = state._nextTabId;
 			const path = createNewTabPath(id);
 			return {

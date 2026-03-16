@@ -575,14 +575,14 @@ describe("useWorkspaceStore", () => {
 			expect(state.activeTabId).toBe(1);
 		});
 
-		it("opens multiple new-tab pages with unique paths", () => {
+		it("reuses existing newtab instead of creating a new one", () => {
 			useWorkspaceStore.getState().openNewTab();
+			const firstPath = useWorkspaceStore.getState().activeTabPath;
+			useWorkspaceStore.getState().openTab("/a.md");
 			useWorkspaceStore.getState().openNewTab();
 			const state = useWorkspaceStore.getState();
 			expect(state.tabs).toHaveLength(2);
-			expect(state.tabs[0].path).toBe("newtab://1");
-			expect(state.tabs[1].path).toBe("newtab://2");
-			expect(state.activeTabPath).toBe("newtab://2");
+			expect(state.activeTabPath).toBe(firstPath);
 		});
 
 		it("coexists with regular file tabs", () => {
