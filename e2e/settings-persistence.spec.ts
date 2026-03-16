@@ -20,7 +20,7 @@ test.describe("settings persistence", () => {
 
 		await page.goto("/");
 		// Workspace should be restored but sidebar should be hidden
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
 	});
 

@@ -29,7 +29,7 @@ test.describe("scratchpad", () => {
 		await mock.setup(workspace, "/workspace", { workspacePath: "/workspace" });
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		// Open scratchpad
 		await page.keyboard.press(`${modKey}+j`);
@@ -46,7 +46,7 @@ test.describe("scratchpad", () => {
 		await mock.setup(workspace, "/workspace", { workspacePath: "/workspace" });
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+j`);
 		await expect(page.getByTestId("scratchpad-panel")).toBeVisible();
@@ -60,7 +60,7 @@ test.describe("scratchpad", () => {
 		await mock.setup(workspace, "/workspace", { workspacePath: "/workspace" });
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		// Open via status bar
 		await page.getByLabel("スクラッチパッド", { exact: true }).click();
@@ -76,7 +76,7 @@ test.describe("scratchpad", () => {
 		await mock.setup(workspace, "/workspace", { workspacePath: "/workspace" });
 
 		await page.goto("/");
-		await expect(page.getByText("Select a file to start editing")).toBeVisible();
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 
 		await page.keyboard.press(`${modKey}+,`);
 		await expect(page.getByText("設定")).toBeVisible();
