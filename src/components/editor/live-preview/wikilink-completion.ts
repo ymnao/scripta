@@ -7,7 +7,6 @@ import {
 import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { searchFilenames } from "../../../lib/commands";
-import { basename } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
 
 let cachedFiles: string[] = [];
@@ -48,7 +47,7 @@ export async function wikilinkCompletionSource(
 
 	const seen = new Set<string>();
 	const options = files.flatMap((filePath) => {
-		const fileName = basename(filePath).replace(/\.md$/i, "") || filePath;
+		const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.md$/i, "") ?? filePath;
 		if (seen.has(fileName)) return [];
 		seen.add(fileName);
 		return [

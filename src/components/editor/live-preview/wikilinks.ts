@@ -9,7 +9,7 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { createFile, searchFilenames } from "../../../lib/commands";
-import { SEP_RE, basename, joinPath } from "../../../lib/path";
+import { SEP_RE, joinPath } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines } from "./cursor-utils";
 import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
@@ -44,7 +44,7 @@ export function resolveWikilinkPath(pageName: string): string | null {
 export function buildFileMap(files: string[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const filePath of files) {
-		const name = basename(filePath).replace(/\.md$/i, "");
+		const name = (filePath.split(/[/\\]/).pop() ?? "").replace(/\.md$/i, "");
 		const key = name.normalize("NFC");
 		if (!key) continue;
 		const existing = map.get(key);
