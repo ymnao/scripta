@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -47,22 +47,21 @@ describe("FileTree", () => {
 	});
 
 	it("loads and displays entries from workspace", async () => {
-		await act(async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		await waitFor(() => {
+			expect(screen.getByText("docs")).toBeInTheDocument();
 		});
 
 		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace");
-		expect(screen.getByText("docs")).toBeInTheDocument();
 		expect(screen.getByText("hello.md")).toBeInTheDocument();
 		expect(screen.getByText("notes.md")).toBeInTheDocument();
 	});
 
 	it("calls onFileSelect when a file is clicked", async () => {
 		const onFileSelect = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
-			);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		await userEvent.click(screen.getByText("hello.md"));
@@ -70,14 +69,15 @@ describe("FileTree", () => {
 	});
 
 	it("highlights the selected file", async () => {
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath="/workspace/hello.md"
-					onFileSelect={() => {}}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath="/workspace/hello.md"
+				onFileSelect={() => {}}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const button = screen.getByText("hello.md").closest("button");
@@ -90,16 +90,17 @@ describe("FileTree", () => {
 		];
 		mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce(childEntries);
 
-		await act(async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		await waitFor(() => {
+			expect(screen.getByText("docs")).toBeInTheDocument();
 		});
 
-		await act(async () => {
-			await userEvent.click(screen.getByText("docs"));
+		await userEvent.click(screen.getByText("docs"));
+		await waitFor(() => {
+			expect(screen.getByText("readme.md")).toBeInTheDocument();
 		});
 
 		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace/docs");
-		expect(screen.getByText("readme.md")).toBeInTheDocument();
 	});
 
 	it("shows loading state before entries are fetched", () => {
@@ -114,29 +115,26 @@ describe("FileTree", () => {
 	it("shows empty folder message", async () => {
 		mockedListDirectory.mockResolvedValue([]);
 
-		await act(async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		await waitFor(() => {
+			expect(screen.getByText("Empty folder")).toBeInTheDocument();
 		});
-
-		expect(screen.getByText("Empty folder")).toBeInTheDocument();
 	});
 
 	it("shows error message on failure", async () => {
 		mockedListDirectory.mockRejectedValue(new Error("Permission denied"));
 
-		await act(async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		await waitFor(() => {
+			expect(screen.getByText("フォルダの読み込みに失敗しました")).toBeInTheDocument();
 		});
-
-		expect(screen.getByText("フォルダの読み込みに失敗しました")).toBeInTheDocument();
 	});
 
 	it("creates a file via context menu and calls onFileSelect", async () => {
 		const onFileSelect = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
-			);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
@@ -152,15 +150,18 @@ describe("FileTree", () => {
 			fireEvent.keyDown(input, { key: "Enter" });
 		});
 
-		expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/new.md");
+		await waitFor(() => {
+			expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/new.md");
+		});
 		expect(onFileSelect).toHaveBeenCalledWith("/workspace/new.md");
 	});
 
 	it("creates a folder via context menu", async () => {
 		mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce([]);
 
-		await act(async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		await waitFor(() => {
+			expect(screen.getByText("docs")).toBeInTheDocument();
 		});
 
 		const folderButton = screen.getByText("docs").closest("button") as HTMLElement;
@@ -168,9 +169,7 @@ describe("FileTree", () => {
 			fireEvent.contextMenu(folderButton);
 		});
 
-		await act(async () => {
-			await userEvent.click(screen.getByText("New Folder"));
-		});
+		await userEvent.click(screen.getByText("New Folder"));
 
 		const input = screen.getByRole("textbox");
 		await userEvent.type(input, "subfolder");
@@ -178,20 +177,23 @@ describe("FileTree", () => {
 			fireEvent.keyDown(input, { key: "Enter" });
 		});
 
-		expect(mockedCreateDirectory).toHaveBeenCalledWith("/workspace/docs/subfolder");
+		await waitFor(() => {
+			expect(mockedCreateDirectory).toHaveBeenCalledWith("/workspace/docs/subfolder");
+		});
 	});
 
 	it("renames a file via context menu and calls onFileRenamed", async () => {
 		const onFileRenamed = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath={null}
-					onFileSelect={() => {}}
-					onFileRenamed={onFileRenamed}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={() => {}}
+				onFileRenamed={onFileRenamed}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
@@ -208,7 +210,12 @@ describe("FileTree", () => {
 			fireEvent.keyDown(input, { key: "Enter" });
 		});
 
-		expect(mockedRenameEntry).toHaveBeenCalledWith("/workspace/hello.md", "/workspace/renamed.md");
+		await waitFor(() => {
+			expect(mockedRenameEntry).toHaveBeenCalledWith(
+				"/workspace/hello.md",
+				"/workspace/renamed.md",
+			);
+		});
 		expect(onFileRenamed).toHaveBeenCalledWith(
 			"/workspace/hello.md",
 			"/workspace/renamed.md",
@@ -218,15 +225,16 @@ describe("FileTree", () => {
 
 	it("shows 'open in new tab' in context menu for files", async () => {
 		const onFileOpenNewTab = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath={null}
-					onFileSelect={() => {}}
-					onFileOpenNewTab={onFileOpenNewTab}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={() => {}}
+				onFileOpenNewTab={onFileOpenNewTab}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
@@ -240,15 +248,16 @@ describe("FileTree", () => {
 
 	it("does not show 'open in new tab' for folders", async () => {
 		const onFileOpenNewTab = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath={null}
-					onFileSelect={() => {}}
-					onFileOpenNewTab={onFileOpenNewTab}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={() => {}}
+				onFileOpenNewTab={onFileOpenNewTab}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("docs")).toBeInTheDocument();
 		});
 
 		const folderButton = screen.getByText("docs").closest("button") as HTMLElement;
@@ -262,15 +271,16 @@ describe("FileTree", () => {
 	it("calls onFileOpenNewTab on Cmd+Click", async () => {
 		const onFileSelect = vi.fn();
 		const onFileOpenNewTab = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath={null}
-					onFileSelect={onFileSelect}
-					onFileOpenNewTab={onFileOpenNewTab}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={onFileSelect}
+				onFileOpenNewTab={onFileOpenNewTab}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
@@ -282,15 +292,16 @@ describe("FileTree", () => {
 	it("calls onFileSelect on normal click (no modifier)", async () => {
 		const onFileSelect = vi.fn();
 		const onFileOpenNewTab = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath={null}
-					onFileSelect={onFileSelect}
-					onFileOpenNewTab={onFileOpenNewTab}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={onFileSelect}
+				onFileOpenNewTab={onFileOpenNewTab}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
@@ -301,15 +312,16 @@ describe("FileTree", () => {
 
 	it("deletes a file via context menu and calls onFileDeleted", async () => {
 		const onFileDeleted = vi.fn();
-		await act(async () => {
-			render(
-				<FileTree
-					workspacePath="/workspace"
-					selectedPath={null}
-					onFileSelect={() => {}}
-					onFileDeleted={onFileDeleted}
-				/>,
-			);
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={() => {}}
+				onFileDeleted={onFileDeleted}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
 		});
 
 		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
@@ -321,11 +333,11 @@ describe("FileTree", () => {
 
 		expect(screen.getByText(/を削除しますか？ゴミ箱に移動されます/)).toBeInTheDocument();
 
-		await act(async () => {
-			await userEvent.click(screen.getByText("削除", { selector: "button" }));
-		});
+		await userEvent.click(screen.getByText("削除", { selector: "button" }));
 
-		expect(mockedDeleteEntry).toHaveBeenCalledWith("/workspace/hello.md");
+		await waitFor(() => {
+			expect(mockedDeleteEntry).toHaveBeenCalledWith("/workspace/hello.md");
+		});
 		expect(onFileDeleted).toHaveBeenCalledWith("/workspace/hello.md", false);
 	});
 });
