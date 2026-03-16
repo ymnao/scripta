@@ -373,22 +373,11 @@ function createMermaidClickHandler() {
 			const mermaidEl = target.closest(".cm-mermaid-widget");
 			if (!mermaidEl) return false;
 
-			// 右クリックではカーソルを移動しない。
-			// カーソル移動するとデコレーションが崩れてウィジェットが消失し、
-			// 後続の contextmenu ハンドラが Mermaid メニューを表示できなくなる
-			if (event.button === 2) {
-				event.preventDefault();
-				return true;
-			}
-
-			const pos = view.posAtDOM(mermaidEl);
-			const block = findFencedCodeBlock(view, pos);
-
+			// カーソルを移動しない。移動するとデコレーション再計算で
+			// ウィジェットが消失する可能性がある（シンタックスツリーの
+			// 不完全パース時や文書末尾ブロックなどのエッジケース）。
+			// 編集は右クリックメニューの「Mermaid を編集」から行う
 			event.preventDefault();
-			view.dispatch({
-				selection: { anchor: block?.to ?? view.state.doc.lineAt(pos).to },
-			});
-			view.focus();
 			return true;
 		},
 		contextmenu(event: MouseEvent, view: EditorView) {
