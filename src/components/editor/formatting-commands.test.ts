@@ -2,6 +2,7 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import {
+	insertHorizontalRule,
 	toggleBold,
 	toggleCheckState,
 	toggleCheckbox,
@@ -210,5 +211,19 @@ describe("toggleCheckState", () => {
 		const result = toggleCheckState(view);
 		expect(result).toBe(false);
 		expect(getDoc(view)).toBe("hello");
+	});
+});
+
+describe("insertHorizontalRule", () => {
+	it("inserts horizontal rule on empty line", () => {
+		const view = createView("", 0);
+		insertHorizontalRule(view);
+		expect(getDoc(view)).toBe("---");
+	});
+
+	it("inserts horizontal rule after non-empty line", () => {
+		const view = createView("hello", 3);
+		insertHorizontalRule(view);
+		expect(getDoc(view)).toBe("hello\n---");
 	});
 });

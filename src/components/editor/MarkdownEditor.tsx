@@ -1,4 +1,5 @@
 import "katex/dist/katex.min.css";
+import { redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
 	HighlightStyle,
@@ -14,13 +15,22 @@ import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type MouseEvent as ReactMouseEvent,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
+import type { ContextMenuItem } from "../filetree/ContextMenu";
 import { ContextMenu } from "../filetree/ContextMenu";
 import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
+	insertHorizontalRule,
 	toggleBold,
 	toggleCheckState,
 	toggleCheckbox,
@@ -37,6 +47,7 @@ import {
 	headingDecoration,
 	horizontalRuleDecoration,
 	imageDecoration,
+	insertTable,
 	linkCardDecoration,
 	linkDecoration,
 	listDecoration,
@@ -49,6 +60,8 @@ import {
 	wikilinkCompletion,
 	wikilinkDecoration,
 } from "./live-preview";
+
+const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
 
 const customHighlightStyle = syntaxHighlighting(
 	HighlightStyle.define([
@@ -136,6 +149,12 @@ export function MarkdownEditor({
 		to: number;
 	} | null>(null);
 	const [mermaidInsertPos, setMermaidInsertPos] = useState<number | null>(null);
+	const [editorContextMenu, setEditorContextMenu] = useState<{
+		position: { x: number; y: number };
+	} | null>(null);
+	// 右クリック mousedown 前の選択状態を保持。
+	// mousedown → mousemove による意図しないマイクロ選択を無視するために使用
+	const preRightClickSelRef = useRef<{ from: number; to: number } | null>(null);
 
 	// Cancel any pending statistics RAF on unmount
 	useEffect(() => {
@@ -194,8 +213,11 @@ export function MarkdownEditor({
 		}
 	}, []);
 
-	const handleDestroyEditor = useCallback(() => {
-		onEditorViewRef.current?.(null);
+	// Notify parent when the editor is destroyed (unmounted).
+	// Cannot use onDestroyEditor prop — it is not in @uiw/react-codemirror's
+	// type definitions and React warns about the unknown DOM event handler.
+	useEffect(() => {
+		return () => onEditorViewRef.current?.(null);
 	}, []);
 
 	const extensions = useMemo(
@@ -280,6 +302,178 @@ export function MarkdownEditor({
 		[fontSize, fontFamily, showLinkCards],
 	);
 
+	const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
+		if (e.button !== 2) return;
+		const target = e.target as HTMLElement;
+		// Mermaid・テーブルウィジェット上の右クリック mousedown を阻止して
+		// カーソル移動によるデコレーション消失を防ぐ
+		if (target.closest(".cm-mermaid-widget") || target.closest(".cm-table-widget")) {
+			e.preventDefault();
+			return;
+		}
+		// 右クリック前の選択状態を保存（mousedown → mousemove による
+		// マイクロ選択を contextmenu ハンドラで無視するため）
+		const view = editorRef.current?.view;
+		if (view) {
+			const sel = view.state.selection.main;
+			preRightClickSelRef.current = { from: sel.from, to: sel.to };
+		}
+	}, []);
+
+	const handleEditorContextMenu = useCallback((e: ReactMouseEvent) => {
+		const target = e.target as HTMLElement;
+		// Mermaid・テーブルウィジェット上のクリックは既存メニューに委譲
+		if (target.closest(".cm-mermaid-widget") || target.closest(".cm-table-widget")) return;
+		// 他のハンドラが既に処理済みなら何もしない
+		if (e.defaultPrevented) return;
+		e.preventDefault();
+		const view = editorRef.current?.view;
+		if (!view) return;
+
+		// 右クリック位置にカーソルを移動。
+		// mousedown 前に存在した選択範囲内ならその選択を維持
+		const clickPos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
+		const pre = preRightClickSelRef.current;
+		// pre が null の場合は mousedown が発火しなかったケース（テスト等）→ 現在の選択を参照
+		const sel = pre ?? { from: view.state.selection.main.from, to: view.state.selection.main.to };
+		const hadSelection = sel.from !== sel.to;
+		if (hadSelection && clickPos >= sel.from && clickPos <= sel.to) {
+			// mousedown でマイクロ選択が発生していた場合は元の選択を復元
+			if (pre) view.dispatch({ selection: EditorSelection.range(pre.from, pre.to) });
+		} else {
+			view.dispatch({ selection: EditorSelection.cursor(clickPos) });
+		}
+		preRightClickSelRef.current = null;
+
+		setEditorContextMenu({ position: { x: e.clientX, y: e.clientY } });
+	}, []);
+
+	const getEditorContextMenuItems = useCallback((): ContextMenuItem[] => {
+		if (!editorContextMenu) return [];
+		const view = editorRef.current?.view;
+		if (!view) return [];
+		const hasSelection = !view.state.selection.main.empty;
+		const sep = (id: string): ContextMenuItem => ({
+			id,
+			label: "",
+			separator: true,
+			onClick: () => {},
+		});
+		const withFocus = (cmd: (v: EditorView) => unknown) => () => {
+			cmd(view);
+			view.focus();
+		};
+
+		// ── 共通項目: 貼り付け / 元に戻す / やり直す ──
+		const pasteItem: ContextMenuItem = {
+			id: "paste",
+			label: "貼り付け",
+			shortcut: `${isMac ? "⌘" : "Ctrl+"}V`,
+			onClick: () => {
+				if (!navigator.clipboard) return;
+				navigator.clipboard.readText().then(
+					(text) => {
+						const s = view.state.selection.main;
+						view.dispatch({ changes: { from: s.from, to: s.to, insert: text } });
+						view.focus();
+					},
+					() => {},
+				);
+			},
+		};
+		const undoRedoItems: ContextMenuItem[] = [
+			{
+				id: "undo",
+				label: "元に戻す",
+				shortcut: `${isMac ? "⌘" : "Ctrl+"}Z`,
+				onClick: withFocus(undo),
+			},
+			{
+				id: "redo",
+				label: "やり直す",
+				shortcut: isMac ? "⇧⌘Z" : "Ctrl+Y",
+				onClick: withFocus(redo),
+			},
+		];
+
+		if (hasSelection) {
+			return [
+				{
+					id: "cut",
+					label: "切り取り",
+					shortcut: `${isMac ? "⌘" : "Ctrl+"}X`,
+					onClick: () => {
+						if (!navigator.clipboard) return;
+						const s = view.state.selection.main;
+						const text = view.state.sliceDoc(s.from, s.to);
+						navigator.clipboard.writeText(text).then(
+							() => {
+								view.dispatch({ changes: { from: s.from, to: s.to, insert: "" } });
+								view.focus();
+							},
+							() => {},
+						);
+					},
+				},
+				{
+					id: "copy",
+					label: "コピー",
+					shortcut: `${isMac ? "⌘" : "Ctrl+"}C`,
+					onClick: () => {
+						if (!navigator.clipboard) return;
+						const s = view.state.selection.main;
+						navigator.clipboard.writeText(view.state.sliceDoc(s.from, s.to)).then(
+							() => {},
+							() => {},
+						);
+						view.focus();
+					},
+				},
+				pasteItem,
+				sep("sep-1"),
+				...undoRedoItems,
+				sep("sep-2"),
+				{
+					id: "bold",
+					label: "太字",
+					shortcut: `${isMac ? "⌘" : "Ctrl+"}B`,
+					onClick: withFocus(toggleBold),
+				},
+				{
+					id: "italic",
+					label: "斜体",
+					shortcut: `${isMac ? "⌘" : "Ctrl+"}I`,
+					onClick: withFocus(toggleItalic),
+				},
+				{
+					id: "strikethrough",
+					label: "取り消し線",
+					shortcut: isMac ? "⇧⌘X" : "Ctrl+Shift+X",
+					onClick: withFocus(toggleStrikethrough),
+				},
+			];
+		}
+
+		return [
+			pasteItem,
+			sep("sep-1"),
+			...undoRedoItems,
+			sep("sep-2"),
+			{
+				id: "insert-table",
+				label: "テーブルを挿入",
+				shortcut: isMac ? "⌃⇧T" : "Alt+Shift+T",
+				onClick: withFocus(insertTable),
+			},
+			{ id: "insert-hr", label: "水平線を挿入", onClick: withFocus(insertHorizontalRule) },
+			{
+				id: "insert-mermaid",
+				label: "Mermaid 図を挿入",
+				onClick: () => setMermaidInsertPos(view.state.selection.main.head),
+			},
+		];
+	}, [editorContextMenu]);
+
 	const handleMermaidSave = useCallback(
 		(newSource: string) => {
 			const view = editorRef.current?.view;
@@ -317,7 +511,12 @@ export function MarkdownEditor({
 	);
 
 	return (
-		<div ref={containerRef} className="relative min-h-0 min-w-0 flex-1">
+		<div
+			ref={containerRef}
+			className="relative min-h-0 min-w-0 flex-1"
+			onMouseDown={handleEditorMouseDown}
+			onContextMenu={handleEditorContextMenu}
+		>
 			<div className="absolute inset-0">
 				<CodeMirror
 					ref={editorRef}
@@ -329,7 +528,6 @@ export function MarkdownEditor({
 					theme="none"
 					aria-label="Markdown editor"
 					onCreateEditor={handleCreateEditor}
-					onDestroyEditor={handleDestroyEditor}
 					basicSetup={{
 						lineNumbers: showLineNumbers,
 						foldGutter: true,
@@ -390,6 +588,13 @@ export function MarkdownEditor({
 						},
 					]}
 					onClose={() => setMermaidContextMenu(null)}
+				/>
+			)}
+			{editorContextMenu && (
+				<ContextMenu
+					position={editorContextMenu.position}
+					items={getEditorContextMenuItems()}
+					onClose={() => setEditorContextMenu(null)}
 				/>
 			)}
 			<MermaidEditorDialog

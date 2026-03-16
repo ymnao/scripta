@@ -7,6 +7,7 @@ export interface ContextMenuItem {
 	onClick: () => void;
 	danger?: boolean;
 	separator?: boolean;
+	shortcut?: string;
 }
 
 interface ContextMenuProps {
@@ -67,7 +68,7 @@ export function ContextMenu({ position, items, onClose }: ContextMenuProps) {
 						key={item.id}
 						type="button"
 						role="menuitem"
-						className={`w-full px-3 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${
+						className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${
 							item.danger ? "text-red-500" : "text-text-primary"
 						}`}
 						onClick={() => {
@@ -75,7 +76,10 @@ export function ContextMenu({ position, items, onClose }: ContextMenuProps) {
 							onClose();
 						}}
 					>
-						{item.label}
+						<span>{item.label}</span>
+						{item.shortcut && (
+							<span className="ml-6 text-xs text-text-secondary">{item.shortcut}</span>
+						)}
 					</button>
 				),
 			)}
