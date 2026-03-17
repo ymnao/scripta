@@ -20,11 +20,7 @@ export function collectCursorLines(
 	const focused = hasFocus ?? ("hasFocus" in viewOrState ? viewOrState.hasFocus : false);
 	if (!focused) return lines;
 	for (const range of state.selection.ranges) {
-		const fromLine = state.doc.lineAt(range.from).number;
-		const toLine = state.doc.lineAt(range.to).number;
-		for (let l = fromLine; l <= toLine; l++) {
-			lines.add(l);
-		}
+		lines.add(state.doc.lineAt(range.anchor).number);
 	}
 	return lines;
 }

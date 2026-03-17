@@ -350,38 +350,16 @@ const treeChangeDetector = ViewPlugin.fromClass(
 
 // ── Click handler ─────────────────────────────────────
 
-/** Find the FencedCode block surrounding `pos`. */
-function findFencedCodeBlock(view: EditorView, pos: number): { from: number; to: number } | null {
-	const tree = syntaxTree(view.state);
-	let node = tree.resolve(pos, -1);
-
-	while (node) {
-		if (node.name === "FencedCode") {
-			return { from: node.from, to: node.to };
-		}
-		if (!node.parent) break;
-		node = node.parent;
-	}
-
-	return null;
-}
-
 function createMermaidClickHandler() {
 	return EditorView.domEventHandlers({
 		mousedown(event: MouseEvent, view: EditorView) {
 			const target = event.target as HTMLElement;
-			const mermaidEl = target.closest(".cm-mermaid-widget");
-			if (!mermaidEl) return false;
-
-			const pos = view.posAtDOM(mermaidEl);
-			const block = findFencedCodeBlock(view, pos);
-
-			event.preventDefault();
-			view.dispatch({
-				selection: { anchor: block?.to ?? view.state.doc.lineAt(pos).to },
-			});
-			view.focus();
-			return true;
+			if (target.closest(".cm-mermaid-widget")) {
+				event.preventDefault();
+				view.focus();
+				return true;
+			}
+			return false;
 		},
 		contextmenu(event: MouseEvent, view: EditorView) {
 			const target = event.target as HTMLElement;
