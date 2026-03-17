@@ -124,6 +124,20 @@ export const toggleItalic: Command = (view) => toggleWrap(view, "*");
 
 export const toggleStrikethrough: Command = (view) => toggleWrap(view, "~~");
 
+function insertBlock(view: EditorView, block: string): boolean {
+	const pos = view.state.selection.main.head;
+	const line = view.state.doc.lineAt(pos);
+	const needsNewline = line.text.trim().length > 0;
+	const insert = needsNewline ? `\n${block}` : block;
+	const insertAt = needsNewline ? line.to : line.from;
+	view.dispatch({
+		changes: { from: insertAt, to: needsNewline ? insertAt : line.to, insert },
+	});
+	return true;
+}
+
+export const insertHorizontalRule: Command = (view) => insertBlock(view, "---");
+
 export function toggleHeading(level: number): Command {
 	const prefix = `${"#".repeat(level)} `;
 	return (view) => {

@@ -355,6 +355,10 @@ function createMermaidClickHandler() {
 		mousedown(event: MouseEvent, view: EditorView) {
 			const target = event.target as HTMLElement;
 			if (target.closest(".cm-mermaid-widget")) {
+				// カーソルを移動しない。移動するとデコレーション再計算で
+				// ウィジェットが消失する可能性がある（シンタックスツリーの
+				// 不完全パース時や文書末尾ブロックなどのエッジケース）。
+				// 編集は右クリックメニューの「Mermaid を編集」から行う
 				event.preventDefault();
 				view.focus();
 				return true;
