@@ -11,7 +11,7 @@ import {
 } from "@codemirror/view";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useWorkspaceStore } from "../../../stores/workspace";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 /** dirname/getSep (path.ts) は最初のセパレータを基準にするが、
  *  mixed separator ("C:/Users\\docs\\note.md") では最後のセパレータを
@@ -110,9 +110,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 				const startLine = state.doc.lineAt(node.from).number;
 				const endLine = state.doc.lineAt(node.to).number;
-				for (let l = startLine; l <= endLine; l++) {
-					if (cursorLines.has(l)) return;
-				}
+				if (cursorInRange(cursorLines, startLine, endLine)) return;
 
 				const cursor = node.node.cursor();
 				let url = "";

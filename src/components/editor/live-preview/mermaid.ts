@@ -16,7 +16,7 @@ import {
 } from "@codemirror/view";
 import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
 import { useThemeStore } from "../../../stores/theme";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -46,14 +46,6 @@ interface MermaidBlock {
 }
 
 // ── Helpers ───────────────────────────────────────────
-
-/** Check if any cursor line falls within the given line range (inclusive). */
-function cursorInBlock(cursorLines: Set<number>, startLine: number, endLine: number): boolean {
-	for (let l = startLine; l <= endLine; l++) {
-		if (cursorLines.has(l)) return true;
-	}
-	return false;
-}
 
 /** Find mermaid fenced code blocks in the document.
  *  Optional `range` limits tree iteration to the given span. */
@@ -176,7 +168,7 @@ export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): 
 		const startLine = state.doc.lineAt(block.from).number;
 		const endLine = state.doc.lineAt(block.to).number;
 
-		if (cursorInBlock(cursorLines, startLine, endLine)) continue;
+		if (cursorInRange(cursorLines, startLine, endLine)) continue;
 
 		const entry = getCacheEntry(block.source, theme);
 		let svg: string | null = null;

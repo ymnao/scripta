@@ -8,7 +8,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 const codeBlockLineDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-line" },
@@ -37,14 +37,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 				// Skip mermaid blocks when cursor is outside — handled by mermaid decoration
 				if (MERMAID_FENCE_RE.test(startLine.text.trim())) {
-					let cursorInBlock = false;
-					for (let l = startLine.number; l <= endLine.number; l++) {
-						if (cursorLines.has(l)) {
-							cursorInBlock = true;
-							break;
-						}
-					}
-					if (!cursorInBlock) return;
+					if (!cursorInRange(cursorLines, startLine.number, endLine.number)) return;
 				}
 
 				// Clamp decoration target lines to the current visible range

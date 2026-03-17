@@ -24,3 +24,15 @@ export function collectCursorLines(
 	}
 	return lines;
 }
+
+/** カーソル行が指定行範囲（inclusive）に含まれるかを判定する。 */
+export function cursorInRange(
+	cursorLines: Set<number>,
+	startLine: number,
+	endLine: number,
+): boolean {
+	for (let l = startLine; l <= endLine; l++) {
+		if (cursorLines.has(l)) return true;
+	}
+	return false;
+}
