@@ -26,7 +26,7 @@ export function writeFile(path: string, content: string): Promise<void> {
 }
 
 export function listDirectory(path: string): Promise<FileEntry[]> {
-	return invoke<FileEntry[]>("list_directory", { path });
+	return withRetry(() => invoke<FileEntry[]>("list_directory", { path }));
 }
 
 export function createFile(path: string): Promise<void> {
@@ -50,11 +50,11 @@ export function fileExists(path: string): Promise<boolean> {
 }
 
 export function renameEntry(oldPath: string, newPath: string): Promise<void> {
-	return invoke<void>("rename_entry", { oldPath, newPath });
+	return withRetry(() => invoke<void>("rename_entry", { oldPath, newPath }));
 }
 
 export function deleteEntry(path: string): Promise<void> {
-	return invoke<void>("delete_entry", { path });
+	return withRetry(() => invoke<void>("delete_entry", { path }));
 }
 
 export function startWatcher(path: string): Promise<void> {
@@ -70,11 +70,13 @@ export function searchFiles(
 	query: string,
 	caseSensitive?: boolean,
 ): Promise<SearchResult[]> {
-	return invoke<SearchResult[]>("search_files", { workspacePath, query, caseSensitive });
+	return withRetry(() =>
+		invoke<SearchResult[]>("search_files", { workspacePath, query, caseSensitive }),
+	);
 }
 
 export function searchFilenames(workspacePath: string, query: string): Promise<string[]> {
-	return invoke<string[]>("search_filenames", { workspacePath, query });
+	return withRetry(() => invoke<string[]>("search_filenames", { workspacePath, query }));
 }
 
 export function showInFolder(path: string): Promise<void> {

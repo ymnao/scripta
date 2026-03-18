@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
 import { processContent } from "../lib/content";
-import { isTransientError } from "../lib/errors";
+import { isTransientError, translateError } from "../lib/errors";
 import { useSettingsStore } from "../stores/settings";
+import { useToastStore } from "../stores/toast";
 
 const MAX_SAVE_RETRIES = 3;
 const SAVE_RETRY_BASE_MS = 5000;
@@ -83,13 +84,20 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 				(err) => {
 					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
 						console.error("Failed to save file:", err);
-						setSaveStatus("error");
 						if (isTransientError(err) && saveRetryCountRef.current < MAX_SAVE_RETRIES) {
 							saveRetryCountRef.current += 1;
 							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
+							setSaveStatus("retrying");
 							retryTimerRef.current = setTimeout(() => {
 								save(contentRef.current).catch(() => {});
 							}, delay);
+						} else {
+							setSaveStatus("error");
+							if (saveRetryCountRef.current > 0) {
+								useToastStore
+									.getState()
+									.addToast("error", `ファイルの保存に失敗しました: ${translateError(err)}`);
+							}
 						}
 					}
 					throw err;

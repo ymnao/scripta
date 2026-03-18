@@ -14,7 +14,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { GitAction } from "../../types/git-sync";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
-export type SaveStatus = "saved" | "unsaved" | "saving" | "error";
+export type SaveStatus = "saved" | "unsaved" | "saving" | "error" | "retrying";
 
 interface StatusBarProps {
 	saveStatus?: SaveStatus;
@@ -168,6 +168,7 @@ export function StatusBar({
 					{saveStatus === "saving" && "保存中..."}
 					{saveStatus === "saved" && "保存済み"}
 					{saveStatus === "error" && "保存失敗"}
+					{saveStatus === "retrying" && "リトライ中..."}
 				</output>
 				{onToggleScratchpad && (
 					<button
