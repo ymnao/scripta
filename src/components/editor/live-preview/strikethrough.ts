@@ -8,7 +8,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 const replaceDecoration = Decoration.replace({});
 const strikethroughMark = Decoration.mark({ class: "cm-strikethrough" });
@@ -30,9 +30,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 				const startLine = state.doc.lineAt(node.from).number;
 				const endLine = state.doc.lineAt(node.to).number;
-				for (let l = startLine; l <= endLine; l++) {
-					if (cursorLines.has(l)) return;
-				}
+				if (cursorInRange(cursorLines, startLine, endLine)) return;
 
 				const cursor = node.node.cursor();
 				if (!cursor.firstChild()) return;

@@ -16,7 +16,7 @@ import {
 } from "@codemirror/view";
 import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
 import { useThemeStore } from "../../../stores/theme";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -46,14 +46,6 @@ interface MermaidBlock {
 }
 
 // ── Helpers ───────────────────────────────────────────
-
-/** Check if any cursor line falls within the given line range (inclusive). */
-function cursorInBlock(cursorLines: Set<number>, startLine: number, endLine: number): boolean {
-	for (let l = startLine; l <= endLine; l++) {
-		if (cursorLines.has(l)) return true;
-	}
-	return false;
-}
 
 /** Find mermaid fenced code blocks in the document.
  *  Optional `range` limits tree iteration to the given span. */
@@ -176,7 +168,7 @@ export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): 
 		const startLine = state.doc.lineAt(block.from).number;
 		const endLine = state.doc.lineAt(block.to).number;
 
-		if (cursorInBlock(cursorLines, startLine, endLine)) continue;
+		if (cursorInRange(cursorLines, startLine, endLine)) continue;
 
 		const entry = getCacheEntry(block.source, theme);
 		let svg: string | null = null;
@@ -350,35 +342,20 @@ const treeChangeDetector = ViewPlugin.fromClass(
 
 // ── Click handler ─────────────────────────────────────
 
-/** Find the FencedCode block surrounding `pos`. */
-function findFencedCodeBlock(view: EditorView, pos: number): { from: number; to: number } | null {
-	const tree = syntaxTree(view.state);
-	let node = tree.resolve(pos, -1);
-
-	while (node) {
-		if (node.name === "FencedCode") {
-			return { from: node.from, to: node.to };
-		}
-		if (!node.parent) break;
-		node = node.parent;
-	}
-
-	return null;
-}
-
 function createMermaidClickHandler() {
 	return EditorView.domEventHandlers({
 		mousedown(event: MouseEvent, view: EditorView) {
 			const target = event.target as HTMLElement;
-			const mermaidEl = target.closest(".cm-mermaid-widget");
-			if (!mermaidEl) return false;
-
-			// カーソルを移動しない。移動するとデコレーション再計算で
-			// ウィジェットが消失する可能性がある（シンタックスツリーの
-			// 不完全パース時や文書末尾ブロックなどのエッジケース）。
-			// 編集は右クリックメニューの「Mermaid を編集」から行う
-			event.preventDefault();
-			return true;
+			if (target.closest(".cm-mermaid-widget")) {
+				// カーソルを移動しない。移動するとデコレーション再計算で
+				// ウィジェットが消失する可能性がある（シンタックスツリーの
+				// 不完全パース時や文書末尾ブロックなどのエッジケース）。
+				// 編集は右クリックメニューの「Mermaid を編集」から行う
+				event.preventDefault();
+				view.focus();
+				return true;
+			}
+			return false;
 		},
 		contextmenu(event: MouseEvent, view: EditorView) {
 			const target = event.target as HTMLElement;

@@ -7,6 +7,7 @@ export function createTestState(
 	doc: string,
 	cursorPos?: number,
 	extraExtensions?: Extension,
+	selection?: EditorSelection,
 ): EditorState {
 	return EditorState.create({
 		doc,
@@ -14,7 +15,7 @@ export function createTestState(
 			markdown({ base: markdownLanguage }),
 			...(extraExtensions ? [extraExtensions] : []),
 		],
-		selection: cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined,
+		selection: selection ?? (cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined),
 	});
 }
 
@@ -36,9 +37,10 @@ export function createViewForTest(
 	cursorPos?: number,
 	visibleRanges?: { from: number; to: number }[],
 	hasFocus?: boolean,
+	selection?: EditorSelection,
 ): EditorView {
-	const state = createTestState(doc, cursorPos);
-	return createMockView(state, visibleRanges, hasFocus ?? cursorPos != null);
+	const state = createTestState(doc, cursorPos, undefined, selection);
+	return createMockView(state, visibleRanges, hasFocus ?? (selection != null || cursorPos != null));
 }
 
 export function collectDecorations(

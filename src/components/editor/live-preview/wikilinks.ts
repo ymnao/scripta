@@ -11,7 +11,7 @@ import {
 import { createFile, searchFilenames } from "../../../lib/commands";
 import { SEP_RE, joinPath } from "../../../lib/path";
 import { useWorkspaceStore } from "../../../stores/workspace";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
 
 const WIKILINK_RE = /\[\[([^\[\]\n\r]+)\]\]/g;
@@ -79,14 +79,7 @@ export function buildDecorations(
 
 			const startLine = state.doc.lineAt(matchFrom).number;
 			const endLine = state.doc.lineAt(matchTo).number;
-			let onCursorLine = false;
-			for (let l = startLine; l <= endLine; l++) {
-				if (cursorLines.has(l)) {
-					onCursorLine = true;
-					break;
-				}
-			}
-			if (onCursorLine) continue;
+			if (cursorInRange(cursorLines, startLine, endLine)) continue;
 
 			const { page } = parseWikilink(match[1]);
 			if (!page) continue;

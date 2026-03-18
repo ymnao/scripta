@@ -12,7 +12,7 @@ import {
 } from "@codemirror/view";
 import katex from "katex";
 import { isEscaped } from "../../../lib/content";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 export { isEscaped };
 
@@ -113,14 +113,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 			const startLine = state.doc.lineAt(matchFrom).number;
 			const endLine = state.doc.lineAt(matchTo).number;
-			let onCursorLine = false;
-			for (let l = startLine; l <= endLine; l++) {
-				if (cursorLines.has(l)) {
-					onCursorLine = true;
-					break;
-				}
-			}
-			if (onCursorLine) continue;
+			if (cursorInRange(cursorLines, startLine, endLine)) continue;
 
 			const tex = match[1];
 			localDisplayRanges.push({ from: matchFrom, to: matchTo });

@@ -10,7 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { open } from "@tauri-apps/plugin-shell";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 // Only allow http/https URLs without whitespace characters.
 // data: URLs are explicitly blocked as defense-in-depth.
@@ -167,9 +167,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 				const startLine = state.doc.lineAt(node.from).number;
 				const endLine = state.doc.lineAt(node.to).number;
-				for (let l = startLine; l <= endLine; l++) {
-					if (cursorLines.has(l)) return;
-				}
+				if (cursorInRange(cursorLines, startLine, endLine)) return;
 
 				const cursor = node.node.cursor();
 				if (!cursor.firstChild()) return;
