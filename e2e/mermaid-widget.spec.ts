@@ -114,7 +114,7 @@ test.describe("mermaid widget", () => {
 	});
 
 	test("insert opens dialog and adds new mermaid block", async ({ page }) => {
-		const { editor, widget } = await openFileAndWaitForMermaid(page);
+		const { widget } = await openFileAndWaitForMermaid(page);
 
 		await widget.click({ button: "right" });
 		const menu = page.locator("[role=menu]");
@@ -128,9 +128,10 @@ test.describe("mermaid widget", () => {
 		const textarea = dialog.locator('[aria-label="Mermaid ソースコード"]');
 		await expect(textarea).toHaveValue("");
 
-		// 新しい Mermaid コードを入力して挿入
+		// 新しい Mermaid コードを入力し Cmd+Enter で挿入
 		await textarea.fill("graph LR\n  X-->Y");
-		await dialog.getByRole("button", { name: "挿入" }).click();
+		await textarea.focus();
+		await page.keyboard.press(`${modKey}+Enter`);
 
 		await expect(dialog).not.toBeVisible();
 		// 新しいブロックがウィジェットとしてレンダリングされ、合計2つになる
