@@ -5,7 +5,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { invoke } = await import("@tauri-apps/api/core");
-const { readFile, writeFile } = await import("./commands");
+const {
+	readFile,
+	writeFile,
+	listDirectory,
+	renameEntry,
+	deleteEntry,
+	searchFiles,
+	searchFilenames,
+} = await import("./commands");
 
 const mockedInvoke = invoke as Mock;
 
@@ -89,6 +97,159 @@ describe("writeFile with retry", () => {
 		mockedInvoke.mockRejectedValue("Permission denied (os error 13)");
 
 		await expect(writeFile("/test.md", "content")).rejects.toBe("Permission denied (os error 13)");
+		expect(mockedInvoke).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("listDirectory with retry", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		mockedInvoke.mockReset();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("retries on transient error and succeeds", async () => {
+		mockedInvoke
+			.mockRejectedValueOnce("Device or resource busy (os error 16)")
+			.mockResolvedValue([]);
+
+		const promise = listDirectory("/workspace");
+		await vi.advanceTimersByTimeAsync(200);
+		const result = await promise;
+
+		expect(result).toEqual([]);
+		expect(mockedInvoke).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retry on non-transient error", async () => {
+		mockedInvoke.mockRejectedValue("Not found: /workspace");
+
+		await expect(listDirectory("/workspace")).rejects.toBe("Not found: /workspace");
+		expect(mockedInvoke).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("renameEntry with retry", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		mockedInvoke.mockReset();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("retries on transient error and succeeds", async () => {
+		mockedInvoke
+			.mockRejectedValueOnce("Device or resource busy (os error 16)")
+			.mockResolvedValue(undefined);
+
+		const promise = renameEntry("/old.md", "/new.md");
+		await vi.advanceTimersByTimeAsync(200);
+		await promise;
+
+		expect(mockedInvoke).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retry on non-transient error", async () => {
+		mockedInvoke.mockRejectedValue("Target already exists: /new.md");
+
+		await expect(renameEntry("/old.md", "/new.md")).rejects.toBe("Target already exists: /new.md");
+		expect(mockedInvoke).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("deleteEntry with retry", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		mockedInvoke.mockReset();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("retries on transient error and succeeds", async () => {
+		mockedInvoke
+			.mockRejectedValueOnce("Device or resource busy (os error 16)")
+			.mockResolvedValue(undefined);
+
+		const promise = deleteEntry("/test.md");
+		await vi.advanceTimersByTimeAsync(200);
+		await promise;
+
+		expect(mockedInvoke).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retry on non-transient error", async () => {
+		mockedInvoke.mockRejectedValue("Permission denied (os error 13)");
+
+		await expect(deleteEntry("/test.md")).rejects.toBe("Permission denied (os error 13)");
+		expect(mockedInvoke).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("searchFiles with retry", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		mockedInvoke.mockReset();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("retries on transient error and succeeds", async () => {
+		mockedInvoke
+			.mockRejectedValueOnce("Resource temporarily unavailable (os error 11)")
+			.mockResolvedValue([]);
+
+		const promise = searchFiles("/workspace", "query");
+		await vi.advanceTimersByTimeAsync(200);
+		const result = await promise;
+
+		expect(result).toEqual([]);
+		expect(mockedInvoke).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retry on non-transient error", async () => {
+		mockedInvoke.mockRejectedValue("Not found: /workspace");
+
+		await expect(searchFiles("/workspace", "query")).rejects.toBe("Not found: /workspace");
+		expect(mockedInvoke).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("searchFilenames with retry", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		mockedInvoke.mockReset();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("retries on transient error and succeeds", async () => {
+		mockedInvoke
+			.mockRejectedValueOnce("Resource temporarily unavailable (os error 35)")
+			.mockResolvedValue([]);
+
+		const promise = searchFilenames("/workspace", "query");
+		await vi.advanceTimersByTimeAsync(200);
+		const result = await promise;
+
+		expect(result).toEqual([]);
+		expect(mockedInvoke).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retry on non-transient error", async () => {
+		mockedInvoke.mockRejectedValue("Not found: /workspace");
+
+		await expect(searchFilenames("/workspace", "query")).rejects.toBe("Not found: /workspace");
 		expect(mockedInvoke).toHaveBeenCalledTimes(1);
 	});
 });

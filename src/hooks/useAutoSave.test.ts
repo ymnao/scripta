@@ -6,6 +6,16 @@ vi.mock("../lib/commands", () => ({
 	writeFile: vi.fn(),
 }));
 
+vi.mock("../stores/toast", () => {
+	const addToast = vi.fn().mockReturnValue("toast-1");
+	return {
+		useToastStore: {
+			getState: () => ({ addToast }),
+			__mockAddToast: addToast,
+		},
+	};
+});
+
 vi.mock("../lib/store", () => ({
 	saveShowLineNumbers: vi.fn(),
 	saveFontSize: vi.fn(),
@@ -124,7 +134,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("transitions to error on save failure", async () => {
-		mockedWriteFile.mockRejectedValue(new Error("write error"));
+		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -142,7 +152,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("resets from error to unsaved on next edit", async () => {
-		mockedWriteFile.mockRejectedValue(new Error("write error"));
+		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -367,7 +377,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("saveNow returns false on save failure", async () => {
-		mockedWriteFile.mockRejectedValue(new Error("write error"));
+		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -532,7 +542,7 @@ describe("useAutoSave", () => {
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
-		expect(result.current.saveStatus).toBe("error");
+		expect(result.current.saveStatus).toBe("retrying");
 		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
 
 		// Retry should fire after 5 seconds
@@ -568,6 +578,42 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 	});
 
+	it("shows toast when retry fails with non-transient error mid-retry", async () => {
+		const { useToastStore } = await import("../stores/toast");
+		const mockAddToast = (useToastStore as unknown as { __mockAddToast: Mock }).__mockAddToast;
+		mockAddToast.mockClear();
+
+		// 1st attempt: transient error → retry scheduled
+		// 2nd attempt: non-transient error → should show toast
+		mockedWriteFile
+			.mockRejectedValueOnce("Connection timed out")
+			.mockRejectedValueOnce("Permission denied (os error 13)");
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+
+		rerender({ content: "changed" });
+
+		// Trigger auto-save (fails with transient error → retrying)
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(result.current.saveStatus).toBe("retrying");
+
+		// Retry fires after 5s (fails with non-transient error → error + toast)
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+		expect(result.current.saveStatus).toBe("error");
+		expect(mockAddToast).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("ファイルの保存に失敗しました"),
+		);
+	});
+
 	it("cancels retry when content changes", async () => {
 		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
 
@@ -583,7 +629,7 @@ describe("useAutoSave", () => {
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
-		expect(result.current.saveStatus).toBe("error");
+		expect(result.current.saveStatus).toBe("retrying");
 
 		mockedWriteFile.mockClear();
 
@@ -613,7 +659,7 @@ describe("useAutoSave", () => {
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
-		expect(result.current.saveStatus).toBe("error");
+		expect(result.current.saveStatus).toBe("retrying");
 
 		const callsAfterError = mockedWriteFile.mock.calls.length;
 
@@ -722,7 +768,11 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 	});
 
-	it("stops retrying after max retries", async () => {
+	it("stops retrying after max retries and shows toast", async () => {
+		const { useToastStore } = await import("../stores/toast");
+		const mockAddToast = (useToastStore as unknown as { __mockAddToast: Mock }).__mockAddToast;
+		mockAddToast.mockClear();
+
 		mockedWriteFile.mockRejectedValue("Connection timed out");
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
@@ -733,11 +783,11 @@ describe("useAutoSave", () => {
 
 		rerender({ content: "changed" });
 
-		// Initial save fails
+		// Initial save fails — status should be "retrying"
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
-		expect(result.current.saveStatus).toBe("error");
+		expect(result.current.saveStatus).toBe("retrying");
 
 		const callsAfterInitial = mockedWriteFile.mock.calls.length;
 
@@ -755,6 +805,13 @@ describe("useAutoSave", () => {
 		const callsAfterRetries = mockedWriteFile.mock.calls.length;
 		// Should have retried exactly 3 times (MAX_SAVE_RETRIES)
 		expect(callsAfterRetries - callsAfterInitial).toBe(3);
+
+		// After max retries, status should be "error" and toast should be shown
+		expect(result.current.saveStatus).toBe("error");
+		expect(mockAddToast).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("ファイルの保存に失敗しました"),
+		);
 
 		// No more retries after max
 		mockedWriteFile.mockClear();

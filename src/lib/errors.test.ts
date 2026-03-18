@@ -46,9 +46,57 @@ describe("translateError", () => {
 		);
 	});
 
+	it("translates os error 11", () => {
+		expect(translateError("Resource temporarily unavailable (os error 11)")).toBe(
+			"リソースが一時的に利用できません",
+		);
+	});
+
+	it("translates os error 16", () => {
+		expect(translateError("Device or resource busy (os error 16)")).toBe("ファイルが使用中です");
+	});
+
+	it("translates os error 35", () => {
+		expect(translateError("Resource temporarily unavailable (os error 35)")).toBe(
+			"リソースが一時的に利用できません",
+		);
+	});
+
+	it("translates os error 36", () => {
+		expect(translateError("Operation now in progress (os error 36)")).toBe("操作の進行中です");
+	});
+
+	it("translates os error 63", () => {
+		expect(translateError("File name too long (os error 63)")).toBe("ファイル名が長すぎます");
+	});
+
+	it("translates os error 66", () => {
+		expect(translateError("Directory not empty (os error 66)")).toBe("フォルダが空ではありません");
+	});
+
+	it("translates timed out error", () => {
+		expect(translateError("Operation timed out")).toBe("操作がタイムアウトしました");
+	});
+
+	it("translates timeout error", () => {
+		expect(translateError("Connection timeout")).toBe("操作がタイムアウトしました");
+	});
+
+	it("translates too many open files error", () => {
+		expect(translateError("Too many open files")).toBe("開いているファイルが多すぎます");
+	});
+
+	it("translates connection refused error", () => {
+		expect(translateError("Connection refused")).toBe("接続が拒否されました");
+	});
+
+	it("translates network is unreachable error", () => {
+		expect(translateError("Network is unreachable")).toBe("ネットワークに接続できません");
+	});
+
 	it("falls back with raw message for unknown errors", () => {
 		expect(translateError("Something unexpected happened")).toBe(
-			"エラーが発生しました: Something unexpected happened",
+			"予期しないエラーが発生しました。詳細: Something unexpected happened",
 		);
 	});
 
@@ -57,7 +105,7 @@ describe("translateError", () => {
 	});
 
 	it("handles non-string non-Error values", () => {
-		expect(translateError(42)).toBe("エラーが発生しました: 42");
+		expect(translateError(42)).toBe("予期しないエラーが発生しました。詳細: 42");
 	});
 });
 
@@ -88,6 +136,30 @@ describe("isTransientError", () => {
 
 	it("returns false for os error 28", () => {
 		expect(isTransientError("No space (os error 28)")).toBe(false);
+	});
+
+	it("returns true for os error 11 (transient)", () => {
+		expect(isTransientError("Resource temporarily unavailable (os error 11)")).toBe(true);
+	});
+
+	it("returns true for os error 16 (transient)", () => {
+		expect(isTransientError("Device or resource busy (os error 16)")).toBe(true);
+	});
+
+	it("returns true for os error 35 (transient)", () => {
+		expect(isTransientError("Resource temporarily unavailable (os error 35)")).toBe(true);
+	});
+
+	it("returns true for os error 36 (transient)", () => {
+		expect(isTransientError("Operation now in progress (os error 36)")).toBe(true);
+	});
+
+	it("returns false for os error 63 (non-transient)", () => {
+		expect(isTransientError("File name too long (os error 63)")).toBe(false);
+	});
+
+	it("returns false for os error 66 (non-transient)", () => {
+		expect(isTransientError("Directory not empty (os error 66)")).toBe(false);
 	});
 
 	it("returns true for unknown/transient errors", () => {

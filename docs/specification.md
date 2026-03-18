@@ -200,7 +200,42 @@ scripta/
 - **ファイルツリーは遅延読み込み** — 大きなワークスペースでも初回表示が高速
 - **テーマは CSS 変数ベース** — UI とエディタで統一的にダーク/ライト切替
 
-## 8. 技術的な補足
+## 8. エラーハンドリング
+
+### リトライ戦略
+
+ファイル I/O コマンドには自動リトライ（指数バックオフ）を適用する。
+
+- **対象コマンド**: readFile, writeFile, listDirectory, renameEntry, deleteEntry, searchFiles, searchFilenames
+- **リトライ回数**: 最大3回
+- **遅延**: 200ms → 400ms → 800ms（指数バックオフ）
+- **非一時エラー**（ファイル不存在、権限不足、ファイル名過長、フォルダ非空等）はリトライしない
+
+### エラーメッセージの日本語化
+
+`translateError()` によるパターンマッチ翻訳を行う。
+
+- OS エラー（os error 2, 11, 13, 16, 17, 28, 30, 35, 36, 63, 66）を日本語メッセージに変換
+- ネットワークエラー（タイムアウト、接続拒否、名前解決失敗等）を日本語に変換
+- Git エラー（認証失敗、コンフリクト等）を日本語に変換
+- 未知のエラーはフォールバックメッセージ（「予期しないエラーが発生しました。詳細: ...」）で表示
+
+### オートセーブのリトライ
+
+一時エラー発生時は最大3回リトライする（5s → 10s → 20s）。
+
+- リトライ中はステータスバーに「リトライ中...」と表示
+- 最終失敗時はトースト通知でエラー内容を日本語で表示
+
+### Git 同期のエラー処理
+
+ネットワークエラー検出時はオフラインモードに移行する。
+
+### OGP 取得
+
+独立したキャッシュベースリトライ（30秒後再試行）を行う。
+
+## 9. 技術的な補足
 
 ### Live Preview の実装方式
 
@@ -214,14 +249,14 @@ CodeMirror 6 の `ViewPlugin` と `Decoration` API を使用する。
 
 ### ファイル操作の Rust コマンド
 
-| コマンド | 引数 | 戻り値 |
-|---------|------|--------|
-| `list_directory` | `path: String` | `Vec<FileEntry>` (名前・種別・パス) |
-| `read_file` | `path: String` | `String` (ファイル内容) |
-| `write_file` | `path: String, content: String` | `()` |
-| `create_file` | `path: String` | `()` |
-| `create_directory` | `path: String` | `()` |
-| `rename_entry` | `old_path: String, new_path: String` | `()` |
-| `delete_entry` | `path: String` | `()` (ゴミ箱へ移動) |
-| `search_files` | `workspace: String, query: String` | `Vec<SearchResult>` |
-| `search_filenames` | `workspace: String, query: String` | `Vec<String>` |
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `list_directory` | `path: String` | `Vec<FileEntry>` (名前・種別・パス) | あり |
+| `read_file` | `path: String` | `String` (ファイル内容) | あり |
+| `write_file` | `path: String, content: String` | `()` | あり |
+| `create_file` | `path: String` | `()` | なし |
+| `create_directory` | `path: String` | `()` | なし |
+| `rename_entry` | `old_path: String, new_path: String` | `()` | あり |
+| `delete_entry` | `path: String` | `()` (ゴミ箱へ移動) | あり |
+| `search_files` | `workspace: String, query: String` | `Vec<SearchResult>` | あり |
+| `search_filenames` | `workspace: String, query: String` | `Vec<String>` | あり |

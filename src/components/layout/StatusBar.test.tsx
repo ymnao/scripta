@@ -24,6 +24,11 @@ describe("StatusBar", () => {
 		expect(screen.getByText("保存失敗")).toBeInTheDocument();
 	});
 
+	it('shows "リトライ中..." when saveStatus is retrying', () => {
+		render(<StatusBar saveStatus="retrying" />);
+		expect(screen.getByText("リトライ中...")).toBeInTheDocument();
+	});
+
 	it("shows no status text when saveStatus is not provided", () => {
 		render(<StatusBar />);
 		expect(screen.queryByText("保存済み")).not.toBeInTheDocument();

@@ -24,6 +24,16 @@ const PATTERNS: ErrorPattern[] = [
 	{ test: /unable to access/i, message: "リモートリポジトリにアクセスできません" },
 	{ test: /conflict/i, message: "マージコンフリクトが発生しました" },
 	{ test: /nothing to commit/i, message: "コミットする変更がありません" },
+	{ test: /\(os error 11\)/, message: "リソースが一時的に利用できません" },
+	{ test: /\(os error 16\)/, message: "ファイルが使用中です" },
+	{ test: /\(os error 35\)/, message: "リソースが一時的に利用できません" },
+	{ test: /\(os error 36\)/, message: "操作の進行中です" },
+	{ test: /\(os error 63\)/, message: "ファイル名が長すぎます" },
+	{ test: /\(os error 66\)/, message: "フォルダが空ではありません" },
+	{ test: /timed?\s*out/i, message: "操作がタイムアウトしました" },
+	{ test: /too many open files/i, message: "開いているファイルが多すぎます" },
+	{ test: /connection refused/i, message: "接続が拒否されました" },
+	{ test: /network is unreachable/i, message: "ネットワークに接続できません" },
 ];
 
 export function translateError(error: unknown): string {
@@ -31,7 +41,7 @@ export function translateError(error: unknown): string {
 	for (const { test, message } of PATTERNS) {
 		if (test.test(raw)) return message;
 	}
-	return `エラーが発生しました: ${raw}`;
+	return `予期しないエラーが発生しました。詳細: ${raw}`;
 }
 
 // Non-transient patterns for file I/O retry logic (withRetry).
@@ -47,6 +57,8 @@ const NON_TRANSIENT = [
 	/\(os error 17\)/,
 	/\(os error 28\)/,
 	/\(os error 30\)/,
+	/\(os error 63\)/,
+	/\(os error 66\)/,
 ];
 
 export function isTransientError(error: unknown): boolean {
