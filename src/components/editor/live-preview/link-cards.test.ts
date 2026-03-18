@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { LinkCardWidget, isStandaloneUrlLine } from "./link-cards";
 
-vi.mock("@tauri-apps/plugin-shell", () => ({}));
 vi.mock("../../../lib/commands", () => ({
 	fetchOgp: vi.fn(),
+	openExternal: vi.fn(),
 }));
 
 describe("isStandaloneUrlLine", () => {

@@ -40,7 +40,7 @@ vi.mock("../../lib/scripta-config", () => ({
 
 const { writeNewFile, openExternal } = await import("../../lib/commands");
 const { fileExists } = await import("../../lib/scripta-config");
-const { SettingsDialog } = await import("./SettingsDialog");
+const { KOFI_URL, SettingsDialog } = await import("./SettingsDialog");
 
 const mockedWriteNewFile = writeNewFile as Mock;
 const mockedFileExists = fileExists as Mock;
@@ -158,6 +158,6 @@ describe("SettingsDialog about section", () => {
 		await userEvent.click(screen.getByText("このアプリについて"));
 		await userEvent.click(screen.getByText("Ko-fi で応援する"));
 
-		expect(openExternal).toHaveBeenCalledWith("https://ko-fi.com/yamanao");
+		expect(openExternal).toHaveBeenCalledWith(KOFI_URL);
 	});
 });

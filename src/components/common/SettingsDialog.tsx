@@ -12,7 +12,7 @@ import { useWorkspaceStore } from "../../stores/workspace";
 import type { SyncMethod } from "../../types/git-sync";
 import { DialogBase } from "./DialogBase";
 
-const KOFI_URL = "https://ko-fi.com/yamanao";
+export const KOFI_URL = "https://ko-fi.com/yamanao";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -708,7 +708,9 @@ export function SettingsDialog({
 								<button
 									type="button"
 									onClick={() => {
-										openExternal(KOFI_URL).catch(() => {});
+										openExternal(KOFI_URL).catch(() => {
+											useToastStore.getState().addToast("error", "リンクを開けませんでした");
+										});
 									}}
 									className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-black/5 hover:text-text-primary dark:hover:bg-white/5"
 								>
