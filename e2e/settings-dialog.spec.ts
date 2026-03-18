@@ -149,6 +149,45 @@ test.describe("settings dialog", () => {
 		await expect(toggle).toHaveAttribute("aria-checked", "false");
 	});
 
+	test("shows about section with Ko-fi button", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
+
+		await page.keyboard.press(`${modKey}+,`);
+		await expect(page.getByText("設定")).toBeVisible();
+
+		const nav = page.locator('nav[aria-label="設定セクション"]');
+		await nav.getByText("このアプリについて").click();
+
+		await expect(page.getByText("scripta", { exact: true })).toBeVisible();
+		await expect(
+			page.getByText("ローカルファイルベースの軽量 Markdown メモアプリ。"),
+		).toBeVisible();
+		await expect(page.getByText("Ko-fi で応援する")).toBeVisible();
+	});
+
+	test("Ko-fi button calls shell:open with correct URL", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
+
+		await page.keyboard.press(`${modKey}+,`);
+		await expect(page.getByText("設定")).toBeVisible();
+
+		const nav = page.locator('nav[aria-label="設定セクション"]');
+		await nav.getByText("このアプリについて").click();
+
+		await page.getByText("Ko-fi で応援する").click();
+
+		const calls = await mock.getCalls("shell:open");
+		expect(calls).toEqual([{ url: "https://ko-fi.com/yamanao" }]);
+	});
+
 	test("can change font family", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");

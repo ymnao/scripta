@@ -1,6 +1,6 @@
-import { ExternalLink, Plus, X } from "lucide-react";
+import { Coffee, ExternalLink, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { writeNewFile } from "../../lib/commands";
+import { openExternal, writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
@@ -11,6 +11,8 @@ import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import type { SyncMethod } from "../../types/git-sync";
 import { DialogBase } from "./DialogBase";
+
+const KOFI_URL = "https://ko-fi.com/yamanao";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -37,13 +39,14 @@ const syncMethodOptions: { value: SyncMethod; label: string }[] = [
 	{ value: "rebase", label: "Rebase" },
 ];
 
-type Section = "appearance" | "editor" | "save" | "scratchpad" | "git-sync" | "workspace";
+type Section = "appearance" | "editor" | "save" | "scratchpad" | "git-sync" | "workspace" | "about";
 
 const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
 	{ key: "editor", label: "エディタ" },
 	{ key: "save", label: "保存" },
 	{ key: "scratchpad", label: "スクラッチパッド" },
+	{ key: "about", label: "このアプリについて" },
 ];
 
 function Toggle({
@@ -688,6 +691,32 @@ export function SettingsDialog({
 							onOpenFile={onOpenFile}
 							onClose={onClose}
 						/>
+					)}
+
+					{validSection === "about" && (
+						<div className="space-y-3">
+							<div className="rounded-md bg-bg-secondary px-4 py-3">
+								<p className="text-xs font-medium text-text-primary">scripta</p>
+								<p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+									ローカルファイルベースの軽量 Markdown メモアプリ。
+								</p>
+							</div>
+							<div className="rounded-md bg-bg-secondary px-4 py-3">
+								<p className="text-[11px] leading-relaxed text-text-secondary">
+									自分が使うために作っています。もし役立ったらコーヒー奢ってください。
+								</p>
+								<button
+									type="button"
+									onClick={() => {
+										openExternal(KOFI_URL).catch(() => {});
+									}}
+									className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-black/5 hover:text-text-primary dark:hover:bg-white/5"
+								>
+									<Coffee size={14} />
+									Ko-fi で応援する
+								</button>
+							</div>
+						</div>
 					)}
 				</div>
 			</div>

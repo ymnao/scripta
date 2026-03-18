@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-shell";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
@@ -89,6 +90,10 @@ export function fetchOgp(url: string): Promise<OgpData> {
 
 export function exportPdf(html: string, outputPath: string): Promise<void> {
 	return invoke<void>("export_pdf", { html, outputPath });
+}
+
+export function openExternal(url: string): Promise<void> {
+	return open(url);
 }
 
 // Git sync commands (no retry — git operations should not be retried)

@@ -4,6 +4,7 @@ import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/commands", () => ({
 	writeNewFile: vi.fn().mockResolvedValue(undefined),
+	openExternal: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../lib/export", () => ({
@@ -37,7 +38,7 @@ vi.mock("../../lib/scripta-config", () => ({
 	]),
 }));
 
-const { writeNewFile } = await import("../../lib/commands");
+const { writeNewFile, openExternal } = await import("../../lib/commands");
 const { fileExists } = await import("../../lib/scripta-config");
 const { SettingsDialog } = await import("./SettingsDialog");
 
@@ -131,5 +132,32 @@ describe("SettingsDialog workspace section", () => {
 		});
 
 		expect(screen.queryByText("ワークスペース")).not.toBeInTheDocument();
+	});
+});
+
+describe("SettingsDialog about section", () => {
+	it("「このアプリについて」セクションでコンテンツが表示される", async () => {
+		await act(async () => {
+			render(<SettingsDialog {...defaultProps} />);
+		});
+
+		await userEvent.click(screen.getByText("このアプリについて"));
+
+		expect(screen.getByText("scripta")).toBeInTheDocument();
+		expect(
+			screen.getByText("ローカルファイルベースの軽量 Markdown メモアプリ。"),
+		).toBeInTheDocument();
+		expect(screen.getByText("Ko-fi で応援する")).toBeInTheDocument();
+	});
+
+	it("Ko-fi ボタンクリックで open() が正しい URL で呼ばれる", async () => {
+		await act(async () => {
+			render(<SettingsDialog {...defaultProps} />);
+		});
+
+		await userEvent.click(screen.getByText("このアプリについて"));
+		await userEvent.click(screen.getByText("Ko-fi で応援する"));
+
+		expect(openExternal).toHaveBeenCalledWith("https://ko-fi.com/yamanao");
 	});
 });
