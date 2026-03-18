@@ -167,6 +167,30 @@ test.describe("export dialog", () => {
 			.toBe(true);
 	});
 
+	test("dialog size stays stable when switching sections", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("note.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		await page.keyboard.press(`${modKey}+Shift+E`);
+
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+		const initialBox = await dialog.boundingBox();
+
+		// セクション切り替えでサイズが変わらないことを確認
+		for (const section of ["PDF", "プロンプト", "HTML"]) {
+			await dialog.getByRole("button", { name: section }).click();
+			const box = await dialog.boundingBox();
+			expect(Math.abs((box?.height ?? 0) - (initialBox?.height ?? 0))).toBeLessThanOrEqual(1);
+			expect(Math.abs((box?.width ?? 0) - (initialBox?.width ?? 0))).toBeLessThanOrEqual(1);
+		}
+	});
+
 	test("context menu export opens dialog for a file", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace", undefined, "/export/note.html");

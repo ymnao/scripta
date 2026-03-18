@@ -452,7 +452,7 @@ export function SettingsDialog({
 	const setAutoPullOnStartup = useGitSyncStore((s) => s.setAutoPullOnStartup);
 
 	return (
-		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} className="max-w-lg">
+		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} size="lg">
 			<div className="flex items-center justify-between">
 				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
 					設定
@@ -487,7 +487,7 @@ export function SettingsDialog({
 				</nav>
 
 				{/* 右カラム: 設定内容 */}
-				<div className="min-h-[10rem] min-w-0 flex-1 space-y-2">
+				<div className="h-64 min-w-0 flex-1 space-y-2 overflow-y-auto">
 					{validSection === "appearance" && (
 						<>
 							<SelectInput

@@ -155,4 +155,38 @@ test.describe("settings dialog", () => {
 		await fontSelect.selectOption("serif");
 		await expect(fontSelect).toHaveValue("serif");
 	});
+
+	test("dialog size stays stable when switching sections", async ({ page }) => {
+		await openSettingsDialog(page);
+
+		const dialog = page.locator("dialog");
+		const initialBox = await dialog.boundingBox();
+
+		const nav = page.locator('nav[aria-label="設定セクション"]');
+		const sections = ["エディタ", "保存", "スクラッチパッド", "外観"];
+		for (const section of sections) {
+			await nav.getByText(section).click();
+			const box = await dialog.boundingBox();
+			expect(Math.abs((box?.height ?? 0) - (initialBox?.height ?? 0))).toBeLessThanOrEqual(1);
+			expect(Math.abs((box?.width ?? 0) - (initialBox?.width ?? 0))).toBeLessThanOrEqual(1);
+		}
+	});
+
+	test("dialog is usable at small viewport", async ({ page }) => {
+		await page.setViewportSize({ width: 800, height: 500 });
+		await openSettingsDialog(page);
+
+		const dialog = page.locator("dialog");
+		const box = await dialog.boundingBox();
+		// ダイアログがビューポートに収まること
+		expect(box?.height).toBeLessThanOrEqual(500);
+
+		// セクション切り替えが操作可能であること
+		const nav = page.locator('nav[aria-label="設定セクション"]');
+		await nav.getByText("エディタ").click();
+		await expect(page.getByText("フォントサイズ")).toBeVisible();
+
+		await nav.getByText("保存").click();
+		await expect(page.getByText("自動保存の遅延")).toBeVisible();
+	});
 });

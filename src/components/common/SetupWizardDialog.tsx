@@ -178,7 +178,7 @@ export function SetupWizardDialog({
 			onClose={handleDismiss}
 			ariaLabelledBy={titleId}
 			ariaDescribedBy={descId}
-			className="max-w-md"
+			size="md"
 			preventClose={processing}
 		>
 			<div className="flex items-center justify-between">

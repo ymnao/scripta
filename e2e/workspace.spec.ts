@@ -122,4 +122,62 @@ test.describe("workspace", () => {
 		await page.goto("/");
 		await expect(page.getByText("Open a folder to get started")).toBeVisible();
 	});
+
+	test("delete confirmation dialog fits at small viewport", async ({ page }) => {
+		await page.setViewportSize({ width: 800, height: 500 });
+		const mock = new TauriMock(page);
+		await mock.setup(
+			{
+				files: { "/workspace/hello.md": "# Hello" },
+				directories: {
+					"/workspace": [{ name: "hello.md", path: "/workspace/hello.md", isDirectory: false }],
+				},
+			},
+			"/workspace",
+		);
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("hello.md file").click({ button: "right" });
+		await page.getByText("Delete").click();
+
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+		const box = await dialog.boundingBox();
+		expect(box?.height).toBeLessThanOrEqual(500);
+
+		// 確認・キャンセルボタンが操作可能であること
+		await expect(page.getByRole("button", { name: "キャンセル" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "削除" })).toBeVisible();
+	});
+
+	test("emoji input dialog fits at small viewport", async ({ page }) => {
+		await page.setViewportSize({ width: 800, height: 500 });
+		const mock = new TauriMock(page);
+		await mock.setup(
+			{
+				files: { "/workspace/hello.md": "# Hello" },
+				directories: {
+					"/workspace": [{ name: "hello.md", path: "/workspace/hello.md", isDirectory: false }],
+					"/workspace/.scripta": [],
+				},
+			},
+			"/workspace",
+		);
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("hello.md file").click({ button: "right" });
+		await page.getByText("アイコンを設定...").click();
+
+		const dialog = page.locator("dialog");
+		await expect(dialog).toBeVisible();
+		await expect(page.getByText("アイコンを設定")).toBeVisible();
+		const box = await dialog.boundingBox();
+		expect(box?.height).toBeLessThanOrEqual(500);
+
+		// 入力と設定ボタンが操作可能であること
+		await expect(page.getByLabel("絵文字を入力")).toBeVisible();
+		await expect(page.getByRole("button", { name: "設定" })).toBeVisible();
+	});
 });
