@@ -46,7 +46,6 @@ const baseSections: { key: Section; label: string }[] = [
 	{ key: "editor", label: "エディタ" },
 	{ key: "save", label: "保存" },
 	{ key: "scratchpad", label: "スクラッチパッド" },
-	{ key: "about", label: "このアプリについて" },
 ];
 
 function Toggle({
@@ -409,6 +408,7 @@ export function SettingsDialog({
 		...baseSections,
 		...(gitAvailable ? [{ key: "git-sync" as Section, label: "Git 同期" }] : []),
 		...(workspacePath ? [{ key: "workspace" as Section, label: "ワークスペース" }] : []),
+		{ key: "about" as Section, label: "このアプリについて" },
 	];
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
 
