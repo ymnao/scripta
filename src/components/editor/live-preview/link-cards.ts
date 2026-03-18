@@ -9,8 +9,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { open } from "@tauri-apps/plugin-shell";
-import { fetchOgp } from "../../../lib/commands";
+import { fetchOgp, openExternal } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl } from "./links";
@@ -93,7 +92,7 @@ export class LinkCardWidget extends WidgetType {
 			container.href = this.url;
 			container.tabIndex = 0;
 			const openUrl = () => {
-				open(this.url).catch((error) => {
+				openExternal(this.url).catch((error) => {
 					console.error("Failed to open URL:", this.url, error);
 				});
 			};

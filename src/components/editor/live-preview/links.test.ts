@@ -9,7 +9,9 @@ import {
 	isSafeUrl,
 } from "./links";
 
-vi.mock("@tauri-apps/plugin-shell", () => ({}));
+vi.mock("../../../lib/commands", () => ({
+	openExternal: vi.fn(),
+}));
 
 describe("isSafeUrl", () => {
 	it("allows http URLs", () => {

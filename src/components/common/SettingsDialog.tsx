@@ -1,6 +1,6 @@
-import { ExternalLink, Plus, X } from "lucide-react";
+import { Coffee, ExternalLink, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { writeNewFile } from "../../lib/commands";
+import { openExternal, writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
@@ -11,6 +11,8 @@ import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import type { SyncMethod } from "../../types/git-sync";
 import { DialogBase } from "./DialogBase";
+
+export const KOFI_URL = "https://ko-fi.com/yamanao";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -37,7 +39,7 @@ const syncMethodOptions: { value: SyncMethod; label: string }[] = [
 	{ value: "rebase", label: "Rebase" },
 ];
 
-type Section = "appearance" | "editor" | "save" | "scratchpad" | "git-sync" | "workspace";
+type Section = "appearance" | "editor" | "save" | "scratchpad" | "git-sync" | "workspace" | "about";
 
 const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
@@ -406,6 +408,7 @@ export function SettingsDialog({
 		...baseSections,
 		...(gitAvailable ? [{ key: "git-sync" as Section, label: "Git 同期" }] : []),
 		...(workspacePath ? [{ key: "workspace" as Section, label: "ワークスペース" }] : []),
+		{ key: "about" as Section, label: "このアプリについて" },
 	];
 	const [activeSection, setActiveSection] = useState<Section>("appearance");
 
@@ -688,6 +691,34 @@ export function SettingsDialog({
 							onOpenFile={onOpenFile}
 							onClose={onClose}
 						/>
+					)}
+
+					{validSection === "about" && (
+						<div className="space-y-3">
+							<div className="rounded-md bg-bg-secondary px-4 py-3">
+								<p className="text-xs font-medium text-text-primary">scripta</p>
+								<p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+									ローカルファイルベースの軽量 Markdown メモアプリ。
+								</p>
+							</div>
+							<div className="rounded-md bg-bg-secondary px-4 py-3">
+								<p className="text-[11px] leading-relaxed text-text-secondary">
+									自分が使うために作っています。もし役立ったらコーヒー奢ってください。
+								</p>
+								<button
+									type="button"
+									onClick={() => {
+										openExternal(KOFI_URL).catch(() => {
+											useToastStore.getState().addToast("error", "リンクを開けませんでした");
+										});
+									}}
+									className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#FF5E5B] px-4 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90"
+								>
+									<Coffee size={14} />
+									Ko-fi で応援する
+								</button>
+							</div>
+						</div>
 					)}
 				</div>
 			</div>

@@ -9,7 +9,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { open } from "@tauri-apps/plugin-shell";
+import { openExternal } from "../../../lib/commands";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
 // Only allow http/https URLs without whitespace characters.
@@ -95,7 +95,7 @@ export class LinkWidget extends WidgetType {
 			anchor.title = this.url;
 			anchor.tabIndex = 0;
 			const openUrl = () => {
-				open(this.url).catch((error) => {
+				openExternal(this.url).catch((error) => {
 					console.error("Failed to open external URL:", this.url, error);
 				});
 			};
