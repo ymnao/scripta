@@ -712,7 +712,7 @@ export function SettingsDialog({
 											useToastStore.getState().addToast("error", "リンクを開けませんでした");
 										});
 									}}
-									className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-black/5 hover:text-text-primary dark:hover:bg-white/5"
+									className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#FF5E5B] px-4 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90"
 								>
 									<Coffee size={14} />
 									Ko-fi で応援する
