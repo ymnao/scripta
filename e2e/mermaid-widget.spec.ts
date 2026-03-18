@@ -30,7 +30,7 @@ async function openFileAndWaitForMermaid(page: Page) {
 	await expect(widget).toBeVisible({ timeout: 15000 });
 	await expect(widget.locator(".cm-mermaid-inner")).toBeVisible({ timeout: 15000 });
 
-	return { editor, widget };
+	return { mock, editor, widget };
 }
 
 test.describe("mermaid widget", () => {
@@ -38,9 +38,10 @@ test.describe("mermaid widget", () => {
 		const { widget } = await openFileAndWaitForMermaid(page);
 
 		await widget.click();
-		await page.waitForTimeout(500);
 
-		await expect(widget).toBeVisible();
+		// click で focusChanged → rebuildMermaidDecos が発火するため、
+		// 再構築後も SVG が残っていることで再計算完了を確認
+		await expect(widget.locator(".cm-mermaid-inner")).toBeVisible();
 	});
 
 	test("drag selection on widget stays stable", async ({ page }) => {
@@ -89,21 +90,72 @@ test.describe("mermaid widget", () => {
 		await expect(menu).not.toBeVisible();
 	});
 
-	test("cross-block drag selection from text through mermaid stays stable", async ({ page }) => {
+	test("delete removes mermaid block from document", async ({ page }) => {
+		const { mock, widget } = await openFileAndWaitForMermaid(page);
+
+		await widget.click({ button: "right" });
+		const menu = page.locator("[role=menu]");
+		await expect(menu).toBeVisible();
+
+		await menu.getByRole("menuitem", { name: "Mermaid を削除" }).click();
+
+		await expect(widget).not.toBeVisible();
+
+		// Cmd+S で保存し、write_file の内容から Mermaid ブロックが消えたことを検証
+		await page.keyboard.press(`${modKey}+s`);
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 5000 });
+
+		const calls = await mock.getCalls("write_file");
+		const saved = calls[calls.length - 1];
+		expect(saved.content).not.toContain("```mermaid");
+		expect(saved.content).not.toContain("graph TD");
+		expect(saved.content).toContain("Some text here.");
+		expect(saved.content).toContain("More text below.");
+	});
+
+	test("insert opens dialog and adds new mermaid block", async ({ page }) => {
 		const { editor, widget } = await openFileAndWaitForMermaid(page);
 
-		// カーソルを3行目（"Some text here."）の先頭に配置
-		await editor.click();
-		await page.keyboard.press(`${modKey}+Home`);
-		await page.keyboard.press("ArrowDown");
-		await page.keyboard.press("ArrowDown");
+		await widget.click({ button: "right" });
+		const menu = page.locator("[role=menu]");
+		await expect(menu).toBeVisible();
 
-		// 文書末尾まで選択を拡張（Mermaid ブロックを横断）
-		await page.keyboard.press(`Shift+${modKey}+End`);
-		await page.waitForTimeout(500);
+		await menu.getByRole("menuitem", { name: "Mermaid 図を挿入" }).click();
 
-		// collectCursorLines は anchor 行（3行目）のみを返すため、
-		// Mermaid ブロック（5-7行目）のデコレーションは維持される
-		await expect(widget).toBeVisible();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		// 挿入モードでは textarea は空
+		const textarea = dialog.locator('[aria-label="Mermaid ソースコード"]');
+		await expect(textarea).toHaveValue("");
+
+		// 新しい Mermaid コードを入力して挿入
+		await textarea.fill("graph LR\n  X-->Y");
+		await dialog.getByRole("button", { name: "挿入" }).click();
+
+		await expect(dialog).not.toBeVisible();
+		// 新しいブロックがウィジェットとしてレンダリングされ、合計2つになる
+		await expect(page.locator(".cm-mermaid-widget")).toHaveCount(2, { timeout: 15000 });
+	});
+
+	test("mouse drag from text through mermaid widget stays stable", async ({ page }) => {
+		const { editor, widget } = await openFileAndWaitForMermaid(page);
+
+		// "Some text here." 行から "More text below." 行へマウスドラッグ
+		// （Mermaid ウィジェットを横断する選択）
+		const startLine = editor.locator(".cm-line", { hasText: "Some text here." });
+		const endLine = editor.locator(".cm-line", { hasText: "More text below." });
+
+		const startBox = await startLine.boundingBox();
+		const endBox = await endLine.boundingBox();
+		if (!startBox || !endBox) throw new Error("line bounding box not found");
+
+		await page.mouse.move(startBox.x + 10, startBox.y + startBox.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(endBox.x + 10, endBox.y + endBox.height / 2, { steps: 5 });
+		await page.mouse.up();
+
+		// collectCursorLines は anchor 行（"Some text here."）のみを返すため、
+		// Mermaid ブロックのデコレーションは維持される
+		await expect(widget.locator(".cm-mermaid-inner")).toBeVisible();
 	});
 });
