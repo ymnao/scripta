@@ -154,7 +154,7 @@ export function ExportDialog({
 	};
 
 	return (
-		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} className="max-w-lg">
+		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} size="lg">
 			<div className="flex items-center justify-between">
 				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
 					エクスポート
@@ -187,7 +187,7 @@ export function ExportDialog({
 					))}
 				</nav>
 
-				<div className="min-h-[10rem] min-w-0 flex-1 space-y-3">
+				<div className="h-64 min-w-0 flex-1 space-y-3 overflow-y-auto">
 					{activeSection === "html" && (
 						<>
 							<SelectInput

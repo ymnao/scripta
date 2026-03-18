@@ -76,7 +76,7 @@ export function MermaidEditorDialog({
 	);
 
 	return (
-		<DialogBase open={open} onClose={onCancel} className="max-w-4xl">
+		<DialogBase open={open} onClose={onCancel} size="xl">
 			<div className="flex flex-col gap-3">
 				<h2 className="text-sm font-semibold text-text-primary">Mermaid エディタ</h2>
 				<div className="flex gap-3" style={{ height: "60vh" }}>

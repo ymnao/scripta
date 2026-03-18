@@ -101,7 +101,7 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
 	const titleId = useId();
 
 	return (
-		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} className="max-w-md">
+		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} size="md">
 			<div className="flex items-center justify-between">
 				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
 					キーボードショートカット

@@ -1,12 +1,21 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
+type DialogSize = "sm" | "md" | "lg" | "xl";
+
+const sizeClasses = {
+	sm: "max-w-sm",
+	md: "max-w-md",
+	lg: "max-w-lg",
+	xl: "max-w-4xl",
+} as const;
+
 interface DialogBaseProps {
 	open: boolean;
 	onClose: () => void;
 	ariaLabelledBy?: string;
 	ariaDescribedBy?: string;
-	className?: string;
+	size?: DialogSize;
 	/** true の間は Escape キーやオーバーレイクリックによる閉じ操作を無効にする */
 	preventClose?: boolean;
 	children: ReactNode;
@@ -17,7 +26,7 @@ export function DialogBase({
 	onClose,
 	ariaLabelledBy,
 	ariaDescribedBy,
-	className,
+	size = "sm",
 	preventClose,
 	children,
 }: DialogBaseProps) {
@@ -77,7 +86,7 @@ export function DialogBase({
 				aria-modal="true"
 				aria-labelledby={ariaLabelledBy}
 				aria-describedby={ariaDescribedBy}
-				className={`relative mx-4 w-full rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${className ?? "max-w-sm"}`}
+				className={`relative mx-4 max-h-[80vh] w-full flex flex-col rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${sizeClasses[size]}`}
 				onMouseDown={(e) => e.stopPropagation()}
 				onCancel={(e) => {
 					e.preventDefault();
@@ -85,7 +94,7 @@ export function DialogBase({
 				}}
 				tabIndex={-1}
 			>
-				{children}
+				<div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
 			</dialog>
 		</div>,
 		document.body,
