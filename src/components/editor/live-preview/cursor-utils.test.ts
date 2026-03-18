@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import { collectCursorLines } from "./cursor-utils";
 import { createTestState } from "./test-helper";
 
+// 範囲選択時に anchor 行のみ返すのは、ドラッグ選択がウィジェットデコレーションを
+// 横断した際のフリッカーを防止するための意図的な設計（Issue #90）。
+// 選択範囲全行を返すと Mermaid・コードブロック等の replace デコレーションが
+// 崩壊・再表示を繰り返し、視覚的に不安定になる。
 describe("collectCursorLines", () => {
 	const doc = "line1\nline2\nline3\nline4\nline5";
 
