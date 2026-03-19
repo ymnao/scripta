@@ -5,9 +5,11 @@ const workspace = {
 	files: {
 		"/workspace/mermaid.md":
 			"# Title\n\nSome text here.\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nMore text below.\n",
+		"/workspace/.scripta/.initialized": "",
 	},
 	directories: {
 		"/workspace": [{ name: "mermaid.md", path: "/workspace/mermaid.md", isDirectory: false }],
+		"/workspace/.scripta": [],
 	},
 };
 

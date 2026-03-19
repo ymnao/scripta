@@ -1,13 +1,12 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-type DialogSize = "sm" | "md" | "lg" | "xl";
+type DialogSize = "sm" | "md" | "lg";
 
-const sizeClasses = {
+const widthClasses = {
 	sm: "max-w-sm",
 	md: "max-w-md",
-	lg: "max-w-lg",
-	xl: "max-w-4xl",
+	lg: "max-w-4xl",
 } as const;
 
 interface DialogBaseProps {
@@ -16,6 +15,8 @@ interface DialogBaseProps {
 	ariaLabelledBy?: string;
 	ariaDescribedBy?: string;
 	size?: DialogSize;
+	/** true にするとダイアログの高さを 32rem に固定する */
+	fixedHeight?: boolean;
 	/** true の間は Escape キーやオーバーレイクリックによる閉じ操作を無効にする */
 	preventClose?: boolean;
 	children: ReactNode;
@@ -27,6 +28,7 @@ export function DialogBase({
 	ariaLabelledBy,
 	ariaDescribedBy,
 	size = "sm",
+	fixedHeight,
 	preventClose,
 	children,
 }: DialogBaseProps) {
@@ -86,7 +88,7 @@ export function DialogBase({
 				aria-modal="true"
 				aria-labelledby={ariaLabelledBy}
 				aria-describedby={ariaDescribedBy}
-				className={`relative mx-4 max-h-[80vh] w-full flex flex-col rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${sizeClasses[size]}`}
+				className={`relative mx-4 my-6 max-h-[calc(100vh-3rem)] w-full overflow-hidden flex flex-col rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${widthClasses[size]}${fixedHeight ? " h-[32rem]" : ""}`}
 				onMouseDown={(e) => e.stopPropagation()}
 				onCancel={(e) => {
 					e.preventDefault();
@@ -94,7 +96,7 @@ export function DialogBase({
 				}}
 				tabIndex={-1}
 			>
-				<div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+				<div className="min-h-0 flex-1 flex flex-col overflow-y-auto">{children}</div>
 			</dialog>
 		</div>,
 		document.body,
