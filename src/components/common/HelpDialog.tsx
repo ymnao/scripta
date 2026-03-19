@@ -101,8 +101,8 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
 	const titleId = useId();
 
 	return (
-		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} size="md">
-			<div className="flex items-center justify-between">
+		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} size="md" fixedHeight>
+			<div className="flex shrink-0 items-center justify-between">
 				<h2 id={titleId} className="text-sm font-semibold text-text-primary">
 					キーボードショートカット
 				</h2>
@@ -116,7 +116,7 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
 				</button>
 			</div>
 
-			<div className="mt-4 space-y-4">
+			<div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
 				{groups.map((group) => (
 					<section key={group.title}>
 						<h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">

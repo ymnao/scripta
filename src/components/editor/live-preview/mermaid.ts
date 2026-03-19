@@ -350,9 +350,10 @@ function createMermaidClickHandler() {
 				// カーソルを移動しない。移動するとデコレーション再計算で
 				// ウィジェットが消失する可能性がある（シンタックスツリーの
 				// 不完全パース時や文書末尾ブロックなどのエッジケース）。
-				// 編集は右クリックメニューの「Mermaid を編集」から行う
+				// 編集は右クリックメニューの「Mermaid を編集」から行う。
+				// view.focus() は呼ばない。focusChanged が発火するとデコレーション
+				// 再構築でウィジェットが消失するため。
 				event.preventDefault();
-				view.focus();
 				return true;
 			}
 			return false;
