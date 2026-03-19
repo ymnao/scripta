@@ -10,6 +10,7 @@ import {
 import { translateError } from "../../lib/errors";
 import { SEP_RE, addTrailingSep, basename, dirname, joinPath, replaceName } from "../../lib/path";
 import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
+import { useDragStore } from "../../stores/drag";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { toRelativePath, useWorkspaceConfigStore } from "../../stores/workspace-config";
@@ -47,6 +48,7 @@ function validateName(name: string): string | null {
 }
 
 const DRAG_THRESHOLD = 5;
+const GHOST_CURSOR_OFFSET = 12;
 
 export function FileTree({
 	workspacePath,
@@ -70,8 +72,7 @@ export function FileTree({
 	const [emojiTarget, setEmojiTarget] = useState<FileEntry | null>(null);
 	const [scriptaDirConfirmTarget, setScriptaDirConfirmTarget] = useState<FileEntry | null>(null);
 
-	const [dragOverPath, setDragOverPath] = useState<string | null>(null);
-	const [dragSourcePath, setDragSourcePath] = useState<string | null>(null);
+	const isRootDragOver = useDragStore((s) => s.overPath === workspacePath);
 
 	const dragRef = useRef<{
 		source: { path: string; isDirectory: boolean };
@@ -431,7 +432,7 @@ export function FileTree({
 			if (!drag.started) {
 				if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
 				drag.started = true;
-				setDragSourcePath(drag.source.path);
+				useDragStore.getState().setSourcePath(drag.source.path);
 				document.body.style.cursor = "grabbing";
 
 				const ghost = document.createElement("div");
@@ -445,12 +446,12 @@ export function FileTree({
 			}
 
 			if (drag.ghost) {
-				drag.ghost.style.left = `${e.clientX + 12}px`;
-				drag.ghost.style.top = `${e.clientY + 12}px`;
+				drag.ghost.style.left = `${e.clientX + GHOST_CURSOR_OFFSET}px`;
+				drag.ghost.style.top = `${e.clientY + GHOST_CURSOR_OFFSET}px`;
 			}
 
 			const target = findDropTarget(e.clientX, e.clientY, drag.source.path);
-			setDragOverPath(target);
+			useDragStore.getState().setOverPath(target);
 		};
 
 		const handlePointerUp = (e: PointerEvent) => {
@@ -470,8 +471,7 @@ export function FileTree({
 				drag.ghost.remove();
 			}
 			dragRef.current = null;
-			setDragOverPath(null);
-			setDragSourcePath(null);
+			useDragStore.getState().reset();
 		};
 
 		document.addEventListener("pointermove", handlePointerMove);
@@ -481,6 +481,16 @@ export function FileTree({
 			document.removeEventListener("pointermove", handlePointerMove);
 			document.removeEventListener("pointerup", handlePointerUp);
 			document.removeEventListener("pointercancel", handlePointerUp);
+			// Clean up drag state on unmount
+			const drag = dragRef.current;
+			if (drag?.ghost) {
+				drag.ghost.remove();
+			}
+			if (drag?.started) {
+				document.body.style.cursor = "";
+			}
+			dragRef.current = null;
+			useDragStore.getState().reset();
 		};
 	}, [findDropTarget]);
 
@@ -568,7 +578,6 @@ export function FileTree({
 
 	const showRootCreating = creating?.parentPath === workspacePath;
 	const renamingPath = renamingEntry?.path ?? null;
-	const isRootDragOver = dragOverPath === workspacePath;
 
 	return (
 		<>
@@ -611,8 +620,6 @@ export function FileTree({
 						onCreateCancel={handleCreateCancel}
 						icons={icons}
 						workspacePath={workspacePath}
-						dragOverPath={dragOverPath}
-						dragSourcePath={dragSourcePath}
 					/>
 				))}
 				{entries.length === 0 && !showRootCreating && (

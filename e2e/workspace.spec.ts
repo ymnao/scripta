@@ -176,8 +176,8 @@ test.describe("workspace", () => {
 		const box = await dialog.boundingBox();
 		expect(box?.height).toBeLessThanOrEqual(500);
 
-		// 入力と設定ボタンが操作可能であること
-		await expect(page.getByLabel("絵文字を入力")).toBeVisible();
+		// 絵文字一覧と設定ボタンが操作可能であること
+		await expect(page.getByLabel("絵文字一覧")).toBeVisible();
 		await expect(page.getByRole("button", { name: "設定" })).toBeVisible();
 	});
 });

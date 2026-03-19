@@ -3,8 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
 import { toRelativePath } from "../../lib/path";
+import { useDragStore } from "../../stores/drag";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
+
+const DRAG_EXPAND_DELAY = 500;
 
 interface CreatingState {
 	parentPath: string;
@@ -27,8 +30,6 @@ interface FileTreeItemProps {
 	onCreateCancel: () => void;
 	icons?: Record<string, string>;
 	workspacePath?: string;
-	dragOverPath: string | null;
-	dragSourcePath: string | null;
 }
 
 export function FileTreeItem({
@@ -47,8 +48,6 @@ export function FileTreeItem({
 	onCreateCancel,
 	icons,
 	workspacePath,
-	dragOverPath,
-	dragSourcePath,
 }: FileTreeItemProps) {
 	const [expanded, setExpanded] = useState(false);
 	const [children, setChildren] = useState<FileEntry[]>([]);
@@ -56,6 +55,9 @@ export function FileTreeItem({
 	const [loading, setLoading] = useState(false);
 	const [loadError, setLoadError] = useState(false);
 	const isMountedRef = useRef(true);
+
+	const isDragSource = useDragStore((s) => s.sourcePath === entry.path);
+	const isDragOver = useDragStore((s) => s.overPath === entry.path && entry.isDirectory);
 
 	useEffect(() => {
 		isMountedRef.current = true;
@@ -123,25 +125,16 @@ export function FileTreeItem({
 
 	// Auto-expand folder on drag hover (500ms)
 	useEffect(() => {
-		if (dragOverPath !== entry.path || !entry.isDirectory || expanded) return;
+		if (!isDragOver || expanded) return;
 		const timer = setTimeout(() => {
 			if (!loaded && !loading && !loadError) {
 				loadChildren();
 			} else if (loaded) {
 				setExpanded(true);
 			}
-		}, 500);
+		}, DRAG_EXPAND_DELAY);
 		return () => clearTimeout(timer);
-	}, [
-		dragOverPath,
-		entry.path,
-		entry.isDirectory,
-		expanded,
-		loaded,
-		loading,
-		loadError,
-		loadChildren,
-	]);
+	}, [isDragOver, expanded, loaded, loading, loadError, loadChildren]);
 
 	const handleClick = useCallback(
 		(e: React.MouseEvent) => {
@@ -187,9 +180,6 @@ export function FileTreeItem({
 			/>
 		);
 	}
-
-	const isDragSource = dragSourcePath === entry.path;
-	const isDragOver = dragOverPath === entry.path && entry.isDirectory;
 
 	return (
 		<li>
@@ -295,8 +285,6 @@ export function FileTreeItem({
 								onCreateCancel={onCreateCancel}
 								icons={icons}
 								workspacePath={workspacePath}
-								dragOverPath={dragOverPath}
-								dragSourcePath={dragSourcePath}
 							/>
 						))}
 					</ul>

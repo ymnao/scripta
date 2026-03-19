@@ -8,6 +8,7 @@ import {
 	listDirectory,
 	renameEntry,
 } from "../../lib/commands";
+import { useDragStore } from "../../stores/drag";
 
 vi.mock("../../lib/commands", () => ({
 	listDirectory: vi.fn(),
@@ -44,6 +45,7 @@ describe("FileTree", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		useDragStore.getState().reset();
 	});
 
 	it("loads and displays entries from workspace", async () => {
