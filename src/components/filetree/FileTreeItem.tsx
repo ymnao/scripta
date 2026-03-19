@@ -27,6 +27,8 @@ interface FileTreeItemProps {
 	onCreateCancel: () => void;
 	icons?: Record<string, string>;
 	workspacePath?: string;
+	dragOverPath: string | null;
+	dragSourcePath: string | null;
 }
 
 export function FileTreeItem({
@@ -45,6 +47,8 @@ export function FileTreeItem({
 	onCreateCancel,
 	icons,
 	workspacePath,
+	dragOverPath,
+	dragSourcePath,
 }: FileTreeItemProps) {
 	const [expanded, setExpanded] = useState(false);
 	const [children, setChildren] = useState<FileEntry[]>([]);
@@ -60,6 +64,27 @@ export function FileTreeItem({
 		};
 	}, []);
 
+	const loadChildren = useCallback(() => {
+		setLoading(true);
+		setLoadError(false);
+		listDirectory(entry.path)
+			.then((entries) => {
+				if (!isMountedRef.current) return;
+				setChildren(entries);
+				setLoaded(true);
+				setExpanded(true);
+			})
+			.catch((err) => {
+				if (!isMountedRef.current) return;
+				console.error("Failed to list directory:", err);
+				setLoadError(true);
+			})
+			.finally(() => {
+				if (!isMountedRef.current) return;
+				setLoading(false);
+			});
+	}, [entry.path]);
+
 	const isSelected = entry.path === selectedPath;
 	const isRenaming = entry.path === renamingPath;
 	const isCreatingHere = creating?.parentPath === entry.path && entry.isDirectory;
@@ -68,29 +93,12 @@ export function FileTreeItem({
 	useEffect(() => {
 		if (isCreatingHere && !expanded) {
 			if (!loaded && !loading && !loadError) {
-				setLoading(true);
-				setLoadError(false);
-				listDirectory(entry.path)
-					.then((entries) => {
-						if (!isMountedRef.current) return;
-						setChildren(entries);
-						setLoaded(true);
-						setExpanded(true);
-					})
-					.catch((err) => {
-						if (!isMountedRef.current) return;
-						console.error("Failed to list directory:", err);
-						setLoadError(true);
-					})
-					.finally(() => {
-						if (!isMountedRef.current) return;
-						setLoading(false);
-					});
+				loadChildren();
 			} else if (loaded) {
 				setExpanded(true);
 			}
 		}
-	}, [isCreatingHere, expanded, loaded, loading, loadError, entry.path]);
+	}, [isCreatingHere, expanded, loaded, loading, loadError, loadChildren]);
 
 	// Re-fetch children when refreshKey changes (for expanded folders)
 	const prevRefreshKeyRef = useRef(refreshKey);
@@ -113,28 +121,33 @@ export function FileTreeItem({
 		};
 	}, [refreshKey, entry.isDirectory, entry.path, expanded, loaded]);
 
+	// Auto-expand folder on drag hover (500ms)
+	useEffect(() => {
+		if (dragOverPath !== entry.path || !entry.isDirectory || expanded) return;
+		const timer = setTimeout(() => {
+			if (!loaded && !loading && !loadError) {
+				loadChildren();
+			} else if (loaded) {
+				setExpanded(true);
+			}
+		}, 500);
+		return () => clearTimeout(timer);
+	}, [
+		dragOverPath,
+		entry.path,
+		entry.isDirectory,
+		expanded,
+		loaded,
+		loading,
+		loadError,
+		loadChildren,
+	]);
+
 	const handleClick = useCallback(
 		(e: React.MouseEvent) => {
 			if (entry.isDirectory) {
 				if ((!loaded || loadError) && !loading) {
-					setLoading(true);
-					setLoadError(false);
-					listDirectory(entry.path)
-						.then((entries) => {
-							if (!isMountedRef.current) return;
-							setChildren(entries);
-							setLoaded(true);
-							setExpanded(true);
-						})
-						.catch((err) => {
-							if (!isMountedRef.current) return;
-							console.error("Failed to list directory:", err);
-							setLoadError(true);
-						})
-						.finally(() => {
-							if (!isMountedRef.current) return;
-							setLoading(false);
-						});
+					loadChildren();
 				} else if (loaded) {
 					setExpanded((prev) => !prev);
 				}
@@ -144,7 +157,16 @@ export function FileTreeItem({
 				onFileSelect(entry.path);
 			}
 		},
-		[entry.isDirectory, entry.path, loaded, loadError, loading, onFileSelect, onFileOpenNewTab],
+		[
+			entry.isDirectory,
+			entry.path,
+			loaded,
+			loadError,
+			loading,
+			loadChildren,
+			onFileSelect,
+			onFileOpenNewTab,
+		],
 	);
 
 	const handleContextMenuEvent = useCallback(
@@ -166,14 +188,19 @@ export function FileTreeItem({
 		);
 	}
 
+	const isDragSource = dragSourcePath === entry.path;
+	const isDragOver = dragOverPath === entry.path && entry.isDirectory;
+
 	return (
 		<li>
 			<button
 				type="button"
+				data-path={entry.path}
+				data-is-directory={entry.isDirectory}
 				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}
 				aria-expanded={entry.isDirectory ? expanded : undefined}
 				aria-selected={isSelected || undefined}
-				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""}`}
+				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""} ${isDragSource ? "opacity-40" : ""} ${isDragOver ? "bg-black/10 dark:bg-white/10" : ""}`}
 				style={{ paddingLeft: `${depth * 16 + 4}px` }}
 				onClick={handleClick}
 				onContextMenu={handleContextMenuEvent}
@@ -268,6 +295,8 @@ export function FileTreeItem({
 								onCreateCancel={onCreateCancel}
 								icons={icons}
 								workspacePath={workspacePath}
+								dragOverPath={dragOverPath}
+								dragSourcePath={dragSourcePath}
 							/>
 						))}
 					</ul>

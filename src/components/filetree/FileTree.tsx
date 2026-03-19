@@ -8,7 +8,7 @@ import {
 	showInFolder,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { SEP_RE, dirname, joinPath, replaceName } from "../../lib/path";
+import { SEP_RE, addTrailingSep, basename, dirname, joinPath, replaceName } from "../../lib/path";
 import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
@@ -46,6 +46,8 @@ function validateName(name: string): string | null {
 	return null;
 }
 
+const DRAG_THRESHOLD = 5;
+
 export function FileTree({
 	workspacePath,
 	selectedPath,
@@ -67,6 +69,22 @@ export function FileTree({
 
 	const [emojiTarget, setEmojiTarget] = useState<FileEntry | null>(null);
 	const [scriptaDirConfirmTarget, setScriptaDirConfirmTarget] = useState<FileEntry | null>(null);
+
+	const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+	const [dragSourcePath, setDragSourcePath] = useState<string | null>(null);
+
+	const dragRef = useRef<{
+		source: { path: string; isDirectory: boolean };
+		startX: number;
+		startY: number;
+		started: boolean;
+		ghost: HTMLDivElement | null;
+	} | null>(null);
+	const rootUlRef = useRef<HTMLUListElement>(null);
+	const skipNextClickRef = useRef(false);
+
+	const workspacePathRef = useRef(workspacePath);
+	workspacePathRef.current = workspacePath;
 
 	const icons = useWorkspaceConfigStore((s) => s.icons);
 	const scriptaDirReady = useWorkspaceConfigStore((s) => s.scriptaDirReady);
@@ -261,6 +279,22 @@ export function FileTree({
 
 	const handleCreateCancel = useCallback(() => setCreating(null), []);
 
+	const executeRename = useCallback(
+		async (oldPath: string, newPath: string, isDirectory: boolean) => {
+			await renameEntry(oldPath, newPath);
+			const oldRel = toRelativePath(workspacePath, oldPath);
+			const newRel = toRelativePath(workspacePath, newPath);
+			if (isDirectory) {
+				renameIconsByPrefix(workspacePath, oldRel, newRel);
+			} else {
+				renameIcon(workspacePath, oldRel, newRel);
+			}
+			refresh();
+			onFileRenamed?.(oldPath, newPath, isDirectory);
+		},
+		[workspacePath, renameIcon, renameIconsByPrefix, refresh, onFileRenamed],
+	);
+
 	const handleRenameConfirm = useCallback(
 		async (newName: string) => {
 			if (!renamingEntry) return;
@@ -279,16 +313,7 @@ export function FileTree({
 			}
 
 			try {
-				await renameEntry(oldPath, newPath);
-				const oldRel = toRelativePath(workspacePath, oldPath);
-				const newRel = toRelativePath(workspacePath, newPath);
-				if (renamingEntry.isDirectory) {
-					renameIconsByPrefix(workspacePath, oldRel, newRel);
-				} else {
-					renameIcon(workspacePath, oldRel, newRel);
-				}
-				refresh();
-				onFileRenamed?.(oldPath, newPath, renamingEntry.isDirectory);
+				await executeRename(oldPath, newPath, renamingEntry.isDirectory);
 			} catch (err) {
 				console.error("Failed to rename:", err);
 				useToastStore
@@ -297,10 +322,167 @@ export function FileTree({
 			}
 			setRenamingEntry(null);
 		},
-		[renamingEntry, onFileRenamed, refresh, workspacePath, renameIcon, renameIconsByPrefix],
+		[renamingEntry, executeRename],
 	);
 
 	const handleRenameCancel = useCallback(() => setRenamingEntry(null), []);
+
+	const handleMoveEntry = useCallback(
+		async (source: { path: string; isDirectory: boolean }, targetDirPath: string) => {
+			const sourcePath = source.path;
+			const newPath = joinPath(targetDirPath, basename(sourcePath));
+
+			// Self-drop
+			if (sourcePath === targetDirPath) return;
+
+			// Same parent
+			if (dirname(sourcePath) === targetDirPath) return;
+
+			// Workspace boundary check
+			const wsPrefix = addTrailingSep(workspacePath);
+			if (
+				!sourcePath.startsWith(wsPrefix) ||
+				(!targetDirPath.startsWith(wsPrefix) && targetDirPath !== workspacePath)
+			) {
+				console.error("Move target is outside workspace");
+				return;
+			}
+
+			// Circular move check
+			if (source.isDirectory) {
+				const sourcePrefix = addTrailingSep(sourcePath);
+				if (targetDirPath.startsWith(sourcePrefix)) {
+					useToastStore
+						.getState()
+						.addToast("error", "フォルダを自身の子孫に移動することはできません");
+					return;
+				}
+			}
+
+			try {
+				await executeRename(sourcePath, newPath, source.isDirectory);
+			} catch (err) {
+				console.error("Failed to move:", err);
+				useToastStore.getState().addToast("error", `移動に失敗しました: ${translateError(err)}`);
+			}
+		},
+		[workspacePath, executeRename],
+	);
+
+	const handleMoveEntryRef = useRef(handleMoveEntry);
+	handleMoveEntryRef.current = handleMoveEntry;
+
+	const findDropTarget = useCallback(
+		(clientX: number, clientY: number, skipPath: string): string | null => {
+			const rootUl = rootUlRef.current;
+			if (!rootUl) return null;
+
+			const rootRect = rootUl.getBoundingClientRect();
+			if (
+				clientX < rootRect.left ||
+				clientX > rootRect.right ||
+				clientY < rootRect.top ||
+				clientY > rootRect.bottom
+			) {
+				return null;
+			}
+
+			const buttons = rootUl.querySelectorAll<HTMLElement>("[data-path]");
+			for (const btn of buttons) {
+				const path = btn.dataset.path;
+				if (!path) continue;
+				const rect = btn.getBoundingClientRect();
+				if (clientY >= rect.top && clientY < rect.bottom) {
+					if (path === skipPath) return null;
+					return btn.dataset.isDirectory === "true" ? path : dirname(path);
+				}
+			}
+
+			return workspacePathRef.current;
+		},
+		[],
+	);
+
+	const handlePointerDown = useCallback((e: React.PointerEvent) => {
+		if (e.button !== 0) return;
+		const target = (e.target as Element).closest<HTMLElement>("[data-path]");
+		if (!target?.dataset.path) return;
+		dragRef.current = {
+			source: {
+				path: target.dataset.path,
+				isDirectory: target.dataset.isDirectory === "true",
+			},
+			startX: e.clientX,
+			startY: e.clientY,
+			started: false,
+			ghost: null,
+		};
+		setContextMenu(null);
+	}, []);
+
+	useEffect(() => {
+		const handlePointerMove = (e: PointerEvent) => {
+			const drag = dragRef.current;
+			if (!drag) return;
+
+			const dx = e.clientX - drag.startX;
+			const dy = e.clientY - drag.startY;
+
+			if (!drag.started) {
+				if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+				drag.started = true;
+				setDragSourcePath(drag.source.path);
+				document.body.style.cursor = "grabbing";
+
+				const ghost = document.createElement("div");
+				ghost.style.cssText =
+					"position:fixed;pointer-events:none;z-index:50;border-radius:4px;padding:2px 8px;font-size:12px;line-height:1.5;opacity:0.9;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.15)";
+				ghost.style.backgroundColor = "var(--color-bg-secondary)";
+				ghost.style.color = "var(--color-text-primary)";
+				ghost.textContent = basename(drag.source.path);
+				document.body.appendChild(ghost);
+				drag.ghost = ghost;
+			}
+
+			if (drag.ghost) {
+				drag.ghost.style.left = `${e.clientX + 12}px`;
+				drag.ghost.style.top = `${e.clientY + 12}px`;
+			}
+
+			const target = findDropTarget(e.clientX, e.clientY, drag.source.path);
+			setDragOverPath(target);
+		};
+
+		const handlePointerUp = (e: PointerEvent) => {
+			const drag = dragRef.current;
+			if (!drag) return;
+
+			if (drag.started) {
+				skipNextClickRef.current = true;
+				const target = findDropTarget(e.clientX, e.clientY, drag.source.path);
+				if (target) {
+					handleMoveEntryRef.current(drag.source, target);
+				}
+				document.body.style.cursor = "";
+			}
+
+			if (drag.ghost) {
+				drag.ghost.remove();
+			}
+			dragRef.current = null;
+			setDragOverPath(null);
+			setDragSourcePath(null);
+		};
+
+		document.addEventListener("pointermove", handlePointerMove);
+		document.addEventListener("pointerup", handlePointerUp);
+		document.addEventListener("pointercancel", handlePointerUp);
+		return () => {
+			document.removeEventListener("pointermove", handlePointerMove);
+			document.removeEventListener("pointerup", handlePointerUp);
+			document.removeEventListener("pointercancel", handlePointerUp);
+		};
+	}, [findDropTarget]);
 
 	const handleDeleteConfirm = useCallback(async () => {
 		if (!deleteTarget) return;
@@ -386,12 +568,22 @@ export function FileTree({
 
 	const showRootCreating = creating?.parentPath === workspacePath;
 	const renamingPath = renamingEntry?.path ?? null;
+	const isRootDragOver = dragOverPath === workspacePath;
 
 	return (
 		<>
 			<ul
-				className="min-h-full select-none overflow-y-auto px-1 py-1"
+				ref={rootUlRef}
+				className={`min-h-full select-none overflow-y-auto px-1 py-1 ${isRootDragOver ? "bg-black/5 dark:bg-white/5" : ""}`}
 				onContextMenu={handleRootContextMenu}
+				onPointerDown={handlePointerDown}
+				onClickCapture={(e) => {
+					if (skipNextClickRef.current) {
+						skipNextClickRef.current = false;
+						e.stopPropagation();
+						e.preventDefault();
+					}
+				}}
 			>
 				{showRootCreating && (
 					<InlineInput
@@ -419,6 +611,8 @@ export function FileTree({
 						onCreateCancel={handleCreateCancel}
 						icons={icons}
 						workspacePath={workspacePath}
+						dragOverPath={dragOverPath}
+						dragSourcePath={dragSourcePath}
 					/>
 				))}
 				{entries.length === 0 && !showRootCreating && (
