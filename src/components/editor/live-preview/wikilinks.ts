@@ -8,8 +8,9 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { createFile, searchFilenames } from "../../../lib/commands";
-import { SEP_RE, joinPath } from "../../../lib/path";
+import { searchFilenames } from "../../../lib/commands";
+import { SEP_RE, basename, joinPath } from "../../../lib/path";
+import { useWikilinkStore } from "../../../stores/wikilink";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
@@ -142,21 +143,14 @@ function navigateWikilink(wikilinkEl: HTMLElement, view: EditorView) {
 	if (!resolvedPath) return;
 	const exists = wikilinkEl.dataset.wikilinkExists === "1";
 
-	const { navigateInTab, bumpFileTreeVersion } = useWorkspaceStore.getState();
+	const { navigateInTab } = useWorkspaceStore.getState();
 	if (!exists) {
-		createFile(resolvedPath)
-			.then(() => {
-				bumpFileTreeVersion();
-				navigateInTab(resolvedPath);
-			})
-			.catch((error) => {
-				console.error("Failed to create wikilink target:", error);
-				// ファイルが既に存在する場合（fileMap未ロード等）はナビゲーションにフォールバック
-				const msg = String(error).toLowerCase();
-				if (msg.includes("already exists") || msg.includes("eexist")) {
-					navigateInTab(resolvedPath);
-				}
-			});
+		// ディレクトリ選択ダイアログ経由でファイルを作成
+		const normalizedName = basename(resolvedPath).replace(/\.md$/i, "").normalize("NFC");
+		const wikilinkState = useWikilinkStore.getState();
+		const references =
+			wikilinkState.unresolvedLinks.find((l) => l.pageName === normalizedName)?.references ?? [];
+		wikilinkState.setCreateTarget(normalizedName, references);
 	} else {
 		navigateInTab(resolvedPath);
 	}

@@ -17,9 +17,11 @@ import { useScratchpadStore } from "../../stores/scratchpad";
 import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
+import { useWikilinkStore } from "../../stores/wikilink";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import { Dialog } from "../common/Dialog";
+import { DirectoryPickerDialog } from "../common/DirectoryPickerDialog";
 import { ExportDialog } from "../common/ExportDialog";
 import { HelpDialog } from "../common/HelpDialog";
 import { SettingsDialog } from "../common/SettingsDialog";
@@ -33,7 +35,7 @@ import { CommandPalette } from "../search/CommandPalette";
 import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
 import { NewTabContent } from "./NewTabContent";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type SidebarPanel } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
 type GoToLine = { line: number; query?: string } | null;
@@ -64,6 +66,7 @@ export function AppLayout() {
 	const activateNextTab = useWorkspaceStore((s) => s.activateNextTab);
 	const activatePrevTab = useWorkspaceStore((s) => s.activatePrevTab);
 	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
+	const bumpContentVersion = useWorkspaceStore((s) => s.bumpContentVersion);
 	const hydratePreference = useThemeStore((s) => s.hydratePreference);
 	const hydrateSettings = useSettingsStore((s) => s.hydrate);
 	const loadIcons = useWorkspaceConfigStore((s) => s.loadIcons);
@@ -108,7 +111,7 @@ export function AppLayout() {
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
-	const [sidebarSearchActive, setSidebarSearchActive] = useState(false);
+	const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>("files");
 	const [sidebarVisible, setSidebarVisible] = useState(true);
 	const [cursorInfo, setCursorInfo] = useState<CursorInfo | null>(null);
 	const [editorError, setEditorError] = useState<string | null>(null);
@@ -229,6 +232,16 @@ export function AppLayout() {
 			resetWorkspaceConfig();
 		}
 	}, [workspacePath, loadIcons, resetWorkspaceConfig]);
+
+	// Reset wikilink store and run initial scan on workspace change
+	useEffect(() => {
+		if (workspacePath) {
+			useWikilinkStore.getState().reset();
+			void useWikilinkStore.getState().scan(workspacePath);
+		} else {
+			useWikilinkStore.getState().reset();
+		}
+	}, [workspacePath]);
 
 	// Open (or re-focus) the conflict resolution window
 	const openConflictResolver = useCallback(() => {
@@ -539,8 +552,9 @@ export function AppLayout() {
 			if (cached) {
 				cached.savedContent = contentRef.current;
 			}
+			bumpContentVersion();
 		}
-	}, [activeTabPath, saveStatus]);
+	}, [activeTabPath, saveStatus, bumpContentVersion]);
 
 	// Sync dirty flag to store.
 	// Guard with contentLoadedForPathRef to avoid misattributing a stale saveStatus
@@ -912,14 +926,18 @@ export function AppLayout() {
 	);
 
 	const handleShowFiles = useCallback(() => {
-		setSidebarSearchActive(false);
+		setSidebarPanel("files");
 	}, []);
 
 	const handleShowSearch = useCallback(() => {
-		setSidebarSearchActive(true);
+		setSidebarPanel("search");
 		requestAnimationFrame(() => {
 			searchInputRef.current?.focus();
 		});
+	}, []);
+
+	const handleShowUnresolved = useCallback(() => {
+		setSidebarPanel("unresolved");
 	}, []);
 
 	const handleSearchNavigate = useCallback(
@@ -1014,7 +1032,7 @@ export function AppLayout() {
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "e") {
 				e.preventDefault();
-				setSidebarSearchActive(false);
+				setSidebarPanel("files");
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
@@ -1026,10 +1044,15 @@ export function AppLayout() {
 			}
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
 				e.preventDefault();
-				setSidebarSearchActive(true);
+				setSidebarPanel("search");
 				requestAnimationFrame(() => {
 					searchInputRef.current?.focus();
 				});
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "u") {
+				e.preventDefault();
+				setSidebarPanel((prev) => (prev === "unresolved" ? "files" : "unresolved"));
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "f" || e.key === "h")) {
@@ -1118,9 +1141,10 @@ export function AppLayout() {
 			<div className="min-h-0 flex flex-1">
 				{sidebarVisible && (
 					<Sidebar
-						searchActive={sidebarSearchActive}
+						activePanel={sidebarPanel}
 						onShowFiles={handleShowFiles}
 						onShowSearch={handleShowSearch}
+						onShowUnresolved={handleShowUnresolved}
 						onSearchNavigate={handleSearchNavigate}
 						onFileSelect={handleFileSelect}
 						onFileOpenNewTab={handleFileOpenNewTab}
@@ -1154,7 +1178,7 @@ export function AppLayout() {
 							onAction={(action) => {
 								if (action === "commandPalette") setCommandPaletteOpen(true);
 								if (action === "workspaceSearch") {
-									setSidebarSearchActive(true);
+									setSidebarPanel("search");
 									requestAnimationFrame(() => searchInputRef.current?.focus());
 								}
 								if (action === "help") setHelpOpen(true);
@@ -1253,6 +1277,7 @@ export function AppLayout() {
 					}}
 				/>
 			)}
+			{workspacePath && <DirectoryPickerDialog workspacePath={workspacePath} />}
 			<ToastContainer />
 
 			<Dialog

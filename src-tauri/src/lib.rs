@@ -43,6 +43,7 @@ pub fn run() {
             commands::watcher::stop_watcher,
             commands::search::search_files,
             commands::search::search_filenames,
+            commands::search::scan_unresolved_wikilinks,
             commands::ogp::fetch_ogp,
             commands::export::export_pdf,
             commands::git_sync::git_check_available,

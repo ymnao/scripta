@@ -76,6 +76,7 @@ const groups: ShortcutGroup[] = [
 			{ keys: [[mod, "J"]], action: "スクラッチパッド" },
 			{ keys: [[mod, "E"]], action: "ファイルエクスプローラー" },
 			{ keys: [[mod, shift, "E"]], action: "エクスポート" },
+			{ keys: [[mod, shift, "U"]], action: "未解決リンク" },
 			{ keys: [[mod, ","]], action: "設定" },
 			{ keys: [["F1"]], action: "ヘルプ" },
 		],

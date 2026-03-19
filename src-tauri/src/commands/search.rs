@@ -1,7 +1,9 @@
 use super::file::resolve_path;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,6 +197,158 @@ pub fn search_filenames(workspace_path: String, query: String) -> Result<Vec<Str
         .collect();
 
     Ok(matched)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikilinkReference {
+    pub file_path: String,
+    pub line_number: usize,
+    pub line_content: String,
+    pub context_before: Vec<String>,
+    pub context_after: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnresolvedWikilink {
+    pub page_name: String,
+    pub references: Vec<WikilinkReference>,
+}
+
+/// Check if a page name contains path traversal characters
+fn is_path_traversal(name: &str) -> bool {
+    name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name.contains("..")
+}
+
+/// Extract wikilink inner contents from a line (returns the text between [[ and ]])
+fn extract_wikilinks_from_line(line: &str) -> Vec<&str> {
+    let mut results = Vec::new();
+    let mut search_start = 0;
+    while let Some(open_pos) = line[search_start..].find("[[") {
+        let abs_open = search_start + open_pos;
+        let inner_start = abs_open + 2;
+        if inner_start >= line.len() {
+            break;
+        }
+        if let Some(close_pos) = line[inner_start..].find("]]") {
+            let inner = &line[inner_start..inner_start + close_pos];
+            if !inner.is_empty() {
+                results.push(inner);
+            }
+            search_start = inner_start + close_pos + 2;
+        } else {
+            break;
+        }
+    }
+    results
+}
+
+#[cfg_attr(feature = "tauri-app", tauri::command)]
+pub fn scan_unresolved_wikilinks(
+    workspace_path: String,
+) -> Result<Vec<UnresolvedWikilink>, String> {
+    let resolved = resolve_path(&workspace_path)?;
+    let mut md_files = Vec::new();
+    collect_md_files(&resolved, &mut md_files)?;
+    md_files.sort();
+
+    // Build set of existing file basenames (NFC normalized, .md removed)
+    let existing_pages: HashSet<String> = md_files
+        .iter()
+        .filter_map(|path| {
+            let name = Path::new(path).file_name()?.to_string_lossy().to_string();
+            if !name.to_lowercase().ends_with(".md") {
+                return None;
+            }
+            let basename = &name[..name.len() - 3];
+            Some(basename.nfc().collect::<String>())
+        })
+        .collect();
+
+    let mut unresolved_map: HashMap<String, Vec<WikilinkReference>> = HashMap::new();
+
+    for file_path in &md_files {
+        let content = match fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_block = false;
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+
+            // Check for fenced code block boundaries
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            if in_code_block {
+                continue;
+            }
+
+            let wikilinks = extract_wikilinks_from_line(line);
+            for inner in wikilinks {
+                // Extract page name (handle [[page|display]])
+                let page = match inner.find('|') {
+                    Some(pipe_idx) => &inner[..pipe_idx],
+                    None => inner,
+                };
+
+                if page.is_empty() || is_path_traversal(page) {
+                    continue;
+                }
+
+                // NFC normalize and strip .md
+                let stripped = if page.to_lowercase().ends_with(".md") {
+                    &page[..page.len() - 3]
+                } else {
+                    page
+                };
+                let normalized: String = stripped.nfc().collect();
+
+                if normalized.is_empty() || existing_pages.contains(&normalized) {
+                    continue;
+                }
+
+                // Build context (3 lines before and after)
+                let context_before: Vec<String> = (line_idx.saturating_sub(3)..line_idx)
+                    .map(|i| lines[i].to_string())
+                    .collect();
+                let context_after: Vec<String> =
+                    ((line_idx + 1)..std::cmp::min(line_idx + 4, lines.len()))
+                        .map(|i| lines[i].to_string())
+                        .collect();
+
+                unresolved_map
+                    .entry(normalized)
+                    .or_default()
+                    .push(WikilinkReference {
+                        file_path: file_path.clone(),
+                        line_number: line_idx + 1,
+                        line_content: line.to_string(),
+                        context_before,
+                        context_after,
+                    });
+            }
+        }
+    }
+
+    let mut result: Vec<UnresolvedWikilink> = unresolved_map
+        .into_iter()
+        .map(|(page_name, references)| UnresolvedWikilink {
+            page_name,
+            references,
+        })
+        .collect();
+    result.sort_by(|a, b| a.page_name.cmp(&b.page_name));
+
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -447,5 +601,166 @@ mod tests {
     fn test_fuzzy_match_case_insensitive() {
         assert!(fuzzy_match("HW", "hello-world.md"));
         assert!(fuzzy_match("hw", "Hello-World.md"));
+    }
+
+    // ── scan_unresolved_wikilinks tests ──
+
+    #[test]
+    fn test_scan_basic_unresolved_link() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("note.md"), "See [[missing-page]] for details").unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "missing-page");
+        assert_eq!(results[0].references.len(), 1);
+        assert_eq!(results[0].references[0].line_number, 1);
+    }
+
+    #[test]
+    fn test_scan_existing_file_filtered() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("existing.md"), "# Existing").unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "Link to [[existing]] and [[missing]]",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "missing");
+    }
+
+    #[test]
+    fn test_scan_code_block_excluded() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "```\n[[in-code]]\n```\n[[outside-code]]",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "outside-code");
+    }
+
+    #[test]
+    fn test_scan_pipe_alias_parsed() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "See [[target|display text]] here",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "target");
+    }
+
+    #[test]
+    fn test_scan_path_traversal_rejected() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "[[../secret]] [[./local]] [[path/to/file]] [[normal]]",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "normal");
+    }
+
+    #[test]
+    fn test_scan_japanese_filenames() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("メモ.md"), "# メモ").unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "[[メモ]] and [[未作成ページ]]",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "未作成ページ");
+    }
+
+    #[test]
+    fn test_scan_context_lines() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "line1\nline2\nline3\nline4 [[missing]] here\nline5\nline6\nline7",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        let ref0 = &results[0].references[0];
+        assert_eq!(ref0.line_number, 4);
+        assert_eq!(ref0.context_before, vec!["line1", "line2", "line3"]);
+        assert_eq!(ref0.context_after, vec!["line5", "line6", "line7"]);
+    }
+
+    #[test]
+    fn test_scan_multiple_references_same_page() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), "See [[missing]]").unwrap();
+        fs::write(dir.path().join("b.md"), "Also [[missing]]").unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "missing");
+        assert_eq!(results[0].references.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_tilde_code_block_excluded() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "~~~\n[[in-code]]\n~~~\n[[outside]]",
+        )
+        .unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "outside");
+    }
+
+    #[test]
+    fn test_scan_empty_wikilink_ignored() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("note.md"), "[[]] and [[valid]]").unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page_name, "valid");
+    }
+
+    #[test]
+    fn test_scan_md_extension_stripped() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("existing.md"), "# Existing").unwrap();
+        fs::write(dir.path().join("note.md"), "[[existing.md]]").unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scan_multiple_wikilinks_on_same_line() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("note.md"), "[[alpha]] and [[beta]]").unwrap();
+
+        let results = scan_unresolved_wikilinks(dir.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(results.len(), 2);
+        // Results are sorted by page name
+        assert_eq!(results[0].page_name, "alpha");
+        assert_eq!(results[1].page_name, "beta");
     }
 }

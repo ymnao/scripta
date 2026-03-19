@@ -59,6 +59,7 @@ import {
 	tableKeymap,
 	wikilinkCompletion,
 	wikilinkDecoration,
+	wikilinkHoverTooltip,
 } from "./live-preview";
 
 const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
@@ -240,6 +241,7 @@ export function MarkdownEditor({
 			emphasisDecoration,
 			strikethroughDecoration,
 			wikilinkDecoration,
+			wikilinkHoverTooltip,
 			linkDecoration,
 			imageDecoration,
 			codeBlockDecoration,

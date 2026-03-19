@@ -267,6 +267,10 @@ export const staticEditorTheme = EditorView.theme({
 		opacity: "0.6",
 		textDecoration: "underline dashed",
 	},
+	".cm-wikilink-missing:hover": {
+		opacity: "0.8",
+		cursor: "help",
+	},
 	".cm-mermaid-widget": {
 		display: "flex",
 		justifyContent: "center",
@@ -352,5 +356,39 @@ export const staticEditorTheme = EditorView.theme({
 		height: "80px",
 		objectFit: "cover",
 		borderRadius: "4px",
+	},
+	// Autocomplete (wikilink completion) tooltip
+	".cm-tooltip.cm-tooltip-autocomplete": {
+		backgroundColor: "var(--color-bg-primary)",
+		border: "1px solid var(--color-border)",
+		borderRadius: "6px",
+		boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+		overflow: "hidden",
+	},
+	".cm-tooltip.cm-tooltip-autocomplete > ul": {
+		fontFamily: "inherit",
+		maxHeight: "240px",
+	},
+	".cm-tooltip.cm-tooltip-autocomplete > ul > li": {
+		padding: "4px 8px",
+		color: "var(--color-text-primary)",
+		display: "flex",
+		alignItems: "center",
+		gap: "6px",
+	},
+	".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": {
+		backgroundColor: "color-mix(in srgb, var(--color-text-link) 15%, transparent)",
+		color: "var(--color-text-primary)",
+	},
+	".cm-completionLabel": {
+		fontSize: "13px",
+	},
+	".cm-completionDetail": {
+		fontSize: "11px",
+		color: "var(--color-text-secondary)",
+		fontStyle: "normal",
+		marginLeft: "auto",
+		overflow: "hidden",
+		textOverflow: "ellipsis",
 	},
 });
