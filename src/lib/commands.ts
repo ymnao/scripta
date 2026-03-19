@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
+import type { UnresolvedWikilink } from "../types/wikilink";
 import type { FileEntry } from "../types/workspace";
 import { isTransientError } from "./errors";
 
@@ -78,6 +79,12 @@ export function searchFiles(
 
 export function searchFilenames(workspacePath: string, query: string): Promise<string[]> {
 	return withRetry(() => invoke<string[]>("search_filenames", { workspacePath, query }));
+}
+
+export function scanUnresolvedWikilinks(workspacePath: string): Promise<UnresolvedWikilink[]> {
+	return withRetry(() =>
+		invoke<UnresolvedWikilink[]>("scan_unresolved_wikilinks", { workspacePath }),
+	);
 }
 
 export function showInFolder(path: string): Promise<void> {

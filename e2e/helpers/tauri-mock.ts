@@ -274,6 +274,102 @@ export class TauriMock {
 					return path in parsedFiles || path in parsedDirs;
 				};
 
+				store.handlers.write_new_file = (args: Record<string, unknown>) => {
+					const path = args.path as string;
+					const content = args.content as string;
+					if (path in parsedFiles) {
+						throw new Error(`Already exists: ${path}`);
+					}
+					parsedFiles[path] = content;
+					const parts = path.split("/");
+					const name = parts[parts.length - 1];
+					const parentPath = parts.slice(0, -1).join("/");
+					if (parentPath in parsedDirs) {
+						parsedDirs[parentPath].push({
+							name,
+							path,
+							isDirectory: false,
+						});
+					}
+				};
+
+				store.handlers.scan_unresolved_wikilinks = (args: Record<string, unknown>) => {
+					const workspacePath = args.workspacePath as string;
+					const mdFiles = collectMdFiles(workspacePath);
+					// Build set of existing basenames (NFC normalized, .md stripped)
+					const existingPages = new Set<string>();
+					for (const filePath of mdFiles) {
+						const parts = filePath.split("/");
+						const fileName = parts[parts.length - 1];
+						if (fileName.toLowerCase().endsWith(".md")) {
+							existingPages.add(fileName.slice(0, -3).normalize("NFC"));
+						}
+					}
+					// Scan for wikilinks
+					const unresolvedMap: Record<
+						string,
+						Array<{
+							filePath: string;
+							lineNumber: number;
+							lineContent: string;
+							contextBefore: string[];
+							contextAfter: string[];
+						}>
+					> = {};
+					for (const filePath of mdFiles) {
+						const content = parsedFiles[filePath];
+						if (!content) continue;
+						const lines = content.split("\n");
+						let inCodeBlock = false;
+						const re = /\[\[([^\[\]\n\r]+)\]\]/g;
+						for (let i = 0; i < lines.length; i++) {
+							const line = lines[i];
+							const trimmed = line.trimStart();
+							if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+								inCodeBlock = !inCodeBlock;
+								continue;
+							}
+							if (inCodeBlock) continue;
+							re.lastIndex = 0;
+							let m: RegExpExecArray | null = null;
+							while (true) {
+								m = re.exec(line);
+								if (!m) break;
+								const inner = m[1];
+								const pipeIdx = inner.indexOf("|");
+								const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
+								if (
+									!page ||
+									page.includes("/") ||
+									page.includes("\\") ||
+									page === "." ||
+									page === ".." ||
+									page.includes("..")
+								)
+									continue;
+								const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
+								const normalized = stripped.normalize("NFC");
+								if (!normalized || existingPages.has(normalized)) continue;
+								if (!unresolvedMap[normalized]) unresolvedMap[normalized] = [];
+								const contextBefore = lines.slice(Math.max(0, i - 3), i).map((l: string) => l);
+								const contextAfter = lines
+									.slice(i + 1, Math.min(lines.length, i + 4))
+									.map((l: string) => l);
+								unresolvedMap[normalized].push({
+									filePath,
+									lineNumber: i + 1,
+									lineContent: line,
+									contextBefore,
+									contextAfter,
+								});
+							}
+						}
+					}
+					return Object.entries(unresolvedMap)
+						.map(([pageName, references]) => ({ pageName, references }))
+						.sort((a, b) => a.pageName.localeCompare(b.pageName));
+				};
+
 				store.handlers.search_filenames = (args: Record<string, unknown>) => {
 					const workspacePath = args.workspacePath as string;
 					const query = (args.query as string).toLowerCase();
@@ -380,6 +476,34 @@ export class TauriMock {
 				eventStore?.emit("fs-change", [{ kind: "delete", path: filePath }]);
 			},
 			{ filePath, parentDir, fileName },
+		);
+	}
+
+	async setDialogResult(result: string | null): Promise<void> {
+		await this.page.evaluate((r: string | null) => {
+			const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
+			if (store) store.dialogResult = r;
+		}, result);
+	}
+
+	async addFiles(
+		files: Record<string, string>,
+		directories: Record<string, Array<{ name: string; path: string; isDirectory: boolean }>>,
+	): Promise<void> {
+		await this.page.evaluate(
+			({
+				files,
+				directories,
+			}: {
+				files: Record<string, string>;
+				directories: Record<string, Array<{ name: string; path: string; isDirectory: boolean }>>;
+			}) => {
+				const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
+				if (!store?._files || !store?._directories) return;
+				Object.assign(store._files, files);
+				Object.assign(store._directories, directories);
+			},
+			{ files, directories },
 		);
 	}
 

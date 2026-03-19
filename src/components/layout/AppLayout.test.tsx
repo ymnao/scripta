@@ -13,6 +13,7 @@ vi.mock("../../lib/commands", () => ({
 	listDirectory: vi.fn().mockResolvedValue([]),
 	startWatcher: vi.fn().mockResolvedValue(undefined),
 	stopWatcher: vi.fn().mockResolvedValue(undefined),
+	scanUnresolvedWikilinks: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({

@@ -1,14 +1,18 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Files, FolderOpen, Search } from "lucide-react";
+import { Files, FolderOpen, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { FileTree } from "../filetree/FileTree";
 import { SearchPanel } from "../search/SearchPanel";
+import { UnresolvedLinksPanel } from "../search/UnresolvedLinksPanel";
+
+export type SidebarPanel = "files" | "search" | "unresolved";
 
 interface SidebarProps {
-	searchActive: boolean;
+	activePanel: SidebarPanel;
 	onShowFiles: () => void;
 	onShowSearch: () => void;
+	onShowUnresolved: () => void;
 	onSearchNavigate: (filePath: string, lineNumber: number, query: string) => void;
 	onFileSelect: (path: string) => void;
 	onFileOpenNewTab: (path: string) => void;
@@ -18,10 +22,17 @@ interface SidebarProps {
 	onExport?: (path: string) => void;
 }
 
+const panelLabels: Record<SidebarPanel, string> = {
+	files: "Files",
+	search: "Search",
+	unresolved: "未解決リンク",
+};
+
 export function Sidebar({
-	searchActive,
+	activePanel,
 	onShowFiles,
 	onShowSearch,
+	onShowUnresolved,
 	onSearchNavigate,
 	onFileSelect,
 	onFileOpenNewTab,
@@ -41,17 +52,20 @@ export function Sidebar({
 		}
 	}, [setWorkspacePath]);
 
+	const iconBtnClass = (active: boolean) =>
+		`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary ${active ? "text-text-primary" : "text-text-secondary hover:bg-black/10 dark:hover:bg-white/10"}`;
+
 	return (
 		<aside className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-primary text-text-primary">
 			<div className="flex items-center justify-between p-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-				<span>{searchActive ? "Search" : "Files"}</span>
+				<span>{panelLabels[activePanel]}</span>
 				<div className="flex items-center gap-1">
 					<button
 						type="button"
 						onClick={onShowFiles}
 						aria-label="Show file explorer"
-						aria-pressed={!searchActive}
-						className={`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary ${!searchActive ? "text-text-primary" : "text-text-secondary hover:bg-black/10 dark:hover:bg-white/10"}`}
+						aria-pressed={activePanel === "files"}
+						className={iconBtnClass(activePanel === "files")}
 					>
 						<Files size={14} />
 					</button>
@@ -59,20 +73,31 @@ export function Sidebar({
 						type="button"
 						onClick={onShowSearch}
 						aria-label="Search in workspace"
-						aria-pressed={searchActive}
-						className={`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary ${searchActive ? "text-text-primary" : "text-text-secondary hover:bg-black/10 dark:hover:bg-white/10"}`}
+						aria-pressed={activePanel === "search"}
+						className={iconBtnClass(activePanel === "search")}
 					>
 						<Search size={14} />
+					</button>
+					<button
+						type="button"
+						onClick={onShowUnresolved}
+						aria-label="Show unresolved wikilinks"
+						aria-pressed={activePanel === "unresolved"}
+						className={iconBtnClass(activePanel === "unresolved")}
+					>
+						<Link2Off size={14} />
 					</button>
 				</div>
 			</div>
 			<div className="flex-1 overflow-y-auto">
-				{searchActive && workspacePath ? (
+				{activePanel === "search" && workspacePath ? (
 					<SearchPanel
 						workspacePath={workspacePath}
 						onNavigate={onSearchNavigate}
 						inputRef={searchInputRef}
 					/>
+				) : activePanel === "unresolved" && workspacePath ? (
+					<UnresolvedLinksPanel workspacePath={workspacePath} onNavigate={onSearchNavigate} />
 				) : workspacePath ? (
 					<FileTree
 						workspacePath={workspacePath}

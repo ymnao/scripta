@@ -18,6 +18,7 @@ interface WorkspaceState {
 	activeTabId: number | null;
 	_nextTabId: number;
 	fileTreeVersion: number;
+	contentVersion: number;
 
 	setWorkspacePath: (path: string | null) => void;
 	openTab: (path: string) => void;
@@ -30,6 +31,7 @@ interface WorkspaceState {
 	renameTabsByPrefix: (oldPrefix: string, newPrefix: string) => void;
 	closeTabsByPrefix: (prefix: string) => void;
 	bumpFileTreeVersion: () => void;
+	bumpContentVersion: () => void;
 	navigateInTab: (path: string) => void;
 	goBackInTab: () => void;
 	goForwardInTab: () => void;
@@ -85,6 +87,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	activeTabId: null,
 	_nextTabId: 1,
 	fileTreeVersion: 0,
+	contentVersion: 0,
 
 	setWorkspacePath: (path) =>
 		set({
@@ -94,9 +97,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 			activeTabId: null,
 			_nextTabId: 1,
 			fileTreeVersion: 0,
+			contentVersion: 0,
 		}),
 
 	bumpFileTreeVersion: () => set((s) => ({ fileTreeVersion: s.fileTreeVersion + 1 })),
+
+	bumpContentVersion: () => set((s) => ({ contentVersion: s.contentVersion + 1 })),
 
 	openTab: (path) =>
 		set((state) => {

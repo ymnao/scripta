@@ -55,7 +55,7 @@ test.describe("wikilink preview", () => {
 		expect(wikilinkCount).toBeGreaterThanOrEqual(4);
 	});
 
-	test("creates and navigates to non-existing file on click", async ({ page }) => {
+	test("clicking missing wikilink opens directory picker dialog", async ({ page }) => {
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");
 
@@ -75,7 +75,13 @@ test.describe("wikilink preview", () => {
 		await expect(missingLink).toBeVisible({ timeout: 5000 });
 		await missingLink.click();
 
-		// Verify navigation occurred (editor shows empty content from new file)
+		// Verify directory picker dialog appears
+		await expect(page.getByText("作成先を選択")).toBeVisible({ timeout: 5000 });
+
+		// Confirm creation at root
+		await page.getByRole("button", { name: "作成" }).click();
+
+		// Verify navigation occurred (editor shows content from new file)
 		await expect(page.getByRole("tab", { selected: true })).toContainText("nonexistent.md", {
 			timeout: 5000,
 		});

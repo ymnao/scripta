@@ -1,0 +1,12 @@
+export interface WikilinkReference {
+	filePath: string;
+	lineNumber: number;
+	lineContent: string;
+	contextBefore: string[];
+	contextAfter: string[];
+}
+
+export interface UnresolvedWikilink {
+	pageName: string;
+	references: WikilinkReference[];
+}
