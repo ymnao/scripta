@@ -374,7 +374,11 @@ export function FileTree({
 	handleMoveEntryRef.current = handleMoveEntry;
 
 	const findDropTarget = useCallback(
-		(clientX: number, clientY: number, skipPath: string): string | null => {
+		(
+			clientX: number,
+			clientY: number,
+			skipPath: string,
+		): { overPath: string; hoverPath: string | null } | null => {
 			const rootUl = rootUlRef.current;
 			if (!rootUl) return null;
 
@@ -395,11 +399,15 @@ export function FileTree({
 				const rect = btn.getBoundingClientRect();
 				if (clientY >= rect.top && clientY < rect.bottom) {
 					if (path === skipPath) return null;
-					return btn.dataset.isDirectory === "true" ? path : dirname(path);
+					const isDir = btn.dataset.isDirectory === "true";
+					return {
+						overPath: isDir ? path : dirname(path),
+						hoverPath: path,
+					};
 				}
 			}
 
-			return workspacePathRef.current;
+			return { overPath: workspacePathRef.current, hoverPath: null };
 		},
 		[],
 	);
@@ -450,8 +458,8 @@ export function FileTree({
 				drag.ghost.style.top = `${e.clientY + GHOST_CURSOR_OFFSET}px`;
 			}
 
-			const target = findDropTarget(e.clientX, e.clientY, drag.source.path);
-			useDragStore.getState().setOverPath(target);
+			const result = findDropTarget(e.clientX, e.clientY, drag.source.path);
+			useDragStore.getState().setDragOver(result?.overPath ?? null, result?.hoverPath ?? null);
 		};
 
 		const handlePointerUp = (e: PointerEvent) => {
@@ -459,10 +467,10 @@ export function FileTree({
 			if (!drag) return;
 
 			if (drag.started) {
-				skipNextClickRef.current = true;
-				const target = findDropTarget(e.clientX, e.clientY, drag.source.path);
-				if (target) {
-					handleMoveEntryRef.current(drag.source, target);
+				const result = findDropTarget(e.clientX, e.clientY, drag.source.path);
+				if (result) {
+					skipNextClickRef.current = true;
+					handleMoveEntryRef.current(drag.source, result.overPath);
 				}
 				document.body.style.cursor = "";
 			}

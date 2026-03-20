@@ -58,6 +58,9 @@ export function FileTreeItem({
 
 	const isDragSource = useDragStore((s) => s.sourcePath === entry.path);
 	const isDragOver = useDragStore((s) => s.overPath === entry.path && entry.isDirectory);
+	const isHoverTarget = useDragStore(
+		(s) => s.hoverPath === entry.path && s.sourcePath !== entry.path,
+	);
 
 	useEffect(() => {
 		isMountedRef.current = true;
@@ -190,7 +193,7 @@ export function FileTreeItem({
 				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}
 				aria-expanded={entry.isDirectory ? expanded : undefined}
 				aria-selected={isSelected || undefined}
-				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""} ${isDragSource ? "opacity-40" : ""} ${isDragOver ? "bg-black/10 dark:bg-white/10" : ""}`}
+				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""} ${isDragSource ? "opacity-40" : ""} ${isDragOver ? "bg-black/10 dark:bg-white/10" : isHoverTarget ? "bg-black/5 dark:bg-white/5" : ""}`}
 				style={{ paddingLeft: `${depth * 16 + 4}px` }}
 				onClick={handleClick}
 				onContextMenu={handleContextMenuEvent}

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { EmojiInputDialog } from "./EmojiInputDialog";
@@ -50,20 +50,25 @@ describe("EmojiInputDialog", () => {
 		expect(screen.getByLabelText("記号")).toBeInTheDocument();
 	});
 
-	it("全カテゴリの絵文字が一覧に表示される", () => {
+	it("全カテゴリの絵文字が一覧に表示される", async () => {
 		renderDialog();
 		const grid = screen.getByLabelText("絵文字一覧");
 
-		// スマイリーとオブジェクトの絵文字が両方表示される
+		// 初期カテゴリはすぐに表示される
 		expect(within(grid).getByLabelText("😀")).toBeInTheDocument();
-		expect(within(grid).getByLabelText("💡")).toBeInTheDocument();
+		// 後半カテゴリはプログレッシブレンダリング後に表示される
+		await waitFor(() => {
+			expect(within(grid).getByLabelText("💡")).toBeInTheDocument();
+		});
 	});
 
-	it("カテゴリ見出しが表示される", () => {
+	it("カテゴリ見出しが表示される", async () => {
 		renderDialog();
 		const grid = screen.getByLabelText("絵文字一覧");
 		expect(within(grid).getByText("スマイリー")).toBeInTheDocument();
-		expect(within(grid).getByText("オブジェクト")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(within(grid).getByText("オブジェクト")).toBeInTheDocument();
+		});
 	});
 
 	it("絵文字をクリックして「設定」→ onConfirm が呼ばれる", async () => {
@@ -113,5 +118,58 @@ describe("EmojiInputDialog", () => {
 	it("currentEmoji=null で「削除」ボタン非表示", () => {
 		renderDialog({ currentEmoji: null });
 		expect(screen.queryByText("削除")).not.toBeInTheDocument();
+	});
+
+	it("検索バーが表示される", () => {
+		renderDialog();
+		expect(screen.getByLabelText("絵文字を検索")).toBeInTheDocument();
+	});
+
+	it("検索するとマッチする絵文字のみ表示される", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "fire");
+
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByLabelText("🔥")).toBeInTheDocument();
+		// カテゴリ見出しは非表示
+		expect(within(grid).queryByText("スマイリー")).not.toBeInTheDocument();
+	});
+
+	it("検索で見つからない場合はメッセージを表示", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "xyznotfound");
+
+		expect(screen.getByText("見つかりませんでした")).toBeInTheDocument();
+	});
+
+	it("検索中はカテゴリタブが非表示", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "heart");
+
+		expect(screen.queryByLabelText("スマイリー")).not.toBeInTheDocument();
+	});
+
+	it("検索をクリアするとカテゴリ表示に戻る", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "fire");
+		await userEvent.clear(searchInput);
+
+		// カテゴリ見出しが再表示される
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByText("スマイリー")).toBeInTheDocument();
+		expect(screen.getByLabelText("スマイリー")).toBeInTheDocument();
+	});
+
+	it("日本語キーワードで検索できる", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "桜");
+
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByLabelText("🌸")).toBeInTheDocument();
 	});
 });
