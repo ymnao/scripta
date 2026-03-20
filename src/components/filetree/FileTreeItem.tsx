@@ -172,12 +172,28 @@ export function FileTreeItem({
 		[onContextMenu, entry],
 	);
 
+	const entryEmoji = (() => {
+		const rel = workspacePath ? toRelativePath(workspacePath, entry.path) : null;
+		if (!rel || !icons) return undefined;
+		if (entry.isDirectory) {
+			const withSlash = rel.endsWith("/") ? rel : `${rel}/`;
+			const withoutSlash = rel.endsWith("/") ? rel.slice(0, -1) : rel;
+			return Object.hasOwn(icons, withSlash)
+				? icons[withSlash]
+				: Object.hasOwn(icons, withoutSlash)
+					? icons[withoutSlash]
+					: undefined;
+		}
+		return Object.hasOwn(icons, rel) ? icons[rel] : undefined;
+	})();
+
 	if (isRenaming) {
 		return (
 			<InlineInput
 				depth={depth}
 				defaultValue={entry.name}
 				icon={entry.isDirectory ? "folder" : "file"}
+				emoji={entryEmoji}
 				onConfirm={onRenameConfirm}
 				onCancel={onRenameCancel}
 			/>
@@ -198,56 +214,36 @@ export function FileTreeItem({
 				onClick={handleClick}
 				onContextMenu={handleContextMenuEvent}
 			>
-				{(() => {
-					const rel = workspacePath ? toRelativePath(workspacePath, entry.path) : null;
-					let emoji: string | undefined;
-					if (rel && icons) {
-						if (entry.isDirectory) {
-							const withSlash = rel.endsWith("/") ? rel : `${rel}/`;
-							const withoutSlash = rel.endsWith("/") ? rel.slice(0, -1) : rel;
-							emoji = Object.hasOwn(icons, withSlash)
-								? icons[withSlash]
-								: Object.hasOwn(icons, withoutSlash)
-									? icons[withoutSlash]
-									: undefined;
-						} else {
-							emoji = Object.hasOwn(icons, rel) ? icons[rel] : undefined;
-						}
-					}
-
-					if (entry.isDirectory) {
-						return (
-							<>
-								{expanded ? (
-									<ChevronDown size={14} className="shrink-0 text-text-secondary" />
-								) : (
-									<ChevronRight size={14} className="shrink-0 text-text-secondary" />
-								)}
-								{emoji ? (
-									<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
-										{emoji}
-									</span>
-								) : (
-									<Folder size={14} className="shrink-0 text-text-secondary" />
-								)}
-							</>
-						);
-					}
-
-					const Icon = getFileIcon(entry.name);
-					return (
-						<>
-							<span className="inline-block w-3.5 shrink-0" />
-							{emoji ? (
-								<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
-									{emoji}
-								</span>
-							) : (
-								<Icon size={14} className="shrink-0 text-text-secondary" />
-							)}
-						</>
-					);
-				})()}
+				{entry.isDirectory ? (
+					<>
+						{expanded ? (
+							<ChevronDown size={14} className="shrink-0 text-text-secondary" />
+						) : (
+							<ChevronRight size={14} className="shrink-0 text-text-secondary" />
+						)}
+						{entryEmoji ? (
+							<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+								{entryEmoji}
+							</span>
+						) : (
+							<Folder size={14} className="shrink-0 text-text-secondary" />
+						)}
+					</>
+				) : (
+					<>
+						<span className="inline-block w-3.5 shrink-0" />
+						{entryEmoji ? (
+							<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+								{entryEmoji}
+							</span>
+						) : (
+							(() => {
+								const Icon = getFileIcon(entry.name);
+								return <Icon size={14} className="shrink-0 text-text-secondary" />;
+							})()
+						)}
+					</>
+				)}
 				<span className="truncate">{entry.name}</span>
 				{loadError && (
 					<AlertTriangle
