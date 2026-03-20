@@ -5,6 +5,7 @@ interface InlineInputProps {
 	depth: number;
 	defaultValue?: string;
 	icon: "file" | "folder";
+	emoji?: string;
 	onConfirm: (value: string) => void;
 	onCancel: () => void;
 }
@@ -13,6 +14,7 @@ export function InlineInput({
 	depth,
 	defaultValue = "",
 	icon,
+	emoji,
 	onConfirm,
 	onCancel,
 }: InlineInputProps) {
@@ -54,7 +56,13 @@ export function InlineInput({
 			style={{ paddingLeft: `${depth * 16 + 4}px` }}
 		>
 			<span className="inline-block w-3.5 shrink-0" />
-			<IconComponent size={14} className="shrink-0 text-text-secondary" />
+			{emoji ? (
+				<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+					{emoji}
+				</span>
+			) : (
+				<IconComponent size={14} className="shrink-0 text-text-secondary" />
+			)}
 			<input
 				ref={inputRef}
 				type="text"

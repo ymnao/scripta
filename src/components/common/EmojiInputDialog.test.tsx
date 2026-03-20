@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { EmojiInputDialog } from "./EmojiInputDialog";
@@ -14,7 +14,6 @@ const defaultProps = {
 
 function renderDialog(overrides: Partial<typeof defaultProps> = {}) {
 	const props = { ...defaultProps, ...overrides };
-	// Reset mocks each render
 	for (const fn of [props.onConfirm, props.onRemove, props.onCancel]) {
 		if (vi.isMockFunction(fn)) fn.mockClear();
 	}
@@ -24,22 +23,12 @@ function renderDialog(overrides: Partial<typeof defaultProps> = {}) {
 describe("EmojiInputDialog", () => {
 	it("open=false で非表示", () => {
 		renderDialog({ open: false });
-		expect(screen.queryByLabelText("絵文字を入力")).not.toBeInTheDocument();
+		expect(screen.queryByText("アイコンを設定")).not.toBeInTheDocument();
 	});
 
 	it("open=true で表示される", () => {
 		renderDialog({ open: true });
-		expect(screen.getByLabelText("絵文字を入力")).toBeInTheDocument();
-	});
-
-	it("currentEmoji の初期値が input に反映される", () => {
-		renderDialog({ currentEmoji: "🎉" });
-		expect(screen.getByLabelText("絵文字を入力")).toHaveValue("🎉");
-	});
-
-	it("currentEmoji=null で空文字が初期値", () => {
-		renderDialog({ currentEmoji: null });
-		expect(screen.getByLabelText("絵文字を入力")).toHaveValue("");
+		expect(screen.getByText("アイコンを設定")).toBeInTheDocument();
 	});
 
 	it("entryName が表示される", () => {
@@ -47,36 +36,67 @@ describe("EmojiInputDialog", () => {
 		expect(screen.getByText("my-note.md")).toBeInTheDocument();
 	});
 
-	it("入力して「設定」→ onConfirm(trimmed) が呼ばれる", async () => {
+	it("絵文字グリッドが表示される", () => {
+		renderDialog();
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(grid).toBeInTheDocument();
+		expect(within(grid).getAllByRole("button").length).toBeGreaterThan(0);
+	});
+
+	it("カテゴリタブが表示される", () => {
+		renderDialog();
+		expect(screen.getByLabelText("スマイリー")).toBeInTheDocument();
+		expect(screen.getByLabelText("オブジェクト")).toBeInTheDocument();
+		expect(screen.getByLabelText("記号")).toBeInTheDocument();
+	});
+
+	it("全カテゴリの絵文字が一覧に表示される", async () => {
+		renderDialog();
+		const grid = screen.getByLabelText("絵文字一覧");
+
+		// 初期カテゴリはすぐに表示される
+		expect(within(grid).getByLabelText("😀")).toBeInTheDocument();
+		// 後半カテゴリはプログレッシブレンダリング後に表示される
+		await waitFor(() => {
+			expect(within(grid).getByLabelText("💡")).toBeInTheDocument();
+		});
+	});
+
+	it("カテゴリ見出しが表示される", async () => {
+		renderDialog();
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByText("スマイリー")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(within(grid).getByText("オブジェクト")).toBeInTheDocument();
+		});
+	});
+
+	it("絵文字をクリックして「設定」→ onConfirm が呼ばれる", async () => {
 		const onConfirm = vi.fn();
 		renderDialog({ onConfirm });
-		const input = screen.getByLabelText("絵文字を入力");
-		await userEvent.type(input, " 🔥 ");
+
+		const grid = screen.getByLabelText("絵文字一覧");
+		await userEvent.click(within(grid).getByLabelText("😀"));
 		await userEvent.click(screen.getByText("設定"));
-		expect(onConfirm).toHaveBeenCalledWith("🔥");
+		expect(onConfirm).toHaveBeenCalledWith("😀");
 	});
 
-	it("Enter キーで onConfirm が呼ばれる", async () => {
-		const onConfirm = vi.fn();
-		renderDialog({ onConfirm });
-		const input = screen.getByLabelText("絵文字を入力");
-		await userEvent.type(input, "✅");
-		await userEvent.keyboard("{Enter}");
-		expect(onConfirm).toHaveBeenCalledWith("✅");
-	});
-
-	it("空入力で「設定」ボタンが disabled", () => {
+	it("絵文字未選択で「設定」ボタンが disabled", () => {
 		renderDialog({ currentEmoji: null });
 		expect(screen.getByText("設定")).toBeDisabled();
 	});
 
-	it("空入力で Enter しても onConfirm が呼ばれない", async () => {
-		const onConfirm = vi.fn();
-		renderDialog({ onConfirm, currentEmoji: null });
-		const input = screen.getByLabelText("絵文字を入力");
-		input.focus();
-		await userEvent.keyboard("{Enter}");
-		expect(onConfirm).not.toHaveBeenCalled();
+	it("currentEmoji がプレビューに反映される", () => {
+		renderDialog({ currentEmoji: "🎉" });
+		const preview = screen.getByLabelText("選択中の絵文字");
+		expect(preview).toHaveTextContent("🎉");
+	});
+
+	it("currentEmoji がグリッド内でハイライトされる", () => {
+		renderDialog({ currentEmoji: "😀" });
+		const grid = screen.getByLabelText("絵文字一覧");
+		const emojiBtn = within(grid).getByLabelText("😀");
+		expect(emojiBtn.className).toContain("bg-black/10");
 	});
 
 	it("「キャンセル」→ onCancel が呼ばれる", async () => {
@@ -98,5 +118,58 @@ describe("EmojiInputDialog", () => {
 	it("currentEmoji=null で「削除」ボタン非表示", () => {
 		renderDialog({ currentEmoji: null });
 		expect(screen.queryByText("削除")).not.toBeInTheDocument();
+	});
+
+	it("検索バーが表示される", () => {
+		renderDialog();
+		expect(screen.getByLabelText("絵文字を検索")).toBeInTheDocument();
+	});
+
+	it("検索するとマッチする絵文字のみ表示される", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "fire");
+
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByLabelText("🔥")).toBeInTheDocument();
+		// カテゴリ見出しは非表示
+		expect(within(grid).queryByText("スマイリー")).not.toBeInTheDocument();
+	});
+
+	it("検索で見つからない場合はメッセージを表示", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "xyznotfound");
+
+		expect(screen.getByText("見つかりませんでした")).toBeInTheDocument();
+	});
+
+	it("検索中はカテゴリタブが非表示", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "heart");
+
+		expect(screen.queryByLabelText("スマイリー")).not.toBeInTheDocument();
+	});
+
+	it("検索をクリアするとカテゴリ表示に戻る", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "fire");
+		await userEvent.clear(searchInput);
+
+		// カテゴリ見出しが再表示される
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByText("スマイリー")).toBeInTheDocument();
+		expect(screen.getByLabelText("スマイリー")).toBeInTheDocument();
+	});
+
+	it("日本語キーワードで検索できる", async () => {
+		renderDialog();
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		await userEvent.type(searchInput, "桜");
+
+		const grid = screen.getByLabelText("絵文字一覧");
+		expect(within(grid).getByLabelText("🌸")).toBeInTheDocument();
 	});
 });

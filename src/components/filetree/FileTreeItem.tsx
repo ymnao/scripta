@@ -3,8 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
 import { toRelativePath } from "../../lib/path";
+import { useDragStore } from "../../stores/drag";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
+
+const DRAG_EXPAND_DELAY = 500;
 
 interface CreatingState {
 	parentPath: string;
@@ -53,12 +56,39 @@ export function FileTreeItem({
 	const [loadError, setLoadError] = useState(false);
 	const isMountedRef = useRef(true);
 
+	const isDragSource = useDragStore((s) => s.sourcePath === entry.path);
+	const isDragOver = useDragStore((s) => s.overPath === entry.path && entry.isDirectory);
+	const isHoverTarget = useDragStore(
+		(s) => s.hoverPath === entry.path && s.sourcePath !== entry.path,
+	);
+
 	useEffect(() => {
 		isMountedRef.current = true;
 		return () => {
 			isMountedRef.current = false;
 		};
 	}, []);
+
+	const loadChildren = useCallback(() => {
+		setLoading(true);
+		setLoadError(false);
+		listDirectory(entry.path)
+			.then((entries) => {
+				if (!isMountedRef.current) return;
+				setChildren(entries);
+				setLoaded(true);
+				setExpanded(true);
+			})
+			.catch((err) => {
+				if (!isMountedRef.current) return;
+				console.error("Failed to list directory:", err);
+				setLoadError(true);
+			})
+			.finally(() => {
+				if (!isMountedRef.current) return;
+				setLoading(false);
+			});
+	}, [entry.path]);
 
 	const isSelected = entry.path === selectedPath;
 	const isRenaming = entry.path === renamingPath;
@@ -68,29 +98,12 @@ export function FileTreeItem({
 	useEffect(() => {
 		if (isCreatingHere && !expanded) {
 			if (!loaded && !loading && !loadError) {
-				setLoading(true);
-				setLoadError(false);
-				listDirectory(entry.path)
-					.then((entries) => {
-						if (!isMountedRef.current) return;
-						setChildren(entries);
-						setLoaded(true);
-						setExpanded(true);
-					})
-					.catch((err) => {
-						if (!isMountedRef.current) return;
-						console.error("Failed to list directory:", err);
-						setLoadError(true);
-					})
-					.finally(() => {
-						if (!isMountedRef.current) return;
-						setLoading(false);
-					});
+				loadChildren();
 			} else if (loaded) {
 				setExpanded(true);
 			}
 		}
-	}, [isCreatingHere, expanded, loaded, loading, loadError, entry.path]);
+	}, [isCreatingHere, expanded, loaded, loading, loadError, loadChildren]);
 
 	// Re-fetch children when refreshKey changes (for expanded folders)
 	const prevRefreshKeyRef = useRef(refreshKey);
@@ -113,28 +126,24 @@ export function FileTreeItem({
 		};
 	}, [refreshKey, entry.isDirectory, entry.path, expanded, loaded]);
 
+	// Auto-expand folder on drag hover (500ms)
+	useEffect(() => {
+		if (!isDragOver || expanded) return;
+		const timer = setTimeout(() => {
+			if (!loaded && !loading && !loadError) {
+				loadChildren();
+			} else if (loaded) {
+				setExpanded(true);
+			}
+		}, DRAG_EXPAND_DELAY);
+		return () => clearTimeout(timer);
+	}, [isDragOver, expanded, loaded, loading, loadError, loadChildren]);
+
 	const handleClick = useCallback(
 		(e: React.MouseEvent) => {
 			if (entry.isDirectory) {
 				if ((!loaded || loadError) && !loading) {
-					setLoading(true);
-					setLoadError(false);
-					listDirectory(entry.path)
-						.then((entries) => {
-							if (!isMountedRef.current) return;
-							setChildren(entries);
-							setLoaded(true);
-							setExpanded(true);
-						})
-						.catch((err) => {
-							if (!isMountedRef.current) return;
-							console.error("Failed to list directory:", err);
-							setLoadError(true);
-						})
-						.finally(() => {
-							if (!isMountedRef.current) return;
-							setLoading(false);
-						});
+					loadChildren();
 				} else if (loaded) {
 					setExpanded((prev) => !prev);
 				}
@@ -144,7 +153,16 @@ export function FileTreeItem({
 				onFileSelect(entry.path);
 			}
 		},
-		[entry.isDirectory, entry.path, loaded, loadError, loading, onFileSelect, onFileOpenNewTab],
+		[
+			entry.isDirectory,
+			entry.path,
+			loaded,
+			loadError,
+			loading,
+			loadChildren,
+			onFileSelect,
+			onFileOpenNewTab,
+		],
 	);
 
 	const handleContextMenuEvent = useCallback(
@@ -154,12 +172,28 @@ export function FileTreeItem({
 		[onContextMenu, entry],
 	);
 
+	const entryEmoji = (() => {
+		const rel = workspacePath ? toRelativePath(workspacePath, entry.path) : null;
+		if (!rel || !icons) return undefined;
+		if (entry.isDirectory) {
+			const withSlash = rel.endsWith("/") ? rel : `${rel}/`;
+			const withoutSlash = rel.endsWith("/") ? rel.slice(0, -1) : rel;
+			return Object.hasOwn(icons, withSlash)
+				? icons[withSlash]
+				: Object.hasOwn(icons, withoutSlash)
+					? icons[withoutSlash]
+					: undefined;
+		}
+		return Object.hasOwn(icons, rel) ? icons[rel] : undefined;
+	})();
+
 	if (isRenaming) {
 		return (
 			<InlineInput
 				depth={depth}
 				defaultValue={entry.name}
 				icon={entry.isDirectory ? "folder" : "file"}
+				emoji={entryEmoji}
 				onConfirm={onRenameConfirm}
 				onCancel={onRenameCancel}
 			/>
@@ -170,64 +204,46 @@ export function FileTreeItem({
 		<li>
 			<button
 				type="button"
+				data-path={entry.path}
+				data-is-directory={entry.isDirectory}
 				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}
 				aria-expanded={entry.isDirectory ? expanded : undefined}
 				aria-selected={isSelected || undefined}
-				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""}`}
+				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""} ${isDragSource ? "opacity-40" : ""} ${isDragOver ? "bg-black/10 dark:bg-white/10" : isHoverTarget ? "bg-black/5 dark:bg-white/5" : ""}`}
 				style={{ paddingLeft: `${depth * 16 + 4}px` }}
 				onClick={handleClick}
 				onContextMenu={handleContextMenuEvent}
 			>
-				{(() => {
-					const rel = workspacePath ? toRelativePath(workspacePath, entry.path) : null;
-					let emoji: string | undefined;
-					if (rel && icons) {
-						if (entry.isDirectory) {
-							const withSlash = rel.endsWith("/") ? rel : `${rel}/`;
-							const withoutSlash = rel.endsWith("/") ? rel.slice(0, -1) : rel;
-							emoji = Object.hasOwn(icons, withSlash)
-								? icons[withSlash]
-								: Object.hasOwn(icons, withoutSlash)
-									? icons[withoutSlash]
-									: undefined;
-						} else {
-							emoji = Object.hasOwn(icons, rel) ? icons[rel] : undefined;
-						}
-					}
-
-					if (entry.isDirectory) {
-						return (
-							<>
-								{expanded ? (
-									<ChevronDown size={14} className="shrink-0 text-text-secondary" />
-								) : (
-									<ChevronRight size={14} className="shrink-0 text-text-secondary" />
-								)}
-								{emoji ? (
-									<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
-										{emoji}
-									</span>
-								) : (
-									<Folder size={14} className="shrink-0 text-text-secondary" />
-								)}
-							</>
-						);
-					}
-
-					const Icon = getFileIcon(entry.name);
-					return (
-						<>
-							<span className="inline-block w-3.5 shrink-0" />
-							{emoji ? (
-								<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
-									{emoji}
-								</span>
-							) : (
-								<Icon size={14} className="shrink-0 text-text-secondary" />
-							)}
-						</>
-					);
-				})()}
+				{entry.isDirectory ? (
+					<>
+						{expanded ? (
+							<ChevronDown size={14} className="shrink-0 text-text-secondary" />
+						) : (
+							<ChevronRight size={14} className="shrink-0 text-text-secondary" />
+						)}
+						{entryEmoji ? (
+							<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+								{entryEmoji}
+							</span>
+						) : (
+							<Folder size={14} className="shrink-0 text-text-secondary" />
+						)}
+					</>
+				) : (
+					<>
+						<span className="inline-block w-3.5 shrink-0" />
+						{entryEmoji ? (
+							<span className="inline-flex w-3.5 shrink-0 items-center justify-center text-sm leading-none">
+								{entryEmoji}
+							</span>
+						) : (
+							(() => {
+								const Icon = getFileIcon(entry.name);
+								return <Icon size={14} className="shrink-0 text-text-secondary" />;
+							})()
+						)}
+					</>
+				)}
 				<span className="truncate">{entry.name}</span>
 				{loadError && (
 					<AlertTriangle
