@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isIMEComposing } from "../../lib/ime";
 import { renderMermaid } from "../../lib/mermaid";
 import { useThemeStore } from "../../stores/theme";
 import { DialogBase } from "../common/DialogBase";
@@ -67,6 +68,7 @@ export function MermaidEditorDialog({
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
+			if (isIMEComposing(e)) return;
 			if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
 				e.preventDefault();
 				handleSave();

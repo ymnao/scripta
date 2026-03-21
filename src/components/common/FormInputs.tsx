@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isIMEComposing } from "../../lib/ime";
 
 interface ToggleProps {
 	id: string;
@@ -87,6 +88,7 @@ export function NumberInput({
 					onChange={(e) => setDraft(e.target.value)}
 					onBlur={commit}
 					onKeyDown={(e) => {
+						if (isIMEComposing(e)) return;
 						if (e.key === "Enter") {
 							e.currentTarget.blur();
 						}
@@ -190,6 +192,7 @@ export function TextInput({
 				onChange={(e) => setDraft(e.target.value)}
 				onBlur={commit}
 				onKeyDown={(e) => {
+					if (isIMEComposing(e)) return;
 					if (e.key === "Enter") {
 						e.currentTarget.blur();
 					}
@@ -261,6 +264,7 @@ export function RangeInput({
 						onChange={(e) => setDraft(e.target.value)}
 						onBlur={handleBlur}
 						onKeyDown={(e) => {
+							if (isIMEComposing(e)) return;
 							if (e.key === "Enter") e.currentTarget.blur();
 						}}
 						aria-label={`${label}の値`}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { isIMEComposing } from "../../lib/ime";
 import { DialogBase } from "./DialogBase";
 import { EMOJI_CATEGORIES, searchEmojis } from "./emoji-data";
 
@@ -117,6 +118,7 @@ export function EmojiInputDialog({
 					value={query}
 					onChange={(e) => setQuery(e.target.value)}
 					onKeyDown={(e) => {
+						if (isIMEComposing(e)) return;
 						if (e.key === "Enter") {
 							e.preventDefault();
 							handleSubmit();

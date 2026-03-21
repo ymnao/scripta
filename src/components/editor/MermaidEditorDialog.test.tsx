@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -142,6 +142,16 @@ describe("MermaidEditorDialog", () => {
 		);
 
 		expect(screen.getByRole("textbox")).toHaveValue("");
+	});
+
+	it("IME変換中のCmd+EnterでonSaveが呼ばれない", () => {
+		const onSave = vi.fn();
+		renderDialog({ onSave });
+		const textarea = screen.getByRole("textbox");
+
+		fireEvent.keyDown(textarea, { key: "Enter", metaKey: true, keyCode: 229 });
+
+		expect(onSave).not.toHaveBeenCalled();
 	});
 
 	it("閉じた後に遅延 promise が解決してもプレビューに反映されない", async () => {

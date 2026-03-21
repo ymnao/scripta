@@ -11,6 +11,7 @@ import { Compartment, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { isIMEComposing } from "../../lib/ime";
 
 export interface SearchBarHandle {
 	focusInput: () => void;
@@ -154,6 +155,7 @@ export function SearchBar({
 
 	const handleSearchKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
+			if (isIMEComposing(e)) return;
 			if (e.key === "Enter") {
 				e.preventDefault();
 				if (e.shiftKey) {
@@ -172,6 +174,7 @@ export function SearchBar({
 
 	const handleReplaceKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
+			if (isIMEComposing(e)) return;
 			if (e.key === "Enter") {
 				e.preventDefault();
 				handleReplaceNext();
