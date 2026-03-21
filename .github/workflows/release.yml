@@ -25,6 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Verify tag matches app version
+        run: |
+          TAG="${{ github.ref_name }}"
+          TAURI_VERSION="v$(jq -r '.version' src-tauri/tauri.conf.json)"
+          if [ "$TAG" != "$TAURI_VERSION" ]; then
+            echo "::error::Tag $TAG does not match tauri.conf.json version $TAURI_VERSION"
+            exit 1
+          fi
+
       - name: Create draft release
         run: gh release create "${{ github.ref_name }}" --draft --generate-notes --title "${{ github.ref_name }}"
         env:
@@ -82,8 +91,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: v__VERSION__
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
           releaseDraft: true
           args: ${{ matrix.args }}
 
