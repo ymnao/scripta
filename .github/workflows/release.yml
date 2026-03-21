@@ -102,6 +102,18 @@ jobs:
           releaseDraft: true
           args: ${{ matrix.args }}
 
+      - name: Collect artifact files
+        id: artifact-files
+        shell: bash
+        run: |
+          {
+            echo 'paths<<EOF'
+            echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while IFS= read -r file; do
+              [ -f "$file" ] && echo "$file"
+            done
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Generate checksums
         shell: bash
         run: |
@@ -109,9 +121,10 @@ jobs:
           if ! command -v sha256sum &>/dev/null; then
             hash_cmd="shasum -a 256"
           fi
-          for file in $(echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]'); do
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
             (cd "$(dirname "$file")" && $hash_cmd "$(basename "$file")") >> "$RUNNER_TEMP/checksums-${{ matrix.platform }}.txt"
-          done
+          done <<< "${{ steps.artifact-files.outputs.paths }}"
 
       - name: Upload checksum artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -119,20 +132,10 @@ jobs:
           name: checksums-${{ matrix.platform }}
           path: ${{ runner.temp }}/checksums-${{ matrix.platform }}.txt
 
-      - name: Prepare artifact paths for attestation
-        id: artifact-paths
-        shell: bash
-        run: |
-          {
-            echo 'paths<<EOF'
-            echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]'
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
-          subject-path: ${{ steps.artifact-paths.outputs.paths }}
+          subject-path: ${{ steps.artifact-files.outputs.paths }}
 
   upload-checksums:
     needs: build
