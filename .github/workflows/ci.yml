@@ -85,6 +85,8 @@ jobs:
 
   rust-test:
     name: Rust (test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: 0
@@ -106,6 +108,8 @@ jobs:
 
   rust-check:
     name: Rust (check)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: sccache
@@ -144,6 +148,7 @@ jobs:
           filters: |
             rust:
               - 'src-tauri/**'
+              - 'Cargo.lock'
 
   rust-check-windows:
     name: Rust (check, Windows)
