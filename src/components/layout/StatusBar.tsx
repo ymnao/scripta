@@ -6,6 +6,7 @@ import {
 	GitBranch,
 	GitCommitHorizontal,
 	Plus,
+	Presentation,
 	Settings,
 	StickyNote,
 	WifiOff,
@@ -31,6 +32,8 @@ interface StatusBarProps {
 	gitReady?: boolean;
 	onToggleScratchpad?: () => void;
 	scratchpadOpen?: boolean;
+	onToggleSlideView?: () => void;
+	slideViewActive?: boolean;
 }
 
 function GitSyncStatus({
@@ -103,6 +106,8 @@ export function StatusBar({
 	gitReady,
 	onToggleScratchpad,
 	scratchpadOpen,
+	onToggleSlideView,
+	slideViewActive,
 }: StatusBarProps) {
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef(0);
@@ -170,6 +175,19 @@ export function StatusBar({
 					{saveStatus === "error" && "保存失敗"}
 					{saveStatus === "retrying" && "リトライ中..."}
 				</output>
+				{onToggleSlideView && (
+					<button
+						type="button"
+						onClick={onToggleSlideView}
+						aria-label="スライドビュー"
+						title="スライドビュー"
+						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+							slideViewActive ? "text-text-primary" : ""
+						}`}
+					>
+						<Presentation size={15} />
+					</button>
+				)}
 				{onToggleScratchpad && (
 					<button
 						type="button"

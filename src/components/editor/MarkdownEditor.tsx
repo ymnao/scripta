@@ -92,7 +92,7 @@ const listFoldService = foldService.of((state, lineStart, lineEnd) => {
 });
 
 const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
-interface GoToLineRequest {
+export interface GoToLineRequest {
 	line: number;
 	query?: string;
 }

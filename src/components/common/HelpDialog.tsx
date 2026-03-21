@@ -73,6 +73,7 @@ const groups: ShortcutGroup[] = [
 		title: "表示",
 		shortcuts: [
 			{ keys: [[mod, "B"]], action: "サイドバーの切り替え（エディタ外）" },
+			{ keys: [[mod, shift, "S"]], action: "スライドビュー" },
 			{ keys: [[mod, "J"]], action: "スクラッチパッド" },
 			{ keys: [[mod, "E"]], action: "ファイルエクスプローラー" },
 			{ keys: [[mod, shift, "E"]], action: "エクスポート" },
