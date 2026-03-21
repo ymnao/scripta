@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // isPdfSupported はモジュールレベルで navigator.platform を参照するため、
 // インポート前に platform を設定する
 vi.hoisted(() => {
-	Object.defineProperty(navigator, "platform", { value: "MacIntel", configurable: true });
+	Object.defineProperty(navigator, "userAgent", {
+		value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+		configurable: true,
+	});
 });
 
 import { useToastStore } from "../../stores/toast";
