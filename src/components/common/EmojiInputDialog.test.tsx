@@ -5,7 +5,7 @@ import { EmojiInputDialog } from "./EmojiInputDialog";
 
 const defaultProps = {
 	open: true,
-	currentEmoji: null,
+	currentEmoji: null as string | null,
 	entryName: "test-file.md",
 	onConfirm: vi.fn(),
 	onRemove: vi.fn(),

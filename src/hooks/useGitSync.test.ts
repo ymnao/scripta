@@ -323,7 +323,7 @@ describe("useGitSync", () => {
 
 		useGitSyncStore.setState({ gitSyncEnabled: true });
 
-		const { result } = renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
+		renderHook(() => useGitSync({ workspacePath: "/test/workspace" }));
 		await vi.advanceTimersByTimeAsync(0);
 
 		// Conflicts detected → manualSync should be blocked

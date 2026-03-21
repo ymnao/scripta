@@ -92,12 +92,14 @@ export function findMermaidBlocks(
 // ── Widget ────────────────────────────────────────────
 
 export class MermaidWidget extends WidgetType {
-	constructor(
-		readonly source: string,
-		readonly svg: string | null,
-		readonly error: string | null,
-	) {
+	source: string;
+	svg: string | null;
+	error: string | null;
+	constructor(source: string, svg: string | null, error: string | null) {
 		super();
+		this.source = source;
+		this.svg = svg;
+		this.error = error;
 	}
 
 	eq(other: MermaidWidget): boolean {
@@ -207,7 +209,7 @@ const mermaidDecorationField = StateField.define<DecorationSet>({
 				return buildMermaidDecorations(tr.state, e.value);
 			}
 		}
-		if (tr.docChanged || tr.selectionSet) {
+		if (tr.docChanged || tr.selection) {
 			// hasFocusField から実フォーカス値を参照（プログラム的な変更にも対応）
 			return buildMermaidDecorations(tr.state, tr.state.field(hasFocusField));
 		}
@@ -344,7 +346,7 @@ const treeChangeDetector = ViewPlugin.fromClass(
 
 function createMermaidClickHandler() {
 	return EditorView.domEventHandlers({
-		mousedown(event: MouseEvent, view: EditorView) {
+		mousedown(event: MouseEvent, _view: EditorView) {
 			const target = event.target as HTMLElement;
 			if (target.closest(".cm-mermaid-widget")) {
 				// カーソルを移動しない。移動するとデコレーション再計算で

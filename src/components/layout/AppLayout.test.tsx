@@ -67,9 +67,10 @@ vi.mock("../../hooks/useGitSync", () => ({
 	useGitSync: () => ({ manualSync: vi.fn() }),
 }));
 
-const MockWebviewWindowConstructor = vi.fn();
-// Assign static method so TypeScript is happy with `WebviewWindow.getByLabel()`
-MockWebviewWindowConstructor.getByLabel = vi.fn().mockReturnValue(null);
+const MockWebviewWindowConstructor = vi.fn() as ReturnType<typeof vi.fn> & {
+	getByLabel: ReturnType<typeof vi.fn>;
+};
+MockWebviewWindowConstructor.getByLabel = vi.fn().mockResolvedValue(null);
 
 vi.mock("@tauri-apps/api/webviewWindow", () => ({
 	WebviewWindow: MockWebviewWindowConstructor,
@@ -183,7 +184,7 @@ describe("AppLayout", () => {
 		mockEditorView.hasFocus = false;
 		mockDestroy.mockClear();
 		MockWebviewWindowConstructor.mockClear();
-		(MockWebviewWindowConstructor.getByLabel as Mock).mockReturnValue(null);
+		MockWebviewWindowConstructor.getByLabel.mockResolvedValue(null);
 		mockedReadFile.mockResolvedValue("# Hello");
 		mockedWriteFile.mockResolvedValue(undefined);
 		nextId = 1;

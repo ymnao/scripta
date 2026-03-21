@@ -16,7 +16,7 @@ let idCounter = 0;
 /** initialize+render をアトミックに直列化するキュー */
 let renderQueue: Promise<void> = Promise.resolve();
 
-function getMermaidTheme(theme: "light" | "dark"): string {
+function getMermaidTheme(theme: "light" | "dark"): "dark" | "default" {
 	return theme === "dark" ? "dark" : "default";
 }
 
@@ -134,7 +134,9 @@ async function ensureInitialized(theme: "light" | "dark"): Promise<void> {
 		}
 		await initPromise;
 	}
-	mermaidModule.default.initialize(buildConfig(theme));
+	if (mermaidModule) {
+		mermaidModule.default.initialize(buildConfig(theme));
+	}
 }
 
 function cacheKey(source: string, theme: "light" | "dark"): string {

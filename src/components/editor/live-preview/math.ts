@@ -57,11 +57,12 @@ export function overlapsCodeBlock(from: number, to: number, codeRanges: CodeRang
 }
 
 export class MathWidget extends WidgetType {
-	constructor(
-		readonly tex: string,
-		readonly displayMode: boolean,
-	) {
+	tex: string;
+	displayMode: boolean;
+	constructor(tex: string, displayMode: boolean) {
 		super();
+		this.tex = tex;
+		this.displayMode = displayMode;
 	}
 
 	eq(other: MathWidget): boolean {
@@ -83,7 +84,7 @@ export class MathWidget extends WidgetType {
 		return wrap;
 	}
 
-	ignoreEvent(): boolean {
+	ignoreEvent(_event: Event): boolean {
 		return false;
 	}
 }
@@ -245,7 +246,7 @@ function createMathClickHandler() {
  * - Typing `$` inserts `$$` with cursor between
  * - Typing `$` when next char is `$` skips over it
  */
-const dollarInputHandler = EditorView.inputHandler.of((view, from, to, insert) => {
+const dollarInputHandler = EditorView.inputHandler.of((view, _from, _to, insert) => {
 	if (insert !== "$") return false;
 
 	const { state } = view;

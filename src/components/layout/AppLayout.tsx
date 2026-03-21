@@ -246,11 +246,11 @@ export function AppLayout() {
 	}, [workspacePath]);
 
 	// Open (or re-focus) the conflict resolution window
-	const openConflictResolver = useCallback(() => {
+	const openConflictResolver = useCallback(async () => {
 		if (!workspacePath) return;
-		const existing = WebviewWindow.getByLabel("conflict-resolver");
+		const existing = await WebviewWindow.getByLabel("conflict-resolver");
 		if (existing) {
-			void existing.setFocus();
+			await existing.setFocus();
 			return;
 		}
 		new WebviewWindow("conflict-resolver", {

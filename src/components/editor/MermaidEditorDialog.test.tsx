@@ -172,7 +172,7 @@ describe("MermaidEditorDialog", () => {
 		);
 
 		// 閉じた後に promise 解決
-		resolveRender?.("<svg>old</svg>");
+		(resolveRender as ((svg: string) => void) | null)?.("<svg>old</svg>");
 		await vi.advanceTimersByTimeAsync(0);
 
 		// 別の source で再オープン

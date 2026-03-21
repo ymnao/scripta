@@ -551,7 +551,7 @@ describe("ArrowLeft keymap", () => {
 		// Cursor at position 10 ("tem"), range.to = 8
 		// head > range.to → handler returns false
 		expect(range).not.toBeNull();
-		expect(doc.indexOf("tem")).toBeGreaterThan(range?.to);
+		expect(doc.indexOf("tem")).toBeGreaterThan(range?.to as number);
 	});
 
 	it("does not activate on first line of document", () => {
@@ -602,7 +602,7 @@ describe("ArrowRight keymap", () => {
 		const range = findMarkerRange(state, line);
 		expect(range).not.toBeNull();
 		// head (3) >= range.from but head (3) >= range.to (2) → not inside marker
-		expect(3).toBeGreaterThanOrEqual(range?.to);
+		expect(3).toBeGreaterThanOrEqual(range?.to as number);
 	});
 
 	it("does not activate at end of last line", () => {
