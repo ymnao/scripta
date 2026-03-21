@@ -28,9 +28,15 @@ jobs:
       - name: Verify tag matches app version
         run: |
           TAG="${{ github.ref_name }}"
-          TAURI_VERSION="v$(jq -r '.version' src-tauri/tauri.conf.json)"
-          if [ "$TAG" != "$TAURI_VERSION" ]; then
-            echo "::error::Tag $TAG does not match tauri.conf.json version $TAURI_VERSION"
+          V_TAURI="v$(jq -r '.version' src-tauri/tauri.conf.json)"
+          V_PKG="v$(jq -r '.version' package.json)"
+          V_CARGO="v$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+          MISMATCH=""
+          [ "$TAG" != "$V_TAURI" ] && MISMATCH="$MISMATCH tauri.conf.json=$V_TAURI"
+          [ "$TAG" != "$V_PKG" ]   && MISMATCH="$MISMATCH package.json=$V_PKG"
+          [ "$TAG" != "$V_CARGO" ] && MISMATCH="$MISMATCH Cargo.toml=$V_CARGO"
+          if [ -n "$MISMATCH" ]; then
+            echo "::error::Tag $TAG does not match:$MISMATCH"
             exit 1
           fi
 
@@ -50,12 +56,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - platform: macos-15
             args: --target universal-apple-darwin
             rust_target: aarch64-apple-darwin,x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
-          - platform: windows-latest
+          - platform: windows-2025
             args: ""
     runs-on: ${{ matrix.platform }}
     steps:
