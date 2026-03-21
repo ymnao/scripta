@@ -120,6 +120,102 @@ fn cleanup_stale_backups(output_path: &str) {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+struct ExportContext {
+    tmp_dir: tempfile::TempDir,
+    file_url: tauri::Url,
+    label: String,
+    backup_path: String,
+    has_backup: bool,
+}
+
+/// Write HTML to a temp file, clean up stale backups, and create a new backup
+/// of the existing output file (if any) for safe overwrite detection.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn prepare_export(html: &str, output_path: &str) -> Result<ExportContext, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let tmp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let tmp_html = tmp_dir.path().join("export.html");
+    std::fs::write(&tmp_html, html).map_err(|e| e.to_string())?;
+
+    let file_url = tauri::Url::from_file_path(&tmp_html)
+        .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let label = format!("pdf-export-{counter}");
+
+    cleanup_stale_backups(output_path);
+    let backup_path = format!(
+        "{}.scripta-backup-{}-{counter}",
+        output_path,
+        std::process::id()
+    );
+    let has_backup = match std::fs::rename(output_path, &backup_path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(format!("既存ファイルの退避に失敗しました: {e}")),
+    };
+
+    Ok(ExportContext {
+        tmp_dir,
+        file_url,
+        label,
+        backup_path,
+        has_backup,
+    })
+}
+
+/// Verify the output file and manage backup restore/cleanup.
+/// On success the backup is removed; on failure it is restored.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn finalize_export(
+    result: Result<(), String>,
+    output_path: &str,
+    backup_path: &str,
+    has_backup: bool,
+) -> Result<(), String> {
+    let result = result.and_then(|()| verify_output(output_path));
+
+    if result.is_ok() {
+        if has_backup {
+            if let Err(e) = std::fs::remove_file(backup_path) {
+                log::warn!("バックアップファイルの削除に失敗: {backup_path}: {e}");
+            }
+        }
+    } else if has_backup {
+        // Restore backup only if output_path is missing or empty (partial write).
+        // A non-empty file may have been written by a concurrent successful export.
+        let should_restore = match std::fs::metadata(output_path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Ok(meta) if meta.len() == 0 => true,
+            Ok(_) => {
+                log::warn!(
+                    "バックアップファイルの復元をスキップしました: {output_path} に非空ファイルが存在します"
+                );
+                false
+            }
+            Err(e) => {
+                log::warn!(
+                    "バックアップ復元前のファイルメタデータ取得に失敗したため復元をスキップします: {output_path}: {e}"
+                );
+                false
+            }
+        };
+        if should_restore {
+            let _ = std::fs::remove_file(output_path);
+            if let Err(e) = std::fs::rename(backup_path, output_path) {
+                log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
+            }
+        } else {
+            let _ = std::fs::remove_file(backup_path);
+        }
+    }
+
+    result
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn export_pdf(
@@ -127,43 +223,16 @@ pub async fn export_pdf(
     html: String,
     output_path: String,
 ) -> Result<(), String> {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
     use tauri::WebviewUrl;
 
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    // Write HTML to a temp file so the WebView can load it via file://
-    let tmp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let tmp_html = tmp_dir.path().join("export.html");
-    std::fs::write(&tmp_html, &html).map_err(|e| e.to_string())?;
-
-    let file_url = tauri::Url::from_file_path(&tmp_html)
-        .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
-    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let label = format!("pdf-export-{counter}");
-
-    // Clean up any stale .scripta-backup-* files from previous crashes.
-    // If the output file doesn't exist but a backup does, restore the newest one.
-    cleanup_stale_backups(&output_path);
-
-    // If a file already exists at the output path, move it to a temporary
-    // backup so we can unambiguously detect the new file.  On failure the
-    // backup is restored, avoiding data loss.
-    // Use PID + counter for a globally unique name that survives app restarts
-    // and avoids collisions with concurrent exports.
-    let backup_path = format!(
-        "{}.scripta-backup-{}-{counter}",
-        output_path,
-        std::process::id()
-    );
-    let has_backup = match std::fs::rename(&output_path, &backup_path) {
-        Ok(()) => true,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(e) => {
-            return Err(format!("既存ファイルの退避に失敗しました: {e}"));
-        }
-    };
+    let ExportContext {
+        tmp_dir,
+        file_url,
+        label,
+        backup_path,
+        has_backup,
+    } = prepare_export(&html, &output_path)?;
 
     // Channel to signal print errors. runOperationModalForWindow is
     // asynchronous — it starts the print operation on a background thread
@@ -328,48 +397,7 @@ pub async fn export_pdf(
     let _ = webview_window.close();
     drop(tmp_dir);
 
-    // Verify output even on apparent success — the print operation may have
-    // completed without actually writing a valid PDF.
-    let result = result.and_then(|()| verify_output(&output_path));
-
-    // On success, remove the backup; on failure, restore it.
-    if result.is_ok() {
-        if has_backup {
-            if let Err(e) = std::fs::remove_file(&backup_path) {
-                log::warn!("バックアップファイルの削除に失敗: {backup_path}: {e}");
-            }
-        }
-    } else if has_backup {
-        // Restore backup only if output_path is missing or empty (partial write).
-        // A non-empty file may have been written by a concurrent successful export.
-        let should_restore = match std::fs::metadata(&output_path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-            Ok(meta) if meta.len() == 0 => true,
-            Ok(_) => {
-                log::warn!(
-                    "バックアップファイルの復元をスキップしました: {output_path} に非空ファイルが存在します"
-                );
-                false
-            }
-            Err(e) => {
-                log::warn!(
-                    "バックアップ復元前のファイルメタデータ取得に失敗したため復元をスキップします: {output_path}: {e}"
-                );
-                false
-            }
-        };
-        if should_restore {
-            let _ = std::fs::remove_file(&output_path);
-            if let Err(e) = std::fs::rename(&backup_path, &output_path) {
-                log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
-            }
-        } else {
-            // Discard backup since output is already valid
-            let _ = std::fs::remove_file(&backup_path);
-        }
-    }
-
-    result
+    finalize_export(result, &output_path, &backup_path, has_backup)
 }
 
 #[cfg(target_os = "windows")]
@@ -379,36 +407,16 @@ pub async fn export_pdf(
     html: String,
     output_path: String,
 ) -> Result<(), String> {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
     use tauri::WebviewUrl;
 
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    // Write HTML to a temp file so the WebView can load it via file://
-    let tmp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let tmp_html = tmp_dir.path().join("export.html");
-    std::fs::write(&tmp_html, &html).map_err(|e| e.to_string())?;
-
-    let file_url = tauri::Url::from_file_path(&tmp_html)
-        .map_err(|()| format!("無効なファイルパスです: {}", tmp_html.display()))?;
-    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let label = format!("pdf-export-{counter}");
-
-    // Clean up stale backups and create a new backup for safe overwrite detection
-    cleanup_stale_backups(&output_path);
-    let backup_path = format!(
-        "{}.scripta-backup-{}-{counter}",
-        output_path,
-        std::process::id()
-    );
-    let has_backup = match std::fs::rename(&output_path, &backup_path) {
-        Ok(()) => true,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(e) => {
-            return Err(format!("既存ファイルの退避に失敗しました: {e}"));
-        }
-    };
+    let ExportContext {
+        tmp_dir,
+        file_url,
+        label,
+        backup_path,
+        has_backup,
+    } = prepare_export(&html, &output_path)?;
 
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     let output = output_path.clone();
@@ -428,11 +436,14 @@ pub async fn export_pdf(
 
         let output = output.clone();
         let tx = tx.clone();
-        let tx_err = tx.clone();
+        let tx_wv_err = tx.clone();
+        let tx_outer_err = tx.clone();
 
         let res = webview.with_webview(move |platform_wv| {
-            // SAFETY: with_webview runs on the main thread; we access WebView2 COM API
-            let result: Result<(), String> = unsafe {
+            // SAFETY: with_webview runs on the main thread; we access WebView2 COM API.
+            // The IIFE allows using `?` inside the closure (with_webview returns `()`).
+            let result: Result<(), String> = (move || -> Result<(), String> {
+                unsafe {
                 use webview2_com::Microsoft::Web::WebView2::Win32::*;
                 use webview2_com::PrintToPdfCompletedHandler;
                 use windows::core::Interface;
@@ -505,15 +516,16 @@ pub async fn export_pdf(
                     .map_err(|e| format!("PrintToPdfの呼び出しに失敗: {e}"))?;
 
                 Ok(())
-            };
+                }
+            })();
 
             if let Err(e) = result {
-                let _ = tx_err.send(Err(e));
+                let _ = tx_wv_err.send(Err(e));
             }
         });
 
         if let Err(e) = res {
-            let _ = tx_err.send(Err(format!("WebView操作に失敗しました: {e}")));
+            let _ = tx_outer_err.send(Err(format!("WebView操作に失敗しました: {e}")));
         }
     })
     .build()
@@ -531,47 +543,7 @@ pub async fn export_pdf(
     let _ = webview_window.close();
     drop(tmp_dir);
 
-    // Verify output even on apparent success — PrintToPdf callback may report
-    // success without actually writing a valid PDF.
-    let result = result.and_then(|()| verify_output(&output_path));
-
-    // On success, remove the backup; on failure, restore it.
-    if result.is_ok() {
-        if has_backup {
-            if let Err(e) = std::fs::remove_file(&backup_path) {
-                log::warn!("バックアップファイルの削除に失敗: {backup_path}: {e}");
-            }
-        }
-    } else if has_backup {
-        // Restore backup only if output_path is missing or empty.
-        // A non-empty file may belong to a concurrent successful export.
-        let should_restore = match std::fs::metadata(&output_path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-            Ok(meta) if meta.len() == 0 => true,
-            Ok(_) => {
-                log::warn!(
-                    "バックアップファイルの復元をスキップしました: {output_path} に非空ファイルが存在します"
-                );
-                false
-            }
-            Err(e) => {
-                log::warn!(
-                    "バックアップ復元前のファイルメタデータ取得に失敗したため復元をスキップします: {output_path}: {e}"
-                );
-                false
-            }
-        };
-        if should_restore {
-            let _ = std::fs::remove_file(&output_path);
-            if let Err(e) = std::fs::rename(&backup_path, &output_path) {
-                log::warn!("バックアップファイルの復元に失敗: {backup_path}: {e}");
-            }
-        } else {
-            let _ = std::fs::remove_file(&backup_path);
-        }
-    }
-
-    result
+    finalize_export(result, &output_path, &backup_path, has_backup)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

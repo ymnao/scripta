@@ -85,6 +85,8 @@ jobs:
 
   rust-test:
     name: Rust (test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: 0
@@ -106,6 +108,8 @@ jobs:
 
   rust-check:
     name: Rust (check)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: sccache
@@ -129,3 +133,40 @@ jobs:
       - name: Check
         working-directory: src-tauri
         run: cargo check --all-targets --locked
+
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src-tauri/**'
+              - 'Cargo.lock'
+
+  rust-check-windows:
+    name: Rust (check, Windows)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # --lib only: platform-specific code (#[cfg(target_os)]) lives in the lib crate.
+      # Skipping bins/tests/benches keeps the check fast on paid runners.
+      - name: Check
+        working-directory: src-tauri
+        run: cargo check --lib --locked
