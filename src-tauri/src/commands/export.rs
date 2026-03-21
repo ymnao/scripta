@@ -436,7 +436,8 @@ pub async fn export_pdf(
 
         let output = output.clone();
         let tx = tx.clone();
-        let tx_err = tx.clone();
+        let tx_wv_err = tx.clone();
+        let tx_outer_err = tx.clone();
 
         let res = webview.with_webview(move |platform_wv| {
             // SAFETY: with_webview runs on the main thread; we access WebView2 COM API.
@@ -519,12 +520,12 @@ pub async fn export_pdf(
             })();
 
             if let Err(e) = result {
-                let _ = tx_err.send(Err(e));
+                let _ = tx_wv_err.send(Err(e));
             }
         });
 
         if let Err(e) = res {
-            let _ = tx_err.send(Err(format!("WebView操作に失敗しました: {e}")));
+            let _ = tx_outer_err.send(Err(format!("WebView操作に失敗しました: {e}")));
         }
     })
     .build()
