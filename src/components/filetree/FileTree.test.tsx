@@ -44,7 +44,7 @@ describe("FileTree", () => {
 	});
 
 	afterEach(() => {
-		vi.restoreAllMocks();
+		vi.clearAllMocks();
 		useDragStore.getState().reset();
 	});
 
@@ -225,6 +225,70 @@ describe("FileTree", () => {
 		);
 	});
 
+	it("does not confirm rename when Enter is pressed during IME composition (keyCode 229)", async () => {
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(fileButton);
+		});
+
+		await userEvent.click(screen.getByText("Rename"));
+
+		const input = screen.getByRole("textbox");
+		await userEvent.clear(input);
+		await userEvent.type(input, "test");
+
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+		});
+
+		expect(mockedRenameEntry).not.toHaveBeenCalled();
+		expect(screen.getByRole("textbox")).toBeInTheDocument();
+	});
+
+	it("confirms rename when Enter is pressed after IME composition ends (keyCode 13)", async () => {
+		const onFileRenamed = vi.fn();
+		render(
+			<FileTree
+				workspacePath="/workspace"
+				selectedPath={null}
+				onFileSelect={() => {}}
+				onFileRenamed={onFileRenamed}
+			/>,
+		);
+		await waitFor(() => {
+			expect(screen.getByText("hello.md")).toBeInTheDocument();
+		});
+
+		const fileButton = screen.getByText("hello.md").closest("button") as HTMLElement;
+		await act(async () => {
+			fireEvent.contextMenu(fileButton);
+		});
+
+		await userEvent.click(screen.getByText("Rename"));
+
+		const input = screen.getByRole("textbox");
+		await userEvent.clear(input);
+		await userEvent.type(input, "メモ.md");
+
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+		});
+		expect(mockedRenameEntry).not.toHaveBeenCalled();
+
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter", keyCode: 13 });
+		});
+
+		await waitFor(() => {
+			expect(mockedRenameEntry).toHaveBeenCalledWith("/workspace/hello.md", "/workspace/メモ.md");
+		});
+	});
+
 	it("shows 'open in new tab' in context menu for files", async () => {
 		const onFileOpenNewTab = vi.fn();
 		render(
@@ -344,10 +408,6 @@ describe("FileTree", () => {
 	});
 
 	describe("Drag and Drop", () => {
-		beforeEach(() => {
-			mockedRenameEntry.mockClear();
-		});
-
 		function mockRect(el: Element, x: number, y: number, w: number, h: number) {
 			vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
 				x,

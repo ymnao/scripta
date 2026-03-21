@@ -1,5 +1,6 @@
 import { File, Folder } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { isIMEComposing } from "../../lib/ime";
 
 interface InlineInputProps {
 	depth: number;
@@ -70,6 +71,7 @@ export function InlineInput({
 				value={value}
 				onChange={(e) => setValue(e.target.value)}
 				onKeyDown={(e) => {
+					if (isIMEComposing(e)) return;
 					if (e.key === "Enter") {
 						e.preventDefault();
 						handleConfirm();

@@ -2,6 +2,7 @@ import { Archive, FileText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { listDirectory, searchFilenames } from "../../lib/commands";
+import { isIMEComposing } from "../../lib/ime";
 import { basename } from "../../lib/path";
 import { getScratchpadArchiveDir } from "../../lib/scripta-config";
 
@@ -122,6 +123,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
+			if (isIMEComposing(e)) return;
 			if (e.key === "ArrowDown") {
 				e.preventDefault();
 				setSelectedIndex((i) => Math.min(i + 1, files.length - 1));

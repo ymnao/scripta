@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isIMEComposing } from "../../lib/ime";
 
 interface GoToLineDialogProps {
 	open: boolean;
@@ -58,6 +59,7 @@ export function GoToLineDialog({ open, totalLines, onGoToLine, onClose }: GoToLi
 					value={value}
 					onChange={(e) => setValue(e.target.value)}
 					onKeyDown={(e) => {
+						if (isIMEComposing(e)) return;
 						if (e.key === "Enter") {
 							e.preventDefault();
 							handleSubmit();

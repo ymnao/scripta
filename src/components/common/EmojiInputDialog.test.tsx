@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { EmojiInputDialog } from "./EmojiInputDialog";
@@ -162,6 +162,19 @@ describe("EmojiInputDialog", () => {
 		const grid = screen.getByLabelText("絵文字一覧");
 		expect(within(grid).getByText("スマイリー")).toBeInTheDocument();
 		expect(screen.getByLabelText("スマイリー")).toBeInTheDocument();
+	});
+
+	it("IME変換中のEnterで絵文字が確定されない", async () => {
+		const onConfirm = vi.fn();
+		renderDialog({ onConfirm });
+
+		const grid = screen.getByLabelText("絵文字一覧");
+		await userEvent.click(within(grid).getByLabelText("😀"));
+
+		const searchInput = screen.getByLabelText("絵文字を検索");
+		fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 229 });
+
+		expect(onConfirm).not.toHaveBeenCalled();
 	});
 
 	it("日本語キーワードで検索できる", async () => {
