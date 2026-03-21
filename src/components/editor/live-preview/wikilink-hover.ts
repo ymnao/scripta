@@ -2,7 +2,6 @@ import type { Extension } from "@codemirror/state";
 import { type PluginValue, ViewPlugin } from "@codemirror/view";
 import { basename } from "../../../lib/path";
 import { useWikilinkStore } from "../../../stores/wikilink";
-import type { UnresolvedWikilink } from "../../../types/wikilink";
 
 class WikilinkHoverPlugin implements PluginValue {
 	private popup: HTMLDivElement | null = null;

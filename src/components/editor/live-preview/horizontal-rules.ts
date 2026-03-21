@@ -11,7 +11,7 @@ import {
 } from "@codemirror/view";
 
 export class HRWidget extends WidgetType {
-	eq(): boolean {
+	eq(_other: WidgetType): boolean {
 		return true;
 	}
 

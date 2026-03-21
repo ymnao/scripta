@@ -1,5 +1,5 @@
 import { Coffee, ExternalLink, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { openExternal, writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";

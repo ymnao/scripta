@@ -63,11 +63,12 @@ function extractDomain(url: string): string {
 }
 
 export class LinkCardWidget extends WidgetType {
-	constructor(
-		readonly url: string,
-		readonly ogp: OgpData | null,
-	) {
+	url: string;
+	ogp: OgpData | null;
+	constructor(url: string, ogp: OgpData | null) {
 		super();
+		this.url = url;
+		this.ogp = ogp;
 	}
 
 	eq(other: LinkCardWidget): boolean {

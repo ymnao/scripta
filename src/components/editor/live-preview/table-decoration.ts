@@ -291,11 +291,12 @@ function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
 }
 
 class EditableTableWidget extends WidgetType {
-	constructor(
-		readonly data: TableData,
-		readonly tableFrom: number,
-	) {
+	data: TableData;
+	tableFrom: number;
+	constructor(data: TableData, tableFrom: number) {
 		super();
+		this.data = data;
+		this.tableFrom = tableFrom;
 	}
 
 	eq(other: EditableTableWidget): boolean {
@@ -330,7 +331,7 @@ class EditableTableWidget extends WidgetType {
 		return wrapper;
 	}
 
-	updateDOM(dom: HTMLElement, view: EditorView): boolean {
+	updateDOM(dom: HTMLElement, _view: EditorView): boolean {
 		widgetPositions.set(dom, this.tableFrom);
 		widgetDataMap.set(dom, this.data);
 		dom.dataset.tableFrom = String(this.tableFrom);

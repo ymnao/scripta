@@ -52,7 +52,7 @@ let storePromise: Promise<Store> | null = null;
 
 function getStore(): Promise<Store> {
 	if (!storePromise) {
-		storePromise = load("settings.json", { autoSave: false }).catch((error) => {
+		storePromise = load("settings.json", { defaults: {}, autoSave: false }).catch((error) => {
 			storePromise = null;
 			throw error;
 		});

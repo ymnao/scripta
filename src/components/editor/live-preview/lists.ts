@@ -12,7 +12,7 @@ import {
 } from "@codemirror/view";
 
 export class BulletWidget extends WidgetType {
-	eq(): boolean {
+	eq(_other: BulletWidget): boolean {
 		return true;
 	}
 
@@ -32,11 +32,12 @@ export class BulletWidget extends WidgetType {
 }
 
 export class CheckboxWidget extends WidgetType {
-	constructor(
-		readonly checked: boolean,
-		readonly pos: number,
-	) {
+	checked: boolean;
+	pos: number;
+	constructor(checked: boolean, pos: number) {
 		super();
+		this.checked = checked;
+		this.pos = pos;
 	}
 
 	eq(other: CheckboxWidget): boolean {

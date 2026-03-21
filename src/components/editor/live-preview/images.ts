@@ -54,11 +54,12 @@ export function resolveImageSrc(
 }
 
 class ImageWidget extends WidgetType {
-	constructor(
-		readonly src: string,
-		readonly alt: string,
-	) {
+	src: string;
+	alt: string;
+	constructor(src: string, alt: string) {
 		super();
+		this.src = src;
+		this.alt = alt;
 	}
 
 	eq(other: ImageWidget): boolean {

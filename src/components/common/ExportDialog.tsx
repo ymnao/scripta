@@ -21,8 +21,7 @@ import { RangeInput, SelectInput, Toggle } from "./FormInputs";
 import { SidebarDialogLayout } from "./SidebarDialogLayout";
 
 const isPdfSupported =
-	typeof navigator !== "undefined" &&
-	/mac|win/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? "");
+	typeof navigator !== "undefined" && /mac|win/i.test(navigator.userAgent ?? "");
 
 interface ExportDialogProps {
 	open: boolean;

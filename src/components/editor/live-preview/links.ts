@@ -75,11 +75,12 @@ export function isSafeImageUrl(url: string): boolean {
 }
 
 export class LinkWidget extends WidgetType {
-	constructor(
-		readonly text: string,
-		readonly url: string,
-	) {
+	text: string;
+	url: string;
+	constructor(text: string, url: string) {
 		super();
+		this.text = text;
+		this.url = url;
 	}
 
 	eq(other: LinkWidget): boolean {

@@ -181,7 +181,7 @@ describe("ExportDialog", () => {
 		});
 
 		it("workspacePath なしでリンク非表示", async () => {
-			renderDialog({ workspacePath: null });
+			renderDialog({ workspacePath: undefined });
 			await switchToPrompt();
 			expect(screen.queryByText("テンプレートをカスタマイズ")).not.toBeInTheDocument();
 		});

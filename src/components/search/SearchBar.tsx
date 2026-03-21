@@ -33,12 +33,14 @@ function countMatches(view: EditorView): { current: number; total: number } {
 	const sel = view.state.selection.main;
 	let total = 0;
 	let current = 0;
-	while (!cursor.next().done) {
+	let result = cursor.next();
+	while (!result.done) {
 		total++;
 		if (total > 9999) return { current, total: 10000 };
-		if (cursor.value.from === sel.from && cursor.value.to === sel.to) {
+		if (result.value.from === sel.from && result.value.to === sel.to) {
 			current = total;
 		}
+		result = cursor.next();
 	}
 	return { current, total };
 }

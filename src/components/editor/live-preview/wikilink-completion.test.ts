@@ -2,7 +2,9 @@ import { CompletionContext as CC, type CompletionContext } from "@codemirror/aut
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestState } from "./test-helper";
 
-const mockSearchFilenames = vi.fn(() => Promise.resolve([] as string[]));
+const mockSearchFilenames = vi.fn((_workspacePath: string, _query: string) =>
+	Promise.resolve([] as string[]),
+);
 let mockFileTreeVersion = 0;
 let mockWorkspacePath = "/workspace";
 
@@ -20,7 +22,8 @@ vi.mock("../../../stores/workspace", () => ({
 }));
 
 vi.mock("../../../lib/commands", () => ({
-	searchFilenames: (...args: unknown[]) => mockSearchFilenames(...args),
+	searchFilenames: (workspacePath: string, query: string) =>
+		mockSearchFilenames(workspacePath, query),
 }));
 
 const { wikilinkCompletion, wikilinkCompletionSource } = await import("./wikilink-completion");
