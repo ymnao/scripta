@@ -27,18 +27,19 @@ import { HelpDialog } from "../common/HelpDialog";
 import { SettingsDialog } from "../common/SettingsDialog";
 import { SetupWizardDialog } from "../common/SetupWizardDialog";
 import { ToastContainer } from "../common/Toast";
-import type { CursorInfo } from "../editor/MarkdownEditor";
+import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { ScratchpadPanel, type ScratchpadSaveHandle } from "../editor/ScratchpadPanel";
 import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
 import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
+import { SlideView } from "../slide/SlideView";
 import { NewTabContent } from "./NewTabContent";
 import { Sidebar, type SidebarPanel } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 
-type GoToLine = { line: number; query?: string } | null;
+type GoToLine = GoToLineRequest | null;
 
 interface TabCache {
 	content: string;
@@ -107,6 +108,7 @@ export function AppLayout() {
 		filePath: string;
 	} | null>(null);
 	const exportRequestIdRef = useRef(0);
+	const [slideViewActive, setSlideViewActive] = useState(false);
 	const [goToLineOpen, setGoToLineOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
@@ -965,9 +967,15 @@ export function AppLayout() {
 		setCursorInfo(info);
 	}, []);
 
-	// Close search bar when switching to non-file tab, close go-to-line on any tab switch
+	const handleSave = useCallback(() => {
+		void saveNow();
+	}, [saveNow]);
+
+	// Close search bar when switching to non-file tab, close go-to-line on any tab switch,
+	// reset slide view on tab switch
 	useEffect(() => {
 		setGoToLineOpen(false);
+		setSlideViewActive(false);
 		if (!activeTabPath || isNewTabPath(activeTabPath)) {
 			setSearchBarOpen(false);
 		}
@@ -1033,6 +1041,14 @@ export function AppLayout() {
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "e") {
 				e.preventDefault();
 				setSidebarPanel("files");
+				return;
+			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "s") {
+				e.preventDefault();
+				const path = useWorkspaceStore.getState().activeTabPath;
+				if (path && !isNewTabPath(path)) {
+					setSlideViewActive((prev) => !prev);
+				}
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
@@ -1127,6 +1143,16 @@ export function AppLayout() {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
 	}
 
+	const editorProps = {
+		value: content,
+		onChange: setContent,
+		onSave: handleSave,
+		onEditorView: handleEditorView,
+		goToLine,
+		onGoToLineDone: handleGoToLineDone,
+		onStatistics: handleStatistics,
+	};
+
 	return (
 		<div className="flex h-screen flex-col bg-bg-primary text-text-primary">
 			<TabBar
@@ -1160,17 +1186,10 @@ export function AppLayout() {
 							<div className="editor-error">
 								<p>{editorError}</p>
 							</div>
+						) : slideViewActive ? (
+							<SlideView key={editorKey} {...editorProps} />
 						) : (
-							<MarkdownEditor
-								key={editorKey}
-								value={content}
-								onChange={setContent}
-								onSave={() => void saveNow()}
-								onEditorView={handleEditorView}
-								goToLine={goToLine}
-								onGoToLineDone={handleGoToLineDone}
-								onStatistics={handleStatistics}
-							/>
+							<MarkdownEditor key={editorKey} {...editorProps} />
 						)
 					) : (
 						<NewTabContent
@@ -1230,6 +1249,12 @@ export function AppLayout() {
 				onGitSync={manualSync}
 				onOpenConflictResolver={openConflictResolver}
 				gitReady={gitReady}
+				onToggleSlideView={
+					activeTabPath && !isNewTab && !editorError
+						? () => setSlideViewActive((prev) => !prev)
+						: undefined
+				}
+				slideViewActive={slideViewActive}
 				onToggleScratchpad={workspacePath ? toggleScratchpad : undefined}
 				scratchpadOpen={scratchpadOpen}
 			/>
