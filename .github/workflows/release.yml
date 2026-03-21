@@ -34,8 +34,8 @@ jobs:
             exit 1
           fi
 
-      - name: Create draft release
-        run: gh release create "${{ github.ref_name }}" --draft --generate-notes --title "${{ github.ref_name }}"
+      - name: Create draft release (idempotent)
+        run: gh release view "${{ github.ref_name }}" &>/dev/null || gh release create "${{ github.ref_name }}" --draft --generate-notes --title "${{ github.ref_name }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
