@@ -70,14 +70,14 @@ scripta/
 │
 ├── src/                          # React フロントエンド
 │   ├── components/
-│   │   ├── layout/               # AppLayout, Sidebar, TitleBar, StatusBar, NewTabContent
+│   │   ├── layout/               # AppLayout, Sidebar, StatusBar, NewTabContent
 │   │   ├── editor/
 │   │   │   ├── MarkdownEditor.tsx
 │   │   │   ├── TabBar.tsx
 │   │   │   ├── ScratchpadPanel.tsx
 │   │   │   ├── MermaidEditorDialog.tsx
-│   │   │   ├── extensions.ts
-│   │   │   ├── themes.ts
+│   │   │   ├── editor-theme.ts
+│   │   │   ├── formatting-commands.ts
 │   │   │   └── live-preview/     # Live Preview デコレーション群
 │   │   ├── filetree/             # FileTree, FileTreeItem, ContextMenu
 │   │   ├── search/               # SearchPanel, CommandPalette, UnresolvedLinksPanel
