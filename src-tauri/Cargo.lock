@@ -85,6 +85,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

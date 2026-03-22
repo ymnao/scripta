@@ -38,6 +38,7 @@ tempfile = "3"
 trash = "5"
 notify = "8"
 ureq = { version = "2", features = ["tls"] }
+semver = "1"
 tauri-plugin-store = { version = "2", optional = true }
 tauri-plugin-window-state = { version = "2", optional = true }
 tokio = { version = "1", features = ["rt"] }

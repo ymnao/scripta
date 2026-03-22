@@ -236,6 +236,8 @@ export function SettingsDialog({
 	const setShowLinkCards = useSettingsStore((s) => s.setShowLinkCards);
 	const scratchpadVolatile = useSettingsStore((s) => s.scratchpadVolatile);
 	const setScratchpadVolatile = useSettingsStore((s) => s.setScratchpadVolatile);
+	const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
+	const setAutoUpdateCheck = useSettingsStore((s) => s.setAutoUpdateCheck);
 
 	const gitSyncEnabled = useGitSyncStore((s) => s.gitSyncEnabled);
 	const setGitSyncEnabled = useGitSyncStore((s) => s.setGitSyncEnabled);
@@ -490,6 +492,12 @@ export function SettingsDialog({
 								ローカルファイルベースの軽量 Markdown メモアプリ。
 							</p>
 						</div>
+						<Toggle
+							id="auto-update-check-toggle"
+							label="起動時にアップデートを確認"
+							checked={autoUpdateCheck}
+							onChange={setAutoUpdateCheck}
+						/>
 						<div className="rounded-md bg-bg-secondary px-4 py-3">
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								自分が使うために作っています。もし役立ったらコーヒー奢ってください。
