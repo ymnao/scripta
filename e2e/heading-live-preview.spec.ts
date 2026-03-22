@@ -4,9 +4,23 @@ import { TauriMock, modKey } from "./helpers/tauri-mock";
 const workspace = {
 	files: {
 		"/workspace/test.md": "first line\n\n## hello\n\nplain text",
+		"/workspace/first-line-heading.md": "## first heading\n\nsecond line",
+		"/workspace/first-line-blockquote.md": "> first quote\n\nsecond line",
 	},
 	directories: {
-		"/workspace": [{ name: "test.md", path: "/workspace/test.md", isDirectory: false }],
+		"/workspace": [
+			{ name: "test.md", path: "/workspace/test.md", isDirectory: false },
+			{
+				name: "first-line-heading.md",
+				path: "/workspace/first-line-heading.md",
+				isDirectory: false,
+			},
+			{
+				name: "first-line-blockquote.md",
+				path: "/workspace/first-line-blockquote.md",
+				isDirectory: false,
+			},
+		],
 	},
 };
 
@@ -146,6 +160,101 @@ test.describe("heading live preview", () => {
 		const heading3 = page.locator(".cm-line.cm-heading-3");
 		await expect(heading3).toBeVisible({ timeout: 5000 });
 		await expect(heading2).not.toBeVisible({ timeout: 5000 });
+	});
+
+	test("first-line heading — Home keeps cursor at visual start, not inside hidden prefix", async ({
+		page,
+	}) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("first-line-heading.md file").click();
+
+		const editor = page.locator(".cm-content");
+		await expect(editor).toBeVisible();
+
+		// Move cursor away so decoration is active
+		await page.keyboard.press(`${modKey}+End`);
+		const headingLine = page.locator(".cm-line.cm-heading-2");
+		await expect(headingLine).toBeVisible({ timeout: 5000 });
+
+		// Click on the heading and press Home
+		await headingLine.click();
+		await page.keyboard.press("Home");
+
+		// Type a character — it should appear at the visual start (after hidden "## "),
+		// not inside the hidden prefix
+		await page.keyboard.type("X");
+		await page.keyboard.press(`${modKey}+s`);
+		await page.waitForTimeout(200);
+
+		const calls = await mock.getCalls("write_file");
+		const lastCall = calls[calls.length - 1];
+		const content = lastCall.content as string;
+		// "X" should be after "## ", making it "## Xfirst heading"
+		expect(content).toMatch(/^## X/);
+	});
+
+	test("first-line heading — Left at visual start stays at visual start", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("first-line-heading.md file").click();
+
+		const editor = page.locator(".cm-content");
+		await expect(editor).toBeVisible();
+
+		await page.keyboard.press(`${modKey}+End`);
+		const headingLine = page.locator(".cm-line.cm-heading-2");
+		await expect(headingLine).toBeVisible({ timeout: 5000 });
+
+		// Click heading, Home, then Left (no previous line to go to)
+		await headingLine.click();
+		await page.keyboard.press("Home");
+		await page.keyboard.press("ArrowLeft");
+
+		// Cursor should still be at visual start, not inside hidden prefix
+		await page.keyboard.type("Y");
+		await page.keyboard.press(`${modKey}+s`);
+		await page.waitForTimeout(200);
+
+		const calls = await mock.getCalls("write_file");
+		const lastCall = calls[calls.length - 1];
+		const content = lastCall.content as string;
+		expect(content).toMatch(/^## Y/);
+	});
+
+	test("first-line blockquote — Home keeps cursor at visual start", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("first-line-blockquote.md file").click();
+
+		const editor = page.locator(".cm-content");
+		await expect(editor).toBeVisible();
+
+		await page.keyboard.press(`${modKey}+End`);
+		const quoteLine = page.locator(".cm-line.cm-blockquote-line");
+		await expect(quoteLine).toBeVisible({ timeout: 5000 });
+
+		await quoteLine.click();
+		await page.keyboard.press("Home");
+
+		// Type — should appear after hidden "> "
+		await page.keyboard.type("Z");
+		await page.keyboard.press(`${modKey}+s`);
+		await page.waitForTimeout(200);
+
+		const calls = await mock.getCalls("write_file");
+		const lastCall = calls[calls.length - 1];
+		const content = lastCall.content as string;
+		expect(content).toMatch(/^> Z/);
 	});
 
 	test("left arrow at heading start moves to previous line", async ({ page }) => {
