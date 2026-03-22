@@ -14,7 +14,12 @@ vi.mock("../../lib/commands", () => ({
 	startWatcher: vi.fn().mockResolvedValue(undefined),
 	stopWatcher: vi.fn().mockResolvedValue(undefined),
 	scanUnresolvedWikilinks: vi.fn().mockResolvedValue([]),
-	checkForUpdate: vi.fn().mockResolvedValue({ hasUpdate: false, latestVersion: "0.1.0", currentVersion: "0.1.0", releaseUrl: "" }),
+	checkForUpdate: vi.fn().mockResolvedValue({
+		hasUpdate: false,
+		latestVersion: "0.1.0",
+		currentVersion: "0.1.0",
+		releaseUrl: "",
+	}),
 	openExternal: vi.fn().mockResolvedValue(undefined),
 }));
 
