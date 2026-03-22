@@ -2,6 +2,7 @@
 	"name": "scripta",
 	"private": true,
 	"version": "0.1.0",
+	"license": "MIT",
 	"type": "module",
 	"packageManager": "pnpm@10.30.0",
 	"scripts": {
