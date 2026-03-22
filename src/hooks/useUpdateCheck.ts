@@ -17,9 +17,11 @@ export function useUpdateCheck(enabled: boolean) {
 		(async () => {
 			try {
 				const lastCheck = await loadLastUpdateCheck();
-				if (Date.now() - lastCheck < CHECK_INTERVAL_MS) return;
+				if (cancelled || Date.now() - lastCheck < CHECK_INTERVAL_MS) return;
 
 				const currentVersion = await getVersion();
+				if (cancelled) return;
+
 				const info = await checkForUpdate(currentVersion);
 				if (cancelled) return;
 

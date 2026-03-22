@@ -199,4 +199,60 @@ describe("useUpdateCheck", () => {
 		// cancelled が true なのでダイアログは開かない
 		expect(result.current.dialogOpen).toBe(false);
 	});
+
+	it("getVersion 待ち中にクリーンアップされたら checkForUpdate を呼ばない", async () => {
+		let resolveGetVersion!: (v: string) => void;
+		mockedGetVersion.mockReturnValue(
+			new Promise<string>((resolve) => {
+				resolveGetVersion = resolve;
+			}),
+		);
+
+		const { rerender } = renderHook(({ enabled }) => useUpdateCheck(enabled), {
+			initialProps: { enabled: true },
+		});
+
+		// loadLastUpdateCheck は即座に完了、getVersion で止まる
+		await vi.waitFor(() => {
+			expect(mockedGetVersion).toHaveBeenCalled();
+		});
+
+		// クリーンアップを発火
+		rerender({ enabled: false });
+
+		// getVersion を完了させる
+		resolveGetVersion("0.1.0");
+		await vi.waitFor(() => {});
+
+		// cancelled なので checkForUpdate は呼ばれない
+		expect(mockedCheckForUpdate).not.toHaveBeenCalled();
+	});
+
+	it("loadLastUpdateCheck 待ち中にクリーンアップされたら後続処理をスキップする", async () => {
+		let resolveLoad!: (v: number) => void;
+		mockedLoadLastUpdateCheck.mockReturnValue(
+			new Promise<number>((resolve) => {
+				resolveLoad = resolve;
+			}),
+		);
+
+		const { rerender } = renderHook(({ enabled }) => useUpdateCheck(enabled), {
+			initialProps: { enabled: true },
+		});
+
+		await vi.waitFor(() => {
+			expect(mockedLoadLastUpdateCheck).toHaveBeenCalled();
+		});
+
+		// クリーンアップを発火
+		rerender({ enabled: false });
+
+		// loadLastUpdateCheck を完了させる (24時間以上前)
+		resolveLoad(0);
+		await vi.waitFor(() => {});
+
+		// cancelled なので getVersion も checkForUpdate も呼ばれない
+		expect(mockedGetVersion).not.toHaveBeenCalled();
+		expect(mockedCheckForUpdate).not.toHaveBeenCalled();
+	});
 });
