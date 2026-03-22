@@ -149,8 +149,6 @@ const headingCursorFilter = EditorState.transactionFilter.of((tr) => {
 				modified = true;
 				return EditorSelection.cursor(line.from - 1);
 			}
-			// First line of the document: no previous line to jump to
-			if (line.from === 0) return range;
 		}
 
 		modified = true;

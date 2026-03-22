@@ -128,7 +128,6 @@ const blockquoteCursorFilter = EditorState.transactionFilter.of((tr) => {
 				modified = true;
 				return EditorSelection.cursor(line.from - 1);
 			}
-			if (line.from === 0) return range;
 		}
 
 		modified = true;
