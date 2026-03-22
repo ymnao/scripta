@@ -170,32 +170,46 @@ const headingCursorFilter = EditorState.transactionFilter.of((tr) => {
  * typing "# " at the visual start transforms the document to "# text" (h1).
  */
 const headingLevelOverrideHandler = EditorView.inputHandler.of((view, from, to, text) => {
-	if (text !== " " || from !== to) return false;
+	if (from !== to) return false;
 
 	const { state } = view;
 	const line = state.doc.lineAt(from);
 
-	// Check if current line is a heading
 	const existingMatch = line.text.match(headingMarkPattern);
 	if (!existingMatch) return false;
 
 	const existingMarks = existingMatch[1].length;
 	const visualStart = line.from + existingMarks + 1;
 
-	if (from <= visualStart) return false;
+	// Case 1: Space typed after # marks at visual start
+	if (text === " " && from > visualStart) {
+		const typed = state.doc.sliceString(visualStart, from);
+		if (!hashOnlyPattern.test(typed)) return false;
 
-	const typed = state.doc.sliceString(visualStart, from);
-	if (!hashOnlyPattern.test(typed)) return false;
+		const newLevel = typed.length;
+		const newPrefix = `${"#".repeat(newLevel)} `;
+		view.dispatch({
+			changes: { from: line.from, to: from, insert: newPrefix },
+			selection: { anchor: line.from + newPrefix.length },
+		});
+		return true;
+	}
 
-	const newLevel = typed.length;
+	// Case 2: Pasted heading pattern (e.g. "# ", "## ") at visual start
+	if (from === visualStart) {
+		const pastedMatch = text.match(/^(#{1,6}) $/);
+		if (!pastedMatch) return false;
 
-	// Replace the old prefix + typed marks with the new prefix
-	const newPrefix = `${"#".repeat(newLevel)} `;
-	view.dispatch({
-		changes: { from: line.from, to: from, insert: newPrefix },
-		selection: { anchor: line.from + newPrefix.length },
-	});
-	return true;
+		const newLevel = pastedMatch[1].length;
+		const newPrefix = `${"#".repeat(newLevel)} `;
+		view.dispatch({
+			changes: { from: line.from, to: from, insert: newPrefix },
+			selection: { anchor: line.from + newPrefix.length },
+		});
+		return true;
+	}
+
+	return false;
 });
 
 export const headingDecoration: Extension = [

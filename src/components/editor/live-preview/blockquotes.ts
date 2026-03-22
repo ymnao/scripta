@@ -1,9 +1,9 @@
 import { syntaxTree } from "@codemirror/language";
-import type { Range } from "@codemirror/state";
+import { EditorSelection, EditorState, type Extension, type Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
-	type EditorView,
+	EditorView,
 	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
@@ -12,7 +12,9 @@ import {
 const blockquoteLineDecoration = Decoration.line({
 	attributes: { class: "cm-blockquote-line" },
 });
-const replaceDecoration = Decoration.replace({});
+const replaceDecoration = Decoration.replace({ inclusiveStart: true });
+
+const blockquoteMarkPattern = /^((?:> ?)+)/;
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
@@ -83,6 +85,58 @@ class BlockquoteDecorationPlugin implements PluginValue {
 	}
 }
 
-export const blockquoteDecoration = ViewPlugin.fromClass(BlockquoteDecorationPlugin, {
+const blockquoteDecorationPlugin = ViewPlugin.fromClass(BlockquoteDecorationPlugin, {
 	decorations: (v) => v.decorations,
+	provide: (plugin) =>
+		EditorView.atomicRanges.of((view) => {
+			return view.plugin(plugin)?.decorations ?? Decoration.none;
+		}),
 });
+
+/**
+ * Prevent the cursor from stopping at line.from of a blockquote line
+ * (which is inside the hidden "> " marks). Instead:
+ * - Left arrow from the visual start → jump to previous line end
+ * - Any other navigation (Home, click, Down) → jump to after marks
+ */
+const blockquoteCursorFilter = EditorState.transactionFilter.of((tr) => {
+	if (!tr.selection) return tr;
+
+	const doc = tr.newDoc;
+	let modified = false;
+	const oldRanges = tr.startState.selection.ranges;
+	const ranges = tr.selection.ranges.map((range, i) => {
+		if (!range.empty) return range;
+
+		const pos = range.head;
+		const line = doc.lineAt(pos);
+
+		if (pos !== line.from) return range;
+
+		const match = line.text.match(blockquoteMarkPattern);
+		if (!match) return range;
+
+		const afterMarks = line.from + match[0].length;
+
+		if (!tr.docChanged) {
+			const oldPos = (oldRanges[i] ?? oldRanges[0]).head;
+			if (
+				tr.startState.doc.lineAt(oldPos).number === line.number &&
+				oldPos === afterMarks &&
+				line.from > 0
+			) {
+				modified = true;
+				return EditorSelection.cursor(line.from - 1);
+			}
+			if (line.from === 0) return range;
+		}
+
+		modified = true;
+		return EditorSelection.cursor(afterMarks);
+	});
+
+	if (!modified) return tr;
+	return [tr, { selection: EditorSelection.create(ranges, tr.selection.mainIndex) }];
+});
+
+export const blockquoteDecoration: Extension = [blockquoteDecorationPlugin, blockquoteCursorFilter];
