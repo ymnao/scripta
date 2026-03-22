@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
+import type { UpdateInfo } from "../types/update";
 import type { UnresolvedWikilink } from "../types/wikilink";
 import type { FileEntry } from "../types/workspace";
 import { isTransientError } from "./errors";
@@ -156,4 +157,8 @@ export function gitFinishConflictResolution(path: string): Promise<string> {
 
 export function gitGetLastCommitTime(path: string): Promise<string | null> {
 	return invoke<string | null>("git_get_last_commit_time", { path });
+}
+
+export function checkForUpdate(currentVersion: string): Promise<UpdateInfo> {
+	return invoke<UpdateInfo>("check_for_update", { currentVersion });
 }

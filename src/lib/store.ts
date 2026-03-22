@@ -24,6 +24,7 @@ interface AppSettings {
 	commitMessage: string;
 	autoPullOnStartup: boolean;
 	scratchpadVolatile: boolean;
+	autoUpdateCheck: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -46,6 +47,7 @@ const DEFAULTS: AppSettings = {
 	commitMessage: GIT_SYNC_DEFAULTS.commitMessage,
 	autoPullOnStartup: GIT_SYNC_DEFAULTS.autoPullOnStartup,
 	scratchpadVolatile: true,
+	autoUpdateCheck: true,
 };
 
 let storePromise: Promise<Store> | null = null;
@@ -181,6 +183,10 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawScratchpadVolatile
 				: DEFAULTS.scratchpadVolatile;
 
+		const rawAutoUpdateCheck = await store.get<unknown>("autoUpdateCheck");
+		const autoUpdateCheck: boolean =
+			typeof rawAutoUpdateCheck === "boolean" ? rawAutoUpdateCheck : DEFAULTS.autoUpdateCheck;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -201,198 +207,56 @@ export async function loadSettings(): Promise<AppSettings> {
 			commitMessage,
 			autoPullOnStartup,
 			scratchpadVolatile,
+			autoUpdateCheck,
 		};
 	} catch {
 		return { ...DEFAULTS };
 	}
 }
 
-export async function saveWorkspacePath(path: string | null): Promise<void> {
+async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
 		const store = await getStore();
-		await store.set("workspacePath", path);
+		await store.set(key, value);
 		await store.save();
 	} catch {
 		// Ignore save errors — app should continue working
 	}
 }
 
-export async function saveThemePreference(preference: ThemePreference): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("themePreference", preference);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
+export const saveWorkspacePath = (path: string | null) => saveSetting("workspacePath", path);
+export const saveThemePreference = (preference: ThemePreference) =>
+	saveSetting("themePreference", preference);
+export const saveSidebarVisible = (visible: boolean) => saveSetting("sidebarVisible", visible);
+export const saveShowLineNumbers = (show: boolean) => saveSetting("showLineNumbers", show);
+export const saveFontSize = (size: number) => saveSetting("fontSize", size);
+export const saveAutoSaveDelay = (delay: number) => saveSetting("autoSaveDelay", delay);
+export const saveHighlightActiveLine = (highlight: boolean) =>
+	saveSetting("highlightActiveLine", highlight);
+export const saveFontFamily = (family: FontFamily) => saveSetting("fontFamily", family);
+export const saveTrimTrailingWhitespace = (trim: boolean) =>
+	saveSetting("trimTrailingWhitespace", trim);
+export const saveShowLinkCards = (show: boolean) => saveSetting("showLinkCards", show);
+export const saveGitSyncEnabled = (enabled: boolean) => saveSetting("gitSyncEnabled", enabled);
+export const saveAutoCommitInterval = (interval: number) =>
+	saveSetting("autoCommitInterval", interval);
+export const saveAutoPullInterval = (interval: number) => saveSetting("autoPullInterval", interval);
+export const saveAutoPushInterval = (interval: number) => saveSetting("autoPushInterval", interval);
+export const savePullBeforePush = (pull: boolean) => saveSetting("pullBeforePush", pull);
+export const saveSyncMethod = (method: SyncMethod) => saveSetting("syncMethod", method);
+export const saveCommitMessage = (message: string) => saveSetting("commitMessage", message);
+export const saveAutoPullOnStartup = (pull: boolean) => saveSetting("autoPullOnStartup", pull);
+export const saveScratchpadVolatile = (volatile: boolean) =>
+	saveSetting("scratchpadVolatile", volatile);
+export const saveAutoUpdateCheck = (enabled: boolean) => saveSetting("autoUpdateCheck", enabled);
+export const saveLastUpdateCheck = (timestamp: number) => saveSetting("lastUpdateCheck", timestamp);
 
-export async function saveSidebarVisible(visible: boolean): Promise<void> {
+export async function loadLastUpdateCheck(): Promise<number> {
 	try {
 		const store = await getStore();
-		await store.set("sidebarVisible", visible);
-		await store.save();
+		const raw = await store.get<unknown>("lastUpdateCheck");
+		return typeof raw === "number" ? raw : 0;
 	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveShowLineNumbers(show: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("showLineNumbers", show);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveFontSize(size: number): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("fontSize", size);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveAutoSaveDelay(delay: number): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("autoSaveDelay", delay);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveHighlightActiveLine(highlight: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("highlightActiveLine", highlight);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveFontFamily(family: FontFamily): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("fontFamily", family);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveTrimTrailingWhitespace(trim: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("trimTrailingWhitespace", trim);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveShowLinkCards(show: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("showLinkCards", show);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveGitSyncEnabled(enabled: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("gitSyncEnabled", enabled);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveAutoCommitInterval(interval: number): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("autoCommitInterval", interval);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveAutoPullInterval(interval: number): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("autoPullInterval", interval);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveAutoPushInterval(interval: number): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("autoPushInterval", interval);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function savePullBeforePush(pull: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("pullBeforePush", pull);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveSyncMethod(method: SyncMethod): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("syncMethod", method);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveCommitMessage(message: string): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("commitMessage", message);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveAutoPullOnStartup(pull: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("autoPullOnStartup", pull);
-		await store.save();
-	} catch {
-		// Ignore save errors
-	}
-}
-
-export async function saveScratchpadVolatile(volatile: boolean): Promise<void> {
-	try {
-		const store = await getStore();
-		await store.set("scratchpadVolatile", volatile);
-		await store.save();
-	} catch {
-		// Ignore save errors
+		return 0;
 	}
 }

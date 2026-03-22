@@ -7,6 +7,7 @@ import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { useGitSync } from "../../hooks/useGitSync";
 import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
+import { useUpdateCheck } from "../../hooks/useUpdateCheck";
 import { listDirectory, readFile, writeFile } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
@@ -98,6 +99,20 @@ export function AppLayout() {
 	const canGoForward = activeTab ? activeTab.historyIndex < activeTab.history.length - 1 : false;
 
 	const [loading, setLoading] = useState(true);
+
+	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
+	// restore or persist the workspace path — only theme and sidebar are restored.
+	const [isNewWindow] = useState(() =>
+		new URLSearchParams(window.location.search).has("newWindow"),
+	);
+
+	const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
+	const {
+		dialogOpen: updateDialogOpen,
+		description: updateDescription,
+		dismissDialog: dismissUpdateDialog,
+		openReleasePage,
+	} = useUpdateCheck(autoUpdateCheck && !loading && !isNewWindow);
 	const [setupWizardOpen, setSetupWizardOpen] = useState(false);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
@@ -147,12 +162,6 @@ export function AppLayout() {
 	const justSwitchedRef = useRef(false);
 	const userSetWorkspaceRef = useRef(false);
 
-	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
-	// restore or persist the workspace path — only theme and sidebar are restored.
-	const [isNewWindow] = useState(() =>
-		new URLSearchParams(window.location.search).has("newWindow"),
-	);
-
 	// Load persisted settings on mount
 	useEffect(() => {
 		let cancelled = false;
@@ -182,6 +191,7 @@ export function AppLayout() {
 				trimTrailingWhitespace: settings.trimTrailingWhitespace,
 				showLinkCards: settings.showLinkCards,
 				scratchpadVolatile: settings.scratchpadVolatile,
+				autoUpdateCheck: settings.autoUpdateCheck,
 			});
 			hydrateGitSync({
 				gitSyncEnabled: settings.gitSyncEnabled,
@@ -1304,6 +1314,15 @@ export function AppLayout() {
 			)}
 			{workspacePath && <DirectoryPickerDialog workspacePath={workspacePath} />}
 			<ToastContainer />
+			<Dialog
+				open={updateDialogOpen}
+				title="アップデートのお知らせ"
+				description={updateDescription}
+				confirmLabel="ダウンロードページを開く"
+				cancelLabel="後で"
+				onConfirm={openReleasePage}
+				onCancel={dismissUpdateDialog}
+			/>
 
 			<Dialog
 				open={externalConflict?.type === "modified"}

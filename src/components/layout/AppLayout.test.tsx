@@ -14,6 +14,17 @@ vi.mock("../../lib/commands", () => ({
 	startWatcher: vi.fn().mockResolvedValue(undefined),
 	stopWatcher: vi.fn().mockResolvedValue(undefined),
 	scanUnresolvedWikilinks: vi.fn().mockResolvedValue([]),
+	checkForUpdate: vi.fn().mockResolvedValue({
+		hasUpdate: false,
+		latestVersion: "0.1.0",
+		currentVersion: "0.1.0",
+		releaseUrl: "",
+	}),
+	openExternal: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@tauri-apps/api/app", () => ({
+	getVersion: vi.fn().mockResolvedValue("0.1.0"),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -41,6 +52,7 @@ vi.mock("../../lib/store", () => ({
 		commitMessage: "vault backup: {{date}}",
 		autoPullOnStartup: false,
 		scratchpadVolatile: true,
+		autoUpdateCheck: true,
 	}),
 	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
 	saveThemePreference: vi.fn().mockResolvedValue(undefined),
@@ -61,6 +73,9 @@ vi.mock("../../lib/store", () => ({
 	saveSyncMethod: vi.fn().mockResolvedValue(undefined),
 	saveCommitMessage: vi.fn().mockResolvedValue(undefined),
 	saveAutoPullOnStartup: vi.fn().mockResolvedValue(undefined),
+	saveAutoUpdateCheck: vi.fn().mockResolvedValue(undefined),
+	loadLastUpdateCheck: vi.fn().mockResolvedValue(0),
+	saveLastUpdateCheck: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../hooks/useGitSync", () => ({

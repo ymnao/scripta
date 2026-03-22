@@ -58,6 +58,7 @@ pub fn run() {
             commands::git_sync::git_resolve_conflict,
             commands::git_sync::git_finish_conflict_resolution,
             commands::git_sync::git_get_last_commit_time,
+            commands::updater::check_for_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

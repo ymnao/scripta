@@ -60,6 +60,7 @@ describe("store", () => {
 				commitMessage: "vault backup: {{date}}",
 				autoPullOnStartup: false,
 				scratchpadVolatile: true,
+				autoUpdateCheck: true,
 			});
 		});
 
@@ -101,6 +102,7 @@ describe("store", () => {
 				commitMessage: "vault backup: {{date}}",
 				autoPullOnStartup: false,
 				scratchpadVolatile: true,
+				autoUpdateCheck: true,
 			});
 		});
 
