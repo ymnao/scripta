@@ -32,6 +32,7 @@ const headingNodeNames: ReadonlyMap<string, HeadingLevel> = new Map([
 const replaceDecoration = Decoration.replace({ inclusiveStart: true });
 
 const headingMarkPattern = /^(#{1,6}) /;
+const hashOnlyPattern = /^#{1,6}$/;
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const builder = new RangeSetBuilder<Decoration>();
@@ -47,7 +48,6 @@ export function buildDecorations(view: EditorView): DecorationSet {
 				if (level === undefined) return;
 				const line = state.doc.lineAt(node.from);
 
-				// Find HeaderMark and check for trailing space
 				const cursor = node.node.cursor();
 				if (!cursor.firstChild()) return;
 
@@ -124,7 +124,8 @@ const headingCursorFilter = EditorState.transactionFilter.of((tr) => {
 
 	const doc = tr.newDoc;
 	let modified = false;
-	const ranges = tr.selection.ranges.map((range) => {
+	const oldRanges = tr.startState.selection.ranges;
+	const ranges = tr.selection.ranges.map((range, i) => {
 		if (!range.empty) return range;
 
 		const pos = range.head;
@@ -137,10 +138,9 @@ const headingCursorFilter = EditorState.transactionFilter.of((tr) => {
 
 		const afterMarks = line.from + match[0].length;
 
-		// Detect leftward movement: old cursor was at the visual start
-		// (right after the hidden marks) on the same line
 		if (!tr.docChanged) {
-			const oldPos = tr.startState.selection.main.head;
+			const oldPos = (oldRanges[i] ?? oldRanges[0]).head;
+			// Leftward movement from the visual start → jump to previous line
 			if (
 				tr.startState.doc.lineAt(oldPos).number === line.number &&
 				oldPos === afterMarks &&
@@ -149,9 +149,10 @@ const headingCursorFilter = EditorState.transactionFilter.of((tr) => {
 				modified = true;
 				return EditorSelection.cursor(line.from - 1);
 			}
+			// First line of the document: no previous line to jump to
+			if (line.from === 0) return range;
 		}
 
-		// Default: push cursor to after the marks
 		modified = true;
 		return EditorSelection.cursor(afterMarks);
 	});
@@ -181,11 +182,10 @@ const headingLevelOverrideHandler = EditorView.inputHandler.of((view, from, to, 
 	const existingMarks = existingMatch[1].length;
 	const visualStart = line.from + existingMarks + 1;
 
-	// Check if there are # marks typed between visual start and cursor
 	if (from <= visualStart) return false;
 
 	const typed = state.doc.sliceString(visualStart, from);
-	if (!/^#{1,6}$/.test(typed)) return false;
+	if (!hashOnlyPattern.test(typed)) return false;
 
 	const newLevel = typed.length;
 

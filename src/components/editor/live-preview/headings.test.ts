@@ -1,21 +1,16 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
-import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { buildDecorations } from "./headings";
 import {
 	collectDecorations,
+	createTestState,
 	createViewForTest,
 	lineDecorations,
 	replaceDecorations,
 } from "./test-helper";
 
-// Helper to dump syntax tree for debugging
 function dumpTree(doc: string): string[] {
-	const state = EditorState.create({
-		doc,
-		extensions: [markdown({ base: markdownLanguage })],
-	});
+	const state = createTestState(doc);
 	ensureSyntaxTree(state, state.doc.length, 5000);
 	const tree = syntaxTree(state);
 	const nodes: string[] = [];
