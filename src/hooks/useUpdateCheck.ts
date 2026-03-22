@@ -24,6 +24,7 @@ export function useUpdateCheck(enabled: boolean) {
 				if (cancelled) return;
 
 				await saveLastUpdateCheck(Date.now());
+				if (cancelled) return;
 
 				if (info.hasUpdate) {
 					setDescription(

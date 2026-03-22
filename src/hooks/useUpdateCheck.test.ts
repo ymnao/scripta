@@ -169,4 +169,34 @@ describe("useUpdateCheck", () => {
 			expect(result.current.dialogOpen).toBe(true);
 		});
 	});
+
+	it("saveLastUpdateCheck 待ち中にクリーンアップされたらダイアログを開かない", async () => {
+		// saveLastUpdateCheck を遅延させてクリーンアップのタイミングを作る
+		let resolveSave!: () => void;
+		mockedSaveLastUpdateCheck.mockReturnValue(
+			new Promise<void>((resolve) => {
+				resolveSave = resolve;
+			}),
+		);
+		mockedCheckForUpdate.mockResolvedValue(updateAvailable);
+
+		const { result, rerender } = renderHook(({ enabled }) => useUpdateCheck(enabled), {
+			initialProps: { enabled: true },
+		});
+
+		// checkForUpdate が呼ばれるまで待つ (saveLastUpdateCheck で止まる)
+		await vi.waitFor(() => {
+			expect(mockedSaveLastUpdateCheck).toHaveBeenCalled();
+		});
+
+		// クリーンアップを発火 (enabled を false に)
+		rerender({ enabled: false });
+
+		// 保存を完了させる
+		resolveSave();
+		await vi.waitFor(() => {});
+
+		// cancelled が true なのでダイアログは開かない
+		expect(result.current.dialogOpen).toBe(false);
+	});
 });
