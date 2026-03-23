@@ -1,0 +1,24 @@
+name: Setup Rust
+description: Install Rust stable toolchain and configure build cache
+
+inputs:
+  targets:
+    description: Additional Rust targets to install (comma-separated)
+    required: false
+    default: ""
+  save-if:
+    description: Whether to save the cache after the job
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+      with:
+        targets: ${{ inputs.targets }}
+
+    - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      with:
+        workspaces: src-tauri
+        save-if: ${{ inputs.save-if }}
