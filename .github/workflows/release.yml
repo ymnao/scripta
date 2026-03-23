@@ -109,7 +109,9 @@ jobs:
           {
             echo 'paths<<EOF'
             echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while IFS= read -r file; do
-              [ -f "$file" ] && echo "$file"
+              if [ -f "$file" ]; then
+                echo "$file"
+              fi
             done
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
