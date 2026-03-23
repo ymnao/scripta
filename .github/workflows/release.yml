@@ -108,7 +108,9 @@ jobs:
         run: |
           {
             echo 'paths<<EOF'
-            echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while IFS= read -r file; do
+            echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while IFS= read -r raw; do
+              # Convert Windows backslash paths to forward slashes for Git Bash
+              file="${raw//\\//}"
               if [ -f "$file" ]; then
                 echo "$file"
               fi
@@ -129,12 +131,14 @@ jobs:
           done <<< "${{ steps.artifact-files.outputs.paths }}"
 
       - name: Upload checksum artifact
+        if: steps.artifact-files.outputs.paths != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: checksums-${{ matrix.platform }}
           path: ${{ runner.temp }}/checksums-${{ matrix.platform }}.txt
 
       - name: Attest build provenance
+        if: steps.artifact-files.outputs.paths != ''
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: ${{ steps.artifact-files.outputs.paths }}
