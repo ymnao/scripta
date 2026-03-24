@@ -1,4 +1,6 @@
 import DOMPurify from "dompurify";
+import { FONT_FAMILY_MAP } from "../components/editor/editor-theme";
+import { useSettingsStore } from "../stores/settings";
 
 type CacheEntry =
 	| { status: "rendering"; promise: Promise<string> }
@@ -16,10 +18,15 @@ let idCounter = 0;
 /** initialize+render をアトミックに直列化するキュー */
 let renderQueue: Promise<void> = Promise.resolve();
 
-/** Mermaid デフォルトテーマのフォントファミリー */
-const MERMAID_FONT_FAMILY = '"trebuchet ms", verdana, arial, sans-serif';
-/** Mermaid 設定の fontSize に対応 */
-const MERMAID_FONT_SIZE = "14px";
+/** エディタ設定に合わせたフォントファミリーを返す */
+function getMermaidFontFamily(): string {
+	return FONT_FAMILY_MAP[useSettingsStore.getState().fontFamily];
+}
+
+/** エディタ設定に合わせたフォントサイズを返す */
+function getMermaidFontSize(): string {
+	return `${useSettingsStore.getState().fontSize}px`;
+}
 
 function getMermaidTheme(theme: "light" | "dark"): "dark" | "default" {
 	return theme === "dark" ? "dark" : "default";
@@ -112,7 +119,8 @@ function buildConfig(theme: "light" | "dark") {
 		securityLevel: "strict" as const,
 		theme: getMermaidTheme(theme),
 		themeCSS: getThemeCss(theme),
-		fontSize: 14,
+		fontFamily: getMermaidFontFamily(),
+		fontSize: useSettingsStore.getState().fontSize,
 		// WKWebView は tauri:// プロトコル下で SVG 内 <style> タグを処理しないため、
 		// <foreignObject> 内の HTML に CSS が届かずテキスト計測が不正確になる。
 		// htmlLabels: false で SVG <text> を使用し foreignObject を回避する。
@@ -247,9 +255,44 @@ export function clearMermaidCache(): void {
 // ── SVG スタイルのインライン化 ────────
 
 /**
- * Mermaid SVG 内の `<style>` ルールを各要素のインラインスタイルに展開する。
- * WKWebView が `tauri://` プロトコル下で SVG 内の `<style>` タグを
- * 正しく処理しないため、スタイルシート処理を完全にバイパスする。
+ * CSS プロパティのうち、同名の SVG プレゼンテーション属性が存在するもの。
+ * WKWebView tauri:// は SVG 要素の CSS（`<style>` タグ・インラインスタイル共に）
+ * をレンダリングに反映しない。プレゼンテーション属性は CSS エンジンを経由せず
+ * SVG レンダラが直接処理するため、WKWebView でも確実に機能する。
+ */
+const SVG_PRESENTATION_PROPS = new Set([
+	"fill",
+	"fill-opacity",
+	"fill-rule",
+	"stroke",
+	"stroke-width",
+	"stroke-dasharray",
+	"stroke-dashoffset",
+	"stroke-linecap",
+	"stroke-linejoin",
+	"stroke-opacity",
+	"font-family",
+	"font-size",
+	"font-weight",
+	"font-style",
+	"text-anchor",
+	"dominant-baseline",
+	"opacity",
+	"paint-order",
+	"text-decoration",
+	"visibility",
+]);
+
+/**
+ * Mermaid SVG 内の `<style>` ルールを各要素に展開する。
+ *
+ * WKWebView が `tauri://` プロトコル下で SVG の CSS エンジンを正しく処理しないため、
+ * `<style>` タグだけでなくインラインスタイルも SVG 要素に反映されない。
+ * そこで CSS ルールを解析し、各要素に:
+ * 1. インラインスタイル（`<style>` が機能する通常ブラウザ/dev モード向け）
+ * 2. SVG プレゼンテーション属性（WKWebView tauri:// 向け）
+ * の両方を設定する。
+ *
  * :hover 等の擬似クラスはインライン化できないため `<style>` は残す。
  */
 export function promoteMermaidStyles(svgEl: Element): void {
@@ -266,7 +309,6 @@ export function promoteMermaidStyles(svgEl: Element): void {
 			let targets: Element[];
 			try {
 				targets = [...svgEl.querySelectorAll(rule.selectorText)];
-				// SVG ルート自身もセレクタに一致するか確認
 				if (svgEl.matches(rule.selectorText)) targets.push(svgEl);
 			} catch {
 				continue; // 擬似クラス等の複雑なセレクタはスキップ
@@ -276,13 +318,15 @@ export function promoteMermaidStyles(svgEl: Element): void {
 				const elStyle = (el as HTMLElement | SVGElement).style;
 				for (let i = 0; i < rule.style.length; i++) {
 					const prop = rule.style[i];
-					// 既存のインラインスタイルは上書きしない
-					if (elStyle.getPropertyValue(prop)) continue;
-					elStyle.setProperty(
-						prop,
-						rule.style.getPropertyValue(prop),
-						rule.style.getPropertyPriority(prop),
-					);
+					const value = rule.style.getPropertyValue(prop);
+					// インラインスタイル設定（通常ブラウザ向け）
+					if (!elStyle.getPropertyValue(prop)) {
+						elStyle.setProperty(prop, value, rule.style.getPropertyPriority(prop));
+					}
+					// プレゼンテーション属性設定（WKWebView tauri:// 向け）
+					if (SVG_PRESENTATION_PROPS.has(prop) && !el.getAttribute(prop)) {
+						el.setAttribute(prop, value);
+					}
 				}
 			}
 		}
@@ -290,21 +334,19 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		// replaceSync に失敗した場合は元の <style> がそのまま機能する
 	}
 
-	// SVG <text>/<tspan> にプレゼンテーション属性でフォントを設定。
-	// WKWebView tauri:// では <style> が機能しないため、
-	// CSS エンジンを経由しない SVG 固有のプレゼンテーション属性をフォールバックとして使用する。
+	// CSS ルールにマッチしなかった <text>/<tspan> 用のフォールバック
 	for (const el of svgEl.querySelectorAll("text, tspan")) {
 		if (!el.getAttribute("font-family")) {
-			el.setAttribute("font-family", MERMAID_FONT_FAMILY);
+			el.setAttribute("font-family", getMermaidFontFamily());
 		}
 		if (!el.getAttribute("font-size")) {
-			el.setAttribute("font-size", MERMAID_FONT_SIZE);
+			el.setAttribute("font-size", getMermaidFontSize());
 		}
 	}
 	if (!svgEl.getAttribute("font-family")) {
-		svgEl.setAttribute("font-family", MERMAID_FONT_FAMILY);
+		svgEl.setAttribute("font-family", getMermaidFontFamily());
 	}
 	if (!svgEl.getAttribute("font-size")) {
-		svgEl.setAttribute("font-size", MERMAID_FONT_SIZE);
+		svgEl.setAttribute("font-size", getMermaidFontSize());
 	}
 }

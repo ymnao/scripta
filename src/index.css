@@ -44,25 +44,6 @@
 	}
 }
 
-/*
- * Mermaid SVG base styles — WKWebView compatibility
- *
- * WKWebView は tauri:// プロトコル下で <style> タグ（SVG 内を含む）を
- * 正しく処理しない。mermaid.render() 時のテキスト計測にはフォント情報が
- * 必要なため、<link> 経由の静的 CSS でベースフォントを提供する。
- * mermaid 内部 <style> が機能する環境では #mermaid-N セレクタ (1,0,0)
- * がこのルール (0,1,1) を上書きするため影響しない。
- */
-svg[id^="mermaid-"] {
-	font-family: "trebuchet ms", verdana, arial, sans-serif;
-	font-size: 14px;
-	fill: #333;
-}
-
-.dark svg[id^="mermaid-"] {
-	fill: #ccc;
-}
-
 /* Editor error display */
 .editor-error {
 	display: flex;
