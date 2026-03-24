@@ -233,40 +233,48 @@ export function getCacheEntry(source: string, theme: "light" | "dark"): CacheEnt
 export function clearMermaidCache(): void {
 	cacheGeneration++;
 	cache.clear();
-	// テーマ変更時に promoted スタイルもクリア（新テーマで再構築される）
-	if (mermaidStyleSheet) {
-		mermaidStyleSheet.replaceSync("");
-	}
 }
 
-// ── adoptedStyleSheets による SVG スタイル適用 ────────
-
-let mermaidStyleSheet: CSSStyleSheet | null = null;
+// ── SVG スタイルのインライン化 ────────
 
 /**
- * Mermaid SVG 内の `<style>` ルールを `document.adoptedStyleSheets` にも複製する。
+ * Mermaid SVG 内の `<style>` ルールを各要素のインラインスタイルに展開する。
  * WKWebView が `tauri://` プロトコル下で SVG 内の `<style>` タグを
- * 正しく処理しないため、CSSOM API でもスタイルを適用する。
- * 元の `<style>` はフォールバックとして残す（二重適用は冪等なので影響なし）。
- * 各 SVG は一意な `#mermaid-N` ID スコープを持つためルールは競合しない。
+ * 正しく処理しないため、スタイルシート処理を完全にバイパスする。
+ * :hover 等の擬似クラスはインライン化できないため `<style>` は残す。
  */
 export function promoteMermaidStyles(svgEl: Element): void {
 	const styleEl = svgEl.querySelector("style");
 	if (!styleEl?.textContent) return;
 
-	if (!mermaidStyleSheet) {
-		mermaidStyleSheet = new CSSStyleSheet();
-		document.adoptedStyleSheets = [...document.adoptedStyleSheets, mermaidStyleSheet];
-	}
-
 	try {
-		const tempSheet = new CSSStyleSheet();
-		tempSheet.replaceSync(styleEl.textContent);
-		for (const rule of tempSheet.cssRules) {
+		const sheet = new CSSStyleSheet();
+		sheet.replaceSync(styleEl.textContent);
+
+		for (const rule of sheet.cssRules) {
+			if (!(rule instanceof CSSStyleRule)) continue;
+
+			let targets: Element[];
 			try {
-				mermaidStyleSheet.insertRule(rule.cssText, mermaidStyleSheet.cssRules.length);
+				targets = [...svgEl.querySelectorAll(rule.selectorText)];
+				// SVG ルート自身もセレクタに一致するか確認
+				if (svgEl.matches(rule.selectorText)) targets.push(svgEl);
 			} catch {
-				// 無効なルールはスキップ
+				continue; // 擬似クラス等の複雑なセレクタはスキップ
+			}
+
+			for (const el of targets) {
+				const elStyle = (el as HTMLElement | SVGElement).style;
+				for (let i = 0; i < rule.style.length; i++) {
+					const prop = rule.style[i];
+					// 既存のインラインスタイルは上書きしない
+					if (elStyle.getPropertyValue(prop)) continue;
+					elStyle.setProperty(
+						prop,
+						rule.style.getPropertyValue(prop),
+						rule.style.getPropertyPriority(prop),
+					);
+				}
 			}
 		}
 	} catch {
