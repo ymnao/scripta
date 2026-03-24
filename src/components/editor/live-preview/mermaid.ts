@@ -114,6 +114,15 @@ export class MermaidWidget extends WidgetType {
 	toDOM(): HTMLElement {
 		const wrapper = document.createElement("div");
 		wrapper.className = "cm-mermaid-widget";
+		// WKWebView (tauri://) でテーマ CSS が効かない場合に備え
+		// レイアウトに必須なスタイルをインラインでも設定する
+		Object.assign(wrapper.style, {
+			display: "flex",
+			justifyContent: "center",
+			padding: "8px 0",
+			margin: "4px 0",
+			overflow: "hidden",
+		});
 
 		if (this.svg) {
 			// useMaxWidth: true (デフォルト) により Mermaid は SVG に
@@ -123,10 +132,12 @@ export class MermaidWidget extends WidgetType {
 			// コンテナ (.cm-mermaid-inner) の max-width が最終的な上限。
 			const inner = document.createElement("div");
 			inner.className = "cm-mermaid-inner";
+			Object.assign(inner.style, { width: "100%", textAlign: "center" });
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
 				promoteMermaidStyles(svgEl);
+				svgEl.style.display = "inline-block";
 				const mw = svgEl.style.maxWidth;
 				if (mw) {
 					// flowchart, sequence 等: max-width を 1.35 倍に拡大
