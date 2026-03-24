@@ -116,31 +116,48 @@ export class MermaidWidget extends WidgetType {
 		wrapper.className = "cm-mermaid-widget";
 
 		if (this.svg) {
-			// useMaxWidth: true (デフォルト) により Mermaid は SVG に
-			// width="100%" + style="max-width: Xpx" を設定する。
-			// この max-width を 1.35 倍に拡大することで、
-			// エディタ幅に合った自然なサイズで表示する。
-			// コンテナ (.cm-mermaid-inner) の max-width が最終的な上限。
 			const inner = document.createElement("div");
 			inner.className = "cm-mermaid-inner";
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
 				promoteMermaidStyles(svgEl);
-				const mw = svgEl.style.maxWidth;
+
+				// max-width を SVG の style 属性から取得。
+				// WKWebView tauri:// は SVG の style 属性を CSSOM に反映しない
+				// 可能性があるため、属性文字列と viewBox もフォールバックとして使う。
+				let mw: string | undefined;
+				const cssom = svgEl.style.maxWidth;
+				if (cssom) {
+					mw = cssom;
+				} else {
+					const styleAttr = svgEl.getAttribute("style") ?? "";
+					const match = styleAttr.match(/max-width:\s*([\d.]+)px/);
+					if (match) {
+						mw = `${match[1]}px`;
+					}
+				}
+				if (!mw) {
+					const vb = svgEl.getAttribute("viewBox");
+					if (vb) {
+						const parts = vb.split(/\s+/);
+						if (parts.length === 4) {
+							mw = `${parts[2]}px`;
+						}
+					}
+				}
+
 				if (mw) {
-					// flowchart, sequence 等: max-width を 1.35 倍に拡大
 					const natural = Number.parseFloat(mw);
 					if (!Number.isNaN(natural)) {
-						svgEl.style.maxWidth = `${natural * 1.35}px`;
+						// max-width を SVG ではなくコンテナ div に設定する。
+						// WKWebView tauri:// は SVG 要素の CSS max-width を処理しないが、
+						// HTML 要素の max-width は正常に機能する。
+						inner.style.maxWidth = `${natural * 1.35}px`;
 					}
-				} else {
-					// gantt, pie, gitGraph 等: max-width なしで
-					// width="100%" height="100%" のパターン。
-					// コンテナ幅いっぱいに表示する。
-					svgEl.setAttribute("width", "100%");
 				}
-				// height を除去し viewBox のアスペクト比で自動算出させる
+				// SVG は viewBox でアスペクト比を保持しコンテナ幅に合わせる
+				svgEl.setAttribute("width", "100%");
 				svgEl.removeAttribute("height");
 			}
 			wrapper.appendChild(inner);

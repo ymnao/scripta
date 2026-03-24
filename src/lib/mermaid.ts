@@ -16,6 +16,11 @@ let idCounter = 0;
 /** initialize+render をアトミックに直列化するキュー */
 let renderQueue: Promise<void> = Promise.resolve();
 
+/** Mermaid デフォルトテーマのフォントファミリー */
+const MERMAID_FONT_FAMILY = '"trebuchet ms", verdana, arial, sans-serif';
+/** Mermaid 設定の fontSize に対応 */
+const MERMAID_FONT_SIZE = "14px";
+
 function getMermaidTheme(theme: "light" | "dark"): "dark" | "default" {
 	return theme === "dark" ? "dark" : "default";
 }
@@ -108,6 +113,10 @@ function buildConfig(theme: "light" | "dark") {
 		theme: getMermaidTheme(theme),
 		themeCSS: getThemeCss(theme),
 		fontSize: 14,
+		// WKWebView は tauri:// プロトコル下で SVG 内 <style> タグを処理しないため、
+		// <foreignObject> 内の HTML に CSS が届かずテキスト計測が不正確になる。
+		// htmlLabels: false で SVG <text> を使用し foreignObject を回避する。
+		htmlLabels: false,
 		flowchart: {
 			nodeSpacing: 40,
 			rankSpacing: 40,
@@ -279,5 +288,23 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		}
 	} catch {
 		// replaceSync に失敗した場合は元の <style> がそのまま機能する
+	}
+
+	// SVG <text>/<tspan> にプレゼンテーション属性でフォントを設定。
+	// WKWebView tauri:// では <style> が機能しないため、
+	// CSS エンジンを経由しない SVG 固有のプレゼンテーション属性をフォールバックとして使用する。
+	for (const el of svgEl.querySelectorAll("text, tspan")) {
+		if (!el.getAttribute("font-family")) {
+			el.setAttribute("font-family", MERMAID_FONT_FAMILY);
+		}
+		if (!el.getAttribute("font-size")) {
+			el.setAttribute("font-size", MERMAID_FONT_SIZE);
+		}
+	}
+	if (!svgEl.getAttribute("font-family")) {
+		svgEl.setAttribute("font-family", MERMAID_FONT_FAMILY);
+	}
+	if (!svgEl.getAttribute("font-size")) {
+		svgEl.setAttribute("font-size", MERMAID_FONT_SIZE);
 	}
 }
