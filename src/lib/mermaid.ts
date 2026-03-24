@@ -244,9 +244,10 @@ export function clearMermaidCache(): void {
 let mermaidStyleSheet: CSSStyleSheet | null = null;
 
 /**
- * Mermaid SVG 内の `<style>` タグを抽出して `document.adoptedStyleSheets` に移動する。
+ * Mermaid SVG 内の `<style>` ルールを `document.adoptedStyleSheets` にも複製する。
  * WKWebView が `tauri://` プロトコル下で SVG 内の `<style>` タグを
- * 正しく処理しないため、CSSOM API で直接スタイルを適用する。
+ * 正しく処理しないため、CSSOM API でもスタイルを適用する。
+ * 元の `<style>` はフォールバックとして残す（二重適用は冪等なので影響なし）。
  * 各 SVG は一意な `#mermaid-N` ID スコープを持つためルールは競合しない。
  */
 export function promoteMermaidStyles(svgEl: Element): void {
@@ -269,9 +270,6 @@ export function promoteMermaidStyles(svgEl: Element): void {
 			}
 		}
 	} catch {
-		// replaceSync に失敗した場合は <style> をそのまま残す
-		return;
+		// replaceSync に失敗した場合は元の <style> がそのまま機能する
 	}
-
-	styleEl.remove();
 }
