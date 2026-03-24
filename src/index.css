@@ -55,6 +55,12 @@
  */
 svg[id^="mermaid-"] {
 	font-family: "trebuchet ms", verdana, arial, sans-serif;
+	font-size: 14px;
+	fill: #333;
+}
+
+.dark svg[id^="mermaid-"] {
+	fill: #ccc;
 }
 
 /* Editor error display */
