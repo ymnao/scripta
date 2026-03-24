@@ -14,7 +14,12 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
+import {
+	clearMermaidCache,
+	getCacheEntry,
+	promoteMermaidStyles,
+	renderMermaid,
+} from "../../../lib/mermaid";
 import { useThemeStore } from "../../../stores/theme";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
@@ -121,6 +126,7 @@ export class MermaidWidget extends WidgetType {
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
+				promoteMermaidStyles(svgEl);
 				const mw = svgEl.style.maxWidth;
 				if (mw) {
 					// flowchart, sequence 等: max-width を 1.35 倍に拡大

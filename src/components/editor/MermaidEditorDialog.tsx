@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isIMEComposing } from "../../lib/ime";
-import { renderMermaid } from "../../lib/mermaid";
+import { promoteMermaidStyles, renderMermaid } from "../../lib/mermaid";
 import { useThemeStore } from "../../stores/theme";
 import { DialogBase } from "../common/DialogBase";
 
@@ -97,6 +97,12 @@ export function MermaidEditorDialog({
 						{preview.svg ? (
 							<div
 								className="w-full [&_svg]:mx-auto [&_svg]:block"
+								ref={(node) => {
+									if (node) {
+										const svg = node.querySelector("svg");
+										if (svg) promoteMermaidStyles(svg);
+									}
+								}}
 								// biome-ignore lint/security/noDangerouslySetInnerHtml: renderMermaid が DOMPurify でサニタイズ済み
 								dangerouslySetInnerHTML={{ __html: preview.svg }}
 							/>

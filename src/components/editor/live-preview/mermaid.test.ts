@@ -5,6 +5,7 @@ vi.mock("../../../lib/mermaid", () => ({
 	renderMermaid: vi.fn(),
 	getCacheEntry: vi.fn(() => undefined),
 	clearMermaidCache: vi.fn(),
+	promoteMermaidStyles: vi.fn(),
 }));
 
 // Mock theme store

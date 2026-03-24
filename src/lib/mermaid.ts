@@ -233,4 +233,45 @@ export function getCacheEntry(source: string, theme: "light" | "dark"): CacheEnt
 export function clearMermaidCache(): void {
 	cacheGeneration++;
 	cache.clear();
+	// テーマ変更時に promoted スタイルもクリア（新テーマで再構築される）
+	if (mermaidStyleSheet) {
+		mermaidStyleSheet.replaceSync("");
+	}
+}
+
+// ── adoptedStyleSheets による SVG スタイル適用 ────────
+
+let mermaidStyleSheet: CSSStyleSheet | null = null;
+
+/**
+ * Mermaid SVG 内の `<style>` タグを抽出して `document.adoptedStyleSheets` に移動する。
+ * WKWebView が `tauri://` プロトコル下で SVG 内の `<style>` タグを
+ * 正しく処理しないため、CSSOM API で直接スタイルを適用する。
+ * 各 SVG は一意な `#mermaid-N` ID スコープを持つためルールは競合しない。
+ */
+export function promoteMermaidStyles(svgEl: Element): void {
+	const styleEl = svgEl.querySelector("style");
+	if (!styleEl?.textContent) return;
+
+	if (!mermaidStyleSheet) {
+		mermaidStyleSheet = new CSSStyleSheet();
+		document.adoptedStyleSheets = [...document.adoptedStyleSheets, mermaidStyleSheet];
+	}
+
+	try {
+		const tempSheet = new CSSStyleSheet();
+		tempSheet.replaceSync(styleEl.textContent);
+		for (const rule of tempSheet.cssRules) {
+			try {
+				mermaidStyleSheet.insertRule(rule.cssText, mermaidStyleSheet.cssRules.length);
+			} catch {
+				// 無効なルールはスキップ
+			}
+		}
+	} catch {
+		// replaceSync に失敗した場合は <style> をそのまま残す
+		return;
+	}
+
+	styleEl.remove();
 }
