@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import { describe, expect, it } from "vitest";
 import { promoteMermaidStyles, sanitizeMermaidSvg } from "./mermaid";
 
@@ -174,5 +175,28 @@ describe("promoteMermaidStyles", () => {
 		}
 
 		expect(Object.keys(matchResults).length).toBeGreaterThan(0);
+	});
+});
+
+describe("DOMPurify と text-anchor 属性", () => {
+	it("DOMPurify が text-anchor 属性とインラインスタイルを保持する", () => {
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg" id="mermaid-0">
+<text text-anchor="middle" x="100" y="50">Hello</text>
+<text style="text-anchor: middle; font-size: 14px" x="300" y="50">Styled</text>
+</svg>`;
+
+		// mermaid 内部 DOMPurify
+		const mermaidResult = DOMPurify.sanitize(svg, {
+			ADD_TAGS: ["foreignobject"],
+			ADD_ATTR: ["dominant-baseline"],
+			HTML_INTEGRATION_POINTS: { foreignobject: true },
+		});
+		expect(mermaidResult).toContain('text-anchor="middle"');
+		expect(mermaidResult).toContain("text-anchor: middle");
+
+		// sanitizeMermaidSvg
+		const ourResult = sanitizeMermaidSvg(svg);
+		expect(ourResult).toContain('text-anchor="middle"');
+		expect(ourResult).toContain("text-anchor: middle");
 	});
 });

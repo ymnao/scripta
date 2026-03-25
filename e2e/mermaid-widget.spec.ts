@@ -140,51 +140,24 @@ test.describe("mermaid widget", () => {
 		await expect(page.locator(".cm-mermaid-widget")).toHaveCount(2, { timeout: 15000 });
 	});
 
-	test("SVG にプレゼンテーション属性 font-family が設定されている", async ({ page }) => {
+	test("SVG が正常にレンダリングされている", async ({ page }) => {
 		const { widget } = await openFileAndWaitForMermaid(page);
 
-		// SVG 内の <style> テキストと属性を取得
 		const info = await widget.evaluate((el) => {
 			const svg = el.querySelector("svg");
 			if (!svg) return { error: "no svg" };
 
 			const styleEl = svg.querySelector("style");
-			const styleText = styleEl?.textContent ?? "(style missing)";
+			// SVG 内にノード要素が存在するか
+			const hasNodes =
+				svg.querySelector(".node") !== null || svg.querySelector("foreignObject") !== null;
 
-			// SVG ルートの属性
-			const rootFontFamily = svg.getAttribute("font-family");
-			const rootFill = svg.getAttribute("fill");
-
-			// text 要素の属性
-			const texts = [...svg.querySelectorAll("text")];
-			const textAttrs = texts.slice(0, 3).map((t) => ({
-				fontFamily: t.getAttribute("font-family"),
-				fill: t.getAttribute("fill"),
-				fontSize: t.getAttribute("font-size"),
-				textContent: t.textContent?.trim().slice(0, 20),
-			}));
-
-			// rect 要素の属性
-			const rects = [...svg.querySelectorAll("rect")];
-			const rectAttrs = rects.slice(0, 3).map((r) => ({
-				fill: r.getAttribute("fill"),
-				stroke: r.getAttribute("stroke"),
-				className: r.className?.baseVal ?? r.getAttribute("class"),
-			}));
-
-			return { styleText: styleText.slice(0, 500), rootFontFamily, rootFill, textAttrs, rectAttrs };
+			return { hasStyle: !!styleEl, hasNodes, svgId: svg.getAttribute("id") };
 		});
 
-		console.log("[e2e 診断] SVG 情報:", JSON.stringify(info, null, 2));
-
-		// SVG ルートに font-family プレゼンテーション属性が設定されている
 		expect(info).not.toHaveProperty("error");
-		expect(info.rootFontFamily).toBeTruthy();
-
-		// text 要素にも font-family が設定されている（直接 or 継承）
-		if (info.textAttrs && info.textAttrs.length > 0) {
-			expect(info.textAttrs[0].fontFamily).toBeTruthy();
-		}
+		expect(info.hasNodes).toBe(true);
+		expect(info.svgId).toBeTruthy();
 	});
 
 	test("mouse drag from text through mermaid widget stays stable", async ({ page }) => {

@@ -18,6 +18,24 @@ let idCounter = 0;
 /** initialize+render をアトミックに直列化するキュー */
 let renderQueue: Promise<void> = Promise.resolve();
 
+/**
+ * mermaid.render() 中の SVG `<text>` 要素に `text-anchor="middle"` を設定。
+ * WKWebView tauri:// では要素生成時の setAttribute のみ text-anchor が有効。
+ */
+function patchTextAnchor(): () => void {
+	const origCreateElementNS = document.createElementNS.bind(document);
+	document.createElementNS = ((namespaceURI: string, qualifiedName: string) => {
+		const el = origCreateElementNS(namespaceURI, qualifiedName);
+		if (namespaceURI === "http://www.w3.org/2000/svg" && qualifiedName === "text") {
+			el.setAttribute("text-anchor", "middle");
+		}
+		return el;
+	}) as typeof document.createElementNS;
+	return () => {
+		document.createElementNS = origCreateElementNS;
+	};
+}
+
 /** エディタ設定に合わせたフォントファミリーを返す */
 function getMermaidFontFamily(): string {
 	return FONT_FAMILY_MAP[useSettingsStore.getState().fontFamily];
@@ -113,6 +131,26 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 	return serializer.serializeToString(sanitizedDoc.documentElement);
 }
 
+/**
+ * サニタイズ済み SVG 文字列を一時的に DOM に挿入し、promoteMermaidStyles を適用して
+ * プレゼンテーション属性（text-anchor, fill, font-family 等）を SVG 文字列に焼き込む。
+ *
+ * toDOM() での DOM 操作ではなく SVG 文字列自体に属性を含めることで、
+ * innerHTML パース時に WKWebView が属性を確実に認識する。
+ */
+function bakeStyledSvg(svgString: string): string {
+	if (!svgString.includes("<svg")) return svgString;
+
+	const container = document.createElement("div");
+	container.innerHTML = svgString;
+	const svgEl = container.querySelector("svg");
+	if (!svgEl) return svgString;
+
+	promoteMermaidStyles(svgEl);
+
+	return container.innerHTML;
+}
+
 function buildConfig(theme: "light" | "dark") {
 	return {
 		startOnLoad: false,
@@ -121,22 +159,19 @@ function buildConfig(theme: "light" | "dark") {
 		themeCSS: getThemeCss(theme),
 		fontFamily: getMermaidFontFamily(),
 		fontSize: useSettingsStore.getState().fontSize,
-		// WKWebView は tauri:// プロトコル下で SVG 内 <style> タグを処理しないため、
-		// <foreignObject> 内の HTML に CSS が届かずテキスト計測が不正確になる。
-		// htmlLabels: false で SVG <text> を使用し foreignObject を回避する。
 		htmlLabels: false,
 		flowchart: {
 			nodeSpacing: 40,
 			rankSpacing: 40,
-			padding: 12,
+			padding: 15,
 			diagramPadding: 8,
 		},
 		sequence: {
 			diagramMarginX: 25,
 			diagramMarginY: 5,
 			actorMargin: 30,
-			boxMargin: 6,
-			boxTextMargin: 4,
+			boxMargin: 10,
+			boxTextMargin: 5,
 			messageMargin: 28,
 		},
 	};
@@ -212,9 +247,16 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 			try {
 				await ensureInitialized(theme);
 				const id = `mermaid-${idCounter++}`;
-				const result = await mermaidModule?.default.render(id, source);
-				const rawSvg = result?.svg ?? "";
-				const svg = sanitizeMermaidSvg(rawSvg);
+
+				const unpatch = patchTextAnchor();
+				let rawSvg: string;
+				try {
+					const result = await mermaidModule?.default.render(id, source);
+					rawSvg = result?.svg ?? "";
+				} finally {
+					unpatch();
+				}
+				const svg = bakeStyledSvg(sanitizeMermaidSvg(rawSvg));
 				// レンダリング中にキャッシュがクリア/エビクトされていたら書き戻さない
 				if (gen !== cacheGeneration || !cache.has(key)) {
 					resolve(svg);
@@ -299,6 +341,14 @@ export function promoteMermaidStyles(svgEl: Element): void {
 	const styleEl = svgEl.querySelector("style");
 	if (!styleEl?.textContent) return;
 
+	// SVG 要素の ID（例: "mermaid-0"）。CSS セレクタから除去して
+	// 切り離された DOM でも querySelectorAll が動作するようにする。
+	// WKWebView は切り離された DOM で #id セレクタを解決できない。
+	const svgId = svgEl.getAttribute("id") ?? "";
+	const idPattern = svgId
+		? new RegExp(`#${svgId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "g")
+		: null;
+
 	try {
 		const sheet = new CSSStyleSheet();
 		sheet.replaceSync(styleEl.textContent);
@@ -308,8 +358,18 @@ export function promoteMermaidStyles(svgEl: Element): void {
 
 			let targets: Element[];
 			try {
-				targets = [...svgEl.querySelectorAll(rule.selectorText)];
-				if (svgEl.matches(rule.selectorText)) targets.push(svgEl);
+				// "#mermaid-0 .node text" → ".node text" に変換
+				const selector = idPattern
+					? rule.selectorText.replace(idPattern, "").trim()
+					: rule.selectorText;
+
+				if (!selector) {
+					// "#mermaid-0" のみ → SVG ルート自身に適用
+					targets = [svgEl];
+				} else {
+					targets = [...svgEl.querySelectorAll(selector)];
+					if (svgEl.matches(selector)) targets.push(svgEl);
+				}
 			} catch {
 				continue; // 擬似クラス等の複雑なセレクタはスキップ
 			}
@@ -332,6 +392,23 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		}
 	} catch {
 		// replaceSync に失敗した場合は元の <style> がそのまま機能する
+	}
+
+	// d3 の .style() で設定されたインラインスタイルをプレゼンテーション属性に変換。
+	// sequenceDiagram のアクター名等は CSS <style> ではなく d3 の .style() で
+	// text-anchor 等を設定するため、<style> ルール展開では拾えない。
+	// WKWebView tauri:// はインラインスタイルも処理しないため、
+	// style 属性文字列をパースしてプレゼンテーション属性にコピーする。
+	for (const el of svgEl.querySelectorAll("[style]")) {
+		const styleAttr = el.getAttribute("style") ?? "";
+		for (const prop of SVG_PRESENTATION_PROPS) {
+			if (el.getAttribute(prop)) continue;
+			const regex = new RegExp(`(?:^|;)\\s*${prop}:\\s*([^;]+)`);
+			const match = styleAttr.match(regex);
+			if (match) {
+				el.setAttribute(prop, match[1].trim());
+			}
+		}
 	}
 
 	// CSS ルールにマッチしなかった <text>/<tspan> 用のフォールバック
