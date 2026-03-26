@@ -97,9 +97,7 @@ describe("promoteMermaidStyles", () => {
 		expect(svgEl).not.toBeNull();
 		if (!svgEl) return;
 
-		const styleEl = svgEl.querySelector("style");
-		expect(styleEl).not.toBeNull();
-		expect(styleEl?.textContent).toContain("font-family");
+		expect(svgEl.querySelector("style")).not.toBeNull();
 
 		promoteMermaidStyles(svgEl);
 
@@ -124,6 +122,44 @@ describe("promoteMermaidStyles", () => {
 		const link = svgEl.querySelector(".flowchart-link");
 		expect(link).not.toBeNull();
 		expect(link?.getAttribute("stroke")).toBeTruthy();
+
+		// <style> タグは残っている（fill/stroke/font の CSS は正常に動作する）
+		expect(svgEl.querySelector("style")).not.toBeNull();
+
+		// <style> から text-anchor 宣言が除去されている
+		const styleContent = svgEl.querySelector("style")?.textContent ?? "";
+		expect(styleContent).not.toContain("text-anchor");
+		// fill 等は残っている
+		expect(styleContent).toContain("fill");
+	});
+
+	it("text-anchor が CSS・インラインから除去され属性のみに設定される", () => {
+		const svg = `<svg id="mermaid-0" xmlns="http://www.w3.org/2000/svg">
+<style>#mermaid-0 text { text-anchor: end; fill: red; }</style>
+<text style="text-anchor: middle; fill: blue">Hello</text>
+</svg>`;
+		const inner = document.createElement("div");
+		inner.innerHTML = svg;
+		const svgEl = inner.querySelector("svg");
+		expect(svgEl).not.toBeNull();
+		if (!svgEl) return;
+
+		promoteMermaidStyles(svgEl);
+
+		const textEl = svgEl.querySelector("text");
+		// プレゼンテーション属性にインラインスタイル値（d3.style() 由来）が設定される
+		expect(textEl?.getAttribute("text-anchor")).toBe("middle");
+
+		// インラインスタイルから text-anchor が除去されている
+		const styleAttr = textEl?.getAttribute("style") ?? "";
+		expect(styleAttr).not.toContain("text-anchor");
+		// fill 等は残っている
+		expect(styleAttr).toContain("fill");
+
+		// <style> から text-anchor が除去されている
+		const cssContent = svgEl.querySelector("style")?.textContent ?? "";
+		expect(cssContent).not.toContain("text-anchor");
+		expect(cssContent).toContain("fill");
 	});
 
 	it("CSSStyleSheet.replaceSync で Mermaid CSS を正しくパースできる", () => {

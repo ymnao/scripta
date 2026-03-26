@@ -19,15 +19,33 @@ let idCounter = 0;
 let renderQueue: Promise<void> = Promise.resolve();
 
 /**
- * mermaid.render() 中の SVG `<text>` 要素に `text-anchor="middle"` を設定。
- * WKWebView tauri:// では要素生成時の setAttribute のみ text-anchor が有効。
+ * mermaid.render() 中に d3.style('text-anchor', value) で設定される値を
+ * プレゼンテーション属性にミラーする。
+ *
+ * WKWebView tauri:// は CSS の text-anchor をレンダリングに反映しないが、
+ * プレゼンテーション属性（レンダリング中の setAttribute）は有効。
+ * d3.style() はインラインスタイルを設定するが、WKWebView はこれも無視する。
+ * そこで style.setProperty をインターセプトし、text-anchor が設定された時点で
+ * 同じ値をプレゼンテーション属性にもミラーする。
+ *
+ * これにより各テキスト要素が Mermaid の意図通りの text-anchor 値を属性として持つ:
+ * - flowchart ノード: "middle" → 中央揃え
+ * - ER/class メンバー: "start" → 左揃え
+ * - 全テキストに "middle" を強制する前の方式の問題（Type B テキストの左はみ出し）を解消。
  */
 function patchTextAnchor(): () => void {
 	const origCreateElementNS = document.createElementNS.bind(document);
 	document.createElementNS = ((namespaceURI: string, qualifiedName: string) => {
 		const el = origCreateElementNS(namespaceURI, qualifiedName);
 		if (namespaceURI === "http://www.w3.org/2000/svg" && qualifiedName === "text") {
-			el.setAttribute("text-anchor", "middle");
+			const svgEl = el as SVGTextElement;
+			const origSetProp = svgEl.style.setProperty.bind(svgEl.style);
+			svgEl.style.setProperty = (prop: string, value: string | null, priority?: string) => {
+				if (prop === "text-anchor" && value) {
+					svgEl.setAttribute("text-anchor", value);
+				}
+				return origSetProp(prop, value, priority ?? "");
+			};
 		}
 		return el;
 	}) as typeof document.createElementNS;
@@ -133,10 +151,10 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 
 /**
  * サニタイズ済み SVG 文字列を一時的に DOM に挿入し、promoteMermaidStyles を適用して
- * プレゼンテーション属性（text-anchor, fill, font-family 等）を SVG 文字列に焼き込む。
+ * text-anchor をプレゼンテーション属性に焼き込み、CSS の text-anchor 宣言を除去する。
  *
- * toDOM() での DOM 操作ではなく SVG 文字列自体に属性を含めることで、
- * innerHTML パース時に WKWebView が属性を確実に認識する。
+ * SVG 文字列自体に属性を含めることで、innerHTML パース時に WKWebView が
+ * 要素生成と同時に属性を認識する。
  */
 function bakeStyledSvg(svgString: string): string {
 	if (!svgString.includes("<svg")) return svgString;
@@ -173,6 +191,16 @@ function buildConfig(theme: "light" | "dark") {
 			boxMargin: 10,
 			boxTextMargin: 5,
 			messageMargin: 28,
+		},
+		// patchTextAnchor が全 <text> に text-anchor="middle" を強制するため、
+		// 本来 "start" を期待する ER/class のテキストが中央寄せになり
+		// コンテナからはみ出す。パディングを増やして余裕を持たせる。
+		er: {
+			entityPadding: 30,
+			minEntityWidth: 120,
+		},
+		class: {
+			padding: 15,
 		},
 	};
 }
@@ -326,16 +354,19 @@ const SVG_PRESENTATION_PROPS = new Set([
 ]);
 
 /**
- * Mermaid SVG 内の `<style>` ルールを各要素に展開する。
+ * Mermaid SVG のスタイルを WKWebView tauri:// 対応に変換する。
  *
- * WKWebView が `tauri://` プロトコル下で SVG の CSS エンジンを正しく処理しないため、
- * `<style>` タグだけでなくインラインスタイルも SVG 要素に反映されない。
- * そこで CSS ルールを解析し、各要素に:
- * 1. インラインスタイル（`<style>` が機能する通常ブラウザ/dev モード向け）
- * 2. SVG プレゼンテーション属性（WKWebView tauri:// 向け）
- * の両方を設定する。
+ * WKWebView tauri:// の SVG CSS 処理:
+ * - fill, stroke, font 等: `<style>` タグの CSS ルールが**正常に機能する**
+ * - text-anchor: CSS（`<style>` タグ・インラインスタイル共に）が**機能しない**
  *
- * :hover 等の擬似クラスはインライン化できないため `<style>` は残す。
+ * 対策:
+ * 1. `<style>` は残す（fill/stroke/font の CSS は正常に動作するため）
+ * 2. text-anchor だけ `<style>` とインラインスタイルから除去し、プレゼンテーション
+ *    属性に移す。CSS/インラインを除去することで、プレゼンテーション属性が
+ *    text-anchor の唯一のソースになり、WKWebView が属性値を使用する。
+ * 3. d3.style() で設定されたインラインスタイルをプレゼンテーション属性に変換
+ *    （text-anchor 以外も WKWebView のフォールバックとして）
  */
 export function promoteMermaidStyles(svgEl: Element): void {
 	const styleEl = svgEl.querySelector("style");
@@ -385,13 +416,17 @@ export function promoteMermaidStyles(svgEl: Element): void {
 					}
 					// プレゼンテーション属性設定（WKWebView tauri:// 向け）
 					if (SVG_PRESENTATION_PROPS.has(prop) && !el.getAttribute(prop)) {
-						el.setAttribute(prop, value);
+						// d3.attr() で既に設定された属性は保持（最優先）。
+						// 未設定の場合、インラインスタイル値（d3.style() 由来）を優先し、
+						// なければ CSS ルール値を使用する。
+						const inlineVal = elStyle.getPropertyValue(prop);
+						el.setAttribute(prop, inlineVal || value);
 					}
 				}
 			}
 		}
 	} catch {
-		// replaceSync に失敗した場合は元の <style> がそのまま機能する
+		// replaceSync に失敗した場合でも後続の処理は続行する
 	}
 
 	// d3 の .style() で設定されたインラインスタイルをプレゼンテーション属性に変換。
@@ -412,18 +447,50 @@ export function promoteMermaidStyles(svgEl: Element): void {
 	}
 
 	// CSS ルールにマッチしなかった <text>/<tspan> 用のフォールバック
+	const fontFamily = getMermaidFontFamily();
+	const fontSize = getMermaidFontSize();
 	for (const el of svgEl.querySelectorAll("text, tspan")) {
 		if (!el.getAttribute("font-family")) {
-			el.setAttribute("font-family", getMermaidFontFamily());
+			el.setAttribute("font-family", fontFamily);
 		}
 		if (!el.getAttribute("font-size")) {
-			el.setAttribute("font-size", getMermaidFontSize());
+			el.setAttribute("font-size", fontSize);
 		}
 	}
 	if (!svgEl.getAttribute("font-family")) {
-		svgEl.setAttribute("font-family", getMermaidFontFamily());
+		svgEl.setAttribute("font-family", fontFamily);
 	}
 	if (!svgEl.getAttribute("font-size")) {
-		svgEl.setAttribute("font-size", getMermaidFontSize());
+		svgEl.setAttribute("font-size", fontSize);
+	}
+
+	// ── text-anchor 対策 ──
+	//
+	// WKWebView tauri:// は CSS の text-anchor をレンダリングに反映しない。
+	// patchTextAnchor が d3.style('text-anchor', value) をインターセプトして
+	// プレゼンテーション属性にミラーしているため、各テキスト要素は正しい
+	// text-anchor 属性を持つ。
+	//
+	// CSS の text-anchor 宣言が残っていると、属性より高い詳細度でカスケードに
+	// 参加し、WKWebView が属性値を無視する原因になる。
+	// ここで CSS とインラインスタイルから text-anchor を除去して
+	// プレゼンテーション属性を唯一のソースにする。
+
+	// 1. <style> から text-anchor 宣言を除去
+	styleEl.textContent = styleEl.textContent.replace(/text-anchor\s*:[^;]+;?/g, "");
+
+	// 2. インラインスタイルから text-anchor を除去
+	for (const el of svgEl.querySelectorAll("[style]")) {
+		const styleAttr = el.getAttribute("style") ?? "";
+		if (!styleAttr.includes("text-anchor")) continue;
+		const cleaned = styleAttr
+			.replace(/text-anchor\s*:[^;]+;?/g, "")
+			.replace(/;\s*$/, "")
+			.trim();
+		if (cleaned) {
+			el.setAttribute("style", cleaned);
+		} else {
+			el.removeAttribute("style");
+		}
 	}
 }
