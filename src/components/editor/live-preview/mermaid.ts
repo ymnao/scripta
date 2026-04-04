@@ -17,6 +17,7 @@ import {
 import {
 	clearMermaidCache,
 	getCacheEntry,
+	isTauriProtocol,
 	promoteMermaidStyles,
 	renderMermaid,
 } from "../../../lib/mermaid";
@@ -122,7 +123,11 @@ export class MermaidWidget extends WidgetType {
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
-				promoteMermaidStyles(svgEl);
+				// bakeStyledSvg で焼き込み済みだが、WKWebView では innerHTML 再パース後に
+				// fill/stroke 等の CSS→属性変換が必要なため再適用する。
+				if (isTauriProtocol) {
+					promoteMermaidStyles(svgEl);
+				}
 
 				// max-width を SVG の style 属性から取得。
 				// WKWebView tauri:// は SVG の style 属性を CSSOM に反映しない
@@ -151,10 +156,14 @@ export class MermaidWidget extends WidgetType {
 				if (mw) {
 					const natural = Number.parseFloat(mw);
 					if (!Number.isNaN(natural)) {
+						const scaledMaxWidth = `${natural * 1.35}px`;
 						// max-width を SVG ではなくコンテナ div に設定する。
 						// WKWebView tauri:// は SVG 要素の CSS max-width を処理しないが、
 						// HTML 要素の max-width は正常に機能する。
-						inner.style.maxWidth = `${natural * 1.35}px`;
+						inner.style.maxWidth = scaledMaxWidth;
+						// 通常ブラウザでは SVG 自身の max-width も有効なため、
+						// 同じ値に更新して元の上限幅で頭打ちになるのを防ぐ。
+						svgEl.style.maxWidth = scaledMaxWidth;
 					}
 				}
 				// SVG は viewBox でアスペクト比を保持しコンテナ幅に合わせる

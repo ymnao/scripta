@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isIMEComposing } from "../../lib/ime";
-import { promoteMermaidStyles, renderMermaid } from "../../lib/mermaid";
+import { isTauriProtocol, promoteMermaidStyles, renderMermaid } from "../../lib/mermaid";
 import { useThemeStore } from "../../stores/theme";
 import { DialogBase } from "../common/DialogBase";
 
@@ -98,7 +98,7 @@ export function MermaidEditorDialog({
 							<div
 								className="w-full [&_svg]:mx-auto [&_svg]:block"
 								ref={(node) => {
-									if (node) {
+									if (isTauriProtocol && node) {
 										const svg = node.querySelector("svg");
 										if (svg) promoteMermaidStyles(svg);
 									}

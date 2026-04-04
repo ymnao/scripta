@@ -13,7 +13,8 @@ const cache = new Map<string, CacheEntry>();
 let cacheGeneration = 0;
 
 /** WKWebView tauri:// プロトコル下で動作しているか */
-const isTauriProtocol = typeof window !== "undefined" && window.location?.protocol === "tauri:";
+export const isTauriProtocol =
+	typeof window !== "undefined" && window.location?.protocol === "tauri:";
 
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
@@ -212,7 +213,8 @@ function buildConfig(theme: "light" | "dark") {
 		themeCSS: getThemeCss(theme),
 		fontFamily: getMermaidFontFamily(),
 		fontSize: useSettingsStore.getState().fontSize,
-		htmlLabels: false,
+		// WKWebView tauri:// では foreignObject のテキスト計測が不正確なため無効化
+		htmlLabels: isTauriProtocol ? false : undefined,
 		flowchart: {
 			nodeSpacing: 40,
 			rankSpacing: 40,
@@ -421,9 +423,11 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		? new RegExp(`#${svgId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "g")
 		: null;
 
+	let cssParsed = false;
 	try {
 		const sheet = new CSSStyleSheet();
 		sheet.replaceSync(styleEl.textContent);
+		cssParsed = true;
 
 		for (const rule of sheet.cssRules) {
 			if (!(rule instanceof CSSStyleRule)) continue;
@@ -524,6 +528,9 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		svgEl.setAttribute("font-size", fontSize);
 	}
 
-	// <style> からも text-anchor を除去（patchTextAnchor が d3.style() の値を属性にミラー済み）
-	styleEl.textContent = styleEl.textContent.replace(/text-anchor\s*:[^;]+;?/g, "");
+	// CSS パースが成功して text-anchor を属性にミラーできた場合のみ <style> から除去。
+	// パース失敗時は <style> を残し、通常ブラウザで CSS text-anchor が機能するようにする。
+	if (cssParsed) {
+		styleEl.textContent = styleEl.textContent.replace(/text-anchor\s*:[^;]+;?/g, "");
+	}
 }

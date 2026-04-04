@@ -6,12 +6,21 @@ vi.mock("../../../lib/mermaid", () => ({
 	getCacheEntry: vi.fn(() => undefined),
 	clearMermaidCache: vi.fn(),
 	promoteMermaidStyles: vi.fn(),
+	isTauriProtocol: false,
 }));
 
 // Mock theme store
 vi.mock("../../../stores/theme", () => ({
 	useThemeStore: {
 		getState: () => ({ theme: "light" as const }),
+		subscribe: vi.fn(() => vi.fn()),
+	},
+}));
+
+// Mock settings store
+vi.mock("../../../stores/settings", () => ({
+	useSettingsStore: {
+		getState: () => ({ fontFamily: "monospace", fontSize: 14 }),
 		subscribe: vi.fn(() => vi.fn()),
 	},
 }));
