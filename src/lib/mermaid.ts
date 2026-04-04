@@ -256,8 +256,7 @@ async function ensureInitialized(theme: "light" | "dark"): Promise<void> {
 }
 
 function cacheKey(source: string, theme: "light" | "dark"): string {
-	const { fontFamily, fontSize } = useSettingsStore.getState();
-	return `${theme}:${fontFamily}:${fontSize}:${source}`;
+	return `${theme}:${getMermaidFontFamily()}:${getMermaidFontSize()}:${source}`;
 }
 
 /** キャッシュが上限を超えた場合、古いエントリを削除する。
@@ -390,6 +389,11 @@ const SVG_PRESENTATION_PROPS = new Set([
 	"visibility",
 ]);
 
+/** インラインスタイル文字列から SVG プレゼンテーション属性値を抽出する事前コンパイル済み正規表現 */
+const STYLE_PROP_RE = new Map<string, RegExp>(
+	[...SVG_PRESENTATION_PROPS].map((p) => [p, new RegExp(`(?:^|;)\\s*${p}:\\s*([^;]+)`)]),
+);
+
 /**
  * Mermaid SVG のスタイルを WKWebView tauri:// 対応に変換する。
  *
@@ -471,14 +475,28 @@ export function promoteMermaidStyles(svgEl: Element): void {
 	// text-anchor 等を設定するため、<style> ルール展開では拾えない。
 	// WKWebView tauri:// はインラインスタイルも処理しないため、
 	// style 属性文字列をパースしてプレゼンテーション属性にコピーする。
+	// インラインスタイル → プレゼンテーション属性変換と text-anchor 除去を1回の走査で処理
 	for (const el of svgEl.querySelectorAll("[style]")) {
-		const styleAttr = el.getAttribute("style") ?? "";
-		for (const prop of SVG_PRESENTATION_PROPS) {
+		let styleAttr = el.getAttribute("style") ?? "";
+		// d3.style() で設定されたプレゼンテーション属性をコピー
+		for (const [prop, regex] of STYLE_PROP_RE) {
 			if (el.getAttribute(prop)) continue;
-			const regex = new RegExp(`(?:^|;)\\s*${prop}:\\s*([^;]+)`);
 			const match = styleAttr.match(regex);
 			if (match) {
 				el.setAttribute(prop, match[1].trim());
+			}
+		}
+		// CSS の text-anchor はカスケードでプレゼンテーション属性を上書きし、
+		// WKWebView tauri:// がその CSS 値をレンダリングできないため除去する。
+		if (styleAttr.includes("text-anchor")) {
+			styleAttr = styleAttr
+				.replace(/text-anchor\s*:[^;]+;?/g, "")
+				.replace(/;\s*$/, "")
+				.trim();
+			if (styleAttr) {
+				el.setAttribute("style", styleAttr);
+			} else {
+				el.removeAttribute("style");
 			}
 		}
 	}
@@ -496,7 +514,6 @@ export function promoteMermaidStyles(svgEl: Element): void {
 			el.setAttribute("font-size", fontSize);
 		}
 	}
-
 	if (!svgEl.getAttribute("font-family")) {
 		svgEl.setAttribute("font-family", fontFamily);
 	}
@@ -507,21 +524,6 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		svgEl.setAttribute("font-size", fontSize);
 	}
 
-	// CSS の text-anchor はカスケードでプレゼンテーション属性を上書きし、
-	// WKWebView tauri:// がその CSS 値をレンダリングできないため除去する。
-	// patchTextAnchor が d3.style() の値を属性にミラー済み。
+	// <style> からも text-anchor を除去（patchTextAnchor が d3.style() の値を属性にミラー済み）
 	styleEl.textContent = styleEl.textContent.replace(/text-anchor\s*:[^;]+;?/g, "");
-	for (const el of svgEl.querySelectorAll("[style]")) {
-		const styleAttr = el.getAttribute("style") ?? "";
-		if (!styleAttr.includes("text-anchor")) continue;
-		const cleaned = styleAttr
-			.replace(/text-anchor\s*:[^;]+;?/g, "")
-			.replace(/;\s*$/, "")
-			.trim();
-		if (cleaned) {
-			el.setAttribute("style", cleaned);
-		} else {
-			el.removeAttribute("style");
-		}
-	}
 }
