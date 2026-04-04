@@ -427,65 +427,57 @@ const STYLE_PROP_RE = new Map<string, RegExp>(
  */
 export function promoteMermaidStyles(svgEl: Element): void {
 	const styleEl = svgEl.querySelector("style");
-	if (!styleEl?.textContent) return;
 
-	// SVG 要素の ID（例: "mermaid-0"）。CSS セレクタから除去して
-	// 切り離された DOM でも querySelectorAll が動作するようにする。
-	// WKWebView は切り離された DOM で #id セレクタを解決できない。
-	const svgId = svgEl.getAttribute("id") ?? "";
-	const idPattern = svgId
-		? new RegExp(`#${svgId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "g")
-		: null;
-
+	// ── CSS <style> ルール展開（<style> がある場合のみ） ──
 	let cssParsed = false;
-	try {
-		const sheet = new CSSStyleSheet();
-		sheet.replaceSync(styleEl.textContent);
-		cssParsed = true;
+	if (styleEl?.textContent) {
+		const svgId = svgEl.getAttribute("id") ?? "";
+		const idPattern = svgId
+			? new RegExp(`#${svgId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "g")
+			: null;
 
-		for (const rule of sheet.cssRules) {
-			if (!(rule instanceof CSSStyleRule)) continue;
+		try {
+			const sheet = new CSSStyleSheet();
+			sheet.replaceSync(styleEl.textContent);
+			cssParsed = true;
 
-			let targets: Element[];
-			try {
-				// "#mermaid-0 .node text" → ".node text" に変換
-				const selector = idPattern
-					? rule.selectorText.replace(idPattern, "").trim()
-					: rule.selectorText;
+			for (const rule of sheet.cssRules) {
+				if (!(rule instanceof CSSStyleRule)) continue;
 
-				if (!selector) {
-					// "#mermaid-0" のみ → SVG ルート自身に適用
-					targets = [svgEl];
-				} else {
-					targets = [...svgEl.querySelectorAll(selector)];
-					if (svgEl.matches(selector)) targets.push(svgEl);
-				}
-			} catch {
-				continue; // 擬似クラス等の複雑なセレクタはスキップ
-			}
+				let targets: Element[];
+				try {
+					const selector = idPattern
+						? rule.selectorText.replace(idPattern, "").trim()
+						: rule.selectorText;
 
-			for (const el of targets) {
-				const elStyle = (el as HTMLElement | SVGElement).style;
-				for (let i = 0; i < rule.style.length; i++) {
-					const prop = rule.style[i];
-					const value = rule.style.getPropertyValue(prop);
-					// インラインスタイル設定（通常ブラウザ向け）
-					if (!elStyle.getPropertyValue(prop)) {
-						elStyle.setProperty(prop, value, rule.style.getPropertyPriority(prop));
+					if (!selector) {
+						targets = [svgEl];
+					} else {
+						targets = [...svgEl.querySelectorAll(selector)];
+						if (svgEl.matches(selector)) targets.push(svgEl);
 					}
-					// プレゼンテーション属性設定（WKWebView tauri:// 向け）
-					if (SVG_PRESENTATION_PROPS.has(prop) && !el.getAttribute(prop)) {
-						// d3.attr() で既に設定された属性は保持（最優先）。
-						// 未設定の場合、インラインスタイル値（d3.style() 由来）を優先し、
-						// なければ CSS ルール値を使用する。
-						const inlineVal = elStyle.getPropertyValue(prop);
-						el.setAttribute(prop, inlineVal || value);
+				} catch {
+					continue;
+				}
+
+				for (const el of targets) {
+					const elStyle = (el as HTMLElement | SVGElement).style;
+					for (let i = 0; i < rule.style.length; i++) {
+						const prop = rule.style[i];
+						const value = rule.style.getPropertyValue(prop);
+						if (!elStyle.getPropertyValue(prop)) {
+							elStyle.setProperty(prop, value, rule.style.getPropertyPriority(prop));
+						}
+						if (SVG_PRESENTATION_PROPS.has(prop) && !el.getAttribute(prop)) {
+							const inlineVal = elStyle.getPropertyValue(prop);
+							el.setAttribute(prop, inlineVal || value);
+						}
 					}
 				}
 			}
+		} catch {
+			// replaceSync に失敗した場合でも後続の処理は続行する
 		}
-	} catch {
-		// replaceSync に失敗した場合でも後続の処理は続行する
 	}
 
 	// d3 の .style() で設定されたインラインスタイルをプレゼンテーション属性に変換。
@@ -544,7 +536,7 @@ export function promoteMermaidStyles(svgEl: Element): void {
 
 	// CSS パースが成功して text-anchor を属性にミラーできた場合のみ <style> から除去。
 	// パース失敗時は <style> を残し、通常ブラウザで CSS text-anchor が機能するようにする。
-	if (cssParsed) {
+	if (cssParsed && styleEl?.textContent) {
 		styleEl.textContent = styleEl.textContent.replace(/text-anchor\s*:[^;]+;?/g, "");
 	}
 }
