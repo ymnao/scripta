@@ -20,6 +20,7 @@ import {
 	promoteMermaidStyles,
 	renderMermaid,
 } from "../../../lib/mermaid";
+import { useSettingsStore } from "../../../stores/settings";
 import { useThemeStore } from "../../../stores/theme";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
@@ -250,18 +251,34 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 		private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 		private destroyed = false;
 		private unsubscribeTheme: (() => void) | null = null;
+		private unsubscribeSettings: (() => void) | null = null;
 		private lastTheme: string;
+		private lastFontFamily: string;
+		private lastFontSize: number;
 		private rebuildScheduled = false;
 
 		constructor(view: EditorView) {
 			this.view = view;
 			this.lastTheme = useThemeStore.getState().theme;
+			const settings = useSettingsStore.getState();
+			this.lastFontFamily = settings.fontFamily;
+			this.lastFontSize = settings.fontSize;
 			this.triggerRender();
 
 			// Watch for theme changes
 			this.unsubscribeTheme = useThemeStore.subscribe((state) => {
 				if (state.theme !== this.lastTheme) {
 					this.lastTheme = state.theme;
+					clearMermaidCache();
+					this.triggerRender();
+				}
+			});
+
+			// Watch for font setting changes
+			this.unsubscribeSettings = useSettingsStore.subscribe((state) => {
+				if (state.fontFamily !== this.lastFontFamily || state.fontSize !== this.lastFontSize) {
+					this.lastFontFamily = state.fontFamily;
+					this.lastFontSize = state.fontSize;
 					clearMermaidCache();
 					this.triggerRender();
 				}
@@ -346,6 +363,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 			this.destroyed = true;
 			if (this.debounceTimer) clearTimeout(this.debounceTimer);
 			this.unsubscribeTheme?.();
+			this.unsubscribeSettings?.();
 		}
 	},
 );

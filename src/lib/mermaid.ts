@@ -12,6 +12,9 @@ const cache = new Map<string, CacheEntry>();
 /** clearMermaidCache 呼び出しごとにインクリメントし、古い世代のレンダリング結果を無視する */
 let cacheGeneration = 0;
 
+/** WKWebView tauri:// プロトコル下で動作しているか */
+const isTauriProtocol = typeof window !== "undefined" && window.location?.protocol === "tauri:";
+
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
 let idCounter = 0;
@@ -166,10 +169,11 @@ function bakeStyledSvg(svgString: string): string {
 
 	promoteMermaidStyles(svgEl);
 
-	// Mermaid のレイアウト計算（rect サイズ）はレンダリング時の font-size で行われるが、
 	// WKWebView tauri:// でフォントメトリクスが微妙に異なりテキストがはみ出す。
 	// 表示用 font-size を 15% 縮小することで、rect サイズはそのままに
 	// テキスト幅が縮小され、左右に均等な余白が生まれる。
+	// 通常ブラウザ（dev モード等）では縮小しない。
+	if (!isTauriProtocol) return container.innerHTML;
 	const SHRINK = 0.85;
 	// CSS <style> 内の font-size を縮小
 	const bakeStyleEl = svgEl.querySelector("style");
@@ -233,13 +237,15 @@ function buildConfig(theme: "light" | "dark") {
 		},
 		// WKWebView tauri:// のフォントメトリクス差異による
 		// テキストはみ出しを防ぐためパディングを増やす。
-		er: {
-			entityPadding: 20,
-			minEntityWidth: 100,
-		},
-		class: {
-			padding: 10,
-		},
+		...(isTauriProtocol && {
+			er: {
+				entityPadding: 20,
+				minEntityWidth: 100,
+			},
+			class: {
+				padding: 10,
+			},
+		}),
 	};
 }
 
@@ -258,7 +264,8 @@ async function ensureInitialized(theme: "light" | "dark"): Promise<void> {
 }
 
 function cacheKey(source: string, theme: "light" | "dark"): string {
-	return `${theme}:${source}`;
+	const { fontFamily, fontSize } = useSettingsStore.getState();
+	return `${theme}:${fontFamily}:${fontSize}:${source}`;
 }
 
 /** キャッシュが上限を超えた場合、古いエントリを削除する。
@@ -314,13 +321,13 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				await ensureInitialized(theme);
 				const id = `mermaid-${idCounter++}`;
 
-				const unpatch = patchTextAnchor();
+				const unpatch = isTauriProtocol ? patchTextAnchor() : null;
 				let rawSvg: string;
 				try {
 					const result = await mermaidModule?.default.render(id, source);
 					rawSvg = result?.svg ?? "";
 				} finally {
-					unpatch();
+					unpatch?.();
 				}
 				const svg = bakeStyledSvg(sanitizeMermaidSvg(rawSvg));
 				// レンダリング中にキャッシュがクリア/エビクトされていたら書き戻さない
