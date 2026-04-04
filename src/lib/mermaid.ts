@@ -294,8 +294,8 @@ function evictIfNeeded(): void {
 /**
  * Mermaid ソースコードを SVG 文字列にレンダリングする。
  * 動的 import でバンドルサイズを軽減し、結果をキャッシュする。
- * 同一 (source, theme) の重複呼び出しは Promise を共有し、
- * initialize+render は排他キューで直列化してテーマ競合を防ぐ。
+ * 同一 (source, theme, fontFamily, fontSize) の重複呼び出しは Promise を共有し、
+ * initialize+render は排他キューで直列化してテーマ・フォント設定の競合を防ぐ。
  */
 export async function renderMermaid(source: string, theme: "light" | "dark"): Promise<string> {
 	const font = takeFontSnapshot();
@@ -335,7 +335,8 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				} finally {
 					unpatch?.();
 				}
-				const svg = bakeStyledSvg(sanitizeMermaidSvg(rawSvg));
+				const sanitizedSvg = sanitizeMermaidSvg(rawSvg);
+				const svg = isTauriProtocol ? bakeStyledSvg(sanitizedSvg) : sanitizedSvg;
 				// レンダリング中にキャッシュがクリア/エビクトされていたら書き戻さない
 				if (gen !== cacheGeneration || !cache.has(key)) {
 					resolve(svg);
