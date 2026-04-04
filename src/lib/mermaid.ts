@@ -166,6 +166,45 @@ function bakeStyledSvg(svgString: string): string {
 
 	promoteMermaidStyles(svgEl);
 
+	// Mermaid のレイアウト計算（rect サイズ）はレンダリング時の font-size で行われるが、
+	// WKWebView tauri:// でフォントメトリクスが微妙に異なりテキストがはみ出す。
+	// 表示用 font-size を 15% 縮小することで、rect サイズはそのままに
+	// テキスト幅が縮小され、左右に均等な余白が生まれる。
+	const SHRINK = 0.85;
+	// CSS <style> 内の font-size を縮小
+	const bakeStyleEl = svgEl.querySelector("style");
+	if (bakeStyleEl?.textContent) {
+		bakeStyleEl.textContent = bakeStyleEl.textContent.replace(
+			/font-size\s*:\s*([\d.]+)(px)?/g,
+			(_, size, unit) =>
+				`font-size: ${(Number.parseFloat(size) * SHRINK).toFixed(1)}${unit || "px"}`,
+		);
+	}
+	// 属性の font-size も縮小
+	for (const el of svgEl.querySelectorAll("[font-size]")) {
+		const fs = el.getAttribute("font-size");
+		if (!fs) continue;
+		const px = Number.parseFloat(fs);
+		if (px > 0) {
+			el.setAttribute("font-size", `${(px * SHRINK).toFixed(1)}px`);
+		}
+	}
+	// インラインスタイルの font-size も縮小
+	// （promoteMermaidStyles が CSS ルールからインラインスタイルに元の値をコピーするため、
+	//   CSS と属性だけ縮小してもインラインスタイルが元のサイズで上書きしてしまう）
+	const fsShrinkRe = /font-size\s*:\s*([\d.]+)(px)?/g;
+	for (const el of svgEl.querySelectorAll("[style]")) {
+		const style = el.getAttribute("style") ?? "";
+		if (!style.includes("font-size")) continue;
+		el.setAttribute(
+			"style",
+			style.replace(
+				fsShrinkRe,
+				(_, s, u) => `font-size: ${(Number.parseFloat(s) * SHRINK).toFixed(1)}${u || "px"}`,
+			),
+		);
+	}
+
 	return container.innerHTML;
 }
 
@@ -192,15 +231,14 @@ function buildConfig(theme: "light" | "dark") {
 			boxTextMargin: 5,
 			messageMargin: 28,
 		},
-		// patchTextAnchor が全 <text> に text-anchor="middle" を強制するため、
-		// 本来 "start" を期待する ER/class のテキストが中央寄せになり
-		// コンテナからはみ出す。パディングを増やして余裕を持たせる。
+		// WKWebView tauri:// のフォントメトリクス差異による
+		// テキストはみ出しを防ぐためパディングを増やす。
 		er: {
-			entityPadding: 30,
-			minEntityWidth: 120,
+			entityPadding: 20,
+			minEntityWidth: 100,
 		},
 		class: {
-			padding: 15,
+			padding: 10,
 		},
 	};
 }
@@ -447,20 +485,28 @@ export function promoteMermaidStyles(svgEl: Element): void {
 	}
 
 	// CSS ルールにマッチしなかった <text>/<tspan> 用のフォールバック
+	// bakeStyledSvg で font-size を縮小済みの場合、インラインスタイルや属性に
+	// 縮小値が設定されている。ここでは「font-size がどこからも設定されていない」
+	// 要素にのみデフォルト値を設定する。
 	const fontFamily = getMermaidFontFamily();
 	const fontSize = getMermaidFontSize();
 	for (const el of svgEl.querySelectorAll("text, tspan")) {
 		if (!el.getAttribute("font-family")) {
 			el.setAttribute("font-family", fontFamily);
 		}
-		if (!el.getAttribute("font-size")) {
+		const elStyle = (el as HTMLElement | SVGElement).style;
+		if (!el.getAttribute("font-size") && !elStyle.getPropertyValue("font-size")) {
 			el.setAttribute("font-size", fontSize);
 		}
 	}
+
 	if (!svgEl.getAttribute("font-family")) {
 		svgEl.setAttribute("font-family", fontFamily);
 	}
-	if (!svgEl.getAttribute("font-size")) {
+	if (
+		!svgEl.getAttribute("font-size") &&
+		!(svgEl as HTMLElement | SVGElement).style?.getPropertyValue("font-size")
+	) {
 		svgEl.setAttribute("font-size", fontSize);
 	}
 
