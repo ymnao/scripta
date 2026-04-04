@@ -205,14 +205,26 @@ function bakeStyledSvg(svgString: string): string {
 	return container.innerHTML;
 }
 
-function buildConfig(theme: "light" | "dark") {
+interface FontSnapshot {
+	fontFamily: string;
+	fontSize: number;
+}
+
+function takeFontSnapshot(): FontSnapshot {
+	return {
+		fontFamily: getMermaidFontFamily(),
+		fontSize: useSettingsStore.getState().fontSize,
+	};
+}
+
+function buildConfig(theme: "light" | "dark", font: FontSnapshot) {
 	return {
 		startOnLoad: false,
 		securityLevel: "strict" as const,
 		theme: getMermaidTheme(theme),
 		themeCSS: getThemeCss(theme),
-		fontFamily: getMermaidFontFamily(),
-		fontSize: useSettingsStore.getState().fontSize,
+		fontFamily: font.fontFamily,
+		fontSize: font.fontSize,
 		// WKWebView tauri:// では foreignObject のテキスト計測が不正確なため無効化
 		htmlLabels: isTauriProtocol ? false : undefined,
 		flowchart: {
@@ -243,7 +255,7 @@ function buildConfig(theme: "light" | "dark") {
 	};
 }
 
-async function ensureInitialized(theme: "light" | "dark"): Promise<void> {
+async function ensureInitialized(theme: "light" | "dark", font: FontSnapshot): Promise<void> {
 	if (!mermaidModule) {
 		if (!initPromise) {
 			initPromise = import("mermaid").then((m) => {
@@ -253,12 +265,12 @@ async function ensureInitialized(theme: "light" | "dark"): Promise<void> {
 		await initPromise;
 	}
 	if (mermaidModule) {
-		mermaidModule.default.initialize(buildConfig(theme));
+		mermaidModule.default.initialize(buildConfig(theme, font));
 	}
 }
 
-function cacheKey(source: string, theme: "light" | "dark"): string {
-	return `${theme}:${getMermaidFontFamily()}:${getMermaidFontSize()}:${source}`;
+function cacheKey(source: string, theme: "light" | "dark", font: FontSnapshot): string {
+	return `${theme}:${font.fontFamily}:${font.fontSize}:${source}`;
 }
 
 /** キャッシュが上限を超えた場合、古いエントリを削除する。
@@ -286,7 +298,8 @@ function evictIfNeeded(): void {
  * initialize+render は排他キューで直列化してテーマ競合を防ぐ。
  */
 export async function renderMermaid(source: string, theme: "light" | "dark"): Promise<string> {
-	const key = cacheKey(source, theme);
+	const font = takeFontSnapshot();
+	const key = cacheKey(source, theme, font);
 	const cached = cache.get(key);
 	if (cached?.status === "rendered") return cached.svg;
 	if (cached?.status === "error") throw new Error(cached.message);
@@ -311,7 +324,7 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
 				return;
 			}
 			try {
-				await ensureInitialized(theme);
+				await ensureInitialized(theme, font);
 				const id = `mermaid-${idCounter++}`;
 
 				const unpatch = isTauriProtocol ? patchTextAnchor() : null;
@@ -349,7 +362,7 @@ export async function renderMermaid(source: string, theme: "light" | "dark"): Pr
  * キャッシュからエントリを取得する。
  */
 export function getCacheEntry(source: string, theme: "light" | "dark"): CacheEntry | undefined {
-	return cache.get(cacheKey(source, theme));
+	return cache.get(cacheKey(source, theme, takeFontSnapshot()));
 }
 
 /**
@@ -364,9 +377,10 @@ export function clearMermaidCache(): void {
 
 /**
  * CSS プロパティのうち、同名の SVG プレゼンテーション属性が存在するもの。
- * WKWebView tauri:// は SVG 要素の CSS（`<style>` タグ・インラインスタイル共に）
- * をレンダリングに反映しない。プレゼンテーション属性は CSS エンジンを経由せず
- * SVG レンダラが直接処理するため、WKWebView でも確実に機能する。
+ * WKWebView の `tauri://` 環境では、SVG の CSS が一律に無効になるわけではないが、
+ * 一部のプロパティ（特に `text-anchor` など）が `<style>` / インラインスタイル経由だと
+ * 安定してレンダリングに反映されないことがある。プレゼンテーション属性は CSS エンジンを
+ * 経由せず SVG レンダラが直接処理するため、属性化できるものはそちらを優先して反映する。
  */
 const SVG_PRESENTATION_PROPS = new Set([
 	"fill",
