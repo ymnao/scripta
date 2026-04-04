@@ -152,6 +152,32 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 	return serializer.serializeToString(sanitizedDoc.documentElement);
 }
 
+const FONT_SIZE_RE = /font-size\s*:\s*([\d.]+)(px)?/g;
+
+/** SVG 内の全 font-size（CSS `<style>`・属性・インラインスタイル）を ratio 倍に縮小する */
+function shrinkFontSizes(svgEl: Element, ratio: number): void {
+	const replacer = (_: string, size: string, unit?: string) =>
+		`font-size: ${(Number.parseFloat(size) * ratio).toFixed(1)}${unit || "px"}`;
+
+	const styleEl = svgEl.querySelector("style");
+	if (styleEl?.textContent) {
+		styleEl.textContent = styleEl.textContent.replace(FONT_SIZE_RE, replacer);
+	}
+	for (const el of svgEl.querySelectorAll("[font-size]")) {
+		const fs = el.getAttribute("font-size");
+		if (!fs) continue;
+		const px = Number.parseFloat(fs);
+		if (px > 0) {
+			el.setAttribute("font-size", `${(px * ratio).toFixed(1)}px`);
+		}
+	}
+	for (const el of svgEl.querySelectorAll("[style]")) {
+		const style = el.getAttribute("style") ?? "";
+		if (!style.includes("font-size")) continue;
+		el.setAttribute("style", style.replace(FONT_SIZE_RE, replacer));
+	}
+}
+
 /**
  * サニタイズ済み SVG 文字列を一時的に DOM に挿入し、promoteMermaidStyles を適用して
  * text-anchor をプレゼンテーション属性に焼き込み、CSS の text-anchor 宣言を除去する。
@@ -170,43 +196,9 @@ function bakeStyledSvg(svgString: string): string {
 	promoteMermaidStyles(svgEl);
 
 	// WKWebView tauri:// でフォントメトリクスが微妙に異なりテキストがはみ出す。
-	// 表示用 font-size を 15% 縮小することで、rect サイズはそのままに
-	// テキスト幅が縮小され、左右に均等な余白が生まれる。
-	// 通常ブラウザ（dev モード等）では縮小しない。
-	if (!isTauriProtocol) return container.innerHTML;
-	const SHRINK = 0.85;
-	// CSS <style> 内の font-size を縮小
-	const bakeStyleEl = svgEl.querySelector("style");
-	if (bakeStyleEl?.textContent) {
-		bakeStyleEl.textContent = bakeStyleEl.textContent.replace(
-			/font-size\s*:\s*([\d.]+)(px)?/g,
-			(_, size, unit) =>
-				`font-size: ${(Number.parseFloat(size) * SHRINK).toFixed(1)}${unit || "px"}`,
-		);
-	}
-	// 属性の font-size も縮小
-	for (const el of svgEl.querySelectorAll("[font-size]")) {
-		const fs = el.getAttribute("font-size");
-		if (!fs) continue;
-		const px = Number.parseFloat(fs);
-		if (px > 0) {
-			el.setAttribute("font-size", `${(px * SHRINK).toFixed(1)}px`);
-		}
-	}
-	// インラインスタイルの font-size も縮小
-	// （promoteMermaidStyles が CSS ルールからインラインスタイルに元の値をコピーするため、
-	//   CSS と属性だけ縮小してもインラインスタイルが元のサイズで上書きしてしまう）
-	const fsShrinkRe = /font-size\s*:\s*([\d.]+)(px)?/g;
-	for (const el of svgEl.querySelectorAll("[style]")) {
-		const style = el.getAttribute("style") ?? "";
-		if (!style.includes("font-size")) continue;
-		el.setAttribute(
-			"style",
-			style.replace(
-				fsShrinkRe,
-				(_, s, u) => `font-size: ${(Number.parseFloat(s) * SHRINK).toFixed(1)}${u || "px"}`,
-			),
-		);
+	// font-size を縮小して rect サイズはそのままにテキスト幅を縮小する。
+	if (isTauriProtocol) {
+		shrinkFontSizes(svgEl, 0.85);
 	}
 
 	return container.innerHTML;
@@ -491,10 +483,8 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		}
 	}
 
-	// CSS ルールにマッチしなかった <text>/<tspan> 用のフォールバック
-	// bakeStyledSvg で font-size を縮小済みの場合、インラインスタイルや属性に
-	// 縮小値が設定されている。ここでは「font-size がどこからも設定されていない」
-	// 要素にのみデフォルト値を設定する。
+	// CSS ルールにマッチしなかった要素用のフォントフォールバック。
+	// bakeStyledSvg で縮小済みの font-size を上書きしないようインラインスタイルもチェック。
 	const fontFamily = getMermaidFontFamily();
 	const fontSize = getMermaidFontSize();
 	for (const el of svgEl.querySelectorAll("text, tspan")) {
@@ -517,22 +507,10 @@ export function promoteMermaidStyles(svgEl: Element): void {
 		svgEl.setAttribute("font-size", fontSize);
 	}
 
-	// ── text-anchor 対策 ──
-	//
-	// WKWebView tauri:// は CSS の text-anchor をレンダリングに反映しない。
-	// patchTextAnchor が d3.style('text-anchor', value) をインターセプトして
-	// プレゼンテーション属性にミラーしているため、各テキスト要素は正しい
-	// text-anchor 属性を持つ。
-	//
-	// CSS の text-anchor 宣言が残っていると、属性より高い詳細度でカスケードに
-	// 参加し、WKWebView が属性値を無視する原因になる。
-	// ここで CSS とインラインスタイルから text-anchor を除去して
-	// プレゼンテーション属性を唯一のソースにする。
-
-	// 1. <style> から text-anchor 宣言を除去
+	// CSS の text-anchor はカスケードでプレゼンテーション属性を上書きし、
+	// WKWebView tauri:// がその CSS 値をレンダリングできないため除去する。
+	// patchTextAnchor が d3.style() の値を属性にミラー済み。
 	styleEl.textContent = styleEl.textContent.replace(/text-anchor\s*:[^;]+;?/g, "");
-
-	// 2. インラインスタイルから text-anchor を除去
 	for (const el of svgEl.querySelectorAll("[style]")) {
 		const styleAttr = el.getAttribute("style") ?? "";
 		if (!styleAttr.includes("text-anchor")) continue;
