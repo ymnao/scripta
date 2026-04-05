@@ -24,7 +24,7 @@ describe("renderMermaid", () => {
 	it("正常なソースで SVG 文字列を返す", async () => {
 		clearMermaidCache();
 		const svg = await renderMermaid("graph TD\n  A-->B", "light");
-		expect(svg).toContain("<svg>");
+		expect(svg).toContain("<svg");
 	});
 
 	it("キャッシュヒット時に同じ結果を返す", async () => {
