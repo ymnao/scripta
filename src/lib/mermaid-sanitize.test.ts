@@ -75,4 +75,9 @@ describe("sanitizeMermaidSvg", () => {
 		const result = sanitizeMermaidSvg(MERMAID_SVG);
 		expect(result).not.toContain("data-fo-id");
 	});
+
+	it("SVG 要素の style 属性（max-width 等）を保持する", () => {
+		const result = sanitizeMermaidSvg(MERMAID_SVG);
+		expect(result).toContain("max-width");
+	});
 });

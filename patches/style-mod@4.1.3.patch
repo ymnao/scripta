@@ -1,0 +1,31 @@
+diff --git a/src/style-mod.js b/src/style-mod.js
+index 009b0bee0075c7e408bf533e23c05dfedc059d67..f86cf71d5020c4c6f6cb30e9ff507fbd21d5731d 100644
+--- a/src/style-mod.js
++++ b/src/style-mod.js
+@@ -91,7 +91,7 @@ let adoptedSet = new Map //<Document, StyleSet>
+ class StyleSet {
+   constructor(root, nonce) {
+     let doc = root.ownerDocument || root, win = doc.defaultView
+-    if (!root.head && root.adoptedStyleSheets && win.CSSStyleSheet) {
++    if (root.adoptedStyleSheets && win.CSSStyleSheet) {
+       let adopted = adoptedSet.get(doc)
+       if (adopted) return root[SET] = adopted
+       this.sheet = new win.CSSStyleSheet
+@@ -127,7 +127,7 @@ class StyleSet {
+ 
+     if (sheet) {
+       if (root.adoptedStyleSheets.indexOf(this.sheet) < 0)
+-        root.adoptedStyleSheets = [this.sheet, ...root.adoptedStyleSheets]
++        root.adoptedStyleSheets = [...root.adoptedStyleSheets, this.sheet]
+     } else {
+       let text = ""
+       for (let i = 0; i < this.modules.length; i++)
+@@ -135,7 +135,7 @@ class StyleSet {
+       this.styleTag.textContent = text
+       let target = root.head || root
+       if (this.styleTag.parentNode != target)
+-        target.insertBefore(this.styleTag, target.firstChild)
++        target.appendChild(this.styleTag)
+     }
+   }
+ 
