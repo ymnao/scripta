@@ -140,6 +140,26 @@ test.describe("mermaid widget", () => {
 		await expect(page.locator(".cm-mermaid-widget")).toHaveCount(2, { timeout: 15000 });
 	});
 
+	test("SVG が正常にレンダリングされている", async ({ page }) => {
+		const { widget } = await openFileAndWaitForMermaid(page);
+
+		const info = await widget.evaluate((el) => {
+			const svg = el.querySelector("svg");
+			if (!svg) return { error: "no svg" };
+
+			const styleEl = svg.querySelector("style");
+			// SVG 内にノード要素が存在するか
+			const hasNodes =
+				svg.querySelector(".node") !== null || svg.querySelector("foreignObject") !== null;
+
+			return { hasStyle: !!styleEl, hasNodes, svgId: svg.getAttribute("id") };
+		});
+
+		expect(info).not.toHaveProperty("error");
+		expect(info.hasNodes).toBe(true);
+		expect(info.svgId).toBeTruthy();
+	});
+
 	test("mouse drag from text through mermaid widget stays stable", async ({ page }) => {
 		const { editor, widget } = await openFileAndWaitForMermaid(page);
 
