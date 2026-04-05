@@ -14,7 +14,14 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
+import {
+	clearMermaidCache,
+	getCacheEntry,
+	isTauriProtocol,
+	promoteMermaidStyles,
+	renderMermaid,
+} from "../../../lib/mermaid";
+import { useSettingsStore } from "../../../stores/settings";
 import { useThemeStore } from "../../../stores/theme";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 
@@ -111,30 +118,56 @@ export class MermaidWidget extends WidgetType {
 		wrapper.className = "cm-mermaid-widget";
 
 		if (this.svg) {
-			// useMaxWidth: true (デフォルト) により Mermaid は SVG に
-			// width="100%" + style="max-width: Xpx" を設定する。
-			// この max-width を 1.35 倍に拡大することで、
-			// エディタ幅に合った自然なサイズで表示する。
-			// コンテナ (.cm-mermaid-inner) の max-width が最終的な上限。
 			const inner = document.createElement("div");
 			inner.className = "cm-mermaid-inner";
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
-				const mw = svgEl.style.maxWidth;
+				// bakeStyledSvg で焼き込み済みだが、WKWebView では innerHTML 再パース後に
+				// fill/stroke 等の CSS→属性変換が必要なため再適用する。
+				if (isTauriProtocol) {
+					promoteMermaidStyles(svgEl);
+				}
+
+				// max-width を SVG の style 属性から取得。
+				// WKWebView tauri:// は SVG の style 属性を CSSOM に反映しない
+				// 可能性があるため、属性文字列と viewBox もフォールバックとして使う。
+				let mw: string | undefined;
+				const cssom = svgEl.style.maxWidth;
+				if (cssom) {
+					mw = cssom;
+				} else {
+					const styleAttr = svgEl.getAttribute("style") ?? "";
+					const match = styleAttr.match(/max-width:\s*([\d.]+)px/);
+					if (match) {
+						mw = `${match[1]}px`;
+					}
+				}
+				if (!mw) {
+					const vb = svgEl.getAttribute("viewBox");
+					if (vb) {
+						const parts = vb.split(/\s+/);
+						if (parts.length === 4) {
+							mw = `${parts[2]}px`;
+						}
+					}
+				}
+
 				if (mw) {
-					// flowchart, sequence 等: max-width を 1.35 倍に拡大
 					const natural = Number.parseFloat(mw);
 					if (!Number.isNaN(natural)) {
-						svgEl.style.maxWidth = `${natural * 1.35}px`;
+						const scaledMaxWidth = `${natural * 1.35}px`;
+						// max-width を SVG ではなくコンテナ div に設定する。
+						// WKWebView tauri:// は SVG 要素の CSS max-width を処理しないが、
+						// HTML 要素の max-width は正常に機能する。
+						inner.style.maxWidth = scaledMaxWidth;
+						// 通常ブラウザでは SVG 自身の max-width も有効なため、
+						// 同じ値に更新して元の上限幅で頭打ちになるのを防ぐ。
+						svgEl.style.maxWidth = scaledMaxWidth;
 					}
-				} else {
-					// gantt, pie, gitGraph 等: max-width なしで
-					// width="100%" height="100%" のパターン。
-					// コンテナ幅いっぱいに表示する。
-					svgEl.setAttribute("width", "100%");
 				}
-				// height を除去し viewBox のアスペクト比で自動算出させる
+				// SVG は viewBox でアスペクト比を保持しコンテナ幅に合わせる
+				svgEl.setAttribute("width", "100%");
 				svgEl.removeAttribute("height");
 			}
 			wrapper.appendChild(inner);
@@ -227,18 +260,34 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 		private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 		private destroyed = false;
 		private unsubscribeTheme: (() => void) | null = null;
+		private unsubscribeSettings: (() => void) | null = null;
 		private lastTheme: string;
+		private lastFontFamily: string;
+		private lastFontSize: number;
 		private rebuildScheduled = false;
 
 		constructor(view: EditorView) {
 			this.view = view;
 			this.lastTheme = useThemeStore.getState().theme;
+			const settings = useSettingsStore.getState();
+			this.lastFontFamily = settings.fontFamily;
+			this.lastFontSize = settings.fontSize;
 			this.triggerRender();
 
 			// Watch for theme changes
 			this.unsubscribeTheme = useThemeStore.subscribe((state) => {
 				if (state.theme !== this.lastTheme) {
 					this.lastTheme = state.theme;
+					clearMermaidCache();
+					this.triggerRender();
+				}
+			});
+
+			// Watch for font setting changes
+			this.unsubscribeSettings = useSettingsStore.subscribe((state) => {
+				if (state.fontFamily !== this.lastFontFamily || state.fontSize !== this.lastFontSize) {
+					this.lastFontFamily = state.fontFamily;
+					this.lastFontSize = state.fontSize;
 					clearMermaidCache();
 					this.triggerRender();
 				}
@@ -323,6 +372,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 			this.destroyed = true;
 			if (this.debounceTimer) clearTimeout(this.debounceTimer);
 			this.unsubscribeTheme?.();
+			this.unsubscribeSettings?.();
 		}
 	},
 );
