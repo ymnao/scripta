@@ -6,17 +6,26 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
+CARGO_TOML="$REPO_ROOT/src-tauri/Cargo.toml"
 
-# Rust クレート名 → npm パッケージ名
-PLUGINS=(
-  "tauri-plugin-dialog:@tauri-apps/plugin-dialog"
-  "tauri-plugin-shell:@tauri-apps/plugin-shell"
-  "tauri-plugin-store:@tauri-apps/plugin-store"
-  "tauri-plugin-window-state:@tauri-apps/plugin-window-state"
-)
+# Cargo.toml から tauri-plugin-* クレートを自動検出し、npm パッケージ名を導出
+# 命名規則: tauri-plugin-X → @tauri-apps/plugin-X
+PLUGINS=()
+while IFS= read -r crate; do
+  suffix="${crate#tauri-plugin-}"
+  PLUGINS+=("${crate}:@tauri-apps/plugin-${suffix}")
+done < <(grep -o 'tauri-plugin-[a-z-]*' "$CARGO_TOML" | sort -u)
+
+if [[ ${#PLUGINS[@]} -eq 0 ]]; then
+  echo "warn: no tauri-plugin-* found in Cargo.toml" >&2
+  exit 0
+fi
 
 # pnpm list から依存パッケージのバージョンを取得（JSON）
-pnpm_list=$(cd "$REPO_ROOT" && pnpm list --json --depth=0 2>/dev/null)
+pnpm_list=$(cd "$REPO_ROOT" && pnpm list --json --depth=0) || {
+  echo "error: pnpm list failed. Run 'pnpm install' first." >&2
+  exit 1
+}
 
 errors=0
 
@@ -24,10 +33,10 @@ for entry in "${PLUGINS[@]}"; do
   crate="${entry%%:*}"
   npm_pkg="${entry##*:}"
 
-  # Cargo.lock から解決済みバージョンを取得
+  # Cargo.lock から解決済みバージョンを取得（完全一致）
   cargo_ver=$(awk -v name="$crate" '
     /^\[\[package\]\]/ { found=0 }
-    $0 ~ "^name = \"" name "\"" { found=1 }
+    $0 == "name = \"" name "\"" { found=1 }
     found && /^version = "/ { gsub(/"/, "", $3); print $3; exit }
   ' "$CARGO_LOCK")
 
@@ -36,8 +45,10 @@ for entry in "${PLUGINS[@]}"; do
     .[0].dependencies[$name].version // empty
   ' 2>/dev/null)
 
-  # いずれかが存在しない場合はスキップ
-  [[ -z "$cargo_ver" || -z "$npm_ver" ]] && continue
+  # いずれかが存在しない場合はスキップ（Rust-only プラグインなど）
+  if [[ -z "$cargo_ver" || -z "$npm_ver" ]]; then
+    continue
+  fi
 
   # major.minor を比較
   cargo_mm="${cargo_ver%.*}"
