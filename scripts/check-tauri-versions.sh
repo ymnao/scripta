@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Tauri プラグインの Rust クレートと npm パッケージのバージョン整合性を検証する。
-# Cargo.lock と pnpm-lock.yaml の解決済みバージョンを比較し、
+# Cargo.lock（安定フォーマット）と pnpm list --json（構造化出力）を使用し、
 # major.minor が異なる場合にエラーを返す。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
-PNPM_LOCK="$REPO_ROOT/pnpm-lock.yaml"
 
 # Rust クレート名 → npm パッケージ名
 PLUGINS=(
@@ -15,6 +14,9 @@ PLUGINS=(
   "tauri-plugin-store:@tauri-apps/plugin-store"
   "tauri-plugin-window-state:@tauri-apps/plugin-window-state"
 )
+
+# pnpm list から依存パッケージのバージョンを取得（JSON）
+pnpm_list=$(cd "$REPO_ROOT" && pnpm list --json --depth=0 2>/dev/null)
 
 errors=0
 
@@ -29,8 +31,10 @@ for entry in "${PLUGINS[@]}"; do
     found && /^version = "/ { gsub(/"/, "", $3); print $3; exit }
   ' "$CARGO_LOCK")
 
-  # pnpm-lock.yaml から解決済みバージョンを取得
-  npm_ver=$(grep -o "${npm_pkg}@[0-9][0-9.]*" "$PNPM_LOCK" | head -1 | sed 's/.*@//')
+  # pnpm list --json から解決済みバージョンを取得
+  npm_ver=$(echo "$pnpm_list" | jq -r --arg name "$npm_pkg" '
+    .[0].dependencies[$name].version // empty
+  ' 2>/dev/null)
 
   # いずれかが存在しない場合はスキップ
   [[ -z "$cargo_ver" || -z "$npm_ver" ]] && continue

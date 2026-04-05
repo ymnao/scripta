@@ -29,9 +29,8 @@ sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$REPO_ROOT/src-taur
 sedi "s/^version = \"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"/version = \"$VERSION\"/" \
   "$REPO_ROOT/src-tauri/Cargo.toml"
 
-# Cargo.lock を同期
-(cd "$REPO_ROOT/src-tauri" && cargo generate-lockfile -q 2>/dev/null) ||
-  (cd "$REPO_ROOT/src-tauri" && cargo check --lib -q)
+# Cargo.lock を最小限に同期（cargo check は変更パッケージのみ更新する）
+(cd "$REPO_ROOT/src-tauri" && cargo check --lib -q 2>&1)
 
 echo "Bumped to $VERSION"
 echo "  package.json"
