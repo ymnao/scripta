@@ -144,7 +144,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 									return (
 										<button
 											type="button"
-											key={`${reference.filePath}-${reference.lineNumber}-${reference.column}`}
+											key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
 											className="search-panel-match"
 											onClick={() => onNavigate(reference.filePath, reference.lineNumber, "")}
 										>
