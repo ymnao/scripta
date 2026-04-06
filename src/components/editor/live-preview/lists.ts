@@ -4,11 +4,11 @@ import {
 	Decoration,
 	type DecorationSet,
 	type EditorView,
+	keymap,
 	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
 	WidgetType,
-	keymap,
 } from "@codemirror/view";
 
 export class BulletWidget extends WidgetType {

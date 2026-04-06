@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
 	insertHorizontalRule,
 	toggleBold,
-	toggleCheckState,
 	toggleCheckbox,
+	toggleCheckState,
 	toggleHeading,
 	toggleItalic,
 	toggleList,

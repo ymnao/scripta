@@ -3,8 +3,8 @@ import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import {
 	BulletWidget,
-	CheckboxWidget,
 	buildDecorations,
+	CheckboxWidget,
 	findMarkerRange,
 	listKeymap,
 } from "./lists";

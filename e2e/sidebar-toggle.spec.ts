@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { TauriMock, modKey } from "./helpers/tauri-mock";
+import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 test.describe("sidebar toggle", () => {
 	test("Cmd+B toggles sidebar visibility", async ({ page }) => {

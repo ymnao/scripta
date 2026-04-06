@@ -107,7 +107,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 				</button>
 			</div>
 
-			<div className="search-panel-results" role="tree" aria-label="Search results">
+			<section className="search-panel-results" aria-label="Search results">
 				{!searched && !query.trim() && (
 					<p className="px-3 py-2 text-xs text-text-secondary">Type to search across all files</p>
 				)}
@@ -121,7 +121,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					</p>
 				)}
 				{results.map((group) => (
-					<div key={group.filePath} role="treeitem">
+					<div key={group.filePath}>
 						<button
 							type="button"
 							className="search-panel-file-header"
@@ -138,10 +138,10 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 						</button>
 						{!collapsed.has(group.filePath) && (
 							<div>
-								{group.matches.map((match, i) => (
+								{group.matches.map((match) => (
 									<button
 										type="button"
-										key={`${match.lineNumber}-${match.matchStart}-${i}`}
+										key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
 										className="search-panel-match"
 										onClick={() => onNavigate(match.filePath, match.lineNumber, query.trim())}
 									>
@@ -159,7 +159,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 						)}
 					</div>
 				))}
-			</div>
+			</section>
 		</div>
 	);
 }
@@ -168,7 +168,11 @@ function HighlightedLine({
 	line,
 	matchStart,
 	matchEnd,
-}: { line: string; matchStart: number; matchEnd: number }) {
+}: {
+	line: string;
+	matchStart: number;
+	matchEnd: number;
+}) {
 	const before = line.slice(0, matchStart);
 	const match = line.slice(matchStart, matchEnd);
 	const after = line.slice(matchEnd);

@@ -2,9 +2,9 @@ import "katex/dist/katex.min.css";
 import { redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
-	HighlightStyle,
 	defaultHighlightStyle,
 	foldService,
+	HighlightStyle,
 	indentUnit,
 	syntaxHighlighting,
 	syntaxTree,
@@ -27,13 +27,12 @@ import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
 import { ContextMenu } from "../filetree/ContextMenu";
-import { MermaidEditorDialog } from "./MermaidEditorDialog";
 import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
 	insertHorizontalRule,
 	toggleBold,
-	toggleCheckState,
 	toggleCheckbox,
+	toggleCheckState,
 	toggleHeading,
 	toggleItalic,
 	toggleList,
@@ -61,6 +60,7 @@ import {
 	wikilinkDecoration,
 	wikilinkHoverTooltip,
 } from "./live-preview";
+import { MermaidEditorDialog } from "./MermaidEditorDialog";
 
 const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
 
@@ -513,8 +513,9 @@ export function MarkdownEditor({
 	);
 
 	return (
-		<div
+		<section
 			ref={containerRef}
+			aria-label="Editor"
 			className="relative min-h-0 min-w-0 flex-1"
 			onMouseDown={handleEditorMouseDown}
 			onContextMenu={handleEditorContextMenu}
@@ -612,6 +613,6 @@ export function MarkdownEditor({
 				onSave={handleMermaidInsert}
 				onCancel={() => setMermaidInsertPos(null)}
 			/>
-		</div>
+		</section>
 	);
 }

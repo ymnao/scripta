@@ -42,6 +42,7 @@ export function NewTabContent({ onAction, hasWorkspace }: NewTabContentProps) {
 			<div className="flex flex-col items-center gap-2">
 				<pre
 					className="text-[11px]"
+					role="img"
 					aria-label="scripta"
 					style={{
 						lineHeight: 1,

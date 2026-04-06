@@ -8,7 +8,7 @@ import {
 	showInFolder,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { SEP_RE, addTrailingSep, basename, dirname, joinPath, replaceName } from "../../lib/path";
+import { addTrailingSep, basename, dirname, joinPath, replaceName, SEP_RE } from "../../lib/path";
 import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useDragStore } from "../../stores/drag";
 import { useToastStore } from "../../stores/toast";
