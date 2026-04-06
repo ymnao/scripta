@@ -81,7 +81,7 @@ export function DialogBase({
 			{!preventClose && (
 				<button
 					type="button"
-					aria-hidden
+					aria-label="Close"
 					data-testid="dialog-backdrop"
 					className="absolute inset-0"
 					onMouseDown={onClose}

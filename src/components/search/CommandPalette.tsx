@@ -150,7 +150,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 		<div className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]">
 			<button
 				type="button"
-				aria-hidden
+				aria-label="Close"
 				className="absolute inset-0"
 				onMouseDown={onClose}
 				tabIndex={-1}
@@ -177,7 +177,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 								? `command-palette-option-${selectedIndex}`
 								: undefined
 						}
-						aria-expanded={files.length > 0}
+						aria-expanded
 						className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
 					/>
 				</div>
