@@ -158,7 +158,7 @@ export function EmojiInputDialog({
 				</div>
 			)}
 
-			<div
+			<section
 				ref={scrollRef}
 				aria-label="絵文字一覧"
 				className="mt-1 overflow-y-auto"
@@ -226,7 +226,7 @@ export function EmojiInputDialog({
 						</div>
 					))
 				)}
-			</div>
+			</section>
 
 			<div className="mt-3 flex justify-between">
 				<div>

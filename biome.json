@@ -9,8 +9,7 @@
 				"noExplicitAny": "error"
 			},
 			"a11y": {
-				"noStaticElementInteractions": "off",
-				"useAriaPropsSupportedByRole": "off"
+				"noStaticElementInteractions": "off"
 			}
 		}
 	},
