@@ -74,7 +74,7 @@ verify() {
 verify "package.json" "$(jq -r '.version' "$REPO_ROOT/package.json")"
 verify "tauri.conf.json" "$(jq -r '.version' "$REPO_ROOT/src-tauri/tauri.conf.json")"
 verify "Cargo.toml" "$(sed -n 's/^version = "\(.*\)"/\1/p' "$CARGO_TOML" | head -1)"
-verify "Cargo.lock" "$(awk '$0 == "name = \"app\"" { found=1 } found && /^version = "/ { gsub(/"/, "", $3); print $3; exit }' "$CARGO_LOCK")"
+verify "Cargo.lock" "$(awk -v name="$CRATE_NAME" '$0 == "name = \"" name "\"" { found=1 } found && /^version = "/ { gsub(/"/, "", $3); print $3; exit }' "$CARGO_LOCK")"
 
 echo "Bumped to $VERSION"
 echo "  package.json"
