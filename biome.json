@@ -6,7 +6,8 @@
 		"rules": {
 			"recommended": true,
 			"suspicious": {
-				"noExplicitAny": "error"
+				"noExplicitAny": "error",
+				"noArrayIndexKey": "off"
 			},
 			"a11y": {
 				"noStaticElementInteractions": "off"

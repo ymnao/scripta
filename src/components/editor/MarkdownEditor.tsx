@@ -515,7 +515,6 @@ export function MarkdownEditor({
 	return (
 		<div
 			ref={containerRef}
-			role="application"
 			className="relative min-h-0 min-w-0 flex-1"
 			onMouseDown={handleEditorMouseDown}
 			onContextMenu={handleEditorContextMenu}
