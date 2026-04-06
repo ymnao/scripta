@@ -29,8 +29,18 @@ sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$REPO_ROOT/src-taur
 sedi "s/^version = \"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"/version = \"$VERSION\"/" \
   "$REPO_ROOT/src-tauri/Cargo.toml"
 
-# Cargo.lock のバージョンフィールドのみ更新（コンパイル不要）
-(cd "$REPO_ROOT/src-tauri" && cargo update --package app -q)
+# Cargo.lock の app パッケージのバージョンのみ直接編集
+# レジストリ不要・他の依存を一切変更しない決定的な操作
+CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
+awk -v ver="$VERSION" '
+  $0 == "name = \"app\"" { found_app=1 }
+  found_app && /^version = "/ {
+    print "version = \"" ver "\""
+    found_app=0
+    next
+  }
+  { print }
+' "$CARGO_LOCK" > "$CARGO_LOCK.tmp" && mv "$CARGO_LOCK.tmp" "$CARGO_LOCK"
 
 echo "Bumped to $VERSION"
 echo "  package.json"

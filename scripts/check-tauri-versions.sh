@@ -40,13 +40,30 @@ for entry in "${PLUGINS[@]}"; do
     found && /^version = "/ { gsub(/"/, "", $3); print $3; exit }
   ' "$CARGO_LOCK")
 
+  # package.json に npm 側が宣言されているか確認
+  has_npm=$(echo "$pnpm_list" | jq -r --arg name "$npm_pkg" '
+    .[0].dependencies[$name] // empty | if . == "" then "no" else "yes" end
+  ' 2>/dev/null)
+
+  # Rust-only プラグイン（npm 側が package.json に未宣言）はスキップ
+  if [[ "$has_npm" != "yes" ]]; then
+    continue
+  fi
+
   # pnpm list --json から解決済みバージョンを取得
   npm_ver=$(echo "$pnpm_list" | jq -r --arg name "$npm_pkg" '
     .[0].dependencies[$name].version // empty
   ' 2>/dev/null)
 
-  # いずれかが存在しない場合はスキップ（Rust-only プラグインなど）
-  if [[ -z "$cargo_ver" || -z "$npm_ver" ]]; then
+  # 片側欠落はエラー（両方宣言されているのに解決済みバージョンが取れない）
+  if [[ -z "$cargo_ver" ]]; then
+    echo "error: $crate not found in Cargo.lock" >&2
+    errors=$((errors + 1))
+    continue
+  fi
+  if [[ -z "$npm_ver" ]]; then
+    echo "error: $npm_pkg not found in pnpm list" >&2
+    errors=$((errors + 1))
     continue
   fi
 
