@@ -85,9 +85,8 @@ test.describe("mermaid widget", () => {
 
 		await menu.getByRole("menuitem", { name: "Mermaid を編集" }).click();
 
-		const dialog = page.getByRole("dialog");
+		const dialog = page.getByRole("dialog").filter({ hasText: "Mermaid エディタ" });
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByText("Mermaid エディタ")).toBeVisible();
 		await expect(dialog.locator('[aria-label="Mermaid ソースコード"]')).toContainText("graph TD");
 		await expect(menu).not.toBeVisible();
 	});
