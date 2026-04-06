@@ -60,7 +60,7 @@ for entry in "${PLUGINS[@]}"; do
 
   # package.json に npm 側が宣言されているか確認
   has_npm=$(echo "$pnpm_list" | jq -r --arg name "$npm_pkg" '
-    .[0].dependencies[$name] // empty | if . == "" then "no" else "yes" end
+    if .[0].dependencies | has($name) then "yes" else "no" end
   ')
 
   # Rust-only プラグイン（npm 側が package.json に未宣言）はスキップ
