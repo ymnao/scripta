@@ -56,8 +56,8 @@ test.describe("command palette", () => {
 
 		// readme.md should match, others should not appear in the palette
 		await expect(page.getByText("readme.md").first()).toBeVisible();
-		// The palette button includes the full path, use it to distinguish from file tree
-		await expect(page.getByRole("button", { name: /hello\.md.*\/workspace/ })).not.toBeVisible();
+		// The palette option includes the full path, use it to distinguish from file tree
+		await expect(page.getByRole("option", { name: /hello\.md.*\/workspace/ })).not.toBeVisible();
 	});
 
 	test("opens file with Enter", async ({ page }) => {
