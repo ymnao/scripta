@@ -16,6 +16,16 @@ done
 CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
 CARGO_TOML="$REPO_ROOT/src-tauri/Cargo.toml"
 
+if [[ ! -f "$CARGO_TOML" ]]; then
+  echo "error: Cargo.toml not found: $CARGO_TOML" >&2
+  exit 1
+fi
+
+if [[ ! -f "$CARGO_LOCK" ]]; then
+  echo "error: Cargo.lock not found: $CARGO_LOCK" >&2
+  exit 1
+fi
+
 # Cargo.toml から tauri-plugin-* クレートを自動検出し、npm パッケージ名を導出
 # 命名規則: tauri-plugin-X → @tauri-apps/plugin-X
 PLUGINS=()
@@ -75,9 +85,9 @@ for entry in "${PLUGINS[@]}"; do
     continue
   fi
 
-  # major.minor を比較
-  cargo_mm="${cargo_ver%.*}"
-  npm_mm="${npm_ver%.*}"
+  # major.minor を抽出（プレリリース版にも対応）
+  cargo_mm=$(echo "$cargo_ver" | grep -o '^[0-9]\+\.[0-9]\+')
+  npm_mm=$(echo "$npm_ver" | grep -o '^[0-9]\+\.[0-9]\+')
 
   if [[ "$cargo_mm" != "$npm_mm" ]]; then
     echo "error: $crate ($cargo_ver) != $npm_pkg ($npm_ver)" >&2
