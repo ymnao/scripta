@@ -14,7 +14,7 @@ PLUGINS=()
 while IFS= read -r crate; do
   suffix="${crate#tauri-plugin-}"
   PLUGINS+=("${crate}:@tauri-apps/plugin-${suffix}")
-done < <(grep -o 'tauri-plugin-[a-z-]*' "$CARGO_TOML" | sort -u)
+done < <(grep -o 'tauri-plugin-[a-z0-9-]*' "$CARGO_TOML" | sort -u)
 
 if [[ ${#PLUGINS[@]} -eq 0 ]]; then
   echo "warn: no tauri-plugin-* found in Cargo.toml" >&2
