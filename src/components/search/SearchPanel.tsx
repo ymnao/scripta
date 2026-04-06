@@ -121,7 +121,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					</p>
 				)}
 				{results.map((group) => (
-					<div key={group.filePath} role="treeitem" tabIndex={-1}>
+					<div key={group.filePath}>
 						<button
 							type="button"
 							className="search-panel-file-header"

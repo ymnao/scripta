@@ -150,7 +150,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 		<div className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]">
 			<button
 				type="button"
-				aria-label="Close"
+				aria-hidden
 				className="absolute inset-0"
 				onMouseDown={onClose}
 				tabIndex={-1}
@@ -166,14 +166,28 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 					<input
 						ref={inputRef}
 						type="text"
+						role="combobox"
 						value={query}
 						onChange={handleChange}
 						placeholder="Search files by name..."
 						aria-label="Search files by name"
+						aria-controls="command-palette-listbox"
+						aria-activedescendant={
+							files.length > 0 && selectedIndex >= 0
+								? `command-palette-option-${selectedIndex}`
+								: undefined
+						}
+						aria-expanded={files.length > 0}
 						className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
 					/>
 				</div>
-				<div ref={listRef} role="listbox" className="overflow-y-auto" aria-label="File results">
+				<div
+					ref={listRef}
+					id="command-palette-listbox"
+					role="listbox"
+					className="overflow-y-auto"
+					aria-label="File results"
+				>
 					{files.length === 0 && (
 						<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
 					)}
@@ -181,6 +195,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 						<button
 							type="button"
 							role="option"
+							id={`command-palette-option-${index}`}
 							key={filePath}
 							aria-selected={index === selectedIndex}
 							className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${

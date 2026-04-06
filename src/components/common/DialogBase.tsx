@@ -81,7 +81,7 @@ export function DialogBase({
 			{!preventClose && (
 				<button
 					type="button"
-					aria-label="Close"
+					aria-hidden
 					className="absolute inset-0"
 					onMouseDown={onClose}
 					tabIndex={-1}

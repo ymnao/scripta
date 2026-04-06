@@ -106,7 +106,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 					<p className="px-3 py-2 text-xs text-text-secondary">未解決のリンクはありません</p>
 				)}
 				{sortedLinks.map((link) => (
-					<div key={link.pageName} role="treeitem" tabIndex={-1} className="group">
+					<div key={link.pageName} className="group">
 						<div className="flex items-center">
 							<button
 								type="button"
