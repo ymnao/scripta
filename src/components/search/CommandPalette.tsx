@@ -157,6 +157,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 			/>
 			<div
 				role="dialog"
+				aria-modal="true"
 				aria-label="Command palette"
 				className="flex h-fit max-h-[60vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-bg-primary shadow-xl"
 				onMouseDown={(e) => e.stopPropagation()}
