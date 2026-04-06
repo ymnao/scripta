@@ -226,7 +226,8 @@ fn is_path_traversal(name: &str) -> bool {
         || name.contains("..")
 }
 
-/// Extract wikilink inner contents from a line (returns the text between [[ and ]])
+/// Extract wikilink inner contents from a line.
+/// Returns `(inner_text, byte_offset)` where `byte_offset` is the 1-based position of `[[`.
 fn extract_wikilinks_from_line(line: &str) -> Vec<(&str, usize)> {
     let mut results = Vec::new();
     let mut search_start = 0;

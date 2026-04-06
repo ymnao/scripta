@@ -181,6 +181,9 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 						className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
 					/>
 				</div>
+				{files.length === 0 && (
+					<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
+				)}
 				<div
 					ref={listRef}
 					id="command-palette-listbox"
@@ -188,17 +191,14 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 					className="overflow-y-auto"
 					aria-label="File results"
 				>
-					{files.length === 0 && (
-						<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
-					)}
 					{files.map((filePath, index) => (
-						<button
-							type="button"
+						<div
 							role="option"
+							tabIndex={-1}
 							id={`command-palette-option-${index}`}
 							key={filePath}
 							aria-selected={index === selectedIndex}
-							className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+							className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm ${
 								index === selectedIndex
 									? "bg-blue-600/10 text-text-primary"
 									: "text-text-primary hover:bg-black/5 dark:hover:bg-white/5"
@@ -207,6 +207,12 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 							onClick={() => {
 								onSelect(filePath);
 								onClose();
+							}}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") {
+									onSelect(filePath);
+									onClose();
+								}
 							}}
 						>
 							{isScratchpadMode ? (
@@ -218,7 +224,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 							<span className="ml-auto min-w-0 truncate text-xs text-text-secondary">
 								{filePath}
 							</span>
-						</button>
+						</div>
 					))}
 				</div>
 			</div>

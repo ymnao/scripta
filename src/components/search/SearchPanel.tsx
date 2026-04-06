@@ -107,7 +107,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 				</button>
 			</div>
 
-			<div className="search-panel-results" role="tree" aria-label="Search results">
+			<section className="search-panel-results" aria-label="Search results">
 				{!searched && !query.trim() && (
 					<p className="px-3 py-2 text-xs text-text-secondary">Type to search across all files</p>
 				)}
@@ -159,7 +159,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 						)}
 					</div>
 				))}
-			</div>
+			</section>
 		</div>
 	);
 }
