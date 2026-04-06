@@ -86,16 +86,6 @@ export function EmojiInputDialog({
 		}
 	}, []);
 
-	const handleGridKeyDown = useCallback((e: React.KeyboardEvent) => {
-		if (e.key === "Enter" || e.key === " ") {
-			const el = (e.target as Element).closest<HTMLElement>("[data-emoji]");
-			if (el?.dataset.emoji) {
-				e.preventDefault();
-				setValue(el.dataset.emoji);
-			}
-		}
-	}, []);
-
 	const searchResults = useMemo(() => {
 		const q = query.trim();
 		if (!q) return null;
@@ -178,7 +168,6 @@ export function EmojiInputDialog({
 										value === emoji ? "bg-black/10 dark:bg-white/10" : ""
 									}`}
 									onClick={handleGridClick}
-									onKeyDown={handleGridKeyDown}
 								>
 									{emoji}
 								</button>
@@ -213,7 +202,6 @@ export function EmojiInputDialog({
 											value === emoji ? "bg-black/10 dark:bg-white/10" : ""
 										}`}
 										onClick={handleGridClick}
-										onKeyDown={handleGridKeyDown}
 									>
 										{emoji}
 									</button>
