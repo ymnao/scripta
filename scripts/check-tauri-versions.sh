@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Tauri プラグインの Rust クレートと npm パッケージのバージョン整合性を検証する。
-# Cargo.lock（安定フォーマット）と pnpm list --json（構造化出力）を使用し、
+# Cargo.lock（安定フォーマット）と pnpm list --json を使用し、
 # major.minor が異なる場合にエラーを返す。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # 必須コマンドの存在チェック
-for cmd in jq awk; do
+for cmd in jq awk pnpm grep sort; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "error: $cmd is required but not found" >&2
     exit 1

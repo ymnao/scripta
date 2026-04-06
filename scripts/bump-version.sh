@@ -25,9 +25,17 @@ sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$REPO_ROOT/package.
 # tauri.conf.json
 sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$REPO_ROOT/src-tauri/tauri.conf.json"
 
-# Cargo.toml — semver パターンで [package] の version のみ置換
-sedi "s/^version = \"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"/version = \"$VERSION\"/" \
-  "$REPO_ROOT/src-tauri/Cargo.toml"
+# Cargo.toml — [package] セクション内の version のみ置換
+CARGO_TOML="$REPO_ROOT/src-tauri/Cargo.toml"
+awk -v ver="$VERSION" '
+  /^\[package\]$/ { in_package=1; print; next }
+  in_package && /^\[/ { in_package=0 }
+  in_package && /^version = "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"$/ {
+    print "version = \"" ver "\""
+    next
+  }
+  { print }
+' "$CARGO_TOML" > "$CARGO_TOML.tmp" && mv "$CARGO_TOML.tmp" "$CARGO_TOML"
 
 # Cargo.lock の app パッケージのバージョンのみ直接編集
 # レジストリ不要・他の依存を一切変更しない決定的な操作
