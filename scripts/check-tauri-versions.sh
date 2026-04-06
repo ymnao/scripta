@@ -5,6 +5,14 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# 必須コマンドの存在チェック
+for cmd in jq awk; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "error: $cmd is required but not found" >&2
+    exit 1
+  fi
+done
 CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
 CARGO_TOML="$REPO_ROOT/src-tauri/Cargo.toml"
 
@@ -43,7 +51,7 @@ for entry in "${PLUGINS[@]}"; do
   # package.json に npm 側が宣言されているか確認
   has_npm=$(echo "$pnpm_list" | jq -r --arg name "$npm_pkg" '
     .[0].dependencies[$name] // empty | if . == "" then "no" else "yes" end
-  ' 2>/dev/null)
+  ')
 
   # Rust-only プラグイン（npm 側が package.json に未宣言）はスキップ
   if [[ "$has_npm" != "yes" ]]; then
@@ -53,7 +61,7 @@ for entry in "${PLUGINS[@]}"; do
   # pnpm list --json から解決済みバージョンを取得
   npm_ver=$(echo "$pnpm_list" | jq -r --arg name "$npm_pkg" '
     .[0].dependencies[$name].version // empty
-  ' 2>/dev/null)
+  ')
 
   # 片側欠落はエラー（両方宣言されているのに解決済みバージョンが取れない）
   if [[ -z "$cargo_ver" ]]; then
@@ -79,7 +87,10 @@ done
 
 if [[ $errors -gt 0 ]]; then
   echo "" >&2
-  echo "$errors mismatch(es) found. Run 'pnpm update <package>' to sync." >&2
+  echo "$errors mismatch(es) found." >&2
+  echo "To sync, update the stale side:" >&2
+  echo "  npm:   pnpm update <package>" >&2
+  echo "  Rust:  cargo update -p <crate>" >&2
   exit 1
 fi
 

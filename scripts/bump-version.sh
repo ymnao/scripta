@@ -37,9 +37,16 @@ awk -v ver="$VERSION" '
   found_app && /^version = "/ {
     print "version = \"" ver "\""
     found_app=0
+    replaced=1
     next
   }
   { print }
+  END {
+    if (!replaced) {
+      print "error: app package not found in Cargo.lock" > "/dev/stderr"
+      exit 1
+    }
+  }
 ' "$CARGO_LOCK" > "$CARGO_LOCK.tmp" && mv "$CARGO_LOCK.tmp" "$CARGO_LOCK"
 
 echo "Bumped to $VERSION"
