@@ -311,6 +311,7 @@ export class TauriMock {
 						Array<{
 							filePath: string;
 							lineNumber: number;
+							column: number;
 							lineContent: string;
 							contextBefore: string[];
 							contextAfter: string[];
@@ -358,6 +359,7 @@ export class TauriMock {
 								unresolvedMap[normalized].push({
 									filePath,
 									lineNumber: i + 1,
+									column: m.index + 1,
 									lineContent: line,
 									contextBefore,
 									contextAfter,
