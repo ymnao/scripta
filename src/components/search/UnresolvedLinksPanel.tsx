@@ -96,7 +96,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 				</div>
 			</div>
 
-			<div className="flex-1 overflow-y-auto" role="tree" aria-label="Unresolved wikilinks">
+			<section className="flex-1 overflow-y-auto" aria-label="Unresolved wikilinks">
 				{loading && sortedLinks.length === 0 && (
 					<div className="flex items-center justify-center py-8">
 						<Loader2 size={16} className="animate-spin text-text-secondary" />
@@ -106,7 +106,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 					<p className="px-3 py-2 text-xs text-text-secondary">未解決のリンクはありません</p>
 				)}
 				{sortedLinks.map((link) => (
-					<div key={link.pageName} role="treeitem" className="group">
+					<div key={link.pageName} className="group">
 						<div className="flex items-center">
 							<button
 								type="button"
@@ -139,12 +139,12 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 						</div>
 						{!collapsed.has(link.pageName) && (
 							<div>
-								{link.references.map((reference, i) => {
+								{link.references.map((reference) => {
 									const relativePath = toRelativePath(workspacePath, reference.filePath);
 									return (
 										<button
 											type="button"
-											key={`${reference.filePath}-${reference.lineNumber}-${i}`}
+											key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
 											className="search-panel-match"
 											onClick={() => onNavigate(reference.filePath, reference.lineNumber, "")}
 										>
@@ -159,7 +159,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 						)}
 					</div>
 				))}
-			</div>
+			</section>
 		</div>
 	);
 }

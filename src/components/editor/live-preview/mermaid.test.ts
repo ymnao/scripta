@@ -25,7 +25,7 @@ vi.mock("../../../stores/settings", () => ({
 	},
 }));
 
-import { MermaidWidget, buildMermaidDecorations, findMermaidBlocks } from "./mermaid";
+import { buildMermaidDecorations, findMermaidBlocks, MermaidWidget } from "./mermaid";
 import {
 	collectDecorations,
 	createTestState,

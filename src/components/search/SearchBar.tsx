@@ -1,10 +1,10 @@
 import {
-	SearchQuery,
 	findNext,
 	findPrevious,
 	getSearchQuery,
 	replaceAll,
 	replaceNext,
+	SearchQuery,
 	setSearchQuery,
 } from "@codemirror/search";
 import { Compartment, StateEffect } from "@codemirror/state";
@@ -197,7 +197,7 @@ export function SearchBar({
 					: `${matchInfo.total} results`;
 
 	return (
-		<div
+		<search
 			className="search-bar"
 			aria-label="Find and replace"
 			onKeyDown={(e) => {
@@ -300,7 +300,7 @@ export function SearchBar({
 					<div className="search-bar-spacer" />
 				</div>
 			)}
-		</div>
+		</search>
 	);
 }
 

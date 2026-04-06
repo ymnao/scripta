@@ -86,16 +86,6 @@ export function EmojiInputDialog({
 		}
 	}, []);
 
-	const handleGridKeyDown = useCallback((e: React.KeyboardEvent) => {
-		if (e.key === "Enter" || e.key === " ") {
-			const el = (e.target as Element).closest<HTMLElement>("[data-emoji]");
-			if (el?.dataset.emoji) {
-				e.preventDefault();
-				setValue(el.dataset.emoji);
-			}
-		}
-	}, []);
-
 	const searchResults = useMemo(() => {
 		const q = query.trim();
 		if (!q) return null;
@@ -129,6 +119,7 @@ export function EmojiInputDialog({
 					className="min-w-0 flex-1 rounded-md border border-border bg-bg-secondary px-2.5 py-1.5 text-sm text-text-primary outline-none placeholder:text-text-secondary focus:border-blue-500"
 				/>
 				<div
+					role="img"
 					className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-secondary text-xl"
 					aria-label="選択中の絵文字"
 				>
@@ -157,7 +148,7 @@ export function EmojiInputDialog({
 				</div>
 			)}
 
-			<div
+			<section
 				ref={scrollRef}
 				aria-label="絵文字一覧"
 				className="mt-1 overflow-y-auto"
@@ -166,11 +157,7 @@ export function EmojiInputDialog({
 			>
 				{isSearching ? (
 					searchResults.length > 0 ? (
-						<div
-							className="grid grid-cols-10 gap-0.5 pt-1"
-							onClick={handleGridClick}
-							onKeyDown={handleGridKeyDown}
-						>
+						<div className="grid grid-cols-10 gap-0.5 pt-1">
 							{searchResults.map((emoji) => (
 								<button
 									key={emoji}
@@ -180,6 +167,7 @@ export function EmojiInputDialog({
 									className={`rounded p-0.5 text-xl leading-none hover:bg-black/10 dark:hover:bg-white/10 ${
 										value === emoji ? "bg-black/10 dark:bg-white/10" : ""
 									}`}
+									onClick={handleGridClick}
 								>
 									{emoji}
 								</button>
@@ -203,11 +191,7 @@ export function EmojiInputDialog({
 							>
 								{cat.label}
 							</div>
-							<div
-								className="grid grid-cols-10 gap-0.5"
-								onClick={handleGridClick}
-								onKeyDown={handleGridKeyDown}
-							>
+							<div className="grid grid-cols-10 gap-0.5">
 								{cat.emojis.map((emoji) => (
 									<button
 										key={emoji}
@@ -217,6 +201,7 @@ export function EmojiInputDialog({
 										className={`rounded p-0.5 text-xl leading-none hover:bg-black/10 dark:hover:bg-white/10 ${
 											value === emoji ? "bg-black/10 dark:bg-white/10" : ""
 										}`}
+										onClick={handleGridClick}
 									>
 										{emoji}
 									</button>
@@ -225,7 +210,7 @@ export function EmojiInputDialog({
 						</div>
 					))
 				)}
-			</div>
+			</section>
 
 			<div className="mt-3 flex justify-between">
 				<div>

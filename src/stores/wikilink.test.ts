@@ -33,6 +33,7 @@ describe("useWikilinkStore", () => {
 					{
 						filePath: "/workspace/note.md",
 						lineNumber: 1,
+						byteOffset: 5,
 						lineContent: "See [[missing-page]]",
 						contextBefore: [],
 						contextAfter: [],
@@ -184,6 +185,7 @@ describe("useWikilinkStore", () => {
 			{
 				filePath: "/workspace/note.md",
 				lineNumber: 1,
+				byteOffset: 1,
 				lineContent: "[[new-page]]",
 				contextBefore: [],
 				contextAfter: [],

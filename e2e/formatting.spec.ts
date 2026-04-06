@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { TauriMock, modKey } from "./helpers/tauri-mock";
+import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
 	files: {

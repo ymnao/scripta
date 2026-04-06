@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LinkCardWidget, isStandaloneUrlLine } from "./link-cards";
+import { isStandaloneUrlLine, LinkCardWidget } from "./link-cards";
 
 vi.mock("../../../lib/commands", () => ({
 	fetchOgp: vi.fn(),

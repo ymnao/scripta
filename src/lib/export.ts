@@ -166,7 +166,7 @@ function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
 	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
 
 	// Collect block element positions once to avoid O(n^2) substring scanning.
-	const blockPattern = /<(?:p|ul|ol|pre|blockquote|table|hr|div)[\s>\/]/gi;
+	const blockPattern = /<(?:p|ul|ol|pre|blockquote|table|hr|div)[\s>/]/gi;
 	const blockPositions: number[] = [];
 	for (let bm = blockPattern.exec(bodyHtml); bm !== null; bm = blockPattern.exec(bodyHtml)) {
 		blockPositions.push(bm.index);

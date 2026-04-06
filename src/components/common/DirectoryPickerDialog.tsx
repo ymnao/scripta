@@ -161,8 +161,8 @@ export function DirectoryPickerDialog({ workspacePath }: DirectoryPickerDialogPr
 			</p>
 
 			<div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded border border-border p-1">
-				<ul role="tree">
-					<li>
+				<div>
+					<div>
 						<button
 							type="button"
 							className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm ${
@@ -189,8 +189,8 @@ export function DirectoryPickerDialog({ workspacePath }: DirectoryPickerDialogPr
 								))}
 							</ul>
 						)}
-					</li>
-				</ul>
+					</div>
+				</div>
 			</div>
 
 			<div className="mt-3 flex shrink-0 justify-end gap-2">

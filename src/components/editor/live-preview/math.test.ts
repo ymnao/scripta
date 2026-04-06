@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MathWidget, buildDecorations, isEscaped } from "./math";
+import { buildDecorations, isEscaped, MathWidget } from "./math";
 import { collectDecorations, createViewForTest, widgetDecorations } from "./test-helper";
 
 vi.mock("katex", () => ({

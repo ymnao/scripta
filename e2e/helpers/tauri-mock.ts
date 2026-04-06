@@ -311,6 +311,7 @@ export class TauriMock {
 						Array<{
 							filePath: string;
 							lineNumber: number;
+							byteOffset: number;
 							lineContent: string;
 							contextBefore: string[];
 							contextAfter: string[];
@@ -321,7 +322,7 @@ export class TauriMock {
 						if (!content) continue;
 						const lines = content.split("\n");
 						let inCodeBlock = false;
-						const re = /\[\[([^\[\]\n\r]+)\]\]/g;
+						const re = /\[\[([^[\]\n\r]+)\]\]/g;
 						for (let i = 0; i < lines.length; i++) {
 							const line = lines[i];
 							const trimmed = line.trimStart();
@@ -358,6 +359,7 @@ export class TauriMock {
 								unresolvedMap[normalized].push({
 									filePath,
 									lineNumber: i + 1,
+									byteOffset: new TextEncoder().encode(line.slice(0, m.index)).length + 1,
 									lineContent: line,
 									contextBefore,
 									contextAfter,
@@ -464,7 +466,11 @@ export class TauriMock {
 				filePath,
 				parentDir,
 				fileName,
-			}: { filePath: string; parentDir: string; fileName: string }) => {
+			}: {
+				filePath: string;
+				parentDir: string;
+				fileName: string;
+			}) => {
 				const store = (window as unknown as WindowWithMock).__TAURI_MOCK__;
 				if (store?._files) delete store._files[filePath];
 				if (store?._directories?.[parentDir]) {

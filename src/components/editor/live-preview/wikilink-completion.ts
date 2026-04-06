@@ -1,8 +1,8 @@
 import {
+	autocompletion,
 	type Completion,
 	type CompletionContext,
 	type CompletionResult,
-	autocompletion,
 } from "@codemirror/autocomplete";
 import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";

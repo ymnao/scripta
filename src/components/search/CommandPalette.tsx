@@ -147,12 +147,18 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 	if (!open) return null;
 
 	return createPortal(
-		<div
-			role="presentation"
-			className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]"
-			onMouseDown={onClose}
-		>
+		<div className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]">
+			<button
+				type="button"
+				aria-label="Close"
+				className="absolute inset-0"
+				onMouseDown={onClose}
+				tabIndex={-1}
+			/>
 			<div
+				role="dialog"
+				aria-modal="true"
+				aria-label="Command palette"
 				className="flex h-fit max-h-[60vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-bg-primary shadow-xl"
 				onMouseDown={(e) => e.stopPropagation()}
 				onKeyDown={handleKeyDown}
@@ -161,23 +167,39 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 					<input
 						ref={inputRef}
 						type="text"
+						role="combobox"
 						value={query}
 						onChange={handleChange}
 						placeholder="Search files by name..."
 						aria-label="Search files by name"
+						aria-controls="command-palette-listbox"
+						aria-activedescendant={
+							files.length > 0 && selectedIndex >= 0
+								? `command-palette-option-${selectedIndex}`
+								: undefined
+						}
+						aria-expanded
 						className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
 					/>
 				</div>
-				<div ref={listRef} className="overflow-y-auto" aria-label="File results">
-					{files.length === 0 && (
-						<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
-					)}
+				{files.length === 0 && (
+					<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
+				)}
+				<div
+					ref={listRef}
+					id="command-palette-listbox"
+					role="listbox"
+					className="overflow-y-auto"
+					aria-label="File results"
+				>
 					{files.map((filePath, index) => (
-						<button
-							type="button"
+						<div
+							role="option"
+							tabIndex={-1}
+							id={`command-palette-option-${index}`}
 							key={filePath}
-							aria-current={index === selectedIndex}
-							className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+							aria-selected={index === selectedIndex}
+							className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm ${
 								index === selectedIndex
 									? "bg-blue-600/10 text-text-primary"
 									: "text-text-primary hover:bg-black/5 dark:hover:bg-white/5"
@@ -186,6 +208,12 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 							onClick={() => {
 								onSelect(filePath);
 								onClose();
+							}}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") {
+									onSelect(filePath);
+									onClose();
+								}
 							}}
 						>
 							{isScratchpadMode ? (
@@ -197,7 +225,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 							<span className="ml-auto min-w-0 truncate text-xs text-text-secondary">
 								{filePath}
 							</span>
-						</button>
+						</div>
 					))}
 				</div>
 			</div>

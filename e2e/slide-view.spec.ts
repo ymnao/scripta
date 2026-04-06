@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { TauriMock, modKey } from "./helpers/tauri-mock";
+import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const slideContent =
 	"# Slide 1\n\nIntro content\n\n---\n\n# Slide 2\n\nSecond slide\n\n---\n\n# Slide 3";
