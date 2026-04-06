@@ -82,6 +82,7 @@ export function DialogBase({
 				<button
 					type="button"
 					aria-hidden
+					data-testid="dialog-backdrop"
 					className="absolute inset-0"
 					onMouseDown={onClose}
 					tabIndex={-1}

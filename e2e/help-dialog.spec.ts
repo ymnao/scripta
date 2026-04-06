@@ -41,7 +41,7 @@ test.describe("help dialog", () => {
 		await expect(page.getByText("キーボードショートカット")).toBeVisible();
 
 		// Click the backdrop (outside the dialog)
-		const backdrop = page.locator('[role="presentation"]');
+		const backdrop = page.getByTestId("dialog-backdrop");
 		await backdrop.click({ position: { x: 5, y: 5 } });
 		await expect(page.getByText("キーボードショートカット")).not.toBeVisible();
 	});
