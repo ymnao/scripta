@@ -141,7 +141,7 @@ test.describe("unresolved wikilinks panel", () => {
 
 		// Verify panel initially shows both unresolved links
 		await page.getByLabel("Show unresolved wikilinks").click();
-		const panel = page.locator('[role="tree"][aria-label="Unresolved wikilinks"]');
+		const panel = page.locator('section[aria-label="Unresolved wikilinks"]');
 		await expect(panel.getByText("another-missing")).toBeVisible();
 		await expect(panel.getByText("missing-page")).toBeVisible();
 
