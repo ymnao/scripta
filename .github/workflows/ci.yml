@@ -19,6 +19,9 @@ jobs:
 
       - uses: ./.github/actions/setup-node-pnpm
 
+      - name: Check Tauri plugin versions
+        run: bash scripts/check-tauri-versions.sh
+
       - name: Lint
         run: pnpm lint
 

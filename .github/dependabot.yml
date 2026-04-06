@@ -9,8 +9,16 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      tauri-plugins:
+        patterns:
+          - "@tauri-apps/plugin-*"
 
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
       interval: weekly
+    groups:
+      tauri-plugins:
+        patterns:
+          - "tauri-plugin-*"
