@@ -37,21 +37,26 @@ awk -v ver="$VERSION" '
   { print }
 ' "$CARGO_TOML" > "$CARGO_TOML.tmp" && mv "$CARGO_TOML.tmp" "$CARGO_TOML"
 
-# Cargo.lock の app パッケージのバージョンのみ直接編集
-# レジストリ不要・他の依存を一切変更しない決定的な操作
+# Cargo.lock のパッケージバージョンのみ直接編集
+# クレート名は Cargo.toml の [package] name から取得
 CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
-awk -v ver="$VERSION" '
-  $0 == "name = \"app\"" { found_app=1 }
-  found_app && /^version = "/ {
+CRATE_NAME=$(awk '/^\[package\]$/ { in_pkg=1; next } in_pkg && /^\[/ { exit } in_pkg && /^name = "/ { gsub(/"/, "", $3); print $3; exit }' "$CARGO_TOML")
+if [[ -z "$CRATE_NAME" ]]; then
+  echo "error: could not read crate name from Cargo.toml" >&2
+  exit 1
+fi
+awk -v ver="$VERSION" -v name="$CRATE_NAME" '
+  $0 == "name = \"" name "\"" { found=1 }
+  found && /^version = "/ {
     print "version = \"" ver "\""
-    found_app=0
+    found=0
     replaced=1
     next
   }
   { print }
   END {
     if (!replaced) {
-      print "error: app package not found in Cargo.lock" > "/dev/stderr"
+      print "error: " name " package not found in Cargo.lock" > "/dev/stderr"
       exit 1
     }
   }
