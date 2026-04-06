@@ -57,6 +57,20 @@ awk -v ver="$VERSION" '
   }
 ' "$CARGO_LOCK" > "$CARGO_LOCK.tmp" && mv "$CARGO_LOCK.tmp" "$CARGO_LOCK"
 
+# 置換結果を検証
+verify() {
+  local file="$1" actual="$2"
+  if [[ "$actual" != "$VERSION" ]]; then
+    echo "error: $file version is '$actual', expected '$VERSION'" >&2
+    exit 1
+  fi
+}
+
+verify "package.json" "$(jq -r '.version' "$REPO_ROOT/package.json")"
+verify "tauri.conf.json" "$(jq -r '.version' "$REPO_ROOT/src-tauri/tauri.conf.json")"
+verify "Cargo.toml" "$(sed -n 's/^version = "\(.*\)"/\1/p' "$CARGO_TOML" | head -1)"
+verify "Cargo.lock" "$(awk '$0 == "name = \"app\"" { found=1 } found && /^version = "/ { gsub(/"/, "", $3); print $3; exit }' "$CARGO_LOCK")"
+
 echo "Bumped to $VERSION"
 echo "  package.json"
 echo "  src-tauri/tauri.conf.json"

@@ -95,6 +95,16 @@ for entry in "${PLUGINS[@]}"; do
   fi
 done
 
+# 逆方向チェック: npm 側に @tauri-apps/plugin-* があるのに Rust 側に未登録のケース
+while IFS= read -r npm_pkg; do
+  suffix="${npm_pkg#@tauri-apps/plugin-}"
+  crate="tauri-plugin-${suffix}"
+  if ! grep -q "tauri-plugin-${suffix}" "$CARGO_TOML"; then
+    echo "error: $npm_pkg found in package.json but $crate missing from Cargo.toml" >&2
+    errors=$((errors + 1))
+  fi
+done < <(echo "$pnpm_list" | jq -r '.[0].dependencies // {} | keys[] | select(startswith("@tauri-apps/plugin-"))')
+
 if [[ $errors -gt 0 ]]; then
   echo "" >&2
   echo "$errors mismatch(es) found." >&2
