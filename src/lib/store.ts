@@ -1,4 +1,4 @@
-import { type Store, load } from "@tauri-apps/plugin-store";
+import { load, type Store } from "@tauri-apps/plugin-store";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
 

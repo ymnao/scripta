@@ -66,7 +66,10 @@
 		"vitest": "^4.1.2"
 	},
 	"pnpm": {
-		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild"],
+		"onlyBuiltDependencies": [
+			"@biomejs/biome",
+			"esbuild"
+		],
 		"overrides": {
 			"@codemirror/state": "$@codemirror/state"
 		},

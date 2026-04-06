@@ -1,5 +1,5 @@
-import { type Page, expect, test } from "@playwright/test";
-import { TauriMock, modKey } from "./helpers/tauri-mock";
+import { expect, type Page, test } from "@playwright/test";
+import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
 	files: {

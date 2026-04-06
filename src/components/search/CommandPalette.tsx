@@ -153,6 +153,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 			onMouseDown={onClose}
 		>
 			<div
+				role="dialog"
 				className="flex h-fit max-h-[60vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-bg-primary shadow-xl"
 				onMouseDown={(e) => e.stopPropagation()}
 				onKeyDown={handleKeyDown}
@@ -168,7 +169,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 						className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
 					/>
 				</div>
-				<div ref={listRef} className="overflow-y-auto" aria-label="File results">
+				<div ref={listRef} role="listbox" className="overflow-y-auto" aria-label="File results">
 					{files.length === 0 && (
 						<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
 					)}

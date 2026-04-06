@@ -204,6 +204,7 @@ export function FileTreeItem({
 		<li>
 			<button
 				type="button"
+				role="treeitem"
 				data-path={entry.path}
 				data-is-directory={entry.isDirectory}
 				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}

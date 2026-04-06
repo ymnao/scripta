@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	LinkWidget,
-	URL_PASTE_RE,
 	buildMarkdownLink,
 	escapeMarkdownLabel,
 	isPrivateHostname,
 	isSafeImageUrl,
 	isSafeUrl,
+	LinkWidget,
+	URL_PASTE_RE,
 } from "./links";
 
 vi.mock("../../../lib/commands", () => ({

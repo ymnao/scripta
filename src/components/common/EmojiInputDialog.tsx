@@ -129,6 +129,7 @@ export function EmojiInputDialog({
 					className="min-w-0 flex-1 rounded-md border border-border bg-bg-secondary px-2.5 py-1.5 text-sm text-text-primary outline-none placeholder:text-text-secondary focus:border-blue-500"
 				/>
 				<div
+					role="img"
 					className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-secondary text-xl"
 					aria-label="選択中の絵文字"
 				>

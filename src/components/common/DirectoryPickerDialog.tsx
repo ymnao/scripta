@@ -161,7 +161,7 @@ export function DirectoryPickerDialog({ workspacePath }: DirectoryPickerDialogPr
 			</p>
 
 			<div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded border border-border p-1">
-				<ul role="tree">
+				<ul>
 					<li>
 						<button
 							type="button"

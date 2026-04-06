@@ -106,7 +106,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 					<p className="px-3 py-2 text-xs text-text-secondary">未解決のリンクはありません</p>
 				)}
 				{sortedLinks.map((link) => (
-					<div key={link.pageName} role="treeitem" className="group">
+					<div key={link.pageName} role="treeitem" tabIndex={-1} className="group">
 						<div className="flex items-center">
 							<button
 								type="button"
@@ -139,12 +139,12 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 						</div>
 						{!collapsed.has(link.pageName) && (
 							<div>
-								{link.references.map((reference, i) => {
+								{link.references.map((reference) => {
 									const relativePath = toRelativePath(workspacePath, reference.filePath);
 									return (
 										<button
 											type="button"
-											key={`${reference.filePath}-${reference.lineNumber}-${i}`}
+											key={`${reference.filePath}-${reference.lineNumber}`}
 											className="search-panel-match"
 											onClick={() => onNavigate(reference.filePath, reference.lineNumber, "")}
 										>

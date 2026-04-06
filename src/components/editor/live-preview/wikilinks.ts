@@ -9,13 +9,13 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { searchFilenames } from "../../../lib/commands";
-import { SEP_RE, basename, joinPath } from "../../../lib/path";
+import { basename, joinPath, SEP_RE } from "../../../lib/path";
 import { useWikilinkStore } from "../../../stores/wikilink";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
 
-const WIKILINK_RE = /\[\[([^\[\]\n\r]+)\]\]/g;
+const WIKILINK_RE = /\[\[([^[\]\n\r]+)\]\]/g;
 
 const hideBrackets = Decoration.replace({});
 

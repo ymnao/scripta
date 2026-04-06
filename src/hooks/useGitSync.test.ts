@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("../lib/commands", () => ({
 	gitCheckAvailable: vi.fn(),

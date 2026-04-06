@@ -4,11 +4,11 @@ import {
 	Decoration,
 	type DecorationSet,
 	EditorView,
+	keymap,
 	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
 	WidgetType,
-	keymap,
 } from "@codemirror/view";
 import katex from "katex";
 import { isEscaped } from "../../../lib/content";

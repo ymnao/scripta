@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
-	HighlightStyle,
 	defaultHighlightStyle,
+	HighlightStyle,
 	indentUnit,
 	syntaxHighlighting,
 } from "@codemirror/language";

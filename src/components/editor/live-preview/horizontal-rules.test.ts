@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HRWidget, buildDecorations } from "./horizontal-rules";
+import { buildDecorations, HRWidget } from "./horizontal-rules";
 import {
 	collectDecorations,
 	createViewForTest,

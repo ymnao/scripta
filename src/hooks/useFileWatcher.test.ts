@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { startWatcher, stopWatcher } from "../lib/commands";
 import type { FsChangeEvent } from "../types/workspace";
 import { useFileWatcher } from "./useFileWatcher";

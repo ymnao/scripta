@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { type ThemePreference, saveThemePreference } from "../lib/store";
+import { saveThemePreference, type ThemePreference } from "../lib/store";
 
 type Theme = "light" | "dark";
 

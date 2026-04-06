@@ -121,7 +121,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					</p>
 				)}
 				{results.map((group) => (
-					<div key={group.filePath} role="treeitem">
+					<div key={group.filePath} role="treeitem" tabIndex={-1}>
 						<button
 							type="button"
 							className="search-panel-file-header"
@@ -138,10 +138,10 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 						</button>
 						{!collapsed.has(group.filePath) && (
 							<div>
-								{group.matches.map((match, i) => (
+								{group.matches.map((match) => (
 									<button
 										type="button"
-										key={`${match.lineNumber}-${match.matchStart}-${i}`}
+										key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
 										className="search-panel-match"
 										onClick={() => onNavigate(match.filePath, match.lineNumber, query.trim())}
 									>
@@ -168,7 +168,11 @@ function HighlightedLine({
 	line,
 	matchStart,
 	matchEnd,
-}: { line: string; matchStart: number; matchEnd: number }) {
+}: {
+	line: string;
+	matchStart: number;
+	matchEnd: number;
+}) {
 	const before = line.slice(0, matchStart);
 	const match = line.slice(matchStart, matchEnd);
 	const after = line.slice(matchEnd);
