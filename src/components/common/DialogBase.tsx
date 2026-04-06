@@ -77,11 +77,16 @@ export function DialogBase({
 	if (!open) return null;
 
 	return createPortal(
-		<div
-			role="presentation"
-			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-			onMouseDown={preventClose ? undefined : onClose}
-		>
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+			{!preventClose && (
+				<button
+					type="button"
+					aria-label="Close"
+					className="absolute inset-0"
+					onMouseDown={onClose}
+					tabIndex={-1}
+				/>
+			)}
 			<dialog
 				ref={dialogRef}
 				open

@@ -6,11 +6,10 @@
 		"rules": {
 			"recommended": true,
 			"suspicious": {
-				"noExplicitAny": "error",
-				"noArrayIndexKey": "off"
+				"noExplicitAny": "error"
 			},
 			"a11y": {
-				"noStaticElementInteractions": "off"
+				"noStaticElementInteractions": "error"
 			}
 		}
 	},

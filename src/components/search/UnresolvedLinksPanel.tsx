@@ -139,12 +139,12 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 						</div>
 						{!collapsed.has(link.pageName) && (
 							<div>
-								{link.references.map((reference, i) => {
+								{link.references.map((reference) => {
 									const relativePath = toRelativePath(workspacePath, reference.filePath);
 									return (
 										<button
 											type="button"
-											key={`${reference.filePath}-${reference.lineNumber}-${i}`}
+											key={`${reference.filePath}-${reference.lineNumber}-${reference.column}`}
 											className="search-panel-match"
 											onClick={() => onNavigate(reference.filePath, reference.lineNumber, "")}
 										>

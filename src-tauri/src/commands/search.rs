@@ -204,6 +204,7 @@ pub fn search_filenames(workspace_path: String, query: String) -> Result<Vec<Str
 pub struct WikilinkReference {
     pub file_path: String,
     pub line_number: usize,
+    pub column: usize,
     pub line_content: String,
     pub context_before: Vec<String>,
     pub context_after: Vec<String>,
@@ -225,7 +226,7 @@ fn is_path_traversal(name: &str) -> bool {
 }
 
 /// Extract wikilink inner contents from a line (returns the text between [[ and ]])
-fn extract_wikilinks_from_line(line: &str) -> Vec<&str> {
+fn extract_wikilinks_from_line(line: &str) -> Vec<(&str, usize)> {
     let mut results = Vec::new();
     let mut search_start = 0;
     while let Some(open_pos) = line[search_start..].find("[[") {
@@ -237,7 +238,7 @@ fn extract_wikilinks_from_line(line: &str) -> Vec<&str> {
         if let Some(close_pos) = line[inner_start..].find("]]") {
             let inner = &line[inner_start..inner_start + close_pos];
             if !inner.is_empty() {
-                results.push(inner);
+                results.push((inner, abs_open + 1));
             }
             search_start = inner_start + close_pos + 2;
         } else {
@@ -293,7 +294,7 @@ pub fn scan_unresolved_wikilinks(
             }
 
             let wikilinks = extract_wikilinks_from_line(line);
-            for inner in wikilinks {
+            for (inner, column) in wikilinks {
                 // Extract page name (handle [[page|display]])
                 let page = match inner.find('|') {
                     Some(pipe_idx) => &inner[..pipe_idx],
@@ -331,6 +332,7 @@ pub fn scan_unresolved_wikilinks(
                     .push(WikilinkReference {
                         file_path: file_path.clone(),
                         line_number: line_idx + 1,
+                        column,
                         line_content: line.to_string(),
                         context_before,
                         context_after,

@@ -147,13 +147,17 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 	if (!open) return null;
 
 	return createPortal(
-		<div
-			role="presentation"
-			className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]"
-			onMouseDown={onClose}
-		>
+		<div className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]">
+			<button
+				type="button"
+				aria-label="Close"
+				className="absolute inset-0"
+				onMouseDown={onClose}
+				tabIndex={-1}
+			/>
 			<div
 				role="dialog"
+				aria-label="Command palette"
 				className="flex h-fit max-h-[60vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-bg-primary shadow-xl"
 				onMouseDown={(e) => e.stopPropagation()}
 				onKeyDown={handleKeyDown}
@@ -176,8 +180,9 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 					{files.map((filePath, index) => (
 						<button
 							type="button"
+							role="option"
 							key={filePath}
-							aria-current={index === selectedIndex}
+							aria-selected={index === selectedIndex}
 							className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
 								index === selectedIndex
 									? "bg-blue-600/10 text-text-primary"

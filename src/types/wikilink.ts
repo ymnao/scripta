@@ -1,6 +1,7 @@
 export interface WikilinkReference {
 	filePath: string;
 	lineNumber: number;
+	column: number;
 	lineContent: string;
 	contextBefore: string[];
 	contextAfter: string[];

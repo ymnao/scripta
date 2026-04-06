@@ -513,8 +513,9 @@ export function MarkdownEditor({
 	);
 
 	return (
-		<div
+		<section
 			ref={containerRef}
+			aria-label="Editor"
 			className="relative min-h-0 min-w-0 flex-1"
 			onMouseDown={handleEditorMouseDown}
 			onContextMenu={handleEditorContextMenu}
@@ -612,6 +613,6 @@ export function MarkdownEditor({
 				onSave={handleMermaidInsert}
 				onCancel={() => setMermaidInsertPos(null)}
 			/>
-		</div>
+		</section>
 	);
 }

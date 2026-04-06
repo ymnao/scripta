@@ -167,11 +167,7 @@ export function EmojiInputDialog({
 			>
 				{isSearching ? (
 					searchResults.length > 0 ? (
-						<div
-							className="grid grid-cols-10 gap-0.5 pt-1"
-							onClick={handleGridClick}
-							onKeyDown={handleGridKeyDown}
-						>
+						<div className="grid grid-cols-10 gap-0.5 pt-1">
 							{searchResults.map((emoji) => (
 								<button
 									key={emoji}
@@ -181,6 +177,8 @@ export function EmojiInputDialog({
 									className={`rounded p-0.5 text-xl leading-none hover:bg-black/10 dark:hover:bg-white/10 ${
 										value === emoji ? "bg-black/10 dark:bg-white/10" : ""
 									}`}
+									onClick={handleGridClick}
+									onKeyDown={handleGridKeyDown}
 								>
 									{emoji}
 								</button>
@@ -204,11 +202,7 @@ export function EmojiInputDialog({
 							>
 								{cat.label}
 							</div>
-							<div
-								className="grid grid-cols-10 gap-0.5"
-								onClick={handleGridClick}
-								onKeyDown={handleGridKeyDown}
-							>
+							<div className="grid grid-cols-10 gap-0.5">
 								{cat.emojis.map((emoji) => (
 									<button
 										key={emoji}
@@ -218,6 +212,8 @@ export function EmojiInputDialog({
 										className={`rounded p-0.5 text-xl leading-none hover:bg-black/10 dark:hover:bg-white/10 ${
 											value === emoji ? "bg-black/10 dark:bg-white/10" : ""
 										}`}
+										onClick={handleGridClick}
+										onKeyDown={handleGridKeyDown}
 									>
 										{emoji}
 									</button>
