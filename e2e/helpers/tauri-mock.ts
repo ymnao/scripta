@@ -359,7 +359,7 @@ export class TauriMock {
 								unresolvedMap[normalized].push({
 									filePath,
 									lineNumber: i + 1,
-									byteOffset: m.index + 1,
+									byteOffset: new TextEncoder().encode(line.slice(0, m.index)).length + 1,
 									lineContent: line,
 									contextBefore,
 									contextAfter,
