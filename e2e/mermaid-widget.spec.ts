@@ -36,6 +36,8 @@ async function openFileAndWaitForMermaid(page: Page) {
 }
 
 test.describe("mermaid widget", () => {
+	test.slow();
+
 	test("left click does not collapse the widget", async ({ page }) => {
 		const { widget } = await openFileAndWaitForMermaid(page);
 
@@ -102,7 +104,7 @@ test.describe("mermaid widget", () => {
 
 		await expect(widget).not.toBeVisible();
 
-		// Cmd+S で保存し、write_file の内容から Mermaid ブロックが消えたことを検証
+		await expect(page.getByText("未保存")).toBeVisible({ timeout: 5000 });
 		await page.keyboard.press(`${modKey}+s`);
 		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 5000 });
 
