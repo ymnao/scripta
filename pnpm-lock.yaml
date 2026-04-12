@@ -77,8 +77,8 @@ importers:
         specifier: ^1.8.0
         version: 1.8.0(react@19.2.4)
       marked:
-        specifier: ^17.0.6
-        version: 17.0.6
+        specifier: ^18.0.0
+        version: 18.0.0
       mermaid:
         specifier: ^11.13.0
         version: 11.13.0
@@ -1782,8 +1782,8 @@ packages:
     engines: {node: '>= 20'}
     hasBin: true
 
-  marked@17.0.6:
-    resolution: {integrity: sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA==}
+  marked@18.0.0:
+    resolution: {integrity: sha512-2e7Qiv/HJSXj8rDEpgTvGKsP8yYtI9xXHKDnrftrmnrJPaFNM7VRb2YCzWaX4BP1iCJ/XPduzDJZMFoqTCcIMA==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -3874,7 +3874,7 @@ snapshots:
 
   marked@16.4.2: {}
 
-  marked@17.0.6: {}
+  marked@18.0.0: {}
 
   mdn-data@2.27.1: {}
 
