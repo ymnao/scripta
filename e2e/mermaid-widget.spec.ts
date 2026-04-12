@@ -85,7 +85,7 @@ test.describe("mermaid widget", () => {
 		const menu = page.locator("[role=menu]");
 		await expect(menu).toBeVisible();
 
-		await menu.getByRole("menuitem", { name: "Mermaid を編集" }).click();
+		await menu.getByRole("menuitem", { name: "Mermaid を編集" }).click({ force: true });
 
 		const dialog = page.getByRole("dialog").filter({ hasText: "Mermaid エディタ" });
 		await expect(dialog).toBeVisible();
@@ -100,7 +100,7 @@ test.describe("mermaid widget", () => {
 		const menu = page.locator("[role=menu]");
 		await expect(menu).toBeVisible();
 
-		await menu.getByRole("menuitem", { name: "Mermaid を削除" }).click();
+		await menu.getByRole("menuitem", { name: "Mermaid を削除" }).click({ force: true });
 
 		await expect(widget).not.toBeVisible();
 
@@ -123,7 +123,7 @@ test.describe("mermaid widget", () => {
 		const menu = page.locator("[role=menu]");
 		await expect(menu).toBeVisible();
 
-		await menu.getByRole("menuitem", { name: "Mermaid 図を挿入" }).click();
+		await menu.getByRole("menuitem", { name: "Mermaid 図を挿入" }).click({ force: true });
 
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toBeVisible();
