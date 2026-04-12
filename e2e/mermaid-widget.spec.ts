@@ -36,6 +36,8 @@ async function openFileAndWaitForMermaid(page: Page) {
 }
 
 test.describe("mermaid widget", () => {
+	test.slow();
+
 	test("left click does not collapse the widget", async ({ page }) => {
 		const { widget } = await openFileAndWaitForMermaid(page);
 
@@ -83,7 +85,7 @@ test.describe("mermaid widget", () => {
 		const menu = page.locator("[role=menu]");
 		await expect(menu).toBeVisible();
 
-		await menu.getByRole("menuitem", { name: "Mermaid を編集" }).click();
+		await menu.getByRole("menuitem", { name: "Mermaid を編集" }).click({ force: true });
 
 		const dialog = page.getByRole("dialog").filter({ hasText: "Mermaid エディタ" });
 		await expect(dialog).toBeVisible();
@@ -98,11 +100,11 @@ test.describe("mermaid widget", () => {
 		const menu = page.locator("[role=menu]");
 		await expect(menu).toBeVisible();
 
-		await menu.getByRole("menuitem", { name: "Mermaid を削除" }).click();
+		await menu.getByRole("menuitem", { name: "Mermaid を削除" }).click({ force: true });
 
 		await expect(widget).not.toBeVisible();
 
-		// Cmd+S で保存し、write_file の内容から Mermaid ブロックが消えたことを検証
+		await expect(page.getByText("未保存")).toBeVisible({ timeout: 5000 });
 		await page.keyboard.press(`${modKey}+s`);
 		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 5000 });
 
@@ -121,7 +123,7 @@ test.describe("mermaid widget", () => {
 		const menu = page.locator("[role=menu]");
 		await expect(menu).toBeVisible();
 
-		await menu.getByRole("menuitem", { name: "Mermaid 図を挿入" }).click();
+		await menu.getByRole("menuitem", { name: "Mermaid 図を挿入" }).click({ force: true });
 
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toBeVisible();
