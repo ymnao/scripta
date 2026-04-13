@@ -25,6 +25,7 @@
 		text-rendering: optimizeLegibility;
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
+		--editor-font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 	}
 
 	body {
@@ -42,6 +43,15 @@
 		--color-border: #333333;
 		--color-text-link: #60a5fa;
 	}
+}
+
+/* Editor font — applied via CSS custom property so that font-family
+   does not depend on style-mod's dynamic injection (WKWebView compat).
+   !important is required because CodeMirror's base theme injects
+   font-family: monospace via adoptedStyleSheets, which takes cascade
+   precedence over regular stylesheets at equal specificity. */
+.cm-editor .cm-scroller {
+	font-family: var(--editor-font-family) !important;
 }
 
 /* Editor error display */

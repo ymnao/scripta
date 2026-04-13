@@ -34,20 +34,13 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
-export function createDynamicEditorTheme(
-	fontSize: number,
-	fontFamily: FontFamily,
-	contentPadding = "8px 48px",
-) {
+export function createDynamicEditorTheme(fontSize: number, contentPadding = "8px 48px") {
 	return EditorView.theme({
 		"&": {
 			height: "100%",
 			fontSize: `${fontSize}px`,
 			backgroundColor: "var(--color-bg-primary)",
 			color: "var(--color-text-primary)",
-		},
-		".cm-scroller": {
-			fontFamily: FONT_FAMILY_MAP[fontFamily],
 		},
 		".cm-content": {
 			padding: contentPadding,

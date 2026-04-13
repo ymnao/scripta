@@ -28,6 +28,7 @@ import { HelpDialog } from "../common/HelpDialog";
 import { SettingsDialog } from "../common/SettingsDialog";
 import { SetupWizardDialog } from "../common/SetupWizardDialog";
 import { ToastContainer } from "../common/Toast";
+import { FONT_FAMILY_MAP } from "../editor/editor-theme";
 import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { ScratchpadPanel, type ScratchpadSaveHandle } from "../editor/ScratchpadPanel";
@@ -107,6 +108,7 @@ export function AppLayout() {
 	);
 
 	const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
+	const fontFamily = useSettingsStore((s) => s.fontFamily);
 	const {
 		dialogOpen: updateDialogOpen,
 		description: updateDescription,
@@ -211,6 +213,11 @@ export function AppLayout() {
 			cancelled = true;
 		};
 	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings, hydrateGitSync]);
+
+	// Sync editor font-family to CSS custom property
+	useEffect(() => {
+		document.documentElement.style.setProperty("--editor-font-family", FONT_FAMILY_MAP[fontFamily]);
+	}, [fontFamily]);
 
 	// Persist workspace path changes (skip the initial restored value and new windows)
 	useEffect(() => {
