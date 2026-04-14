@@ -36,6 +36,7 @@ export function useAutoSave(
 		processContent(content, useSettingsStore.getState().trimTrailingWhitespace),
 	);
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
@@ -152,14 +153,16 @@ export function useAutoSave(
 				// Composition 中はステータスを更新せず旧ファイルへ書き込みだけ行う。
 				// flush 時点では既に別タブが表示されているため、saveStatus を
 				// 変更すると現在のタブの表示が壊れる。
-				debounceTimerRef.current = setTimeout(function tryFlush() {
+				flushTimerRef.current = setTimeout(function tryFlush() {
 					if (isComposingRef.current?.()) {
-						debounceTimerRef.current = setTimeout(tryFlush, IME_COMPOSITION_DEFER_MS);
+						flushTimerRef.current = setTimeout(tryFlush, IME_COMPOSITION_DEFER_MS);
 						return;
 					}
+					flushTimerRef.current = null;
 					const p = inflightRef.current.then(() => writeFile(prevPath, processed));
 					inflightRef.current = p.catch(() => {});
 					p.then(() => {
+						if (!isMountedRef.current) return;
 						onFlushCompleteRef.current?.(prevPath, currentContent);
 					}).catch((err) => {
 						console.error("Failed to save previous file:", err);
@@ -225,6 +228,9 @@ export function useAutoSave(
 			isMountedRef.current = false;
 			if (debounceTimerRef.current) {
 				clearTimeout(debounceTimerRef.current);
+			}
+			if (flushTimerRef.current) {
+				clearTimeout(flushTimerRef.current);
 			}
 			if (retryTimerRef.current) {
 				clearTimeout(retryTimerRef.current);
