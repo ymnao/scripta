@@ -194,15 +194,15 @@ class MathDecorationPlugin implements PluginValue {
 	update(update: ViewUpdate) {
 		this.view = update.view;
 
+		if (update.view.composing) {
+			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+			return;
+		}
+
 		if (this.pendingRebuild) {
 			this.pendingRebuild = false;
 			this.decorations = buildDecorations(update.view);
 			this.prevCursorLines = collectCursorLines(update.view);
-			return;
-		}
-
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
 			return;
 		}
 
@@ -228,6 +228,10 @@ class MathDecorationPlugin implements PluginValue {
 		this.rebuildTimer = setTimeout(() => {
 			this.rebuildTimer = null;
 			if (this.destroyed) return;
+			if (this.view.composing) {
+				this.scheduleRebuild();
+				return;
+			}
 			this.pendingRebuild = true;
 			this.view.dispatch({});
 		}, 150);

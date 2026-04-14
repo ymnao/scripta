@@ -298,16 +298,16 @@ class LinkCardDecorationPlugin implements PluginValue {
 	update(update: ViewUpdate) {
 		this.view = update.view;
 
+		if (update.view.composing) {
+			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+			return;
+		}
+
 		if (this.pendingUpdate) {
 			this.pendingUpdate = false;
 			this.decorations = buildDecorations(update.view);
 			this.prevCursorLines = collectCursorLines(update.view);
 			this.fetchMissingOgp(update.view);
-			return;
-		}
-
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
 			return;
 		}
 
@@ -335,6 +335,10 @@ class LinkCardDecorationPlugin implements PluginValue {
 		this.rebuildTimer = setTimeout(() => {
 			this.rebuildTimer = null;
 			if (this.destroyed) return;
+			if (this.view.composing) {
+				this.scheduleRebuild();
+				return;
+			}
 			this.pendingUpdate = true;
 			this.view.dispatch({});
 		}, 150);
