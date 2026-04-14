@@ -147,12 +147,24 @@ export function AppLayout() {
 	const [content, setContent] = useState("");
 	const [editorKey, setEditorKey] = useState(0);
 	const isNewTab = activeTabPath ? isNewTabPath(activeTabPath) : false;
+	const isEditorComposing = useCallback(() => editorViewRef.current?.composing ?? false, []);
+	const tabCacheRef = useRef(new Map<string, TabCache>());
+	const handleFlushComplete = useCallback(
+		(path: string, savedContent: string) => {
+			const cached = tabCacheRef.current.get(path);
+			if (cached) {
+				cached.savedContent = savedContent;
+			}
+			setTabDirty(path, false);
+		},
+		[setTabDirty],
+	);
 	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent } = useAutoSave(
 		isNewTab ? "" : (activeTabPath ?? ""),
 		content,
+		isEditorComposing,
+		handleFlushComplete,
 	);
-
-	const tabCacheRef = useRef(new Map<string, TabCache>());
 	const prevTabPathRef = useRef<string | null>(null);
 	const contentLoadedForPathRef = useRef<string | null>(null);
 	const contentRef = useRef(content);

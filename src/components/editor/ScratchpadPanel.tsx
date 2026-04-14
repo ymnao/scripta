@@ -82,9 +82,11 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 
 	const scratchpadPath = getScratchpadPath(workspacePath);
 
+	const isEditorComposing = useCallback(() => editorRef.current?.view?.composing ?? false, []);
 	const { saveStatus, saveNow, markSaved, getLastSavedContent } = useAutoSave(
 		scratchpadPath,
 		content,
+		isEditorComposing,
 	);
 
 	// Ref so handleChange can read the latest savedContent without a dep on getLastSavedContent
