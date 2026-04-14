@@ -9,13 +9,22 @@ import {
 
 export const setHighlightQuery = StateEffect.define<string>();
 
+/** ASCII 文字のみで構成されるかを判定する。 */
+function isAsciiOnly(text: string): boolean {
+	for (let i = 0; i < text.length; i++) {
+		if (text.charCodeAt(i) > 127) return false;
+	}
+	return true;
+}
+
 /**
  * Build a mapping from UTF-16 code unit offsets in the lowercased string
  * back to the corresponding UTF-16 code unit offsets in the original string.
  * `toLowerCase()` can change string length (e.g. İ → i̇), so we need
  * to map indices found in the lowered string back to their original positions.
  */
-function buildLowerToOrigUtf16Map(text: string): number[] {
+function buildLowerToOrigUtf16Map(text: string): number[] | null {
+	if (isAsciiOnly(text)) return null;
 	const map: number[] = [];
 	let origOffset = 0;
 	for (const ch of text) {
@@ -78,8 +87,10 @@ const highlightPlugin = ViewPlugin.fromClass(
 				while (pos < lowerText.length) {
 					const idx = lowerText.indexOf(lowerQuery, pos);
 					if (idx === -1) break;
-					const origStart = lowerToOrig[idx];
-					const origEnd = lowerToOrig[idx + lowerQuery.length];
+					const origStart = lowerToOrig ? lowerToOrig[idx] : idx;
+					const origEnd = lowerToOrig
+						? lowerToOrig[idx + lowerQuery.length]
+						: idx + lowerQuery.length;
 					builder.add(from + origStart, from + origEnd, highlightMark);
 					pos = idx + 1;
 				}

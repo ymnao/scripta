@@ -19,6 +19,8 @@ export const isTauriProtocol =
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
 let idCounter = 0;
+/** 最後に initialize() に渡した設定のキー。変更がなければ再初期化をスキップする。 */
+let lastInitKey = "";
 /** initialize+render をアトミックに直列化するキュー */
 let renderQueue: Promise<void> = Promise.resolve();
 
@@ -265,7 +267,11 @@ async function ensureInitialized(theme: "light" | "dark", font: FontSnapshot): P
 		await initPromise;
 	}
 	if (mermaidModule) {
-		mermaidModule.default.initialize(buildConfig(theme, font));
+		const key = `${theme}:${font.fontFamily}:${font.fontSize}`;
+		if (key !== lastInitKey) {
+			mermaidModule.default.initialize(buildConfig(theme, font));
+			lastInitKey = key;
+		}
 	}
 }
 
@@ -372,6 +378,7 @@ export function getCacheEntry(source: string, theme: "light" | "dark"): CacheEnt
 export function clearMermaidCache(): void {
 	cacheGeneration++;
 	cache.clear();
+	lastInitKey = "";
 }
 
 // ── SVG スタイルのインライン化 ────────

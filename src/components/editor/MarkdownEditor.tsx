@@ -282,16 +282,17 @@ export function MarkdownEditor({
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
 				cancelAnimationFrame(statsRafIdRef.current);
+				const docLen = update.state.doc.length;
 				statsRafIdRef.current = requestAnimationFrame(() => {
 					const sel = update.state.selection.main;
 					const lineInfo = update.state.doc.lineAt(sel.head);
 					const info: CursorInfo = {
 						line: lineInfo.number,
 						col: sel.head - lineInfo.from + 1,
-						chars: update.state.doc.length,
+						chars: docLen,
 					};
 					if (!sel.empty) {
-						info.selectedChars = update.state.sliceDoc(sel.from, sel.to).length;
+						info.selectedChars = sel.to - sel.from;
 						const fromLine = update.state.doc.lineAt(sel.from).number;
 						const toLine = update.state.doc.lineAt(sel.to).number;
 						info.selectedLines = toLine - fromLine + 1;

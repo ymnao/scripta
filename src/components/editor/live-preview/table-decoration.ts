@@ -997,48 +997,57 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 
 // ── Decoration builder (takes EditorState, not EditorView) ──
 
-export function buildTableDecorations(state: EditorState): DecorationSet {
+export function buildTableDecorations(
+	state: EditorState,
+	visibleRanges?: readonly { from: number; to: number }[],
+): DecorationSet {
 	const tree = syntaxTree(state);
 	const ranges: Range<Decoration>[] = [];
 
-	tree.iterate({
-		enter(node) {
-			if (node.name !== "Table") return;
+	const iterRanges = visibleRanges ?? [{ from: 0, to: state.doc.length }];
 
-			const startLine = state.doc.lineAt(node.from).number;
-			let endLine = state.doc.lineAt(node.to).number;
+	for (const vr of iterRanges) {
+		tree.iterate({
+			from: vr.from,
+			to: vr.to,
+			enter(node) {
+				if (node.name !== "Table") return;
 
-			// Trim trailing non-table lines (parser may include adjacent text)
-			while (endLine > startLine) {
-				const text = state.doc.line(endLine).text.trim();
-				if (text.includes("|")) break;
-				endLine--;
-			}
+				const startLine = state.doc.lineAt(node.from).number;
+				let endLine = state.doc.lineAt(node.to).number;
 
-			const lines: string[] = [];
-			for (let l = startLine; l <= endLine; l++) {
-				lines.push(state.doc.line(l).text);
-			}
+				// Trim trailing non-table lines (parser may include adjacent text)
+				while (endLine > startLine) {
+					const text = state.doc.line(endLine).text.trim();
+					if (text.includes("|")) break;
+					endLine--;
+				}
 
-			const tableData = parseTableFromLines(lines);
-			if (!tableData) return;
-			if (tableData.rows.length < 2) return;
-			const minCols = Math.min(...tableData.rows.map((r) => r.cells.length));
-			if (minCols < 2) return;
+				const lines: string[] = [];
+				for (let l = startLine; l <= endLine; l++) {
+					lines.push(state.doc.line(l).text);
+				}
 
-			const from = state.doc.line(startLine).from;
-			const to = state.doc.line(endLine).to;
+				const tableData = parseTableFromLines(lines);
+				if (!tableData) return;
+				if (tableData.rows.length < 2) return;
+				const minCols = Math.min(...tableData.rows.map((r) => r.cells.length));
+				if (minCols < 2) return;
 
-			ranges.push(
-				Decoration.replace({
-					widget: new EditableTableWidget(tableData, from),
-					block: true,
-				}).range(from, to),
-			);
+				const from = state.doc.line(startLine).from;
+				const to = state.doc.line(endLine).to;
 
-			return false;
-		},
-	});
+				ranges.push(
+					Decoration.replace({
+						widget: new EditableTableWidget(tableData, from),
+						block: true,
+					}).range(from, to),
+				);
+
+				return false;
+			},
+		});
+	}
 
 	return Decoration.set(ranges, true);
 }

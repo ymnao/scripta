@@ -247,6 +247,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 	private view: EditorView;
 	private fetchingUrls = new Set<string>();
 	private pendingUpdate = false;
+	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 	private destroyed = false;
 
 	constructor(view: EditorView) {
@@ -310,14 +311,15 @@ class LinkCardDecorationPlugin implements PluginValue {
 			return;
 		}
 
-		const forceRebuild =
-			update.docChanged ||
-			update.viewportChanged ||
-			syntaxTree(update.state) !== syntaxTree(update.startState);
-		if (forceRebuild) {
+		if (update.viewportChanged || syntaxTree(update.state) !== syntaxTree(update.startState)) {
+			this.cancelRebuild();
 			this.decorations = buildDecorations(update.view);
 			this.prevCursorLines = collectCursorLines(update.view);
 			this.fetchMissingOgp(update.view);
+		} else if (update.docChanged) {
+			this.decorations = this.decorations.map(update.changes);
+			this.prevCursorLines = collectCursorLines(update.view);
+			this.scheduleRebuild();
 		} else if (update.selectionSet || update.focusChanged) {
 			const next = collectCursorLines(update.view);
 			if (cursorLinesChanged(this.prevCursorLines, next)) {
@@ -328,8 +330,26 @@ class LinkCardDecorationPlugin implements PluginValue {
 		}
 	}
 
+	private scheduleRebuild() {
+		if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+		this.rebuildTimer = setTimeout(() => {
+			this.rebuildTimer = null;
+			if (this.destroyed) return;
+			this.pendingUpdate = true;
+			this.view.dispatch({});
+		}, 150);
+	}
+
+	private cancelRebuild() {
+		if (this.rebuildTimer) {
+			clearTimeout(this.rebuildTimer);
+			this.rebuildTimer = null;
+		}
+	}
+
 	destroy() {
 		this.destroyed = true;
+		this.cancelRebuild();
 	}
 }
 
