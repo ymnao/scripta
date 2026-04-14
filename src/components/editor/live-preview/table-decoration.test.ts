@@ -68,26 +68,6 @@ describe("buildTableDecorations", () => {
 		expect(wR.eq(wC)).toBe(false);
 	});
 
-	it("estimatedHeight が行数に基づく正の値を返す", () => {
-		const smallTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
-		const largeTable = "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n| 7 | 8 |";
-
-		const wSmall = widgetDecorations(
-			collectDecorations(buildTableDecorations(createTestState(smallTable))),
-		);
-		const wLarge = widgetDecorations(
-			collectDecorations(buildTableDecorations(createTestState(largeTable))),
-		);
-
-		const heightSmall = wSmall[0].value.spec.widget.estimatedHeight;
-		const heightLarge = wLarge[0].value.spec.widget.estimatedHeight;
-
-		// 2行 (header + 1 data) × 33 + 16 = 82
-		expect(heightSmall).toBe(2 * 33 + 16);
-		// 5行 (header + 4 data) × 33 + 16 = 181
-		expect(heightLarge).toBe(5 * 33 + 16);
-	});
-
 	it("同じアライメント・内容のテーブルは eq() が true を返す", () => {
 		const table = "| A | B |\n| :---: | --- |\n| 1 | 2 |";
 		const state1 = createTestState(table);

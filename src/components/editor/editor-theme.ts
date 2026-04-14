@@ -267,7 +267,8 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-mermaid-widget": {
 		display: "flex",
 		justifyContent: "center",
-		padding: "12px 0",
+		padding: "8px 0",
+		margin: "4px 0",
 		overflow: "hidden",
 	},
 	".cm-mermaid-inner": {
