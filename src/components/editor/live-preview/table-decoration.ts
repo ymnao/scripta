@@ -300,7 +300,7 @@ class EditableTableWidget extends WidgetType {
 	}
 
 	get estimatedHeight(): number {
-		// 各行 ~33px (content ~20px + padding 12px + border 1px) + margin 16px
+		// 各行 ~33px (content ~20px + padding 12px + border 1px) + padding 16px
 		return this.data.rows.length * 33 + 16;
 	}
 

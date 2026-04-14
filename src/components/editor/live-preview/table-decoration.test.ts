@@ -82,9 +82,10 @@ describe("buildTableDecorations", () => {
 		const heightSmall = wSmall[0].value.spec.widget.estimatedHeight;
 		const heightLarge = wLarge[0].value.spec.widget.estimatedHeight;
 
-		expect(heightSmall).toBeGreaterThan(0);
-		expect(heightLarge).toBeGreaterThan(0);
-		expect(heightLarge).toBeGreaterThan(heightSmall);
+		// 2行 (header + 1 data) × 33 + 16 = 82
+		expect(heightSmall).toBe(2 * 33 + 16);
+		// 5行 (header + 4 data) × 33 + 16 = 181
+		expect(heightLarge).toBe(5 * 33 + 16);
 	});
 
 	it("同じアライメント・内容のテーブルは eq() が true を返す", () => {
