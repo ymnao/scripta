@@ -299,6 +299,11 @@ class EditableTableWidget extends WidgetType {
 		this.tableFrom = tableFrom;
 	}
 
+	get estimatedHeight(): number {
+		// 各行 ~33px (content ~20px + padding 12px + border 1px) + margin 16px
+		return this.data.rows.length * 33 + 16;
+	}
+
 	eq(other: EditableTableWidget): boolean {
 		if (this.tableFrom !== other.tableFrom) return false;
 		const a = this.data;

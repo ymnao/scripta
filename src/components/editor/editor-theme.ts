@@ -193,7 +193,7 @@ export const staticEditorTheme = EditorView.theme({
 		height: "0.6em",
 	},
 	".cm-table-widget": {
-		margin: "8px 0",
+		padding: "8px 0",
 	},
 	".cm-table-widget table": {
 		borderCollapse: "collapse",
