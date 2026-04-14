@@ -150,15 +150,15 @@ export function AppLayout() {
 	const isEditorComposing = useCallback(() => editorViewRef.current?.composing ?? false, []);
 	const tabCacheRef = useRef(new Map<string, TabCache>());
 	const handleFlushComplete = useCallback(
-		(path: string, savedContent: string) => {
+		(path: string, rawContent: string) => {
 			const cached = tabCacheRef.current.get(path);
 			if (cached) {
-				cached.savedContent = savedContent;
+				cached.savedContent = rawContent;
 			}
 			// flush 対象タブが現在アクティブで、かつ flush 後にさらに編集されていた場合は
 			// dirty をクリアしない（ユーザーの編集が未保存のまま残っている）
 			const currentActive = useWorkspaceStore.getState().activeTabPath;
-			if (currentActive === path && contentRef.current !== savedContent) {
+			if (currentActive === path && contentRef.current !== rawContent) {
 				return;
 			}
 			setTabDirty(path, false);

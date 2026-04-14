@@ -22,7 +22,7 @@ export function useAutoSave(
 	filePath: string,
 	content: string,
 	isComposing?: () => boolean,
-	onFlushComplete?: (path: string, savedContent: string) => void,
+	onFlushComplete?: (path: string, rawContent: string) => void,
 ): UseAutoSaveReturn {
 	const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
