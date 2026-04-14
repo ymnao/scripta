@@ -839,6 +839,12 @@ function deleteTable(view: EditorView, wrapperEl: HTMLElement): void {
 let activeMenuCleanup: (() => void) | null = null;
 
 function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement): void {
+	// 前回のメニューが残っていればリスナーごと確実に除去
+	if (activeMenuCleanup) {
+		activeMenuCleanup();
+		activeMenuCleanup = null;
+	}
+
 	const eventTarget = e.target;
 	const baseElement =
 		eventTarget instanceof Element
@@ -853,12 +859,6 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 
 	e.preventDefault();
 	e.stopPropagation();
-
-	// 前回のメニューが残っていればリスナーごと確実に除去
-	if (activeMenuCleanup) {
-		activeMenuCleanup();
-		activeMenuCleanup = null;
-	}
 
 	const data = getDataFor(wrapperEl);
 	if (!data) return;
