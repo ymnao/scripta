@@ -8,6 +8,7 @@ import { useToastStore } from "../stores/toast";
 
 const MAX_SAVE_RETRIES = 3;
 const SAVE_RETRY_BASE_MS = 5000;
+const IME_COMPOSITION_DEFER_MS = 200;
 
 interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;
@@ -17,15 +18,25 @@ interface UseAutoSaveReturn {
 	getLastSavedContent: () => string;
 }
 
-export function useAutoSave(filePath: string, content: string): UseAutoSaveReturn {
+export function useAutoSave(
+	filePath: string,
+	content: string,
+	isComposing?: () => boolean,
+	onFlushComplete?: (path: string, rawContent: string) => void,
+): UseAutoSaveReturn {
 	const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
 	const contentRef = useRef(content);
 	contentRef.current = content;
+	const isComposingRef = useRef(isComposing);
+	isComposingRef.current = isComposing;
+	const onFlushCompleteRef = useRef(onFlushComplete);
+	onFlushCompleteRef.current = onFlushComplete;
 	const lastSavedContentRef = useRef(
 		processContent(content, useSettingsStore.getState().trimTrailingWhitespace),
 	);
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
@@ -74,7 +85,11 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 						if (debounceTimerRef.current) {
 							clearTimeout(debounceTimerRef.current);
 						}
-						debounceTimerRef.current = setTimeout(() => {
+						debounceTimerRef.current = setTimeout(function tryFollowUp() {
+							if (isComposingRef.current?.()) {
+								debounceTimerRef.current = setTimeout(tryFollowUp, IME_COMPOSITION_DEFER_MS);
+								return;
+							}
 							save(contentRef.current).catch(() => {});
 						}, followUpDelay);
 					} else {
@@ -88,7 +103,11 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 							saveRetryCountRef.current += 1;
 							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
 							setSaveStatus("retrying");
-							retryTimerRef.current = setTimeout(() => {
+							retryTimerRef.current = setTimeout(function tryRetry() {
+								if (isComposingRef.current?.()) {
+									retryTimerRef.current = setTimeout(tryRetry, IME_COMPOSITION_DEFER_MS);
+									return;
+								}
 								save(contentRef.current).catch(() => {});
 							}, delay);
 						} else {
@@ -130,23 +149,45 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		awaitingNewFileRef.current = true;
 
 		if (hadUnsavedChanges) {
-			saveIdRef.current += 1;
-			const flushSaveId = saveIdRef.current;
-			setSaveStatus("saving");
-			const flushPromise = inflightRef.current.then(() => writeFile(prevPath, processed));
-			inflightRef.current = flushPromise.catch(() => {});
-			flushPromise
-				.then(() => {
-					if (!isMountedRef.current) return;
-					if (flushSaveId !== saveIdRef.current) return;
-					setSaveStatus("saved");
-				})
-				.catch((err) => {
-					if (!isMountedRef.current) return;
-					if (flushSaveId !== saveIdRef.current) return;
-					console.error("Failed to save previous file:", err);
-					setSaveStatus("error");
-				});
+			if (isComposingRef.current?.()) {
+				// Composition 中はステータスを更新せず旧ファイルへ書き込みだけ行う。
+				// flush 時点では既に別タブが表示されているため、saveStatus を
+				// 変更すると現在のタブの表示が壊れる。
+				flushTimerRef.current = setTimeout(function tryFlush() {
+					if (isComposingRef.current?.()) {
+						flushTimerRef.current = setTimeout(tryFlush, IME_COMPOSITION_DEFER_MS);
+						return;
+					}
+					flushTimerRef.current = null;
+					const p = inflightRef.current.then(() => writeFile(prevPath, processed));
+					inflightRef.current = p.catch(() => {});
+					p.then(() => {
+						if (!isMountedRef.current) return;
+						onFlushCompleteRef.current?.(prevPath, currentContent);
+					}).catch((err) => {
+						console.error("Failed to save previous file:", err);
+					});
+				}, IME_COMPOSITION_DEFER_MS);
+			} else {
+				saveIdRef.current += 1;
+				const flushSaveId = saveIdRef.current;
+				setSaveStatus("saving");
+				const flushPromise = inflightRef.current.then(() => writeFile(prevPath, processed));
+				inflightRef.current = flushPromise.catch(() => {});
+				flushPromise
+					.then(() => {
+						if (!isMountedRef.current) return;
+						if (flushSaveId !== saveIdRef.current) return;
+						onFlushCompleteRef.current?.(prevPath, currentContent);
+						setSaveStatus("saved");
+					})
+					.catch((err) => {
+						if (!isMountedRef.current) return;
+						if (flushSaveId !== saveIdRef.current) return;
+						console.error("Failed to save previous file:", err);
+						setSaveStatus("error");
+					});
+			}
 		}
 	}, [filePath, clearRetryState]);
 
@@ -167,8 +208,12 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 		if (debounceTimerRef.current) {
 			clearTimeout(debounceTimerRef.current);
 		}
-		debounceTimerRef.current = setTimeout(() => {
-			save(content).catch(() => {});
+		debounceTimerRef.current = setTimeout(function tryAutoSave() {
+			if (isComposingRef.current?.()) {
+				debounceTimerRef.current = setTimeout(tryAutoSave, IME_COMPOSITION_DEFER_MS);
+				return;
+			}
+			save(contentRef.current).catch(() => {});
 		}, autoSaveDelay);
 		return () => {
 			if (debounceTimerRef.current) {
@@ -183,6 +228,9 @@ export function useAutoSave(filePath: string, content: string): UseAutoSaveRetur
 			isMountedRef.current = false;
 			if (debounceTimerRef.current) {
 				clearTimeout(debounceTimerRef.current);
+			}
+			if (flushTimerRef.current) {
+				clearTimeout(flushTimerRef.current);
 			}
 			if (retryTimerRef.current) {
 				clearTimeout(retryTimerRef.current);

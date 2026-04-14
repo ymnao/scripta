@@ -820,4 +820,245 @@ describe("useAutoSave", () => {
 		});
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 	});
+
+	describe("IME composition deferral", () => {
+		beforeEach(() => {
+			mockedWriteFile.mockClear();
+		});
+
+		it("defers auto-save during IME composition and saves after composition ends", async () => {
+			const composing = { value: true };
+			const isComposing = () => composing.value;
+
+			const { result, rerender } = renderHook(
+				({ content }) => useAutoSave("test.md", content, isComposing),
+				{ initialProps: { content: "initial" } },
+			);
+
+			result.current.markSaved("initial");
+			rerender({ content: "日本語" });
+
+			// Advance past debounce period
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			// Save deferred because composing
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// Advance one defer cycle — still composing
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// End composition
+			composing.value = false;
+
+			// Next defer cycle should trigger save
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "日本語\n");
+			expect(result.current.saveStatus).toBe("saved");
+		});
+
+		it("defers follow-up save during IME composition", async () => {
+			let resolveSave!: () => void;
+			mockedWriteFile.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveSave = resolve;
+					}),
+			);
+
+			const composing = { value: false };
+			const isComposing = () => composing.value;
+
+			const { result, rerender } = renderHook(
+				({ content }) => useAutoSave("test.md", content, isComposing),
+				{ initialProps: { content: "initial" } },
+			);
+
+			act(() => {
+				result.current.markSaved("initial");
+			});
+
+			// Edit to "v1" and trigger auto-save
+			rerender({ content: "v1" });
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+
+			// While write is in-flight, content changes to "v2"
+			rerender({ content: "v2" });
+
+			// Start composing before save completes
+			composing.value = true;
+
+			// Resolve the in-flight save — follow-up should be scheduled
+			mockedWriteFile.mockResolvedValue(undefined);
+			await act(async () => {
+				resolveSave();
+			});
+			expect(result.current.saveStatus).toBe("unsaved");
+
+			mockedWriteFile.mockClear();
+
+			// Advance past follow-up delay — composing, so save should be deferred
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// End composition
+			composing.value = false;
+
+			// Defer cycle should trigger save
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "v2\n");
+			expect(result.current.saveStatus).toBe("saved");
+		});
+
+		it("saveNow saves immediately even during IME composition", async () => {
+			const isComposing = () => true;
+
+			const { result, rerender } = renderHook(
+				({ content }) => useAutoSave("test.md", content, isComposing),
+				{ initialProps: { content: "initial" } },
+			);
+
+			result.current.markSaved("initial");
+			rerender({ content: "changed" });
+
+			await act(async () => {
+				await result.current.saveNow();
+			});
+
+			expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed\n");
+			expect(result.current.saveStatus).toBe("saved");
+		});
+
+		it("cancels composition defer timer on content change", async () => {
+			const composing = { value: true };
+			const isComposing = () => composing.value;
+
+			const { result, rerender } = renderHook(
+				({ content }) => useAutoSave("test.md", content, isComposing),
+				{ initialProps: { content: "initial" } },
+			);
+
+			result.current.markSaved("initial");
+			rerender({ content: "v1" });
+
+			// Advance past debounce — enters composition defer loop
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// Content changes — should cancel defer and start new debounce
+			composing.value = false;
+			rerender({ content: "v2" });
+
+			// Old defer timer should not fire (cancelled by content effect cleanup)
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// New debounce should fire after full delay
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "v2\n");
+		});
+
+		it("defers error retry during IME composition", async () => {
+			mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
+
+			const composing = { value: false };
+			const isComposing = () => composing.value;
+
+			const { result, rerender } = renderHook(
+				({ content }) => useAutoSave("test.md", content, isComposing),
+				{ initialProps: { content: "initial" } },
+			);
+
+			result.current.markSaved("initial");
+			rerender({ content: "changed" });
+
+			// Trigger auto-save (fails with transient error → retry scheduled at 5s)
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(result.current.saveStatus).toBe("retrying");
+
+			mockedWriteFile.mockClear();
+
+			// Start composing before retry fires
+			composing.value = true;
+
+			// Advance past retry delay — composing, so save should be deferred
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// End composition
+			composing.value = false;
+
+			// Defer cycle should trigger save
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "changed\n");
+			expect(result.current.saveStatus).toBe("saved");
+		});
+
+		it("defers flush on file switch during IME composition without touching saveStatus", async () => {
+			const composing = { value: true };
+			const isComposing = () => composing.value;
+			const onFlushComplete = vi.fn();
+
+			const { result, rerender } = renderHook(
+				({ filePath, content }) => useAutoSave(filePath, content, isComposing, onFlushComplete),
+				{ initialProps: { filePath: "a.md", content: "initial" } },
+			);
+
+			act(() => {
+				result.current.markSaved("initial");
+			});
+
+			// Edit content for file A
+			rerender({ filePath: "a.md", content: "edited A" });
+
+			// Switch to file B while composing — flush should be deferred
+			await act(async () => {
+				rerender({ filePath: "b.md", content: "edited A" });
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// Mark new file as saved (simulates file load for tab B)
+			act(() => {
+				result.current.markSaved("content B");
+			});
+			expect(result.current.saveStatus).toBe("saved");
+
+			// End composition
+			composing.value = false;
+
+			// Defer cycle should flush old file silently
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
+			// Status must still reflect the current tab (B), not the old flush
+			expect(result.current.saveStatus).toBe("saved");
+			// onFlushComplete called with old path and raw content
+			expect(onFlushComplete).toHaveBeenCalledWith("a.md", "edited A");
+		});
+	});
 });

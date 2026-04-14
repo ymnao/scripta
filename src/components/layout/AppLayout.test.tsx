@@ -549,12 +549,14 @@ describe("AppLayout", () => {
 		await act(async () => {
 			screen.getByTestId("editor-change").click();
 		});
+		// Make flush fail so b.md stays dirty in cache
+		mockedWriteFile.mockRejectedValueOnce(new Error("flush fail"));
 		mockedReadFile.mockResolvedValue("content A");
 		await act(async () => {
 			useWorkspaceStore.setState({ activeTabPath: "/workspace/a.md", activeTabId: 1 });
 		});
 
-		// Now b.md has dirty content in cache. Make writeFile fail.
+		// b.md still has dirty content in cache (flush failed). Make writeFile fail for close.
 		mockedWriteFile.mockRejectedValue(new Error("disk full"));
 
 		// Try to close b.md (non-active tab) via the close button
@@ -812,7 +814,7 @@ describe("AppLayout", () => {
 		expect(mockDestroy).toHaveBeenCalled();
 	});
 
-	it("saves dirty cached tabs on window close", async () => {
+	it("flushes dirty cached tab on tab switch and window close succeeds", async () => {
 		// Open a.md and edit it
 		openFileInStore("/workspace", "/workspace/a.md");
 		mockedReadFile.mockResolvedValue("content A");
@@ -823,7 +825,7 @@ describe("AppLayout", () => {
 			screen.getByTestId("editor-change").click();
 		});
 
-		// Switch to b.md (caches a.md's dirty content)
+		// Switch to b.md — flush saves a.md and updates cache
 		mockedReadFile.mockResolvedValue("content B");
 		await act(async () => {
 			useWorkspaceStore.setState({
@@ -849,19 +851,21 @@ describe("AppLayout", () => {
 			});
 		});
 
+		// Flush during tab switch should have saved a.md
+		expect(mockedWriteFile).toHaveBeenCalledWith(
+			"/workspace/a.md",
+			expect.stringContaining("new content"),
+		);
+
 		mockedWriteFile.mockClear();
 
-		// Simulate window close — a.md should be saved from cache
+		// Simulate window close — a.md already saved by flush, no re-save needed
 		const preventDefault = vi.fn();
 		await act(async () => {
 			await closeHandler?.({ preventDefault });
 		});
 
 		expect(preventDefault).toHaveBeenCalled();
-		expect(mockedWriteFile).toHaveBeenCalledWith(
-			"/workspace/a.md",
-			expect.stringContaining("new content"),
-		);
 		expect(mockDestroy).toHaveBeenCalled();
 	});
 
@@ -908,7 +912,7 @@ describe("AppLayout", () => {
 		expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
 	});
 
-	it("normalizes cached content and updates dirty state on window close", async () => {
+	it("normalizes cached content and updates dirty state on tab switch flush", async () => {
 		// Open a.md and edit it
 		openFileInStore("/workspace", "/workspace/a.md");
 		mockedReadFile.mockResolvedValue("content A");
@@ -919,7 +923,7 @@ describe("AppLayout", () => {
 			screen.getByTestId("editor-change").click();
 		});
 
-		// Switch to b.md (caches a.md's dirty content)
+		// Switch to b.md — flush saves a.md with normalization and clears dirty
 		mockedReadFile.mockResolvedValue("content B");
 		await act(async () => {
 			useWorkspaceStore.setState({
@@ -945,20 +949,11 @@ describe("AppLayout", () => {
 			});
 		});
 
-		mockedWriteFile.mockClear();
-
-		// Simulate window close — cached tab should be saved with normalization
-		const preventDefault = vi.fn();
-		await act(async () => {
-			await closeHandler?.({ preventDefault });
-		});
-
-		// Should write normalized content (trailing newline)
+		// Flush should write normalized content (trailing newline)
 		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content\n");
-		// Dirty flag should be cleared after successful save
+		// Dirty flag should be cleared after successful flush
 		const aTab = useWorkspaceStore.getState().tabs.find((t) => t.path === "/workspace/a.md");
 		expect(aTab?.dirty).toBe(false);
-		expect(mockDestroy).toHaveBeenCalled();
 	});
 
 	it("does not destroy window when cached tab save fails on close", async () => {
@@ -972,7 +967,10 @@ describe("AppLayout", () => {
 			screen.getByTestId("editor-change").click();
 		});
 
-		// Switch to b.md (caches a.md's dirty content)
+		// Make flush fail so a.md stays dirty in cache
+		mockedWriteFile.mockRejectedValueOnce(new Error("flush fail"));
+
+		// Switch to b.md (caches a.md's dirty content, flush fails)
 		mockedReadFile.mockResolvedValue("content B");
 		await act(async () => {
 			useWorkspaceStore.setState({
@@ -998,7 +996,7 @@ describe("AppLayout", () => {
 			});
 		});
 
-		// Make save fail for cached tab
+		// Make save fail for cached tab on window close
 		mockedWriteFile.mockRejectedValue(new Error("disk full"));
 
 		// Simulate window close
