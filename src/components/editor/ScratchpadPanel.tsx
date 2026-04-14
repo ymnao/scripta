@@ -1,14 +1,8 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import {
-	defaultHighlightStyle,
-	HighlightStyle,
-	indentUnit,
-	syntaxHighlighting,
-} from "@codemirror/language";
+import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { GripHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +10,12 @@ import { useAutoSave } from "../../hooks/useAutoSave";
 import { readFile } from "../../lib/commands";
 import { getScratchpadPath } from "../../lib/scripta-config";
 import { useSettingsStore } from "../../stores/settings";
-import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
+import {
+	codeHighlightStyle,
+	composingClass,
+	createDynamicEditorTheme,
+	staticEditorTheme,
+} from "./editor-theme";
 import {
 	blockquoteDecoration,
 	codeBlockDecoration,
@@ -50,13 +49,6 @@ interface ScratchpadCacheEntry {
 	savedContent: string;
 }
 export const scratchpadContentCache = new Map<string, ScratchpadCacheEntry>();
-
-const customHighlightStyle = syntaxHighlighting(
-	HighlightStyle.define([
-		{ tag: tags.heading, fontWeight: "bold" },
-		{ tag: tags.link, textDecoration: "none" },
-	]),
-);
 
 const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: languages });
 
@@ -219,7 +211,7 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-			customHighlightStyle,
+			codeHighlightStyle,
 			markdownExtension,
 			headingDecoration,
 			emphasisDecoration,

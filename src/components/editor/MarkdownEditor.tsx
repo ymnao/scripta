@@ -2,8 +2,8 @@ import "katex/dist/katex.min.css";
 import { redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
+	defaultHighlightStyle,
 	foldService,
-	HighlightStyle,
 	indentUnit,
 	syntaxHighlighting,
 	syntaxTree,
@@ -12,7 +12,6 @@ import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
 	type MouseEvent as ReactMouseEvent,
@@ -26,7 +25,12 @@ import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
 import { ContextMenu } from "../filetree/ContextMenu";
-import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
+import {
+	codeHighlightStyle,
+	composingClass,
+	createDynamicEditorTheme,
+	staticEditorTheme,
+} from "./editor-theme";
 import {
 	insertHorizontalRule,
 	toggleBold,
@@ -62,30 +66,6 @@ import {
 import { MermaidEditorDialog } from "./MermaidEditorDialog";
 
 const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
-
-const codeHighlightStyle = syntaxHighlighting(
-	HighlightStyle.define([
-		{ tag: tags.heading, fontWeight: "bold" },
-		{ tag: tags.link, textDecoration: "none" },
-		{ tag: tags.emphasis, fontStyle: "italic" },
-		{ tag: tags.strong, fontWeight: "bold" },
-		{ tag: tags.strikethrough, textDecoration: "line-through" },
-		{ tag: tags.keyword, color: "var(--color-syntax-keyword)" },
-		{ tag: [tags.atom, tags.bool], color: "var(--color-syntax-atom)" },
-		{ tag: tags.number, color: "var(--color-syntax-number)" },
-		{ tag: [tags.string, tags.special(tags.string)], color: "var(--color-syntax-string)" },
-		{ tag: tags.regexp, color: "var(--color-syntax-regexp)" },
-		{ tag: tags.escape, color: "var(--color-syntax-escape)" },
-		{ tag: tags.definition(tags.variableName), color: "var(--color-syntax-definition)" },
-		{ tag: tags.function(tags.variableName), color: "var(--color-syntax-function)" },
-		{ tag: tags.typeName, color: "var(--color-syntax-type)" },
-		{ tag: tags.className, color: "var(--color-syntax-class)" },
-		{ tag: tags.changed, color: "var(--color-syntax-changed)" },
-		{ tag: tags.annotation, color: "var(--color-syntax-annotation)" },
-		{ tag: tags.comment, color: "var(--color-syntax-comment)" },
-		{ tag: tags.invalid, color: "var(--color-syntax-invalid)" },
-	]),
-);
 
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
 	const tree = syntaxTree(state);
@@ -246,6 +226,7 @@ export function MarkdownEditor({
 			createDynamicEditorTheme(fontSize),
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
+			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			codeHighlightStyle,
 			markdownExtension,
 			listFoldService,
