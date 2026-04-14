@@ -68,6 +68,44 @@ describe("buildTableDecorations", () => {
 		expect(wR.eq(wC)).toBe(false);
 	});
 
+	describe("ignoreEvent", () => {
+		function getWidget() {
+			const state = createTestState(simpleTable);
+			const decos = widgetDecorations(collectDecorations(buildTableDecorations(state)));
+			return decos[0].value.spec.widget;
+		}
+
+		it("セル内クリックは true を返す（ウィジェットが処理）", () => {
+			const widget = getWidget();
+			const td = document.createElement("td");
+			const event = new MouseEvent("mousedown", { bubbles: true });
+			Object.defineProperty(event, "target", { value: td });
+			expect(widget.ignoreEvent(event)).toBe(true);
+		});
+
+		it("セル外（padding 帯）クリックは false を返す（エディタに委譲）", () => {
+			const widget = getWidget();
+			const div = document.createElement("div");
+			const event = new MouseEvent("mousedown", { bubbles: true });
+			Object.defineProperty(event, "target", { value: div });
+			expect(widget.ignoreEvent(event)).toBe(false);
+		});
+
+		it("target が Text ノードでも例外にならない", () => {
+			const widget = getWidget();
+			const text = document.createTextNode("hello");
+			const event = new MouseEvent("mousedown", { bubbles: true });
+			Object.defineProperty(event, "target", { value: text });
+			expect(widget.ignoreEvent(event)).toBe(false);
+		});
+
+		it("Ctrl/Cmd+キーは false を返す", () => {
+			const widget = getWidget();
+			const event = new KeyboardEvent("keydown", { key: "s", metaKey: true });
+			expect(widget.ignoreEvent(event)).toBe(false);
+		});
+	});
+
 	it("同じアライメント・内容のテーブルは eq() が true を返す", () => {
 		const table = "| A | B |\n| :---: | --- |\n| 1 | 2 |";
 		const state1 = createTestState(table);

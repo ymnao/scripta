@@ -417,8 +417,13 @@ class EditableTableWidget extends WidgetType {
 			return false;
 		}
 		// セル外（padding 帯）のクリックはエディタに委譲し、カーソル配置を可能にする
-		if (e instanceof MouseEvent && !(e.target as HTMLElement).closest("td, th")) {
-			return false;
+		if (e instanceof MouseEvent) {
+			const target = e.target;
+			const element =
+				target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+			if (!element?.closest("td, th")) {
+				return false;
+			}
 		}
 		return true;
 	}
@@ -834,7 +839,10 @@ function deleteTable(view: EditorView, wrapperEl: HTMLElement): void {
 let activeMenuCleanup: (() => void) | null = null;
 
 function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement): void {
-	const target = (e.target as HTMLElement).closest("[data-row][data-col]") as HTMLElement | null;
+	const eventTarget = e.target;
+	if (!(eventTarget instanceof Element)) return;
+
+	const target = eventTarget.closest("[data-row][data-col]") as HTMLElement | null;
 	if (!target) return;
 
 	e.preventDefault();
