@@ -6,6 +6,7 @@ import { useSettingsStore } from "../../stores/settings";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
+import { FONT_FAMILY_MAP } from "../editor/editor-theme";
 
 vi.mock("../../lib/commands", () => ({
 	readFile: vi.fn(),
@@ -219,6 +220,8 @@ describe("AppLayout", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
+		useSettingsStore.getState().hydrate({ fontFamily: "monospace" });
+		document.documentElement.style.removeProperty("--editor-font-family");
 	});
 
 	it("syncs --editor-font-family CSS variable when fontFamily changes", async () => {
@@ -227,24 +230,24 @@ describe("AppLayout", () => {
 		});
 
 		// Default: monospace
-		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toContain(
-			"monospace",
+		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toBe(
+			FONT_FAMILY_MAP.monospace,
 		);
 
 		// Switch to serif
 		await act(async () => {
 			useSettingsStore.getState().setFontFamily("serif");
 		});
-		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toContain(
-			"Georgia",
+		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toBe(
+			FONT_FAMILY_MAP.serif,
 		);
 
 		// Switch to sans-serif
 		await act(async () => {
 			useSettingsStore.getState().setFontFamily("sans-serif");
 		});
-		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toContain(
-			"system-ui",
+		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toBe(
+			FONT_FAMILY_MAP["sans-serif"],
 		);
 	});
 
