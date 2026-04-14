@@ -70,7 +70,6 @@ interface ScratchpadPanelProps {
 
 export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadPanelProps) {
 	const fontSize = useSettingsStore((s) => s.fontSize);
-	const fontFamily = useSettingsStore((s) => s.fontFamily);
 
 	const [content, setContent] = useState("");
 	const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -214,7 +213,7 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
-			createDynamicEditorTheme(fontSize, fontFamily, "4px 12px"),
+			createDynamicEditorTheme(fontSize, "4px 12px"),
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -239,7 +238,7 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 				},
 			]),
 		],
-		[fontSize, fontFamily, saveNow],
+		[fontSize, saveNow],
 	);
 
 	if (!loaded) return null;

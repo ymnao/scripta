@@ -126,7 +126,6 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
 	const fontSize = useSettingsStore((s) => s.fontSize);
-	const fontFamily = useSettingsStore((s) => s.fontFamily);
 	const highlightActiveLine = useSettingsStore((s) => s.highlightActiveLine);
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const onSaveRef = useRef(onSave);
@@ -228,7 +227,7 @@ export function MarkdownEditor({
 			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
-			createDynamicEditorTheme(fontSize, fontFamily),
+			createDynamicEditorTheme(fontSize),
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -301,7 +300,7 @@ export function MarkdownEditor({
 				});
 			}),
 		],
-		[fontSize, fontFamily, showLinkCards],
+		[fontSize, showLinkCards],
 	);
 
 	const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {

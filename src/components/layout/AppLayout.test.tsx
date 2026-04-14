@@ -2,9 +2,11 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { fileExists, readFile, writeFile } from "../../lib/commands";
 import { isNewTabPath } from "../../lib/path";
+import { useSettingsStore } from "../../stores/settings";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
+import { FONT_FAMILY_MAP } from "../editor/editor-theme";
 
 vi.mock("../../lib/commands", () => ({
 	readFile: vi.fn(),
@@ -218,6 +220,35 @@ describe("AppLayout", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
+		useSettingsStore.getState().hydrate({ fontFamily: "monospace" });
+		document.documentElement.style.removeProperty("--editor-font-family");
+	});
+
+	it("syncs --editor-font-family CSS variable when fontFamily changes", async () => {
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// Default: monospace
+		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toBe(
+			FONT_FAMILY_MAP.monospace,
+		);
+
+		// Switch to serif
+		await act(async () => {
+			useSettingsStore.getState().setFontFamily("serif");
+		});
+		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toBe(
+			FONT_FAMILY_MAP.serif,
+		);
+
+		// Switch to sans-serif
+		await act(async () => {
+			useSettingsStore.getState().setFontFamily("sans-serif");
+		});
+		expect(document.documentElement.style.getPropertyValue("--editor-font-family")).toBe(
+			FONT_FAMILY_MAP["sans-serif"],
+		);
 	});
 
 	it("shows motto when no workspace is open", async () => {
