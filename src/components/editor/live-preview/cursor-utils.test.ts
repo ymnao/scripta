@@ -1,6 +1,6 @@
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { createTestState } from "./test-helper";
 
 // 範囲選択時に anchor 行のみ返すのは、ドラッグ選択がウィジェットデコレーションを
@@ -59,5 +59,31 @@ describe("collectCursorLines", () => {
 		const state = createTestState(doc, undefined, undefined, selection);
 		const lines = collectCursorLines(state, true);
 		expect(lines).toEqual(new Set([1]));
+	});
+});
+
+describe("cursorLinesChanged", () => {
+	it("同一セットでは false を返す", () => {
+		expect(cursorLinesChanged(new Set([1, 3]), new Set([1, 3]))).toBe(false);
+	});
+
+	it("両方空では false を返す", () => {
+		expect(cursorLinesChanged(new Set(), new Set())).toBe(false);
+	});
+
+	it("サイズが異なれば true を返す", () => {
+		expect(cursorLinesChanged(new Set([1]), new Set([1, 3]))).toBe(true);
+	});
+
+	it("サイズが同じでも内容が異なれば true を返す", () => {
+		expect(cursorLinesChanged(new Set([1, 3]), new Set([1, 4]))).toBe(true);
+	});
+
+	it("空から非空への変化で true を返す", () => {
+		expect(cursorLinesChanged(new Set(), new Set([1]))).toBe(true);
+	});
+
+	it("非空から空への変化で true を返す", () => {
+		expect(cursorLinesChanged(new Set([1]), new Set())).toBe(true);
 	});
 });

@@ -12,7 +12,7 @@ import { searchFilenames } from "../../../lib/commands";
 import { basename, joinPath, SEP_RE } from "../../../lib/path";
 import { useWikilinkStore } from "../../../stores/wikilink";
 import { useWorkspaceStore } from "../../../stores/workspace";
-import { collectCursorLines, cursorInRange } from "./cursor-utils";
+import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
 
 const WIKILINK_RE = /\[\[([^[\]\n\r]+)\]\]/g;
@@ -207,6 +207,7 @@ function createWikilinkClickHandler() {
 
 class WikilinkDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
+	prevCursorLines: Set<number>;
 	fileMap: Map<string, string> | null = null;
 	lastFileTreeVersion = -1;
 	view: EditorView;
@@ -217,6 +218,7 @@ class WikilinkDecorationPlugin implements PluginValue {
 	constructor(view: EditorView) {
 		this.view = view;
 		this.decorations = buildDecorations(view, this.fileMap);
+		this.prevCursorLines = collectCursorLines(view);
 		this.fetchFiles();
 	}
 
@@ -251,6 +253,7 @@ class WikilinkDecorationPlugin implements PluginValue {
 		if (this.pendingFileMapUpdate) {
 			this.pendingFileMapUpdate = false;
 			this.decorations = buildDecorations(update.view, this.fileMap);
+			this.prevCursorLines = collectCursorLines(update.view);
 			// 一覧取得中に fileTreeVersion が進んでいた場合の取りこぼしを防ぐ
 			const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
 			if (currentVersion !== this.lastFileTreeVersion) {
@@ -269,15 +272,20 @@ class WikilinkDecorationPlugin implements PluginValue {
 			this.fetchFiles();
 		}
 
-		if (
+		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||
-			update.selectionSet ||
-			update.focusChanged ||
 			update.geometryChanged ||
-			syntaxTree(update.state) !== syntaxTree(update.startState)
-		) {
+			syntaxTree(update.state) !== syntaxTree(update.startState);
+		if (forceRebuild) {
 			this.decorations = buildDecorations(update.view, this.fileMap);
+			this.prevCursorLines = collectCursorLines(update.view);
+		} else if (update.selectionSet || update.focusChanged) {
+			const next = collectCursorLines(update.view);
+			if (cursorLinesChanged(this.prevCursorLines, next)) {
+				this.prevCursorLines = next;
+				this.decorations = buildDecorations(update.view, this.fileMap);
+			}
 		}
 	}
 

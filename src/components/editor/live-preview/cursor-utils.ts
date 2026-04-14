@@ -29,6 +29,15 @@ export function collectCursorLines(
 	return lines;
 }
 
+/** 前回と今回のカーソル行集合を比較し、変化があれば true を返す。 */
+export function cursorLinesChanged(prev: Set<number>, next: Set<number>): boolean {
+	if (prev.size !== next.size) return true;
+	for (const line of next) {
+		if (!prev.has(line)) return true;
+	}
+	return false;
+}
+
 /** カーソル行が指定行範囲（inclusive）に含まれるかを判定する。 */
 export function cursorInRange(
 	cursorLines: Set<number>,

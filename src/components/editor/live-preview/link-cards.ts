@@ -11,7 +11,7 @@ import {
 } from "@codemirror/view";
 import { fetchOgp, openExternal } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl } from "./links";
 import { collectCodeRanges, overlapsCodeBlock } from "./math";
 
@@ -243,6 +243,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 class LinkCardDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
+	prevCursorLines: Set<number>;
 	private view: EditorView;
 	private fetchingUrls = new Set<string>();
 	private pendingUpdate = false;
@@ -251,6 +252,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 	constructor(view: EditorView) {
 		this.view = view;
 		this.decorations = buildDecorations(view);
+		this.prevCursorLines = collectCursorLines(view);
 		this.fetchMissingOgp(view);
 	}
 
@@ -298,6 +300,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 		if (this.pendingUpdate) {
 			this.pendingUpdate = false;
 			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
 			this.fetchMissingOgp(update.view);
 			return;
 		}
@@ -307,15 +310,21 @@ class LinkCardDecorationPlugin implements PluginValue {
 			return;
 		}
 
-		if (
+		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||
-			update.selectionSet ||
-			update.focusChanged ||
-			syntaxTree(update.state) !== syntaxTree(update.startState)
-		) {
+			syntaxTree(update.state) !== syntaxTree(update.startState);
+		if (forceRebuild) {
 			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
 			this.fetchMissingOgp(update.view);
+		} else if (update.selectionSet || update.focusChanged) {
+			const next = collectCursorLines(update.view);
+			if (cursorLinesChanged(this.prevCursorLines, next)) {
+				this.prevCursorLines = next;
+				this.decorations = buildDecorations(update.view);
+				this.fetchMissingOgp(update.view);
+			}
 		}
 	}
 
