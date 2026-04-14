@@ -2,7 +2,6 @@ import "katex/dist/katex.min.css";
 import { redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
-	defaultHighlightStyle,
 	foldService,
 	HighlightStyle,
 	indentUnit,
@@ -64,10 +63,27 @@ import { MermaidEditorDialog } from "./MermaidEditorDialog";
 
 const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
 
-const customHighlightStyle = syntaxHighlighting(
+const codeHighlightStyle = syntaxHighlighting(
 	HighlightStyle.define([
 		{ tag: tags.heading, fontWeight: "bold" },
 		{ tag: tags.link, textDecoration: "none" },
+		{ tag: tags.emphasis, fontStyle: "italic" },
+		{ tag: tags.strong, fontWeight: "bold" },
+		{ tag: tags.strikethrough, textDecoration: "line-through" },
+		{ tag: tags.keyword, color: "var(--color-syntax-keyword)" },
+		{ tag: [tags.atom, tags.bool], color: "var(--color-syntax-atom)" },
+		{ tag: tags.number, color: "var(--color-syntax-number)" },
+		{ tag: [tags.string, tags.special(tags.string)], color: "var(--color-syntax-string)" },
+		{ tag: tags.regexp, color: "var(--color-syntax-regexp)" },
+		{ tag: tags.escape, color: "var(--color-syntax-escape)" },
+		{ tag: tags.definition(tags.variableName), color: "var(--color-syntax-definition)" },
+		{ tag: tags.function(tags.variableName), color: "var(--color-syntax-function)" },
+		{ tag: tags.typeName, color: "var(--color-syntax-type)" },
+		{ tag: tags.className, color: "var(--color-syntax-class)" },
+		{ tag: tags.changed, color: "var(--color-syntax-changed)" },
+		{ tag: tags.annotation, color: "var(--color-syntax-annotation)" },
+		{ tag: tags.comment, color: "var(--color-syntax-comment)" },
+		{ tag: tags.invalid, color: "var(--color-syntax-invalid)" },
 	]),
 );
 
@@ -230,8 +246,7 @@ export function MarkdownEditor({
 			createDynamicEditorTheme(fontSize),
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
-			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-			customHighlightStyle,
+			codeHighlightStyle,
 			markdownExtension,
 			listFoldService,
 			search(),
