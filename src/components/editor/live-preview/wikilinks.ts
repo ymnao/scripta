@@ -275,7 +275,6 @@ class WikilinkDecorationPlugin implements PluginValue {
 		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||
-			update.geometryChanged ||
 			syntaxTree(update.state) !== syntaxTree(update.startState);
 		if (forceRebuild) {
 			this.decorations = buildDecorations(update.view, this.fileMap);

@@ -461,12 +461,18 @@ function createMermaidClickHandler() {
 
 const focusChangeHandler = ViewPlugin.fromClass(
 	class {
+		private prevCursorLines: Set<number> = new Set();
+
 		update(update: ViewUpdate) {
 			if (update.focusChanged) {
-				const { view } = update;
-				queueMicrotask(() => {
-					view.dispatch({ effects: rebuildMermaidDecos.of(view.hasFocus) });
-				});
+				const next = collectCursorLines(update.view);
+				if (cursorLinesChanged(this.prevCursorLines, next)) {
+					this.prevCursorLines = next;
+					const { view } = update;
+					queueMicrotask(() => {
+						view.dispatch({ effects: rebuildMermaidDecos.of(view.hasFocus) });
+					});
+				}
 			}
 		}
 	},
