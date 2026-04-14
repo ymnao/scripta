@@ -305,6 +305,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 
 		if (this.pendingUpdate) {
 			this.pendingUpdate = false;
+			this.cancelRebuild();
 			this.decorations = buildDecorations(update.view);
 			this.prevCursorLines = collectCursorLines(update.view);
 			this.fetchMissingOgp(update.view);
