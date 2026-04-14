@@ -155,6 +155,12 @@ export function AppLayout() {
 			if (cached) {
 				cached.savedContent = savedContent;
 			}
+			// flush 対象タブが現在アクティブで、かつ flush 後にさらに編集されていた場合は
+			// dirty をクリアしない（ユーザーの編集が未保存のまま残っている）
+			const currentActive = useWorkspaceStore.getState().activeTabPath;
+			if (currentActive === path && contentRef.current !== savedContent) {
+				return;
+			}
 			setTabDirty(path, false);
 		},
 		[setTabDirty],

@@ -177,8 +177,8 @@ export function useAutoSave(
 				flushPromise
 					.then(() => {
 						if (!isMountedRef.current) return;
-						onFlushCompleteRef.current?.(prevPath, currentContent);
 						if (flushSaveId !== saveIdRef.current) return;
+						onFlushCompleteRef.current?.(prevPath, currentContent);
 						setSaveStatus("saved");
 					})
 					.catch((err) => {
