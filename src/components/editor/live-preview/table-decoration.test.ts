@@ -91,12 +91,24 @@ describe("buildTableDecorations", () => {
 			expect(widget.ignoreEvent(event)).toBe(false);
 		});
 
-		it("target が Text ノードでも例外にならない", () => {
+		it("セル外の Text ノードは false を返す（エディタに委譲）", () => {
 			const widget = getWidget();
+			const div = document.createElement("div");
 			const text = document.createTextNode("hello");
+			div.appendChild(text);
 			const event = new MouseEvent("mousedown", { bubbles: true });
 			Object.defineProperty(event, "target", { value: text });
 			expect(widget.ignoreEvent(event)).toBe(false);
+		});
+
+		it("セル内の Text ノードは parentElement 経由で true を返す", () => {
+			const widget = getWidget();
+			const td = document.createElement("td");
+			const text = document.createTextNode("cell text");
+			td.appendChild(text);
+			const event = new MouseEvent("mousedown", { bubbles: true });
+			Object.defineProperty(event, "target", { value: text });
+			expect(widget.ignoreEvent(event)).toBe(true);
 		});
 
 		it("Ctrl/Cmd+キーは false を返す", () => {

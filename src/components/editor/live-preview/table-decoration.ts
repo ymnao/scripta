@@ -840,9 +840,15 @@ let activeMenuCleanup: (() => void) | null = null;
 
 function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement): void {
 	const eventTarget = e.target;
-	if (!(eventTarget instanceof Element)) return;
+	const baseElement =
+		eventTarget instanceof Element
+			? eventTarget
+			: eventTarget instanceof Node
+				? eventTarget.parentElement
+				: null;
+	if (!baseElement) return;
 
-	const target = eventTarget.closest("[data-row][data-col]") as HTMLElement | null;
+	const target = baseElement.closest("[data-row][data-col]") as HTMLElement | null;
 	if (!target) return;
 
 	e.preventDefault();

@@ -305,8 +305,14 @@ export function MarkdownEditor({
 
 	const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
 		if (e.button !== 2) return;
-		const target = e.target;
-		if (!(target instanceof Element)) return;
+		const rawTarget = e.target;
+		const target =
+			rawTarget instanceof Element
+				? rawTarget
+				: rawTarget instanceof Node
+					? rawTarget.parentElement
+					: null;
+		if (!target) return;
 		// Mermaid・テーブルセル上の右クリック mousedown を阻止して
 		// カーソル移動によるデコレーション消失を防ぐ
 		if (target.closest(".cm-mermaid-widget") || target.closest(".cm-table-cell")) {
@@ -323,8 +329,14 @@ export function MarkdownEditor({
 	}, []);
 
 	const handleEditorContextMenu = useCallback((e: ReactMouseEvent) => {
-		const target = e.target;
-		if (!(target instanceof Element)) return;
+		const rawTarget = e.target;
+		const target =
+			rawTarget instanceof Element
+				? rawTarget
+				: rawTarget instanceof Node
+					? rawTarget.parentElement
+					: null;
+		if (!target) return;
 		// Mermaid・テーブルセル上のクリックは既存メニューに委譲
 		if (target.closest(".cm-mermaid-widget") || target.closest(".cm-table-cell")) return;
 		// 他のハンドラが既に処理済みなら何もしない
