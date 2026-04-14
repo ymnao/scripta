@@ -4,7 +4,6 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
 	defaultHighlightStyle,
 	foldService,
-	HighlightStyle,
 	indentUnit,
 	syntaxHighlighting,
 	syntaxTree,
@@ -13,7 +12,6 @@ import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
 	type MouseEvent as ReactMouseEvent,
@@ -27,7 +25,12 @@ import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
 import { ContextMenu } from "../filetree/ContextMenu";
-import { composingClass, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
+import {
+	codeHighlightStyle,
+	composingClass,
+	createDynamicEditorTheme,
+	staticEditorTheme,
+} from "./editor-theme";
 import {
 	insertHorizontalRule,
 	toggleBold,
@@ -63,13 +66,6 @@ import {
 import { MermaidEditorDialog } from "./MermaidEditorDialog";
 
 const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
-
-const customHighlightStyle = syntaxHighlighting(
-	HighlightStyle.define([
-		{ tag: tags.heading, fontWeight: "bold" },
-		{ tag: tags.link, textDecoration: "none" },
-	]),
-);
 
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
 	const tree = syntaxTree(state);
@@ -231,7 +227,7 @@ export function MarkdownEditor({
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-			customHighlightStyle,
+			codeHighlightStyle,
 			markdownExtension,
 			listFoldService,
 			search(),
@@ -282,16 +278,17 @@ export function MarkdownEditor({
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
 				cancelAnimationFrame(statsRafIdRef.current);
+				const docLen = update.state.doc.length;
 				statsRafIdRef.current = requestAnimationFrame(() => {
 					const sel = update.state.selection.main;
 					const lineInfo = update.state.doc.lineAt(sel.head);
 					const info: CursorInfo = {
 						line: lineInfo.number,
 						col: sel.head - lineInfo.from + 1,
-						chars: update.state.doc.length,
+						chars: docLen,
 					};
 					if (!sel.empty) {
-						info.selectedChars = update.state.sliceDoc(sel.from, sel.to).length;
+						info.selectedChars = sel.to - sel.from;
 						const fromLine = update.state.doc.lineAt(sel.from).number;
 						const toLine = update.state.doc.lineAt(sel.to).number;
 						info.selectedLines = toLine - fromLine + 1;

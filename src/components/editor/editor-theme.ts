@@ -1,4 +1,6 @@
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView, ViewPlugin } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import type { FontFamily } from "../../lib/store";
 
 /**
@@ -385,3 +387,29 @@ export const staticEditorTheme = EditorView.theme({
 		textOverflow: "ellipsis",
 	},
 });
+
+/** CSS 変数ベースのシンタックスハイライト。ライト/ダーク両対応。
+ *  defaultHighlightStyle (fallback) でカバーされないタグ色を CSS 変数で上書きする。 */
+export const codeHighlightStyle = syntaxHighlighting(
+	HighlightStyle.define([
+		{ tag: tags.heading, fontWeight: "bold" },
+		{ tag: tags.link, textDecoration: "none" },
+		{ tag: tags.emphasis, fontStyle: "italic" },
+		{ tag: tags.strong, fontWeight: "bold" },
+		{ tag: tags.strikethrough, textDecoration: "line-through" },
+		{ tag: tags.keyword, color: "var(--color-syntax-keyword)" },
+		{ tag: [tags.atom, tags.bool], color: "var(--color-syntax-atom)" },
+		{ tag: tags.number, color: "var(--color-syntax-number)" },
+		{ tag: [tags.string, tags.special(tags.string)], color: "var(--color-syntax-string)" },
+		{ tag: tags.regexp, color: "var(--color-syntax-regexp)" },
+		{ tag: tags.escape, color: "var(--color-syntax-escape)" },
+		{ tag: tags.definition(tags.variableName), color: "var(--color-syntax-definition)" },
+		{ tag: tags.function(tags.variableName), color: "var(--color-syntax-function)" },
+		{ tag: tags.typeName, color: "var(--color-syntax-type)" },
+		{ tag: tags.className, color: "var(--color-syntax-class)" },
+		{ tag: tags.changed, color: "var(--color-syntax-changed)" },
+		{ tag: tags.annotation, color: "var(--color-syntax-annotation)" },
+		{ tag: tags.comment, color: "var(--color-syntax-comment)" },
+		{ tag: tags.invalid, color: "var(--color-syntax-invalid)" },
+	]),
+);

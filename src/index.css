@@ -26,6 +26,22 @@
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
 		--editor-font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+		/* Syntax highlighting (light) */
+		--color-syntax-keyword: #7c4dff;
+		--color-syntax-atom: #221199;
+		--color-syntax-number: #116644;
+		--color-syntax-string: #aa1111;
+		--color-syntax-regexp: #ee4400;
+		--color-syntax-escape: #0000ff;
+		--color-syntax-definition: #3300aa;
+		--color-syntax-function: #008855;
+		--color-syntax-type: #116677;
+		--color-syntax-class: #225566;
+		--color-syntax-changed: #0000cc;
+		--color-syntax-annotation: #994400;
+		--color-syntax-comment: #404740;
+		--color-syntax-invalid: #ff0000;
 	}
 
 	body {
@@ -42,6 +58,22 @@
 		--color-text-secondary: #777777;
 		--color-border: #333333;
 		--color-text-link: #60a5fa;
+
+		/* Syntax highlighting (dark) */
+		--color-syntax-keyword: #c678dd;
+		--color-syntax-atom: #d19a66;
+		--color-syntax-number: #d19a66;
+		--color-syntax-string: #98c379;
+		--color-syntax-regexp: #e06c75;
+		--color-syntax-escape: #56b6c2;
+		--color-syntax-definition: #e06c75;
+		--color-syntax-function: #61afef;
+		--color-syntax-type: #e5c07b;
+		--color-syntax-class: #e5c07b;
+		--color-syntax-changed: #61afef;
+		--color-syntax-annotation: #d19a66;
+		--color-syntax-comment: #5c6370;
+		--color-syntax-invalid: #f44747;
 	}
 }
 

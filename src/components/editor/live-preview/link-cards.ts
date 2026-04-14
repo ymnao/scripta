@@ -11,7 +11,7 @@ import {
 } from "@codemirror/view";
 import { fetchOgp, openExternal } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
-import { collectCursorLines } from "./cursor-utils";
+import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl } from "./links";
 import { collectCodeRanges, overlapsCodeBlock } from "./math";
 
@@ -243,14 +243,17 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 class LinkCardDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
+	prevCursorLines: Set<number>;
 	private view: EditorView;
 	private fetchingUrls = new Set<string>();
 	private pendingUpdate = false;
+	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 	private destroyed = false;
 
 	constructor(view: EditorView) {
 		this.view = view;
 		this.decorations = buildDecorations(view);
+		this.prevCursorLines = collectCursorLines(view);
 		this.fetchMissingOgp(view);
 	}
 
@@ -295,32 +298,63 @@ class LinkCardDecorationPlugin implements PluginValue {
 	update(update: ViewUpdate) {
 		this.view = update.view;
 
-		if (this.pendingUpdate) {
-			this.pendingUpdate = false;
-			this.decorations = buildDecorations(update.view);
-			this.fetchMissingOgp(update.view);
-			return;
-		}
-
 		if (update.view.composing) {
 			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
 			return;
 		}
 
-		if (
-			update.docChanged ||
-			update.viewportChanged ||
-			update.selectionSet ||
-			update.focusChanged ||
-			syntaxTree(update.state) !== syntaxTree(update.startState)
-		) {
+		if (this.pendingUpdate) {
+			this.pendingUpdate = false;
+			this.cancelRebuild();
 			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
 			this.fetchMissingOgp(update.view);
+			return;
+		}
+
+		if (update.viewportChanged || syntaxTree(update.state) !== syntaxTree(update.startState)) {
+			this.cancelRebuild();
+			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
+			this.fetchMissingOgp(update.view);
+		} else if (update.docChanged) {
+			this.decorations = this.decorations.map(update.changes);
+			this.prevCursorLines = collectCursorLines(update.view);
+			this.scheduleRebuild();
+		} else if (update.selectionSet || update.focusChanged) {
+			const next = collectCursorLines(update.view);
+			if (cursorLinesChanged(this.prevCursorLines, next)) {
+				this.prevCursorLines = next;
+				this.decorations = buildDecorations(update.view);
+				this.fetchMissingOgp(update.view);
+			}
+		}
+	}
+
+	private scheduleRebuild() {
+		if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+		this.rebuildTimer = setTimeout(() => {
+			this.rebuildTimer = null;
+			if (this.destroyed) return;
+			if (this.view.composing) {
+				this.scheduleRebuild();
+				return;
+			}
+			this.pendingUpdate = true;
+			this.view.dispatch({});
+		}, 150);
+	}
+
+	private cancelRebuild() {
+		if (this.rebuildTimer) {
+			clearTimeout(this.rebuildTimer);
+			this.rebuildTimer = null;
 		}
 	}
 
 	destroy() {
 		this.destroyed = true;
+		this.cancelRebuild();
 	}
 }
 

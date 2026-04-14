@@ -8,7 +8,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { collectCursorLines, cursorInRange } from "./cursor-utils";
+import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
 const codeBlockLineDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-line" },
@@ -73,9 +73,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 class CodeBlockDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
+	prevCursorLines: Set<number>;
 
 	constructor(view: EditorView) {
 		this.decorations = buildDecorations(view);
+		this.prevCursorLines = collectCursorLines(view);
 	}
 
 	update(update: ViewUpdate) {
@@ -83,14 +85,19 @@ class CodeBlockDecorationPlugin implements PluginValue {
 			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
 			return;
 		}
-		if (
+		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||
-			update.selectionSet ||
-			update.focusChanged ||
-			syntaxTree(update.state) !== syntaxTree(update.startState)
-		) {
+			syntaxTree(update.state) !== syntaxTree(update.startState);
+		if (forceRebuild) {
 			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
+		} else if (update.selectionSet || update.focusChanged) {
+			const next = collectCursorLines(update.view);
+			if (cursorLinesChanged(this.prevCursorLines, next)) {
+				this.prevCursorLines = next;
+				this.decorations = buildDecorations(update.view);
+			}
 		}
 	}
 }

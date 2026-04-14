@@ -23,7 +23,7 @@ import {
 } from "../../../lib/mermaid";
 import { useSettingsStore } from "../../../stores/settings";
 import { useThemeStore } from "../../../stores/theme";
-import { collectCursorLines, cursorInRange } from "./cursor-utils";
+import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -242,9 +242,16 @@ const mermaidDecorationField = StateField.define<DecorationSet>({
 				return buildMermaidDecorations(tr.state, e.value);
 			}
 		}
-		if (tr.docChanged || tr.selection) {
-			// hasFocusField から実フォーカス値を参照（プログラム的な変更にも対応）
+		if (tr.docChanged) {
 			return buildMermaidDecorations(tr.state, tr.state.field(hasFocusField));
+		}
+		if (tr.selection) {
+			const hasFocus = tr.state.field(hasFocusField);
+			const oldLines = collectCursorLines(tr.startState, tr.startState.field(hasFocusField));
+			const newLines = collectCursorLines(tr.state, hasFocus);
+			if (cursorLinesChanged(oldLines, newLines)) {
+				return buildMermaidDecorations(tr.state, hasFocus);
+			}
 		}
 		return decos;
 	},
@@ -256,6 +263,7 @@ const mermaidDecorationField = StateField.define<DecorationSet>({
 const mermaidRenderPlugin = ViewPlugin.fromClass(
 	class {
 		private view: EditorView;
+		private prevCursorLines: Set<number> = new Set();
 		private pendingRender = false;
 		private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 		private destroyed = false;
@@ -268,6 +276,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 
 		constructor(view: EditorView) {
 			this.view = view;
+			this.prevCursorLines = collectCursorLines(view);
 			this.lastTheme = useThemeStore.getState().theme;
 			const settings = useSettingsStore.getState();
 			this.lastFontFamily = settings.fontFamily;
@@ -299,18 +308,24 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 
 			if (this.pendingRender) {
 				this.pendingRender = false;
+				this.prevCursorLines = collectCursorLines(update.view);
 				this.triggerRender();
 				return;
 			}
 
-			if (
+			const forceRebuild =
 				update.docChanged ||
 				update.viewportChanged ||
-				update.selectionSet ||
-				update.focusChanged ||
-				syntaxTree(update.state) !== syntaxTree(update.startState)
-			) {
+				syntaxTree(update.state) !== syntaxTree(update.startState);
+			if (forceRebuild) {
+				this.prevCursorLines = collectCursorLines(update.view);
 				this.triggerRender();
+			} else if (update.selectionSet || update.focusChanged) {
+				const next = collectCursorLines(update.view);
+				if (cursorLinesChanged(this.prevCursorLines, next)) {
+					this.prevCursorLines = next;
+					this.triggerRender();
+				}
 			}
 		}
 

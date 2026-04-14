@@ -32,27 +32,28 @@ export function buildDecorations(view: EditorView): DecorationSet {
 				const startLine = state.doc.lineAt(node.from);
 				const endLine = state.doc.lineAt(node.to);
 
-				// Add line decoration and hide QuoteMarks per line
+				// Add line decorations
 				for (let l = startLine.number; l <= endLine.number; l++) {
 					const line = state.doc.line(l);
 					ranges.push(blockquoteLineDecoration.range(line.from, line.from));
-
-					tree.iterate({
-						from: line.from,
-						to: line.to,
-						enter(child) {
-							if (child.name !== "QuoteMark") return;
-							let replaceEnd = child.to;
-							if (
-								replaceEnd < state.doc.length &&
-								state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
-							) {
-								replaceEnd += 1;
-							}
-							ranges.push(replaceDecoration.range(child.from, replaceEnd));
-						},
-					});
 				}
+
+				// Single pass: find all QuoteMarks in the blockquote
+				tree.iterate({
+					from: node.from,
+					to: node.to,
+					enter(child) {
+						if (child.name !== "QuoteMark") return;
+						let replaceEnd = child.to;
+						if (
+							replaceEnd < state.doc.length &&
+							state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
+						) {
+							replaceEnd += 1;
+						}
+						ranges.push(replaceDecoration.range(child.from, replaceEnd));
+					},
+				});
 
 				// Prevent processing nested Blockquote nodes again
 				return false;

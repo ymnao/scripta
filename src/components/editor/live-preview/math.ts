@@ -12,7 +12,7 @@ import {
 } from "@codemirror/view";
 import katex from "katex";
 import { isEscaped } from "../../../lib/content";
-import { collectCursorLines, cursorInRange } from "./cursor-utils";
+import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
 export { isEscaped };
 
@@ -130,18 +130,24 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		// consume $ characters that belong to those regions.
 		let textForInline = text;
 		if (localDisplayRanges.length > 0 || codeRanges.length > 0) {
-			const chars = textForInline.split("");
-			for (const dr of localDisplayRanges) {
-				const relFrom = Math.max(dr.from - from, 0);
-				const relTo = Math.min(dr.to - from, chars.length);
-				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
+			const allRanges = [...localDisplayRanges, ...codeRanges]
+				.map((r) => ({
+					from: Math.max(r.from - from, 0),
+					to: Math.min(r.to - from, text.length),
+				}))
+				.filter((r) => r.from < r.to)
+				.sort((a, b) => a.from - b.from);
+
+			const parts: string[] = [];
+			let pos = 0;
+			for (const r of allRanges) {
+				if (r.from > pos) parts.push(text.slice(pos, r.from));
+				const blankLen = r.to - Math.max(r.from, pos);
+				if (blankLen > 0) parts.push(" ".repeat(blankLen));
+				pos = Math.max(pos, r.to);
 			}
-			for (const cr of codeRanges) {
-				const relFrom = Math.max(cr.from - from, 0);
-				const relTo = Math.min(cr.to - from, chars.length);
-				for (let idx = relFrom; idx < relTo; idx++) chars[idx] = " ";
-			}
-			textForInline = chars.join("");
+			if (pos < text.length) parts.push(text.slice(pos));
+			textForInline = parts.join("");
 		}
 
 		for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
@@ -173,25 +179,74 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 class MathDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
+	prevCursorLines: Set<number>;
+	private view: EditorView;
+	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+	private pendingRebuild = false;
+	private destroyed = false;
 
 	constructor(view: EditorView) {
+		this.view = view;
 		this.decorations = buildDecorations(view);
+		this.prevCursorLines = collectCursorLines(view);
 	}
 
 	update(update: ViewUpdate) {
+		this.view = update.view;
+
 		if (update.view.composing) {
 			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
 			return;
 		}
-		if (
-			update.docChanged ||
-			update.viewportChanged ||
-			update.selectionSet ||
-			update.focusChanged ||
-			syntaxTree(update.state) !== syntaxTree(update.startState)
-		) {
+
+		if (this.pendingRebuild) {
+			this.pendingRebuild = false;
 			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
+			return;
 		}
+
+		if (update.viewportChanged || syntaxTree(update.state) !== syntaxTree(update.startState)) {
+			this.cancelRebuild();
+			this.decorations = buildDecorations(update.view);
+			this.prevCursorLines = collectCursorLines(update.view);
+		} else if (update.docChanged) {
+			this.decorations = this.decorations.map(update.changes);
+			this.prevCursorLines = collectCursorLines(update.view);
+			this.scheduleRebuild();
+		} else if (update.selectionSet || update.focusChanged) {
+			const next = collectCursorLines(update.view);
+			if (cursorLinesChanged(this.prevCursorLines, next)) {
+				this.prevCursorLines = next;
+				this.decorations = buildDecorations(update.view);
+			}
+		}
+	}
+
+	private scheduleRebuild() {
+		if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+		this.rebuildTimer = setTimeout(() => {
+			this.rebuildTimer = null;
+			if (this.destroyed) return;
+			if (this.view.composing) {
+				this.scheduleRebuild();
+				return;
+			}
+			this.pendingRebuild = true;
+			this.view.dispatch({});
+		}, 150);
+	}
+
+	private cancelRebuild() {
+		if (this.rebuildTimer) {
+			clearTimeout(this.rebuildTimer);
+			this.rebuildTimer = null;
+		}
+	}
+
+	destroy() {
+		this.destroyed = true;
+		this.cancelRebuild();
 	}
 }
 
