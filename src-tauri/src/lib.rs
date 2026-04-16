@@ -33,9 +33,16 @@ pub fn run() {
             };
             // macOS: WKWebsiteDataStore のキャッシュは FS 削除では除去できないため
             // WebView 生成後に clear_all_browsing_data() で best-effort 削除する
-            app.manage(WebViewCacheClearNeeded(
-                std::sync::atomic::AtomicBool::new(cache_cleared),
-            ));
+            let done_file = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_default()
+                .join(".cache-clear-done");
+            app.manage(WebViewCacheClearState {
+                needed: std::sync::atomic::AtomicBool::new(cache_cleared),
+                clear_requested: std::sync::atomic::AtomicBool::new(false),
+                done_file,
+            });
 
             setup_menu(app)?;
 
@@ -82,22 +89,43 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// macOS で WebView 生成後に clear_all_browsing_data() を呼ぶためのフラグ
-/// FS 削除ではカバーできない WKWebsiteDataStore のキャッシュを best-effort で除去する
-/// macOS では pending 確定もこのコマンド成功後に行い、未完了時は次回起動でリトライ
+/// macOS の clear_all_browsing_data() 呼び出し状態を管理する
+///
+/// macOS では clear_all_browsing_data() が非同期で完了前に返るため:
+/// - コマンド成功時: clear_requested フラグを立てる
+/// - アプリ正常終了時（Drop）: `.cache-clear-done` マーカーを書き込む
+/// - 次回起動時: pending + done が揃えば `.cache-version` に確定
+///
+/// これにより非同期削除の完了猶予としてアプリの全稼働時間を確保する
+/// 異常終了時は Drop が走らず done が書かれないため、次回起動でリトライされる
 #[cfg(feature = "tauri-app")]
-struct WebViewCacheClearNeeded(std::sync::atomic::AtomicBool);
+struct WebViewCacheClearState {
+    needed: std::sync::atomic::AtomicBool,
+    clear_requested: std::sync::atomic::AtomicBool,
+    done_file: std::path::PathBuf,
+}
+
+#[cfg(feature = "tauri-app")]
+impl Drop for WebViewCacheClearState {
+    fn drop(&mut self) {
+        if self
+            .clear_requested
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            let _ = std::fs::write(&self.done_file, "");
+        }
+    }
+}
 
 #[cfg(feature = "tauri-app")]
 #[tauri::command]
 #[allow(unused_variables)]
 fn clear_webview_browsing_data(
-    app: tauri::AppHandle,
     webview: tauri::Webview,
-    state: tauri::State<'_, WebViewCacheClearNeeded>,
+    state: tauri::State<'_, WebViewCacheClearState>,
 ) -> Result<(), String> {
     if !state
-        .0
+        .needed
         .load(std::sync::atomic::Ordering::Relaxed)
     {
         return Ok(());
@@ -105,25 +133,17 @@ fn clear_webview_browsing_data(
 
     #[cfg(target_os = "macos")]
     {
-        use tauri::Manager;
-
         webview
             .clear_all_browsing_data()
             .map_err(|e| e.to_string())?;
-
-        // 成功後に pending を version に確定
-        if let Ok(data_dir) = app.path().app_data_dir() {
-            let pending_file = data_dir.join(".cache-version-pending");
-            let version_file = data_dir.join(".cache-version");
-            if let Ok(v) = std::fs::read_to_string(&pending_file) {
-                let _ = std::fs::write(&version_file, v.trim());
-            }
-            let _ = std::fs::remove_file(&pending_file);
-        }
+        // done marker はアプリ正常終了時（Drop）に書き込む
+        state
+            .clear_requested
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     state
-        .0
+        .needed
         .store(false, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
@@ -180,9 +200,6 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
     let version_file = data_dir.join(".cache-version");
     let pending_file = data_dir.join(".cache-version-pending");
 
-    // レガシーマーカーを掃除（旧実装からの移行）
-    let _ = std::fs::remove_file(data_dir.join(".cache-clear-done"));
-
     let state = MarkerState {
         version: std::fs::read_to_string(&version_file)
             .ok()
@@ -194,13 +211,30 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
 
     let actions = plan_cache_actions(&current_version, &state);
 
-    // macOS: pending 確定はコマンド側で行う（clear_all_browsing_data 成功後）
-    // 非 macOS: FS 削除のみで完結するためここで確定
-    if actions.confirm_pending && !cfg!(target_os = "macos") {
-        if let Some(ref v) = state.pending {
-            let _ = std::fs::write(&version_file, v.as_str());
+    let done_file = data_dir.join(".cache-clear-done");
+    let done_exists = done_file.exists();
+
+    let mut pending_confirmed = false;
+    if actions.confirm_pending {
+        // macOS: pending + done が揃った場合のみ確定（非同期削除の完了猶予後）
+        // 非 macOS: FS 削除のみで完結するため即確定
+        let should_confirm = if cfg!(target_os = "macos") {
+            done_exists
+        } else {
+            true
+        };
+
+        if should_confirm {
+            if let Some(ref v) = state.pending {
+                let _ = std::fs::write(&version_file, v.as_str());
+            }
+            let _ = std::fs::remove_file(&pending_file);
+            let _ = std::fs::remove_file(&done_file);
+            pending_confirmed = true;
         }
-        let _ = std::fs::remove_file(&pending_file);
+    } else if done_exists {
+        // pending なし — 孤立した done を掃除
+        let _ = std::fs::remove_file(&done_file);
     }
 
     if actions.clear_cache {
@@ -218,9 +252,9 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
         std::fs::write(&pending_file, version.as_str())?;
     }
 
-    // macOS: pending がある場合も API 呼び出しが必要（前回未完了のリトライ含む）
+    // macOS: 新規クリアまたは前回未完了（pending 未確定）の場合に API 呼び出し必要
     let needs_webview_clear = if cfg!(target_os = "macos") {
-        actions.clear_cache || actions.confirm_pending
+        actions.clear_cache || (actions.confirm_pending && !pending_confirmed)
     } else {
         actions.clear_cache
     };
