@@ -113,13 +113,7 @@ impl Drop for WebViewCacheClearState {
             .load(std::sync::atomic::Ordering::Relaxed)
         {
             if let Some(ref path) = self.done_file {
-                // シンボリックリンクへの書き込みを拒否
-                match std::fs::symlink_metadata(path) {
-                    Ok(meta) if meta.file_type().is_symlink() => {}
-                    _ => {
-                        let _ = std::fs::write(path, "");
-                    }
-                }
+                let _ = safe_write_file(path, "");
             }
         }
     }
