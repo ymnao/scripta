@@ -12,6 +12,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            use tauri::Manager;
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -22,9 +24,18 @@ pub fn run() {
 
             // バージョン変更時にファイルシステム上の WebView キャッシュを削除
             // WebView 生成前に実行し、古い JS/CSS のディスクキャッシュ読み込みを防止
-            if let Err(e) = check_and_clear_cache(app) {
-                log::warn!("キャッシュクリアチェック失敗: {e}");
-            }
+            let cache_cleared = match check_and_clear_cache(app) {
+                Ok(cleared) => cleared,
+                Err(e) => {
+                    log::warn!("キャッシュクリアチェック失敗: {e}");
+                    false
+                }
+            };
+            // macOS: WKWebsiteDataStore のキャッシュは FS 削除では除去できないため
+            // WebView 生成後に clear_all_browsing_data() で best-effort 削除する
+            app.manage(WebViewCacheClearNeeded(
+                std::sync::atomic::AtomicBool::new(cache_cleared),
+            ));
 
             setup_menu(app)?;
 
@@ -65,9 +76,40 @@ pub fn run() {
             commands::git_sync::git_finish_conflict_resolution,
             commands::git_sync::git_get_last_commit_time,
             commands::updater::check_for_update,
+            clear_webview_browsing_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// macOS で WebView 生成後に clear_all_browsing_data() を呼ぶためのフラグ
+/// FS 削除ではカバーできない WKWebsiteDataStore のキャッシュを best-effort で除去する
+/// マーカーシステムには依存しない（FS 削除が確定的な主経路、API 呼び出しは補助）
+#[cfg(feature = "tauri-app")]
+struct WebViewCacheClearNeeded(std::sync::atomic::AtomicBool);
+
+#[cfg(feature = "tauri-app")]
+#[tauri::command]
+fn clear_webview_browsing_data(
+    #[allow(unused_variables)] webview: tauri::Webview,
+    state: tauri::State<'_, WebViewCacheClearNeeded>,
+) -> Result<(), String> {
+    if !state
+        .0
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    webview
+        .clear_all_browsing_data()
+        .map_err(|e| e.to_string())?;
+
+    state
+        .0
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 /// マーカーファイルの読み取り状態
@@ -112,8 +154,9 @@ fn plan_cache_actions(current_version: &str, state: &MarkerState) -> CacheAction
 }
 
 /// マーカーファイルを読み取り、必要に応じてキャッシュを削除する
+/// 戻り値: キャッシュ削除を実行したか（macOS の browsing data クリア判定に使用）
 #[cfg(feature = "tauri-app")]
-fn check_and_clear_cache(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Error>> {
     use tauri::Manager;
 
     let current_version = app.package_info().version.to_string();
@@ -157,7 +200,7 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         std::fs::write(&pending_file, version.as_str())?;
     }
 
-    Ok(())
+    Ok(actions.clear_cache)
 }
 
 /// macOS/Windows: app_cache_dir に WebView キャッシュが保存される

@@ -8,7 +8,7 @@ import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { useGitSync } from "../../hooks/useGitSync";
 import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
 import { useUpdateCheck } from "../../hooks/useUpdateCheck";
-import { listDirectory, readFile, writeFile } from "../../lib/commands";
+import { clearWebviewBrowsingData, listDirectory, readFile, writeFile } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
@@ -224,6 +224,8 @@ export function AppLayout() {
 				autoPullOnStartup: settings.autoPullOnStartup,
 			});
 			setSidebarVisible(settings.sidebarVisible);
+			// macOS: WKWebsiteDataStore のキャッシュを best-effort で削除
+			void clearWebviewBrowsingData();
 			setLoading(false);
 		})();
 
