@@ -31,6 +31,12 @@ export function useScratchpadVolatile(workspacePath: string | null) {
 
 		if (lastDate === today) return;
 
+		if (!lastDate) {
+			// localStorage が消えた or 初回実行 — 今日の日付だけ記録して終了
+			localStorage.setItem(key, today);
+			return;
+		}
+
 		// Date changed — archive old content
 		const scratchpadPath = getScratchpadPath(workspacePath);
 

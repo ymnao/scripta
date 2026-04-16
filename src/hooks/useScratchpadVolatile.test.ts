@@ -41,6 +41,23 @@ describe("useScratchpadVolatile", () => {
 		expect(localStorage.getItem("scratchpad-last-active-date:/workspace")).toBeTruthy();
 	});
 
+	it("does not clear scratchpad when lastDate is missing (localStorage cleared)", async () => {
+		// localStorage has no date key — simulates clear_all_browsing_data() clearing localStorage
+		mockedReadFile.mockImplementation(async (path: string) => {
+			if (path.endsWith("scratchpad.md")) return "important notes";
+			throw new Error("Not found");
+		});
+
+		await act(async () => {
+			renderHook(() => useScratchpadVolatile("/workspace"));
+		});
+
+		// Should NOT write (clear) the scratchpad
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+		// Should set today's date for next run
+		expect(localStorage.getItem("scratchpad-last-active-date:/workspace")).toBeTruthy();
+	});
+
 	it("does not archive when scratchpadVolatile is false", async () => {
 		useSettingsStore.setState({ scratchpadVolatile: false });
 		localStorage.setItem("scratchpad-last-active-date:/workspace", "2026-01-01");
