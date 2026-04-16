@@ -37,7 +37,8 @@ pub fn run() {
                 }
             };
             app.manage(BrowsingDataClearState {
-                needed: std::sync::Mutex::new(needs_browsing_clear),
+                needed: std::sync::atomic::AtomicBool::new(needs_browsing_clear),
+                cleared: std::sync::atomic::AtomicBool::new(false),
                 done_file,
             });
 
@@ -88,21 +89,35 @@ pub fn run() {
 
 #[cfg(feature = "tauri-app")]
 struct BrowsingDataClearState {
-    needed: std::sync::Mutex<bool>,
+    needed: std::sync::atomic::AtomicBool,
+    cleared: std::sync::atomic::AtomicBool,
     done_file: std::path::PathBuf,
 }
 
+/// アプリ正常終了時に done marker を書き込み
+/// clear_all_browsing_data() の非同期削除が完了する十分な時間を確保する
+#[cfg(feature = "tauri-app")]
+impl Drop for BrowsingDataClearState {
+    fn drop(&mut self) {
+        if self.cleared.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = std::fs::write(&self.done_file, "");
+        }
+    }
+}
+
 /// WebView 生成後に呼ばれ、バージョン変更時のみ clear_all_browsing_data() を実行
-/// 成功時に `.cache-clear-done` を書き込み、次回起動で pending + done が揃って初めて確定
-/// 失敗時はフラグが残り再呼び出し可能
+/// done marker はアプリ正常終了時（Drop）に書き込まれ、次回起動で pending + done が
+/// 揃って初めて version marker を確定する
+/// 失敗時は needed フラグが残り再呼び出し可能
 #[cfg(feature = "tauri-app")]
 #[tauri::command]
 fn clear_browsing_data_if_needed(
     webview: tauri::Webview,
     state: tauri::State<'_, BrowsingDataClearState>,
 ) -> Result<(), String> {
-    let mut guard = state.needed.lock().map_err(|e| e.to_string())?;
-    if !*guard {
+    use std::sync::atomic::Ordering;
+
+    if !state.needed.load(Ordering::Relaxed) {
         return Ok(());
     }
 
@@ -110,9 +125,8 @@ fn clear_browsing_data_if_needed(
         .clear_all_browsing_data()
         .map_err(|e| e.to_string())?;
 
-    std::fs::write(&state.done_file, "").map_err(|e| e.to_string())?;
-
-    *guard = false;
+    state.needed.store(false, Ordering::Relaxed);
+    state.cleared.store(true, Ordering::Relaxed);
     Ok(())
 }
 
