@@ -24,8 +24,8 @@ pub fn run() {
 
             // バージョン変更時にファイルシステム上の WebView キャッシュを削除
             // WebView 生成前に実行し、古い JS/CSS のディスクキャッシュ読み込みを防止
-            let cache_cleared = match check_and_clear_cache(app) {
-                Ok(cleared) => cleared,
+            let needs_webview_clear = match check_and_clear_cache(app) {
+                Ok(needed) => needed,
                 Err(e) => {
                     log::warn!("キャッシュクリアチェック失敗: {e}");
                     false
@@ -36,10 +36,10 @@ pub fn run() {
             let done_file = app
                 .path()
                 .app_data_dir()
-                .unwrap_or_default()
-                .join(".cache-clear-done");
+                .ok()
+                .map(|d| d.join(".cache-clear-done"));
             app.manage(WebViewCacheClearState {
-                needed: std::sync::atomic::AtomicBool::new(cache_cleared),
+                needed: std::sync::atomic::AtomicBool::new(needs_webview_clear),
                 clear_requested: std::sync::atomic::AtomicBool::new(false),
                 done_file,
             });
@@ -102,7 +102,7 @@ pub fn run() {
 struct WebViewCacheClearState {
     needed: std::sync::atomic::AtomicBool,
     clear_requested: std::sync::atomic::AtomicBool,
-    done_file: std::path::PathBuf,
+    done_file: Option<std::path::PathBuf>,
 }
 
 #[cfg(feature = "tauri-app")]
@@ -112,7 +112,15 @@ impl Drop for WebViewCacheClearState {
             .clear_requested
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            let _ = std::fs::write(&self.done_file, "");
+            if let Some(ref path) = self.done_file {
+                // シンボリックリンクへの書き込みを拒否
+                match std::fs::symlink_metadata(path) {
+                    Ok(meta) if meta.file_type().is_symlink() => {}
+                    _ => {
+                        let _ = std::fs::write(path, "");
+                    }
+                }
+            }
         }
     }
 }
@@ -124,28 +132,63 @@ fn clear_webview_browsing_data(
     webview: tauri::Webview,
     state: tauri::State<'_, WebViewCacheClearState>,
 ) -> Result<(), String> {
-    if !state
+    // compare_exchange で一度だけ実行（複数ウィンドウからの重複呼び出しを防止）
+    if state
         .needed
-        .load(std::sync::atomic::Ordering::Relaxed)
+        .compare_exchange(
+            true,
+            false,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Relaxed,
+        )
+        .is_err()
     {
         return Ok(());
     }
 
     #[cfg(target_os = "macos")]
     {
-        webview
-            .clear_all_browsing_data()
-            .map_err(|e| e.to_string())?;
-        // done marker はアプリ正常終了時（Drop）に書き込む
+        if let Err(e) = webview.clear_all_browsing_data() {
+            // 失敗時はフラグを戻してリトライ可能にする
+            state
+                .needed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            return Err(e.to_string());
+        }
         state
             .clear_requested
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    state
-        .needed
-        .store(false, std::sync::atomic::Ordering::Relaxed);
     Ok(())
+}
+
+/// シンボリックリンクでないファイルに安全に書き込む
+/// シンボリックリンクの場合はエラーを返す
+fn safe_write_file(
+    path: &std::path::Path,
+    content: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(format!("シンボリックリンクへの書き込みを拒否: {}", path.display()).into());
+        }
+        _ => {}
+    }
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+/// シンボリックリンクでないファイルを安全に削除する
+/// シンボリックリンクの場合は何もしない
+fn safe_remove_file(path: &std::path::Path) {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {}
+        Ok(_) => {
+            let _ = std::fs::remove_file(path);
+        }
+        Err(_) => {}
+    }
 }
 
 /// マーカーファイルの読み取り状態
@@ -209,14 +252,14 @@ fn resolve_pending(
         let should_confirm = !require_done_for_confirm || done_exists;
         if should_confirm {
             if let Some(ref v) = state.pending {
-                std::fs::write(version_file, v.as_str())?;
+                safe_write_file(version_file, v.as_str())?;
             }
-            let _ = std::fs::remove_file(pending_file);
-            let _ = std::fs::remove_file(done_file);
+            safe_remove_file(pending_file);
+            safe_remove_file(done_file);
             return Ok(true);
         }
     } else if done_exists {
-        let _ = std::fs::remove_file(done_file);
+        safe_remove_file(done_file);
     }
 
     Ok(false)
@@ -265,7 +308,7 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
 
     if let Some(ref version) = actions.write_pending {
         std::fs::create_dir_all(&data_dir)?;
-        std::fs::write(&pending_file, version.as_str())?;
+        safe_write_file(&pending_file, version.as_str())?;
     }
 
     let needs_webview_clear = if cfg!(target_os = "macos") {
