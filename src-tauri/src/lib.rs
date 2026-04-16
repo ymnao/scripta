@@ -12,8 +12,6 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            use tauri::Manager;
-
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -24,23 +22,9 @@ pub fn run() {
 
             // バージョン変更時にファイルシステム上の WebView キャッシュを削除
             // WebView 生成前に実行し、古い JS/CSS のディスクキャッシュ読み込みを防止
-            let done_file = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_default()
-                .join(".cache-clear-done");
-            let needs_browsing_clear = match check_and_clear_cache(app) {
-                Ok(needed) => needed,
-                Err(e) => {
-                    log::warn!("キャッシュクリアチェック失敗: {e}");
-                    false
-                }
-            };
-            app.manage(BrowsingDataClearState {
-                needed: std::sync::atomic::AtomicBool::new(needs_browsing_clear),
-                cleared: std::sync::atomic::AtomicBool::new(false),
-                done_file,
-            });
+            if let Err(e) = check_and_clear_cache(app) {
+                log::warn!("キャッシュクリアチェック失敗: {e}");
+            }
 
             setup_menu(app)?;
 
@@ -81,122 +65,99 @@ pub fn run() {
             commands::git_sync::git_finish_conflict_resolution,
             commands::git_sync::git_get_last_commit_time,
             commands::updater::check_for_update,
-            clear_browsing_data_if_needed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-#[cfg(feature = "tauri-app")]
-struct BrowsingDataClearState {
-    needed: std::sync::atomic::AtomicBool,
-    cleared: std::sync::atomic::AtomicBool,
-    done_file: std::path::PathBuf,
+/// マーカーファイルの読み取り状態
+#[derive(Debug, PartialEq)]
+struct MarkerState {
+    /// `.cache-version` の内容
+    version: Option<String>,
+    /// `.cache-version-pending` の内容
+    pending: Option<String>,
 }
 
-/// アプリ正常終了時に done marker を書き込み
-/// clear_all_browsing_data() の非同期削除が完了する十分な時間を確保する
-#[cfg(feature = "tauri-app")]
-impl Drop for BrowsingDataClearState {
-    fn drop(&mut self) {
-        if self.cleared.load(std::sync::atomic::Ordering::Relaxed) {
-            let _ = std::fs::write(&self.done_file, "");
-        }
-    }
+/// `plan_cache_actions` が返すアクション
+#[derive(Debug, PartialEq)]
+struct CacheActions {
+    /// pending を version に昇格する
+    confirm_pending: bool,
+    /// ファイルシステムのキャッシュを削除する
+    clear_cache: bool,
+    /// 新しい pending を書き込む（値はバージョン文字列）
+    write_pending: Option<String>,
 }
 
-/// WebView 生成後に呼ばれ、バージョン変更時のみ clear_all_browsing_data() を実行
-/// done marker はアプリ正常終了時（Drop）に書き込まれ、次回起動で pending + done が
-/// 揃って初めて version marker を確定する
-/// 失敗時は needed フラグが残り再呼び出し可能
-#[cfg(feature = "tauri-app")]
-#[tauri::command]
-fn clear_browsing_data_if_needed(
-    webview: tauri::Webview,
-    state: tauri::State<'_, BrowsingDataClearState>,
-) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
-
-    if !state.needed.load(Ordering::Relaxed) {
-        return Ok(());
-    }
-
-    webview
-        .clear_all_browsing_data()
-        .map_err(|e| e.to_string())?;
-
-    state.needed.store(false, Ordering::Relaxed);
-    state.cleared.store(true, Ordering::Relaxed);
-    Ok(())
-}
-
-/// ファイルシステム上の WebView キャッシュを削除し、browsing data クリアが必要か返す
+/// マーカーの状態から必要なアクションを決定する純粋関数
 ///
-/// マーカーファイルの状態遷移:
-///   バージョン変更時: `.cache-version-pending` を書き込み
-///   コマンド成功時:   `.cache-clear-done` を書き込み
-///   次回起動時:       pending + done が揃えば `.cache-version` に確定
-///                     pending のみなら browsing data クリアをリトライ
+/// 状態遷移:
+///   バージョン変更時: FS キャッシュ削除 + `.cache-version-pending` 書き込み
+///   次回起動時:       pending を `.cache-version` に昇格（確定）
+fn plan_cache_actions(current_version: &str, state: &MarkerState) -> CacheActions {
+    // pending があれば、前回のクリア済みバージョンとして優先
+    let effective_version = state.pending.as_deref().or(state.version.as_deref());
+    let version_matches = effective_version.map_or(false, |v| v == current_version);
+
+    CacheActions {
+        confirm_pending: state.pending.is_some(),
+        clear_cache: !version_matches,
+        write_pending: if version_matches {
+            None
+        } else {
+            Some(current_version.to_string())
+        },
+    }
+}
+
+/// マーカーファイルを読み取り、必要に応じてキャッシュを削除する
 #[cfg(feature = "tauri-app")]
-fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Error>> {
+fn check_and_clear_cache(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::Manager;
 
     let current_version = app.package_info().version.to_string();
     let data_dir = app.path().app_data_dir()?;
     let version_file = data_dir.join(".cache-version");
     let pending_file = data_dir.join(".cache-version-pending");
-    let done_file = data_dir.join(".cache-clear-done");
 
-    // Phase 1: 前回セッションのクリア状態を解決
-    if pending_file.exists() {
-        if done_file.exists() {
-            // pending + done: 前回のクリアが完了 → version marker を確定
-            if let Ok(v) = std::fs::read_to_string(&pending_file) {
-                let _ = std::fs::write(&version_file, v.trim());
-            }
-            let _ = std::fs::remove_file(&pending_file);
-            let _ = std::fs::remove_file(&done_file);
-        } else {
-            // pending のみ: 前回のクリアが未完了
-            if std::fs::read_to_string(&pending_file)
-                .ok()
-                .map_or(false, |v| v.trim() == current_version)
-            {
-                // 同一バージョン — FS は済み、browsing data クリアだけリトライ
-                return Ok(true);
-            }
-            // 異なるバージョン — 古い pending を破棄して全体やり直し
-            let _ = std::fs::remove_file(&pending_file);
+    // レガシーマーカーを掃除（旧実装からの移行）
+    let _ = std::fs::remove_file(data_dir.join(".cache-clear-done"));
+
+    let state = MarkerState {
+        version: std::fs::read_to_string(&version_file)
+            .ok()
+            .map(|s| s.trim().to_string()),
+        pending: std::fs::read_to_string(&pending_file)
+            .ok()
+            .map(|s| s.trim().to_string()),
+    };
+
+    let actions = plan_cache_actions(&current_version, &state);
+
+    if actions.confirm_pending {
+        if let Some(ref v) = state.pending {
+            let _ = std::fs::write(&version_file, v.as_str());
         }
-    } else {
-        // pending なし — 孤立 done があれば掃除
-        let _ = std::fs::remove_file(&done_file);
+        let _ = std::fs::remove_file(&pending_file);
     }
 
-    // Phase 2: バージョン比較とクリア
-    match std::fs::read_to_string(&version_file) {
-        Ok(stored) if stored.trim() == current_version => Ok(false),
-        Ok(stored) => {
-            clear_webview_cache(app)?;
-            log::info!(
-                "WebView キャッシュをクリア: {} → {current_version}",
-                stored.trim()
-            );
-            std::fs::write(&pending_file, &current_version)?;
-            Ok(true)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            clear_webview_cache(app)?;
-            std::fs::create_dir_all(&data_dir)?;
-            std::fs::write(&pending_file, &current_version)?;
-            Ok(true)
-        }
-        Err(_) => {
-            clear_webview_cache(app)?;
-            std::fs::write(&pending_file, &current_version)?;
-            Ok(true)
-        }
+    if actions.clear_cache {
+        clear_webview_cache(app)?;
+        let from = state
+            .pending
+            .as_deref()
+            .or(state.version.as_deref())
+            .unwrap_or("(なし)");
+        log::info!("WebView キャッシュをクリア: {from} → {current_version}");
     }
+
+    if let Some(ref version) = actions.write_pending {
+        std::fs::create_dir_all(&data_dir)?;
+        std::fs::write(&pending_file, version.as_str())?;
+    }
+
+    Ok(())
 }
 
 /// macOS/Windows: app_cache_dir に WebView キャッシュが保存される
@@ -384,4 +345,120 @@ fn setup_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn state(version: Option<&str>, pending: Option<&str>) -> MarkerState {
+        MarkerState {
+            version: version.map(String::from),
+            pending: pending.map(String::from),
+        }
+    }
+
+    #[test]
+    fn fresh_install_clears_and_writes_pending() {
+        let actions = plan_cache_actions("0.1.2", &state(None, None));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: false,
+                clear_cache: true,
+                write_pending: Some("0.1.2".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn same_version_does_nothing() {
+        let actions = plan_cache_actions("0.1.2", &state(Some("0.1.2"), None));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: false,
+                clear_cache: false,
+                write_pending: None,
+            }
+        );
+    }
+
+    #[test]
+    fn version_upgrade_clears_and_writes_pending() {
+        let actions = plan_cache_actions("0.1.2", &state(Some("0.1.1"), None));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: false,
+                clear_cache: true,
+                write_pending: Some("0.1.2".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn pending_from_previous_session_confirmed() {
+        let actions = plan_cache_actions("0.1.2", &state(Some("0.1.1"), Some("0.1.2")));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: true,
+                clear_cache: false,
+                write_pending: None,
+            }
+        );
+    }
+
+    #[test]
+    fn pending_confirmed_then_another_update() {
+        let actions = plan_cache_actions("0.1.3", &state(Some("0.1.1"), Some("0.1.2")));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: true,
+                clear_cache: true,
+                write_pending: Some("0.1.3".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn pending_without_version_file_confirmed() {
+        let actions = plan_cache_actions("0.1.2", &state(None, Some("0.1.2")));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: true,
+                clear_cache: false,
+                write_pending: None,
+            }
+        );
+    }
+
+    #[test]
+    fn stale_pending_triggers_full_clear() {
+        let actions = plan_cache_actions("0.1.2", &state(None, Some("0.1.1")));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: true,
+                clear_cache: true,
+                write_pending: Some("0.1.2".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn downgrade_clears_cache() {
+        let actions = plan_cache_actions("0.1.1", &state(Some("0.1.2"), None));
+        assert_eq!(
+            actions,
+            CacheActions {
+                confirm_pending: false,
+                clear_cache: true,
+                write_pending: Some("0.1.1".into()),
+            }
+        );
+    }
 }
