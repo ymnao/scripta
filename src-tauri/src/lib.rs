@@ -149,7 +149,7 @@ fn clear_webview_browsing_data(
     #[cfg(target_os = "macos")]
     {
         if let Err(e) = webview.clear_all_browsing_data() {
-            // 失敗時はフラグを戻してリトライ可能にする
+            log::warn!("clear_all_browsing_data 失敗（次回リトライ）: {e}");
             state
                 .needed
                 .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -187,19 +187,18 @@ fn file_exists_no_follow(path: &std::path::Path) -> bool {
     )
 }
 
-/// シンボリックリンクでないファイルに安全に書き込む
-/// シンボリックリンクの場合はエラーを返す
+/// 一時ファイル + rename で原子的に書き込み、TOCTOU を回避する
+/// 同一ディレクトリ内で tempfile を作り rename するため、symlink を辿らない
 fn safe_write_file(
     path: &std::path::Path,
     content: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            return Err(format!("シンボリックリンクへの書き込みを拒否: {}", path.display()).into());
-        }
-        _ => {}
-    }
-    std::fs::write(path, content)?;
+    let dir = path
+        .parent()
+        .ok_or("親ディレクトリが取得できません")?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    std::io::Write::write_all(&mut tmp, content.as_bytes())?;
+    tmp.persist(path)?;
     Ok(())
 }
 
@@ -240,6 +239,8 @@ struct CacheActions {
 /// 状態遷移:
 ///   バージョン変更時: FS キャッシュ削除 + `.cache-version-pending` 書き込み
 ///   次回起動時:       pending を `.cache-version` に昇格（確定）
+///                     macOS では `.cache-clear-done` が揃うまで確定を遅延
+///                     （clear_all_browsing_data の非同期完了を待つため）
 fn plan_cache_actions(current_version: &str, state: &MarkerState) -> CacheActions {
     // pending があれば、前回のクリア済みバージョンとして優先
     let effective_version = state.pending.as_deref().or(state.version.as_deref());

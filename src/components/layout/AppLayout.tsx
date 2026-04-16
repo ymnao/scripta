@@ -224,7 +224,7 @@ export function AppLayout() {
 				autoPullOnStartup: settings.autoPullOnStartup,
 			});
 			setSidebarVisible(settings.sidebarVisible);
-			clearWebviewBrowsingData().catch(() => {});
+			clearWebviewBrowsingData().catch((e) => console.warn("clearWebviewBrowsingData:", e));
 			setLoading(false);
 		})();
 
