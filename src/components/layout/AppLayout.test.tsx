@@ -23,6 +23,7 @@ vi.mock("../../lib/commands", () => ({
 		releaseUrl: "",
 	}),
 	openExternal: vi.fn().mockResolvedValue(undefined),
+	clearBrowsingDataIfNeeded: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@tauri-apps/api/app", () => ({

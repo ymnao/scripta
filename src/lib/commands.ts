@@ -162,3 +162,7 @@ export function gitGetLastCommitTime(path: string): Promise<string | null> {
 export function checkForUpdate(currentVersion: string): Promise<UpdateInfo> {
 	return invoke<UpdateInfo>("check_for_update", { currentVersion });
 }
+
+export function clearBrowsingDataIfNeeded(): Promise<void> {
+	return invoke<void>("clear_browsing_data_if_needed");
+}
