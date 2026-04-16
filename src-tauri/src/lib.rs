@@ -189,8 +189,40 @@ fn plan_cache_actions(current_version: &str, state: &MarkerState) -> CacheAction
     }
 }
 
+/// 前回セッションの pending マーカーを解決する
+///
+/// `require_done_for_confirm`: true の場合、pending + done が揃ったときのみ確定
+/// （macOS で clear_all_browsing_data() の非同期完了猶予として使用）
+///
+/// 戻り値: pending が確定されたか
+fn resolve_pending(
+    actions: &CacheActions,
+    state: &MarkerState,
+    version_file: &std::path::Path,
+    pending_file: &std::path::Path,
+    done_file: &std::path::Path,
+    require_done_for_confirm: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let done_exists = done_file.exists();
+
+    if actions.confirm_pending {
+        let should_confirm = !require_done_for_confirm || done_exists;
+        if should_confirm {
+            if let Some(ref v) = state.pending {
+                std::fs::write(version_file, v.as_str())?;
+            }
+            let _ = std::fs::remove_file(pending_file);
+            let _ = std::fs::remove_file(done_file);
+            return Ok(true);
+        }
+    } else if done_exists {
+        let _ = std::fs::remove_file(done_file);
+    }
+
+    Ok(false)
+}
+
 /// マーカーファイルを読み取り、必要に応じてキャッシュを削除する
-/// 戻り値: キャッシュ削除を実行したか（macOS の browsing data クリア判定に使用）
 #[cfg(feature = "tauri-app")]
 fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Error>> {
     use tauri::Manager;
@@ -199,6 +231,7 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
     let data_dir = app.path().app_data_dir()?;
     let version_file = data_dir.join(".cache-version");
     let pending_file = data_dir.join(".cache-version-pending");
+    let done_file = data_dir.join(".cache-clear-done");
 
     let state = MarkerState {
         version: std::fs::read_to_string(&version_file)
@@ -211,31 +244,14 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
 
     let actions = plan_cache_actions(&current_version, &state);
 
-    let done_file = data_dir.join(".cache-clear-done");
-    let done_exists = done_file.exists();
-
-    let mut pending_confirmed = false;
-    if actions.confirm_pending {
-        // macOS: pending + done が揃った場合のみ確定（非同期削除の完了猶予後）
-        // 非 macOS: FS 削除のみで完結するため即確定
-        let should_confirm = if cfg!(target_os = "macos") {
-            done_exists
-        } else {
-            true
-        };
-
-        if should_confirm {
-            if let Some(ref v) = state.pending {
-                let _ = std::fs::write(&version_file, v.as_str());
-            }
-            let _ = std::fs::remove_file(&pending_file);
-            let _ = std::fs::remove_file(&done_file);
-            pending_confirmed = true;
-        }
-    } else if done_exists {
-        // pending なし — 孤立した done を掃除
-        let _ = std::fs::remove_file(&done_file);
-    }
+    let pending_confirmed = resolve_pending(
+        &actions,
+        &state,
+        &version_file,
+        &pending_file,
+        &done_file,
+        cfg!(target_os = "macos"),
+    )?;
 
     if actions.clear_cache {
         clear_webview_cache(app)?;
@@ -252,7 +268,6 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
         std::fs::write(&pending_file, version.as_str())?;
     }
 
-    // macOS: 新規クリアまたは前回未完了（pending 未確定）の場合に API 呼び出し必要
     let needs_webview_clear = if cfg!(target_os = "macos") {
         actions.clear_cache || (actions.confirm_pending && !pending_confirmed)
     } else {
@@ -562,5 +577,202 @@ mod cache_tests {
                 write_pending: Some("0.1.1".into()),
             }
         );
+    }
+
+    // --- resolve_pending tests ---
+
+    fn setup_dir() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[test]
+    fn resolve_pending_with_done_confirms() {
+        let dir = setup_dir();
+        let version = dir.path().join("version");
+        let pending = dir.path().join("pending");
+        let done = dir.path().join("done");
+
+        std::fs::write(&pending, "0.1.2").unwrap();
+        std::fs::write(&done, "").unwrap();
+
+        let s = state(Some("0.1.1"), Some("0.1.2"));
+        let actions = CacheActions {
+            confirm_pending: true,
+            clear_cache: false,
+            write_pending: None,
+        };
+
+        let confirmed = resolve_pending(&actions, &s, &version, &pending, &done, true).unwrap();
+
+        assert!(confirmed);
+        assert_eq!(std::fs::read_to_string(&version).unwrap(), "0.1.2");
+        assert!(!pending.exists());
+        assert!(!done.exists());
+    }
+
+    #[test]
+    fn resolve_pending_without_done_does_not_confirm_when_required() {
+        let dir = setup_dir();
+        let version = dir.path().join("version");
+        let pending = dir.path().join("pending");
+        let done = dir.path().join("done");
+
+        std::fs::write(&pending, "0.1.2").unwrap();
+
+        let s = state(Some("0.1.1"), Some("0.1.2"));
+        let actions = CacheActions {
+            confirm_pending: true,
+            clear_cache: false,
+            write_pending: None,
+        };
+
+        let confirmed = resolve_pending(&actions, &s, &version, &pending, &done, true).unwrap();
+
+        assert!(!confirmed);
+        assert!(!version.exists());
+        assert!(pending.exists());
+    }
+
+    #[test]
+    fn resolve_pending_without_done_confirms_when_not_required() {
+        let dir = setup_dir();
+        let version = dir.path().join("version");
+        let pending = dir.path().join("pending");
+        let done = dir.path().join("done");
+
+        std::fs::write(&pending, "0.1.2").unwrap();
+
+        let s = state(Some("0.1.1"), Some("0.1.2"));
+        let actions = CacheActions {
+            confirm_pending: true,
+            clear_cache: false,
+            write_pending: None,
+        };
+
+        let confirmed = resolve_pending(&actions, &s, &version, &pending, &done, false).unwrap();
+
+        assert!(confirmed);
+        assert_eq!(std::fs::read_to_string(&version).unwrap(), "0.1.2");
+        assert!(!pending.exists());
+    }
+
+    #[test]
+    fn resolve_cleans_orphaned_done() {
+        let dir = setup_dir();
+        let version = dir.path().join("version");
+        let pending = dir.path().join("pending");
+        let done = dir.path().join("done");
+
+        std::fs::write(&done, "").unwrap();
+
+        let s = state(Some("0.1.2"), None);
+        let actions = CacheActions {
+            confirm_pending: false,
+            clear_cache: false,
+            write_pending: None,
+        };
+
+        let confirmed = resolve_pending(&actions, &s, &version, &pending, &done, true).unwrap();
+
+        assert!(!confirmed);
+        assert!(!done.exists());
+    }
+
+    // --- integration: full marker round-trip ---
+
+    #[test]
+    fn full_round_trip_without_done_requirement() {
+        let dir = setup_dir();
+        let data_dir = dir.path();
+        let version_file = data_dir.join("version");
+        let pending_file = data_dir.join("pending");
+        let done_file = data_dir.join("done");
+
+        // Startup 1: fresh install → clear + pending
+        let s1 = MarkerState {
+            version: None,
+            pending: None,
+        };
+        let a1 = plan_cache_actions("0.1.2", &s1);
+        assert!(a1.clear_cache);
+        resolve_pending(&a1, &s1, &version_file, &pending_file, &done_file, false).unwrap();
+        if let Some(ref v) = a1.write_pending {
+            std::fs::write(&pending_file, v.as_str()).unwrap();
+        }
+
+        // Startup 2: pending confirmed
+        let s2 = MarkerState {
+            version: std::fs::read_to_string(&version_file)
+                .ok()
+                .map(|s| s.trim().to_string()),
+            pending: std::fs::read_to_string(&pending_file)
+                .ok()
+                .map(|s| s.trim().to_string()),
+        };
+        let a2 = plan_cache_actions("0.1.2", &s2);
+        assert!(!a2.clear_cache);
+        assert!(a2.confirm_pending);
+        let confirmed =
+            resolve_pending(&a2, &s2, &version_file, &pending_file, &done_file, false).unwrap();
+        assert!(confirmed);
+        assert_eq!(std::fs::read_to_string(&version_file).unwrap(), "0.1.2");
+        assert!(!pending_file.exists());
+
+        // Startup 3: stable
+        let s3 = MarkerState {
+            version: std::fs::read_to_string(&version_file)
+                .ok()
+                .map(|s| s.trim().to_string()),
+            pending: None,
+        };
+        let a3 = plan_cache_actions("0.1.2", &s3);
+        assert!(!a3.clear_cache);
+        assert!(!a3.confirm_pending);
+    }
+
+    #[test]
+    fn full_round_trip_with_done_requirement() {
+        let dir = setup_dir();
+        let data_dir = dir.path();
+        let version_file = data_dir.join("version");
+        let pending_file = data_dir.join("pending");
+        let done_file = data_dir.join("done");
+
+        // Startup 1: version change → clear + pending
+        std::fs::write(&version_file, "0.1.1").unwrap();
+        let s1 = MarkerState {
+            version: Some("0.1.1".into()),
+            pending: None,
+        };
+        let a1 = plan_cache_actions("0.1.2", &s1);
+        resolve_pending(&a1, &s1, &version_file, &pending_file, &done_file, true).unwrap();
+        std::fs::write(&pending_file, "0.1.2").unwrap();
+
+        // Startup 2: pending without done → not confirmed, needs retry
+        let s2 = MarkerState {
+            version: Some("0.1.1".into()),
+            pending: Some("0.1.2".into()),
+        };
+        let a2 = plan_cache_actions("0.1.2", &s2);
+        let confirmed =
+            resolve_pending(&a2, &s2, &version_file, &pending_file, &done_file, true).unwrap();
+        assert!(!confirmed);
+        assert!(pending_file.exists());
+
+        // Simulate: command runs, Drop writes done
+        std::fs::write(&done_file, "").unwrap();
+
+        // Startup 3: pending + done → confirmed
+        let s3 = MarkerState {
+            version: Some("0.1.1".into()),
+            pending: Some("0.1.2".into()),
+        };
+        let a3 = plan_cache_actions("0.1.2", &s3);
+        let confirmed =
+            resolve_pending(&a3, &s3, &version_file, &pending_file, &done_file, true).unwrap();
+        assert!(confirmed);
+        assert_eq!(std::fs::read_to_string(&version_file).unwrap(), "0.1.2");
+        assert!(!pending_file.exists());
+        assert!(!done_file.exists());
     }
 }
