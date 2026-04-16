@@ -84,14 +84,16 @@ pub fn run() {
 
 /// macOS で WebView 生成後に clear_all_browsing_data() を呼ぶためのフラグ
 /// FS 削除ではカバーできない WKWebsiteDataStore のキャッシュを best-effort で除去する
-/// マーカーシステムには依存しない（FS 削除が確定的な主経路、API 呼び出しは補助）
+/// macOS では pending 確定もこのコマンド成功後に行い、未完了時は次回起動でリトライ
 #[cfg(feature = "tauri-app")]
 struct WebViewCacheClearNeeded(std::sync::atomic::AtomicBool);
 
 #[cfg(feature = "tauri-app")]
 #[tauri::command]
+#[allow(unused_variables)]
 fn clear_webview_browsing_data(
-    #[allow(unused_variables)] webview: tauri::Webview,
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: tauri::State<'_, WebViewCacheClearNeeded>,
 ) -> Result<(), String> {
     if !state
@@ -102,9 +104,23 @@ fn clear_webview_browsing_data(
     }
 
     #[cfg(target_os = "macos")]
-    webview
-        .clear_all_browsing_data()
-        .map_err(|e| e.to_string())?;
+    {
+        use tauri::Manager;
+
+        webview
+            .clear_all_browsing_data()
+            .map_err(|e| e.to_string())?;
+
+        // 成功後に pending を version に確定
+        if let Ok(data_dir) = app.path().app_data_dir() {
+            let pending_file = data_dir.join(".cache-version-pending");
+            let version_file = data_dir.join(".cache-version");
+            if let Ok(v) = std::fs::read_to_string(&pending_file) {
+                let _ = std::fs::write(&version_file, v.trim());
+            }
+            let _ = std::fs::remove_file(&pending_file);
+        }
+    }
 
     state
         .0
@@ -178,7 +194,9 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
 
     let actions = plan_cache_actions(&current_version, &state);
 
-    if actions.confirm_pending {
+    // macOS: pending 確定はコマンド側で行う（clear_all_browsing_data 成功後）
+    // 非 macOS: FS 削除のみで完結するためここで確定
+    if actions.confirm_pending && !cfg!(target_os = "macos") {
         if let Some(ref v) = state.pending {
             let _ = std::fs::write(&version_file, v.as_str());
         }
@@ -200,7 +218,14 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
         std::fs::write(&pending_file, version.as_str())?;
     }
 
-    Ok(actions.clear_cache)
+    // macOS: pending がある場合も API 呼び出しが必要（前回未完了のリトライ含む）
+    let needs_webview_clear = if cfg!(target_os = "macos") {
+        actions.clear_cache || actions.confirm_pending
+    } else {
+        actions.clear_cache
+    };
+
+    Ok(needs_webview_clear)
 }
 
 /// macOS/Windows: app_cache_dir に WebView キャッシュが保存される
