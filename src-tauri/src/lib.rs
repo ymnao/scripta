@@ -163,6 +163,30 @@ fn clear_webview_browsing_data(
     Ok(())
 }
 
+/// バージョン文字列の最大長（symlink 経由で巨大ファイルを読まないための上限）
+const MAX_VERSION_LEN: u64 = 64;
+
+/// シンボリックリンクでない通常ファイルを安全に読み取る
+/// symlink は無視し、長すぎるファイルは読まない
+fn safe_read_marker(path: &std::path::Path) -> Option<String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if !meta.file_type().is_symlink() && meta.is_file() && meta.len() <= MAX_VERSION_LEN => {}
+        _ => return None,
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// ファイルがシンボリックリンクでなく実在するか
+fn file_exists_no_follow(path: &std::path::Path) -> bool {
+    matches!(
+        std::fs::symlink_metadata(path),
+        Ok(meta) if !meta.file_type().is_symlink() && meta.is_file()
+    )
+}
+
 /// シンボリックリンクでないファイルに安全に書き込む
 /// シンボリックリンクの場合はエラーを返す
 fn safe_write_file(
@@ -246,7 +270,7 @@ fn resolve_pending(
     done_file: &std::path::Path,
     require_done_for_confirm: bool,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    let done_exists = done_file.exists();
+    let done_exists = file_exists_no_follow(done_file);
 
     if actions.confirm_pending {
         let should_confirm = !require_done_for_confirm || done_exists;
@@ -277,12 +301,8 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
     let done_file = data_dir.join(".cache-clear-done");
 
     let state = MarkerState {
-        version: std::fs::read_to_string(&version_file)
-            .ok()
-            .map(|s| s.trim().to_string()),
-        pending: std::fs::read_to_string(&pending_file)
-            .ok()
-            .map(|s| s.trim().to_string()),
+        version: safe_read_marker(&version_file),
+        pending: safe_read_marker(&pending_file),
     };
 
     let actions = plan_cache_actions(&current_version, &state);
@@ -303,7 +323,12 @@ fn check_and_clear_cache(app: &mut tauri::App) -> Result<bool, Box<dyn std::erro
             .as_deref()
             .or(state.version.as_deref())
             .unwrap_or("(なし)");
-        log::info!("WebView キャッシュをクリア: {from} → {current_version}");
+        // ログにはバージョン形式の値のみ出力（不正な内容を除外）
+        if from.len() <= 20 && from.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+            log::info!("WebView キャッシュをクリア: {from} → {current_version}");
+        } else {
+            log::info!("WebView キャッシュをクリア: (不明) → {current_version}");
+        }
     }
 
     if let Some(ref version) = actions.write_pending {

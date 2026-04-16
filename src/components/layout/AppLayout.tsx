@@ -224,8 +224,7 @@ export function AppLayout() {
 				autoPullOnStartup: settings.autoPullOnStartup,
 			});
 			setSidebarVisible(settings.sidebarVisible);
-			// macOS: WKWebsiteDataStore のキャッシュを best-effort で削除
-			void clearWebviewBrowsingData();
+			clearWebviewBrowsingData().catch(() => {});
 			setLoading(false);
 		})();
 
