@@ -54,7 +54,7 @@ export function useAutoSave(
 	}, []);
 
 	const save = useCallback(
-		(contentToSave: string): Promise<void> => {
+		(contentToSave: string, manual?: boolean): Promise<void> => {
 			if (!filePath) return Promise.resolve();
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
@@ -99,7 +99,7 @@ export function useAutoSave(
 				(err) => {
 					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
 						console.error("Failed to save file:", err);
-						if (isTransientError(err) && saveRetryCountRef.current < MAX_SAVE_RETRIES) {
+						if (!manual && isTransientError(err) && saveRetryCountRef.current < MAX_SAVE_RETRIES) {
 							saveRetryCountRef.current += 1;
 							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
 							setSaveStatus("retrying");
@@ -244,9 +244,14 @@ export function useAutoSave(
 			debounceTimerRef.current = null;
 		}
 		clearRetryState();
-		return save(contentRef.current).then(
+		return save(contentRef.current, true).then(
 			() => true,
-			() => false,
+			(err) => {
+				useToastStore
+					.getState()
+					.addToast("error", `ファイルの保存に失敗しました: ${translateError(err)}`);
+				return false;
+			},
 		);
 	}, [save, clearRetryState]);
 

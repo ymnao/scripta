@@ -376,7 +376,11 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
-	it("saveNow returns false on save failure", async () => {
+	it("saveNow returns false on save failure and shows toast", async () => {
+		const { useToastStore } = await import("../stores/toast");
+		const mockAddToast = (useToastStore as unknown as { __mockAddToast: Mock }).__mockAddToast;
+		mockAddToast.mockClear();
+
 		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
@@ -394,6 +398,10 @@ describe("useAutoSave", () => {
 
 		expect(saved).toBe(false);
 		expect(result.current.saveStatus).toBe("error");
+		expect(mockAddToast).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("ファイルの保存に失敗しました"),
+		);
 	});
 
 	it("saveNow returns true when content is already saved (no-op)", async () => {
@@ -676,6 +684,44 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(10000);
 		});
 		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("saveNow does not retry on transient error and shows exactly one toast", async () => {
+		const { useToastStore } = await import("../stores/toast");
+		const mockAddToast = (useToastStore as unknown as { __mockAddToast: Mock }).__mockAddToast;
+		mockAddToast.mockClear();
+
+		mockedWriteFile.mockRejectedValue("Connection timed out");
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		result.current.markSaved("initial");
+		rerender({ content: "changed" });
+
+		let saved!: boolean;
+		await act(async () => {
+			saved = await result.current.saveNow();
+		});
+
+		expect(saved).toBe(false);
+		// Manual save should go directly to error, NOT retrying
+		expect(result.current.saveStatus).toBe("error");
+		expect(mockAddToast).toHaveBeenCalledTimes(1);
+		expect(mockAddToast).toHaveBeenCalledWith(
+			"error",
+			expect.stringContaining("ファイルの保存に失敗しました"),
+		);
+
+		// No retry should be scheduled
+		mockedWriteFile.mockClear();
+		await act(async () => {
+			vi.advanceTimersByTime(60000);
+		});
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+		// Still exactly one toast — no double toast from retries
+		expect(mockAddToast).toHaveBeenCalledTimes(1);
 	});
 
 	it("schedules follow-up save when content changed during write", async () => {
