@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForUnsaved } from "./helpers/assertions";
 import { TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
@@ -76,7 +77,7 @@ test.describe("file watcher", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" edited");
 
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		await mock.simulateFileModify("/workspace/hello.md", "# External Change");
 
@@ -98,7 +99,7 @@ test.describe("file watcher", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" edited");
 
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		await mock.simulateFileDelete("/workspace/hello.md", "/workspace", "hello.md");
 

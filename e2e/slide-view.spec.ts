@@ -80,9 +80,12 @@ test.describe("slide view", () => {
 		await page.keyboard.press(`${modKey}+Shift+s`);
 		await expect(page.getByText("1 / 3")).toBeVisible();
 
-		// Focus the editor inside SlideView then move cursor to end (Slide 3)
-		const editor = page.locator(".cm-content");
-		await editor.focus();
+		// In slide view the editor is partially overlaid by the preview pane,
+		// so a regular click can't reliably focus it. Focus programmatically,
+		// then use real Playwright keyboard input.
+		await page.evaluate(() => {
+			(document.querySelector(".cm-content") as HTMLElement | null)?.focus();
+		});
 		await page.keyboard.press(`${modKey}+End`);
 
 		await expect(page.getByText("3 / 3")).toBeVisible();

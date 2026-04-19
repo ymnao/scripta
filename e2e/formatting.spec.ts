@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
 	files: {
 		"/workspace/test.md": "hello world",
+		"/workspace/.scripta/initialized.json": '{"initializedAt":"2026-01-01T00:00:00.000Z"}',
 	},
 	directories: {
 		"/workspace": [{ name: "test.md", path: "/workspace/test.md", isDirectory: false }],
@@ -34,10 +36,15 @@ test.describe("formatting shortcuts", () => {
 		}
 
 		await page.keyboard.press(`${modKey}+b`);
+		await waitForUnsaved(page);
 
-		// Verify the text contains bold markers
-		const text = await editor.textContent();
-		expect(text).toContain("**world**");
+		// Save and check the actual content via write_file mock
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		const calls = await mock.getCalls("write_file");
+		const lastCall = calls[calls.length - 1];
+		expect(lastCall.content).toContain("**world**");
 	});
 
 	test("Cmd+Shift+X wraps selection with strikethrough markers", async ({ page }) => {
@@ -62,10 +69,11 @@ test.describe("formatting shortcuts", () => {
 		}
 
 		await page.keyboard.press(`${modKey}+Shift+x`);
+		await waitForUnsaved(page);
 
 		// Save and check the actual content via write_file mock
 		await page.keyboard.press(`${modKey}+s`);
-		await page.waitForTimeout(200);
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];

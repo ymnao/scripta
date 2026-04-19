@@ -10,6 +10,14 @@ const MAX_SAVE_RETRIES = 3;
 const SAVE_RETRY_BASE_MS = 5000;
 const IME_COMPOSITION_DEFER_MS = 200;
 
+function saveErrorMessage(err: unknown): string {
+	return `ファイルの保存に失敗しました: ${translateError(err)}`;
+}
+
+interface SaveOptions {
+	skipRetry?: boolean;
+}
+
 interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;
 	saveNow: () => Promise<boolean>;
@@ -54,7 +62,7 @@ export function useAutoSave(
 	}, []);
 
 	const save = useCallback(
-		(contentToSave: string): Promise<void> => {
+		(contentToSave: string, options?: SaveOptions): Promise<void> => {
 			if (!filePath) return Promise.resolve();
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
@@ -99,7 +107,11 @@ export function useAutoSave(
 				(err) => {
 					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
 						console.error("Failed to save file:", err);
-						if (isTransientError(err) && saveRetryCountRef.current < MAX_SAVE_RETRIES) {
+						if (
+							!options?.skipRetry &&
+							isTransientError(err) &&
+							saveRetryCountRef.current < MAX_SAVE_RETRIES
+						) {
 							saveRetryCountRef.current += 1;
 							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
 							setSaveStatus("retrying");
@@ -113,9 +125,7 @@ export function useAutoSave(
 						} else {
 							setSaveStatus("error");
 							if (saveRetryCountRef.current > 0) {
-								useToastStore
-									.getState()
-									.addToast("error", `ファイルの保存に失敗しました: ${translateError(err)}`);
+								useToastStore.getState().addToast("error", saveErrorMessage(err));
 							}
 						}
 					}
@@ -244,9 +254,18 @@ export function useAutoSave(
 			debounceTimerRef.current = null;
 		}
 		clearRetryState();
-		return save(contentRef.current).then(
+		const promise = save(contentRef.current, { skipRetry: true });
+		// Capture the saveId that save() just assigned so we can detect
+		// whether a newer save superseded this one before the error fires.
+		const id = saveIdRef.current;
+		return promise.then(
 			() => true,
-			() => false,
+			(err) => {
+				if (isMountedRef.current && id === saveIdRef.current) {
+					useToastStore.getState().addToast("error", saveErrorMessage(err));
+				}
+				return false;
+			},
 		);
 	}, [save, clearRetryState]);
 

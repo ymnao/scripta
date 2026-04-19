@@ -156,6 +156,31 @@ test.describe("settings dialog", () => {
 		await expect(fontSelect).toHaveValue("serif");
 	});
 
+	test("font family change applies to editor computed style", async ({ page }) => {
+		const mock = new TauriMock(page);
+		await mock.setup(workspace, "/workspace");
+
+		await page.goto("/");
+		await page.getByLabel("Open folder").click();
+		await page.getByLabel("test.md file").click();
+		await expect(page.locator(".cm-content")).toBeVisible();
+
+		// Default font should contain monospace
+		const scroller = page.locator(".cm-scroller");
+		const defaultFont = await scroller.evaluate((el) => window.getComputedStyle(el).fontFamily);
+		expect(defaultFont).toContain("monospace");
+
+		// Change font to serif via settings
+		await page.keyboard.press(`${modKey}+,`);
+		await page.locator('nav[aria-label="設定セクション"]').getByText("エディタ").click();
+		await page.locator("#font-family-select").selectOption("serif");
+		await page.keyboard.press("Escape");
+
+		// Computed style on .cm-scroller should now reflect serif
+		const serifFont = await scroller.evaluate((el) => window.getComputedStyle(el).fontFamily);
+		expect(serifFont).toContain("Georgia");
+	});
+
 	test("dialog size stays stable when switching sections", async ({ page }) => {
 		await openSettingsDialog(page);
 
