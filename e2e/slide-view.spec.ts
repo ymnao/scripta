@@ -83,21 +83,25 @@ test.describe("slide view", () => {
 		// Move cursor to end of document (Slide 3) via CodeMirror API.
 		// In slide view, the editor is partially overlaid by the preview pane,
 		// so a regular click can't reliably focus it.
-		await page.evaluate(() => {
-			const content = document.querySelector(".cm-content") as HTMLElement | null;
-			if (!content) return;
-			content.focus();
-			// Dispatch Cmd+End to move cursor to document end
-			content.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: "End",
-					code: "End",
-					metaKey: true,
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-		});
+		const useMeta = modKey === "Meta";
+		await page.evaluate(
+			(meta) => {
+				const content = document.querySelector(".cm-content") as HTMLElement | null;
+				if (!content) return;
+				content.focus();
+				content.dispatchEvent(
+					new KeyboardEvent("keydown", {
+						key: "End",
+						code: "End",
+						metaKey: meta,
+						ctrlKey: !meta,
+						bubbles: true,
+						cancelable: true,
+					}),
+				);
+			},
+			useMeta,
+		);
 
 		await expect(page.getByText("3 / 3")).toBeVisible();
 	});
