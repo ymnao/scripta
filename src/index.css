@@ -79,11 +79,10 @@
 
 /* Editor font — applied via CSS custom property so that font-family
    does not depend on style-mod's dynamic injection (WKWebView compat).
-   !important is required because CodeMirror's base theme injects
-   font-family: monospace via adoptedStyleSheets, which takes cascade
-   precedence over regular stylesheets at equal specificity. */
-.cm-editor .cm-scroller {
-	font-family: var(--editor-font-family) !important;
+   Doubled class selector raises specificity above CodeMirror's base theme
+   which injects font-family via adoptedStyleSheets (wins at equal specificity). */
+.cm-editor.cm-editor .cm-scroller {
+	font-family: var(--editor-font-family);
 }
 
 /* Editor error display */

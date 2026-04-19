@@ -107,7 +107,11 @@ export function useAutoSave(
 				(err) => {
 					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
 						console.error("Failed to save file:", err);
-						if (!options?.skipRetry && isTransientError(err) && saveRetryCountRef.current < MAX_SAVE_RETRIES) {
+						if (
+							!options?.skipRetry &&
+							isTransientError(err) &&
+							saveRetryCountRef.current < MAX_SAVE_RETRIES
+						) {
 							saveRetryCountRef.current += 1;
 							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
 							setSaveStatus("retrying");
@@ -121,9 +125,7 @@ export function useAutoSave(
 						} else {
 							setSaveStatus("error");
 							if (saveRetryCountRef.current > 0) {
-								useToastStore
-									.getState()
-									.addToast("error", saveErrorMessage(err));
+								useToastStore.getState().addToast("error", saveErrorMessage(err));
 							}
 						}
 					}
