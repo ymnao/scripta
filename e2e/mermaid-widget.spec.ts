@@ -7,6 +7,7 @@ const workspace = {
 		"/workspace/mermaid.md":
 			"# Title\n\nSome text here.\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nMore text below.\n",
 		"/workspace/.scripta/.initialized": "",
+		"/workspace/.scripta/initialized.json": '{"initializedAt":"2026-01-01T00:00:00.000Z"}',
 	},
 	directories: {
 		"/workspace": [{ name: "mermaid.md", path: "/workspace/mermaid.md", isDirectory: false }],
