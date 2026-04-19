@@ -6,6 +6,7 @@ const workspace = {
 		"/workspace/test.md": "first line\n\n## hello\n\nplain text",
 		"/workspace/first-line-heading.md": "## first heading\n\nsecond line",
 		"/workspace/first-line-blockquote.md": "> first quote\n\nsecond line",
+		"/workspace/.scripta/initialized.json": '{"initializedAt":"2026-01-01T00:00:00.000Z"}',
 	},
 	directories: {
 		"/workspace": [
@@ -116,10 +117,11 @@ test.describe("heading live preview", () => {
 
 		// The line should become plain text "hello" without heading decoration
 		await expect(headingLine).not.toBeVisible({ timeout: 5000 });
+		await expect(page.getByText("未保存")).toBeVisible();
 
 		// Save and verify the content
 		await page.keyboard.press(`${modKey}+s`);
-		await page.waitForTimeout(200);
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -187,8 +189,9 @@ test.describe("heading live preview", () => {
 		// Type a character — it should appear at the visual start (after hidden "## "),
 		// not inside the hidden prefix
 		await page.keyboard.type("X");
+		await expect(page.getByText("未保存")).toBeVisible();
 		await page.keyboard.press(`${modKey}+s`);
-		await page.waitForTimeout(200);
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -219,8 +222,9 @@ test.describe("heading live preview", () => {
 
 		// Cursor should still be at visual start, not inside hidden prefix
 		await page.keyboard.type("Y");
+		await expect(page.getByText("未保存")).toBeVisible();
 		await page.keyboard.press(`${modKey}+s`);
-		await page.waitForTimeout(200);
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -248,8 +252,9 @@ test.describe("heading live preview", () => {
 
 		// Type — should appear after hidden "> "
 		await page.keyboard.type("Z");
+		await expect(page.getByText("未保存")).toBeVisible();
 		await page.keyboard.press(`${modKey}+s`);
-		await page.waitForTimeout(200);
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -285,10 +290,11 @@ test.describe("heading live preview", () => {
 
 		// Type something to verify cursor is on the previous line
 		await page.keyboard.type("X");
+		await expect(page.getByText("未保存")).toBeVisible();
 
 		// Save and check: "X" should appear on the line before "## hello"
 		await page.keyboard.press(`${modKey}+s`);
-		await page.waitForTimeout(200);
+		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];

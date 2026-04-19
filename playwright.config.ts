@@ -14,7 +14,13 @@ export default defineConfig({
 	projects: [
 		{
 			name: "chromium",
-			use: { ...devices["Desktop Chrome"] },
+			use: {
+				...devices["Desktop Chrome"],
+				// Reset the Windows user agent from "Desktop Chrome" device descriptor
+				// so Chromium uses its native UA. This ensures CodeMirror correctly detects
+				// the host platform and maps Mod key to Meta (macOS) or Control (Linux/Windows).
+				userAgent: undefined,
+			},
 		},
 	],
 	webServer: {

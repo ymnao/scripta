@@ -80,10 +80,24 @@ test.describe("slide view", () => {
 		await page.keyboard.press(`${modKey}+Shift+s`);
 		await expect(page.getByText("1 / 3")).toBeVisible();
 
-		// Focus the editor inside SlideView then move cursor to end (Slide 3)
-		const editor = page.locator(".cm-content");
-		await editor.focus();
-		await page.keyboard.press(`${modKey}+End`);
+		// Move cursor to end of document (Slide 3) via CodeMirror API.
+		// In slide view, the editor is partially overlaid by the preview pane,
+		// so a regular click can't reliably focus it.
+		await page.evaluate(() => {
+			const content = document.querySelector(".cm-content") as HTMLElement | null;
+			if (!content) return;
+			content.focus();
+			// Dispatch Cmd+End to move cursor to document end
+			content.dispatchEvent(
+				new KeyboardEvent("keydown", {
+					key: "End",
+					code: "End",
+					metaKey: true,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
 
 		await expect(page.getByText("3 / 3")).toBeVisible();
 	});
