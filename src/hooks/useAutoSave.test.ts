@@ -34,6 +34,7 @@ const mockedWriteFile = writeFile as Mock;
 describe("useAutoSave", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
+		mockedWriteFile.mockClear();
 		mockedWriteFile.mockResolvedValue(undefined);
 		// Reset to default trimTrailingWhitespace
 		useSettingsStore.setState({ trimTrailingWhitespace: true });
@@ -722,6 +723,54 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 		// Still exactly one toast — no double toast from retries
 		expect(mockAddToast).toHaveBeenCalledTimes(1);
+	});
+
+	it("saveNow does not show toast when a newer save supersedes it", async () => {
+		const { useToastStore } = await import("../stores/toast");
+		const mockAddToast = (useToastStore as unknown as { __mockAddToast: Mock }).__mockAddToast;
+		mockAddToast.mockClear();
+
+		let rejectFirst!: (reason: unknown) => void;
+		mockedWriteFile
+			.mockImplementationOnce(
+				() =>
+					new Promise<void>((_resolve, reject) => {
+						rejectFirst = reject;
+					}),
+			)
+			.mockResolvedValueOnce(undefined);
+
+		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
+			initialProps: { content: "initial" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+
+		// First saveNow starts (will be slow — manually rejected later)
+		rerender({ content: "v1" });
+		act(() => {
+			result.current.saveNow();
+		});
+		// Flush microtasks so writeFile is called and rejectFirst is assigned
+		await act(async () => {});
+
+		// Second saveNow starts before the first completes (chains on inflightRef)
+		rerender({ content: "v2" });
+		act(() => {
+			result.current.saveNow();
+		});
+
+		// Reject the first write — it's stale, so no toast should appear.
+		// The second write (chained on inflightRef) resolves immediately after.
+		await act(async () => {
+			rejectFirst("Connection timed out");
+		});
+
+		// No toast because the first save was superseded by the second
+		expect(mockAddToast).not.toHaveBeenCalled();
+		expect(result.current.saveStatus).toBe("saved");
 	});
 
 	it("schedules follow-up save when content changed during write", async () => {

@@ -254,10 +254,16 @@ export function useAutoSave(
 			debounceTimerRef.current = null;
 		}
 		clearRetryState();
-		return save(contentRef.current, { skipRetry: true }).then(
+		const promise = save(contentRef.current, { skipRetry: true });
+		// Capture the saveId that save() just assigned so we can detect
+		// whether a newer save superseded this one before the error fires.
+		const id = saveIdRef.current;
+		return promise.then(
 			() => true,
 			(err) => {
-				useToastStore.getState().addToast("error", saveErrorMessage(err));
+				if (isMountedRef.current && id === saveIdRef.current) {
+					useToastStore.getState().addToast("error", saveErrorMessage(err));
+				}
 				return false;
 			},
 		);
