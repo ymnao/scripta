@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
@@ -104,9 +105,9 @@ test.describe("mermaid widget", () => {
 
 		await expect(widget).not.toBeVisible();
 
-		await expect(page.getByText("未保存")).toBeVisible({ timeout: 5000 });
+		await waitForUnsaved(page);
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 5000 });
+		await waitForSaved(page, 5000);
 
 		const calls = await mock.getCalls("write_file");
 		const saved = calls[calls.length - 1];

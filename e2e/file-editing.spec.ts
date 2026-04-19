@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
@@ -40,7 +41,7 @@ test.describe("file editing", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" updated");
 
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 	});
 
 	test("auto-saves after debounce and shows 保存済み status", async ({ page }) => {
@@ -56,8 +57,8 @@ test.describe("file editing", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" updated");
 
-		await expect(page.getByText("未保存")).toBeVisible();
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 5000 });
+		await waitForUnsaved(page);
+		await waitForSaved(page, 5000);
 
 		const calls = await mock.getCalls("write_file");
 		expect(calls.length).toBeGreaterThanOrEqual(1);
@@ -77,10 +78,10 @@ test.describe("file editing", () => {
 		await page.locator(".cm-content").click();
 		await page.keyboard.type(" manual");
 
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		expect(calls.length).toBeGreaterThanOrEqual(1);

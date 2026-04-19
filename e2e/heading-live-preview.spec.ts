@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
@@ -117,11 +118,11 @@ test.describe("heading live preview", () => {
 
 		// The line should become plain text "hello" without heading decoration
 		await expect(headingLine).not.toBeVisible({ timeout: 5000 });
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		// Save and verify the content
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -189,9 +190,9 @@ test.describe("heading live preview", () => {
 		// Type a character — it should appear at the visual start (after hidden "## "),
 		// not inside the hidden prefix
 		await page.keyboard.type("X");
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -222,9 +223,9 @@ test.describe("heading live preview", () => {
 
 		// Cursor should still be at visual start, not inside hidden prefix
 		await page.keyboard.type("Y");
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -252,9 +253,9 @@ test.describe("heading live preview", () => {
 
 		// Type — should appear after hidden "> "
 		await page.keyboard.type("Z");
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -290,11 +291,11 @@ test.describe("heading live preview", () => {
 
 		// Type something to verify cursor is on the previous line
 		await page.keyboard.type("X");
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		// Save and check: "X" should appear on the line before "## hello"
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];

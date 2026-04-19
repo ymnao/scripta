@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { modKey, TauriMock } from "./helpers/tauri-mock";
 
 const workspace = {
@@ -35,11 +36,11 @@ test.describe("formatting shortcuts", () => {
 		}
 
 		await page.keyboard.press(`${modKey}+b`);
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		// Save and check the actual content via write_file mock
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
@@ -68,11 +69,11 @@ test.describe("formatting shortcuts", () => {
 		}
 
 		await page.keyboard.press(`${modKey}+Shift+x`);
-		await expect(page.getByText("未保存")).toBeVisible();
+		await waitForUnsaved(page);
 
 		// Save and check the actual content via write_file mock
 		await page.keyboard.press(`${modKey}+s`);
-		await expect(page.getByText("保存済み", { exact: true })).toBeVisible({ timeout: 3000 });
+		await waitForSaved(page);
 
 		const calls = await mock.getCalls("write_file");
 		const lastCall = calls[calls.length - 1];
