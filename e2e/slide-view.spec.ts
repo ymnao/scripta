@@ -80,25 +80,13 @@ test.describe("slide view", () => {
 		await page.keyboard.press(`${modKey}+Shift+s`);
 		await expect(page.getByText("1 / 3")).toBeVisible();
 
-		// Move cursor to end of document (Slide 3) via CodeMirror API.
-		// In slide view, the editor is partially overlaid by the preview pane,
-		// so a regular click can't reliably focus it.
-		const useMeta = modKey === "Meta";
-		await page.evaluate((meta) => {
-			const content = document.querySelector(".cm-content") as HTMLElement | null;
-			if (!content) return;
-			content.focus();
-			content.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: "End",
-					code: "End",
-					metaKey: meta,
-					ctrlKey: !meta,
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-		}, useMeta);
+		// In slide view the editor is partially overlaid by the preview pane,
+		// so a regular click can't reliably focus it. Focus programmatically,
+		// then use real Playwright keyboard input.
+		await page.evaluate(() => {
+			(document.querySelector(".cm-content") as HTMLElement | null)?.focus();
+		});
+		await page.keyboard.press(`${modKey}+End`);
 
 		await expect(page.getByText("3 / 3")).toBeVisible();
 	});
