@@ -306,7 +306,7 @@ scripta/
 
 ファイル I/O コマンドには自動リトライ（指数バックオフ）を適用する。
 
-- **対象コマンド**: readFile, writeFile, listDirectory, renameEntry, deleteEntry, searchFiles, searchFilenames
+- **対象コマンド**: readFile, writeFile, listDirectory, renameEntry, deleteEntry, searchFiles, searchFilenames, scanUnresolvedWikilinks
 - **リトライ回数**: 最大3回
 - **遅延**: 200ms → 400ms → 800ms（指数バックオフ）
 - **非一時エラー**（ファイル不存在、権限不足、ファイル名過長、フォルダ非空等）はリトライしない
@@ -364,27 +364,27 @@ CodeMirror 6 の `ViewPlugin` と `Decoration` API を使用する。
 
 #### Git Sync コマンド
 
-| コマンド | 引数 | 戻り値 |
-|---------|------|--------|
-| `git_check_available` | — | `bool` |
-| `git_check_repo` | `path` | `bool` |
-| `git_status` | `path` | `GitStatusResult` |
-| `git_add_all` | `path` | `()` |
-| `git_commit` | `path, message` | `String` |
-| `git_pull` | `path, sync_method` | `String` |
-| `git_push` | `path` | `String` |
-| `git_get_conflicted_files` | `path` | `Vec<String>` |
-| `git_get_conflict_content` | `path, file_path` | `ConflictContentResult { ours, theirs }` |
-| `git_resolve_conflict` | `path, file_path, content, resolution` | `()` |
-| `git_finish_conflict_resolution` | `path` | `String` |
-| `git_get_last_commit_time` | `path` | `Option<String>` |
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `git_check_available` | — | `bool` | なし |
+| `git_check_repo` | `path` | `bool` | なし |
+| `git_status` | `path` | `GitStatusResult` | なし |
+| `git_add_all` | `path` | `()` | なし |
+| `git_commit` | `path, message` | `String` | なし |
+| `git_pull` | `path, sync_method` | `String` | なし |
+| `git_push` | `path` | `String` | なし |
+| `git_get_conflicted_files` | `path` | `Vec<String>` | なし |
+| `git_get_conflict_content` | `path, file_path` | `ConflictContentResult { ours, theirs }` | なし |
+| `git_resolve_conflict` | `path, file_path, content, resolution` | `()` | なし |
+| `git_finish_conflict_resolution` | `path` | `String` | なし |
+| `git_get_last_commit_time` | `path` | `Option<String>` | なし |
 
 #### その他のコマンド
 
-| コマンド | 引数 | 戻り値 |
-|---------|------|--------|
-| `export_pdf` | `html, output_path` | `()` |
-| `fetch_ogp` | `url` | `OgpData` |
-| `check_for_update` | `current_version` | `UpdateInfo` |
-| `start_watcher` | `path` | `()` |
-| `stop_watcher` | — | `()` |
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `export_pdf` | `html, output_path` | `()` | なし |
+| `fetch_ogp` | `url` | `OgpData` | 30秒後に再試行（フロント側キャッシュ） |
+| `check_for_update` | `current_version` | `UpdateInfo` | なし |
+| `start_watcher` | `path` | `()` | なし |
+| `stop_watcher` | — | `()` | なし |
