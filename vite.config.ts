@@ -23,32 +23,9 @@ export default defineConfig({
 	envPrefix: ["VITE_", "TAURI_ENV_"],
 
 	build: {
-		// Tauri デスクトップアプリではチャンク分割のパフォーマンス効果は薄いが、
-		// ビルド時の 500 KB 超過警告を解消するためにベンダーチャンクを分離する
-		rolldownOptions: {
-			output: {
-				codeSplitting: {
-					// CodeMirror を core/ext に分割するのは単一グループだと 500 KB を超えるため
-					groups: [
-						{
-							name: "vendor-react",
-							test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
-							priority: 3,
-						},
-						{
-							name: "vendor-codemirror-core",
-							test: /node_modules[\\/](@codemirror[\\/](state|view)|@lezer[\\/](common|lr)|crelt|style-mod|w3c-keyname)[\\/]/,
-							priority: 2,
-						},
-						{
-							name: "vendor-codemirror-ext",
-							test: /node_modules[\\/](@codemirror[\\/](autocomplete|commands|lang-markdown|language-data|language|search)|@lezer[\\/](highlight|markdown)|@uiw[\\/]react-codemirror)[\\/]/,
-							priority: 2,
-						},
-					],
-				},
-			},
-		},
+		// Tauri はローカルファイル読み込みのためチャンク分割の恩恵がなく、
+		// 警告閾値の引き上げで対応する（デフォルト 500 KB）
+		chunkSizeWarningLimit: 1000,
 	},
 
 	resolve: {
