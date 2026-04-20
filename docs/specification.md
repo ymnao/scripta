@@ -372,8 +372,8 @@ CodeMirror 6 の `ViewPlugin` と `Decoration` API を使用する。
 | `git_pull` | `path, sync_method` | `String` |
 | `git_push` | `path` | `String` |
 | `git_get_conflicted_files` | `path` | `Vec<String>` |
-| `git_get_conflict_content` | `path` ほか | コンフリクト内容 |
-| `git_resolve_conflict` | `path` ほか | `()` |
+| `git_get_conflict_content` | `path, file_path` | `ConflictContentResult { ours, theirs }` |
+| `git_resolve_conflict` | `path, file_path, content, resolution` | `()` |
 | `git_finish_conflict_resolution` | `path` | `String` |
 | `git_get_last_commit_time` | `path` | `Option<String>` |
 
