@@ -40,7 +40,7 @@ function resolveCodeContent(view: EditorView, dom: HTMLElement): string | null {
 }
 
 export class CodeBlockCopyWidget extends WidgetType {
-	eq(): boolean {
+	eq(_other: CodeBlockCopyWidget): boolean {
 		return true;
 	}
 
@@ -133,8 +133,26 @@ function getFencedCodeRange(
 	}
 }
 
-function findCopyButtonForBlock(view: EditorView, lineEl: Element): HTMLElement | null {
-	const blockRange = getFencedCodeRange(view, lineEl);
+type BlockRangeCache = WeakMap<Element, { from: number; to: number } | null>;
+
+function getCachedBlockRange(
+	cache: BlockRangeCache,
+	view: EditorView,
+	lineEl: Element,
+): { from: number; to: number } | null {
+	const cached = cache.get(lineEl);
+	if (cached !== undefined) return cached;
+	const range = getFencedCodeRange(view, lineEl);
+	cache.set(lineEl, range);
+	return range;
+}
+
+function findCopyButtonForBlock(
+	view: EditorView,
+	lineEl: Element,
+	cache: BlockRangeCache,
+): HTMLElement | null {
+	const blockRange = getCachedBlockRange(cache, view, lineEl);
 	if (!blockRange) return null;
 
 	if (lineEl.classList.contains("cm-codeblock-copy-anchor")) {
@@ -144,7 +162,7 @@ function findCopyButtonForBlock(view: EditorView, lineEl: Element): HTMLElement 
 	let el: Element | null = lineEl.previousElementSibling;
 	while (el?.classList.contains("cm-codeblock-line")) {
 		if (el.classList.contains("cm-codeblock-copy-anchor")) {
-			const candidateRange = getFencedCodeRange(view, el);
+			const candidateRange = getCachedBlockRange(cache, view, el);
 			if (candidateRange?.from === blockRange.from) {
 				return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
 			}
@@ -156,7 +174,7 @@ function findCopyButtonForBlock(view: EditorView, lineEl: Element): HTMLElement 
 	el = lineEl.nextElementSibling;
 	while (el?.classList.contains("cm-codeblock-line")) {
 		if (el.classList.contains("cm-codeblock-copy-anchor")) {
-			const candidateRange = getFencedCodeRange(view, el);
+			const candidateRange = getCachedBlockRange(cache, view, el);
 			if (candidateRange?.from === blockRange.from) {
 				return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
 			}
@@ -226,6 +244,7 @@ export function buildCopyDecorations(view: EditorView): DecorationSet {
 class CodeBlockCopyPlugin implements PluginValue {
 	decorations: DecorationSet;
 	activeButton: HTMLElement | null = null;
+	blockRangeCache: BlockRangeCache = new WeakMap();
 
 	constructor(view: EditorView) {
 		this.decorations = buildCopyDecorations(view);
@@ -242,6 +261,7 @@ class CodeBlockCopyPlugin implements PluginValue {
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
 			this.decorations = buildCopyDecorations(update.view);
+			this.blockRangeCache = new WeakMap();
 			if (this.activeButton) {
 				this.activeButton.classList.remove("cm-codeblock-copy-visible");
 				this.activeButton = null;
@@ -265,7 +285,7 @@ export const codeBlockCopyDecoration = ViewPlugin.fromClass(CodeBlockCopyPlugin,
 				return;
 			}
 
-			const btn = findCopyButtonForBlock(view, lineEl);
+			const btn = findCopyButtonForBlock(view, lineEl, this.blockRangeCache);
 			if (btn === this.activeButton) return;
 
 			if (this.activeButton) {
