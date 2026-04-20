@@ -22,6 +22,32 @@ export default defineConfig({
 	// Expose TAURI_ENV_* (platform, debug) but not TAURI_SIGNING_* etc.
 	envPrefix: ["VITE_", "TAURI_ENV_"],
 
+	build: {
+		rolldownOptions: {
+			output: {
+				codeSplitting: {
+					groups: [
+						{
+							name: "vendor-react",
+							test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+							priority: 3,
+						},
+						{
+							name: "vendor-codemirror-core",
+							test: /node_modules[\\/](@codemirror[\\/](state|view)|@lezer[\\/](common|lr)|crelt|style-mod|w3c-keyname)[\\/]/,
+							priority: 2,
+						},
+						{
+							name: "vendor-codemirror-ext",
+							test: /node_modules[\\/](@codemirror[\\/](autocomplete|commands|lang-markdown|language-data|language|search)|@lezer[\\/](highlight|markdown)|@uiw[\\/]react-codemirror)[\\/]/,
+							priority: 2,
+						},
+					],
+				},
+			},
+		},
+	},
+
 	resolve: {
 		alias: isTauriMock
 			? {
