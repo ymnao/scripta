@@ -44,6 +44,7 @@ import {
 import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
 import {
 	blockquoteDecoration,
+	codeBlockCopyDecoration,
 	codeBlockDecoration,
 	emphasisDecoration,
 	headingDecoration,
@@ -240,6 +241,7 @@ export function MarkdownEditor({
 			linkDecoration,
 			imageDecoration,
 			codeBlockDecoration,
+			codeBlockCopyDecoration,
 			mermaidDecoration,
 			listDecoration,
 			blockquoteDecoration,

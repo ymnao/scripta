@@ -15,7 +15,7 @@ const codeBlockLineDecoration = Decoration.line({
 });
 const replaceDecoration = Decoration.replace({});
 
-const MERMAID_FENCE_RE = /^`{3,}\s*mermaid\s*$/;
+export const MERMAID_FENCE_RE = /^`{3,}\s*mermaid\s*$/;
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
