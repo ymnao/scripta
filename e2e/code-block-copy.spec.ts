@@ -14,7 +14,8 @@ const workspace = {
 };
 
 test.describe("code block copy button", () => {
-	test("copies code via focused button and Enter", async ({ page }) => {
+	test("copies code via focused button and Enter", async ({ page, context }) => {
+		await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 		const mock = new TauriMock(page);
 		await mock.setup(workspace, "/workspace");
 		await page.goto("/");
@@ -40,22 +41,14 @@ test.describe("code block copy button", () => {
 		await copyButton.focus();
 		await expect(copyButton).toBeFocused();
 
-		// クリップボード API をモックして結果を検証
-		await page.evaluate(() => {
-			(window as unknown as Record<string, string>).__copied__ = "";
-			navigator.clipboard.writeText = async (text: string) => {
-				(window as unknown as Record<string, string>).__copied__ = text;
-			};
-		});
-
 		await page.keyboard.press("Enter");
 
 		// 成功フィードバック（チェックマーク表示）
 		await expect(copyButton).toHaveClass(/cm-codeblock-copy-success/);
 
-		const copied = await page.evaluate(
-			() => (window as unknown as Record<string, string>).__copied__,
-		);
-		expect(copied).toBe("const x = 1;");
+		// 実クリップボードの内容を検証
+		await page.waitForTimeout(100);
+		const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+		expect(clipboardText).toBe("const x = 1;");
 	});
 });

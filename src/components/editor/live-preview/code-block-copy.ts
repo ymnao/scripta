@@ -39,13 +39,16 @@ export class CodeBlockCopyWidget extends WidgetType {
 		button.setAttribute("title", "Copy");
 		button.innerHTML = COPY_ICON_SVG + CHECK_ICON_SVG;
 
+		let feedbackTimer: ReturnType<typeof setTimeout> | undefined;
 		const copy = () => {
 			if (!navigator.clipboard) return;
 			navigator.clipboard.writeText(this.code).then(
 				() => {
+					if (feedbackTimer !== undefined) clearTimeout(feedbackTimer);
 					button.classList.add("cm-codeblock-copy-success");
-					setTimeout(() => {
+					feedbackTimer = setTimeout(() => {
 						button.classList.remove("cm-codeblock-copy-success");
+						feedbackTimer = undefined;
 					}, 1500);
 				},
 				() => {},
