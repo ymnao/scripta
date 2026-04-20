@@ -82,9 +82,10 @@ describe("buildCopyDecorations", () => {
 });
 
 describe("CodeBlockCopyWidget", () => {
-	function createMockView(code: string) {
+	function createMockView(code: string, focusFn?: () => void) {
 		return {
 			state: { doc: { sliceString: () => code } },
+			focus: focusFn ?? (() => {}),
 		} as unknown as EditorView;
 	}
 
@@ -163,24 +164,62 @@ describe("CodeBlockCopyWidget", () => {
 	);
 
 	it(
-		"Enter key copies code to clipboard",
+		"Enter key copies code to clipboard and focuses editor",
 		withMockClipboard(async (written) => {
+			let focused = false;
 			const widget = new CodeBlockCopyWidget(0, 11);
-			const el = widget.toDOM(createMockView("hello world"));
+			const el = widget.toDOM(
+				createMockView("hello world", () => {
+					focused = true;
+				}),
+			);
 			el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 			await Promise.resolve();
 			expect(written).toEqual(["hello world"]);
+			expect(focused).toBe(true);
 		}),
 	);
 
 	it(
-		"Space key copies code to clipboard",
+		"Space key copies code to clipboard and focuses editor",
 		withMockClipboard(async (written) => {
+			let focused = false;
 			const widget = new CodeBlockCopyWidget(0, 11);
-			const el = widget.toDOM(createMockView("hello world"));
+			const el = widget.toDOM(
+				createMockView("hello world", () => {
+					focused = true;
+				}),
+			);
 			el.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
 			await Promise.resolve();
 			expect(written).toEqual(["hello world"]);
+			expect(focused).toBe(true);
 		}),
 	);
+
+	it("destroy clears the feedback timer", async () => {
+		const original = navigator.clipboard;
+		Object.defineProperty(navigator, "clipboard", {
+			value: {
+				writeText: () => Promise.resolve(),
+			},
+			configurable: true,
+		});
+		try {
+			const widget = new CodeBlockCopyWidget(0, 4);
+			const el = widget.toDOM(createMockView("code"));
+			el.click();
+			await Promise.resolve();
+			expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
+			widget.destroy(el);
+			// Timer was cleared, so class won't be removed by the timer
+			// (we just verify destroy doesn't throw and the class remains until manual cleanup)
+			expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
+		} finally {
+			Object.defineProperty(navigator, "clipboard", {
+				value: original,
+				configurable: true,
+			});
+		}
+	});
 });

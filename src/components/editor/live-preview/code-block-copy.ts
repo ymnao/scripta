@@ -19,6 +19,8 @@ const codeBlockFirstDecoration = Decoration.line({
 const COPY_ICON_SVG = `<svg class="cm-copy-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 const CHECK_ICON_SVG = `<svg class="cm-codeblock-copy-check" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 
+const feedbackTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
 export class CodeBlockCopyWidget extends WidgetType {
 	readonly codeFrom: number;
 	readonly codeTo: number;
@@ -41,18 +43,21 @@ export class CodeBlockCopyWidget extends WidgetType {
 		button.setAttribute("title", "Copy");
 		button.innerHTML = COPY_ICON_SVG + CHECK_ICON_SVG;
 
-		let feedbackTimer: ReturnType<typeof setTimeout> | undefined;
 		const copy = () => {
 			if (!navigator.clipboard) return;
 			const code = view.state.doc.sliceString(this.codeFrom, this.codeTo);
 			navigator.clipboard.writeText(code).then(
 				() => {
-					if (feedbackTimer !== undefined) clearTimeout(feedbackTimer);
+					const prev = feedbackTimers.get(button);
+					if (prev !== undefined) clearTimeout(prev);
 					button.classList.add("cm-codeblock-copy-success");
-					feedbackTimer = setTimeout(() => {
-						button.classList.remove("cm-codeblock-copy-success");
-						feedbackTimer = undefined;
-					}, 1500);
+					feedbackTimers.set(
+						button,
+						setTimeout(() => {
+							button.classList.remove("cm-codeblock-copy-success");
+							feedbackTimers.delete(button);
+						}, 1500),
+					);
 				},
 				() => {},
 			);
@@ -74,10 +79,19 @@ export class CodeBlockCopyWidget extends WidgetType {
 				e.preventDefault();
 				e.stopPropagation();
 				copy();
+				view.focus();
 			}
 		});
 
 		return button;
+	}
+
+	destroy(dom: HTMLElement): void {
+		const timer = feedbackTimers.get(dom);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			feedbackTimers.delete(dom);
+		}
 	}
 
 	ignoreEvent(event: Event): boolean {
