@@ -197,7 +197,7 @@ export const staticEditorTheme = EditorView.theme({
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 15%, transparent)",
 	},
 	".cm-codeblock-copy-success": {
-		color: "#22c55e",
+		color: "var(--color-success, #22c55e)",
 		opacity: "1",
 		pointerEvents: "auto",
 	},

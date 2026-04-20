@@ -95,28 +95,66 @@ export class CodeBlockCopyWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		return event.type === "mousedown" || event.type === "click" || event.type === "keydown";
+		if (event.type === "mousedown" || event.type === "click") {
+			return true;
+		}
+		if (event.type === "keydown" && event instanceof KeyboardEvent) {
+			return event.key === "Enter" || event.key === " ";
+		}
+		return false;
 	}
 }
 
-function findCopyButtonForBlock(lineEl: Element): HTMLElement | null {
+function getFencedCodeRange(
+	view: EditorView,
+	lineEl: Element,
+): { from: number; to: number } | null {
+	try {
+		const pos = view.posAtDOM(lineEl, 0);
+		let node = syntaxTree(view.state).resolveInner(pos, 1);
+		while (node.name !== "FencedCode") {
+			const parent = node.parent;
+			if (!parent) return null;
+			node = parent;
+		}
+		return { from: node.from, to: node.to };
+	} catch {
+		return null;
+	}
+}
+
+function findCopyButtonForBlock(view: EditorView, lineEl: Element): HTMLElement | null {
+	const blockRange = getFencedCodeRange(view, lineEl);
+	if (!blockRange) return null;
+
 	if (lineEl.classList.contains("cm-codeblock-first")) {
 		return lineEl.querySelector(".cm-codeblock-copy") as HTMLElement | null;
 	}
+
 	let el: Element | null = lineEl.previousElementSibling;
 	while (el?.classList.contains("cm-codeblock-line")) {
 		if (el.classList.contains("cm-codeblock-first")) {
-			return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
+			const candidateRange = getFencedCodeRange(view, el);
+			if (candidateRange?.from === blockRange.from) {
+				return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
+			}
+			break;
 		}
 		el = el.previousElementSibling;
 	}
+
 	el = lineEl.nextElementSibling;
 	while (el?.classList.contains("cm-codeblock-line")) {
 		if (el.classList.contains("cm-codeblock-first")) {
-			return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
+			const candidateRange = getFencedCodeRange(view, el);
+			if (candidateRange?.from === blockRange.from) {
+				return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
+			}
+			break;
 		}
 		el = el.nextElementSibling;
 	}
+
 	return null;
 }
 
@@ -204,7 +242,7 @@ class CodeBlockCopyPlugin implements PluginValue {
 export const codeBlockCopyDecoration = ViewPlugin.fromClass(CodeBlockCopyPlugin, {
 	decorations: (v) => v.decorations,
 	eventHandlers: {
-		mouseover(this: CodeBlockCopyPlugin, event: MouseEvent) {
+		mouseover(this: CodeBlockCopyPlugin, event: MouseEvent, view: EditorView) {
 			const target = event.target as HTMLElement;
 			const lineEl = target.closest(".cm-codeblock-line");
 
@@ -216,7 +254,7 @@ export const codeBlockCopyDecoration = ViewPlugin.fromClass(CodeBlockCopyPlugin,
 				return;
 			}
 
-			const btn = findCopyButtonForBlock(lineEl);
+			const btn = findCopyButtonForBlock(view, lineEl);
 			if (btn === this.activeButton) return;
 
 			if (this.activeButton) {

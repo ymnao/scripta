@@ -9,14 +9,14 @@ import {
 } from "./test-helper";
 
 describe("buildCopyDecorations", () => {
-	it("creates widget decoration when cursor is outside code block", () => {
+	it("creates widget for code block in viewport", () => {
 		const view = createViewForTest("text\n\n```\ncode\n```");
 		const decos = collectDecorations(buildCopyDecorations(view));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
 	});
 
-	it("creates widget even when cursor is inside code block", () => {
+	it("creates widget regardless of cursor position", () => {
 		const doc = "text\n\n```\ncode\n```";
 		const cursorPos = doc.indexOf("code");
 		const view = createViewForTest(doc, cursorPos);
@@ -111,9 +111,19 @@ describe("CodeBlockCopyWidget", () => {
 		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(true);
 	});
 
-	it("ignoreEvent returns true for keydown", () => {
+	it("ignoreEvent returns true for Enter keydown", () => {
 		const widget = new CodeBlockCopyWidget(0, 4);
-		expect(widget.ignoreEvent(new KeyboardEvent("keydown"))).toBe(true);
+		expect(widget.ignoreEvent(new KeyboardEvent("keydown", { key: "Enter" }))).toBe(true);
+	});
+
+	it("ignoreEvent returns true for Space keydown", () => {
+		const widget = new CodeBlockCopyWidget(0, 4);
+		expect(widget.ignoreEvent(new KeyboardEvent("keydown", { key: " " }))).toBe(true);
+	});
+
+	it("ignoreEvent returns false for other keydown", () => {
+		const widget = new CodeBlockCopyWidget(0, 4);
+		expect(widget.ignoreEvent(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(false);
 	});
 
 	it("ignoreEvent returns false for other events", () => {
@@ -130,7 +140,7 @@ describe("CodeBlockCopyWidget", () => {
 
 	function withMockClipboard(fn: (written: string[]) => Promise<void> | void) {
 		return async () => {
-			const original = navigator.clipboard;
+			const descriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 			const written: string[] = [];
 			Object.defineProperty(navigator, "clipboard", {
 				value: {
@@ -144,10 +154,11 @@ describe("CodeBlockCopyWidget", () => {
 			try {
 				await fn(written);
 			} finally {
-				Object.defineProperty(navigator, "clipboard", {
-					value: original,
-					configurable: true,
-				});
+				if (descriptor) {
+					Object.defineProperty(navigator, "clipboard", descriptor);
+				} else {
+					delete (navigator as unknown as Record<string, unknown>).clipboard;
+				}
 			}
 		};
 	}
@@ -197,29 +208,16 @@ describe("CodeBlockCopyWidget", () => {
 		}),
 	);
 
-	it("destroy clears the feedback timer", async () => {
-		const original = navigator.clipboard;
-		Object.defineProperty(navigator, "clipboard", {
-			value: {
-				writeText: () => Promise.resolve(),
-			},
-			configurable: true,
-		});
-		try {
+	it(
+		"destroy clears the feedback timer",
+		withMockClipboard(async () => {
 			const widget = new CodeBlockCopyWidget(0, 4);
 			const el = widget.toDOM(createMockView("code"));
 			el.click();
 			await Promise.resolve();
 			expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
 			widget.destroy(el);
-			// Timer was cleared, so class won't be removed by the timer
-			// (we just verify destroy doesn't throw and the class remains until manual cleanup)
 			expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
-		} finally {
-			Object.defineProperty(navigator, "clipboard", {
-				value: original,
-				configurable: true,
-			});
-		}
-	});
+		}),
+	);
 });
