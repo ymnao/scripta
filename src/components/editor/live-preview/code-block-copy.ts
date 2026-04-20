@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import type { Range } from "@codemirror/state";
+import type { Line, Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -16,22 +16,24 @@ const codeBlockFirstDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-first" },
 });
 
-const COPY_ICON_SVG = `<svg class="cm-copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-const CHECK_ICON_SVG = `<svg class="cm-codeblock-copy-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+const COPY_ICON_SVG = `<svg class="cm-copy-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const CHECK_ICON_SVG = `<svg class="cm-codeblock-copy-check" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 
 export class CodeBlockCopyWidget extends WidgetType {
-	readonly code: string;
+	readonly codeFrom: number;
+	readonly codeTo: number;
 
-	constructor(code: string) {
+	constructor(codeFrom: number, codeTo: number) {
 		super();
-		this.code = code;
+		this.codeFrom = codeFrom;
+		this.codeTo = codeTo;
 	}
 
 	eq(other: CodeBlockCopyWidget): boolean {
-		return this.code === other.code;
+		return this.codeFrom === other.codeFrom && this.codeTo === other.codeTo;
 	}
 
-	toDOM(): HTMLElement {
+	toDOM(view: EditorView): HTMLElement {
 		const button = document.createElement("button");
 		button.type = "button";
 		button.className = "cm-codeblock-copy";
@@ -42,7 +44,8 @@ export class CodeBlockCopyWidget extends WidgetType {
 		let feedbackTimer: ReturnType<typeof setTimeout> | undefined;
 		const copy = () => {
 			if (!navigator.clipboard) return;
-			navigator.clipboard.writeText(this.code).then(
+			const code = view.state.doc.sliceString(this.codeFrom, this.codeTo);
+			navigator.clipboard.writeText(code).then(
 				() => {
 					if (feedbackTimer !== undefined) clearTimeout(feedbackTimer);
 					button.classList.add("cm-codeblock-copy-success");
@@ -121,18 +124,34 @@ export function buildCopyDecorations(view: EditorView): DecorationSet {
 				if (MERMAID_FENCE_RE.test(startLine.text.trim())) return;
 				if (endLine.number - startLine.number < 2) return;
 
-				const code = state.doc.sliceString(startLine.to + 1, endLine.from - 1);
-				if (code.length === 0) return;
+				const codeFrom = startLine.to + 1;
+				const codeTo = endLine.from - 1;
+				if (codeFrom >= codeTo) return;
 
-				const firstContentLine = state.doc.line(startLine.number + 1);
-				if (firstContentLine.from < from || firstContentLine.from > to) return;
+				const firstContentLineNum = startLine.number + 1;
+				const lastContentLineNum = endLine.number - 1;
+				const firstContentLine = state.doc.line(firstContentLineNum);
 
-				ranges.push(codeBlockFirstDecoration.range(firstContentLine.from, firstContentLine.from));
+				let targetLine: Line;
+				if (firstContentLine.from >= from) {
+					targetLine = firstContentLine;
+				} else {
+					const lineAtFrom = state.doc.lineAt(from);
+					if (lineAtFrom.number >= firstContentLineNum && lineAtFrom.number <= lastContentLineNum) {
+						targetLine = lineAtFrom;
+					} else {
+						return;
+					}
+				}
+
+				if (targetLine.from > to) return;
+
+				ranges.push(codeBlockFirstDecoration.range(targetLine.from, targetLine.from));
 				ranges.push(
 					Decoration.widget({
-						widget: new CodeBlockCopyWidget(code),
+						widget: new CodeBlockCopyWidget(codeFrom, codeTo),
 						side: 1,
-					}).range(firstContentLine.to),
+					}).range(targetLine.to),
 				);
 			},
 		});
