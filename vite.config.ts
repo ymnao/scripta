@@ -22,6 +22,12 @@ export default defineConfig({
 	// Expose TAURI_ENV_* (platform, debug) but not TAURI_SIGNING_* etc.
 	envPrefix: ["VITE_", "TAURI_ENV_"],
 
+	build: {
+		// Tauri はローカルファイル読み込みのためチャンク分割の恩恵がなく、
+		// 警告閾値の引き上げで対応する（デフォルト 500 KB）
+		chunkSizeWarningLimit: 1000,
+	},
+
 	resolve: {
 		alias: isTauriMock
 			? {
