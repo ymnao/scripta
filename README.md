@@ -85,6 +85,7 @@ scripta/
 │   │   │   ├── git_sync.rs       # Git 操作（commit/pull/push/conflict）
 │   │   │   ├── export.rs         # HTML/PDF/プロンプト エクスポート
 │   │   │   ├── ogp.rs            # OGP メタデータ取得
+│   │   │   ├── updater.rs        # アップデートチェック
 │   │   │   └── watcher.rs        # ファイル変更監視
 │   ├── capabilities/             # Tauri v2 パーミッション設定
 │   └── Cargo.toml
@@ -112,7 +113,8 @@ scripta/
 │
 ├── docs/                         # 仕様書・実装手順書
 ├── package.json
-└── vite.config.ts
+├── vite.config.ts
+└── biome.json
 ```
 
 ## 主な機能
@@ -123,7 +125,7 @@ scripta/
 - **Live Preview** — 見出し・太字・斜体・リンク・画像・コードブロック・チェックボックス・引用・水平線・テーブル・数式（KaTeX）・Mermaid 図のインライン描画（カーソル行は生 Markdown を表示）
 - **タブバー** — 複数ファイルの同時編集・未保存インジケーター・タブ履歴の前後移動
 - **オートセーブ** — 2 秒デバウンスによる自動保存
-- **スクラッチパッド** — ワークスペースに依存しない揮発性のメモ領域（`Cmd+J`）
+- **スクラッチパッド** — ワークスペースごとの揮発性メモ領域（`Cmd+J`）
 - **Wikilink** — `[[ページ名]]` 形式でノート間リンク・自動補完・ホバープレビュー・未解決リンク一覧
 - **Mermaid 図** — コードブロック内の Mermaid をリアルタイム描画・専用エディタダイアログ
 - **数式** — KaTeX による LaTeX 数式描画

@@ -285,7 +285,8 @@ scripta/
 │
 ├── docs/                         # 仕様書・実装手順書
 ├── package.json
-└── vite.config.ts
+├── vite.config.ts
+└── biome.json
 ```
 
 ## 7. 設計方針
