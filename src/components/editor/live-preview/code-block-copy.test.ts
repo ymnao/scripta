@@ -1,5 +1,5 @@
 import type { EditorView } from "@codemirror/view";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildCopyDecorations, CodeBlockCopyWidget } from "./code-block-copy";
 import {
 	collectDecorations,
@@ -211,13 +211,20 @@ describe("CodeBlockCopyWidget", () => {
 	it(
 		"destroy clears the feedback timer",
 		withMockClipboard(async () => {
-			const widget = new CodeBlockCopyWidget(0, 4);
-			const el = widget.toDOM(createMockView("code"));
-			el.click();
-			await Promise.resolve();
-			expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
-			widget.destroy(el);
-			expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
+			vi.useFakeTimers();
+			try {
+				const widget = new CodeBlockCopyWidget(0, 4);
+				const el = widget.toDOM(createMockView("code"));
+				el.click();
+				await Promise.resolve();
+				expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
+				widget.destroy(el);
+				vi.advanceTimersByTime(2000);
+				// タイマーがクリアされたため、時間が経過してもクラスが残る
+				expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
+			} finally {
+				vi.useRealTimers();
+			}
 		}),
 	);
 });

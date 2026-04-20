@@ -10,7 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 
-const MERMAID_FENCE_RE = /^`{3,}\s*mermaid\s*$/;
+import { MERMAID_FENCE_RE } from "./code-blocks";
 
 const codeBlockFirstDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-first" },

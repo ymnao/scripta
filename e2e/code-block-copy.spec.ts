@@ -35,7 +35,7 @@ test.describe("code block copy button", () => {
 		await codeBlockLine.hover();
 
 		const copyButton = page.locator(".cm-codeblock-copy");
-		await expect(copyButton).toBeVisible();
+		await expect(copyButton).toHaveClass(/cm-codeblock-copy-visible/);
 
 		// コピーボタンにフォーカス → Enter でコピー
 		await copyButton.focus();
