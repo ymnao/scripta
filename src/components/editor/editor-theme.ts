@@ -162,6 +162,54 @@ export const staticEditorTheme = EditorView.theme({
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	},
+	".cm-codeblock-first": {
+		position: "relative",
+	},
+	".cm-codeblock-copy": {
+		position: "absolute",
+		right: "4px",
+		top: "0",
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "center",
+		width: "28px",
+		height: "28px",
+		border: "none",
+		borderRadius: "4px",
+		backgroundColor: "transparent",
+		color: "var(--color-text-secondary)",
+		cursor: "pointer",
+		opacity: "0",
+		pointerEvents: "none",
+		transition: "opacity 0.15s, background-color 0.15s",
+	},
+	".cm-codeblock-copy:focus-visible": {
+		opacity: "1",
+		pointerEvents: "auto",
+		outline: "2px solid var(--color-text-link)",
+		outlineOffset: "1px",
+	},
+	".cm-codeblock-copy-visible": {
+		opacity: "1",
+		pointerEvents: "auto",
+	},
+	".cm-codeblock-copy-visible:hover": {
+		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 15%, transparent)",
+	},
+	".cm-codeblock-copy-success": {
+		color: "#22c55e",
+		opacity: "1",
+		pointerEvents: "auto",
+	},
+	".cm-codeblock-copy-check": {
+		display: "none",
+	},
+	".cm-codeblock-copy-success .cm-copy-icon": {
+		display: "none",
+	},
+	".cm-codeblock-copy-success .cm-codeblock-copy-check": {
+		display: "block",
+	},
 	".cm-list-marker": {
 		display: "inline-flex",
 		alignItems: "center",

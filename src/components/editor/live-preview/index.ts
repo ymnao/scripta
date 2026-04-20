@@ -1,4 +1,5 @@
 export { blockquoteDecoration } from "./blockquotes";
+export { codeBlockCopyDecoration } from "./code-block-copy";
 export { codeBlockDecoration } from "./code-blocks";
 export { emphasisDecoration } from "./emphasis";
 export { headingDecoration } from "./headings";

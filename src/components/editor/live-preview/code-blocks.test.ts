@@ -40,7 +40,9 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildDecorations(view));
 		const lines = lineDecorations(decos);
 		for (const line of lines) {
-			expect(line.value.spec.attributes.class).toBe("cm-codeblock-line");
+			expect((line.value.spec as { attributes?: { class?: string } }).attributes?.class).toBe(
+				"cm-codeblock-line",
+			);
 		}
 	});
 
