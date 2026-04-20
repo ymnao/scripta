@@ -379,7 +379,7 @@ CodeMirror 6 の `ViewPlugin` と `Decoration` API を使用する。
 
 | コマンド | 引数 | 戻り値 |
 |---------|------|--------|
-| `export_pdf` | `content, title` ほか | PDF バイナリ |
+| `export_pdf` | `html, output_path` | `()` |
 | `fetch_ogp` | `url` | `OgpMetadata` |
 | `check_for_update` | `current_version` | `UpdateInfo` |
 | `start_watcher` | `path` ほか | `()` |
