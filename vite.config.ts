@@ -23,9 +23,12 @@ export default defineConfig({
 	envPrefix: ["VITE_", "TAURI_ENV_"],
 
 	build: {
+		// Tauri デスクトップアプリではチャンク分割のパフォーマンス効果は薄いが、
+		// ビルド時の 500 KB 超過警告を解消するためにベンダーチャンクを分離する
 		rolldownOptions: {
 			output: {
 				codeSplitting: {
+					// CodeMirror を core/ext に分割するのは単一グループだと 500 KB を超えるため
 					groups: [
 						{
 							name: "vendor-react",
