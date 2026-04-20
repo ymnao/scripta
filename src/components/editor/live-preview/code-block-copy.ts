@@ -12,8 +12,8 @@ import {
 
 import { MERMAID_FENCE_RE } from "./code-blocks";
 
-const codeBlockFirstDecoration = Decoration.line({
-	attributes: { class: "cm-codeblock-first" },
+const copyAnchorDecoration = Decoration.line({
+	attributes: { class: "cm-codeblock-copy-anchor" },
 });
 
 const COPY_ICON_SVG = `<svg class="cm-copy-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
@@ -21,18 +21,27 @@ const CHECK_ICON_SVG = `<svg class="cm-codeblock-copy-check" aria-hidden="true" 
 
 const feedbackTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 
-export class CodeBlockCopyWidget extends WidgetType {
-	readonly codeFrom: number;
-	readonly codeTo: number;
-
-	constructor(codeFrom: number, codeTo: number) {
-		super();
-		this.codeFrom = codeFrom;
-		this.codeTo = codeTo;
+function resolveCodeContent(view: EditorView, dom: HTMLElement): string | null {
+	try {
+		const pos = view.posAtDOM(dom, 0);
+		let node = syntaxTree(view.state).resolveInner(pos, 1);
+		while (node.name !== "FencedCode") {
+			const parent = node.parent;
+			if (!parent) return null;
+			node = parent;
+		}
+		const startLine = view.state.doc.lineAt(node.from);
+		const endLine = view.state.doc.lineAt(node.to);
+		const code = view.state.doc.sliceString(startLine.to + 1, endLine.from - 1);
+		return code || null;
+	} catch {
+		return null;
 	}
+}
 
-	eq(other: CodeBlockCopyWidget): boolean {
-		return this.codeFrom === other.codeFrom && this.codeTo === other.codeTo;
+export class CodeBlockCopyWidget extends WidgetType {
+	eq(): boolean {
+		return true;
 	}
 
 	toDOM(view: EditorView): HTMLElement {
@@ -45,7 +54,8 @@ export class CodeBlockCopyWidget extends WidgetType {
 
 		const copy = () => {
 			if (!navigator.clipboard) return;
-			const code = view.state.doc.sliceString(this.codeFrom, this.codeTo);
+			const code = resolveCodeContent(view, button);
+			if (!code) return;
 			navigator.clipboard.writeText(code).then(
 				() => {
 					const prev = feedbackTimers.get(button);
@@ -127,13 +137,13 @@ function findCopyButtonForBlock(view: EditorView, lineEl: Element): HTMLElement 
 	const blockRange = getFencedCodeRange(view, lineEl);
 	if (!blockRange) return null;
 
-	if (lineEl.classList.contains("cm-codeblock-first")) {
+	if (lineEl.classList.contains("cm-codeblock-copy-anchor")) {
 		return lineEl.querySelector(".cm-codeblock-copy") as HTMLElement | null;
 	}
 
 	let el: Element | null = lineEl.previousElementSibling;
 	while (el?.classList.contains("cm-codeblock-line")) {
-		if (el.classList.contains("cm-codeblock-first")) {
+		if (el.classList.contains("cm-codeblock-copy-anchor")) {
 			const candidateRange = getFencedCodeRange(view, el);
 			if (candidateRange?.from === blockRange.from) {
 				return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
@@ -145,7 +155,7 @@ function findCopyButtonForBlock(view: EditorView, lineEl: Element): HTMLElement 
 
 	el = lineEl.nextElementSibling;
 	while (el?.classList.contains("cm-codeblock-line")) {
-		if (el.classList.contains("cm-codeblock-first")) {
+		if (el.classList.contains("cm-codeblock-copy-anchor")) {
 			const candidateRange = getFencedCodeRange(view, el);
 			if (candidateRange?.from === blockRange.from) {
 				return el.querySelector(".cm-codeblock-copy") as HTMLElement | null;
@@ -176,9 +186,7 @@ export function buildCopyDecorations(view: EditorView): DecorationSet {
 				if (MERMAID_FENCE_RE.test(startLine.text.trim())) return;
 				if (endLine.number - startLine.number < 2) return;
 
-				const codeFrom = startLine.to + 1;
-				const codeTo = endLine.from - 1;
-				if (codeFrom >= codeTo) return;
+				if (startLine.to + 1 >= endLine.from - 1) return;
 
 				const firstContentLineNum = startLine.number + 1;
 				const lastContentLineNum = endLine.number - 1;
@@ -198,10 +206,10 @@ export function buildCopyDecorations(view: EditorView): DecorationSet {
 
 				if (targetLine.from > to) return;
 
-				ranges.push(codeBlockFirstDecoration.range(targetLine.from, targetLine.from));
+				ranges.push(copyAnchorDecoration.range(targetLine.from, targetLine.from));
 				ranges.push(
 					Decoration.widget({
-						widget: new CodeBlockCopyWidget(codeFrom, codeTo),
+						widget: new CodeBlockCopyWidget(),
 						side: 1,
 					}).range(targetLine.to),
 				);

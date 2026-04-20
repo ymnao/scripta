@@ -162,7 +162,7 @@ export const staticEditorTheme = EditorView.theme({
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
 	},
-	".cm-codeblock-first": {
+	".cm-codeblock-copy-anchor": {
 		position: "relative",
 	},
 	".cm-codeblock-copy": {

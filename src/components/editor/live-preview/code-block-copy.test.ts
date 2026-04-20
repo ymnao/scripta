@@ -1,8 +1,10 @@
+import { ensureSyntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
 import { describe, expect, it, vi } from "vitest";
 import { buildCopyDecorations, CodeBlockCopyWidget } from "./code-block-copy";
 import {
 	collectDecorations,
+	createTestState,
 	createViewForTest,
 	lineDecorations,
 	widgetDecorations,
@@ -49,17 +51,17 @@ describe("buildCopyDecorations", () => {
 		expect(widgets).toHaveLength(2);
 	});
 
-	it("adds cm-codeblock-first class to first content line", () => {
+	it("adds cm-codeblock-copy-anchor class to anchor line", () => {
 		const doc = "text\n\n```\ncode\n```";
 		const view = createViewForTest(doc);
 		const decos = collectDecorations(buildCopyDecorations(view));
-		const firstLineDecos = lineDecorations(decos).filter(
+		const anchorDecos = lineDecorations(decos).filter(
 			(d) =>
 				(d.value.spec as { attributes?: { class?: string } }).attributes?.class ===
-				"cm-codeblock-first",
+				"cm-codeblock-copy-anchor",
 		);
-		expect(firstLineDecos).toHaveLength(1);
-		expect(firstLineDecos[0].from).toBe(doc.indexOf("code"));
+		expect(anchorDecos).toHaveLength(1);
+		expect(anchorDecos[0].from).toBe(doc.indexOf("code"));
 	});
 
 	it("does not create widget for mermaid blocks", () => {
@@ -82,58 +84,55 @@ describe("buildCopyDecorations", () => {
 });
 
 describe("CodeBlockCopyWidget", () => {
-	function createMockView(code: string, focusFn?: () => void) {
+	function createCopyMockView(doc: string, codePos: number, focusFn?: () => void) {
+		const state = createTestState(doc);
+		ensureSyntaxTree(state, state.doc.length, 5000);
 		return {
-			state: { doc: { sliceString: () => code } },
+			state,
+			posAtDOM: () => codePos,
 			focus: focusFn ?? (() => {}),
 		} as unknown as EditorView;
 	}
 
-	it("eq returns true for same range", () => {
-		const a = new CodeBlockCopyWidget(0, 5);
-		const b = new CodeBlockCopyWidget(0, 5);
+	it("eq always returns true", () => {
+		const a = new CodeBlockCopyWidget();
+		const b = new CodeBlockCopyWidget();
 		expect(a.eq(b)).toBe(true);
 	});
 
-	it("eq returns false for different range", () => {
-		const a = new CodeBlockCopyWidget(0, 5);
-		const b = new CodeBlockCopyWidget(0, 10);
-		expect(a.eq(b)).toBe(false);
-	});
-
 	it("ignoreEvent returns true for mousedown", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
+		const widget = new CodeBlockCopyWidget();
 		expect(widget.ignoreEvent(new MouseEvent("mousedown"))).toBe(true);
 	});
 
 	it("ignoreEvent returns true for click", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
+		const widget = new CodeBlockCopyWidget();
 		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(true);
 	});
 
 	it("ignoreEvent returns true for Enter keydown", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
+		const widget = new CodeBlockCopyWidget();
 		expect(widget.ignoreEvent(new KeyboardEvent("keydown", { key: "Enter" }))).toBe(true);
 	});
 
 	it("ignoreEvent returns true for Space keydown", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
+		const widget = new CodeBlockCopyWidget();
 		expect(widget.ignoreEvent(new KeyboardEvent("keydown", { key: " " }))).toBe(true);
 	});
 
 	it("ignoreEvent returns false for other keydown", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
+		const widget = new CodeBlockCopyWidget();
 		expect(widget.ignoreEvent(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(false);
 	});
 
 	it("ignoreEvent returns false for other events", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
+		const widget = new CodeBlockCopyWidget();
 		expect(widget.ignoreEvent(new FocusEvent("focus"))).toBe(false);
 	});
 
 	it("toDOM returns a focusable button element", () => {
-		const widget = new CodeBlockCopyWidget(0, 4);
-		const el = widget.toDOM(createMockView("code"));
+		const widget = new CodeBlockCopyWidget();
+		const el = widget.toDOM(createCopyMockView("```\ncode\n```", 4));
 		expect(el.tagName).toBe("BUTTON");
 		expect(el.tabIndex).not.toBe(-1);
 	});
@@ -166,8 +165,9 @@ describe("CodeBlockCopyWidget", () => {
 	it(
 		"click copies code to clipboard",
 		withMockClipboard(async (written) => {
-			const widget = new CodeBlockCopyWidget(0, 11);
-			const el = widget.toDOM(createMockView("hello world"));
+			const doc = "```\nhello world\n```";
+			const widget = new CodeBlockCopyWidget();
+			const el = widget.toDOM(createCopyMockView(doc, doc.indexOf("hello world")));
 			el.click();
 			await Promise.resolve();
 			expect(written).toEqual(["hello world"]);
@@ -178,9 +178,10 @@ describe("CodeBlockCopyWidget", () => {
 		"Enter key copies code to clipboard and focuses editor",
 		withMockClipboard(async (written) => {
 			let focused = false;
-			const widget = new CodeBlockCopyWidget(0, 11);
+			const doc = "```\nhello world\n```";
+			const widget = new CodeBlockCopyWidget();
 			const el = widget.toDOM(
-				createMockView("hello world", () => {
+				createCopyMockView(doc, doc.indexOf("hello world"), () => {
 					focused = true;
 				}),
 			);
@@ -195,9 +196,10 @@ describe("CodeBlockCopyWidget", () => {
 		"Space key copies code to clipboard and focuses editor",
 		withMockClipboard(async (written) => {
 			let focused = false;
-			const widget = new CodeBlockCopyWidget(0, 11);
+			const doc = "```\nhello world\n```";
+			const widget = new CodeBlockCopyWidget();
 			const el = widget.toDOM(
-				createMockView("hello world", () => {
+				createCopyMockView(doc, doc.indexOf("hello world"), () => {
 					focused = true;
 				}),
 			);
@@ -213,8 +215,9 @@ describe("CodeBlockCopyWidget", () => {
 		withMockClipboard(async () => {
 			vi.useFakeTimers();
 			try {
-				const widget = new CodeBlockCopyWidget(0, 4);
-				const el = widget.toDOM(createMockView("code"));
+				const doc = "```\ncode\n```";
+				const widget = new CodeBlockCopyWidget();
+				const el = widget.toDOM(createCopyMockView(doc, doc.indexOf("code")));
 				el.click();
 				await Promise.resolve();
 				expect(el.classList.contains("cm-codeblock-copy-success")).toBe(true);
