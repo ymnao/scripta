@@ -172,6 +172,7 @@ export function buildCopyDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
 	const ranges: Range<Decoration>[] = [];
+	const processed = new Set<number>();
 
 	for (const { from, to } of view.visibleRanges) {
 		tree.iterate({
@@ -179,6 +180,8 @@ export function buildCopyDecorations(view: EditorView): DecorationSet {
 			to,
 			enter(node) {
 				if (node.name !== "FencedCode") return;
+				if (processed.has(node.from)) return;
+				processed.add(node.from);
 
 				const startLine = state.doc.lineAt(node.from);
 				const endLine = state.doc.lineAt(node.to);
