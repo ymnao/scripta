@@ -13,6 +13,12 @@ updates:
       tauri-plugins:
         patterns:
           - "@tauri-apps/plugin-*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
 
   - package-ecosystem: cargo
     directory: /src-tauri
