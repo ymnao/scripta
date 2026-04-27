@@ -1,0 +1,448 @@
+# scripta（Electron 版）仕様書
+
+> このドキュメントは Electron 版の最終形を表す。
+> 移行段階・実装順序は `migration-plan.md` を参照。
+
+## 1. プロダクト概要
+
+**scripta** は、ローカルファイルベースの軽量 Markdown メモアプリケーション。
+Obsidian のように任意のフォルダを「ワークスペース」として開き、その中の Markdown ファイルを Live Preview 方式で編集できるデスクトップアプリ。
+
+### コンセプト
+
+- **ローカルファースト** — データはすべてユーザーのファイルシステム上の `.md` ファイル。独自フォーマットや DB は使わない
+- **挙動の安定性** — Electron + Chromium による全プラットフォーム共通の描画・動作。OS 標準 WebView の差異に依存しない
+- **Live Preview** — カーソル外の Markdown をその場でインライン描画し、Split Pane なしで「書く」と「見る」を同時に実現
+
+## 2. 技術スタック
+
+| レイヤー | 技術 | バージョン | 選定理由 |
+|---------|------|-----------|---------|
+| デスクトップフレームワーク | Electron | latest stable | Chromium 固定で挙動が一貫。エコシステムが成熟。`webContents.printToPDF` 等の機能が強力 |
+| フロントエンド | React + TypeScript | React 19 | CodeMirror 6 エコシステムが最も充実。型安全性も確保 |
+| エディタ | CodeMirror 6 (`@uiw/react-codemirror`) | v6 | Obsidian と同じ基盤。Decoration / Widget でインライン描画を実現 |
+| 状態管理 | zustand | v5 | 最小 API、ボイラープレートなし、1.1KB |
+| スタイル | Tailwind CSS | v4 | CSS 変数ベースのテーマ管理 |
+| ビルド | Vite | v8+ | 高速 HMR。`electron-vite` で main/preload も統合 |
+| Lint / Format | Biome | v2 | Rust 製で高速。`noExplicitAny` で型安全性を強制 |
+| テスト | Vitest | v4+ | フロント側・main 側両方のユニットテスト |
+| e2e | Playwright (`_electron` API) | latest | Electron 公式サポート |
+| パッケージング | electron-builder | latest | macOS / Windows / Linux のマルチプラットフォーム配布 |
+| 自動アップデート | electron-updater | latest | GitHub Releases ベース |
+| パッケージマネージャ | pnpm | v10+ | 高速インストール、厳密な依存解決 |
+
+### Node 側ライブラリ方針
+
+| 用途 | ライブラリ | 備考 |
+|------|----------|------|
+| ファイル I/O | `fs/promises`（標準） | — |
+| ワークスペース走査 | `fast-glob` | 大規模ワークスペースでも高速 |
+| ファイル変更監視 | `chokidar` | クロスプラットフォーム対応 |
+| 全文検索 | `ripgrep`（sidecar バイナリ） | `child_process.spawn` で起動し JSON 出力をパース |
+| Git 操作 | `simple-git` | git CLI ラッパー |
+| HTTP フェッチ | `undici` | OGP 取得用 |
+| HTML パース | `cheerio` | OGP メタデータ抽出 |
+| ゴミ箱移動 | `electron.shell.trashItem` | OS ネイティブのゴミ箱と連携 |
+| 永続化（設定） | `electron-store` | ワークスペースパス、ウィンドウ位置等 |
+
+## 3. 機能要件
+
+### 3.1 ワークスペース管理
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| WS-1 | フォルダを開く | OS のフォルダ選択ダイアログで任意のフォルダをワークスペースとして開く |
+| WS-2 | 最後のワークスペースを記憶 | アプリ再起動時に前回のワークスペースを自動で開く（`electron-store` で永続化） |
+| WS-3 | 新しいウィンドウ | `Cmd+Shift+N` またはメニュー「File > New Window」で空のウィンドウを新規作成する |
+
+**ウィンドウとワークスペースの方針:**
+
+- 1 ウィンドウ = 1 ワークスペースとする。ワークスペースを切り替えたい場合は新しいウィンドウを作成し、そこでフォルダを開く
+- 同一ウィンドウ内でのワークスペース切り替えはサポートしない（シンプルさと状態管理の明確化を優先）
+- 各ウィンドウは独立した状態（タブ、エディタ内容、ファイルツリー）を持つ
+
+### 3.2 ファイルツリー
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| FT-1 | ツリー表示 | ワークスペース内のフォルダ・ファイルを階層表示 |
+| FT-2 | 展開/折りたたみ | フォルダの開閉。遅延読み込みで大きなワークスペースでも高速 |
+| FT-3 | ファイル選択 | クリックでエディタにファイルを開く |
+| FT-4 | 新規作成 | ファイル・フォルダの新規作成 |
+| FT-5 | リネーム | ファイル・フォルダのインラインリネーム |
+| FT-6 | 削除 | ゴミ箱への移動（完全削除ではない） |
+| FT-7 | コンテキストメニュー | 右クリックで操作メニューを表示 |
+
+### 3.3 エディタ
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| ED-1 | Markdown 編集 | CodeMirror 6 ベースのテキスト編集 |
+| ED-2 | シンタックスハイライト | Markdown 構文のハイライト表示 |
+| ED-3 | タブバー | 複数ファイルを同時に開き、タブで切り替え |
+| ED-4 | オートセーブ | 編集後 2 秒のデバウンスで自動保存 |
+| ED-5 | 手動保存 | `Cmd+S` で即座に保存 |
+| ED-6 | 未保存表示 | タブにドットなどで未保存状態を表示 |
+| ED-7 | タブ履歴ナビゲーション | `Cmd+[` / `Cmd+]` でタブ内の履歴を戻る/進む |
+| ED-8 | スクラッチパッド | `Cmd+J` でワークスペースごとの揮発性メモ領域を開く |
+| ED-9 | 書式コマンド | `Cmd+B`（太字）、`Cmd+I`（斜体）、`Cmd+Shift+X`（取り消し線）、`Cmd+1`〜`6`（見出し）等のショートカットで書式適用 |
+| ED-10 | Mermaid エディタ | Mermaid コードブロックの専用編集ダイアログ |
+
+### 3.4 Live Preview
+
+エディタのコア体験。カーソルがある行/ブロックは生 Markdown を表示し、カーソルが離れるとインライン描画に切り替わる。
+
+| ID | 対象 | 描画内容 |
+|----|------|---------|
+| LP-1 | 見出し (`#`) | `#` マーカーを非表示にし、フォントサイズを段階的に大きく表示 |
+| LP-2 | 太字 (`**`) | `**` を非表示にし、太字スタイルを適用 |
+| LP-3 | 斜体 (`*`) | `*` を非表示にし、斜体スタイルを適用 |
+| LP-4 | リンク (`[text](url)`) | クリッカブルなリンクとして描画。**Cmd/Ctrl+クリックで外部ブラウザに開く**（旧版の click 動作からの改善） |
+| LP-5 | 画像 (`![alt](path)`) | 画像をインライン表示 |
+| LP-6 | コードブロック | フェンスドコードのシンタックスハイライト |
+| LP-7 | チェックボックス (`- [ ]`) | クリッカブルなチェックボックスとして描画 |
+| LP-8 | 引用 (`>`) | 左ボーダー付きの引用スタイル |
+| LP-9 | 水平線 (`---`) | 視覚的な水平線として描画 |
+| LP-10 | 取り消し線 (`~~`) | `~~` を非表示にし、取り消し線スタイルを適用 |
+| LP-11 | テーブル | Markdown テーブルを整形して表示 |
+| LP-12 | 数式（KaTeX） | `$...$` / `$$...$$` を KaTeX でレンダリング |
+| LP-13 | Mermaid 図 | Mermaid コードブロックをリアルタイムに図として描画 |
+| LP-14 | Wikilink (`[[...]]`) | ノート間リンクとして描画。自動補完・ホバープレビュー対応 |
+| LP-15 | リンクカード | リンク先の OGP 情報をカード形式で表示 |
+| LP-16 | コードブロックコピー | コードブロックにコピーボタンを表示 |
+
+**共通ルール:**
+- カーソルがある行では装飾を解除し、生の Markdown 構文を表示する
+- カーソルが離れた行ではインライン描画が適用される
+
+### 3.5 検索
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| SR-1 | ファイル内検索 | `Cmd+F` でエディタ内の検索バーを表示。マッチ数表示、前後ナビゲーション対応 |
+| SR-2 | ファイル内置換 | `Cmd+H` で置換フィールド付きの検索バーを表示。単一置換・全置換に対応 |
+| SR-3 | ワークスペース横断検索 | `Cmd+Shift+F` でサイドバーを検索パネルに切り替え、全ファイルを横断検索（ripgrep sidecar）。結果をファイル別にグルーピング表示し、クリックで該当行にジャンプ |
+| SR-4 | コマンドパレット | `Cmd+P` でファイル名によるファジー検索・ジャンプ |
+| SR-5 | 未解決リンク一覧 | `Cmd+Shift+U` でワークスペース内の未解決 Wikilink を一覧表示 |
+
+### 3.6 Wikilink
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| WL-1 | Wikilink 記法 | `[[ページ名]]` 形式でノート間リンクを作成 |
+| WL-2 | 自動補完 | `[[` 入力時にワークスペース内のファイル名を候補表示 |
+| WL-3 | ホバープレビュー | Wikilink にホバーするとリンク先の内容をプレビュー表示 |
+| WL-4 | ジャンプ | Wikilink クリックでリンク先ファイルを開く |
+
+### 3.7 Git Sync
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| GS-1 | 自動コミット | 設定した間隔でワークスペースの変更を自動コミット |
+| GS-2 | 自動プル/プッシュ | リモートリポジトリとの同期を自動化 |
+| GS-3 | コンフリクト解消 | 競合発生時の差分表示・手動解決 UI |
+
+### 3.8 スライドビュー
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| SL-1 | スライド表示 | `Cmd+Shift+S` で `---` 区切りの Markdown をスライドとして表示 |
+| SL-2 | スライドプレビュー | スライドの縮小プレビュー一覧を表示 |
+
+### 3.9 エクスポート
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| EX-1 | HTML エクスポート | Markdown を HTML に変換してエクスポート |
+| EX-2 | PDF エクスポート | `webContents.printToPDF` で PDF を生成 |
+| EX-3 | プロンプトエクスポート | LLM 用のプロンプト形式でエクスポート |
+
+### 3.10 テーマ
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| TH-1 | ダークモード | ダークカラーテーマ |
+| TH-2 | ライトモード | ライトカラーテーマ |
+| TH-3 | テーマ切替 | ボタンまたはショートカットで切り替え。UI とエディタ双方に反映 |
+
+### 3.11 ファイル監視
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| FW-1 | 外部変更検知 | `chokidar` で外部エディタ等での変更を検知し、エディタ内容を更新 |
+
+### 3.12 絵文字アイコン
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| EM-1 | 絵文字設定 | ファイル/フォルダに絵文字アイコンを設定（全 Unicode 絵文字対応・検索機能付き） |
+
+### 3.13 アップデートチェック
+
+| ID | 機能 | 説明 |
+|----|------|------|
+| UP-1 | 自動チェック | `electron-updater` で新しいバージョンのリリースを自動チェックし通知 |
+
+## 4. UI 構成
+
+```
+┌──────────────────────────────────────────────────┐
+│  ●●●  タブバー  [file1.md] [file2.md ●]         │
+├────────────┬─────────────────────────────────────┤
+│  サイド    │                                     │
+│  バー      ├─────────────────────────────────────┤
+│  バー      │                                     │
+│            │                                     │
+│  ファイル  │         エディタ領域                  │
+│  ツリー    │      (Live Preview)                  │
+│            │                                     │
+│            │                                     │
+│            │                                     │
+├────────────┴─────────────────────────────────────┤
+│  ステータスバー        行:列 | 文字数 | テーマ    │
+└──────────────────────────────────────────────────┘
+```
+
+- **タブバー**: macOS ネイティブトラフィックライト + タブ一覧。ドラッグ領域を兼ねる。未保存ファイルにはインジケーター表示（`titleBarStyle: 'hiddenInset'` を使用）
+- **サイドバー**: ファイルツリー。リサイズ可能。トグルで表示/非表示
+- **エディタ領域**: CodeMirror 6 による Markdown 編集 + Live Preview
+- **ステータスバー**: カーソル位置、文字数、テーマ切替ボタン
+
+## 5. キーボードショートカット
+
+> **注**: 以下の `Cmd` は macOS の場合。Windows / Linux では `Ctrl` に読み替えてください。
+
+### 書式
+
+| ショートカット | 動作 |
+|--------------|------|
+| `Cmd+B` | 太字（エディタ内） |
+| `Cmd+I` | 斜体 |
+| `Cmd+Shift+X` | 取り消し線 |
+| `Cmd+1`〜`6` | 見出し 1〜6 |
+| `Cmd+L` | リストの切り替え |
+| `Cmd+Shift+L` | チェックボックスの切り替え |
+| `Cmd+Enter` | チェック / チェック解除 |
+
+### ファイル
+
+| ショートカット | 動作 |
+|--------------|------|
+| `Cmd+S` | ファイル保存 |
+| `Cmd+T` | 新しいタブ |
+| `Cmd+W` | タブを閉じる |
+| `Cmd+[` / `Alt+←` | 戻る |
+| `Cmd+]` / `Alt+→` | 進む |
+
+### ナビゲーション
+
+| ショートカット | 動作 |
+|--------------|------|
+| `Cmd+Shift+[` | 前のタブ |
+| `Cmd+Shift+]` | 次のタブ |
+| `Cmd+G` | 指定行へジャンプ |
+
+### 検索
+
+| ショートカット | 動作 |
+|--------------|------|
+| `Cmd+F` | 検索 |
+| `Cmd+H` | 置換 |
+| `Cmd+P` | コマンドパレット |
+| `Cmd+Shift+F` | ワークスペース検索 |
+
+### 表示
+
+| ショートカット | 動作 |
+|--------------|------|
+| `Cmd+B` | サイドバーの切り替え（エディタ外） |
+| `Cmd+Shift+S` | スライドビュー |
+| `Cmd+J` | スクラッチパッド |
+| `Cmd+E` | ファイルエクスプローラー |
+| `Cmd+Shift+E` | エクスポート |
+| `Cmd+Shift+U` | 未解決リンク |
+| `Cmd+,` | 設定 |
+| `F1` | ヘルプ |
+
+## 6. プロジェクト構成
+
+```
+scripta-next/
+├── electron/                       # Electron 本体
+│   ├── main/                       # メインプロセス
+│   │   ├── index.ts                # エントリポイント・ウィンドウ管理
+│   │   ├── menu.ts                 # アプリケーションメニュー
+│   │   └── ipc/
+│   │       ├── file.ts             # ファイル読み書き・作成・削除
+│   │       ├── workspace.ts        # フォルダ走査・ツリー取得
+│   │       ├── search.ts           # 全文検索（ripgrep sidecar）・ファイル名検索
+│   │       ├── git.ts              # Git 操作（simple-git）
+│   │       ├── ogp.ts              # OGP メタデータ取得（undici + cheerio）
+│   │       ├── pdf.ts              # PDF エクスポート（webContents.printToPDF）
+│   │       ├── updater.ts          # 自動アップデート（electron-updater）
+│   │       └── watcher.ts          # ファイル変更監視（chokidar）
+│   └── preload/
+│       └── index.ts                # contextBridge で window.api を公開
+│
+├── src/                            # React フロントエンド
+│   ├── components/
+│   │   ├── layout/                 # AppLayout, Sidebar, StatusBar, NewTabContent
+│   │   ├── editor/
+│   │   │   ├── MarkdownEditor.tsx
+│   │   │   ├── TabBar.tsx
+│   │   │   ├── ScratchpadPanel.tsx
+│   │   │   ├── MermaidEditorDialog.tsx
+│   │   │   ├── editor-theme.ts
+│   │   │   ├── formatting-commands.ts
+│   │   │   └── live-preview/       # Live Preview デコレーション群
+│   │   ├── filetree/               # FileTree, FileTreeItem, ContextMenu
+│   │   ├── search/                 # SearchPanel, CommandPalette, UnresolvedLinksPanel
+│   │   ├── slide/                  # SlideView, SlidePreview
+│   │   ├── conflict/               # ConflictWindow, ConflictDiffView
+│   │   └── common/                 # Dialog, EmojiInputDialog, ExportDialog, SettingsDialog 等
+│   ├── stores/                     # zustand ストア
+│   ├── hooks/                      # useAutoSave, useFileWatcher, useGitSync 等
+│   ├── lib/
+│   │   └── commands.ts             # window.api ラッパー（IPC への薄いブリッジ）
+│   └── types/                      # 型定義
+│
+├── docs/                           # 仕様書・移行計画
+├── e2e/                            # Playwright e2e テスト
+├── electron-builder.yml            # 配布用ビルド設定
+├── package.json
+├── vite.config.ts                  # Vite（renderer 側）
+├── electron.vite.config.ts         # main / preload 用ビルド設定（採用する場合）
+└── biome.json
+```
+
+## 7. 設計方針
+
+- **ファイル I/O は全て IPC 経由** — レンダラから直接 `fs` を叩かない（`nodeIntegration: false` を維持）
+- **`contextBridge` でホワイトリスト式に API を公開** — `window.api.<command>` のみを expose
+- **CodeMirror が自身の状態を管理** — React store との過剰同期を避け、大きなドキュメントでも高速
+- **Live Preview は段階的に構築** — 旧版の実装を流用しつつ、Chromium 固定での挙動差異があれば最適化
+- **カーソル行は常に生 Markdown** — 編集中の箇所は構文がそのまま見える
+- **ファイルツリーは遅延読み込み** — 大きなワークスペースでも初回表示が高速
+- **テーマは CSS 変数ベース** — UI とエディタで統一的にダーク/ライト切替
+- **メイン側のロジックはユニットテストする** — IPC ハンドラは可能な限りピュア関数として切り出し、Vitest でカバー
+
+## 8. エラーハンドリング
+
+### リトライ戦略
+
+ファイル I/O の IPC ハンドラには自動リトライ（指数バックオフ）を適用する。
+
+- **対象**: `read_file`, `write_file`, `list_directory`, `rename_entry`, `delete_entry`, `search_files`, `search_filenames`, `scan_unresolved_wikilinks`
+- **リトライ回数**: 最大 3 回
+- **遅延**: 200ms → 400ms → 800ms（指数バックオフ）
+- **非一時エラー**（ファイル不存在、権限不足、ファイル名過長、フォルダ非空等）はリトライしない
+
+### エラーメッセージの日本語化
+
+`translateError()` 相当のパターンマッチ翻訳を行う。
+
+- Node.js のエラーコード（`ENOENT`, `EACCES`, `EAGAIN`, `EBUSY`, `EEXIST`, `ENOSPC`, `ENOTEMPTY` 等）を日本語メッセージに変換
+- ネットワークエラー（タイムアウト、接続拒否、名前解決失敗等）を日本語に変換
+- Git エラー（認証失敗、コンフリクト等）を日本語に変換
+- 未知のエラーはフォールバックメッセージで表示
+
+### オートセーブのリトライ
+
+一時エラー発生時は最大 3 回リトライする（5s → 10s → 20s）。
+
+- リトライ中はステータスバーに「リトライ中...」と表示
+- 最終失敗時はトースト通知でエラー内容を日本語で表示
+
+### Git 同期のエラー処理
+
+ネットワークエラー検出時はオフラインモードに移行する。
+
+### OGP 取得
+
+独立したキャッシュベースリトライ（30 秒後再試行）を行う。
+プライベート IP / ループバック / リンクローカル / CGNAT / マルチキャストへのアクセスは main 側で必ず弾く（SSRF 防御）。
+
+## 9. 技術的な補足
+
+### Live Preview の実装方式
+
+CodeMirror 6 の `ViewPlugin` と `Decoration` API を使用する。
+
+- `ViewPlugin.fromClass()` でカーソル位置を監視
+- `@lezer/markdown` のパースツリーから Markdown 構造を取得
+- `Decoration.replace()` で構文記号（`#`, `**`, `*` 等）を非表示に
+- `Decoration.widget()` で画像等のカスタム DOM を挿入
+- カーソルがある行ではデコレーションを適用しない
+
+### IPC コマンド一覧
+
+#### ファイル操作
+
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `list_directory` | `path: string` | `FileEntry[]` | あり |
+| `read_file` | `path: string` | `string` | あり |
+| `write_file` | `path: string, content: string` | `void` | あり |
+| `create_file` | `path: string` | `void` | なし |
+| `create_directory` | `path: string` | `void` | なし |
+| `write_new_file` | `path: string, content: string` | `void` | なし |
+| `path_exists` | `path: string` | `boolean` | なし |
+| `file_exists` | `path: string` | `boolean` | なし |
+| `rename_entry` | `oldPath: string, newPath: string` | `void` | あり |
+| `delete_entry` | `path: string` | `void`（ゴミ箱へ） | あり |
+| `start_watcher` | `path: string` | `void` | なし |
+| `stop_watcher` | — | `void` | なし |
+| `show_in_folder` | `path: string` | `void` | なし |
+
+#### 検索
+
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `search_files` | `workspacePath, query, caseSensitive?` | `SearchResult[]` | あり |
+| `search_filenames` | `workspacePath, query` | `string[]` | あり |
+| `scan_unresolved_wikilinks` | `workspacePath` | `UnresolvedWikilink[]` | あり |
+
+#### Git Sync
+
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `git_check_available` | — | `boolean` | なし |
+| `git_check_repo` | `path` | `boolean` | なし |
+| `git_status` | `path` | `GitStatus` | なし |
+| `git_add_all` | `path` | `void` | なし |
+| `git_commit` | `path, message` | `string` | なし |
+| `git_pull` | `path, syncMethod` | `string` | なし |
+| `git_push` | `path` | `string` | なし |
+| `git_get_conflicted_files` | `path` | `string[]` | なし |
+| `git_get_conflict_content` | `path, filePath` | `ConflictContent` | なし |
+| `git_resolve_conflict` | `path, filePath, content, resolution` | `void` | なし |
+| `git_finish_conflict_resolution` | `path` | `string` | なし |
+| `git_get_last_commit_time` | `path` | `string \| null` | なし |
+
+#### その他
+
+| コマンド | 引数 | 戻り値 | リトライ |
+|---------|------|--------|---------|
+| `export_pdf` | `html, outputPath` | `void` | なし |
+| `fetch_ogp` | `url` | `OgpData` | 30 秒後に再試行（フロント側キャッシュ） |
+| `check_for_update` | `currentVersion` | `UpdateInfo` | なし |
+| `open_external` | `url` | `void` | なし |
+| `clear_webview_browsing_data` | — | `void` | なし |
+
+### Electron セキュリティ設定（最低ライン）
+
+```ts
+new BrowserWindow({
+  webPreferences: {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    preload: path.join(__dirname, '../preload/index.js'),
+  },
+})
+```
+
+- `contextBridge` で expose する API は `window.api.<command>` 形式で、ハンドラ単位にホワイトリスト
+- 外部 URL は必ず `shell.openExternal` 経由（`<a href>` で直接遷移させない）
+- CSP は本番ビルドでも `default-src 'self'` を基本に、画像のみ `https:` 許可
+- リモートコンテンツの読み込みは行わない（OGP 画像は main 側で fetch して data URL 化するか、画像専用 fetch エンドポイントを介する）
