@@ -2,8 +2,17 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, shell } from "electron";
 
+function isSafeExternalUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		return parsed.protocol === "https:" || parsed.protocol === "http:";
+	} catch {
+		return false;
+	}
+}
+
 function createWindow(): void {
-	const window = new BrowserWindow({
+	const mainWindow = new BrowserWindow({
 		width: 1200,
 		height: 800,
 		show: false,
@@ -16,19 +25,31 @@ function createWindow(): void {
 		},
 	});
 
-	window.on("ready-to-show", () => {
-		window.show();
+	mainWindow.on("ready-to-show", () => {
+		mainWindow.show();
 	});
 
-	window.webContents.setWindowOpenHandler(({ url }) => {
-		shell.openExternal(url);
+	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+		if (isSafeExternalUrl(url)) shell.openExternal(url);
 		return { action: "deny" };
 	});
 
+	mainWindow.webContents.on("will-navigate", (event, url) => {
+		const currentUrl = mainWindow.webContents.getURL();
+		if (!currentUrl) return;
+		try {
+			const target = new URL(url);
+			const current = new URL(currentUrl);
+			if (target.origin !== current.origin) event.preventDefault();
+		} catch {
+			event.preventDefault();
+		}
+	});
+
 	if (process.env.ELECTRON_RENDERER_URL) {
-		window.loadURL(process.env.ELECTRON_RENDERER_URL);
+		mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
 	} else {
-		window.loadFile(join(__dirname, "../renderer/index.html"));
+		mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 	}
 }
 
