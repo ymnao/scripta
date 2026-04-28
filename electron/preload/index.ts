@@ -1,13 +1,10 @@
 import { electronAPI } from "@electron-toolkit/preload";
 import { contextBridge } from "electron";
+import type { Api } from "./api";
 
-const api = {
-	getVersion: (): string => process.versions.electron,
+const api: Api = {
+	getVersion: () => process.versions.electron,
 };
 
-try {
-	contextBridge.exposeInMainWorld("electron", electronAPI);
-	contextBridge.exposeInMainWorld("api", api);
-} catch (error) {
-	console.error(error);
-}
+contextBridge.exposeInMainWorld("electron", electronAPI);
+contextBridge.exposeInMainWorld("api", api);

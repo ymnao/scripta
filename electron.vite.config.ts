@@ -1,16 +1,16 @@
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
-const root = fileURLToPath(new URL(".", import.meta.url));
+const root = import.meta.dirname;
 
 export default defineConfig({
 	main: {
 		plugins: [externalizeDepsPlugin()],
 		build: {
 			rollupOptions: {
-				input: new URL("electron/main/index.ts", import.meta.url).pathname,
+				input: join(root, "electron/main/index.ts"),
 			},
 		},
 	},
@@ -18,7 +18,7 @@ export default defineConfig({
 		plugins: [externalizeDepsPlugin()],
 		build: {
 			rollupOptions: {
-				input: new URL("electron/preload/index.ts", import.meta.url).pathname,
+				input: join(root, "electron/preload/index.ts"),
 				output: {
 					format: "cjs",
 					entryFileNames: "[name].js",
@@ -31,7 +31,7 @@ export default defineConfig({
 		plugins: [react(), tailwindcss()],
 		build: {
 			rollupOptions: {
-				input: new URL("index.html", import.meta.url).pathname,
+				input: join(root, "index.html"),
 			},
 		},
 	},
