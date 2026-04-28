@@ -11,6 +11,10 @@ export default defineConfig({
 		build: {
 			rollupOptions: {
 				input: join(root, "electron/main/index.ts"),
+				output: {
+					format: "cjs",
+					entryFileNames: "[name].js",
+				},
 			},
 		},
 	},

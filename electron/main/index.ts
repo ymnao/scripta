@@ -52,7 +52,9 @@ function createWindow(): void {
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
 		if (isSafeExternalUrl(url)) {
-			void shell.openExternal(url).catch(() => {});
+			void shell.openExternal(url).catch((error) => {
+				console.error("Failed to open external URL:", url, error);
+			});
 		}
 		return { action: "deny" };
 	});
@@ -61,7 +63,9 @@ function createWindow(): void {
 		if (isAllowedRendererUrl(url)) return;
 		event.preventDefault();
 		if (isSafeExternalUrl(url)) {
-			void shell.openExternal(url).catch(() => {});
+			void shell.openExternal(url).catch((error) => {
+				console.error("Failed to open external URL:", url, error);
+			});
 		}
 	});
 
@@ -89,9 +93,14 @@ app.on("window-all-closed", () => {
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
 	session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+		const cleaned = Object.fromEntries(
+			Object.entries(details.responseHeaders ?? {}).filter(
+				([name]) => name.toLowerCase() !== "content-security-policy",
+			),
+		);
 		callback({
 			responseHeaders: {
-				...details.responseHeaders,
+				...cleaned,
 				"Content-Security-Policy": [is.dev ? CSP_DEV : CSP_PROD],
 			},
 		});
