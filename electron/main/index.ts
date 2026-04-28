@@ -3,7 +3,7 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 
 const CSP_PROD =
-	"default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self';";
+	"default-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self';";
 const CSP_DEV =
 	"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:*; object-src 'none'; base-uri 'self';";
 
@@ -18,8 +18,18 @@ function isSafeExternalUrl(url: string): boolean {
 
 function isAllowedRendererUrl(url: string): boolean {
 	const devUrl = process.env.ELECTRON_RENDERER_URL;
-	if (devUrl && url.startsWith(devUrl)) return true;
-	return false;
+	if (!devUrl) return false;
+	try {
+		const parsed = new URL(url);
+		const allowed = new URL(devUrl);
+		if (parsed.origin !== allowed.origin) return false;
+		const basePath = allowed.pathname.endsWith("/")
+			? allowed.pathname.slice(0, -1)
+			: allowed.pathname;
+		return parsed.pathname === basePath || parsed.pathname.startsWith(`${basePath}/`);
+	} catch {
+		return false;
+	}
 }
 
 function createWindow(): void {
