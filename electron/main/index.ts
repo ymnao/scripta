@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, session, shell } from "electron";
+
+const CSP_PROD =
+	"default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self';";
+const CSP_DEV =
+	"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:*; object-src 'none'; base-uri 'self';";
 
 function isSafeExternalUrl(url: string): boolean {
 	try {
@@ -9,6 +14,12 @@ function isSafeExternalUrl(url: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function isAllowedRendererUrl(url: string): boolean {
+	const devUrl = process.env.ELECTRON_RENDERER_URL;
+	if (devUrl && url.startsWith(devUrl)) return true;
+	return false;
 }
 
 function createWindow(): void {
@@ -30,19 +41,17 @@ function createWindow(): void {
 	});
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-		if (isSafeExternalUrl(url)) shell.openExternal(url);
+		if (isSafeExternalUrl(url)) {
+			void shell.openExternal(url).catch(() => {});
+		}
 		return { action: "deny" };
 	});
 
 	mainWindow.webContents.on("will-navigate", (event, url) => {
-		const currentUrl = mainWindow.webContents.getURL();
-		if (!currentUrl) return;
-		try {
-			const target = new URL(url);
-			const current = new URL(currentUrl);
-			if (target.origin !== current.origin) event.preventDefault();
-		} catch {
-			event.preventDefault();
+		if (isAllowedRendererUrl(url)) return;
+		event.preventDefault();
+		if (isSafeExternalUrl(url)) {
+			void shell.openExternal(url).catch(() => {});
 		}
 	});
 
@@ -69,5 +78,13 @@ app.on("window-all-closed", () => {
 
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
+	session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+		callback({
+			responseHeaders: {
+				...details.responseHeaders,
+				"Content-Security-Policy": [is.dev ? CSP_DEV : CSP_PROD],
+			},
+		});
+	});
 	createWindow();
 });
