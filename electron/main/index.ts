@@ -92,18 +92,24 @@ app.on("window-all-closed", () => {
 
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
-	session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-		const cleaned = Object.fromEntries(
-			Object.entries(details.responseHeaders ?? {}).filter(
-				([name]) => name.toLowerCase() !== "content-security-policy",
-			),
-		);
-		callback({
-			responseHeaders: {
-				...cleaned,
-				"Content-Security-Policy": [is.dev ? CSP_DEV : CSP_PROD],
-			},
-		});
-	});
+	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
+		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
+		: ["file:///*"];
+	session.defaultSession.webRequest.onHeadersReceived(
+		{ urls: cspTargetUrls },
+		(details, callback) => {
+			const cleaned = Object.fromEntries(
+				Object.entries(details.responseHeaders ?? {}).filter(
+					([name]) => name.toLowerCase() !== "content-security-policy",
+				),
+			);
+			callback({
+				responseHeaders: {
+					...cleaned,
+					"Content-Security-Policy": [is.dev ? CSP_DEV : CSP_PROD],
+				},
+			});
+		},
+	);
 	createWindow();
 });
