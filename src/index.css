@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+	html {
+		background-color: #ffffff;
+	}
+
+	html.dark {
+		background-color: #1a1a1a;
+	}
+
+	:root {
+		font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		font-synthesis: none;
+		text-rendering: optimizeLegibility;
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	body {
+		margin: 0;
+		overflow: hidden;
+	}
+}
