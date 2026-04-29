@@ -7,6 +7,9 @@ const CSP_PROD =
 const CSP_DEV =
 	"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:*; object-src 'none'; base-uri 'self';";
 
+const RENDERER_FILE_DIR = join(__dirname, "../renderer");
+const openWindows = new Set<BrowserWindow>();
+
 function isSafeExternalUrl(url: string): boolean {
 	try {
 		const parsed = new URL(url);
@@ -18,15 +21,24 @@ function isSafeExternalUrl(url: string): boolean {
 
 function isAllowedRendererUrl(url: string): boolean {
 	const devUrl = process.env.ELECTRON_RENDERER_URL;
-	if (!devUrl) return false;
+	if (devUrl) {
+		try {
+			const parsed = new URL(url);
+			const allowed = new URL(devUrl);
+			if (parsed.origin !== allowed.origin) return false;
+			const basePath = allowed.pathname.endsWith("/")
+				? allowed.pathname.slice(0, -1)
+				: allowed.pathname;
+			return parsed.pathname === basePath || parsed.pathname.startsWith(`${basePath}/`);
+		} catch {
+			return false;
+		}
+	}
 	try {
 		const parsed = new URL(url);
-		const allowed = new URL(devUrl);
-		if (parsed.origin !== allowed.origin) return false;
-		const basePath = allowed.pathname.endsWith("/")
-			? allowed.pathname.slice(0, -1)
-			: allowed.pathname;
-		return parsed.pathname === basePath || parsed.pathname.startsWith(`${basePath}/`);
+		if (parsed.protocol !== "file:") return false;
+		const path = decodeURIComponent(parsed.pathname);
+		return path === RENDERER_FILE_DIR || path.startsWith(`${RENDERER_FILE_DIR}/`);
 	} catch {
 		return false;
 	}
@@ -45,9 +57,14 @@ function createWindow(): void {
 			sandbox: true,
 		},
 	});
+	openWindows.add(mainWindow);
 
 	mainWindow.on("ready-to-show", () => {
 		mainWindow.show();
+	});
+
+	mainWindow.on("closed", () => {
+		openWindows.delete(mainWindow);
 	});
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -70,9 +87,13 @@ function createWindow(): void {
 	});
 
 	if (process.env.ELECTRON_RENDERER_URL) {
-		mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+		void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL).catch((error) => {
+			console.error("Failed to load renderer URL:", error);
+		});
 	} else {
-		mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+		void mainWindow.loadFile(join(__dirname, "../renderer/index.html")).catch((error) => {
+			console.error("Failed to load renderer file:", error);
+		});
 	}
 }
 
