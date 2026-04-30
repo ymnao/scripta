@@ -5,7 +5,16 @@ import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { useGitSync } from "../../hooks/useGitSync";
 import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
 import { useUpdateCheck } from "../../hooks/useUpdateCheck";
-import { clearWebviewBrowsingData, listDirectory, readFile, writeFile } from "../../lib/commands";
+import {
+	clearWebviewBrowsingData,
+	closeWindow,
+	listDirectory,
+	onMenuEvent,
+	onWindowCloseRequested,
+	openConflictWindow,
+	readFile,
+	writeFile,
+} from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
@@ -281,7 +290,7 @@ export function AppLayout() {
 	// Open (or re-focus) the conflict resolution window
 	const openConflictResolver = useCallback(async () => {
 		if (!workspacePath) return;
-		await window.api.openConflictWindow(workspacePath);
+		await openConflictWindow(workspacePath);
 	}, [workspacePath]);
 
 	// Auto-open conflict resolution window only on 0 → >0 transition
@@ -343,10 +352,10 @@ export function AppLayout() {
 	// Listen for native menu events
 	useEffect(() => {
 		const unlisteners: Array<() => void> = [];
-		unlisteners.push(window.api.onMenuEvent("open-settings", () => setSettingsOpen(true)));
-		unlisteners.push(window.api.onMenuEvent("open-help", () => setHelpOpen(true)));
+		unlisteners.push(onMenuEvent("open-settings", () => setSettingsOpen(true)));
+		unlisteners.push(onMenuEvent("open-help", () => setHelpOpen(true)));
 		unlisteners.push(
-			window.api.onMenuEvent("export", () => {
+			onMenuEvent("export", () => {
 				const path = useWorkspaceStore.getState().activeTabPath;
 				if (!path || isNewTabPath(path)) return;
 				handleExport(path);
@@ -360,7 +369,7 @@ export function AppLayout() {
 	// Save all dirty tabs before window closes
 	useEffect(() => {
 		let cancelled = false;
-		const unlisten = window.api.onWindowCloseRequested(async () => {
+		const unlisten = onWindowCloseRequested(async () => {
 			let hasFailed = false;
 			const currentActiveTab = useWorkspaceStore.getState().activeTabPath;
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
@@ -1014,14 +1023,14 @@ export function AppLayout() {
 				e.preventDefault();
 				if (e.shiftKey) {
 					// Cmd+Shift+W: タブの有無に関わらずウィンドウを閉じる（未保存の変更は保存される）
-					void window.api.closeWindow();
+					void closeWindow();
 					return;
 				}
 				if (activeTabId != null) {
 					void handleCloseTab(activeTabId);
 				} else {
 					// タブがない時はウィンドウを閉じる
-					void window.api.closeWindow();
+					void closeWindow();
 				}
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {

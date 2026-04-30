@@ -9,6 +9,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
+import { convertFileSrc } from "../../../lib/commands";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
@@ -37,7 +38,7 @@ export function resolveImageSrc(
 		return rawUrl;
 	}
 	if (rawUrl.startsWith("/") || rawUrl.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(rawUrl)) {
-		return window.api.convertFileSrc(rawUrl);
+		return convertFileSrc(rawUrl);
 	}
 	if (!activeTabPath) return rawUrl;
 	const dir = parentDir(activeTabPath);
@@ -49,7 +50,7 @@ export function resolveImageSrc(
 	const sep = detectSeparator(activeTabPath);
 	const needsSep = !dir.endsWith("/") && !dir.endsWith("\\");
 	const resolved = needsSep ? `${dir}${sep}${normalized}` : `${dir}${normalized}`;
-	return window.api.convertFileSrc(resolved);
+	return convertFileSrc(resolved);
 }
 
 class ImageWidget extends WidgetType {

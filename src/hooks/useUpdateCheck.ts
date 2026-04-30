@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { checkForUpdate, openExternal } from "../lib/commands";
+import { checkForUpdate, getAppVersion, openExternal } from "../lib/commands";
 import { loadLastUpdateCheck, saveLastUpdateCheck } from "../lib/store";
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -18,7 +18,7 @@ export function useUpdateCheck(enabled: boolean) {
 				const lastCheck = await loadLastUpdateCheck();
 				if (cancelled || Date.now() - lastCheck < CHECK_INTERVAL_MS) return;
 
-				const currentVersion = await window.api.getAppVersion();
+				const currentVersion = await getAppVersion();
 				if (cancelled) return;
 
 				const info = await checkForUpdate(currentVersion);

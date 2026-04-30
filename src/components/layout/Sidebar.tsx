@@ -1,5 +1,6 @@
 import { Files, FolderOpen, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
+import { openDirectoryPicker } from "../../lib/commands";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { FileTree } from "../filetree/FileTree";
 import { SearchPanel } from "../search/SearchPanel";
@@ -45,7 +46,7 @@ export function Sidebar({
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 
 	const handleOpenFolder = useCallback(async () => {
-		const selected = await window.api.openDirectoryPicker();
+		const selected = await openDirectoryPicker();
 		if (selected) {
 			setWorkspacePath(selected);
 		}

@@ -8,6 +8,7 @@ import {
 	gitPull,
 	gitPush,
 	gitStatus,
+	onConflictResolved,
 } from "../lib/commands";
 import { isNetworkError, translateError } from "../lib/errors";
 import { useGitSyncStore } from "../stores/git-sync";
@@ -374,7 +375,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			}
 		};
 
-		const unlisten = window.api.onConflictResolved(handleConflictResolved);
+		const unlisten = onConflictResolved(handleConflictResolved);
 		return () => unlisten();
 	}, [workspacePath, refreshStatus]);
 

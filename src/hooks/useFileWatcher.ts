@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { startWatcher, stopWatcher } from "../lib/commands";
+import { onFsChange, startWatcher, stopWatcher } from "../lib/commands";
 import { useToastStore } from "../stores/toast";
 import type { FsChangeEvent } from "../types/workspace";
 
@@ -75,7 +75,7 @@ export function useFileWatcher({
 			try {
 				await startWatcher(workspacePath);
 				if (cancelled) return;
-				unlistenFn = window.api.onFsChange((batch) => {
+				unlistenFn = onFsChange((batch) => {
 					if (!cancelled) handleEvents(batch);
 				});
 			} catch (err) {

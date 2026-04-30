@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+	closeWindow,
+	emitConflictResolved,
 	gitAddAll,
 	gitCheckRepo,
 	gitFinishConflictResolution,
@@ -92,8 +94,8 @@ export function ConflictWindow() {
 			// Use git_finish_conflict_resolution which detects whether we're in a
 			// rebase (→ git rebase --continue) or merge (→ git commit --no-edit).
 			await gitFinishConflictResolution(workspacePath);
-			await window.api.emitConflictResolved();
-			await window.api.closeWindow();
+			await emitConflictResolved();
+			await closeWindow();
 		} catch (err) {
 			setError(String(err));
 		}
@@ -105,8 +107,8 @@ export function ConflictWindow() {
 		if (loading || error || files.length > 0) return;
 		void (async () => {
 			try {
-				await window.api.emitConflictResolved();
-				await window.api.closeWindow();
+				await emitConflictResolved();
+				await closeWindow();
 			} catch {
 				// Auto-close failure is non-fatal
 			}

@@ -1,9 +1,10 @@
+import type { MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
 import type { UpdateInfo } from "../types/update";
 import type { UnresolvedWikilink } from "../types/wikilink";
-import type { FileEntry } from "../types/workspace";
+import type { FileEntry, FsChangeEvent } from "../types/workspace";
 import { isTransientError } from "./errors";
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, baseDelayMs = 200): Promise<T> {
@@ -157,4 +158,48 @@ export function checkForUpdate(currentVersion: string): Promise<UpdateInfo> {
 
 export function clearWebviewBrowsingData(): Promise<void> {
 	return window.api.clearWebviewBrowsingData();
+}
+
+export function getAppVersion(): Promise<string> {
+	return window.api.getAppVersion();
+}
+
+export function closeWindow(): Promise<void> {
+	return window.api.closeWindow();
+}
+
+export function openConflictWindow(workspacePath: string): Promise<void> {
+	return window.api.openConflictWindow(workspacePath);
+}
+
+export function convertFileSrc(path: string): string {
+	return window.api.convertFileSrc(path);
+}
+
+export function openDirectoryPicker(): Promise<string | null> {
+	return window.api.openDirectoryPicker();
+}
+
+export function showSaveDialog(opts: SaveDialogOptions): Promise<string | null> {
+	return window.api.showSaveDialog(opts);
+}
+
+export function emitConflictResolved(): Promise<void> {
+	return window.api.emitConflictResolved();
+}
+
+export function onFsChange(cb: (events: FsChangeEvent[]) => void): () => void {
+	return window.api.onFsChange(cb);
+}
+
+export function onConflictResolved(cb: () => void): () => void {
+	return window.api.onConflictResolved(cb);
+}
+
+export function onMenuEvent(name: MenuEventName, cb: () => void): () => void {
+	return window.api.onMenuEvent(name, cb);
+}
+
+export function onWindowCloseRequested(cb: () => void | Promise<void>): () => void {
+	return window.api.onWindowCloseRequested(cb);
 }

@@ -1,4 +1,4 @@
-import { exportPdf, writeFile } from "./commands";
+import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { markdownToHtml } from "./markdown-to-html";
 import { renderMermaid } from "./mermaid";
@@ -515,7 +515,7 @@ export async function exportAsHtml(
 	const title = extractTitle(filePath);
 	const defaultName = `${title}.html`;
 
-	const savePath = await window.api.showSaveDialog({
+	const savePath = await showSaveDialog({
 		defaultPath: defaultName,
 		filters: [{ name: "HTML", extensions: ["html"] }],
 	});
@@ -550,7 +550,7 @@ export async function exportAsPdf(
 	const title = extractTitle(filePath);
 	const defaultName = `${title}.pdf`;
 
-	const savePath = await window.api.showSaveDialog({
+	const savePath = await showSaveDialog({
 		defaultPath: defaultName,
 		filters: [{ name: "PDF", extensions: ["pdf"] }],
 	});
@@ -650,7 +650,7 @@ export async function exportAsPrompt(
 	const title = extractTitle(filePath);
 	const defaultName = `${title}-prompt.md`;
 
-	const savePath = await window.api.showSaveDialog({
+	const savePath = await showSaveDialog({
 		defaultPath: defaultName,
 		filters: [{ name: "Markdown", extensions: ["md"] }],
 	});
