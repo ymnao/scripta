@@ -1,0 +1,714 @@
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+
+vi.mock("./commands", () => ({
+	writeFile: vi.fn().mockResolvedValue(undefined),
+	exportPdf: vi.fn().mockResolvedValue(undefined),
+	showSaveDialog: vi.fn(),
+}));
+
+vi.mock("./mermaid", () => ({
+	renderMermaid: vi.fn(async (source: string) => `<svg>${source}</svg>`),
+}));
+
+const { writeFile, exportPdf, showSaveDialog } = await import("./commands");
+const {
+	buildDynamicPageBreakScript,
+	buildHtmlDocument,
+	buildPromptFromTemplate,
+	exportAsHtml,
+	exportAsPdf,
+	exportAsPrompt,
+	findMermaidCodeBlocks,
+	getDefaultPromptTemplate,
+	preprocessMermaidBlocks,
+} = await import("./export");
+
+const mockedSave = showSaveDialog as Mock;
+const mockedWriteFile = writeFile as Mock;
+const mockedExportPdf = exportPdf as Mock;
+
+describe("exportAsHtml", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns false when save dialog is cancelled", async () => {
+		mockedSave.mockResolvedValue(null);
+		const result = await exportAsHtml("# Hello", "/workspace/test.md");
+		expect(result).toBe(false);
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("writes HTML file on save", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		const result = await exportAsHtml("# Hello", "/workspace/test.md");
+		expect(result).toBe(true);
+		expect(mockedWriteFile).toHaveBeenCalledWith(
+			"/output/test.html",
+			expect.stringContaining("<!DOCTYPE html>"),
+		);
+	});
+
+	it("includes title in HTML document", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("# Hello", "/workspace/my-note.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("<title>my-note</title>");
+	});
+
+	it("includes KaTeX CDN link in HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("$x^2$", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("converts markdown content to HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("**bold**", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("<strong>bold</strong>");
+	});
+
+	it("applies light theme when specified", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("# Hello", "/workspace/test.md", { theme: "light" });
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("applies dark theme when specified", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("# Hello", "/workspace/test.md", { theme: "dark" });
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("color-scheme: dark");
+		expect(html).toContain("background: #1a1a1a");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("resolves system theme to light/dark for consistent Mermaid rendering", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("# Hello", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		// system テーマは Mermaid SVG と合わせるため解決済みテーマ（light）で固定される
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("includes Mermaid SVG in final HTML output", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsHtml(md, "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("```mermaid");
+	});
+});
+
+describe("exportAsPrompt", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns false when save dialog is cancelled", async () => {
+		mockedSave.mockResolvedValue(null);
+		const result = await exportAsPrompt("# Hello", "/workspace/test.md");
+		expect(result).toBe(false);
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("writes prompt markdown file on save", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const result = await exportAsPrompt("# Hello\n\nWorld", "/workspace/test.md");
+		expect(result).toBe(true);
+		expect(mockedWriteFile).toHaveBeenCalledWith(
+			"/output/test-prompt.md",
+			expect.stringContaining("# HTML変換プロンプト"),
+		);
+	});
+
+	it("includes title and markdown content in prompt", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		await exportAsPrompt("# Hello", "/workspace/my-doc.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("my-doc");
+		expect(output).toContain("# Hello");
+	});
+
+	it("wraps markdown content in code block", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		await exportAsPrompt("some content", "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("```markdown");
+		expect(output).toContain("some content");
+	});
+
+	it("uses longer fence when content contains triple backticks", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const md = "Some text\n```js\nconsole.log('hi');\n```\nEnd";
+		await exportAsPrompt(md, "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		// Fence must be longer than the 3 backticks in content
+		expect(output).toContain("````markdown");
+		expect(output).toContain(md);
+	});
+
+	it("uses even longer fence for nested fences", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const md = "````\ninner\n````";
+		await exportAsPrompt(md, "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("`````markdown");
+	});
+});
+
+describe("exportAsPdf", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns false when save dialog is cancelled", async () => {
+		mockedSave.mockResolvedValue(null);
+		const result = await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(result).toBe(false);
+		expect(mockedExportPdf).not.toHaveBeenCalled();
+	});
+
+	it("calls exportPdf command on save", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		const result = await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(result).toBe(true);
+		expect(mockedExportPdf).toHaveBeenCalledWith(
+			expect.stringContaining("<!DOCTYPE html>"),
+			"/output/test.pdf",
+		);
+	});
+
+	it("always uses light theme for PDF", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: light");
+		expect(html).not.toContain("prefers-color-scheme");
+	});
+
+	it("uses pdf filter for save dialog", async () => {
+		mockedSave.mockResolvedValue(null);
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		expect(mockedSave).toHaveBeenCalledWith(
+			expect.objectContaining({
+				defaultPath: "test.pdf",
+				filters: [{ name: "PDF", extensions: ["pdf"] }],
+			}),
+		);
+	});
+
+	it("includes A4 page size and print margins in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("size: A4");
+		expect(html).toContain("margin: 20mm");
+	});
+
+	it("converts single newlines to <br> in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("line1\nline2", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<br");
+	});
+
+	it("renders KaTeX math in PDF HTML", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("$x^2$", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("katex");
+		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("includes Mermaid SVG in final PDF HTML output", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsPdf(md, "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("```mermaid");
+	});
+
+	it("includes page break CSS when pageBreakLevel is set", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("h1, h2 { break-before: page; }");
+	});
+});
+
+describe("buildHtmlDocument page break", () => {
+	it("includes h1 break-before when level is h1", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h1",
+			smart: false,
+		});
+		expect(html).toContain("h1 { break-before: page; }");
+	});
+
+	it("includes h1 and h2 break-before when level is h2", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h2",
+			smart: false,
+		});
+		expect(html).toContain("h1, h2 { break-before: page; }");
+	});
+
+	it("includes h1, h2 and h3 break-before when level is h3", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h3",
+			smart: false,
+		});
+		expect(html).toContain("h1, h2, h3 { break-before: page; }");
+	});
+
+	it("smart: marks first heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>First</h2><p>text</p><h2>Second</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>First</h2>");
+		expect(html).toContain("<h2>Second</h2>");
+		expect(html).toContain("[data-no-break] { break-before: auto !important; }");
+	});
+
+	it("smart: marks sub-heading with data-no-break even with content between", () => {
+		const html = buildHtmlDocument("<h2>Section</h2><p>intro</p><h3>Sub</h3>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>Section</h2>");
+		expect(html).toContain("<h3 data-no-break>Sub</h3>");
+	});
+
+	it("smart: does not mark same-level heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>A</h2>");
+		expect(html).toContain("<h2>B</h2>");
+	});
+
+	it("smart: does not mark shallower heading with data-no-break", () => {
+		const html = buildHtmlDocument("<h2>A</h2><h3>B</h3><p>text</p><h2>C</h2>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toContain("<h2 data-no-break>A</h2>");
+		expect(html).toContain("<h3 data-no-break>B</h3>");
+		expect(html).toContain("<h2>C</h2>");
+	});
+
+	it("smart: ignores headings beyond target level", () => {
+		const html = buildHtmlDocument(
+			"<h1>Ch</h1><h2>Sec</h2><h3>Sub</h3><h2>Next</h2>",
+			"test",
+			"light",
+			{ level: "h2", smart: true },
+		);
+		expect(html).toContain("<h1 data-no-break>Ch</h1>");
+		expect(html).toContain("<h2 data-no-break>Sec</h2>");
+		expect(html).toContain("<h3>Sub</h3>");
+		expect(html).toContain("<h2>Next</h2>");
+	});
+
+	it("smart: does not suppress sub-heading when many blocks between", () => {
+		const html = buildHtmlDocument(
+			"<h2>Section</h2><p>intro</p><ul><li>a</li></ul><h3>Sub</h3>",
+			"test",
+			"light",
+			{ level: "h3", smart: true },
+		);
+		expect(html).toContain("<h2 data-no-break>Section</h2>");
+		expect(html).toContain("<h3>Sub</h3>");
+	});
+
+	it("does not include break-before when level is none", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "none",
+			smart: true,
+		});
+		expect(html).not.toContain("break-before: page");
+	});
+
+	it("does not include break-before when pageBreak is undefined", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light");
+		expect(html).not.toContain("break-before: page");
+	});
+
+	it("adds task-list-item class to li elements with checkboxes", () => {
+		const body = '<ul><li><input disabled="" type="checkbox"> task</li></ul>';
+		const html = buildHtmlDocument(body, "test", "light");
+		expect(html).toContain('class="task-list-item"');
+		expect(html).toContain(".task-list-item { list-style: none; }");
+	});
+});
+
+describe("exportAsPdf zoom", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("adds zoom and compensated max-width when zoom is not 100", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 80 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 0.8; max-width: 1000px">');
+	});
+
+	it("does not add zoom style when zoom is 100", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<body>");
+		expect(html).not.toContain("zoom:");
+	});
+
+	it("compensates max-width for 50% zoom", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 50 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 0.5; max-width: 1600px">');
+	});
+
+	it("compensates max-width for 150% zoom", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", { zoom: 150 });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<body style="zoom: 1.5; max-width: 533px">');
+	});
+});
+
+describe("buildDynamicPageBreakScript", () => {
+	it("includes correct maxLevel for h1", () => {
+		const script = buildDynamicPageBreakScript("h1");
+		expect(script).toContain("var maxLevel = 1;");
+	});
+
+	it("includes correct maxLevel for h2", () => {
+		const script = buildDynamicPageBreakScript("h2");
+		expect(script).toContain("var maxLevel = 2;");
+	});
+
+	it("includes correct maxLevel for h3", () => {
+		const script = buildDynamicPageBreakScript("h3");
+		expect(script).toContain("var maxLevel = 3;");
+	});
+
+	it("sets forceLevel to 0 by default", () => {
+		const script = buildDynamicPageBreakScript("h3");
+		expect(script).toContain("var forceLevel = 0;");
+	});
+
+	it("sets forceLevel to maxLevel-1 when forceUpperBreak is true", () => {
+		const script = buildDynamicPageBreakScript("h3", true);
+		expect(script).toContain("var forceLevel = 2;");
+	});
+
+	it("sets forceLevel to 1 for h2 with forceUpperBreak", () => {
+		const script = buildDynamicPageBreakScript("h2", true);
+		expect(script).toContain("var forceLevel = 1;");
+	});
+
+	it("sets forceLevel to 0 for h1 with forceUpperBreak (no upper levels)", () => {
+		const script = buildDynamicPageBreakScript("h1", true);
+		expect(script).toContain("var forceLevel = 0;");
+	});
+});
+
+describe("exportAsPdf dynamic page break script", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("injects script when smart page break is enabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("<script>");
+		expect(html).toContain("var maxLevel = 2;");
+		expect(html).toContain("</script>\n</body>");
+	});
+
+	it("does not inject script when smart page break is disabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("does not inject script when pageBreakLevel is none", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md", {
+			pageBreakLevel: "none",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("does not inject script when pageBreak options are not provided", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("<script>");
+	});
+
+	it("passes forceUpperBreak to script when enabled", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World\n### Section", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+			forceUpperBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("var forceLevel = 2;");
+	});
+
+	it("sets forceLevel to 0 when forceUpperBreak is not set", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("var forceLevel = 0;");
+	});
+
+	it("injects script right before the final </body>", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Test\n\nparagraph", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// Script should appear right before </body></html>
+		expect(html).toMatch(/<\/script>\n<\/body>\s*\n<\/html>/);
+		// Only one </body> should exist
+		const bodyCloseCount = html.split("</body>").length - 1;
+		expect(bodyCloseCount).toBe(1);
+	});
+
+	it("applies zoom to the first <body> tag", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# Test\n\nparagraph", "/workspace/test.md", {
+			zoom: 80,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toMatch(/<body style="zoom: 0\.8; max-width: 1000px">/);
+		// Only one <body> tag should exist
+		const bodyOpenCount = html.split("<body").length - 1;
+		expect(bodyOpenCount).toBe(1);
+	});
+});
+
+describe("getDefaultPromptTemplate", () => {
+	it("contains {title} and {content} placeholders", () => {
+		const template = getDefaultPromptTemplate();
+		expect(template).toContain("{title}");
+		expect(template).toContain("{content}");
+	});
+
+	it("contains the HTML conversion prompt header", () => {
+		const template = getDefaultPromptTemplate();
+		expect(template).toContain("# HTML変換プロンプト");
+	});
+});
+
+describe("buildPromptFromTemplate", () => {
+	it("replaces {title} and {content} placeholders", () => {
+		const template = "Title: {title}\n\n{content}";
+		const result = buildPromptFromTemplate(template, "My Doc", "hello world");
+		expect(result).toContain("Title: My Doc");
+		expect(result).toContain("```markdown\nhello world\n```");
+	});
+
+	it("wraps content in a fence block", () => {
+		const template = "{content}";
+		const result = buildPromptFromTemplate(template, "test", "some text");
+		expect(result).toMatch(/^```markdown\nsome text\n```$/);
+	});
+
+	it("uses longer fence when content contains backticks", () => {
+		const template = "{content}";
+		const result = buildPromptFromTemplate(template, "test", "```js\ncode\n```");
+		expect(result).toContain("````markdown");
+	});
+
+	it("replaces multiple {title} occurrences", () => {
+		const template = "{title} - {title}";
+		const result = buildPromptFromTemplate(template, "Doc", "text");
+		expect(result).toContain("Doc - Doc");
+	});
+
+	it("preserves $ and $1 in content without special expansion", () => {
+		const template = "{content}";
+		const result = buildPromptFromTemplate(template, "test", "Price is $100 and $1");
+		expect(result).toContain("Price is $100 and $1");
+	});
+
+	it("preserves $& and $$ in title without special expansion", () => {
+		const template = "Title: {title}";
+		const result = buildPromptFromTemplate(template, "Cost $$ and $&", "text");
+		expect(result).toContain("Cost $$ and $&");
+	});
+});
+
+describe("exportAsPrompt with custom template", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("uses custom template when provided", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		const customTemplate = "Custom: {title}\n\n{content}";
+		await exportAsPrompt("# Hello", "/workspace/test.md", customTemplate);
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("Custom: test");
+		expect(output).toContain("# Hello");
+	});
+
+	it("uses default template when customTemplate is null", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		await exportAsPrompt("# Hello", "/workspace/test.md", null);
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("# HTML変換プロンプト");
+	});
+
+	it("uses default template when customTemplate is undefined", async () => {
+		mockedSave.mockResolvedValue("/output/test-prompt.md");
+		await exportAsPrompt("# Hello", "/workspace/test.md");
+		const output = mockedWriteFile.mock.calls[0][1] as string;
+		expect(output).toContain("# HTML変換プロンプト");
+	});
+});
+
+describe("findMermaidCodeBlocks", () => {
+	it("標準的な mermaid ブロックを検出する", () => {
+		const md = "text\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nmore";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+	});
+
+	it("4文字以上のバッククォートに対応する", () => {
+		const md = "````mermaid\ngraph TD\n  A-->B\n````";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+	});
+
+	it("閉じフェンスが開始より短い場合はマッチしない", () => {
+		const md = "````mermaid\ngraph TD\n```\nmore\n````";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		// ``` は閉じフェンスとして無視され、```` で閉じる
+		expect(blocks[0].source).toBe("graph TD\n```\nmore");
+	});
+
+	it("空のブロックはスキップする", () => {
+		const md = "```mermaid\n\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(0);
+	});
+
+	it("通常のコードブロックは無視する", () => {
+		const md = "```js\nconst x = 1;\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(0);
+	});
+
+	it("複数の mermaid ブロックを検出する", () => {
+		const md =
+			"```mermaid\ngraph TD\n  A-->B\n```\n\n```mermaid\nsequenceDiagram\n  A->>B: Hi\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(2);
+		expect(blocks[0].source).toBe("graph TD\n  A-->B");
+		expect(blocks[1].source).toBe("sequenceDiagram\n  A->>B: Hi");
+	});
+
+	it("インデントされたフェンスに対応する", () => {
+		const md = "  ```mermaid\n  graph TD\n    A-->B\n  ```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+	});
+
+	it("CRLF 改行に対応する", () => {
+		const md = "```mermaid\r\ngraph TD\r\n  A-->B\r\n```";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		// offset/length で元文字列を正確にスライスできることを検証
+		const sliced = md.slice(blocks[0].index, blocks[0].index + blocks[0].length);
+		expect(sliced).toBe(md);
+	});
+
+	it("CRLF 混在のオフセットが正確である", () => {
+		const md = "text\r\n\r\n```mermaid\r\ngraph TD\r\n```\r\nmore";
+		const blocks = findMermaidCodeBlocks(md);
+		expect(blocks).toHaveLength(1);
+		const sliced = md.slice(blocks[0].index, blocks[0].index + blocks[0].length);
+		expect(sliced).toBe("```mermaid\r\ngraph TD\r\n```");
+	});
+});
+
+describe("preprocessMermaidBlocks", () => {
+	it("mermaid ブロックを SVG に変換する", async () => {
+		const md = "text\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nmore";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toContain('<div class="mermaid-diagram">');
+		expect(result).toContain("<svg>");
+		expect(result).not.toContain("```mermaid");
+		expect(result).toContain("text\n\n");
+		expect(result).toContain("\n\nmore");
+	});
+
+	it("mermaid ブロックがなければそのまま返す", async () => {
+		const md = "# Hello\n\nWorld";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toBe(md);
+	});
+
+	it("複数の mermaid ブロックをすべて変換する", async () => {
+		const md = "```mermaid\ngraph TD\n```\n\n```mermaid\nsequenceDiagram\n```";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).not.toContain("```mermaid");
+		const svgCount = (result.match(/<svg>/g) || []).length;
+		expect(svgCount).toBe(2);
+	});
+
+	it("エラー時は元のコードブロックを残す", async () => {
+		const { renderMermaid } = await import("./mermaid");
+		(renderMermaid as Mock).mockRejectedValueOnce(new Error("Parse error"));
+		const md = "```mermaid\nINVALID\n```";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toBe(md);
+	});
+
+	it("CRLF 改行でも正しく変換する", async () => {
+		const md = "text\r\n\r\n```mermaid\r\ngraph TD\r\n```\r\n\r\nmore";
+		const result = await preprocessMermaidBlocks(md, "light");
+		expect(result).toContain('<div class="mermaid-diagram">');
+		expect(result).not.toContain("```mermaid");
+		expect(result).toContain("text\r\n\r\n");
+		expect(result).toContain("\r\n\r\nmore");
+	});
+});
