@@ -1,10 +1,10 @@
 import { ipcMain, shell } from "electron";
+import { isSafeExternalUrl } from "../utils/url";
 
 export function registerShellIpc(): void {
 	ipcMain.handle("shell:open-external", async (_event, url: string) => {
-		const parsed = new URL(url);
-		if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-			throw new Error(`Refusing to open non-http(s) URL: ${parsed.protocol}`);
+		if (!isSafeExternalUrl(url)) {
+			throw new Error(`Refusing to open unsafe URL: ${url}`);
 		}
 		await shell.openExternal(url);
 	});
