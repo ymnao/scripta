@@ -1,14 +1,12 @@
+import { ConflictWindow } from "./components/conflict/ConflictWindow";
+import { DemoView } from "./components/demo/DemoView";
+import { AppLayout } from "./components/layout/AppLayout";
+
 function App() {
-	return (
-		<div className="flex h-screen items-center justify-center bg-white text-gray-900 dark:bg-neutral-900 dark:text-neutral-100">
-			<div className="text-center">
-				<h1 className="text-4xl font-bold">scripta-next</h1>
-				<p className="mt-2 text-sm text-gray-500 dark:text-neutral-400">
-					Electron {window.api.getVersion()} / Stage 0a bootstrap
-				</p>
-			</div>
-		</div>
-	);
+	const params = new URLSearchParams(window.location.search);
+	if (params.has("conflict")) return <ConflictWindow />;
+	if (params.has("demo")) return <DemoView />;
+	return <AppLayout />;
 }
 
 export default App;

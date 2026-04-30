@@ -2,25 +2,480 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+	/* Background */
+	--color-bg-primary: #ffffff;
+	--color-bg-secondary: #f8f8f8;
+
+	/* Text */
+	--color-text-primary: #333333;
+	--color-text-secondary: #999999;
+
+	/* Border */
+	--color-border: #e8e8e8;
+
+	/* Link */
+	--color-text-link: #2563eb;
+}
+
 @layer base {
-	html {
-		background-color: #ffffff;
-	}
-
-	html.dark {
-		background-color: #1a1a1a;
-	}
-
 	:root {
 		font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		font-synthesis: none;
 		text-rendering: optimizeLegibility;
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
+		--editor-font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+		/* Syntax highlighting (light) */
+		--color-syntax-keyword: #7c4dff;
+		--color-syntax-atom: #221199;
+		--color-syntax-number: #116644;
+		--color-syntax-string: #aa1111;
+		--color-syntax-regexp: #ee4400;
+		--color-syntax-escape: #0000ff;
+		--color-syntax-definition: #3300aa;
+		--color-syntax-function: #008855;
+		--color-syntax-type: #116677;
+		--color-syntax-class: #225566;
+		--color-syntax-changed: #0000cc;
+		--color-syntax-annotation: #994400;
+		--color-syntax-comment: #404740;
+		--color-syntax-invalid: #ff0000;
 	}
 
 	body {
 		margin: 0;
 		overflow: hidden;
+		background-color: var(--color-bg-primary);
 	}
+
+	/* Dark theme overrides */
+	.dark {
+		--color-bg-primary: #1a1a1a;
+		--color-bg-secondary: #222222;
+		--color-text-primary: #d4d4d4;
+		--color-text-secondary: #777777;
+		--color-border: #333333;
+		--color-text-link: #60a5fa;
+
+		/* Syntax highlighting (dark) */
+		--color-syntax-keyword: #c678dd;
+		--color-syntax-atom: #d19a66;
+		--color-syntax-number: #d19a66;
+		--color-syntax-string: #98c379;
+		--color-syntax-regexp: #e06c75;
+		--color-syntax-escape: #56b6c2;
+		--color-syntax-definition: #e06c75;
+		--color-syntax-function: #61afef;
+		--color-syntax-type: #e5c07b;
+		--color-syntax-class: #e5c07b;
+		--color-syntax-changed: #61afef;
+		--color-syntax-annotation: #d19a66;
+		--color-syntax-comment: #5c6370;
+		--color-syntax-invalid: #f44747;
+	}
+}
+
+/* Editor font — applied via CSS custom property so that font-family
+   does not depend on style-mod's dynamic injection (WKWebView compat).
+   Doubled class selector raises specificity above CodeMirror's base theme
+   which injects font-family via adoptedStyleSheets (wins at equal specificity). */
+.cm-editor.cm-editor .cm-scroller {
+	font-family: var(--editor-font-family);
+}
+
+/* Editor error display */
+.editor-error {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	padding: 24px;
+	color: var(--color-text-secondary);
+	font-size: 13px;
+	text-align: center;
+}
+
+/* Search Bar (VSCode-style floating) */
+.search-bar {
+	position: absolute;
+	top: 8px;
+	right: 20px;
+	z-index: 50;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 6px 6px 6px 4px;
+	min-width: 320px;
+	background-color: var(--color-bg-secondary);
+	border: 1px solid var(--color-border);
+	border-radius: 6px;
+	box-shadow:
+		0 2px 8px rgba(0, 0, 0, 0.12),
+		0 1px 3px rgba(0, 0, 0, 0.08);
+	font-size: 13px;
+	color: var(--color-text-primary);
+}
+
+.search-bar-row {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.search-bar-replace-row {
+	padding-left: 0;
+}
+
+.search-bar-input-wrap {
+	flex: 1;
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.search-bar-input {
+	width: 100%;
+	padding: 3px 8px;
+	padding-right: 70px;
+	border: 1px solid var(--color-border);
+	border-radius: 4px;
+	background-color: var(--color-bg-primary);
+	color: var(--color-text-primary);
+	font-size: 13px;
+	line-height: 1.4;
+	outline: none;
+	font-family: inherit;
+}
+
+.search-bar-input:focus {
+	border-color: var(--color-text-link);
+}
+
+.search-bar-input::placeholder {
+	color: var(--color-text-secondary);
+}
+
+.search-bar-replace-row .search-bar-input {
+	padding-right: 8px;
+}
+
+.search-bar-match-count {
+	position: absolute;
+	right: 8px;
+	top: 50%;
+	transform: translateY(-50%);
+	font-size: 11px;
+	color: var(--color-text-secondary);
+	pointer-events: none;
+	white-space: nowrap;
+}
+
+.search-bar-icon-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--color-text-secondary);
+	cursor: pointer;
+	flex-shrink: 0;
+	transition:
+		background-color 0.1s,
+		color 0.1s;
+}
+
+.search-bar-icon-btn:hover:not(:disabled) {
+	color: var(--color-text-primary);
+	background-color: color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
+}
+
+.search-bar-icon-btn:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.search-bar-spacer {
+	width: 24px;
+	flex-shrink: 0;
+}
+
+/* Workspace Search Panel (sidebar) */
+.search-panel-input-wrap {
+	position: relative;
+	display: flex;
+	align-items: center;
+	padding: 6px 8px;
+}
+
+.search-panel-input-icon {
+	position: absolute;
+	left: 14px;
+	color: var(--color-text-secondary);
+	pointer-events: none;
+	flex-shrink: 0;
+}
+
+.search-panel-input {
+	width: 100%;
+	padding: 4px 28px 4px 24px;
+	border: 1px solid var(--color-border);
+	border-radius: 4px;
+	background-color: var(--color-bg-primary);
+	color: var(--color-text-primary);
+	font-size: 12px;
+	line-height: 1.4;
+	outline: none;
+	font-family: inherit;
+}
+
+.search-panel-input:focus {
+	border-color: var(--color-text-link);
+}
+
+.search-panel-input::placeholder {
+	color: var(--color-text-secondary);
+}
+
+.search-panel-option-btn {
+	position: absolute;
+	right: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 20px;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	background: transparent;
+	color: var(--color-text-secondary);
+	font-size: 11px;
+	font-weight: 600;
+	font-family: inherit;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.search-panel-option-btn:hover {
+	color: var(--color-text-primary);
+	background-color: color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
+}
+
+.search-panel-option-btn-active {
+	color: var(--color-text-primary);
+	border-color: var(--color-text-link);
+	background-color: color-mix(in srgb, var(--color-text-link) 12%, transparent);
+}
+
+.search-panel-results {
+	flex: 1;
+	overflow-y: auto;
+}
+
+.search-panel-file-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	width: 100%;
+	padding: 3px 8px;
+	border: none;
+	background: none;
+	color: var(--color-text-primary);
+	font-size: 12px;
+	font-weight: 600;
+	text-align: left;
+	cursor: pointer;
+}
+
+.search-panel-file-header:hover {
+	background-color: color-mix(in srgb, var(--color-text-secondary) 10%, transparent);
+}
+
+.search-panel-file-chevron {
+	width: 12px;
+	flex-shrink: 0;
+	text-align: center;
+	color: var(--color-text-secondary);
+	font-size: 11px;
+}
+
+.search-panel-file-name {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.search-panel-file-count {
+	flex-shrink: 0;
+	padding: 0 5px;
+	border-radius: 8px;
+	background-color: color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
+	color: var(--color-text-secondary);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 1.6;
+}
+
+.search-panel-match {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	width: 100%;
+	padding: 2px 8px 2px 24px;
+	border: none;
+	background: none;
+	color: var(--color-text-primary);
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+	line-height: 1.5;
+}
+
+.search-panel-match:hover {
+	background-color: color-mix(in srgb, var(--color-text-secondary) 10%, transparent);
+}
+
+.search-panel-line-number {
+	flex-shrink: 0;
+	min-width: 24px;
+	text-align: right;
+	color: var(--color-text-secondary);
+	font-size: 11px;
+}
+
+.search-panel-line-content {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.search-panel-highlight {
+	background-color: color-mix(in srgb, #facc15 35%, transparent);
+	color: inherit;
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+/* Slide Preview */
+.slide-preview-content {
+	color: var(--color-text-primary);
+	font-size: 14px;
+	line-height: 1.7;
+}
+
+.slide-preview-content h1 {
+	font-size: 1.6em;
+	font-weight: 700;
+	margin: 0 0 0.6em;
+	line-height: 1.3;
+}
+
+.slide-preview-content h2 {
+	font-size: 1.3em;
+	font-weight: 600;
+	margin: 0 0 0.5em;
+	line-height: 1.3;
+}
+
+.slide-preview-content h3 {
+	font-size: 1.1em;
+	font-weight: 600;
+	margin: 0 0 0.4em;
+	line-height: 1.4;
+}
+
+.slide-preview-content h4,
+.slide-preview-content h5,
+.slide-preview-content h6 {
+	font-size: 1em;
+	font-weight: 600;
+	margin: 0 0 0.3em;
+}
+
+.slide-preview-content p {
+	margin: 0 0 0.8em;
+}
+
+.slide-preview-content ul,
+.slide-preview-content ol {
+	margin: 0 0 0.8em;
+	padding-left: 1.5em;
+}
+
+.slide-preview-content li {
+	margin-bottom: 0.2em;
+}
+
+.slide-preview-content code {
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+	font-size: 0.9em;
+	padding: 0.15em 0.4em;
+	border-radius: 4px;
+	background-color: color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
+}
+
+.slide-preview-content pre {
+	margin: 0 0 0.8em;
+	padding: 0.8em 1em;
+	border-radius: 6px;
+	background-color: color-mix(in srgb, var(--color-text-secondary) 8%, transparent);
+	overflow-x: auto;
+}
+
+.slide-preview-content pre code {
+	padding: 0;
+	background: none;
+}
+
+.slide-preview-content blockquote {
+	margin: 0 0 0.8em;
+	padding-left: 1em;
+	border-left: 3px solid var(--color-border);
+	color: var(--color-text-secondary);
+}
+
+.slide-preview-content a {
+	color: var(--color-text-link);
+	text-decoration: underline;
+}
+
+.slide-preview-content img {
+	max-width: 100%;
+	border-radius: 4px;
+}
+
+.slide-preview-content table {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 0 0 0.8em;
+	font-size: 0.9em;
+}
+
+.slide-preview-content th,
+.slide-preview-content td {
+	padding: 0.4em 0.8em;
+	border: 1px solid var(--color-border);
+	text-align: left;
+}
+
+.slide-preview-content th {
+	font-weight: 600;
+	background-color: color-mix(in srgb, var(--color-text-secondary) 6%, transparent);
+}
+
+.slide-preview-content hr {
+	border: none;
+	border-top: 1px solid var(--color-border);
+	margin: 1em 0;
+}
+
+.slide-preview-content input[type="checkbox"] {
+	margin-right: 0.4em;
 }
