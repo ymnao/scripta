@@ -1,11 +1,31 @@
 import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
+import { registerIpcHandlers } from "./ipc";
 
-const CSP_PROD =
-	"default-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self';";
-const CSP_DEV =
-	"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:*; object-src 'none'; base-uri 'self';";
+const CSP_PROD = [
+	"default-src 'self'",
+	"script-src 'self'",
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' https: data: blob:",
+	"font-src 'self' data:",
+	"connect-src 'self'",
+	"worker-src 'self' blob:",
+	"object-src 'none'",
+	"base-uri 'self'",
+].join("; ");
+
+const CSP_DEV = [
+	"default-src 'self'",
+	"script-src 'self' 'unsafe-inline'",
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' https: data: blob:",
+	"font-src 'self' data:",
+	"connect-src 'self' ws://localhost:* http://localhost:*",
+	"worker-src 'self' blob:",
+	"object-src 'none'",
+	"base-uri 'self'",
+].join("; ");
 
 const RENDERER_FILE_DIR = join(__dirname, "../renderer");
 const openWindows = new Set<BrowserWindow>();
@@ -113,6 +133,7 @@ app.on("window-all-closed", () => {
 
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
+	registerIpcHandlers();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];
