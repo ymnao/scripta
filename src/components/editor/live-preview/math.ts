@@ -121,6 +121,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			ranges.push(
 				Decoration.replace({
 					widget: new MathWidget(tex, true),
+					block: true,
 				}).range(matchFrom, matchTo),
 			);
 		}
