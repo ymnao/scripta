@@ -1,11 +1,17 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type Extension, type Range } from "@codemirror/state";
+import {
+	EditorSelection,
+	type EditorState,
+	type Extension,
+	type Range,
+	StateEffect,
+	StateField,
+} from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
 	EditorView,
 	keymap,
-	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
 	WidgetType,
@@ -89,178 +95,142 @@ export class MathWidget extends WidgetType {
 	}
 }
 
-export function buildDecorations(view: EditorView): DecorationSet {
-	const { state } = view;
+export function buildMathDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
 	const tree = syntaxTree(state);
-
-	const cursorLines = collectCursorLines(view);
-
+	const cursorLines = collectCursorLines(state, hasFocus);
 	const ranges: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
-		const text = state.doc.sliceString(from, to);
-		const codeRanges = collectCodeRanges(tree, from, to);
-		const localDisplayRanges: CodeRange[] = [];
+	const docLength = state.doc.length;
+	const text = state.doc.sliceString(0, docLength);
+	const codeRanges = collectCodeRanges(tree, 0, docLength);
+	const localDisplayRanges: CodeRange[] = [];
 
-		// Pass 1: Display math ($$...$$)
-		for (const match of text.matchAll(DISPLAY_MATH_RE)) {
-			const matchFrom = from + match.index;
-			const matchTo = matchFrom + match[0].length;
+	// Pass 1: Display math ($$...$$). Block decoration → must be on a StateField.
+	for (const match of text.matchAll(DISPLAY_MATH_RE)) {
+		const matchFrom = match.index;
+		const matchTo = matchFrom + match[0].length;
 
-			if (isEscaped(text, match.index)) continue;
-			const closingDisplayPos = match.index + match[0].length - 2;
-			if (isEscaped(text, closingDisplayPos)) continue;
-			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+		if (isEscaped(text, match.index)) continue;
+		const closingDisplayPos = match.index + match[0].length - 2;
+		if (isEscaped(text, closingDisplayPos)) continue;
+		if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
 
-			const startLine = state.doc.lineAt(matchFrom).number;
-			const endLine = state.doc.lineAt(matchTo).number;
-			if (cursorInRange(cursorLines, startLine, endLine)) continue;
+		const startLine = state.doc.lineAt(matchFrom).number;
+		const endLine = state.doc.lineAt(matchTo).number;
+		if (cursorInRange(cursorLines, startLine, endLine)) continue;
 
-			const tex = match[1];
-			localDisplayRanges.push({ from: matchFrom, to: matchTo });
-			ranges.push(
-				Decoration.replace({
-					widget: new MathWidget(tex, true),
-					block: true,
-				}).range(matchFrom, matchTo),
-			);
+		const tex = match[1];
+		localDisplayRanges.push({ from: matchFrom, to: matchTo });
+		ranges.push(
+			Decoration.replace({
+				widget: new MathWidget(tex, true),
+				block: true,
+			}).range(matchFrom, matchTo),
+		);
+	}
+
+	// Pass 2: Inline math ($...$).
+	// Blank out display math and code ranges so the regex does not consume $ from those regions.
+	let textForInline = text;
+	if (localDisplayRanges.length > 0 || codeRanges.length > 0) {
+		const allRanges = [...localDisplayRanges, ...codeRanges]
+			.filter((r) => r.from < r.to)
+			.sort((a, b) => a.from - b.from);
+		const parts: string[] = [];
+		let pos = 0;
+		for (const r of allRanges) {
+			if (r.from > pos) parts.push(text.slice(pos, r.from));
+			const blankLen = r.to - Math.max(r.from, pos);
+			if (blankLen > 0) parts.push(" ".repeat(blankLen));
+			pos = Math.max(pos, r.to);
 		}
+		if (pos < text.length) parts.push(text.slice(pos));
+		textForInline = parts.join("");
+	}
 
-		// Pass 2: Inline math ($...$)
-		// Blank out display math and code ranges so the regex does not
-		// consume $ characters that belong to those regions.
-		let textForInline = text;
-		if (localDisplayRanges.length > 0 || codeRanges.length > 0) {
-			const allRanges = [...localDisplayRanges, ...codeRanges]
-				.map((r) => ({
-					from: Math.max(r.from - from, 0),
-					to: Math.min(r.to - from, text.length),
-				}))
-				.filter((r) => r.from < r.to)
-				.sort((a, b) => a.from - b.from);
+	for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
+		const matchFrom = match.index;
+		const matchTo = matchFrom + match[0].length;
 
-			const parts: string[] = [];
-			let pos = 0;
-			for (const r of allRanges) {
-				if (r.from > pos) parts.push(text.slice(pos, r.from));
-				const blankLen = r.to - Math.max(r.from, pos);
-				if (blankLen > 0) parts.push(" ".repeat(blankLen));
-				pos = Math.max(pos, r.to);
-			}
-			if (pos < text.length) parts.push(text.slice(pos));
-			textForInline = parts.join("");
-		}
+		if (isEscaped(textForInline, match.index)) continue;
+		const closingInlinePos = match.index + match[0].length - 1;
+		if (isEscaped(textForInline, closingInlinePos)) continue;
 
-		for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
-			const matchFrom = from + match.index;
-			const matchTo = matchFrom + match[0].length;
+		// Ensure the match does not span across blanked-out code/display regions
+		if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
+		if (localDisplayRanges.some((dr) => !(matchTo <= dr.from || matchFrom >= dr.to))) continue;
 
-			if (isEscaped(textForInline, match.index)) continue;
-			const closingInlinePos = match.index + match[0].length - 1;
-			if (isEscaped(textForInline, closingInlinePos)) continue;
+		const lineNum = state.doc.lineAt(matchFrom).number;
+		if (cursorLines.has(lineNum)) continue;
 
-			// Ensure the match does not span across blanked-out code/display regions
-			if (overlapsCodeBlock(matchFrom, matchTo, codeRanges)) continue;
-			if (localDisplayRanges.some((dr) => !(matchTo <= dr.from || matchFrom >= dr.to))) continue;
-
-			const lineNum = state.doc.lineAt(matchFrom).number;
-			if (cursorLines.has(lineNum)) continue;
-
-			const tex = match[1];
-			ranges.push(
-				Decoration.replace({
-					widget: new MathWidget(tex, false),
-				}).range(matchFrom, matchTo),
-			);
-		}
+		const tex = match[1];
+		ranges.push(
+			Decoration.replace({
+				widget: new MathWidget(tex, false),
+			}).range(matchFrom, matchTo),
+		);
 	}
 
 	return Decoration.set(ranges, true);
 }
 
-class MathDecorationPlugin implements PluginValue {
-	decorations: DecorationSet;
-	prevCursorLines: Set<number>;
-	private view: EditorView;
-	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
-	private pendingRebuild = false;
-	private destroyed = false;
+const rebuildMathDecos = StateEffect.define<boolean>();
 
-	constructor(view: EditorView) {
-		this.view = view;
-		this.decorations = buildDecorations(view);
-		this.prevCursorLines = collectCursorLines(view);
-	}
-
-	update(update: ViewUpdate) {
-		this.view = update.view;
-
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
+const mathHasFocusField = StateField.define<boolean>({
+	create() {
+		return false;
+	},
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(rebuildMathDecos)) return e.value;
 		}
-
-		if (this.pendingRebuild) {
-			this.pendingRebuild = false;
-			this.decorations = buildDecorations(update.view);
-			this.prevCursorLines = collectCursorLines(update.view);
-			return;
-		}
-
-		if (update.viewportChanged || syntaxTree(update.state) !== syntaxTree(update.startState)) {
-			this.cancelRebuild();
-			this.decorations = buildDecorations(update.view);
-			this.prevCursorLines = collectCursorLines(update.view);
-		} else if (update.docChanged) {
-			this.decorations = this.decorations.map(update.changes);
-			this.prevCursorLines = collectCursorLines(update.view);
-			this.scheduleRebuild();
-		} else if (update.selectionSet || update.focusChanged) {
-			const next = collectCursorLines(update.view);
-			if (cursorLinesChanged(this.prevCursorLines, next)) {
-				this.prevCursorLines = next;
-				this.decorations = buildDecorations(update.view);
-			}
-		}
-	}
-
-	private scheduleRebuild() {
-		if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
-		this.rebuildTimer = setTimeout(() => {
-			this.rebuildTimer = null;
-			if (this.destroyed) return;
-			if (this.view.composing) {
-				this.scheduleRebuild();
-				return;
-			}
-			this.pendingRebuild = true;
-			this.view.dispatch({});
-		}, 150);
-	}
-
-	private cancelRebuild() {
-		if (this.rebuildTimer) {
-			clearTimeout(this.rebuildTimer);
-			this.rebuildTimer = null;
-		}
-	}
-
-	destroy() {
-		this.destroyed = true;
-		this.cancelRebuild();
-	}
-}
-
-const mathPlugin = ViewPlugin.fromClass(MathDecorationPlugin, {
-	decorations: (v) => v.decorations,
+		return value;
+	},
 });
 
+const mathDecorationField = StateField.define<DecorationSet>({
+	create(state) {
+		return buildMathDecorations(state, false);
+	},
+	update(decos, tr) {
+		for (const e of tr.effects) {
+			if (e.is(rebuildMathDecos)) {
+				return buildMathDecorations(tr.state, e.value);
+			}
+		}
+		if (tr.docChanged) {
+			return buildMathDecorations(tr.state, tr.state.field(mathHasFocusField));
+		}
+		if (tr.selection) {
+			const hasFocus = tr.state.field(mathHasFocusField);
+			const oldLines = collectCursorLines(tr.startState, tr.startState.field(mathHasFocusField));
+			const newLines = collectCursorLines(tr.state, hasFocus);
+			if (cursorLinesChanged(oldLines, newLines)) {
+				return buildMathDecorations(tr.state, hasFocus);
+			}
+		}
+		return decos;
+	},
+	provide: (f) => EditorView.decorations.from(f),
+});
+
+const mathFocusHandler = ViewPlugin.fromClass(
+	class {
+		update(update: ViewUpdate) {
+			if (update.focusChanged) {
+				const { view } = update;
+				queueMicrotask(() => {
+					view.dispatch({ effects: rebuildMathDecos.of(view.hasFocus) });
+				});
+			}
+		}
+	},
+);
+
 /**
- * Click handler for math widgets.
- * domEventHandlers runs before the editor's built-in mousedown processing,
- * so returning true prevents the default range-selection behaviour.
- * If this handler somehow fails to match, ignoreEvent()=>false lets the
- * editor place the cursor normally as a fallback.
+ * Click handler for math widgets. Returns true to suppress the editor's
+ * default range-selection behaviour. ignoreEvent()=>false on the widget
+ * lets the editor place the cursor normally if this handler does not match.
  */
 function createMathClickHandler() {
 	return EditorView.domEventHandlers({
@@ -269,15 +239,13 @@ function createMathClickHandler() {
 			const mathEl = target.closest(".cm-math-inline, .cm-math-display");
 			if (!mathEl) return false;
 
-			// Use the plugin's own decoration set to find the exact range
-			const plugin = view.plugin(mathPlugin);
-			if (!plugin) return false;
+			const decorations = view.state.field(mathDecorationField, false);
+			if (!decorations) return false;
 
 			const pos = view.posAtDOM(mathEl);
 			let endPos = -1;
 
-			// Search for the decoration that covers `pos`
-			const iter = plugin.decorations.iter();
+			const iter = decorations.iter();
 			while (iter.value) {
 				if (iter.from <= pos && pos <= iter.to) {
 					endPos = iter.to;
@@ -307,7 +275,6 @@ const dollarInputHandler = EditorView.inputHandler.of((view, _from, _to, insert)
 
 	const { state } = view;
 
-	// Handle each selection range
 	const changes = state.changeByRange((range) => {
 		const pos = range.from;
 		const nextChar = state.doc.sliceString(pos, pos + 1);
@@ -348,7 +315,6 @@ const dollarBackspace = keymap.of([
 		key: "Backspace",
 		run(view) {
 			const { state } = view;
-			// Only handle if all ranges are empty cursors between $$
 			for (const range of state.selection.ranges) {
 				if (!range.empty) return false;
 				const pos = range.from;
@@ -371,7 +337,9 @@ const dollarBackspace = keymap.of([
 ]);
 
 export const mathDecoration: Extension = [
-	mathPlugin,
+	mathHasFocusField,
+	mathDecorationField,
+	mathFocusHandler,
 	createMathClickHandler(),
 	dollarInputHandler,
 	dollarBackspace,
