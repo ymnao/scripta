@@ -10,47 +10,43 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: ./.github/actions/setup-node-pnpm
 
-      - name: Lint
-        run: pnpm lint
+      - run: pnpm lint
 
   typecheck:
-    name: Typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: ./.github/actions/setup-node-pnpm
 
-      - name: Typecheck
-        run: pnpm typecheck
+      - run: pnpm typecheck
 
   test:
-    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: ./.github/actions/setup-node-pnpm
 
-      - name: Test
-        run: pnpm test
+      - run: pnpm test
 
   build:
-    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: ./.github/actions/setup-node-pnpm
 
-      - name: Build
-        run: pnpm build
+      - run: pnpm build
