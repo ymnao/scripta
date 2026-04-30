@@ -1,0 +1,25 @@
+name: Setup Node.js with pnpm
+description: Install pnpm, setup Node.js with caching, and install dependencies
+
+inputs:
+  node-version:
+    description: Node.js version to use
+    required: false
+    default: "22"
+
+runs:
+  using: composite
+  steps:
+    # pnpm のバージョンは package.json の packageManager フィールド（pnpm@10.30.0）から自動取得される。
+    # version を with で明示しないことで package.json との二重管理を避け、再現性は packageManager に一元化する。
+    - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+
+    # node-version "22" は 22 系の最新を取得する。Node 22.12.0 以降が既にリリース済みのため、
+    # package.json の engines.node (^20.19.0 || >=22.12.0) を確実に満たす。
+    - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - run: pnpm install --frozen-lockfile
+      shell: bash
