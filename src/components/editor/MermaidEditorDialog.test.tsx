@@ -2,10 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock mermaid renderer
+// Mock mermaid module — must export everything MermaidEditorDialog imports.
 const mockRenderMermaid = vi.fn();
 vi.mock("../../lib/mermaid", () => ({
 	renderMermaid: (...args: unknown[]) => mockRenderMermaid(...args),
+	isTauriProtocol: false,
+	promoteMermaidStyles: vi.fn(),
 }));
 
 // Mock theme store

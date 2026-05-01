@@ -18,14 +18,17 @@ export function createTestState(
 		selection: selection ?? (cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined),
 	});
 	// `syntaxTree(state)` を直接呼ぶテストが多いため、ここで構文木を完全に
-	// 構築する。`ensureSyntaxTree` の timeout は ms ベースで shuffle 並列実行下では
-	// CPU 競合により 5 秒以内に完了しないことがある。`syntaxTreeAvailable` で
-	// 完了確認しつつ十分長い timeout で poll する（markdown の小さな doc なら
-	// 通常 1〜2 ループで終わる。100 ループ × 60 秒で実質無制限）。
+	// 構築する。`ensureSyntaxTree(state, upto, timeout)` の timeout は ms ベースで
+	// shuffle 並列実行下の CPU 競合では parse work loop が time-budget を使い切って
+	// 部分木のまま return null するケースがある（lists / mermaid / headings 等で
+	// buildDecorations が空配列になる事象が報告されている）。
+	// timeout = Infinity で同期完了を強制する。markdown parser は有限 work で
+	// 必ず終わるため無限ループにはならない（doc の終端で stop）。`syntaxTreeAvailable`
+	// で念のため完了確認し、未完了なら追加 work を回す。
 	const limit = state.doc.length;
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 10; i++) {
 		if (syntaxTreeAvailable(state, limit)) break;
-		ensureSyntaxTree(state, limit, 60_000);
+		ensureSyntaxTree(state, limit, Number.POSITIVE_INFINITY);
 	}
 	return state;
 }
