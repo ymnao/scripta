@@ -1,5 +1,5 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { ensureSyntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTreeAvailable } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import type { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 
@@ -18,9 +18,14 @@ export function createTestState(
 		selection: selection ?? (cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined),
 	});
 	// `syntaxTree(state)` を直接呼ぶテストが多いため、ここで構文木を確実に
-	// 構築しておく。lazy parse のままだと shuffle 順で他テストの作業が挟まり、
-	// `syntaxTree()` が部分的なスタブを返してフレークすることがある。
-	ensureSyntaxTree(state, state.doc.length, 5000);
+	// 構築する。lazy parse のままだと shuffle 順で他テストの CPU 競合が挟まり、
+	// `ensureSyntaxTree` の timeout (ms) を消費しきって部分的なスタブが返り
+	// フレークすることがある。完了するまで poll するのが最も信頼できる
+	// （markdown の小さな doc なら数ループで終わる）。
+	const limit = state.doc.length;
+	for (let i = 0; i < 50 && !syntaxTreeAvailable(state, limit); i++) {
+		ensureSyntaxTree(state, limit, 5000);
+	}
 	return state;
 }
 
