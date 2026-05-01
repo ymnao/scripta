@@ -1,5 +1,5 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { ensureSyntaxTree, syntaxTreeAvailable } from "@codemirror/language";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import type { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 
@@ -9,7 +9,7 @@ export function createTestState(
 	extraExtensions?: Extension,
 	selection?: EditorSelection,
 ): EditorState {
-	const state = EditorState.create({
+	const initial = EditorState.create({
 		doc,
 		extensions: [
 			markdown({ base: markdownLanguage }),
@@ -17,20 +17,15 @@ export function createTestState(
 		],
 		selection: selection ?? (cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined),
 	});
-	// `syntaxTree(state)` を直接呼ぶテストが多いため、ここで構文木を完全に
-	// 構築する。`ensureSyntaxTree(state, upto, timeout)` の timeout は ms ベースで
-	// shuffle 並列実行下の CPU 競合では parse work loop が time-budget を使い切って
-	// 部分木のまま return null するケースがある（lists / mermaid / headings 等で
-	// buildDecorations が空配列になる事象が報告されている）。
-	// timeout = Infinity で同期完了を強制する。markdown parser は有限 work で
-	// 必ず終わるため無限ループにはならない（doc の終端で stop）。`syntaxTreeAvailable`
-	// で念のため完了確認し、未完了なら追加 work を回す。
-	const limit = state.doc.length;
-	for (let i = 0; i < 10; i++) {
-		if (syntaxTreeAvailable(state, limit)) break;
-		ensureSyntaxTree(state, limit, Number.POSITIVE_INFINITY);
-	}
-	return state;
+	// LanguageState.init は viewport 3000 文字までしか parse せず、その先は lazy。
+	// テストでは `syntaxTree(state)` の完全な tree が必要なので、ここで全文 parse する。
+	ensureSyntaxTree(initial, initial.doc.length, Number.POSITIVE_INFINITY);
+	// `ensureSyntaxTree` は parse context の tree を更新するが、`syntaxTree(state)` が
+	// 返す `field.tree` はスナップショットなので同期されない。
+	// LanguageState.apply は `this.tree != this.context.tree` のとき new LanguageState を
+	// 作って context.tree を field.tree にコピーする。no-op transaction で apply を
+	// 発火させ、field.tree を最新の parse 結果と同期する。
+	return initial.update({}).state;
 }
 
 export function createMockView(
@@ -38,7 +33,6 @@ export function createMockView(
 	visibleRanges?: { from: number; to: number }[],
 	hasFocus = false,
 ): EditorView {
-	ensureSyntaxTree(state, state.doc.length, 5000);
 	return {
 		state,
 		visibleRanges: visibleRanges ?? [{ from: 0, to: state.doc.length }],
