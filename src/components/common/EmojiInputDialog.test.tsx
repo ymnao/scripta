@@ -1,7 +1,25 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EmojiInputDialog } from "./EmojiInputDialog";
+
+// EmojiInputDialog は useEffect 内で `requestAnimationFrame(() =>
+// setAllCategoriesReady(true))` を呼んでグリッド表示を遅延させる。jsdom の
+// rAF は setTimeout(cb, ~16ms) で polyfill され CPU 競合で大きく遅れるため、
+// このテストでだけ rAF を同期実行に置き換えて waitFor の timeout を防ぐ。
+// グローバル上書きは CodeMirror の measure 周りを壊すので、必ず spyOn で
+// このファイル内に閉じる。
+beforeEach(() => {
+	vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+		cb(performance.now());
+		return 0;
+	});
+	vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 const defaultProps = {
 	open: true,
