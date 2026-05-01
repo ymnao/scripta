@@ -4,15 +4,25 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// useSettingsStore は zustand store なので関数呼び出し（selector）と
+// `.getState()` / `.subscribe()` の両方が使われる。mermaid.ts などは
+// `useSettingsStore.getState()` を直接呼ぶため、ここも mock する必要がある。
+const settingsState = {
+	showLineNumbers: false,
+	fontSize: 14,
+	fontFamily: "monospace",
+	highlightActiveLine: false,
+	showLinkCards: false,
+};
 vi.mock("../../stores/settings", () => ({
-	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
-		selector({
-			showLineNumbers: false,
-			fontSize: 14,
-			fontFamily: "monospace",
-			highlightActiveLine: false,
-			showLinkCards: false,
-		}),
+	useSettingsStore: Object.assign(
+		(selector: (s: typeof settingsState) => unknown) => selector(settingsState),
+		{
+			getState: () => settingsState,
+			setState: () => {},
+			subscribe: () => () => {},
+		},
+	),
 }));
 
 vi.mock("mermaid", () => ({

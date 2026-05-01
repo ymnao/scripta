@@ -39,3 +39,12 @@ Object.defineProperty(window, "matchMedia", {
 		dispatchEvent: () => false,
 	}),
 });
+
+// jsdom の requestAnimationFrame は setTimeout(cb, ~16ms) で polyfill されており、
+// CPU 競合下で callback が遅延する。テストでは rAF を介した state 更新を待つ
+// `waitFor` が timeout する事象が出るため、同期実行に置き換える。
+window.requestAnimationFrame = (cb: FrameRequestCallback): number => {
+	cb(performance.now());
+	return 0;
+};
+window.cancelAnimationFrame = () => {};
