@@ -9,7 +9,7 @@ export function createTestState(
 	extraExtensions?: Extension,
 	selection?: EditorSelection,
 ): EditorState {
-	return EditorState.create({
+	const state = EditorState.create({
 		doc,
 		extensions: [
 			markdown({ base: markdownLanguage }),
@@ -17,6 +17,11 @@ export function createTestState(
 		],
 		selection: selection ?? (cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined),
 	});
+	// `syntaxTree(state)` を直接呼ぶテストが多いため、ここで構文木を確実に
+	// 構築しておく。lazy parse のままだと shuffle 順で他テストの作業が挟まり、
+	// `syntaxTree()` が部分的なスタブを返してフレークすることがある。
+	ensureSyntaxTree(state, state.doc.length, 5000);
+	return state;
 }
 
 export function createMockView(
