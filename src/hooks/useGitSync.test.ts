@@ -54,19 +54,22 @@ describe("useGitSync", () => {
 		useGitSyncStore.getState().resetRuntime();
 		useGitSyncStore.setState({ ...GIT_SYNC_DEFAULTS });
 
-		mockedGitCheckAvailable.mockResolvedValue(true);
-		mockedGitCheckRepo.mockResolvedValue(true);
-		mockedGitStatus.mockResolvedValue({
+		// 各 mock を reset してから default を設定する。
+		// reset しないと前テストの mockResolvedValueOnce キューが残り、shuffle 順で
+		// 別テストの 1 回目の呼び出しが意図せず前テストの Once 値を返してしまう。
+		mockedGitCheckAvailable.mockReset().mockResolvedValue(true);
+		mockedGitCheckRepo.mockReset().mockResolvedValue(true);
+		mockedGitStatus.mockReset().mockResolvedValue({
 			branch: "main",
 			changedFilesCount: 0,
 			conflictFiles: [],
 			hasRemote: false,
 		});
-		mockedGitGetLastCommitTime.mockResolvedValue("2024-01-01 00:00:00");
-		mockedGitAddAll.mockResolvedValue(undefined);
-		mockedGitCommit.mockResolvedValue("committed");
-		mockedGitPull.mockResolvedValue("");
-		mockedGitPush.mockResolvedValue("");
+		mockedGitGetLastCommitTime.mockReset().mockResolvedValue("2024-01-01 00:00:00");
+		mockedGitAddAll.mockReset().mockResolvedValue(undefined);
+		mockedGitCommit.mockReset().mockResolvedValue("committed");
+		mockedGitPull.mockReset().mockResolvedValue("");
+		mockedGitPush.mockReset().mockResolvedValue("");
 	});
 
 	afterEach(() => {
@@ -218,9 +221,13 @@ describe("useGitSync", () => {
 		mockedGitPull.mockRejectedValue(new Error("CONFLICT (content): Merge conflict in file1.md"));
 		mockedGitPush.mockClear();
 
-		// Trigger manual sync which does commit → pull → push
+		// Trigger manual sync which does commit → pull → push.
+		// queue.enqueue() の戻り値は捨てられているので外から待てない。queue 内で
+		// commit → pull(失敗) → refreshStatus と複数 await が連鎖するため、
+		// timer を進めて await chain 全体を解決させる。100ms ≪ autoCommit/Pull/Push
+		// のデフォルト間隔（10 分）なので interval は発火しない。
 		result.current.manualSync();
-		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(100);
 
 		// Pull was called
 		expect(mockedGitPull).toHaveBeenCalled();

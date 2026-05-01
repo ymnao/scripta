@@ -10,6 +10,7 @@ import {
 } from "../../lib/commands";
 import { isNewTabPath } from "../../lib/path";
 import { useSettingsStore } from "../../stores/settings";
+import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { FsChangeEvent } from "../../types/workspace";
@@ -170,6 +171,12 @@ function openFileInStore(workspacePath: string, filePath: string) {
 describe("AppLayout", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
+		// shuffle 順での mock 履歴・Once キューのリークを防ぐため、Once キューも含めて
+		// 完全に reset する。`mockReset` は実装も消すので、その後で必要な
+		// mockImplementation / mockResolvedValue を再設定する。
+		mockedReadFile.mockReset().mockResolvedValue("# Hello");
+		mockedWriteFile.mockReset().mockResolvedValue(undefined);
+		mockedFileExists.mockReset().mockResolvedValue(false);
 		fsChangeCallback = null;
 		closeHandler = null;
 		capturedOnFileSelect = null;
@@ -190,8 +197,6 @@ describe("AppLayout", () => {
 			};
 		});
 		(openConflictWindow as Mock).mockClear();
-		mockedReadFile.mockResolvedValue("# Hello");
-		mockedWriteFile.mockResolvedValue(undefined);
 		nextId = 1;
 		useWorkspaceStore.setState({
 			workspacePath: null,
@@ -203,6 +208,7 @@ describe("AppLayout", () => {
 		useWorkspaceConfigStore.getState().reset();
 		useGitSyncStore.getState().resetRuntime();
 		useScratchpadStore.setState({ open: false });
+		useToastStore.setState({ toasts: [] });
 	});
 
 	afterEach(() => {

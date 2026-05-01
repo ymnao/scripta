@@ -56,7 +56,10 @@ describe("StatusBar", () => {
 
 	it("copies file path to clipboard on click", async () => {
 		const writeText = vi.fn().mockResolvedValue(undefined);
-		Object.assign(navigator, { clipboard: { writeText } });
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: { writeText },
+		});
 
 		render(<StatusBar filePath="docs/readme.md" />);
 		await userEvent.click(screen.getByTestId("file-path"));
