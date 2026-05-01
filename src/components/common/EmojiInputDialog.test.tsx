@@ -12,12 +12,16 @@ const defaultProps = {
 	onCancel: vi.fn(),
 };
 
+// userEvent v14 の delay は内部で setTimeout を使うため、shuffle 並列下で
+// CPU 競合が起きると `userEvent.type` 系が timeout する事象が出る。
+// `{ delay: null }` で internal setTimeout を無効化し、各キー入力を同期処理にする。
 function renderDialog(overrides: Partial<typeof defaultProps> = {}) {
 	const props = { ...defaultProps, ...overrides };
 	for (const fn of [props.onConfirm, props.onRemove, props.onCancel]) {
 		if (vi.isMockFunction(fn)) fn.mockClear();
 	}
-	return render(<EmojiInputDialog {...props} />);
+	const user = userEvent.setup({ delay: null });
+	return { ...render(<EmojiInputDialog {...props} />), user };
 }
 
 describe("EmojiInputDialog", () => {
@@ -73,11 +77,11 @@ describe("EmojiInputDialog", () => {
 
 	it("絵文字をクリックして「設定」→ onConfirm が呼ばれる", async () => {
 		const onConfirm = vi.fn();
-		renderDialog({ onConfirm });
+		const { user } = renderDialog({ onConfirm });
 
 		const grid = screen.getByLabelText("絵文字一覧");
-		await userEvent.click(within(grid).getByLabelText("😀"));
-		await userEvent.click(screen.getByText("設定"));
+		await user.click(within(grid).getByLabelText("😀"));
+		await user.click(screen.getByText("設定"));
 		expect(onConfirm).toHaveBeenCalledWith("😀");
 	});
 
@@ -101,17 +105,17 @@ describe("EmojiInputDialog", () => {
 
 	it("「キャンセル」→ onCancel が呼ばれる", async () => {
 		const onCancel = vi.fn();
-		renderDialog({ onCancel });
-		await userEvent.click(screen.getByText("キャンセル"));
+		const { user } = renderDialog({ onCancel });
+		await user.click(screen.getByText("キャンセル"));
 		expect(onCancel).toHaveBeenCalled();
 	});
 
 	it("currentEmoji ありで「削除」ボタン表示、クリックで onRemove", async () => {
 		const onRemove = vi.fn();
-		renderDialog({ currentEmoji: "📝", onRemove });
+		const { user } = renderDialog({ currentEmoji: "📝", onRemove });
 		const deleteBtn = screen.getByText("削除");
 		expect(deleteBtn).toBeInTheDocument();
-		await userEvent.click(deleteBtn);
+		await user.click(deleteBtn);
 		expect(onRemove).toHaveBeenCalled();
 	});
 
@@ -126,9 +130,9 @@ describe("EmojiInputDialog", () => {
 	});
 
 	it("検索するとマッチする絵文字のみ表示される", async () => {
-		renderDialog();
+		const { user } = renderDialog();
 		const searchInput = screen.getByLabelText("絵文字を検索");
-		await userEvent.type(searchInput, "fire");
+		await user.type(searchInput, "fire");
 
 		const grid = screen.getByLabelText("絵文字一覧");
 		expect(within(grid).getByLabelText("🔥")).toBeInTheDocument();
@@ -137,26 +141,26 @@ describe("EmojiInputDialog", () => {
 	});
 
 	it("検索で見つからない場合はメッセージを表示", async () => {
-		renderDialog();
+		const { user } = renderDialog();
 		const searchInput = screen.getByLabelText("絵文字を検索");
-		await userEvent.type(searchInput, "xyznotfound");
+		await user.type(searchInput, "xyznotfound");
 
 		expect(screen.getByText("見つかりませんでした")).toBeInTheDocument();
 	});
 
 	it("検索中はカテゴリタブが非表示", async () => {
-		renderDialog();
+		const { user } = renderDialog();
 		const searchInput = screen.getByLabelText("絵文字を検索");
-		await userEvent.type(searchInput, "heart");
+		await user.type(searchInput, "heart");
 
 		expect(screen.queryByLabelText("スマイリー")).not.toBeInTheDocument();
 	});
 
 	it("検索をクリアするとカテゴリ表示に戻る", async () => {
-		renderDialog();
+		const { user } = renderDialog();
 		const searchInput = screen.getByLabelText("絵文字を検索");
-		await userEvent.type(searchInput, "fire");
-		await userEvent.clear(searchInput);
+		await user.type(searchInput, "fire");
+		await user.clear(searchInput);
 
 		// カテゴリ見出しが再表示される
 		const grid = screen.getByLabelText("絵文字一覧");
@@ -166,10 +170,10 @@ describe("EmojiInputDialog", () => {
 
 	it("IME変換中のEnterで絵文字が確定されない", async () => {
 		const onConfirm = vi.fn();
-		renderDialog({ onConfirm });
+		const { user } = renderDialog({ onConfirm });
 
 		const grid = screen.getByLabelText("絵文字一覧");
-		await userEvent.click(within(grid).getByLabelText("😀"));
+		await user.click(within(grid).getByLabelText("😀"));
 
 		const searchInput = screen.getByLabelText("絵文字を検索");
 		fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 229 });
@@ -178,9 +182,9 @@ describe("EmojiInputDialog", () => {
 	});
 
 	it("日本語キーワードで検索できる", async () => {
-		renderDialog();
+		const { user } = renderDialog();
 		const searchInput = screen.getByLabelText("絵文字を検索");
-		await userEvent.type(searchInput, "桜");
+		await user.type(searchInput, "桜");
 
 		const grid = screen.getByLabelText("絵文字一覧");
 		expect(within(grid).getByLabelText("🌸")).toBeInTheDocument();
