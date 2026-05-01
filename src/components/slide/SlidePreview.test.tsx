@@ -23,7 +23,7 @@ describe("SlidePreview", () => {
 			<SlidePreview markdown={"# Title\n---"} slideIndex={0} totalSlides={2} />,
 		);
 		const content = container.querySelector(".slide-preview-content");
-		expect(content).toBeDefined();
+		expect(content).not.toBeNull();
 		expect(content?.innerHTML).toContain("Title");
 		// --- が <hr> に変換されていないこと
 		expect(content?.querySelector("hr")).toBeNull();
@@ -33,6 +33,7 @@ describe("SlidePreview", () => {
 		const { container } = render(<SlidePreview markdown="---" slideIndex={0} totalSlides={2} />);
 		// "---" のみは Markdown の水平線として解釈される
 		const content = container.querySelector(".slide-preview-content");
-		expect(content).toBeDefined();
+		expect(content).not.toBeNull();
+		expect(content?.querySelector("hr")).not.toBeNull();
 	});
 });
