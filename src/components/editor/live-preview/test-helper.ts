@@ -17,14 +17,15 @@ export function createTestState(
 		],
 		selection: selection ?? (cursorPos != null ? EditorSelection.cursor(cursorPos) : undefined),
 	});
-	// `syntaxTree(state)` を直接呼ぶテストが多いため、ここで構文木を確実に
-	// 構築する。lazy parse のままだと shuffle 順で他テストの CPU 競合が挟まり、
-	// `ensureSyntaxTree` の timeout (ms) を消費しきって部分的なスタブが返り
-	// フレークすることがある。完了するまで poll するのが最も信頼できる
-	// （markdown の小さな doc なら数ループで終わる）。
+	// `syntaxTree(state)` を直接呼ぶテストが多いため、ここで構文木を完全に
+	// 構築する。`ensureSyntaxTree` の timeout は ms ベースで shuffle 並列実行下では
+	// CPU 競合により 5 秒以内に完了しないことがある。`syntaxTreeAvailable` で
+	// 完了確認しつつ十分長い timeout で poll する（markdown の小さな doc なら
+	// 通常 1〜2 ループで終わる。100 ループ × 60 秒で実質無制限）。
 	const limit = state.doc.length;
-	for (let i = 0; i < 50 && !syntaxTreeAvailable(state, limit); i++) {
-		ensureSyntaxTree(state, limit, 5000);
+	for (let i = 0; i < 100; i++) {
+		if (syntaxTreeAvailable(state, limit)) break;
+		ensureSyntaxTree(state, limit, 60_000);
 	}
 	return state;
 }

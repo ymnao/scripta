@@ -1,10 +1,14 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 import { installDefaultApiMock } from "./__test-utils__/api-mock";
 
 afterEach(() => {
 	cleanup();
+	// fake timers が次のテストに漏れて userEvent などが hung するのを防ぐため、
+	// 各テスト終了時に必ず real timers に戻す。fake timers を使うテストは自身の
+	// beforeEach で改めて vi.useFakeTimers() を呼ぶ。
+	vi.useRealTimers();
 });
 
 beforeEach(() => {

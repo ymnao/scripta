@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock mermaid renderer
 const mockRenderMermaid = vi.fn();
@@ -28,6 +28,15 @@ function renderDialog(overrides: Partial<typeof defaultProps & { mode: "edit" | 
 	if (vi.isMockFunction(props.onCancel)) props.onCancel.mockClear();
 	return render(<MermaidEditorDialog {...props} />);
 }
+
+beforeEach(() => {
+	// MermaidEditorDialog は code 変更時 setTimeout(..., 300) で renderMermaid を呼ぶ。
+	// テストを終わらせた後にも pending な timer が発火し、reset 済みの mock が
+	// undefined を返して `.then` で TypeError になる事象を防ぐため、デフォルトを
+	// 必ず Promise を返す形に揃える。
+	mockRenderMermaid.mockReset();
+	mockRenderMermaid.mockResolvedValue("<svg>fake</svg>");
+});
 
 afterEach(() => {
 	mockRenderMermaid.mockReset();
