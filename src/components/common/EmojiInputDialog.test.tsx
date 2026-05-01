@@ -3,6 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EmojiInputDialog } from "./EmojiInputDialog";
 
+// emoji-data.ts (2914 行) の全絵文字を jsdom で render するため CPU 競合下では
+// default 5000ms に間に合わないテストがある。このファイルだけ timeout を
+// 15s に拡大する（global 拡大はハング検出の感度を下げるため避ける）。
+vi.setConfig({ testTimeout: 15_000 });
+
 // EmojiInputDialog は useEffect 内で `requestAnimationFrame(() =>
 // setAllCategoriesReady(true))` を呼んでグリッド表示を遅延させる。jsdom の
 // rAF は setTimeout(cb, ~16ms) で polyfill され CPU 競合で大きく遅れるため、
