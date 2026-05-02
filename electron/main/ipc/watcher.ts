@@ -1,21 +1,8 @@
 import { ipcMain } from "electron";
-import { registerWorkspaceRoot, unregisterWorkspaceRoot, validatePath } from "../utils/path-guard";
 
-let activeRoot: string | null = null;
-
+// Stage 1: no-op。Stage 2 で chokidar による実装に置き換える。
+// Workspace ルートの登録は workspace:set IPC が責務を持つ。
 export function registerWatcherIpc(): void {
-	ipcMain.handle("watcher:start", async (_event, path: string) => {
-		const resolved = validatePath(path);
-		if (activeRoot && activeRoot !== resolved) {
-			unregisterWorkspaceRoot(activeRoot);
-		}
-		registerWorkspaceRoot(resolved);
-		activeRoot = resolved;
-	});
-	ipcMain.handle("watcher:stop", async () => {
-		if (activeRoot) {
-			unregisterWorkspaceRoot(activeRoot);
-			activeRoot = null;
-		}
-	});
+	ipcMain.handle("watcher:start", async (_event, _path: string) => {});
+	ipcMain.handle("watcher:stop", async () => {});
 }

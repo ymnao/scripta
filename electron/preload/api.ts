@@ -29,6 +29,8 @@ export type Api = Readonly<{
 	openDirectoryPicker: () => Promise<string | null>;
 	showSaveDialog: (opts: SaveDialogOptions) => Promise<string | null>;
 
+	workspaceSet: (path: string | null) => Promise<void>;
+
 	readFile: (path: string) => Promise<string>;
 	writeFile: (path: string, content: string) => Promise<void>;
 	writeNewFile: (path: string, content: string) => Promise<void>;

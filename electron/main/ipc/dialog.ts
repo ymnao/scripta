@@ -7,6 +7,7 @@ import {
 	type SaveDialogReturnValue,
 } from "electron";
 import type { SaveDialogOptions } from "../../preload/api";
+import { registerTransientWritePath } from "../utils/path-guard";
 
 function getParentWindow(): BrowserWindow | undefined {
 	return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -32,6 +33,9 @@ export function registerDialogIpc(): void {
 	ipcMain.handle("dialog:save", async (_event, opts: SaveDialogOptions): Promise<string | null> => {
 		const result = await showSaveDialog(opts);
 		if (result.canceled || !result.filePath) return null;
+		// ユーザーが明示的に選択した保存先は workspace 外でも書き込みを許可する。
+		// transient 許可は 1 回限り（fs:write の path-guard で consume される）。
+		registerTransientWritePath(result.filePath);
 		return result.filePath;
 	});
 }

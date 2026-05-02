@@ -3,6 +3,11 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 
 const allowedRoots = new Set<string>();
 
+// dialog.showSaveDialog でユーザーが明示選択した保存先など、ワークスペース外でも
+// 「ユーザーの意図的な書き込み」として 1 回限り許可するパス。
+// fs:write 等で assertPathAllowed がマッチした時点で consume（削除）される。
+const transientWritePaths = new Set<string>();
+
 export function validatePath(p: string): string {
 	if (typeof p !== "string" || p.length === 0) {
 		throw new Error("Invalid path: empty");
@@ -49,10 +54,20 @@ export function unregisterWorkspaceRoot(p: string): void {
 
 export function clearWorkspaceRoots(): void {
 	allowedRoots.clear();
+	transientWritePaths.clear();
 }
 
 export function getWorkspaceRoots(): string[] {
 	return [...allowedRoots];
+}
+
+export function registerTransientWritePath(p: string): void {
+	const validated = validatePath(p);
+	transientWritePaths.add(realpathBestEffort(validated));
+}
+
+export function getTransientWritePaths(): string[] {
+	return [...transientWritePaths];
 }
 
 function isPathInside(child: string, parent: string): boolean {
@@ -61,13 +76,13 @@ function isPathInside(child: string, parent: string): boolean {
 	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-// Fail-closed: ワークスペース未登録時はすべて拒否する。
+// Fail-closed: ワークスペース未登録 + transient 許可なし → 拒否する。
 // 起動時に main/index.ts が saved workspacePath を auto-register することで
 // 既存ワークスペースは利用継続でき、初回起動 / ワークスペース未選択時は
 // fs:* IPC が一切通らないことが保証される。
 export function isPathAllowed(p: string): boolean {
-	if (allowedRoots.size === 0) return false;
 	const target = realpathBestEffort(p);
+	if (transientWritePaths.has(target)) return true;
 	for (const root of allowedRoots) {
 		if (isPathInside(target, root)) return true;
 	}
@@ -75,9 +90,13 @@ export function isPathAllowed(p: string): boolean {
 }
 
 export function assertPathAllowed(p: string): void {
-	if (!isPathAllowed(p)) {
-		// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
-		console.warn(`[path-guard] denied outside workspace: ${p}`);
-		throw new Error("Permission denied: outside workspace");
+	const target = realpathBestEffort(p);
+	// transient 許可は 1 回限り：マッチしたら consume して return
+	if (transientWritePaths.delete(target)) return;
+	for (const root of allowedRoots) {
+		if (isPathInside(target, root)) return;
 	}
+	// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
+	console.warn(`[path-guard] denied outside workspace: ${p}`);
+	throw new Error("Permission denied: outside workspace");
 }

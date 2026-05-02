@@ -9,6 +9,7 @@ import { registerShellIpc } from "./shell";
 import { registerUpdateIpc } from "./update";
 import { registerWatcherIpc } from "./watcher";
 import { registerWindowIpc } from "./window";
+import { registerWorkspaceIpc } from "./workspace";
 
 export function registerIpcHandlers(): void {
 	registerDialogIpc();
@@ -22,4 +23,5 @@ export function registerIpcHandlers(): void {
 	registerUpdateIpc();
 	registerWatcherIpc();
 	registerWindowIpc();
+	registerWorkspaceIpc();
 }

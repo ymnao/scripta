@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	assertPathAllowed,
 	clearWorkspaceRoots,
+	getTransientWritePaths,
 	getWorkspaceRoots,
 	isPathAllowed,
+	registerTransientWritePath,
 	registerWorkspaceRoot,
 	unregisterWorkspaceRoot,
 	validatePath,
@@ -190,5 +192,46 @@ describe("assertPathAllowed", () => {
 		} finally {
 			spy.mockRestore();
 		}
+	});
+});
+
+describe("transient write paths", () => {
+	it("allows a transient path even when no workspace is registered", () => {
+		const target = join(outsideDir, "export.html");
+		registerTransientWritePath(target);
+		expect(isPathAllowed(target)).toBe(true);
+	});
+
+	it("permits the transient path exactly once and consumes it on assert", () => {
+		const target = join(outsideDir, "export.html");
+		registerTransientWritePath(target);
+		expect(getTransientWritePaths()).toHaveLength(1);
+
+		expect(() => assertPathAllowed(target)).not.toThrow();
+		// 1 回 consume された後、再度 assert すると拒否される
+		expect(() => assertPathAllowed(target)).toThrow(/Permission denied/);
+		expect(getTransientWritePaths()).toEqual([]);
+	});
+
+	it("does not consume when assert matches via workspace root (transient remains)", () => {
+		registerWorkspaceRoot(workspaceDir);
+		const wsFile = join(workspaceDir, "f.md");
+		const transient = join(outsideDir, "export.html");
+		registerTransientWritePath(transient);
+
+		// workspace 経路で許可された場合、transient は consume されない
+		expect(() => assertPathAllowed(wsFile)).not.toThrow();
+		expect(getTransientWritePaths()).toHaveLength(1);
+
+		// transient はまだ使える
+		expect(() => assertPathAllowed(transient)).not.toThrow();
+		expect(getTransientWritePaths()).toEqual([]);
+	});
+
+	it("clearWorkspaceRoots also clears transient write paths", () => {
+		registerTransientWritePath(join(outsideDir, "x.html"));
+		expect(getTransientWritePaths()).toHaveLength(1);
+		clearWorkspaceRoots();
+		expect(getTransientWritePaths()).toEqual([]);
 	});
 });

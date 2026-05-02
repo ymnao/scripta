@@ -1,6 +1,6 @@
 import { Files, FolderOpen, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
-import { openDirectoryPicker } from "../../lib/commands";
+import { openDirectoryPicker, workspaceSet } from "../../lib/commands";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { FileTree } from "../filetree/FileTree";
 import { SearchPanel } from "../search/SearchPanel";
@@ -48,6 +48,9 @@ export function Sidebar({
 	const handleOpenFolder = useCallback(async () => {
 		const selected = await openDirectoryPicker();
 		if (selected) {
+			// fs:* IPC が走り出す前に main 側 workspace 登録を完了させる必要がある
+			// （FileTree などが setWorkspacePath をトリガーに即 listDirectory を打つため）
+			await workspaceSet(selected);
 			setWorkspacePath(selected);
 		}
 	}, [setWorkspacePath]);

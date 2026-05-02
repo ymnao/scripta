@@ -3,7 +3,7 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getWorkspacePathFromSettings } from "./ipc/settings";
-import { registerWorkspaceRoot } from "./utils/path-guard";
+import { setActiveWorkspace } from "./ipc/workspace";
 import { isSafeExternalUrl } from "./utils/url";
 
 const CSP_PROD = [
@@ -133,7 +133,7 @@ function bootstrapWorkspaceFromSettings(): void {
 	const savedPath = getWorkspacePathFromSettings();
 	if (savedPath === null) return;
 	try {
-		registerWorkspaceRoot(savedPath);
+		setActiveWorkspace(savedPath);
 	} catch (e) {
 		console.warn("[bootstrap] failed to register saved workspace path:", e);
 	}

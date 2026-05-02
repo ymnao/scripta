@@ -184,6 +184,10 @@ export function showSaveDialog(opts: SaveDialogOptions): Promise<string | null> 
 	return window.api.showSaveDialog(opts);
 }
 
+export function workspaceSet(path: string | null): Promise<void> {
+	return window.api.workspaceSet(path);
+}
+
 export function emitConflictResolved(): Promise<void> {
 	return window.api.emitConflictResolved();
 }

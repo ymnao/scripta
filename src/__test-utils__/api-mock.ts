@@ -22,6 +22,8 @@ export function createApiMock(): Api {
 		openDirectoryPicker: vi.fn(async () => null),
 		showSaveDialog: vi.fn(async () => null),
 
+		workspaceSet: vi.fn(async () => {}),
+
 		readFile: vi.fn(async () => ""),
 		writeFile: vi.fn(async () => {}),
 		writeNewFile: vi.fn(async () => {}),

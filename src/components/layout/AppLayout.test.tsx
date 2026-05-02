@@ -34,6 +34,7 @@ vi.mock("../../lib/commands", () => ({
 	clearWebviewBrowsingData: vi.fn().mockResolvedValue(undefined),
 	getAppVersion: vi.fn().mockResolvedValue("0.1.0"),
 	openDirectoryPicker: vi.fn().mockResolvedValue(null),
+	workspaceSet: vi.fn().mockResolvedValue(undefined),
 	openConflictWindow: vi.fn().mockResolvedValue(undefined),
 	closeWindow: vi.fn().mockResolvedValue(undefined),
 	onFsChange: vi.fn(),
