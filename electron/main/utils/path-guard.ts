@@ -61,42 +61,19 @@ function isPathInside(child: string, parent: string): boolean {
 	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-function isWithinRegisteredRoot(target: string): boolean {
+export function isPathAllowed(p: string): boolean {
+	if (allowedRoots.size === 0) return true;
+	const target = realpathBestEffort(p);
 	for (const root of allowedRoots) {
 		if (isPathInside(target, root)) return true;
 	}
 	return false;
 }
 
-export function isReadAllowed(p: string): boolean {
-	if (allowedRoots.size === 0) return true;
-	return isWithinRegisteredRoot(realpathBestEffort(p));
-}
-
-export function isWriteAllowed(p: string): boolean {
-	if (allowedRoots.size === 0) return true;
-	// realpathBestEffort は対象が未存在でも、実在する最も近い祖先を realpath し
-	// その下に未存在 suffix を付けた形を返す。これで:
-	//   - 中間ディレクトリ symlink（例: workspace/escape -> /etc, write to /etc/passwd）を解消できる
-	//   - 既存ファイルが symlink で外を指していれば検出できる
-	return isWithinRegisteredRoot(realpathBestEffort(p));
-}
-
-function logDenied(kind: "read" | "write", p: string): void {
-	// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
-	console.warn(`[path-guard] ${kind} denied outside workspace: ${p}`);
-}
-
-export function assertReadAllowed(p: string): void {
-	if (!isReadAllowed(p)) {
-		logDenied("read", p);
-		throw new Error("Permission denied: outside workspace");
-	}
-}
-
-export function assertWriteAllowed(p: string): void {
-	if (!isWriteAllowed(p)) {
-		logDenied("write", p);
+export function assertPathAllowed(p: string): void {
+	if (!isPathAllowed(p)) {
+		// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
+		console.warn(`[path-guard] denied outside workspace: ${p}`);
 		throw new Error("Permission denied: outside workspace");
 	}
 }

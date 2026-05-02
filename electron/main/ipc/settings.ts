@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, ipcMain } from "electron";
@@ -15,10 +15,6 @@ function createStore(path: string): Store {
 
 function load(store: Store): Record<string, unknown> {
 	if (store.cache !== null) return store.cache;
-	if (!existsSync(store.path)) {
-		store.cache = {};
-		return store.cache;
-	}
 	try {
 		const raw = readFileSync(store.path, "utf8");
 		const parsed = JSON.parse(raw);
@@ -27,6 +23,7 @@ function load(store: Store): Record<string, unknown> {
 				? (parsed as Record<string, unknown>)
 				: {};
 	} catch {
+		// ENOENT (初回起動) も JSON 破損も同じく空オブジェクトにフォールバック
 		store.cache = {};
 	}
 	return store.cache;
@@ -34,15 +31,16 @@ function load(store: Store): Record<string, unknown> {
 
 async function persist(store: Store): Promise<void> {
 	if (store.cache === null) return;
-	// write-file-atomic は temp file への write → fsync → rename を行う。
-	// 電源断やプロセスクラッシュでも、settings.json が空 / 半端な状態に
-	// なることを防ぐ（rename だけでは fsync 抜けで OS バッファ未flush の事故が残る）。
+	// write-file-atomic は tmp への write → fsync → rename を保証するため、
+	// 電源断やクラッシュで settings.json が破損した状態にならない。
 	await mkdir(dirname(store.path), { recursive: true });
 	await writeFileAtomic(store.path, JSON.stringify(store.cache, null, 2), {
 		encoding: "utf8",
 	});
 }
 
+// undefined と未設定を区別しない（旧 Tauri 版と同じセマンティクス）。
+// null を set した key は load() の data に残るが getValue は null を返す。
 function getValue(store: Store, key: string): unknown {
 	const data = load(store);
 	return key in data ? data[key] : null;

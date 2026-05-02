@@ -4,12 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	assertReadAllowed,
-	assertWriteAllowed,
+	assertPathAllowed,
 	clearWorkspaceRoots,
 	getWorkspaceRoots,
-	isReadAllowed,
-	isWriteAllowed,
+	isPathAllowed,
 	registerWorkspaceRoot,
 	unregisterWorkspaceRoot,
 	validatePath,
@@ -85,27 +83,26 @@ describe("workspace root registration", () => {
 	});
 });
 
-describe("isReadAllowed / isWriteAllowed", () => {
+describe("isPathAllowed", () => {
 	it("allows everything when no roots are registered (back-compat)", () => {
-		expect(isReadAllowed("/anywhere/file")).toBe(true);
-		expect(isWriteAllowed("/anywhere/file")).toBe(true);
+		expect(isPathAllowed("/anywhere/file")).toBe(true);
 	});
 
-	it("allows reads of files inside the workspace", async () => {
+	it("allows files inside the workspace", async () => {
 		const file = join(workspaceDir, "f.md");
 		await writeFile(file, "x", "utf8");
 		registerWorkspaceRoot(workspaceDir);
-		expect(isReadAllowed(file)).toBe(true);
+		expect(isPathAllowed(file)).toBe(true);
 	});
 
-	it("rejects reads of files outside the workspace", async () => {
+	it("rejects files outside the workspace", async () => {
 		const outsideFile = join(outsideDir, "secret");
 		await writeFile(outsideFile, "x", "utf8");
 		registerWorkspaceRoot(workspaceDir);
-		expect(isReadAllowed(outsideFile)).toBe(false);
+		expect(isPathAllowed(outsideFile)).toBe(false);
 	});
 
-	it("blocks symlink-based escape from the workspace (read)", async () => {
+	it("blocks symlink-based escape from the workspace", async () => {
 		// workspace 内に outside ディレクトリを指す symlink を仕込む
 		const link = join(workspaceDir, "escape");
 		await symlink(outsideDir, link);
@@ -114,31 +111,31 @@ describe("isReadAllowed / isWriteAllowed", () => {
 		registerWorkspaceRoot(workspaceDir);
 		// 単純な path.resolve では「workspace 内」と判定されてしまうが、
 		// realpath ベースの判定では outside に解決されるため拒否される
-		expect(isReadAllowed(target)).toBe(false);
+		expect(isPathAllowed(target)).toBe(false);
 	});
 
-	it("allows writes inside the workspace even before the file exists", () => {
+	it("allows paths inside the workspace even before the file exists", () => {
 		registerWorkspaceRoot(workspaceDir);
 		const newPath = join(workspaceDir, "subdir", "new.md");
-		expect(isWriteAllowed(newPath)).toBe(true);
+		expect(isPathAllowed(newPath)).toBe(true);
 	});
 
-	it("blocks symlink-based escape on writes (parent dir is realpath'd)", async () => {
+	it("blocks symlink-based escape via intermediate directories", async () => {
 		const link = join(workspaceDir, "escape");
 		await symlink(outsideDir, link);
 		registerWorkspaceRoot(workspaceDir);
 		const evil = join(link, "new-file.md");
-		expect(isWriteAllowed(evil)).toBe(false);
+		expect(isPathAllowed(evil)).toBe(false);
 	});
 
-	it("allows writes inside any of multiple registered roots", async () => {
+	it("allows paths inside any of multiple registered roots", async () => {
 		const second = await mkdtemp(join(tmpdir(), "scripta-pg-ws2-"));
 		try {
 			registerWorkspaceRoot(workspaceDir);
 			registerWorkspaceRoot(second);
-			expect(isWriteAllowed(join(workspaceDir, "a.md"))).toBe(true);
-			expect(isWriteAllowed(join(second, "b.md"))).toBe(true);
-			expect(isWriteAllowed(join(outsideDir, "c.md"))).toBe(false);
+			expect(isPathAllowed(join(workspaceDir, "a.md"))).toBe(true);
+			expect(isPathAllowed(join(second, "b.md"))).toBe(true);
+			expect(isPathAllowed(join(outsideDir, "c.md"))).toBe(false);
 		} finally {
 			await rm(second, { recursive: true, force: true });
 		}
@@ -148,31 +145,31 @@ describe("isReadAllowed / isWriteAllowed", () => {
 		const sibling = await mkdtemp(join(tmpdir(), "scripta-pg-ws-"));
 		try {
 			registerWorkspaceRoot(workspaceDir);
-			expect(isReadAllowed(join(sibling, "f.md"))).toBe(false);
+			expect(isPathAllowed(join(sibling, "f.md"))).toBe(false);
 		} finally {
 			await rm(sibling, { recursive: true, force: true });
 		}
 	});
 });
 
-describe("assertReadAllowed / assertWriteAllowed", () => {
+describe("assertPathAllowed", () => {
 	it("does not throw inside the workspace", async () => {
 		const file = join(workspaceDir, "f.md");
 		await writeFile(file, "x", "utf8");
 		registerWorkspaceRoot(workspaceDir);
-		expect(() => assertReadAllowed(file)).not.toThrow();
-		expect(() => assertWriteAllowed(join(workspaceDir, "new.md"))).not.toThrow();
+		expect(() => assertPathAllowed(file)).not.toThrow();
+		expect(() => assertPathAllowed(join(workspaceDir, "new.md"))).not.toThrow();
 	});
 
 	it("throws a generic Permission denied error WITHOUT leaking the path", async () => {
 		registerWorkspaceRoot(workspaceDir);
 		const offendingPath = join(outsideDir, "secret");
-		expect(() => assertReadAllowed(offendingPath)).toThrow(
+		expect(() => assertPathAllowed(offendingPath)).toThrow(
 			/^Permission denied: outside workspace$/,
 		);
 		// 違反パスが Error.message に含まれていないことを明示的に検証
 		try {
-			assertReadAllowed(offendingPath);
+			assertPathAllowed(offendingPath);
 		} catch (e) {
 			expect((e as Error).message).not.toContain(offendingPath);
 			expect((e as Error).message).not.toContain(outsideDir);
@@ -183,7 +180,7 @@ describe("assertReadAllowed / assertWriteAllowed", () => {
 		registerWorkspaceRoot(workspaceDir);
 		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
-			expect(() => assertWriteAllowed(join(outsideDir, "x"))).toThrow();
+			expect(() => assertPathAllowed(join(outsideDir, "x"))).toThrow();
 			expect(spy).toHaveBeenCalledTimes(1);
 			expect(spy.mock.calls[0][0]).toContain("[path-guard]");
 			expect(spy.mock.calls[0][0]).toContain(outsideDir);

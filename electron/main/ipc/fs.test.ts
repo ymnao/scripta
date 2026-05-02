@@ -1,15 +1,13 @@
 // @vitest-environment node
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 	shell: {
-		trashItem: vi.fn(async (path: string) => {
-			await rm(path, { recursive: true, force: true });
-		}),
+		trashItem: vi.fn(async () => {}),
 	},
 }));
 
@@ -284,12 +282,5 @@ describe("deleteEntryImpl", () => {
 		await writeFile(outside, "", "utf8").catch(() => {});
 		await expect(deleteEntryImpl(outside)).rejects.toThrow(/Permission denied/);
 		await rm(outside, { force: true });
-	});
-});
-
-describe("path normalization", () => {
-	it("validates paths consistently with the OS separator", () => {
-		const sample = join(workspaceDir, "a", "b");
-		expect(sample.includes(sep)).toBe(true);
 	});
 });
