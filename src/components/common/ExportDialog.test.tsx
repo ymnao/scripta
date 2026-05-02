@@ -2,8 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// isPdfSupported はモジュールレベルで navigator.platform を参照するため、
-// インポート前に platform を設定する
+// isPdfSupported はモジュールレベルで navigator.userAgent を参照するため、
+// インポート前に userAgent を設定する
 vi.hoisted(() => {
 	Object.defineProperty(navigator, "userAgent", {
 		value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
