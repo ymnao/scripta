@@ -24,7 +24,7 @@ default = ["tauri-app"]
 tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-log", "dep:tauri-plugin-shell", "dep:tauri-plugin-store", "dep:tauri-plugin-window-state", "dep:tauri-build"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.4", features = [], optional = true }
+tauri-build = { version = "2.6.0", features = [], optional = true }
 
 [dependencies]
 serde_json = "1.0"
