@@ -17,7 +17,8 @@
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-		"test": "vitest run --passWithNoTests"
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"dependencies": {
 		"@codemirror/autocomplete": "^6.20.1",
@@ -45,6 +46,9 @@
 		"@electron-toolkit/preload": "^3.0.2",
 		"@electron-toolkit/utils": "^4.0.0",
 		"@tailwindcss/vite": "^4.2.4",
+		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/react": "^16.3.2",
+		"@testing-library/user-event": "^14.6.1",
 		"@types/js-yaml": "^4.0.9",
 		"@types/katex": "^0.16.8",
 		"@types/node": "^25.6.0",
@@ -54,6 +58,7 @@
 		"electron": "^41.3.0",
 		"electron-builder": "^26.8.1",
 		"electron-vite": "^5.0.0",
+		"jsdom": "^29.1.1",
 		"tailwindcss": "^4.2.4",
 		"typescript": "~6.0.3",
 		"vite": "^7.3.2",

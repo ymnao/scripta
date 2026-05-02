@@ -1,0 +1,148 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StatusBar } from "./StatusBar";
+
+describe("StatusBar", () => {
+	it('shows "未保存" when saveStatus is unsaved', () => {
+		render(<StatusBar saveStatus="unsaved" />);
+		expect(screen.getByText("未保存")).toBeInTheDocument();
+	});
+
+	it('shows "保存中..." when saveStatus is saving', () => {
+		render(<StatusBar saveStatus="saving" />);
+		expect(screen.getByText("保存中...")).toBeInTheDocument();
+	});
+
+	it('shows "保存済み" when saveStatus is saved', () => {
+		render(<StatusBar saveStatus="saved" />);
+		expect(screen.getByText("保存済み")).toBeInTheDocument();
+	});
+
+	it('shows "保存失敗" when saveStatus is error', () => {
+		render(<StatusBar saveStatus="error" />);
+		expect(screen.getByText("保存失敗")).toBeInTheDocument();
+	});
+
+	it('shows "リトライ中..." when saveStatus is retrying', () => {
+		render(<StatusBar saveStatus="retrying" />);
+		expect(screen.getByText("リトライ中...")).toBeInTheDocument();
+	});
+
+	it("shows no status text when saveStatus is not provided", () => {
+		render(<StatusBar />);
+		expect(screen.queryByText("保存済み")).not.toBeInTheDocument();
+		expect(screen.queryByText("未保存")).not.toBeInTheDocument();
+		expect(screen.queryByText("保存中...")).not.toBeInTheDocument();
+		expect(screen.queryByText("保存失敗")).not.toBeInTheDocument();
+	});
+
+	it("shows cursor info when provided", () => {
+		render(<StatusBar cursorInfo={{ line: 10, col: 5, chars: 1234 }} />);
+		expect(screen.getByText("10 行, 5 列")).toBeInTheDocument();
+		expect(screen.getByText("1234 文字")).toBeInTheDocument();
+	});
+
+	it("does not show cursor info when not provided", () => {
+		render(<StatusBar saveStatus="saved" />);
+		expect(screen.queryByText(/\d+ 行,/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/文字/)).not.toBeInTheDocument();
+	});
+
+	it("shows file path when provided", () => {
+		render(<StatusBar filePath="docs/readme.md" />);
+		expect(screen.getByTestId("file-path")).toHaveTextContent("docs/readme.md");
+	});
+
+	describe("clipboard interactions", () => {
+		// 同一 worker 内の他テストへ状態が漏れないよう、各テストの前後で
+		// navigator.clipboard を退避・復元する。
+		let originalClipboard: typeof navigator.clipboard | undefined;
+
+		beforeEach(() => {
+			originalClipboard = navigator.clipboard;
+		});
+
+		afterEach(() => {
+			Object.defineProperty(navigator, "clipboard", {
+				configurable: true,
+				value: originalClipboard,
+			});
+		});
+
+		it("copies file path to clipboard on click", async () => {
+			const writeText = vi.fn().mockResolvedValue(undefined);
+			Object.defineProperty(navigator, "clipboard", {
+				configurable: true,
+				value: { writeText },
+			});
+
+			render(<StatusBar filePath="docs/readme.md" />);
+			await userEvent.click(screen.getByTestId("file-path"));
+
+			expect(writeText).toHaveBeenCalledWith("docs/readme.md");
+		});
+
+		it("does not throw when clipboard is unavailable", async () => {
+			Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+
+			render(<StatusBar filePath="docs/readme.md" />);
+			await userEvent.click(screen.getByTestId("file-path"));
+			// Should not throw
+		});
+	});
+
+	it("shows selection info when selectedChars and selectedLines are present", () => {
+		render(
+			<StatusBar
+				cursorInfo={{ line: 3, col: 1, chars: 500, selectedChars: 42, selectedLines: 3 }}
+			/>,
+		);
+		expect(screen.getByTestId("selection-info")).toHaveTextContent("3 行選択, 42 文字選択");
+		expect(screen.queryByText(/\d+ 行,/)).not.toBeInTheDocument();
+	});
+
+	it("shows cursor position when no selection", () => {
+		render(<StatusBar cursorInfo={{ line: 5, col: 10, chars: 200 }} />);
+		expect(screen.getByText("5 行, 10 列")).toBeInTheDocument();
+		expect(screen.queryByTestId("selection-info")).not.toBeInTheDocument();
+	});
+
+	it("clicking conflict status opens conflict resolver instead of syncing", async () => {
+		const onGitSync = vi.fn();
+		const onOpenConflictResolver = vi.fn();
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={true}
+				offlineMode={false}
+				onGitSync={onGitSync}
+				onOpenConflictResolver={onOpenConflictResolver}
+			/>,
+		);
+		const button = screen.getByTitle("コンフリクト解消ウィンドウを開く");
+		await userEvent.click(button);
+		expect(onOpenConflictResolver).toHaveBeenCalledTimes(1);
+		expect(onGitSync).not.toHaveBeenCalled();
+	});
+
+	it("clicking sync status calls onGitSync when no conflicts", async () => {
+		const onGitSync = vi.fn();
+		const onOpenConflictResolver = vi.fn();
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={false}
+				offlineMode={false}
+				onGitSync={onGitSync}
+				onOpenConflictResolver={onOpenConflictResolver}
+			/>,
+		);
+		const button = screen.getByTitle("手動同期");
+		await userEvent.click(button);
+		expect(onGitSync).toHaveBeenCalledTimes(1);
+		expect(onOpenConflictResolver).not.toHaveBeenCalled();
+	});
+});
