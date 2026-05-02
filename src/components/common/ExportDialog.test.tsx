@@ -1,18 +1,28 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // isPdfSupported はモジュールレベルで navigator.userAgent を参照するため、
-// インポート前に userAgent を設定する
-vi.hoisted(() => {
+// インポート前に userAgent を設定する。同一 worker 内の他テストへ状態を
+// 漏らさないよう、元の値を退避して afterAll で必ず復元する。
+const originalUserAgent = vi.hoisted(() => {
+	const orig = navigator.userAgent;
 	Object.defineProperty(navigator, "userAgent", {
 		value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
 		configurable: true,
 	});
+	return orig;
 });
 
 import { useToastStore } from "../../stores/toast";
 import { ExportDialog } from "./ExportDialog";
+
+afterAll(() => {
+	Object.defineProperty(navigator, "userAgent", {
+		value: originalUserAgent,
+		configurable: true,
+	});
+});
 
 vi.mock("../../lib/export", () => ({
 	exportAsHtml: vi.fn(),

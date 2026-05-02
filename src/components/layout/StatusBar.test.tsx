@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusBar } from "./StatusBar";
 
 describe("StatusBar", () => {
@@ -54,28 +54,42 @@ describe("StatusBar", () => {
 		expect(screen.getByTestId("file-path")).toHaveTextContent("docs/readme.md");
 	});
 
-	it("copies file path to clipboard on click", async () => {
-		const writeText = vi.fn().mockResolvedValue(undefined);
-		Object.defineProperty(navigator, "clipboard", {
-			configurable: true,
-			value: { writeText },
+	describe("clipboard interactions", () => {
+		// 同一 worker 内の他テストへ状態が漏れないよう、各テストの前後で
+		// navigator.clipboard を退避・復元する。
+		let originalClipboard: typeof navigator.clipboard | undefined;
+
+		beforeEach(() => {
+			originalClipboard = navigator.clipboard;
 		});
 
-		render(<StatusBar filePath="docs/readme.md" />);
-		await userEvent.click(screen.getByTestId("file-path"));
+		afterEach(() => {
+			Object.defineProperty(navigator, "clipboard", {
+				configurable: true,
+				value: originalClipboard,
+			});
+		});
 
-		expect(writeText).toHaveBeenCalledWith("docs/readme.md");
-	});
+		it("copies file path to clipboard on click", async () => {
+			const writeText = vi.fn().mockResolvedValue(undefined);
+			Object.defineProperty(navigator, "clipboard", {
+				configurable: true,
+				value: { writeText },
+			});
 
-	it("does not throw when clipboard is unavailable", async () => {
-		const original = navigator.clipboard;
-		Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+			render(<StatusBar filePath="docs/readme.md" />);
+			await userEvent.click(screen.getByTestId("file-path"));
 
-		render(<StatusBar filePath="docs/readme.md" />);
-		await userEvent.click(screen.getByTestId("file-path"));
-		// Should not throw
+			expect(writeText).toHaveBeenCalledWith("docs/readme.md");
+		});
 
-		Object.defineProperty(navigator, "clipboard", { value: original, configurable: true });
+		it("does not throw when clipboard is unavailable", async () => {
+			Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+
+			render(<StatusBar filePath="docs/readme.md" />);
+			await userEvent.click(screen.getByTestId("file-path"));
+			// Should not throw
+		});
 	});
 
 	it("shows selection info when selectedChars and selectedLines are present", () => {
