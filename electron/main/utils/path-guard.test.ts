@@ -84,8 +84,11 @@ describe("workspace root registration", () => {
 });
 
 describe("isPathAllowed", () => {
-	it("allows everything when no roots are registered (back-compat)", () => {
-		expect(isPathAllowed("/anywhere/file")).toBe(true);
+	it("denies everything when no roots are registered (fail-closed)", () => {
+		// アプリ起動直後 / ワークスペース未選択 / watcher:stop 後に任意 path への
+		// アクセスを許してしまう抜け穴を防ぐ
+		expect(isPathAllowed("/anywhere/file")).toBe(false);
+		expect(isPathAllowed("/etc/passwd")).toBe(false);
 	});
 
 	it("allows files inside the workspace", async () => {

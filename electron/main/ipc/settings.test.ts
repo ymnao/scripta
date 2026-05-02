@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +57,25 @@ describe("createStore + load", () => {
 		const second = load(store);
 		expect(second.a).toBe(2);
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"rethrows non-ENOENT read errors instead of silently dropping settings",
+		async () => {
+			// chmod 0o000 で読み取り不可にして EACCES を発生させる。
+			// ENOENT 以外を握りつぶすと「一時 I/O 異常で既存設定が見えなくなり、
+			// 後続の settings:set + settings:save で上書き消失」が起きるため、
+			// load() は呼び出し側に伝播する必要がある。
+			const protectedFile = join(dir, "protected.json");
+			await writeFile(protectedFile, JSON.stringify({ existing: "data" }), "utf8");
+			await chmod(protectedFile, 0o000);
+			try {
+				const store = createStore(protectedFile);
+				expect(() => load(store)).toThrow();
+			} finally {
+				await chmod(protectedFile, 0o644).catch(() => {});
+			}
+		},
+	);
 });
 
 describe("getValue / setValue / deleteValue", () => {

@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, ipcMain } from "electron";
 import writeFileAtomic from "write-file-atomic";
+import { isErrnoCode } from "../utils/fs-errors";
 
 interface Store {
 	path: string;
@@ -15,15 +16,27 @@ function createStore(path: string): Store {
 
 function load(store: Store): Record<string, unknown> {
 	if (store.cache !== null) return store.cache;
+	let raw: string;
 	try {
-		const raw = readFileSync(store.path, "utf8");
+		raw = readFileSync(store.path, "utf8");
+	} catch (e) {
+		// ENOENT は初回起動 → 空オブジェクトにフォールバック
+		// EACCES / EIO 等は呼び出し側に伝える（黙って空にすると、その後の
+		// settings:set + settings:save で既存設定を上書き消失させる）
+		if (isErrnoCode(e, "ENOENT")) {
+			store.cache = {};
+			return store.cache;
+		}
+		throw e;
+	}
+	try {
 		const parsed = JSON.parse(raw);
 		store.cache =
 			typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
 				? (parsed as Record<string, unknown>)
 				: {};
 	} catch {
-		// ENOENT (初回起動) も JSON 破損も同じく空オブジェクトにフォールバック
+		// JSON 破損はユーザーの誤操作で壊した場合の救済として空にフォールバック
 		store.cache = {};
 	}
 	return store.cache;
@@ -63,6 +76,18 @@ function getMainStore(): Store {
 		mainStore = createStore(join(app.getPath("userData"), "settings.json"));
 	}
 	return mainStore;
+}
+
+// 起動時の workspace auto-register 用に「副作用なくキャッシュから取得」する。
+// load() が EACCES 等で throw した場合は null を返し、未登録のまま起動を続行する
+// （fail-closed なので、その後 fs:* IPC は workspace 選択まで一切通らない）。
+export function getWorkspacePathFromSettings(): string | null {
+	try {
+		const data = load(getMainStore());
+		return typeof data.workspacePath === "string" ? data.workspacePath : null;
+	} catch {
+		return null;
+	}
 }
 
 export function registerSettingsIpc(): void {

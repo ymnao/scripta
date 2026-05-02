@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
+import { getWorkspacePathFromSettings } from "./ipc/settings";
+import { registerWorkspaceRoot } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
 
 const CSP_PROD = [
@@ -123,9 +125,24 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
+function bootstrapWorkspaceFromSettings(): void {
+	// 起動時に saved workspacePath を register することで、ユーザーが
+	// ワークスペースを再選択しなくても fs:* が通る状態にする。
+	// path-guard は fail-closed なので、この処理がないと前回までの
+	// ワークスペースが使えなくなる。
+	const savedPath = getWorkspacePathFromSettings();
+	if (savedPath === null) return;
+	try {
+		registerWorkspaceRoot(savedPath);
+	} catch (e) {
+		console.warn("[bootstrap] failed to register saved workspace path:", e);
+	}
+}
+
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
 	registerIpcHandlers();
+	bootstrapWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];

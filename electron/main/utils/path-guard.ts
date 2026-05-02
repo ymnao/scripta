@@ -61,8 +61,12 @@ function isPathInside(child: string, parent: string): boolean {
 	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+// Fail-closed: ワークスペース未登録時はすべて拒否する。
+// 起動時に main/index.ts が saved workspacePath を auto-register することで
+// 既存ワークスペースは利用継続でき、初回起動 / ワークスペース未選択時は
+// fs:* IPC が一切通らないことが保証される。
 export function isPathAllowed(p: string): boolean {
-	if (allowedRoots.size === 0) return true;
+	if (allowedRoots.size === 0) return false;
 	const target = realpathBestEffort(p);
 	for (const root of allowedRoots) {
 		if (isPathInside(target, root)) return true;
