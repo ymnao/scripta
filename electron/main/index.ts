@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
-import { unregisterWindow } from "./ipc/workspace";
+import { getWorkspacePathFromSettings } from "./ipc/settings";
+import { approveWorkspacePath, unregisterWindow } from "./ipc/workspace";
 import { isSafeExternalUrl } from "./utils/url";
 
 const CSP_PROD = [
@@ -127,11 +128,25 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
+function approveSavedWorkspaceFromSettings(): void {
+	// 起動時に「前回までの workspacePath」を approve リストへ入れる。
+	// register はしない（実際の register は renderer 側 AppLayout が
+	// workspaceSet を呼んだ時点で行う window 単位の管理）。
+	// この approve がないと、saved workspace を持っているユーザーでも
+	// renderer が workspace:set を打つと「未承認」として拒否されてしまう。
+	const savedPath = getWorkspacePathFromSettings();
+	if (savedPath === null) return;
+	try {
+		approveWorkspacePath(savedPath);
+	} catch (e) {
+		console.warn("[bootstrap] failed to approve saved workspace path:", e);
+	}
+}
+
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
 	registerIpcHandlers();
-	// workspace の登録は renderer 側 AppLayout が settings から読み込んだ workspacePath を
-	// workspaceSet で申告した時点で行う（window 単位の管理のため、ここでは bootstrap しない）
+	approveSavedWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];

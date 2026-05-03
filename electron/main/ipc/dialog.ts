@@ -8,6 +8,7 @@ import {
 } from "electron";
 import type { SaveDialogOptions } from "../../preload/api";
 import { registerTransientWritePath } from "../utils/path-guard";
+import { approveWorkspacePath } from "./workspace";
 
 function getParentWindow(): BrowserWindow | undefined {
 	return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -27,6 +28,9 @@ export function registerDialogIpc(): void {
 	ipcMain.handle("dialog:open-directory", async (): Promise<string | null> => {
 		const result = await showOpenDialog({ properties: ["openDirectory"] });
 		if (result.canceled || result.filePaths.length === 0) return null;
+		// OS ネイティブな folder picker を通過した path のみを「ユーザー承認済み」として
+		// approve リストに入れる。renderer が workspace:set を打つ際の信頼境界。
+		approveWorkspacePath(result.filePaths[0]);
 		return result.filePaths[0];
 	});
 

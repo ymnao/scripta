@@ -9,9 +9,15 @@ vi.mock("electron", () => ({
 }));
 
 import { canonicalize, clearWorkspaceRoots, getWorkspaceRoots } from "../utils/path-guard";
-import { __testing } from "./workspace";
+import { __testing, approveWorkspacePath, isWorkspacePathApproved } from "./workspace";
 
-const { setActiveWorkspaceForWindow, unregisterWindow, getWindowWorkspaces, reset } = __testing;
+const {
+	setActiveWorkspaceForWindow,
+	unregisterWindow,
+	getWindowWorkspaces,
+	getApprovedWorkspacePaths,
+	reset,
+} = __testing;
 
 let dirA = "";
 let dirB = "";
@@ -94,28 +100,33 @@ describe("multi-window isolation", () => {
 		expect(getWorkspaceRoots()).toEqual([]);
 	});
 
-	it("ref-counts via canonical path so symlink-aliased paths share the same slot", async () => {
-		// dirA を指す symlink を作り、別ウィンドウから symlink パス経由で workspace を申告する。
-		// raw 文字列で比較していると「2 つの別 path」と見なされ、片方が手放した瞬間に
-		// もう一方がまだ使っているのに unregister されてしまう（今回の修正対象の事故シナリオ）。
-		const link = join(tmpdir(), `scripta-ws-link-${Date.now()}-${Math.random()}`);
-		await symlink(dirA, link);
-		try {
-			setActiveWorkspaceForWindow(1, dirA);
-			setActiveWorkspaceForWindow(2, link);
-			// 同じ実体を指すので allowedRoots は 1 件のみ
-			expect(getWorkspaceRoots()).toHaveLength(1);
+	// fs.symlink は Windows で Developer Mode 無効時に EPERM になる。skip して
+	// macOS / Linux でのみ symlink 検証を行う。
+	it.skipIf(process.platform === "win32")(
+		"ref-counts via canonical path so symlink-aliased paths share the same slot",
+		async () => {
+			// dirA を指す symlink を作り、別ウィンドウから symlink パス経由で workspace を申告する。
+			// raw 文字列で比較していると「2 つの別 path」と見なされ、片方が手放した瞬間に
+			// もう一方がまだ使っているのに unregister されてしまう（今回の修正対象の事故シナリオ）。
+			const link = join(tmpdir(), `scripta-ws-link-${Date.now()}-${Math.random()}`);
+			await symlink(dirA, link);
+			try {
+				setActiveWorkspaceForWindow(1, dirA);
+				setActiveWorkspaceForWindow(2, link);
+				// 同じ実体を指すので allowedRoots は 1 件のみ
+				expect(getWorkspaceRoots()).toHaveLength(1);
 
-			setActiveWorkspaceForWindow(1, null);
-			// window 2 が symlink 経由でまだ使っているので、root は残るべき
-			expect(getWorkspaceRoots()).toHaveLength(1);
+				setActiveWorkspaceForWindow(1, null);
+				// window 2 が symlink 経由でまだ使っているので、root は残るべき
+				expect(getWorkspaceRoots()).toHaveLength(1);
 
-			setActiveWorkspaceForWindow(2, null);
-			expect(getWorkspaceRoots()).toEqual([]);
-		} finally {
-			await rm(link, { force: true });
-		}
-	});
+				setActiveWorkspaceForWindow(2, null);
+				expect(getWorkspaceRoots()).toEqual([]);
+			} finally {
+				await rm(link, { force: true });
+			}
+		},
+	);
 });
 
 describe("unregisterWindow", () => {
@@ -139,5 +150,47 @@ describe("unregisterWindow", () => {
 		unregisterWindow(999);
 		expect(getWorkspaceRoots()).toHaveLength(1);
 		expect(getWindowWorkspaces().get(1)).toBe(canonicalize(dirA));
+	});
+});
+
+describe("approveWorkspacePath / isWorkspacePathApproved", () => {
+	it("approves a path and stores it in canonical form", () => {
+		approveWorkspacePath(dirA);
+		expect(getApprovedWorkspacePaths().has(canonicalize(dirA))).toBe(true);
+	});
+
+	it("isWorkspacePathApproved returns true for an approved path", () => {
+		approveWorkspacePath(dirA);
+		expect(isWorkspacePathApproved(dirA)).toBe(true);
+	});
+
+	it("isWorkspacePathApproved returns false for an unapproved path", () => {
+		expect(isWorkspacePathApproved(dirA)).toBe(false);
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"treats symlink-aliased paths as the same approval (canonical compare)",
+		async () => {
+			const link = join(tmpdir(), `scripta-ws-approve-link-${Date.now()}-${Math.random()}`);
+			await symlink(dirA, link);
+			try {
+				approveWorkspacePath(dirA);
+				expect(isWorkspacePathApproved(link)).toBe(true);
+			} finally {
+				await rm(link, { force: true });
+			}
+		},
+	);
+
+	it("returns false for invalid input (relative path / null byte) without throwing", () => {
+		expect(isWorkspacePathApproved("relative/path")).toBe(false);
+		expect(isWorkspacePathApproved("/tmp/\0evil")).toBe(false);
+	});
+
+	it("reset() clears approved paths along with windowWorkspaces", () => {
+		approveWorkspacePath(dirA);
+		expect(getApprovedWorkspacePaths().size).toBe(1);
+		reset();
+		expect(getApprovedWorkspacePaths().size).toBe(0);
 	});
 });

@@ -78,6 +78,19 @@ function getMainStore(): Store {
 	return mainStore;
 }
 
+// 起動時に「前回までの workspacePath」を approve リストに入れるための副作用なし getter。
+// load() が EACCES 等で throw した場合は null を返し、approve をスキップする。
+// 過去にユーザーが OS ネイティブな folder picker で承認した path なので、
+// プロセス再起動後もユーザー承認済み扱いとして再入場を許可する。
+export function getWorkspacePathFromSettings(): string | null {
+	try {
+		const data = load(getMainStore());
+		return typeof data.workspacePath === "string" ? data.workspacePath : null;
+	} catch {
+		return null;
+	}
+}
+
 export function registerSettingsIpc(): void {
 	ipcMain.handle(
 		"settings:get",

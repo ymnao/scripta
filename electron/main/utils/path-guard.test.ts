@@ -30,7 +30,10 @@ afterEach(async () => {
 	await rm(outsideDir, { recursive: true, force: true });
 });
 
-describe("validatePath", () => {
+// POSIX 固定パス（/tmp/foo など）を扱う describe。Windows では path.resolve の結果が
+// "C:\\tmp\\foo" になり assertion が落ちるため skip。Windows 専用の検証は
+// 必要になった段階で別 describe を追加する。
+describe.skipIf(process.platform === "win32")("validatePath", () => {
 	it("returns absolute paths after normalization", () => {
 		expect(validatePath("/tmp/test.md")).toBe("/tmp/test.md");
 	});
@@ -113,17 +116,22 @@ describe("isPathAllowed", () => {
 		expect(isPathAllowed(outsideFile)).toBe(false);
 	});
 
-	it("blocks symlink-based escape from the workspace", async () => {
-		// workspace 内に outside ディレクトリを指す symlink を仕込む
-		const link = join(workspaceDir, "escape");
-		await symlink(outsideDir, link);
-		const target = join(link, "secret");
-		await writeFile(target, "leaked", "utf8");
-		registerWorkspaceRoot(workspaceDir);
-		// 単純な path.resolve では「workspace 内」と判定されてしまうが、
-		// realpath ベースの判定では outside に解決されるため拒否される
-		expect(isPathAllowed(target)).toBe(false);
-	});
+	// fs.symlink は Windows で Developer Mode 無効時に EPERM になる。skip して
+	// macOS / Linux でのみ symlink 検証を行う。
+	it.skipIf(process.platform === "win32")(
+		"blocks symlink-based escape from the workspace",
+		async () => {
+			// workspace 内に outside ディレクトリを指す symlink を仕込む
+			const link = join(workspaceDir, "escape");
+			await symlink(outsideDir, link);
+			const target = join(link, "secret");
+			await writeFile(target, "leaked", "utf8");
+			registerWorkspaceRoot(workspaceDir);
+			// 単純な path.resolve では「workspace 内」と判定されてしまうが、
+			// realpath ベースの判定では outside に解決されるため拒否される
+			expect(isPathAllowed(target)).toBe(false);
+		},
+	);
 
 	it("allows paths inside the workspace even before the file exists", () => {
 		registerWorkspaceRoot(workspaceDir);
@@ -131,13 +139,16 @@ describe("isPathAllowed", () => {
 		expect(isPathAllowed(newPath)).toBe(true);
 	});
 
-	it("blocks symlink-based escape via intermediate directories", async () => {
-		const link = join(workspaceDir, "escape");
-		await symlink(outsideDir, link);
-		registerWorkspaceRoot(workspaceDir);
-		const evil = join(link, "new-file.md");
-		expect(isPathAllowed(evil)).toBe(false);
-	});
+	it.skipIf(process.platform === "win32")(
+		"blocks symlink-based escape via intermediate directories",
+		async () => {
+			const link = join(workspaceDir, "escape");
+			await symlink(outsideDir, link);
+			registerWorkspaceRoot(workspaceDir);
+			const evil = join(link, "new-file.md");
+			expect(isPathAllowed(evil)).toBe(false);
+		},
+	);
 
 	it("allows paths inside any of multiple registered roots", async () => {
 		const second = await mkdtemp(join(tmpdir(), "scripta-pg-ws2-"));
