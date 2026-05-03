@@ -1,36 +1,71 @@
 import { ipcMain } from "electron";
 import { registerWorkspaceRoot, unregisterWorkspaceRoot } from "../utils/path-guard";
 
-let activeWorkspace: string | null = null;
+// 複数ウィンドウ対応のため、各 window (webContents.id 単位) が現在開いている
+// workspace を保持する。allowedRoots（path-guard）への register/unregister は
+// この Map の使用 count に従ってのみ行う：
+//   - ある path を最初に使う window が現れたら register
+//   - その path を使う window がゼロになったら unregister
+// これにより「ウィンドウ A で /A、ウィンドウ B で /B」のような構成で、
+// 一方の workspace:set が他方の root を奪わないことを保証する。
+const windowWorkspaces = new Map<number, string>();
 
-// path-guard に「現在の workspace」を 1 つ持たせるための薄いラッパー。
-// フロント側の setWorkspacePath より先に await されることで、
-// 新規 workspace 選択時の race（FileTree が register 前に listDirectory を叩く）を防ぐ。
-// 起動時の bootstrap も同じ経路を通すことで、register/unregister の整合性を保つ。
-export function setActiveWorkspace(path: string | null): void {
-	if (activeWorkspace !== null && activeWorkspace !== path) {
-		unregisterWorkspaceRoot(activeWorkspace);
+function isPathStillUsedByOtherWindow(path: string, excludeWindowId: number): boolean {
+	for (const [id, p] of windowWorkspaces) {
+		if (id !== excludeWindowId && p === path) return true;
 	}
-	if (path !== null && path !== activeWorkspace) {
-		registerWorkspaceRoot(path);
-	}
-	activeWorkspace = path;
+	return false;
 }
 
-export function getActiveWorkspace(): string | null {
-	return activeWorkspace;
+function isPathUsedByAnyWindow(path: string): boolean {
+	for (const p of windowWorkspaces.values()) {
+		if (p === path) return true;
+	}
+	return false;
+}
+
+export function setActiveWorkspaceForWindow(webContentsId: number, path: string | null): void {
+	const previous = windowWorkspaces.get(webContentsId);
+	if (previous === path) return;
+
+	if (previous !== undefined) {
+		windowWorkspaces.delete(webContentsId);
+		if (!isPathStillUsedByOtherWindow(previous, webContentsId)) {
+			unregisterWorkspaceRoot(previous);
+		}
+	}
+
+	if (path !== null) {
+		const alreadyRegistered = isPathUsedByAnyWindow(path);
+		windowWorkspaces.set(webContentsId, path);
+		if (!alreadyRegistered) {
+			registerWorkspaceRoot(path);
+		}
+	}
+}
+
+// ウィンドウが close された時に呼ぶ。そのウィンドウだけが使っていた path は
+// allowedRoots からも消える（fail-closed の整合性を保つ）。
+export function unregisterWindow(webContentsId: number): void {
+	const path = windowWorkspaces.get(webContentsId);
+	if (path === undefined) return;
+	windowWorkspaces.delete(webContentsId);
+	if (!isPathUsedByAnyWindow(path)) {
+		unregisterWorkspaceRoot(path);
+	}
 }
 
 export function registerWorkspaceIpc(): void {
-	ipcMain.handle("workspace:set", async (_event, path: string | null) => {
-		setActiveWorkspace(path);
+	ipcMain.handle("workspace:set", async (event, path: string | null) => {
+		setActiveWorkspaceForWindow(event.sender.id, path);
 	});
 }
 
 export const __testing = {
-	setActiveWorkspace,
-	getActiveWorkspace,
-	resetActiveWorkspace: (): void => {
-		activeWorkspace = null;
+	setActiveWorkspaceForWindow,
+	unregisterWindow,
+	getWindowWorkspaces: (): Map<number, string> => new Map(windowWorkspaces),
+	reset: (): void => {
+		windowWorkspaces.clear();
 	},
 };

@@ -199,14 +199,15 @@ export function AppLayout() {
 
 			if (!isNewWindow && settings.workspacePath) {
 				try {
-					// main 側 bootstrap で既に register 済みでも、setActiveWorkspace は冪等なので
-					// renderer 側からも明示呼び出しすることで「workspace 設定経路の単一化」を保つ
 					await workspaceSet(settings.workspacePath);
 					if (cancelled) return;
 					await listDirectory(settings.workspacePath);
 					if (cancelled) return;
 					setWorkspacePath(settings.workspacePath);
 				} catch {
+					// listDirectory 失敗（パス消失・権限喪失など）時は、
+					// main 側の許可 root も巻き戻して fail-closed の整合性を保つ
+					await workspaceSet(null).catch(() => {});
 					void saveWorkspacePath(null);
 				}
 			}

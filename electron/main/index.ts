@@ -2,8 +2,7 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
-import { getWorkspacePathFromSettings } from "./ipc/settings";
-import { setActiveWorkspace } from "./ipc/workspace";
+import { unregisterWindow } from "./ipc/workspace";
 import { isSafeExternalUrl } from "./utils/url";
 
 const CSP_PROD = [
@@ -77,8 +76,11 @@ function createWindow(): void {
 		mainWindow.show();
 	});
 
+	const closingWindowId = mainWindow.webContents.id;
 	mainWindow.on("closed", () => {
 		openWindows.delete(mainWindow);
+		// このウィンドウだけが使っていた workspace path は allowedRoots からも消える
+		unregisterWindow(closingWindowId);
 	});
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -125,24 +127,11 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
-function bootstrapWorkspaceFromSettings(): void {
-	// 起動時に saved workspacePath を register することで、ユーザーが
-	// ワークスペースを再選択しなくても fs:* が通る状態にする。
-	// path-guard は fail-closed なので、この処理がないと前回までの
-	// ワークスペースが使えなくなる。
-	const savedPath = getWorkspacePathFromSettings();
-	if (savedPath === null) return;
-	try {
-		setActiveWorkspace(savedPath);
-	} catch (e) {
-		console.warn("[bootstrap] failed to register saved workspace path:", e);
-	}
-}
-
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
 	registerIpcHandlers();
-	bootstrapWorkspaceFromSettings();
+	// workspace の登録は renderer 側 AppLayout が settings から読み込んだ workspacePath を
+	// workspaceSet で申告した時点で行う（window 単位の管理のため、ここでは bootstrap しない）
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];

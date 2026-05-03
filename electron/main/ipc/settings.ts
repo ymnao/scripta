@@ -78,18 +78,6 @@ function getMainStore(): Store {
 	return mainStore;
 }
 
-// 起動時の workspace auto-register 用に「副作用なくキャッシュから取得」する。
-// load() が EACCES 等で throw した場合は null を返し、未登録のまま起動を続行する
-// （fail-closed なので、その後 fs:* IPC は workspace 選択まで一切通らない）。
-export function getWorkspacePathFromSettings(): string | null {
-	try {
-		const data = load(getMainStore());
-		return typeof data.workspacePath === "string" ? data.workspacePath : null;
-	} catch {
-		return null;
-	}
-}
-
 export function registerSettingsIpc(): void {
 	ipcMain.handle(
 		"settings:get",
