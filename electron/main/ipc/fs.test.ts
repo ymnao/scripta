@@ -12,8 +12,15 @@ vi.mock("electron", () => ({
 }));
 
 import { shell } from "electron";
-import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
+import {
+	clearWorkspaceRoots,
+	getTransientWritePathsForWindow,
+	registerTransientWritePath,
+	registerWorkspaceRoot,
+} from "../utils/path-guard";
 import { __testing } from "./fs";
+
+const TEST_WIN = 1;
 
 const {
 	readFileImpl,
@@ -62,52 +69,98 @@ describe("readFileImpl", () => {
 describe("writeFileImpl", () => {
 	it("writes content to a new file", async () => {
 		const path = join(workspaceDir, "out.md");
-		await writeFileImpl(path, "abc");
+		await writeFileImpl(TEST_WIN, path, "abc");
 		expect(await readFile(path, "utf8")).toBe("abc");
 	});
 
 	it("creates parent directories as needed", async () => {
 		const path = join(workspaceDir, "a", "b", "c", "deep.md");
-		await writeFileImpl(path, "nested");
+		await writeFileImpl(TEST_WIN, path, "nested");
 		expect(await readFile(path, "utf8")).toBe("nested");
 	});
 
 	it("overwrites an existing file", async () => {
 		const path = join(workspaceDir, "out.md");
 		await writeFile(path, "original", "utf8");
-		await writeFileImpl(path, "replaced");
+		await writeFileImpl(TEST_WIN, path, "replaced");
 		expect(await readFile(path, "utf8")).toBe("replaced");
 	});
 
 	it("rejects writes outside the registered workspace", async () => {
 		const outside = join(tmpdir(), "scripta-outside.md");
-		await expect(writeFileImpl(outside, "x")).rejects.toThrow(/Permission denied/);
+		await expect(writeFileImpl(TEST_WIN, outside, "x")).rejects.toThrow(/Permission denied/);
+	});
+
+	it("permits a SaveDialog-style transient write path and consumes it on success", async () => {
+		const outside = join(tmpdir(), `scripta-outside-success-${Date.now()}.md`);
+		registerTransientWritePath(TEST_WIN, outside);
+		try {
+			await writeFileImpl(TEST_WIN, outside, "exported");
+			expect(await readFile(outside, "utf8")).toBe("exported");
+			// 成功後に transient capability は consume される
+			expect(getTransientWritePathsForWindow(TEST_WIN)).toEqual([]);
+		} finally {
+			await rm(outside, { force: true });
+		}
+	});
+
+	it("does NOT consume the transient when the write fails (retry-friendly)", async () => {
+		// 親ディレクトリ書き込み失敗を擬似的に作る代わりに、failure path として
+		// 「対象自体がディレクトリ」のケースを使う（writeFile が EISDIR を返す）。
+		const outsideDir = await mkdtemp(join(tmpdir(), "scripta-outside-dir-"));
+		try {
+			registerTransientWritePath(TEST_WIN, outsideDir);
+			await expect(writeFileImpl(TEST_WIN, outsideDir, "x")).rejects.toThrow();
+			// 失敗したので transient はまだ残っており、withRetry で再試行可能
+			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
+		} finally {
+			await rm(outsideDir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects when another window's transient is used (no cross-window leakage)", async () => {
+		const outside = join(tmpdir(), `scripta-outside-cross-${Date.now()}.md`);
+		const OTHER_WIN = 9999;
+		registerTransientWritePath(OTHER_WIN, outside);
+		await expect(writeFileImpl(TEST_WIN, outside, "x")).rejects.toThrow(/Permission denied/);
 	});
 });
 
 describe("writeNewFileImpl", () => {
 	it("creates a new file with content", async () => {
 		const path = join(workspaceDir, "new.md");
-		await writeNewFileImpl(path, "fresh");
+		await writeNewFileImpl(TEST_WIN, path, "fresh");
 		expect(await readFile(path, "utf8")).toBe("fresh");
 	});
 
 	it("creates parent directories", async () => {
 		const path = join(workspaceDir, "a", "b", "new.md");
-		await writeNewFileImpl(path, "nested");
+		await writeNewFileImpl(TEST_WIN, path, "nested");
 		expect(await readFile(path, "utf8")).toBe("nested");
 	});
 
 	it("fails atomically when the file already exists (preserves original)", async () => {
 		const path = join(workspaceDir, "exist.md");
 		await writeFile(path, "original", "utf8");
-		await expect(writeNewFileImpl(path, "overwrite")).rejects.toThrow(/EEXIST/);
+		await expect(writeNewFileImpl(TEST_WIN, path, "overwrite")).rejects.toThrow(/EEXIST/);
 		expect(await readFile(path, "utf8")).toBe("original");
 	});
 
 	it("rejects writes outside the registered workspace", async () => {
 		const outside = join(tmpdir(), "scripta-outside.md");
-		await expect(writeNewFileImpl(outside, "x")).rejects.toThrow(/Permission denied/);
+		await expect(writeNewFileImpl(TEST_WIN, outside, "x")).rejects.toThrow(/Permission denied/);
+	});
+
+	it("does NOT consume the transient on EEXIST failure", async () => {
+		const outside = join(tmpdir(), `scripta-outside-exists-${Date.now()}.md`);
+		await writeFile(outside, "preexisting", "utf8");
+		try {
+			registerTransientWritePath(TEST_WIN, outside);
+			await expect(writeNewFileImpl(TEST_WIN, outside, "new")).rejects.toThrow(/EEXIST/);
+			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
+		} finally {
+			await rm(outside, { force: true });
+		}
 	});
 });
 

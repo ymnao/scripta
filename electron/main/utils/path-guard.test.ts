@@ -5,8 +5,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	assertPathAllowed,
+	assertWritePathAllowed,
+	clearTransientWritePathsForWindow,
 	clearWorkspaceRoots,
-	getTransientWritePaths,
+	consumeTransientWritePath,
+	getTransientWritePathsForWindow,
 	getWorkspaceRoots,
 	isPathAllowed,
 	registerTransientWritePath,
@@ -212,43 +215,68 @@ describe("assertPathAllowed", () => {
 	});
 });
 
-describe("transient write paths", () => {
-	it("allows a transient path even when no workspace is registered", () => {
-		const target = join(outsideDir, "export.html");
-		registerTransientWritePath(target);
-		expect(isPathAllowed(target)).toBe(true);
-	});
+describe("transient write paths (window-scoped, write-only capability)", () => {
+	const WIN_A = 1;
+	const WIN_B = 2;
 
-	it("permits the transient path exactly once and consumes it on assert", () => {
+	it("isPathAllowed (read guard) does NOT see transient paths", () => {
 		const target = join(outsideDir, "export.html");
-		registerTransientWritePath(target);
-		expect(getTransientWritePaths()).toHaveLength(1);
-
-		expect(() => assertPathAllowed(target)).not.toThrow();
-		// 1 回 consume された後、再度 assert すると拒否される
+		registerTransientWritePath(WIN_A, target);
+		// transient は write 専用 capability。read 系では参照されない
+		expect(isPathAllowed(target)).toBe(false);
 		expect(() => assertPathAllowed(target)).toThrow(/Permission denied/);
-		expect(getTransientWritePaths()).toEqual([]);
 	});
 
-	it("does not consume when assert matches via workspace root (transient remains)", () => {
+	it("assertWritePathAllowed permits a transient path without consuming it", () => {
+		const target = join(outsideDir, "export.html");
+		registerTransientWritePath(WIN_A, target);
+		expect(getTransientWritePathsForWindow(WIN_A)).toHaveLength(1);
+
+		// withRetry の再試行を想定して同じ window から複数回チェック → 全て通る
+		expect(() => assertWritePathAllowed(WIN_A, target)).not.toThrow();
+		expect(() => assertWritePathAllowed(WIN_A, target)).not.toThrow();
+		// チェックだけでは consume されない
+		expect(getTransientWritePathsForWindow(WIN_A)).toHaveLength(1);
+	});
+
+	it("consumeTransientWritePath removes the path only after explicit consume", () => {
+		const target = join(outsideDir, "export.html");
+		registerTransientWritePath(WIN_A, target);
+		expect(consumeTransientWritePath(WIN_A, target)).toBe(true);
+		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
+		// 2 度目は no-op
+		expect(consumeTransientWritePath(WIN_A, target)).toBe(false);
+	});
+
+	it("permits write via workspace root regardless of transient state", () => {
 		registerWorkspaceRoot(workspaceDir);
 		const wsFile = join(workspaceDir, "f.md");
-		const transient = join(outsideDir, "export.html");
-		registerTransientWritePath(transient);
-
-		// workspace 経路で許可された場合、transient は consume されない
-		expect(() => assertPathAllowed(wsFile)).not.toThrow();
-		expect(getTransientWritePaths()).toHaveLength(1);
-
-		// transient はまだ使える
-		expect(() => assertPathAllowed(transient)).not.toThrow();
-		expect(getTransientWritePaths()).toEqual([]);
+		expect(() => assertWritePathAllowed(WIN_A, wsFile)).not.toThrow();
 	});
 
-	it("clearWorkspaceRoots also clears transient write paths", () => {
-		registerTransientWritePath(join(outsideDir, "x.html"));
-		expect(getTransientWritePaths()).toHaveLength(1);
+	it("isolates transient paths per window (no cross-window consumption)", () => {
+		const target = join(outsideDir, "export.html");
+		registerTransientWritePath(WIN_A, target);
+		// 別 window からは見えない
+		expect(() => assertWritePathAllowed(WIN_B, target)).toThrow(/Permission denied/);
+		expect(getTransientWritePathsForWindow(WIN_B)).toEqual([]);
+		// 元の window では引き続き有効
+		expect(() => assertWritePathAllowed(WIN_A, target)).not.toThrow();
+	});
+
+	it("clearTransientWritePathsForWindow removes only that window's paths", () => {
+		registerTransientWritePath(WIN_A, join(outsideDir, "a.html"));
+		registerTransientWritePath(WIN_B, join(outsideDir, "b.html"));
+		clearTransientWritePathsForWindow(WIN_A);
+		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
+		expect(getTransientWritePathsForWindow(WIN_B)).toHaveLength(1);
+	});
+
+	it("clearWorkspaceRoots also wipes transient paths for all windows (test reset)", () => {
+		registerTransientWritePath(WIN_A, join(outsideDir, "a.html"));
+		registerTransientWritePath(WIN_B, join(outsideDir, "b.html"));
 		clearWorkspaceRoots();
-		expect(getTransientWritePaths()).toEqual([]);
+		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
+		expect(getTransientWritePathsForWindow(WIN_B)).toEqual([]);
 	});
 });

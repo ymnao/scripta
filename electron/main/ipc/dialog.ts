@@ -34,12 +34,13 @@ export function registerDialogIpc(): void {
 		return result.filePaths[0];
 	});
 
-	ipcMain.handle("dialog:save", async (_event, opts: SaveDialogOptions): Promise<string | null> => {
+	ipcMain.handle("dialog:save", async (event, opts: SaveDialogOptions): Promise<string | null> => {
 		const result = await showSaveDialog(opts);
 		if (result.canceled || !result.filePath) return null;
 		// ユーザーが明示的に選択した保存先は workspace 外でも書き込みを許可する。
-		// transient 許可は 1 回限り（fs:write の path-guard で consume される）。
-		registerTransientWritePath(result.filePath);
+		// transient 許可は (a) ダイアログを開いた window のスコープのみで有効、
+		// (b) 書き込み成功後に consume、(c) window close で cleanup される短命 capability。
+		registerTransientWritePath(event.sender.id, result.filePath);
 		return result.filePath;
 	});
 }

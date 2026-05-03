@@ -3,7 +3,12 @@ import { dirname, join } from "node:path";
 import { ipcMain, shell } from "electron";
 import type { FileEntry } from "../../../src/types/workspace";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
-import { assertPathAllowed, validatePath } from "../utils/path-guard";
+import {
+	assertPathAllowed,
+	assertWritePathAllowed,
+	consumeTransientWritePath,
+	validatePath,
+} from "../utils/path-guard";
 
 async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
@@ -24,16 +29,19 @@ async function readFileImpl(path: string): Promise<string> {
 	return await fsp.readFile(resolved, "utf8");
 }
 
-async function writeFileImpl(path: string, content: string): Promise<void> {
+async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertWritePathAllowed(senderId, resolved);
 	await fsp.mkdir(dirname(resolved), { recursive: true });
 	await fsp.writeFile(resolved, content, "utf8");
+	// 書き込み成功後にだけ transient capability を消費する。
+	// 失敗時は残り、renderer 側 withRetry で再試行できる。
+	consumeTransientWritePath(senderId, resolved);
 }
 
-async function writeNewFileImpl(path: string, content: string): Promise<void> {
+async function writeNewFileImpl(senderId: number, path: string, content: string): Promise<void> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertWritePathAllowed(senderId, resolved);
 	await fsp.mkdir(dirname(resolved), { recursive: true });
 	const fh = await fsp.open(resolved, "wx");
 	try {
@@ -41,6 +49,7 @@ async function writeNewFileImpl(path: string, content: string): Promise<void> {
 	} finally {
 		await fh.close();
 	}
+	consumeTransientWritePath(senderId, resolved);
 }
 
 async function listDirectoryImpl(path: string): Promise<FileEntry[]> {
@@ -122,11 +131,11 @@ async function deleteEntryImpl(path: string): Promise<void> {
 
 export function registerFsIpc(): void {
 	ipcMain.handle("fs:read", (_event, path: string) => readFileImpl(path));
-	ipcMain.handle("fs:write", (_event, path: string, content: string) =>
-		writeFileImpl(path, content),
+	ipcMain.handle("fs:write", (event, path: string, content: string) =>
+		writeFileImpl(event.sender.id, path, content),
 	);
-	ipcMain.handle("fs:write-new", (_event, path: string, content: string) =>
-		writeNewFileImpl(path, content),
+	ipcMain.handle("fs:write-new", (event, path: string, content: string) =>
+		writeNewFileImpl(event.sender.id, path, content),
 	);
 	ipcMain.handle("fs:list", (_event, path: string) => listDirectoryImpl(path));
 	ipcMain.handle("fs:create-file", (_event, path: string) => createFileImpl(path));
