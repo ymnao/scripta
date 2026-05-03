@@ -1,6 +1,7 @@
 import {
 	BrowserWindow,
 	dialog,
+	type IpcMainInvokeEvent,
 	ipcMain,
 	type OpenDialogOptions,
 	type OpenDialogReturnValue,
@@ -10,23 +11,37 @@ import type { SaveDialogOptions } from "../../preload/api";
 import { registerTransientWritePath } from "../utils/path-guard";
 import { approveWorkspacePath } from "./workspace";
 
-function getParentWindow(): BrowserWindow | undefined {
-	return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+// ダイアログは「IPC を呼び出した window」の上に出すのが正解。focused/first で
+// 代用すると、複数ウィンドウ時に sender と親ウィンドウがズレ、
+// SaveDialog の transient capability 所有者と UI 上の親ウィンドウが食い違う。
+function getOwnerWindow(event: IpcMainInvokeEvent): BrowserWindow | null {
+	return (
+		BrowserWindow.fromWebContents(event.sender) ??
+		BrowserWindow.getFocusedWindow() ??
+		BrowserWindow.getAllWindows()[0] ??
+		null
+	);
 }
 
-function showOpenDialog(opts: OpenDialogOptions): Promise<OpenDialogReturnValue> {
-	const parent = getParentWindow();
-	return parent ? dialog.showOpenDialog(parent, opts) : dialog.showOpenDialog(opts);
+function showOpenDialog(
+	event: IpcMainInvokeEvent,
+	opts: OpenDialogOptions,
+): Promise<OpenDialogReturnValue> {
+	const owner = getOwnerWindow(event);
+	return owner ? dialog.showOpenDialog(owner, opts) : dialog.showOpenDialog(opts);
 }
 
-function showSaveDialog(opts: SaveDialogOptions): Promise<SaveDialogReturnValue> {
-	const parent = getParentWindow();
-	return parent ? dialog.showSaveDialog(parent, opts) : dialog.showSaveDialog(opts);
+function showSaveDialog(
+	event: IpcMainInvokeEvent,
+	opts: SaveDialogOptions,
+): Promise<SaveDialogReturnValue> {
+	const owner = getOwnerWindow(event);
+	return owner ? dialog.showSaveDialog(owner, opts) : dialog.showSaveDialog(opts);
 }
 
 export function registerDialogIpc(): void {
-	ipcMain.handle("dialog:open-directory", async (): Promise<string | null> => {
-		const result = await showOpenDialog({ properties: ["openDirectory"] });
+	ipcMain.handle("dialog:open-directory", async (event): Promise<string | null> => {
+		const result = await showOpenDialog(event, { properties: ["openDirectory"] });
 		if (result.canceled || result.filePaths.length === 0) return null;
 		// OS ネイティブな folder picker を通過した path のみを「ユーザー承認済み」として
 		// approve リストに入れる。renderer が workspace:set を打つ際の信頼境界。
@@ -35,7 +50,7 @@ export function registerDialogIpc(): void {
 	});
 
 	ipcMain.handle("dialog:save", async (event, opts: SaveDialogOptions): Promise<string | null> => {
-		const result = await showSaveDialog(opts);
+		const result = await showSaveDialog(event, opts);
 		if (result.canceled || !result.filePath) return null;
 		// ユーザーが明示的に選択した保存先は workspace 外でも書き込みを許可する。
 		// transient 許可は (a) ダイアログを開いた window のスコープのみで有効、

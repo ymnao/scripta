@@ -91,15 +91,37 @@ export function getWorkspacePathFromSettings(): string | null {
 	}
 }
 
+// renderer から settings:set / settings:delete を介して書き換えられないキー。
+// workspacePath は workspace:set の承認境界（main 側 isWorkspacePathApproved）を
+// バイパスされる経路になりうるため main 専用にする。永続化は persistWorkspacePath
+// 経由で workspace:set ハンドラ側から行う。
+const RESERVED_KEYS: ReadonlySet<string> = new Set(["workspacePath"]);
+
+export async function persistWorkspacePath(path: string | null): Promise<void> {
+	const store = getMainStore();
+	if (path === null) {
+		deleteValue(store, "workspacePath");
+	} else {
+		setValue(store, "workspacePath", path);
+	}
+	await persist(store);
+}
+
 export function registerSettingsIpc(): void {
 	ipcMain.handle(
 		"settings:get",
 		async (_event, key: string): Promise<unknown> => getValue(getMainStore(), key),
 	);
 	ipcMain.handle("settings:set", async (_event, key: string, value: unknown) => {
+		if (RESERVED_KEYS.has(key)) {
+			throw new Error(`Permission denied: settings key "${key}" is reserved`);
+		}
 		setValue(getMainStore(), key, value);
 	});
 	ipcMain.handle("settings:delete", async (_event, key: string) => {
+		if (RESERVED_KEYS.has(key)) {
+			throw new Error(`Permission denied: settings key "${key}" is reserved`);
+		}
 		deleteValue(getMainStore(), key);
 	});
 	ipcMain.handle("settings:save", async () => {
@@ -114,4 +136,5 @@ export const __testing = {
 	getValue,
 	setValue,
 	deleteValue,
+	RESERVED_KEYS,
 };

@@ -252,6 +252,14 @@ describe("isTransientError", () => {
 		expect(isTransientError("EAGAIN: resource temporarily unavailable")).toBe(true);
 	});
 
+	it("returns false for EMFILE (FD exhaustion is non-transient — retrying is wasteful)", () => {
+		expect(isTransientError("EMFILE: too many open files, open '/path'")).toBe(false);
+	});
+
+	it("returns false for 'too many open files' phrasing", () => {
+		expect(isTransientError("Too many open files")).toBe(false);
+	});
+
 	it("returns true for unknown/transient errors", () => {
 		expect(isTransientError("Connection timed out")).toBe(true);
 	});

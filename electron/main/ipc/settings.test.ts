@@ -11,7 +11,7 @@ vi.mock("electron", () => ({
 
 import { __testing } from "./settings";
 
-const { createStore, load, persist, getValue, setValue, deleteValue } = __testing;
+const { createStore, load, persist, getValue, setValue, deleteValue, RESERVED_KEYS } = __testing;
 
 let dir = "";
 let storePath = "";
@@ -157,5 +157,13 @@ describe("persist", () => {
 		await persist(store);
 		const raw = await readFile(storePath, "utf8");
 		expect(JSON.parse(raw)).toEqual({ original: true, added: 1 });
+	});
+});
+
+describe("RESERVED_KEYS", () => {
+	it("includes workspacePath (renderer must not be able to write/delete it)", () => {
+		// renderer 側 settings:set("workspacePath", "/") のような任意上書きを防ぐ承認境界。
+		// この set に含まれているキーは settings:set / settings:delete ハンドラで reject される。
+		expect(RESERVED_KEYS.has("workspacePath")).toBe(true);
 	});
 });

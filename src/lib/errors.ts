@@ -75,6 +75,9 @@ const NON_TRANSIENT = [
 	/\bEROFS\b/,
 	/\bENAMETOOLONG\b/,
 	/\bENOTEMPTY\b/,
+	// FD 枯渇は短時間でリトライしても回復しないことが多く、無駄なリトライを避ける
+	/\bEMFILE\b/,
+	/too many open files/i,
 	/\(os error 2\)/,
 	/\(os error 13\)/,
 	/\(os error 17\)/,

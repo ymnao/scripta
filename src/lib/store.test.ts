@@ -10,7 +10,6 @@ import {
 	saveSidebarVisible,
 	saveThemePreference,
 	saveTrimTrailingWhitespace,
-	saveWorkspacePath,
 } from "./store";
 
 // test-setup.ts の beforeEach が `window.api` を毎回新しい `createApiMock()` で置き換えるので、
@@ -159,20 +158,6 @@ describe("store", () => {
 			});
 			const settings = await loadSettings();
 			expect(settings.trimTrailingWhitespace).toBe(true);
-		});
-	});
-
-	describe("saveWorkspacePath", () => {
-		it("saves workspace path to store", async () => {
-			await saveWorkspacePath("/new/path");
-			expect(window.api.settingsSet).toHaveBeenCalledWith("workspacePath", "/new/path");
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-
-		it("saves null workspace path", async () => {
-			await saveWorkspacePath(null);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("workspacePath", null);
-			expect(window.api.settingsSave).toHaveBeenCalled();
 		});
 	});
 

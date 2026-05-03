@@ -65,7 +65,6 @@ vi.mock("../../lib/store", () => ({
 		scratchpadVolatile: true,
 		autoUpdateCheck: true,
 	}),
-	saveWorkspacePath: vi.fn().mockResolvedValue(undefined),
 	saveThemePreference: vi.fn().mockResolvedValue(undefined),
 	saveSidebarVisible: vi.fn().mockResolvedValue(undefined),
 	saveShowLineNumbers: vi.fn().mockResolvedValue(undefined),

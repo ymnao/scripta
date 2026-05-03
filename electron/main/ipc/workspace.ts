@@ -1,5 +1,6 @@
 import { ipcMain } from "electron";
 import { canonicalize, registerWorkspaceRoot, unregisterWorkspaceRoot } from "../utils/path-guard";
+import { persistWorkspacePath } from "./settings";
 
 // renderer 経由で workspace:set を受け付ける際、main 側で「ユーザーが OS ネイティブ
 // な操作（dialog.showOpenDialog や前回 settings 経由）で承認した path」だけを
@@ -91,6 +92,10 @@ export function registerWorkspaceIpc(): void {
 			throw new Error("Permission denied: workspace not approved");
 		}
 		setActiveWorkspaceForWindow(event.sender.id, path);
+		// 永続化は main 専用経路。renderer 側から settings:set("workspacePath", ...) で
+		// 任意値を書き込めると、次回起動の bootstrap が「未承認 path を approve」する
+		// 抜け穴になるため、approve 通過後に main がここから書き込む。
+		await persistWorkspacePath(path);
 	});
 }
 
