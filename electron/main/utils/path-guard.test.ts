@@ -93,6 +93,12 @@ describe("isPathAllowed", () => {
 		expect(isPathAllowed("/etc/passwd")).toBe(false);
 	});
 
+	it("throws on relative input — validatePath is enforced inside the guard", () => {
+		// 呼び出し側が誤って相対パスを渡しても、cwd 解釈で false-positive にならない
+		expect(() => isPathAllowed("relative/path")).toThrow(/Invalid path: must be absolute/);
+		expect(() => assertPathAllowed("relative/path")).toThrow(/Invalid path: must be absolute/);
+	});
+
 	it("allows files inside the workspace", async () => {
 		const file = join(workspaceDir, "f.md");
 		await writeFile(file, "x", "utf8");

@@ -76,12 +76,20 @@ function isPathInside(child: string, parent: string): boolean {
 	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+// validatePath + realpath 正規化済みのパスを返す。workspace.ts のように
+// 「path-guard と整合した正規形」で値を保持したい呼び出し側用の helper。
+export function canonicalize(p: string): string {
+	return realpathBestEffort(validatePath(p));
+}
+
 // Fail-closed: ワークスペース未登録 + transient 許可なし → 拒否する。
-// 起動時に main/index.ts が saved workspacePath を auto-register することで
-// 既存ワークスペースは利用継続でき、初回起動 / ワークスペース未選択時は
+// renderer 側 AppLayout が settings から読み込んだ workspacePath を workspaceSet で
+// 申告した時点で初めて register されるため、初回起動 / ワークスペース未選択時は
 // fs:* IPC が一切通らないことが保証される。
 export function isPathAllowed(p: string): boolean {
-	const target = realpathBestEffort(p);
+	// 内部で validate することで、呼び出し側が誤って相対パスを渡した場合も
+	// realpath が cwd を base に解決してしまうフットガンを防ぐ
+	const target = realpathBestEffort(validatePath(p));
 	if (transientWritePaths.has(target)) return true;
 	for (const root of allowedRoots) {
 		if (isPathInside(target, root)) return true;
@@ -90,7 +98,7 @@ export function isPathAllowed(p: string): boolean {
 }
 
 export function assertPathAllowed(p: string): void {
-	const target = realpathBestEffort(p);
+	const target = realpathBestEffort(validatePath(p));
 	// transient 許可は 1 回限り：マッチしたら consume して return
 	if (transientWritePaths.delete(target)) return;
 	for (const root of allowedRoots) {

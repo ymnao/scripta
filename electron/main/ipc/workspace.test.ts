@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
-import { clearWorkspaceRoots, getWorkspaceRoots } from "../utils/path-guard";
+import { canonicalize, clearWorkspaceRoots, getWorkspaceRoots } from "../utils/path-guard";
 import { __testing } from "./workspace";
 
 const { setActiveWorkspaceForWindow, unregisterWindow, getWindowWorkspaces, reset } = __testing;
@@ -34,7 +34,7 @@ describe("setActiveWorkspaceForWindow", () => {
 	it("registers a workspace root for a window", () => {
 		setActiveWorkspaceForWindow(1, dirA);
 		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(1)).toBe(dirA);
+		expect(getWindowWorkspaces().get(1)).toBe(canonicalize(dirA));
 	});
 
 	it("does nothing if the window already has the same path", () => {
@@ -70,7 +70,7 @@ describe("multi-window isolation", () => {
 		// window 1 が path を変えても window 2 の dirB は残る
 		setActiveWorkspaceForWindow(1, null);
 		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(2)).toBe(dirB);
+		expect(getWindowWorkspaces().get(2)).toBe(canonicalize(dirB));
 	});
 
 	it("registers a path only once when shared by multiple windows", () => {
@@ -93,6 +93,29 @@ describe("multi-window isolation", () => {
 		// 全 window が手放したので unregister
 		expect(getWorkspaceRoots()).toEqual([]);
 	});
+
+	it("ref-counts via canonical path so symlink-aliased paths share the same slot", async () => {
+		// dirA を指す symlink を作り、別ウィンドウから symlink パス経由で workspace を申告する。
+		// raw 文字列で比較していると「2 つの別 path」と見なされ、片方が手放した瞬間に
+		// もう一方がまだ使っているのに unregister されてしまう（今回の修正対象の事故シナリオ）。
+		const link = join(tmpdir(), `scripta-ws-link-${Date.now()}-${Math.random()}`);
+		await symlink(dirA, link);
+		try {
+			setActiveWorkspaceForWindow(1, dirA);
+			setActiveWorkspaceForWindow(2, link);
+			// 同じ実体を指すので allowedRoots は 1 件のみ
+			expect(getWorkspaceRoots()).toHaveLength(1);
+
+			setActiveWorkspaceForWindow(1, null);
+			// window 2 が symlink 経由でまだ使っているので、root は残るべき
+			expect(getWorkspaceRoots()).toHaveLength(1);
+
+			setActiveWorkspaceForWindow(2, null);
+			expect(getWorkspaceRoots()).toEqual([]);
+		} finally {
+			await rm(link, { force: true });
+		}
+	});
 });
 
 describe("unregisterWindow", () => {
@@ -108,13 +131,13 @@ describe("unregisterWindow", () => {
 		setActiveWorkspaceForWindow(2, dirA);
 		unregisterWindow(1);
 		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(2)).toBe(dirA);
+		expect(getWindowWorkspaces().get(2)).toBe(canonicalize(dirA));
 	});
 
 	it("is a no-op for an unknown window id", () => {
 		setActiveWorkspaceForWindow(1, dirA);
 		unregisterWindow(999);
 		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(1)).toBe(dirA);
+		expect(getWindowWorkspaces().get(1)).toBe(canonicalize(dirA));
 	});
 });

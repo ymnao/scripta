@@ -1,5 +1,5 @@
 import { ipcMain } from "electron";
-import { registerWorkspaceRoot, unregisterWorkspaceRoot } from "../utils/path-guard";
+import { canonicalize, registerWorkspaceRoot, unregisterWorkspaceRoot } from "../utils/path-guard";
 
 // 複数ウィンドウ対応のため、各 window (webContents.id 単位) が現在開いている
 // workspace を保持する。allowedRoots（path-guard）への register/unregister は
@@ -8,25 +8,31 @@ import { registerWorkspaceRoot, unregisterWorkspaceRoot } from "../utils/path-gu
 //   - その path を使う window がゼロになったら unregister
 // これにより「ウィンドウ A で /A、ウィンドウ B で /B」のような構成で、
 // 一方の workspace:set が他方の root を奪わないことを保証する。
+//
+// Map に格納する値は canonicalize()（validatePath + realpath 正規化）後の文字列。
+// raw 文字列のまま保持すると、symlink 経由・大小文字差・/var → /private/var
+// などの表記揺れで「同じ実体なのに ref-count で別物扱い」となり、
+// 他 window がまだ使っているのに unregister が走る事故が起こる。
 const windowWorkspaces = new Map<number, string>();
 
-function isPathStillUsedByOtherWindow(path: string, excludeWindowId: number): boolean {
+function isPathStillUsedByOtherWindow(canonical: string, excludeWindowId: number): boolean {
 	for (const [id, p] of windowWorkspaces) {
-		if (id !== excludeWindowId && p === path) return true;
+		if (id !== excludeWindowId && p === canonical) return true;
 	}
 	return false;
 }
 
-function isPathUsedByAnyWindow(path: string): boolean {
+function isPathUsedByAnyWindow(canonical: string): boolean {
 	for (const p of windowWorkspaces.values()) {
-		if (p === path) return true;
+		if (p === canonical) return true;
 	}
 	return false;
 }
 
 export function setActiveWorkspaceForWindow(webContentsId: number, path: string | null): void {
+	const canonical = path === null ? null : canonicalize(path);
 	const previous = windowWorkspaces.get(webContentsId);
-	if (previous === path) return;
+	if (previous === canonical) return;
 
 	if (previous !== undefined) {
 		windowWorkspaces.delete(webContentsId);
@@ -35,11 +41,11 @@ export function setActiveWorkspaceForWindow(webContentsId: number, path: string 
 		}
 	}
 
-	if (path !== null) {
-		const alreadyRegistered = isPathUsedByAnyWindow(path);
-		windowWorkspaces.set(webContentsId, path);
+	if (canonical !== null) {
+		const alreadyRegistered = isPathUsedByAnyWindow(canonical);
+		windowWorkspaces.set(webContentsId, canonical);
 		if (!alreadyRegistered) {
-			registerWorkspaceRoot(path);
+			registerWorkspaceRoot(canonical);
 		}
 	}
 }

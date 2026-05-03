@@ -9,8 +9,12 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
 		await fsp.access(absolute);
 		return true;
-	} catch {
-		return false;
+	} catch (e) {
+		// ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような
+		// 呼び出し元が「実際は権限問題なのに Source not found / Not found」と
+		// 誤分類してしまう。ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
+		if (isErrnoCode(e, "ENOENT")) return false;
+		throw e;
 	}
 }
 
@@ -89,8 +93,9 @@ async function fileExistsImpl(path: string): Promise<boolean> {
 	try {
 		const stat = await fsp.stat(resolved);
 		return stat.isFile();
-	} catch {
-		return false;
+	} catch (e) {
+		if (isErrnoCode(e, "ENOENT")) return false;
+		throw e;
 	}
 }
 
