@@ -1,6 +1,8 @@
 import { Files, FolderOpen, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
 import { openDirectoryPicker, workspaceSet } from "../../lib/commands";
+import { translateError } from "../../lib/errors";
+import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { FileTree } from "../filetree/FileTree";
 import { SearchPanel } from "../search/SearchPanel";
@@ -47,11 +49,19 @@ export function Sidebar({
 
 	const handleOpenFolder = useCallback(async () => {
 		const selected = await openDirectoryPicker();
-		if (selected) {
+		if (!selected) return;
+		try {
 			// fs:* IPC が走り出す前に main 側 workspace 登録を完了させる必要がある
 			// （FileTree などが setWorkspacePath をトリガーに即 listDirectory を打つため）
 			await workspaceSet(selected);
 			setWorkspacePath(selected);
+		} catch (error) {
+			// main 側 reject（未承認 path / settings 永続化失敗 / Permission denied 等）を
+			// silently 握りつぶさず、ユーザーに通知する
+			console.error("Failed to open folder:", error);
+			useToastStore
+				.getState()
+				.addToast("error", `フォルダを開けませんでした: ${translateError(error)}`);
 		}
 	}, [setWorkspacePath]);
 

@@ -145,9 +145,12 @@ export function registerTransientWritePath(windowId: number, p: string): void {
 }
 
 export function consumeTransientWritePath(windowId: number, p: string): boolean {
-	const canonical = canonicalize(p);
+	// fs:write / fs:write-new は成功時に毎回これを呼ぶため、transient 未登録の
+	// 通常保存（workspace 内 write）が hot path。Set 取得を先に行い、
+	// 該当 window の Set が無ければ canonicalize（realpath sync）を走らせず即 return。
 	const set = transientWritePaths.get(windowId);
 	if (set === undefined) return false;
+	const canonical = canonicalize(p);
 	const removed = set.delete(canonical);
 	if (set.size === 0) transientWritePaths.delete(windowId);
 	return removed;

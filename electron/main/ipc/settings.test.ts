@@ -20,6 +20,7 @@ const {
 	deleteValue,
 	RESERVED_KEYS,
 	isSafeSettingsKey,
+	isJsonSerializable,
 	FORBIDDEN_SETTINGS_KEYS,
 } = __testing;
 
@@ -183,6 +184,44 @@ describe("RESERVED_KEYS", () => {
 		// renderer 側 settings:set("workspacePath", "/") のような任意上書きを防ぐ承認境界。
 		// この set に含まれているキーは settings:set / settings:delete ハンドラで reject される。
 		expect(RESERVED_KEYS.has("workspacePath")).toBe(true);
+	});
+});
+
+describe("isJsonSerializable (persistence safety)", () => {
+	it("accepts JSON-safe primitives and plain objects", () => {
+		expect(isJsonSerializable(null)).toBe(true);
+		expect(isJsonSerializable(true)).toBe(true);
+		expect(isJsonSerializable(42)).toBe(true);
+		expect(isJsonSerializable("hello")).toBe(true);
+		expect(isJsonSerializable({ a: 1, b: "x", c: null })).toBe(true);
+		expect(isJsonSerializable([1, "two", { three: 3 }])).toBe(true);
+	});
+
+	it("rejects BigInt (TypeError on JSON.stringify)", () => {
+		// BigInt が settings に混入すると settings:save / persistWorkspacePath が
+		// 恒久的に失敗し、workspace 登録自体が永続的に通らなくなる
+		expect(isJsonSerializable(BigInt(1))).toBe(false);
+	});
+
+	it("rejects circular references", () => {
+		const obj: { self?: unknown } = {};
+		obj.self = obj;
+		expect(isJsonSerializable(obj)).toBe(false);
+	});
+
+	it("rejects circular references nested in arrays", () => {
+		const a: unknown[] = [];
+		a.push(a);
+		expect(isJsonSerializable(a)).toBe(false);
+	});
+
+	// 関数 / undefined / Symbol は JSON.stringify が「stringify されないだけで
+	// throw しない」ので、isJsonSerializable は true を返す。これらは undefined や
+	// 欠落した key として永続化されるが、settings の取り出し側 (getValue) は
+	// undefined を null に正規化するので運用上問題なし
+	it("does not reject values that JSON.stringify silently drops (functions/undefined)", () => {
+		expect(isJsonSerializable(undefined)).toBe(true);
+		expect(isJsonSerializable(() => 1)).toBe(true);
 	});
 });
 

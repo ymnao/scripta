@@ -26,6 +26,20 @@ export function isSafeSettingsKey(key: unknown): key is string {
 	return SAFE_SETTINGS_KEY_PATTERN.test(key);
 }
 
+// settings は最終的に JSON.stringify で永続化される。BigInt / 関数 / Symbol /
+// 循環参照などを混入させると、settings:save だけでなく workspace:set ハンドラの
+// persistWorkspacePath（settings 全体を stringify する）まで巻き込んで永続化が
+// 恒久的に失敗し、fail-closed の workspace 登録ができなくなる。
+// 入力受付の段階で reject して状態を汚染させない。
+export function isJsonSerializable(value: unknown): boolean {
+	try {
+		JSON.stringify(value);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 // null-prototype object を返す。get/set/delete 時に Object.prototype 由来の
 // メソッド（toString 等）が誤ってマッチするのを防ぎ、prototype pollution の
 // 足掛かりにもならない。
@@ -157,6 +171,9 @@ export function registerSettingsIpc(): void {
 		if (RESERVED_KEYS.has(key)) {
 			throw new Error(`Permission denied: settings key "${key}" is reserved`);
 		}
+		if (!isJsonSerializable(value)) {
+			throw new Error("Invalid settings value: not JSON-serializable");
+		}
 		setValue(getMainStore(), key, value);
 	});
 	ipcMain.handle("settings:delete", async (_event, key: unknown) => {
@@ -184,5 +201,6 @@ export const __testing = {
 	deleteValue,
 	RESERVED_KEYS,
 	isSafeSettingsKey,
+	isJsonSerializable,
 	FORBIDDEN_SETTINGS_KEYS,
 };
