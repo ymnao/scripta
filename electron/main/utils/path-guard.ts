@@ -1,10 +1,21 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-// fs IPC ガードはすべて window-scoped。各ウィンドウが「自分が承認した
-// workspace root」だけにアクセスできるようにする。read/list/rename/delete も
-// write も同じ window 単位で判定するため、ウィンドウ A の renderer が
-// ウィンドウ B の workspace 配下を覗くことはできない。
+// fs IPC のガードは window-scoped。allowedRoots は Map<windowId, Set<string>>
+// 構造を取り、ある window が `workspace:set` で申告して登録した root だけがその
+// window からの fs IPC で許可される（read/list/rename/delete/write 全て同じ Set）。
+//
+// 信頼境界の補足：approve リスト（workspace.ts の `approvedWorkspacePaths`）は
+// プロセス全体で共有される。これは UX 上の選択 — ユーザーが picker で承認した、
+// もしくは saved workspacePath として永続化された path は、別ウィンドウからも
+// `workspace:set` で切り替えできる方が自然なため。「ウィンドウ A から B の
+// workspace を絶対に覗かせない」という強い分離が必要になった場合は、approve も
+// window-scoped 化する設計変更が必要（その時は Sidebar の picker → approve の
+// 紐付けと、saved workspace 復元の入り口を window 単位で切り直す）。
+//
+// 現状の保証は「approve 済みでない任意 path に対する権限昇格を防ぐ（main 側で
+// reject）」「ある window が register していない root には fs IPC が通らない」
+// の 2 点。
 const windowAllowedRoots = new Map<number, Set<string>>();
 
 // dialog.showSaveDialog でユーザーが明示選択した保存先など、ワークスペース外でも
@@ -173,6 +184,14 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 	return false;
 }
 
+// 内部 helper：validatePath が throw した場合は呼び出し側に伝播する。
+// API contract の差を吸収するため isPathAllowed / assertPathAllowed の本体に分離。
+function isPathAllowedOrThrow(windowId: number, p: string): boolean {
+	// 内部で validate することで、呼び出し側が誤って相対パスを渡した場合も
+	// realpath が cwd を base に解決してしまうフットガンを防ぐ
+	return isWithinWindowAllowedRoot(windowId, realpathBestEffort(validatePath(p)));
+}
+
 // Fail-closed: ウィンドウ未登録時はすべて拒否する。
 // renderer 側 AppLayout が settings から読み込んだ workspacePath を workspaceSet で
 // 申告した時点で初めて register されるため、初回起動 / ワークスペース未選択時は
@@ -180,14 +199,24 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //
 // この関数は read/list/rename/delete などの非書き込み系で使う。
 // SaveDialog 由来の transient write 許可は **参照しない**（write 専用 capability）。
+//
+// API contract: boolean を返す。validatePath が throw する不正入力（相対パス・
+// null byte 等）も、呼び出し側の意図（「許可されているか?」のクエリ）に沿って
+// false に寄せる。validate エラーを throw として扱いたい場合は assertPathAllowed
+// を使うこと。
 export function isPathAllowed(windowId: number, p: string): boolean {
-	// 内部で validate することで、呼び出し側が誤って相対パスを渡した場合も
-	// realpath が cwd を base に解決してしまうフットガンを防ぐ
-	return isWithinWindowAllowedRoot(windowId, realpathBestEffort(validatePath(p)));
+	try {
+		return isPathAllowedOrThrow(windowId, p);
+	} catch {
+		return false;
+	}
 }
 
+// validatePath が throw する場合（相対パス・null byte 等）は "Invalid path: ..." を
+// そのまま投げ、ガード違反は "Permission denied: outside workspace" を投げる。
+// 呼び出し側で 2 種類のエラーを区別できる。
 export function assertPathAllowed(windowId: number, p: string): void {
-	if (isPathAllowed(windowId, p)) return;
+	if (isPathAllowedOrThrow(windowId, p)) return;
 	// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
 	console.warn(`[path-guard] denied outside workspace: ${p}`);
 	throw new Error("Permission denied: outside workspace");

@@ -123,12 +123,21 @@ describe("isPathAllowed (window-scoped)", () => {
 		expect(isPathAllowed(WIN_B, file)).toBe(true);
 	});
 
-	it("throws on relative input — validatePath is enforced inside the guard", () => {
-		// 呼び出し側が誤って相対パスを渡しても、cwd 解釈で false-positive にならない
-		expect(() => isPathAllowed(WIN_A, "relative/path")).toThrow(/Invalid path: must be absolute/);
+	it("isPathAllowed returns false for invalid input (boolean contract)", () => {
+		// validatePath が throw する系のフォールバックは false に寄せる：
+		// 呼び出し側は「許可されているか?」のクエリとして使うため、boolean 契約を保つ
+		expect(isPathAllowed(WIN_A, "relative/path")).toBe(false);
+		expect(isPathAllowed(WIN_A, "")).toBe(false);
+		expect(isPathAllowed(WIN_A, "/tmp/\0evil")).toBe(false);
+	});
+
+	it("assertPathAllowed propagates validate errors as 'Invalid path: ...'", () => {
+		// 呼び出し側で「不正入力」と「権限エラー」を区別できるように、
+		// validate エラーは Invalid path として throw する
 		expect(() => assertPathAllowed(WIN_A, "relative/path")).toThrow(
 			/Invalid path: must be absolute/,
 		);
+		expect(() => assertPathAllowed(WIN_A, "")).toThrow(/Invalid path: empty/);
 	});
 
 	it("allows files inside the window's workspace", async () => {
