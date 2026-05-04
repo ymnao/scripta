@@ -57,8 +57,11 @@ export function Sidebar({
 			setWorkspacePath(selected);
 		} catch (error) {
 			// main 側 reject（未承認 path / settings 永続化失敗 / Permission denied 等）を
-			// silently 握りつぶさず、ユーザーに通知する
+			// silently 握りつぶさず、ユーザーに通知する。
+			// 加えて、workspace:set ハンドラの中間で失敗していても allowedRoots に
+			// 残骸が残らないよう defensive に巻き戻す（AppLayout の hydrate 経路と同じパターン）。
 			console.error("Failed to open folder:", error);
+			await workspaceSet(null).catch(() => {});
 			useToastStore
 				.getState()
 				.addToast("error", `フォルダを開けませんでした: ${translateError(error)}`);

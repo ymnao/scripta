@@ -76,11 +76,14 @@ export function registerWorkspaceIpc(): void {
 			console.warn(`[workspace] rejected non-approved path: ${path}`);
 			throw new Error("Permission denied: workspace not approved");
 		}
-		setActiveWorkspaceForWindow(event.sender.id, path);
-		// 永続化は main 専用経路。renderer 側から settings:set("workspacePath", ...) で
-		// 任意値を書き込めると、次回起動の bootstrap が「未承認 path を approve」する
-		// 抜け穴になるため、approve 通過後に main がここから書き込む。
+		// 永続化を先に行うことで atomic 性を確保する。persistWorkspacePath が
+		// throw した場合、allowedRoots は更新されないため「workspace は登録済みだが
+		// settings は古い」という不整合が残らない。
+		// renderer 側 settings:set("workspacePath", ...) で任意値を書き込めると、
+		// 次回起動の bootstrap が「未承認 path を approve」する抜け穴になるため、
+		// approve 通過後に main がここから書き込む。
 		await persistWorkspacePath(path);
+		setActiveWorkspaceForWindow(event.sender.id, path);
 	});
 }
 
