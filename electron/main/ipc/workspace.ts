@@ -28,8 +28,15 @@ export function isWorkspacePathApproved(rawPath: string): boolean {
 }
 
 // 複数ウィンドウ対応のため、各 window (webContents.id 単位) が現在開いている
-// workspace を保持する。path-guard 側も window 単位の Set を持つので、
-// ウィンドウ A の renderer が ウィンドウ B の workspace 配下を読み書きすることはできない。
+// workspace を保持する。path-guard 側の allowedRoots も window 単位の Set を
+// 持つので、各 window は自分の root Set だけを介して fs IPC が通る。
+// 旧設計にあった「全 window の union を ref-count で管理」は撤廃済み。
+//
+// 信頼境界の補足：approve リスト（approvedWorkspacePaths）はプロセス全体で
+// 共有される。これは UX 上の選択（ユーザーが picker で承認した、または前回
+// 起動時の saved workspacePath は別ウィンドウからも切り替えできる方が自然）。
+// 厳密な「window A から B の workspace を絶対に覗かせない」を保証するには
+// approve も window-scoped 化する設計変更が必要。詳しくは path-guard.ts を参照。
 //
 // Map に格納する値は canonicalize()（validatePath + realpath 正規化）後の文字列。
 // raw 文字列のまま保持すると、symlink 経由・大小文字差・/var → /private/var
