@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -173,6 +173,21 @@ describe("isPathAllowed", () => {
 			expect(isPathAllowed(join(sibling, "f.md"))).toBe(false);
 		} finally {
 			await rm(sibling, { recursive: true, force: true });
+		}
+	});
+
+	it("allows directory names that start with '..' (e.g. '..backup') as legitimate paths", async () => {
+		// `..backup` は二つのドットで始まる正当なディレクトリ名。
+		// rel.startsWith("..") だけで判定すると偽陽性（outside）になる回帰を防ぐ
+		const dotDir = join(workspaceDir, "..backup");
+		await mkdir(dotDir);
+		try {
+			const target = join(dotDir, "note.md");
+			await writeFile(target, "x", "utf8");
+			registerWorkspaceRoot(workspaceDir);
+			expect(isPathAllowed(target)).toBe(true);
+		} finally {
+			await rm(dotDir, { recursive: true, force: true });
 		}
 	});
 });

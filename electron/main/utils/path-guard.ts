@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const allowedRoots = new Set<string>();
 
@@ -31,12 +31,41 @@ export function validatePath(p: string): string {
 //  - macOS の /var → /private/var など、root と対象の symlink 解決状態が一致する
 //  - 中間ディレクトリが symlink の場合も正しく解決される（symlink-in-the-middle 対策）
 // すべての祖先が解決失敗した場合は入力をそのまま返す（fall-through）。
+//
+// fs IPC のたびに realpathSync を呼ぶとイベントループをブロックするため、
+// 実在する祖先の realpath 結果を簡易 LRU でキャッシュする。Symlink target の
+// 変更は process 寿命中に発生する稀有なケースで、Electron app の典型的な
+// 使用シナリオでは許容範囲内と判断。
+const realpathCache = new Map<string, string>();
+const REALPATH_CACHE_MAX = 256;
+
+function cachedRealpathSync(p: string): string {
+	const cached = realpathCache.get(p);
+	if (cached !== undefined) {
+		// LRU: 末尾に move（Map は insertion order を保つ）
+		realpathCache.delete(p);
+		realpathCache.set(p, cached);
+		return cached;
+	}
+	const result = realpathSync(p);
+	if (realpathCache.size >= REALPATH_CACHE_MAX) {
+		const oldest = realpathCache.keys().next().value;
+		if (oldest !== undefined) realpathCache.delete(oldest);
+	}
+	realpathCache.set(p, result);
+	return result;
+}
+
+export function clearRealpathCache(): void {
+	realpathCache.clear();
+}
+
 function realpathBestEffort(p: string): string {
 	let current = p;
 	let suffix = "";
 	while (true) {
 		try {
-			const real = realpathSync(current);
+			const real = cachedRealpathSync(current);
 			return suffix ? join(real, suffix) : real;
 		} catch {
 			const parent = dirname(current);
@@ -60,6 +89,8 @@ export function unregisterWorkspaceRoot(p: string): void {
 export function clearWorkspaceRoots(): void {
 	allowedRoots.clear();
 	transientWritePaths.clear();
+	// テスト間で symlink ターゲットを切り替えるケースに備え、realpath cache も clear する
+	realpathCache.clear();
 }
 
 function isWithinAnyAllowedRoot(target: string): boolean {
@@ -104,7 +135,14 @@ export function getTransientWritePathsForWindow(windowId: number): string[] {
 function isPathInside(child: string, parent: string): boolean {
 	if (child === parent) return true;
 	const rel = relative(parent, child);
-	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
+	if (rel.length === 0) return false;
+	if (isAbsolute(rel)) return false;
+	// rel.startsWith("..") だけだと "..backup/foo" のようにディレクトリ名が ".." で
+	// 始まる正当なパスを誤って outside 扱いにしてしまう。
+	// 「親に上がる」のは rel === ".." または rel が `..${sep}` で始まる場合のみ。
+	if (rel === "..") return false;
+	if (rel.startsWith(`..${sep}`)) return false;
+	return true;
 }
 
 // validatePath + realpath 正規化済みのパスを返す。workspace.ts のように

@@ -82,13 +82,16 @@ async function persist(store: Store): Promise<void> {
 	});
 }
 
-// undefined と未設定を区別しない（旧 Tauri 版と同じセマンティクス）。
-// null を set した key は load() の data に残るが getValue は null を返す。
-// own property のみを参照することで Object.prototype 由来 (toString 等) の
-// 誤マッチや IPC で関数を返してしまう事故を防ぐ。
+// 「未設定（own property なし）」と「null/undefined を set 済み」をどちらも
+// null として返す。旧 Tauri 版（Option<Value>）も None / Some(Null) を区別
+// しない仕様だったので合わせる。own property のみを参照することで
+// Object.prototype 由来 (toString 等) の誤マッチや IPC で関数を返してしまう
+// 事故を防ぐ。
 function getValue(store: Store, key: string): unknown {
 	const data = load(store);
-	return Object.hasOwn(data, key) ? data[key] : null;
+	if (!Object.hasOwn(data, key)) return null;
+	const v = data[key];
+	return v === undefined ? null : v;
 }
 
 function setValue(store: Store, key: string, value: unknown): void {

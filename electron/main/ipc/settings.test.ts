@@ -112,6 +112,14 @@ describe("getValue / setValue / deleteValue", () => {
 		expect("k" in load(store)).toBe(true);
 	});
 
+	it("getValue normalizes a stored undefined to null (旧 Tauri Option<Value> 互換)", () => {
+		const store = createStore(storePath);
+		setValue(store, "k", undefined);
+		// own property は存在するが、IPC で undefined を直接返さず null に寄せる
+		expect(getValue(store, "k")).toBeNull();
+		expect(Object.hasOwn(load(store), "k")).toBe(true);
+	});
+
 	it("deleteValue removes a key", () => {
 		const store = createStore(storePath);
 		setValue(store, "k", 1);
