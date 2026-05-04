@@ -11,7 +11,17 @@ vi.mock("electron", () => ({
 
 import { __testing } from "./settings";
 
-const { createStore, load, persist, getValue, setValue, deleteValue, RESERVED_KEYS } = __testing;
+const {
+	createStore,
+	load,
+	persist,
+	getValue,
+	setValue,
+	deleteValue,
+	RESERVED_KEYS,
+	isSafeSettingsKey,
+	FORBIDDEN_SETTINGS_KEYS,
+} = __testing;
 
 let dir = "";
 let storePath = "";
@@ -165,5 +175,80 @@ describe("RESERVED_KEYS", () => {
 		// renderer 側 settings:set("workspacePath", "/") のような任意上書きを防ぐ承認境界。
 		// この set に含まれているキーは settings:set / settings:delete ハンドラで reject される。
 		expect(RESERVED_KEYS.has("workspacePath")).toBe(true);
+	});
+});
+
+describe("isSafeSettingsKey (prototype pollution defense)", () => {
+	it("accepts identifier-shaped keys", () => {
+		expect(isSafeSettingsKey("foo")).toBe(true);
+		expect(isSafeSettingsKey("workspacePath")).toBe(true);
+		expect(isSafeSettingsKey("snake_case")).toBe(true);
+		expect(isSafeSettingsKey("_underscore")).toBe(true);
+		expect(isSafeSettingsKey("camelCase123")).toBe(true);
+	});
+
+	it("rejects __proto__ / constructor / prototype to block prototype pollution", () => {
+		for (const key of FORBIDDEN_SETTINGS_KEYS) {
+			expect(isSafeSettingsKey(key)).toBe(false);
+		}
+	});
+
+	it("rejects keys with unsafe characters", () => {
+		expect(isSafeSettingsKey("with space")).toBe(false);
+		expect(isSafeSettingsKey("with-dash")).toBe(false);
+		expect(isSafeSettingsKey("with.dot")).toBe(false);
+		expect(isSafeSettingsKey("with/slash")).toBe(false);
+		expect(isSafeSettingsKey("")).toBe(false);
+	});
+
+	it("rejects keys not starting with letter or underscore", () => {
+		expect(isSafeSettingsKey("1leading")).toBe(false);
+		expect(isSafeSettingsKey("$dollar")).toBe(false);
+	});
+
+	it("rejects non-string inputs", () => {
+		expect(isSafeSettingsKey(undefined)).toBe(false);
+		expect(isSafeSettingsKey(null)).toBe(false);
+		expect(isSafeSettingsKey(42)).toBe(false);
+		expect(isSafeSettingsKey({})).toBe(false);
+	});
+});
+
+describe("getValue uses own-property semantics (not 'in')", () => {
+	it("returns null for inherited Object.prototype keys (toString / hasOwnProperty)", () => {
+		const store = createStore(storePath);
+		// 旧実装の `key in data` だと Object.prototype 由来のメソッドにマッチして
+		// 関数が IPC で structured clone 不可になり例外/DoS になっていた
+		expect(getValue(store, "toString")).toBeNull();
+		expect(getValue(store, "hasOwnProperty")).toBeNull();
+		expect(getValue(store, "constructor")).toBeNull();
+	});
+
+	it("does not bleed Object.prototype methods even when cache is freshly empty", async () => {
+		// load() 直後の cache は null-prototype object。typeof check で関数が
+		// 露出していないことを確認
+		const store = createStore(storePath);
+		expect(typeof getValue(store, "toString")).toBe("object"); // null is "object"
+	});
+});
+
+describe("load() filters unsafe keys from existing settings.json", () => {
+	it("drops __proto__ / constructor / prototype if present in the file", async () => {
+		// 別バージョンや手書きで unsafe キーが入っていた場合に main 側で取り込まないこと。
+		// JSON.parse 時点で __proto__ は own property として復元されるので、
+		// load 内のフィルタで明示的に除外する必要がある
+		await writeFile(
+			storePath,
+			JSON.stringify({ safeKey: "ok", __proto__: { polluted: true }, "with-dash": 1 }),
+			"utf8",
+		);
+		const store = createStore(storePath);
+		const data = load(store);
+		expect(getValue(store, "safeKey")).toBe("ok");
+		expect(Object.hasOwn(data, "__proto__")).toBe(false);
+		expect(Object.hasOwn(data, "with-dash")).toBe(false);
+		// 主要な確認：global Object.prototype が汚染されていない
+		// （仮に load が __proto__ を取り込んでいたら polluted が leak する）
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
 	});
 });
