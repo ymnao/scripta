@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
+	canonicalize,
 	clearTransientWritePathsForWindow,
 	clearWorkspaceRoots,
 	clearWorkspaceRootsForWindow,
@@ -293,9 +294,11 @@ describe("transient write paths (window-scoped, write-only capability)", () => {
 	it("consumeTransientWritePath removes the path only after explicit consume", () => {
 		const target = join(outsideDir, "export.html");
 		registerTransientWritePath(WIN_A, target);
-		expect(consumeTransientWritePath(WIN_A, target)).toBe(true);
+		// consumeTransientWritePath は canonical 前提 API なので、呼び出し側は
+		// canonicalize() の結果を渡す（fs.ts は assertWritePathAllowed の戻り値を渡す）
+		expect(consumeTransientWritePath(WIN_A, canonicalize(target))).toBe(true);
 		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
-		expect(consumeTransientWritePath(WIN_A, target)).toBe(false);
+		expect(consumeTransientWritePath(WIN_A, canonicalize(target))).toBe(false);
 	});
 
 	it("permits write via workspace root regardless of transient state", () => {

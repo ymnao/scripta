@@ -197,22 +197,27 @@ export function AppLayout() {
 			if (cancelled) return;
 
 			if (!isNewWindow && settings.workspacePath) {
+				let registeredOnMain = false;
 				try {
 					await workspaceSet(settings.workspacePath);
+					registeredOnMain = true;
 					if (cancelled) return;
 					await listDirectory(settings.workspacePath);
 					if (cancelled) return;
 					setWorkspacePath(settings.workspacePath);
 				} catch {
-					// listDirectory 失敗（パス消失・権限喪失など）時は、main 側の許可 root も
-					// 巻き戻して fail-closed の整合性を保つ。
-					// ただし unmount / window close 後（cancelled）にロールバックすると、
-					// ユーザーの保存済み workspacePath を意図せず削除する副作用になるので、
-					// このウィンドウがまだ生きている時だけ実行する。
-					// workspaceSet(null) は main 側で settings の workspacePath も
-					// 削除するので renderer 側で saveWorkspacePath を呼ぶ必要はない
+					// 段階別ハンドリング：
+					// - workspaceSet 自体の失敗（settings 永続化失敗・未承認扱い等）→
+					//   main 側 state は atomic で変化していないので、保存済み workspacePath を
+					//   削除してはいけない。何もしない
+					// - workspaceSet 成功後の listDirectory 失敗（パス消失・権限喪失等）→
+					//   main 側に登録済みなので fail-closed の整合性のため巻き戻す
+					// 加えて unmount / window close 後（cancelled）はロールバックしない
+					// （ユーザーの保存済み workspacePath を意図せず削除する副作用を防ぐ）
 					if (cancelled) return;
-					await workspaceSet(null).catch(() => {});
+					if (registeredOnMain) {
+						await workspaceSet(null).catch(() => {});
+					}
 				}
 			}
 

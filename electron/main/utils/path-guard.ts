@@ -151,14 +151,19 @@ export function registerTransientWritePath(windowId: number, p: string): void {
 	set.add(canonical);
 }
 
-export function consumeTransientWritePath(windowId: number, p: string): boolean {
-	// fs:write / fs:write-new は成功時に毎回これを呼ぶため、transient 未登録の
-	// 通常保存（workspace 内 write）が hot path。Set 取得を先に行い、
-	// 該当 window の Set が無ければ canonicalize（realpath sync）を走らせず即 return。
+// この関数は **canonical 前提** API。`assertWritePathAllowed` の戻り値や
+// `canonicalize()` の結果をそのまま渡すこと。raw（未正規化）パスを渡しても
+// silently false を返して capability が解放されない可能性がある。
+//
+// fs:write / fs:write-new は成功時に毎回これを呼ぶため、transient 未登録の
+// 通常保存（workspace 内 write）が hot path。
+//   1. 該当 window の Set が無ければ即 false（realpathSync を走らせない）
+//   2. ある場合も「canonical 前提」なので追加の realpathSync 呼び出しは不要
+// により hot path で realpath syscall を回避する。
+export function consumeTransientWritePath(windowId: number, canonicalPath: string): boolean {
 	const set = transientWritePaths.get(windowId);
 	if (set === undefined) return false;
-	const canonical = canonicalize(p);
-	const removed = set.delete(canonical);
+	const removed = set.delete(canonicalPath);
 	if (set.size === 0) transientWritePaths.delete(windowId);
 	return removed;
 }
