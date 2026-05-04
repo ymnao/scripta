@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -58,7 +58,7 @@ describe("setActiveWorkspaceForWindow", () => {
 		setActiveWorkspaceForWindow(WIN_A, dirB);
 		const roots = getWorkspaceRootsForWindow(WIN_A);
 		expect(roots).toHaveLength(1);
-		expect(roots[0].endsWith(dirB.split("/").slice(-1)[0])).toBe(true);
+		expect(roots[0].endsWith(basename(dirB))).toBe(true);
 	});
 
 	it("clears the window's workspace when path is null", () => {

@@ -58,10 +58,11 @@ export function Sidebar({
 		} catch (error) {
 			// main 側 reject（未承認 path / settings 永続化失敗 / Permission denied 等）を
 			// silently 握りつぶさず、ユーザーに通知する。
-			// 加えて、workspace:set ハンドラの中間で失敗していても allowedRoots に
-			// 残骸が残らないよう defensive に巻き戻す（AppLayout の hydrate 経路と同じパターン）。
+			// workspace:set は atomic（永続化が成功した後にのみ allowedRoots を更新）
+			// なので、失敗時は main 側 state が変化していない。ここで workspaceSet(null) を
+			// 呼ぶと、既存 workspace が開かれていた場合にそれまで誤って巻き戻してしまうため、
+			// ロールバックは行わず既存状態を維持する。
 			console.error("Failed to open folder:", error);
-			await workspaceSet(null).catch(() => {});
 			useToastStore
 				.getState()
 				.addToast("error", `フォルダを開けませんでした: ${translateError(error)}`);

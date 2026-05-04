@@ -204,10 +204,14 @@ export function AppLayout() {
 					if (cancelled) return;
 					setWorkspacePath(settings.workspacePath);
 				} catch {
-					// listDirectory 失敗（パス消失・権限喪失など）時は、
-					// main 側の許可 root も巻き戻して fail-closed の整合性を保つ。
+					// listDirectory 失敗（パス消失・権限喪失など）時は、main 側の許可 root も
+					// 巻き戻して fail-closed の整合性を保つ。
+					// ただし unmount / window close 後（cancelled）にロールバックすると、
+					// ユーザーの保存済み workspacePath を意図せず削除する副作用になるので、
+					// このウィンドウがまだ生きている時だけ実行する。
 					// workspaceSet(null) は main 側で settings の workspacePath も
 					// 削除するので renderer 側で saveWorkspacePath を呼ぶ必要はない
+					if (cancelled) return;
 					await workspaceSet(null).catch(() => {});
 				}
 			}
