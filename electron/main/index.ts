@@ -3,6 +3,7 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getWorkspacePathFromSettings } from "./ipc/settings";
+import { stopWatcherForWindow } from "./ipc/watcher";
 import { approveWorkspacePath, unregisterWindow } from "./ipc/workspace";
 import { isSafeExternalUrl } from "./utils/url";
 
@@ -80,6 +81,10 @@ function createWindow(): void {
 	const closingWindowId = mainWindow.webContents.id;
 	mainWindow.on("closed", () => {
 		openWindows.delete(mainWindow);
+		// chokidar セッションを止めてからガード状態を解除する。順序を逆にすると、
+		// allowedRoots を消した直後に flush の webContents.send が走って `isDestroyed`
+		// チェックの前に起動した watcher が無関係なログを吐く可能性があるため。
+		stopWatcherForWindow(closingWindowId);
 		// 該当ウィンドウの workspace root と未消費 transient capability を
 		// path-guard から一括削除する（unregisterWindow が内部で実行）。
 		unregisterWindow(closingWindowId);

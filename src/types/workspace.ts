@@ -4,7 +4,9 @@ export interface FileEntry {
 	isDirectory: boolean;
 }
 
+export type FsKind = "create" | "modify" | "delete";
+
 export interface FsChangeEvent {
-	kind: "create" | "modify" | "delete";
+	kind: FsKind;
 	path: string;
 }
