@@ -1,7 +1,11 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const allowedRoots = new Set<string>();
+// fs IPC ガードはすべて window-scoped。各ウィンドウが「自分が承認した
+// workspace root」だけにアクセスできるようにする。read/list/rename/delete も
+// write も同じ window 単位で判定するため、ウィンドウ A の renderer が
+// ウィンドウ B の workspace 配下を覗くことはできない。
+const windowAllowedRoots = new Map<number, Set<string>>();
 
 // dialog.showSaveDialog でユーザーが明示選択した保存先など、ワークスペース外でも
 // 「ユーザーの意図的な書き込み」として 1 回限り許可するパス。
@@ -76,36 +80,51 @@ function realpathBestEffort(p: string): string {
 	}
 }
 
-export function registerWorkspaceRoot(p: string): void {
-	const validated = validatePath(p);
-	allowedRoots.add(realpathBestEffort(validated));
+// validatePath + realpath 正規化済みのパスを返す。workspace.ts のように
+// 「path-guard と整合した正規形」で値を保持したい呼び出し側用の helper。
+export function canonicalize(p: string): string {
+	return realpathBestEffort(validatePath(p));
 }
 
-export function unregisterWorkspaceRoot(p: string): void {
-	const validated = validatePath(p);
-	allowedRoots.delete(realpathBestEffort(validated));
+export function registerWorkspaceRoot(windowId: number, p: string): void {
+	const canonical = canonicalize(p);
+	let set = windowAllowedRoots.get(windowId);
+	if (set === undefined) {
+		set = new Set<string>();
+		windowAllowedRoots.set(windowId, set);
+	}
+	set.add(canonical);
+}
+
+export function unregisterWorkspaceRoot(windowId: number, p: string): void {
+	const canonical = canonicalize(p);
+	const set = windowAllowedRoots.get(windowId);
+	if (set === undefined) return;
+	set.delete(canonical);
+	if (set.size === 0) windowAllowedRoots.delete(windowId);
+}
+
+// 該当ウィンドウが close したときの cleanup。allowedRoots と transientWritePaths を
+// まとめて消すことで、後続のゾンビ window-id 経由でガードが緩む事故を防ぐ。
+export function clearWorkspaceRootsForWindow(windowId: number): void {
+	windowAllowedRoots.delete(windowId);
+	transientWritePaths.delete(windowId);
 }
 
 export function clearWorkspaceRoots(): void {
-	allowedRoots.clear();
+	windowAllowedRoots.clear();
 	transientWritePaths.clear();
 	// テスト間で symlink ターゲットを切り替えるケースに備え、realpath cache も clear する
 	realpathCache.clear();
 }
 
-function isWithinAnyAllowedRoot(target: string): boolean {
-	for (const root of allowedRoots) {
-		if (isPathInside(target, root)) return true;
-	}
-	return false;
-}
-
-export function getWorkspaceRoots(): string[] {
-	return [...allowedRoots];
+export function getWorkspaceRootsForWindow(windowId: number): string[] {
+	const set = windowAllowedRoots.get(windowId);
+	return set ? [...set] : [];
 }
 
 export function registerTransientWritePath(windowId: number, p: string): void {
-	const canonical = realpathBestEffort(validatePath(p));
+	const canonical = canonicalize(p);
 	let set = transientWritePaths.get(windowId);
 	if (set === undefined) {
 		set = new Set<string>();
@@ -115,7 +134,7 @@ export function registerTransientWritePath(windowId: number, p: string): void {
 }
 
 export function consumeTransientWritePath(windowId: number, p: string): boolean {
-	const canonical = realpathBestEffort(validatePath(p));
+	const canonical = canonicalize(p);
 	const set = transientWritePaths.get(windowId);
 	if (set === undefined) return false;
 	const removed = set.delete(canonical);
@@ -145,39 +164,42 @@ function isPathInside(child: string, parent: string): boolean {
 	return true;
 }
 
-// validatePath + realpath 正規化済みのパスを返す。workspace.ts のように
-// 「path-guard と整合した正規形」で値を保持したい呼び出し側用の helper。
-export function canonicalize(p: string): string {
-	return realpathBestEffort(validatePath(p));
+function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
+	const set = windowAllowedRoots.get(windowId);
+	if (set === undefined) return false;
+	for (const root of set) {
+		if (isPathInside(target, root)) return true;
+	}
+	return false;
 }
 
-// Fail-closed: ワークスペース未登録時はすべて拒否する。
+// Fail-closed: ウィンドウ未登録時はすべて拒否する。
 // renderer 側 AppLayout が settings から読み込んだ workspacePath を workspaceSet で
 // 申告した時点で初めて register されるため、初回起動 / ワークスペース未選択時は
 // fs:* IPC が一切通らないことが保証される。
 //
 // この関数は read/list/rename/delete などの非書き込み系で使う。
 // SaveDialog 由来の transient write 許可は **参照しない**（write 専用 capability）。
-export function isPathAllowed(p: string): boolean {
+export function isPathAllowed(windowId: number, p: string): boolean {
 	// 内部で validate することで、呼び出し側が誤って相対パスを渡した場合も
 	// realpath が cwd を base に解決してしまうフットガンを防ぐ
-	return isWithinAnyAllowedRoot(realpathBestEffort(validatePath(p)));
+	return isWithinWindowAllowedRoot(windowId, realpathBestEffort(validatePath(p)));
 }
 
-export function assertPathAllowed(p: string): void {
-	if (isPathAllowed(p)) return;
+export function assertPathAllowed(windowId: number, p: string): void {
+	if (isPathAllowed(windowId, p)) return;
 	// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
 	console.warn(`[path-guard] denied outside workspace: ${p}`);
 	throw new Error("Permission denied: outside workspace");
 }
 
 // write 系 IPC（fs:write / fs:write-new）専用ガード。
-// workspace root マッチ OR 該当 window の transient set にマッチで許可。
+// 該当 window の workspace root マッチ OR 該当 window の transient set にマッチで許可。
 // **consume はしない**（withRetry の再試行中も許可が残るように）。
 // 書き込み成功後に consumeTransientWritePath を呼んで明示的に capability を使い切る。
 export function assertWritePathAllowed(windowId: number, p: string): void {
 	const target = realpathBestEffort(validatePath(p));
-	if (isWithinAnyAllowedRoot(target)) return;
+	if (isWithinWindowAllowedRoot(windowId, target)) return;
 	const set = transientWritePaths.get(windowId);
 	if (set?.has(target)) return;
 	console.warn(`[path-guard] write denied outside workspace: ${p}`);

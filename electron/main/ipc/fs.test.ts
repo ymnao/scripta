@@ -21,6 +21,7 @@ import {
 import { __testing } from "./fs";
 
 const TEST_WIN = 1;
+const OTHER_WIN = 2;
 
 const {
 	readFileImpl,
@@ -40,7 +41,7 @@ let workspaceDir = "";
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-fs-test-"));
-	registerWorkspaceRoot(workspaceDir);
+	registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	vi.mocked(shell.trashItem).mockClear();
 });
 
@@ -53,16 +54,25 @@ describe("readFileImpl", () => {
 	it("reads UTF-8 content from a file", async () => {
 		const path = join(workspaceDir, "hello.md");
 		await writeFile(path, "こんにちは\n世界", "utf8");
-		expect(await readFileImpl(path)).toBe("こんにちは\n世界");
+		expect(await readFileImpl(TEST_WIN, path)).toBe("こんにちは\n世界");
 	});
 
 	it("throws ENOENT when the file is missing", async () => {
 		const path = join(workspaceDir, "missing.md");
-		await expect(readFileImpl(path)).rejects.toThrow(/ENOENT/);
+		await expect(readFileImpl(TEST_WIN, path)).rejects.toThrow(/ENOENT/);
 	});
 
 	it("rejects relative paths", async () => {
-		await expect(readFileImpl("relative.md")).rejects.toThrow(/Invalid path: must be absolute/);
+		await expect(readFileImpl(TEST_WIN, "relative.md")).rejects.toThrow(
+			/Invalid path: must be absolute/,
+		);
+	});
+
+	it("rejects reads from another window's workspace (window-scoped guard)", async () => {
+		// この再現が、レビュー指摘の本質：別ウィンドウ workspace 配下を覗けてはいけない
+		const path = join(workspaceDir, "shared.md");
+		await writeFile(path, "secret", "utf8");
+		await expect(readFileImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
 	});
 });
 
@@ -120,7 +130,6 @@ describe("writeFileImpl", () => {
 
 	it("rejects when another window's transient is used (no cross-window leakage)", async () => {
 		const outside = join(tmpdir(), `scripta-outside-cross-${Date.now()}.md`);
-		const OTHER_WIN = 9999;
 		registerTransientWritePath(OTHER_WIN, outside);
 		await expect(writeFileImpl(TEST_WIN, outside, "x")).rejects.toThrow(/Permission denied/);
 	});
@@ -171,7 +180,7 @@ describe("listDirectoryImpl", () => {
 		const sub = join(workspaceDir, "sub");
 		await mkdir(sub);
 
-		const entries = await listDirectoryImpl(workspaceDir);
+		const entries = await listDirectoryImpl(TEST_WIN, workspaceDir);
 		const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
 		expect(sorted).toHaveLength(3);
 		expect(sorted[0]).toEqual({
@@ -192,58 +201,62 @@ describe("listDirectoryImpl", () => {
 	});
 
 	it("returns an empty array for an empty directory", async () => {
-		expect(await listDirectoryImpl(workspaceDir)).toEqual([]);
+		expect(await listDirectoryImpl(TEST_WIN, workspaceDir)).toEqual([]);
 	});
 
 	it("throws ENOENT for a missing directory", async () => {
-		await expect(listDirectoryImpl(join(workspaceDir, "nope"))).rejects.toThrow(/ENOENT/);
+		await expect(listDirectoryImpl(TEST_WIN, join(workspaceDir, "nope"))).rejects.toThrow(/ENOENT/);
+	});
+
+	it("rejects list from another window (window-scoped guard)", async () => {
+		await expect(listDirectoryImpl(OTHER_WIN, workspaceDir)).rejects.toThrow(/Permission denied/);
 	});
 });
 
 describe("createFileImpl", () => {
 	it("creates an empty file", async () => {
 		const path = join(workspaceDir, "new.md");
-		await createFileImpl(path);
+		await createFileImpl(TEST_WIN, path);
 		expect(await readFile(path, "utf8")).toBe("");
 	});
 
 	it("creates parent directories", async () => {
 		const path = join(workspaceDir, "deep", "x", "new.md");
-		await createFileImpl(path);
+		await createFileImpl(TEST_WIN, path);
 		expect(await readFile(path, "utf8")).toBe("");
 	});
 
 	it("throws Already exists when the file is already present", async () => {
 		const path = join(workspaceDir, "exists.md");
 		await writeFile(path, "", "utf8");
-		await expect(createFileImpl(path)).rejects.toThrow(/^Already exists:/);
+		await expect(createFileImpl(TEST_WIN, path)).rejects.toThrow(/^Already exists:/);
 	});
 
 	it("rejects creation outside the workspace", async () => {
 		const outside = join(tmpdir(), "scripta-outside-create.md");
-		await expect(createFileImpl(outside)).rejects.toThrow(/Permission denied/);
+		await expect(createFileImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
 	});
 });
 
 describe("createDirectoryImpl", () => {
 	it("creates a new directory", async () => {
 		const path = join(workspaceDir, "new-dir");
-		await createDirectoryImpl(path);
+		await createDirectoryImpl(TEST_WIN, path);
 		const s = await stat(path);
 		expect(s.isDirectory()).toBe(true);
 	});
 
 	it("creates intermediate directories", async () => {
 		const path = join(workspaceDir, "a", "b", "c");
-		await createDirectoryImpl(path);
+		await createDirectoryImpl(TEST_WIN, path);
 		const s = await stat(path);
 		expect(s.isDirectory()).toBe(true);
 	});
 
 	it("throws Already exists when the directory exists", async () => {
 		const path = join(workspaceDir, "dir");
-		await createDirectoryImpl(path);
-		await expect(createDirectoryImpl(path)).rejects.toThrow(/^Already exists:/);
+		await createDirectoryImpl(TEST_WIN, path);
+		await expect(createDirectoryImpl(TEST_WIN, path)).rejects.toThrow(/^Already exists:/);
 	});
 });
 
@@ -251,26 +264,33 @@ describe("pathExistsImpl / fileExistsImpl", () => {
 	it("pathExists returns true for an existing file", async () => {
 		const path = join(workspaceDir, "f.md");
 		await writeFile(path, "", "utf8");
-		expect(await pathExistsImpl(path)).toBe(true);
+		expect(await pathExistsImpl(TEST_WIN, path)).toBe(true);
 	});
 
 	it("pathExists returns true for an existing directory", async () => {
-		expect(await pathExistsImpl(workspaceDir)).toBe(true);
+		expect(await pathExistsImpl(TEST_WIN, workspaceDir)).toBe(true);
 	});
 
 	it("pathExists returns false for a missing entry", async () => {
-		expect(await pathExistsImpl(join(workspaceDir, "missing"))).toBe(false);
+		expect(await pathExistsImpl(TEST_WIN, join(workspaceDir, "missing"))).toBe(false);
 	});
 
 	it("fileExists returns true only for files (not directories)", async () => {
 		const path = join(workspaceDir, "file.md");
 		await writeFile(path, "", "utf8");
-		expect(await fileExistsImpl(path)).toBe(true);
-		expect(await fileExistsImpl(workspaceDir)).toBe(false);
+		expect(await fileExistsImpl(TEST_WIN, path)).toBe(true);
+		expect(await fileExistsImpl(TEST_WIN, workspaceDir)).toBe(false);
 	});
 
 	it("fileExists returns false when missing", async () => {
-		expect(await fileExistsImpl(join(workspaceDir, "missing.md"))).toBe(false);
+		expect(await fileExistsImpl(TEST_WIN, join(workspaceDir, "missing.md"))).toBe(false);
+	});
+
+	it("rejects pathExists / fileExists from another window", async () => {
+		const path = join(workspaceDir, "f.md");
+		await writeFile(path, "", "utf8");
+		await expect(pathExistsImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
+		await expect(fileExistsImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
 	});
 });
 
@@ -279,8 +299,8 @@ describe("renameEntryImpl", () => {
 		const oldPath = join(workspaceDir, "old.md");
 		const newPath = join(workspaceDir, "new.md");
 		await writeFile(oldPath, "content", "utf8");
-		await renameEntryImpl(oldPath, newPath);
-		expect(await pathExistsImpl(oldPath)).toBe(false);
+		await renameEntryImpl(TEST_WIN, oldPath, newPath);
+		expect(await pathExistsImpl(TEST_WIN, oldPath)).toBe(false);
 		expect(await readFile(newPath, "utf8")).toBe("content");
 	});
 
@@ -288,14 +308,14 @@ describe("renameEntryImpl", () => {
 		const oldPath = join(workspaceDir, "old.md");
 		const newPath = join(workspaceDir, "moved", "deep", "new.md");
 		await writeFile(oldPath, "x", "utf8");
-		await renameEntryImpl(oldPath, newPath);
+		await renameEntryImpl(TEST_WIN, oldPath, newPath);
 		expect(await readFile(newPath, "utf8")).toBe("x");
 	});
 
 	it("throws Source not found when missing", async () => {
 		const oldPath = join(workspaceDir, "missing.md");
 		const newPath = join(workspaceDir, "new.md");
-		await expect(renameEntryImpl(oldPath, newPath)).rejects.toThrow(/^Source not found:/);
+		await expect(renameEntryImpl(TEST_WIN, oldPath, newPath)).rejects.toThrow(/^Source not found:/);
 	});
 
 	it("throws Target already exists when destination exists", async () => {
@@ -303,15 +323,24 @@ describe("renameEntryImpl", () => {
 		const newPath = join(workspaceDir, "new.md");
 		await writeFile(oldPath, "a", "utf8");
 		await writeFile(newPath, "b", "utf8");
-		await expect(renameEntryImpl(oldPath, newPath)).rejects.toThrow(/^Target already exists:/);
+		await expect(renameEntryImpl(TEST_WIN, oldPath, newPath)).rejects.toThrow(
+			/^Target already exists:/,
+		);
 	});
 
 	it("rejects when either side is outside the workspace", async () => {
 		const inside = join(workspaceDir, "f.md");
 		await writeFile(inside, "", "utf8");
 		const outside = join(tmpdir(), "scripta-outside-rename.md");
-		await expect(renameEntryImpl(inside, outside)).rejects.toThrow(/Permission denied/);
-		await expect(renameEntryImpl(outside, inside)).rejects.toThrow(/Permission denied/);
+		await expect(renameEntryImpl(TEST_WIN, inside, outside)).rejects.toThrow(/Permission denied/);
+		await expect(renameEntryImpl(TEST_WIN, outside, inside)).rejects.toThrow(/Permission denied/);
+	});
+
+	it("rejects rename from another window", async () => {
+		const oldPath = join(workspaceDir, "old.md");
+		const newPath = join(workspaceDir, "new.md");
+		await writeFile(oldPath, "x", "utf8");
+		await expect(renameEntryImpl(OTHER_WIN, oldPath, newPath)).rejects.toThrow(/Permission denied/);
 	});
 });
 
@@ -319,21 +348,27 @@ describe("deleteEntryImpl", () => {
 	it("calls shell.trashItem for an existing file", async () => {
 		const path = join(workspaceDir, "f.md");
 		await writeFile(path, "", "utf8");
-		await deleteEntryImpl(path);
+		await deleteEntryImpl(TEST_WIN, path);
 		expect(shell.trashItem).toHaveBeenCalledTimes(1);
 		expect(shell.trashItem).toHaveBeenCalledWith(path);
 	});
 
 	it("throws Not found for missing entries", async () => {
 		const path = join(workspaceDir, "missing.md");
-		await expect(deleteEntryImpl(path)).rejects.toThrow(/^Not found:/);
+		await expect(deleteEntryImpl(TEST_WIN, path)).rejects.toThrow(/^Not found:/);
 		expect(shell.trashItem).not.toHaveBeenCalled();
 	});
 
 	it("rejects deletes outside the workspace", async () => {
 		const outside = join(tmpdir(), "scripta-outside-delete.md");
 		await writeFile(outside, "", "utf8").catch(() => {});
-		await expect(deleteEntryImpl(outside)).rejects.toThrow(/Permission denied/);
+		await expect(deleteEntryImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
 		await rm(outside, { force: true });
+	});
+
+	it("rejects delete from another window", async () => {
+		const path = join(workspaceDir, "f.md");
+		await writeFile(path, "", "utf8");
+		await expect(deleteEntryImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
 	});
 });

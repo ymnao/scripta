@@ -8,15 +8,19 @@ import {
 	assertWritePathAllowed,
 	clearTransientWritePathsForWindow,
 	clearWorkspaceRoots,
+	clearWorkspaceRootsForWindow,
 	consumeTransientWritePath,
 	getTransientWritePathsForWindow,
-	getWorkspaceRoots,
+	getWorkspaceRootsForWindow,
 	isPathAllowed,
 	registerTransientWritePath,
 	registerWorkspaceRoot,
 	unregisterWorkspaceRoot,
 	validatePath,
 } from "./path-guard";
+
+const WIN_A = 1;
+const WIN_B = 2;
 
 let workspaceDir = "";
 let outsideDir = "";
@@ -62,61 +66,83 @@ describe.skipIf(process.platform === "win32")("validatePath", () => {
 	});
 });
 
-describe("workspace root registration", () => {
-	it("registers and lists realpath-resolved roots", () => {
-		registerWorkspaceRoot(workspaceDir);
-		const roots = getWorkspaceRoots();
+describe("workspace root registration (window-scoped)", () => {
+	it("registers a realpath-resolved root under a window", () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		const roots = getWorkspaceRootsForWindow(WIN_A);
 		expect(roots).toHaveLength(1);
-		// macOS では /var → /private/var など symlink が解消される。
-		// その対称性を確かめるためには realpath したパスの末尾が workspaceDir の末尾と一致することで十分。
+		// macOS では /var → /private/var など symlink が解消される
 		expect(roots[0].endsWith(workspaceDir.split("/").slice(-1)[0])).toBe(true);
 	});
 
-	it("unregisters a realpath-resolved root", () => {
-		registerWorkspaceRoot(workspaceDir);
-		unregisterWorkspaceRoot(workspaceDir);
-		expect(getWorkspaceRoots()).toEqual([]);
+	it("unregisters a root from a window", () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		unregisterWorkspaceRoot(WIN_A, workspaceDir);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
 	});
 
-	it("clears all roots", () => {
-		registerWorkspaceRoot(workspaceDir);
+	it("clears all roots across windows", () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		registerWorkspaceRoot(WIN_B, outsideDir);
 		clearWorkspaceRoots();
-		expect(getWorkspaceRoots()).toEqual([]);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toEqual([]);
+	});
+
+	it("clearWorkspaceRootsForWindow removes only one window's roots", () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		registerWorkspaceRoot(WIN_B, outsideDir);
+		clearWorkspaceRootsForWindow(WIN_A);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
 
 	it("registers non-existent paths by falling back to resolve()", () => {
 		const phantom = "/this/path/does/not/exist";
-		registerWorkspaceRoot(phantom);
-		expect(getWorkspaceRoots()).toEqual([phantom]);
+		registerWorkspaceRoot(WIN_A, phantom);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([phantom]);
 	});
 });
 
-describe("isPathAllowed", () => {
-	it("denies everything when no roots are registered (fail-closed)", () => {
-		// アプリ起動直後 / ワークスペース未選択 / watcher:stop 後に任意 path への
-		// アクセスを許してしまう抜け穴を防ぐ
-		expect(isPathAllowed("/anywhere/file")).toBe(false);
-		expect(isPathAllowed("/etc/passwd")).toBe(false);
+describe("isPathAllowed (window-scoped)", () => {
+	it("denies everything when the window has no roots (fail-closed)", () => {
+		// アプリ起動直後 / ワークスペース未選択時に任意 path へのアクセスを許してしまう
+		// 抜け穴を防ぐ
+		expect(isPathAllowed(WIN_A, "/anywhere/file")).toBe(false);
+		expect(isPathAllowed(WIN_A, "/etc/passwd")).toBe(false);
+	});
+
+	it("does NOT see roots registered to a different window", () => {
+		// ウィンドウ A の renderer が ウィンドウ B の workspace 配下を read/list/rename/
+		// delete できてしまう回帰を防ぐ
+		registerWorkspaceRoot(WIN_B, workspaceDir);
+		const file = join(workspaceDir, "f.md");
+		expect(isPathAllowed(WIN_A, file)).toBe(false);
+		expect(() => assertPathAllowed(WIN_A, file)).toThrow(/Permission denied/);
+		// 当該 window は通る
+		expect(isPathAllowed(WIN_B, file)).toBe(true);
 	});
 
 	it("throws on relative input — validatePath is enforced inside the guard", () => {
 		// 呼び出し側が誤って相対パスを渡しても、cwd 解釈で false-positive にならない
-		expect(() => isPathAllowed("relative/path")).toThrow(/Invalid path: must be absolute/);
-		expect(() => assertPathAllowed("relative/path")).toThrow(/Invalid path: must be absolute/);
+		expect(() => isPathAllowed(WIN_A, "relative/path")).toThrow(/Invalid path: must be absolute/);
+		expect(() => assertPathAllowed(WIN_A, "relative/path")).toThrow(
+			/Invalid path: must be absolute/,
+		);
 	});
 
-	it("allows files inside the workspace", async () => {
+	it("allows files inside the window's workspace", async () => {
 		const file = join(workspaceDir, "f.md");
 		await writeFile(file, "x", "utf8");
-		registerWorkspaceRoot(workspaceDir);
-		expect(isPathAllowed(file)).toBe(true);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		expect(isPathAllowed(WIN_A, file)).toBe(true);
 	});
 
 	it("rejects files outside the workspace", async () => {
 		const outsideFile = join(outsideDir, "secret");
 		await writeFile(outsideFile, "x", "utf8");
-		registerWorkspaceRoot(workspaceDir);
-		expect(isPathAllowed(outsideFile)).toBe(false);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		expect(isPathAllowed(WIN_A, outsideFile)).toBe(false);
 	});
 
 	// fs.symlink は Windows で Developer Mode 無効時に EPERM になる。skip して
@@ -124,22 +150,19 @@ describe("isPathAllowed", () => {
 	it.skipIf(process.platform === "win32")(
 		"blocks symlink-based escape from the workspace",
 		async () => {
-			// workspace 内に outside ディレクトリを指す symlink を仕込む
 			const link = join(workspaceDir, "escape");
 			await symlink(outsideDir, link);
 			const target = join(link, "secret");
 			await writeFile(target, "leaked", "utf8");
-			registerWorkspaceRoot(workspaceDir);
-			// 単純な path.resolve では「workspace 内」と判定されてしまうが、
-			// realpath ベースの判定では outside に解決されるため拒否される
-			expect(isPathAllowed(target)).toBe(false);
+			registerWorkspaceRoot(WIN_A, workspaceDir);
+			expect(isPathAllowed(WIN_A, target)).toBe(false);
 		},
 	);
 
 	it("allows paths inside the workspace even before the file exists", () => {
-		registerWorkspaceRoot(workspaceDir);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
 		const newPath = join(workspaceDir, "subdir", "new.md");
-		expect(isPathAllowed(newPath)).toBe(true);
+		expect(isPathAllowed(WIN_A, newPath)).toBe(true);
 	});
 
 	it.skipIf(process.platform === "win32")(
@@ -147,20 +170,20 @@ describe("isPathAllowed", () => {
 		async () => {
 			const link = join(workspaceDir, "escape");
 			await symlink(outsideDir, link);
-			registerWorkspaceRoot(workspaceDir);
+			registerWorkspaceRoot(WIN_A, workspaceDir);
 			const evil = join(link, "new-file.md");
-			expect(isPathAllowed(evil)).toBe(false);
+			expect(isPathAllowed(WIN_A, evil)).toBe(false);
 		},
 	);
 
-	it("allows paths inside any of multiple registered roots", async () => {
+	it("allows paths inside any of multiple roots registered to the same window", async () => {
 		const second = await mkdtemp(join(tmpdir(), "scripta-pg-ws2-"));
 		try {
-			registerWorkspaceRoot(workspaceDir);
-			registerWorkspaceRoot(second);
-			expect(isPathAllowed(join(workspaceDir, "a.md"))).toBe(true);
-			expect(isPathAllowed(join(second, "b.md"))).toBe(true);
-			expect(isPathAllowed(join(outsideDir, "c.md"))).toBe(false);
+			registerWorkspaceRoot(WIN_A, workspaceDir);
+			registerWorkspaceRoot(WIN_A, second);
+			expect(isPathAllowed(WIN_A, join(workspaceDir, "a.md"))).toBe(true);
+			expect(isPathAllowed(WIN_A, join(second, "b.md"))).toBe(true);
+			expect(isPathAllowed(WIN_A, join(outsideDir, "c.md"))).toBe(false);
 		} finally {
 			await rm(second, { recursive: true, force: true });
 		}
@@ -169,8 +192,8 @@ describe("isPathAllowed", () => {
 	it("does not falsely match sibling directories sharing a name prefix", async () => {
 		const sibling = await mkdtemp(join(tmpdir(), "scripta-pg-ws-"));
 		try {
-			registerWorkspaceRoot(workspaceDir);
-			expect(isPathAllowed(join(sibling, "f.md"))).toBe(false);
+			registerWorkspaceRoot(WIN_A, workspaceDir);
+			expect(isPathAllowed(WIN_A, join(sibling, "f.md"))).toBe(false);
 		} finally {
 			await rm(sibling, { recursive: true, force: true });
 		}
@@ -184,32 +207,31 @@ describe("isPathAllowed", () => {
 		try {
 			const target = join(dotDir, "note.md");
 			await writeFile(target, "x", "utf8");
-			registerWorkspaceRoot(workspaceDir);
-			expect(isPathAllowed(target)).toBe(true);
+			registerWorkspaceRoot(WIN_A, workspaceDir);
+			expect(isPathAllowed(WIN_A, target)).toBe(true);
 		} finally {
 			await rm(dotDir, { recursive: true, force: true });
 		}
 	});
 });
 
-describe("assertPathAllowed", () => {
-	it("does not throw inside the workspace", async () => {
+describe("assertPathAllowed (window-scoped)", () => {
+	it("does not throw inside the window's workspace", async () => {
 		const file = join(workspaceDir, "f.md");
 		await writeFile(file, "x", "utf8");
-		registerWorkspaceRoot(workspaceDir);
-		expect(() => assertPathAllowed(file)).not.toThrow();
-		expect(() => assertPathAllowed(join(workspaceDir, "new.md"))).not.toThrow();
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		expect(() => assertPathAllowed(WIN_A, file)).not.toThrow();
+		expect(() => assertPathAllowed(WIN_A, join(workspaceDir, "new.md"))).not.toThrow();
 	});
 
 	it("throws a generic Permission denied error WITHOUT leaking the path", async () => {
-		registerWorkspaceRoot(workspaceDir);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
 		const offendingPath = join(outsideDir, "secret");
-		expect(() => assertPathAllowed(offendingPath)).toThrow(
+		expect(() => assertPathAllowed(WIN_A, offendingPath)).toThrow(
 			/^Permission denied: outside workspace$/,
 		);
-		// 違反パスが Error.message に含まれていないことを明示的に検証
 		try {
-			assertPathAllowed(offendingPath);
+			assertPathAllowed(WIN_A, offendingPath);
 		} catch (e) {
 			expect((e as Error).message).not.toContain(offendingPath);
 			expect((e as Error).message).not.toContain(outsideDir);
@@ -217,10 +239,10 @@ describe("assertPathAllowed", () => {
 	});
 
 	it("logs the offending path to console.warn but not to the thrown Error", async () => {
-		registerWorkspaceRoot(workspaceDir);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
 		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
-			expect(() => assertPathAllowed(join(outsideDir, "x"))).toThrow();
+			expect(() => assertPathAllowed(WIN_A, join(outsideDir, "x"))).toThrow();
 			expect(spy).toHaveBeenCalledTimes(1);
 			expect(spy.mock.calls[0][0]).toContain("[path-guard]");
 			expect(spy.mock.calls[0][0]).toContain(outsideDir);
@@ -231,15 +253,12 @@ describe("assertPathAllowed", () => {
 });
 
 describe("transient write paths (window-scoped, write-only capability)", () => {
-	const WIN_A = 1;
-	const WIN_B = 2;
-
 	it("isPathAllowed (read guard) does NOT see transient paths", () => {
 		const target = join(outsideDir, "export.html");
 		registerTransientWritePath(WIN_A, target);
 		// transient は write 専用 capability。read 系では参照されない
-		expect(isPathAllowed(target)).toBe(false);
-		expect(() => assertPathAllowed(target)).toThrow(/Permission denied/);
+		expect(isPathAllowed(WIN_A, target)).toBe(false);
+		expect(() => assertPathAllowed(WIN_A, target)).toThrow(/Permission denied/);
 	});
 
 	it("assertWritePathAllowed permits a transient path without consuming it", () => {
@@ -259,12 +278,11 @@ describe("transient write paths (window-scoped, write-only capability)", () => {
 		registerTransientWritePath(WIN_A, target);
 		expect(consumeTransientWritePath(WIN_A, target)).toBe(true);
 		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
-		// 2 度目は no-op
 		expect(consumeTransientWritePath(WIN_A, target)).toBe(false);
 	});
 
 	it("permits write via workspace root regardless of transient state", () => {
-		registerWorkspaceRoot(workspaceDir);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
 		const wsFile = join(workspaceDir, "f.md");
 		expect(() => assertWritePathAllowed(WIN_A, wsFile)).not.toThrow();
 	});
@@ -272,10 +290,8 @@ describe("transient write paths (window-scoped, write-only capability)", () => {
 	it("isolates transient paths per window (no cross-window consumption)", () => {
 		const target = join(outsideDir, "export.html");
 		registerTransientWritePath(WIN_A, target);
-		// 別 window からは見えない
 		expect(() => assertWritePathAllowed(WIN_B, target)).toThrow(/Permission denied/);
 		expect(getTransientWritePathsForWindow(WIN_B)).toEqual([]);
-		// 元の window では引き続き有効
 		expect(() => assertWritePathAllowed(WIN_A, target)).not.toThrow();
 	});
 
@@ -285,6 +301,14 @@ describe("transient write paths (window-scoped, write-only capability)", () => {
 		clearTransientWritePathsForWindow(WIN_A);
 		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
 		expect(getTransientWritePathsForWindow(WIN_B)).toHaveLength(1);
+	});
+
+	it("clearWorkspaceRootsForWindow also wipes transient paths for that window", () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		registerTransientWritePath(WIN_A, join(outsideDir, "x.html"));
+		clearWorkspaceRootsForWindow(WIN_A);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
 	});
 
 	it("clearWorkspaceRoots also wipes transient paths for all windows (test reset)", () => {

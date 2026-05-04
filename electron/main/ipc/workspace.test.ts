@@ -8,7 +8,7 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
-import { canonicalize, clearWorkspaceRoots, getWorkspaceRoots } from "../utils/path-guard";
+import { canonicalize, clearWorkspaceRoots, getWorkspaceRootsForWindow } from "../utils/path-guard";
 import { __testing, approveWorkspacePath, isWorkspacePathApproved } from "./workspace";
 
 const {
@@ -18,6 +18,9 @@ const {
 	getApprovedWorkspacePaths,
 	reset,
 } = __testing;
+
+const WIN_A = 1;
+const WIN_B = 2;
 
 let dirA = "";
 let dirB = "";
@@ -37,119 +40,93 @@ afterEach(async () => {
 });
 
 describe("setActiveWorkspaceForWindow", () => {
-	it("registers a workspace root for a window", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(1)).toBe(canonicalize(dirA));
+	it("registers the workspace root under the window's own slot", () => {
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
 	});
 
 	it("does nothing if the window already has the same path", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		const rootsBefore = getWorkspaceRoots();
-		setActiveWorkspaceForWindow(1, dirA);
-		expect(getWorkspaceRoots()).toEqual(rootsBefore);
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		const before = getWorkspaceRootsForWindow(WIN_A);
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual(before);
 	});
 
 	it("unregisters the previous path when a window switches", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		setActiveWorkspaceForWindow(1, dirB);
-		expect(getWorkspaceRoots()).toHaveLength(1);
-		// dirA が消え、dirB だけが残る
-		const roots = getWorkspaceRoots();
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_A, dirB);
+		const roots = getWorkspaceRootsForWindow(WIN_A);
+		expect(roots).toHaveLength(1);
 		expect(roots[0].endsWith(dirB.split("/").slice(-1)[0])).toBe(true);
 	});
 
 	it("clears the window's workspace when path is null", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		setActiveWorkspaceForWindow(1, null);
-		expect(getWorkspaceRoots()).toEqual([]);
-		expect(getWindowWorkspaces().has(1)).toBe(false);
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_A, null);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getWindowWorkspaces().has(WIN_A)).toBe(false);
 	});
 });
 
 describe("multi-window isolation", () => {
+	it("does not leak one window's path to another window's allowedRoots view", () => {
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_B, dirB);
+		// 各 window は自分の roots だけを持つ
+		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
+		expect(getWorkspaceRootsForWindow(WIN_A)[0]).toBe(canonicalize(dirA));
+		expect(getWorkspaceRootsForWindow(WIN_B)[0]).toBe(canonicalize(dirB));
+	});
+
 	it("does not unregister another window's path when one window switches", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		setActiveWorkspaceForWindow(2, dirB);
-		expect(getWorkspaceRoots()).toHaveLength(2);
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_B, dirB);
 
-		// window 1 が path を変えても window 2 の dirB は残る
-		setActiveWorkspaceForWindow(1, null);
-		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(2)).toBe(canonicalize(dirB));
+		setActiveWorkspaceForWindow(WIN_A, null);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
 
-	it("registers a path only once when shared by multiple windows", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		setActiveWorkspaceForWindow(2, dirA);
-		// 同じ path が 2 window に紐付いているが、allowedRoots には 1 件のみ
-		expect(getWorkspaceRoots()).toHaveLength(1);
+	it("registers the same path independently in each window", () => {
+		// 旧設計の ref-count は撤廃。各 window が自分の Set に持つ
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_B, dirA);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
 
-	it("keeps the shared path registered until the last window releases it (ref-count)", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		setActiveWorkspaceForWindow(2, dirA);
-		expect(getWorkspaceRoots()).toHaveLength(1);
-
-		setActiveWorkspaceForWindow(1, null);
-		// window 2 がまだ dirA を使っているので残る
-		expect(getWorkspaceRoots()).toHaveLength(1);
-
-		setActiveWorkspaceForWindow(2, null);
-		// 全 window が手放したので unregister
-		expect(getWorkspaceRoots()).toEqual([]);
+	it("unregistering one window does not affect the other window even with shared path", () => {
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_B, dirA);
+		setActiveWorkspaceForWindow(WIN_A, null);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
-
-	// fs.symlink は Windows で Developer Mode 無効時に EPERM になる。skip して
-	// macOS / Linux でのみ symlink 検証を行う。
-	it.skipIf(process.platform === "win32")(
-		"ref-counts via canonical path so symlink-aliased paths share the same slot",
-		async () => {
-			// dirA を指す symlink を作り、別ウィンドウから symlink パス経由で workspace を申告する。
-			// raw 文字列で比較していると「2 つの別 path」と見なされ、片方が手放した瞬間に
-			// もう一方がまだ使っているのに unregister されてしまう（今回の修正対象の事故シナリオ）。
-			const link = join(tmpdir(), `scripta-ws-link-${Date.now()}-${Math.random()}`);
-			await symlink(dirA, link);
-			try {
-				setActiveWorkspaceForWindow(1, dirA);
-				setActiveWorkspaceForWindow(2, link);
-				// 同じ実体を指すので allowedRoots は 1 件のみ
-				expect(getWorkspaceRoots()).toHaveLength(1);
-
-				setActiveWorkspaceForWindow(1, null);
-				// window 2 が symlink 経由でまだ使っているので、root は残るべき
-				expect(getWorkspaceRoots()).toHaveLength(1);
-
-				setActiveWorkspaceForWindow(2, null);
-				expect(getWorkspaceRoots()).toEqual([]);
-			} finally {
-				await rm(link, { force: true });
-			}
-		},
-	);
 });
 
 describe("unregisterWindow", () => {
-	it("removes the window's workspace from allowedRoots if no other window uses it", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		unregisterWindow(1);
-		expect(getWorkspaceRoots()).toEqual([]);
-		expect(getWindowWorkspaces().has(1)).toBe(false);
+	it("removes the window's workspace from its own allowedRoots", () => {
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		unregisterWindow(WIN_A);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
+		expect(getWindowWorkspaces().has(WIN_A)).toBe(false);
 	});
 
-	it("keeps the path registered if another window still uses it", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		setActiveWorkspaceForWindow(2, dirA);
-		unregisterWindow(1);
-		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(2)).toBe(canonicalize(dirA));
+	it("does not affect other windows' state", () => {
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		setActiveWorkspaceForWindow(WIN_B, dirA);
+		unregisterWindow(WIN_A);
+		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
+		expect(getWindowWorkspaces().get(WIN_B)).toBe(canonicalize(dirA));
 	});
 
 	it("is a no-op for an unknown window id", () => {
-		setActiveWorkspaceForWindow(1, dirA);
-		unregisterWindow(999);
-		expect(getWorkspaceRoots()).toHaveLength(1);
-		expect(getWindowWorkspaces().get(1)).toBe(canonicalize(dirA));
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		unregisterWindow(9999);
+		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
 	});
 });
 

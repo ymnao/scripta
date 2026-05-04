@@ -23,9 +23,9 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 	}
 }
 
-async function readFileImpl(path: string): Promise<string> {
+async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	return await fsp.readFile(resolved, "utf8");
 }
 
@@ -52,9 +52,9 @@ async function writeNewFileImpl(senderId: number, path: string, content: string)
 	consumeTransientWritePath(senderId, resolved);
 }
 
-async function listDirectoryImpl(path: string): Promise<FileEntry[]> {
+async function listDirectoryImpl(senderId: number, path: string): Promise<FileEntry[]> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	const entries = await fsp.readdir(resolved, { withFileTypes: true });
 	return entries.map((entry) => ({
 		name: entry.name,
@@ -63,9 +63,9 @@ async function listDirectoryImpl(path: string): Promise<FileEntry[]> {
 	}));
 }
 
-async function createFileImpl(path: string): Promise<void> {
+async function createFileImpl(senderId: number, path: string): Promise<void> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	await fsp.mkdir(dirname(resolved), { recursive: true });
 	try {
 		const fh = await fsp.open(resolved, "wx");
@@ -76,9 +76,9 @@ async function createFileImpl(path: string): Promise<void> {
 	}
 }
 
-async function createDirectoryImpl(path: string): Promise<void> {
+async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	// 親は recursive で先に作る。対象自体は非 recursive にすることで
 	// 「既存なら EEXIST」を atomic に得る（race-free）。
 	await fsp.mkdir(dirname(resolved), { recursive: true });
@@ -90,15 +90,15 @@ async function createDirectoryImpl(path: string): Promise<void> {
 	}
 }
 
-async function pathExistsImpl(path: string): Promise<boolean> {
+async function pathExistsImpl(senderId: number, path: string): Promise<boolean> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	return pathExistsAt(resolved);
 }
 
-async function fileExistsImpl(path: string): Promise<boolean> {
+async function fileExistsImpl(senderId: number, path: string): Promise<boolean> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	try {
 		const stat = await fsp.stat(resolved);
 		return stat.isFile();
@@ -108,11 +108,11 @@ async function fileExistsImpl(path: string): Promise<boolean> {
 	}
 }
 
-async function renameEntryImpl(oldPath: string, newPath: string): Promise<void> {
+async function renameEntryImpl(senderId: number, oldPath: string, newPath: string): Promise<void> {
 	const oldResolved = validatePath(oldPath);
 	const newResolved = validatePath(newPath);
-	assertPathAllowed(oldResolved);
-	assertPathAllowed(newResolved);
+	assertPathAllowed(senderId, oldResolved);
+	assertPathAllowed(senderId, newResolved);
 	if (!(await pathExistsAt(oldResolved))) throw FsError.sourceNotFound(oldResolved);
 	// fs.rename は target 既存時に上書きする default 挙動なので、
 	// 「Target already exists」を出すために事前 check が必要。
@@ -122,30 +122,32 @@ async function renameEntryImpl(oldPath: string, newPath: string): Promise<void> 
 	await fsp.rename(oldResolved, newResolved);
 }
 
-async function deleteEntryImpl(path: string): Promise<void> {
+async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 	const resolved = validatePath(path);
-	assertPathAllowed(resolved);
+	assertPathAllowed(senderId, resolved);
 	if (!(await pathExistsAt(resolved))) throw FsError.notFound(resolved);
 	await shell.trashItem(resolved);
 }
 
 export function registerFsIpc(): void {
-	ipcMain.handle("fs:read", (_event, path: string) => readFileImpl(path));
+	ipcMain.handle("fs:read", (event, path: string) => readFileImpl(event.sender.id, path));
 	ipcMain.handle("fs:write", (event, path: string, content: string) =>
 		writeFileImpl(event.sender.id, path, content),
 	);
 	ipcMain.handle("fs:write-new", (event, path: string, content: string) =>
 		writeNewFileImpl(event.sender.id, path, content),
 	);
-	ipcMain.handle("fs:list", (_event, path: string) => listDirectoryImpl(path));
-	ipcMain.handle("fs:create-file", (_event, path: string) => createFileImpl(path));
-	ipcMain.handle("fs:create-directory", (_event, path: string) => createDirectoryImpl(path));
-	ipcMain.handle("fs:path-exists", (_event, path: string) => pathExistsImpl(path));
-	ipcMain.handle("fs:file-exists", (_event, path: string) => fileExistsImpl(path));
-	ipcMain.handle("fs:rename", (_event, oldPath: string, newPath: string) =>
-		renameEntryImpl(oldPath, newPath),
+	ipcMain.handle("fs:list", (event, path: string) => listDirectoryImpl(event.sender.id, path));
+	ipcMain.handle("fs:create-file", (event, path: string) => createFileImpl(event.sender.id, path));
+	ipcMain.handle("fs:create-directory", (event, path: string) =>
+		createDirectoryImpl(event.sender.id, path),
 	);
-	ipcMain.handle("fs:delete", (_event, path: string) => deleteEntryImpl(path));
+	ipcMain.handle("fs:path-exists", (event, path: string) => pathExistsImpl(event.sender.id, path));
+	ipcMain.handle("fs:file-exists", (event, path: string) => fileExistsImpl(event.sender.id, path));
+	ipcMain.handle("fs:rename", (event, oldPath: string, newPath: string) =>
+		renameEntryImpl(event.sender.id, oldPath, newPath),
+	);
+	ipcMain.handle("fs:delete", (event, path: string) => deleteEntryImpl(event.sender.id, path));
 }
 
 export const __testing = {

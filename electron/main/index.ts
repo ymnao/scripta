@@ -4,7 +4,6 @@ import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getWorkspacePathFromSettings } from "./ipc/settings";
 import { approveWorkspacePath, unregisterWindow } from "./ipc/workspace";
-import { clearTransientWritePathsForWindow } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
 
 const CSP_PROD = [
@@ -81,10 +80,9 @@ function createWindow(): void {
 	const closingWindowId = mainWindow.webContents.id;
 	mainWindow.on("closed", () => {
 		openWindows.delete(mainWindow);
-		// このウィンドウだけが使っていた workspace path は allowedRoots からも消える
+		// 該当ウィンドウの workspace root と未消費 transient capability を
+		// path-guard から一括削除する（unregisterWindow が内部で実行）。
 		unregisterWindow(closingWindowId);
-		// 未消費の SaveDialog 由来の write capability を破棄して短命性を担保
-		clearTransientWritePathsForWindow(closingWindowId);
 	});
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
