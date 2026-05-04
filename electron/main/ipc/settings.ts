@@ -26,18 +26,26 @@ export function isSafeSettingsKey(key: unknown): key is string {
 	return SAFE_SETTINGS_KEY_PATTERN.test(key);
 }
 
-// settings は最終的に JSON.stringify で永続化される。BigInt / 関数 / Symbol /
-// 循環参照などを混入させると、settings:save だけでなく workspace:set ハンドラの
-// persistWorkspacePath（settings 全体を stringify する）まで巻き込んで永続化が
-// 恒久的に失敗し、fail-closed の workspace 登録ができなくなる。
-// 入力受付の段階で reject して状態を汚染させない。
+// settings 値に求める 2 つの不変条件を入力受付時に検証する：
+//   1. JSON.stringify が完走する（永続化が恒久失敗しない。BigInt / 循環参照を排除）
+//   2. structuredClone が完走する（settings:get の IPC 戻り値で DataCloneError に
+//      ならない。function / Symbol などを排除）
+// JSON.stringify は function / Symbol を silently drop するだけで throw しない
+// ため、structuredClone と併用しないと侵害された renderer がそれらを cache に
+// 入れて settings:get 越しに main を DoS できる。
 export function isJsonSerializable(value: unknown): boolean {
 	try {
 		JSON.stringify(value);
-		return true;
 	} catch {
 		return false;
 	}
+	try {
+		// structuredClone は Node 17+ で標準。Electron 41 (Node 22 系) で利用可。
+		structuredClone(value);
+	} catch {
+		return false;
+	}
+	return true;
 }
 
 // null-prototype object を返す。get/set/delete 時に Object.prototype 由来の

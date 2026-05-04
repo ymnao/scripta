@@ -215,13 +215,23 @@ describe("isJsonSerializable (persistence safety)", () => {
 		expect(isJsonSerializable(a)).toBe(false);
 	});
 
-	// 関数 / undefined / Symbol は JSON.stringify が「stringify されないだけで
-	// throw しない」ので、isJsonSerializable は true を返す。これらは undefined や
-	// 欠落した key として永続化されるが、settings の取り出し側 (getValue) は
-	// undefined を null に正規化するので運用上問題なし
-	it("does not reject values that JSON.stringify silently drops (functions/undefined)", () => {
+	it("rejects functions (JSON.stringify drops silently but structuredClone throws)", () => {
+		// 旧実装は JSON.stringify だけで判定しており function を素通りさせていた。
+		// IPC 戻り値の structuredClone で DataCloneError → main DoS を起こせるため
+		// 入口で弾く必要がある（structuredClone 検証で防げる）
+		expect(isJsonSerializable(() => 1)).toBe(false);
+	});
+
+	it("rejects Symbol", () => {
+		expect(isJsonSerializable(Symbol("x"))).toBe(false);
+	});
+
+	it("rejects objects containing a function value", () => {
+		expect(isJsonSerializable({ ok: 1, fn: () => 2 })).toBe(false);
+	});
+
+	it("allows undefined (Electron IPC supports it; getValue normalizes to null)", () => {
 		expect(isJsonSerializable(undefined)).toBe(true);
-		expect(isJsonSerializable(() => 1)).toBe(true);
 	});
 });
 
