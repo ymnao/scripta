@@ -184,23 +184,22 @@ describe("listDirectoryImpl", () => {
 		const entries = await listDirectoryImpl(TEST_WIN, workspaceDir);
 		const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
 		expect(sorted).toHaveLength(3);
-		// listDirectoryImpl が assertPathAllowed から canonical（realpath 済み）を
-		// 受け取り、エントリの path にはその canonical を join するため、
-		// 期待値も canonicalize した workspaceDir を基準にする
-		const wsCanonical = canonicalize(workspaceDir);
+		// 戻り値の path は renderer 側 workspacePath（raw 入力）と整合させるため
+		// canonical ではなく入力表記を base にする（symlink workspace / macOS /var 等の
+		// ズレで FileTree の replacePrefix が崩れないように）
 		expect(sorted[0]).toEqual({
 			name: "a.md",
-			path: join(wsCanonical, "a.md"),
+			path: join(workspaceDir, "a.md"),
 			isDirectory: false,
 		});
 		expect(sorted[1]).toEqual({
 			name: "b.md",
-			path: join(wsCanonical, "b.md"),
+			path: join(workspaceDir, "b.md"),
 			isDirectory: false,
 		});
 		expect(sorted[2]).toEqual({
 			name: "sub",
-			path: join(wsCanonical, "sub"),
+			path: join(workspaceDir, "sub"),
 			isDirectory: true,
 		});
 	});

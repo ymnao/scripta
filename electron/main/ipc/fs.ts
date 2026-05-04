@@ -1,5 +1,5 @@
 import { promises as fsp } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ipcMain, shell } from "electron";
 import type { FileEntry } from "../../../src/types/workspace";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
@@ -57,9 +57,15 @@ async function writeNewFileImpl(senderId: number, path: string, content: string)
 async function listDirectoryImpl(senderId: number, path: string): Promise<FileEntry[]> {
 	const canonical = assertPathAllowed(senderId, path);
 	const entries = await fsp.readdir(canonical, { withFileTypes: true });
+	// 戻り値の path は renderer が保持する workspacePath（raw 入力側）と表記を揃える。
+	// canonical（symlink 解決後）を返してしまうと、macOS の /var → /private/var、
+	// symlink workspace などで FileTree の `replacePrefix(workspacePath, ...)` /
+	// `startsWith(workspacePath)` 等の前提が崩れる。
+	// I/O は canonical で行う（TOCTOU 防止）一方、戻り値の path は input 表記に揃える。
+	const inputResolved = resolve(path);
 	return entries.map((entry) => ({
 		name: entry.name,
-		path: join(canonical, entry.name),
+		path: join(inputResolved, entry.name),
 		isDirectory: entry.isDirectory(),
 	}));
 }

@@ -51,6 +51,13 @@ export function validatePath(p: string): string {
 // 実在する祖先の realpath 結果を簡易 LRU でキャッシュする。Symlink target の
 // 変更は process 寿命中に発生する稀有なケースで、Electron app の典型的な
 // 使用シナリオでは許容範囲内と判断。
+//
+// 将来検討: cache miss 時の realpathSync は同期 I/O なので、深いパス階層 /
+// network FS / 大量ファイルアクセス時に main プロセスのイベントループを
+// ブロックしうる。`fs.promises.realpath` への async 化（assertPathAllowed /
+// assertWritePathAllowed / canonicalize / 全 fs IPC ハンドラまで波及する API
+// 変更）は Stage 2 以降で検討する。現状は LRU 256 entries + 通常運用での
+// hit 率の高さで実用上の問題を回避できると判断。
 const realpathCache = new Map<string, string>();
 const REALPATH_CACHE_MAX = 256;
 
