@@ -210,7 +210,8 @@ async function saveSetting(key: string, value: unknown): Promise<void> {
 	}
 }
 
-export const saveWorkspacePath = (path: string | null) => saveSetting("workspacePath", path);
+// saveWorkspacePath は廃止。workspacePath の永続化は main 側 workspace:set ハンドラが
+// 行う（settings:set の reserved key として renderer からの書き込みは拒否される）。
 export const saveThemePreference = (preference: ThemePreference) =>
 	saveSetting("themePreference", preference);
 export const saveSidebarVisible = (visible: boolean) => saveSetting("sidebarVisible", visible);

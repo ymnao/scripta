@@ -74,6 +74,64 @@ describe("translateError", () => {
 		expect(translateError("Directory not empty (os error 66)")).toBe("フォルダが空ではありません");
 	});
 
+	it("translates Node ENOENT error", () => {
+		expect(translateError("ENOENT: no such file or directory, open '/path'")).toBe(
+			"ファイルまたはフォルダが見つかりません",
+		);
+	});
+
+	it("translates Node EACCES error", () => {
+		expect(translateError("EACCES: permission denied, open '/path'")).toBe(
+			"アクセス権限がありません",
+		);
+	});
+
+	it("translates Node EEXIST error", () => {
+		expect(translateError("EEXIST: file already exists, mkdir '/path'")).toBe(
+			"ファイルが既に存在します",
+		);
+	});
+
+	it("translates Node ENOSPC error", () => {
+		expect(translateError("ENOSPC: no space left on device, write")).toBe(
+			"ディスク容量が不足しています",
+		);
+	});
+
+	it("translates Node EROFS error", () => {
+		expect(translateError("EROFS: read-only file system, open '/path'")).toBe(
+			"読み取り専用のファイルシステムです",
+		);
+	});
+
+	it("translates Node EBUSY error", () => {
+		expect(translateError("EBUSY: resource busy or locked, unlink '/path'")).toBe(
+			"ファイルが使用中です",
+		);
+	});
+
+	it("translates Node ENAMETOOLONG error", () => {
+		expect(translateError("ENAMETOOLONG: name too long, open '/path'")).toBe(
+			"ファイル名が長すぎます",
+		);
+	});
+
+	it("translates Node ENOTEMPTY error", () => {
+		expect(translateError("ENOTEMPTY: directory not empty, rmdir '/path'")).toBe(
+			"フォルダが空ではありません",
+		);
+	});
+
+	it("translates Permission denied error", () => {
+		expect(translateError("Permission denied: outside workspace: /etc/passwd")).toBe(
+			"アクセス権限がありません",
+		);
+	});
+
+	it("translates Invalid path error", () => {
+		expect(translateError("Invalid path: must be absolute")).toBe("不正なパスです");
+	});
+
 	it("translates timed out error", () => {
 		expect(translateError("Operation timed out")).toBe("操作がタイムアウトしました");
 	});
@@ -160,6 +218,46 @@ describe("isTransientError", () => {
 
 	it("returns false for os error 66 (non-transient)", () => {
 		expect(isTransientError("Directory not empty (os error 66)")).toBe(false);
+	});
+
+	it("returns false for Node ENOENT (non-transient)", () => {
+		expect(isTransientError("ENOENT: no such file or directory")).toBe(false);
+	});
+
+	it("returns false for Node EACCES (non-transient)", () => {
+		expect(isTransientError("EACCES: permission denied")).toBe(false);
+	});
+
+	it("returns false for Node EEXIST (non-transient)", () => {
+		expect(isTransientError("EEXIST: file already exists")).toBe(false);
+	});
+
+	it("returns false for Node ENOTEMPTY (non-transient)", () => {
+		expect(isTransientError("ENOTEMPTY: directory not empty")).toBe(false);
+	});
+
+	it("returns false for Permission denied (non-transient)", () => {
+		expect(isTransientError("Permission denied: outside workspace")).toBe(false);
+	});
+
+	it("returns false for Invalid path (non-transient)", () => {
+		expect(isTransientError("Invalid path: must be absolute")).toBe(false);
+	});
+
+	it("returns true for Node EBUSY (transient)", () => {
+		expect(isTransientError("EBUSY: resource busy or locked")).toBe(true);
+	});
+
+	it("returns true for Node EAGAIN (transient)", () => {
+		expect(isTransientError("EAGAIN: resource temporarily unavailable")).toBe(true);
+	});
+
+	it("returns false for EMFILE (FD exhaustion is non-transient — retrying is wasteful)", () => {
+		expect(isTransientError("EMFILE: too many open files, open '/path'")).toBe(false);
+	});
+
+	it("returns false for 'too many open files' phrasing", () => {
+		expect(isTransientError("Too many open files")).toBe(false);
 	});
 
 	it("returns true for unknown/transient errors", () => {

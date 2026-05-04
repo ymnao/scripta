@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
+import { getWorkspacePathFromSettings } from "./ipc/settings";
+import { approveWorkspacePath, unregisterWindow } from "./ipc/workspace";
 import { isSafeExternalUrl } from "./utils/url";
 
 const CSP_PROD = [
@@ -75,8 +77,12 @@ function createWindow(): void {
 		mainWindow.show();
 	});
 
+	const closingWindowId = mainWindow.webContents.id;
 	mainWindow.on("closed", () => {
 		openWindows.delete(mainWindow);
+		// 該当ウィンドウの workspace root と未消費 transient capability を
+		// path-guard から一括削除する（unregisterWindow が内部で実行）。
+		unregisterWindow(closingWindowId);
 	});
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -123,9 +129,25 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
+function approveSavedWorkspaceFromSettings(): void {
+	// 起動時に「前回までの workspacePath」を approve リストへ入れる。
+	// register はしない（実際の register は renderer 側 AppLayout が
+	// workspaceSet を呼んだ時点で行う window 単位の管理）。
+	// この approve がないと、saved workspace を持っているユーザーでも
+	// renderer が workspace:set を打つと「未承認」として拒否されてしまう。
+	const savedPath = getWorkspacePathFromSettings();
+	if (savedPath === null) return;
+	try {
+		approveWorkspacePath(savedPath);
+	} catch (e) {
+		console.warn("[bootstrap] failed to approve saved workspace path:", e);
+	}
+}
+
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
 	registerIpcHandlers();
+	approveSavedWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];

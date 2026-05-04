@@ -41,6 +41,8 @@ const api: Api = Object.freeze({
 	openDirectoryPicker: () => ipcRenderer.invoke("dialog:open-directory"),
 	showSaveDialog: (opts) => ipcRenderer.invoke("dialog:save", opts),
 
+	workspaceSet: (path) => ipcRenderer.invoke("workspace:set", path),
+
 	readFile: (path) => ipcRenderer.invoke("fs:read", path),
 	writeFile: (path, content) => ipcRenderer.invoke("fs:write", path, content),
 	writeNewFile: (path, content) => ipcRenderer.invoke("fs:write-new", path, content),

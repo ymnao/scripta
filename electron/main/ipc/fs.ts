@@ -1,43 +1,164 @@
-import { ipcMain } from "electron";
+import { promises as fsp } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { ipcMain, shell } from "electron";
 import type { FileEntry } from "../../../src/types/workspace";
+import { FsError, isErrnoCode } from "../utils/fs-errors";
+import {
+	assertPathAllowed,
+	assertWritePathAllowed,
+	consumeTransientWritePath,
+} from "../utils/path-guard";
 
-const memoryFs = new Map<string, string>();
+async function pathExistsAt(absolute: string): Promise<boolean> {
+	try {
+		await fsp.access(absolute);
+		return true;
+	} catch (e) {
+		// ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような
+		// 呼び出し元が「実際は権限問題なのに Source not found / Not found」と
+		// 誤分類してしまう。ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
+		if (isErrnoCode(e, "ENOENT")) return false;
+		throw e;
+	}
+}
+
+// すべての impl は path-guard の assert 系から **canonical（realpath 済み）** を
+// 受け取り、I/O にもその canonical を使う。これで:
+//   1. 判定と実 I/O が同一パスになるため TOCTOU で symlink を差し替えられても
+//      workspace 外アクセスが成立しない
+//   2. validate + realpath が impl 内で 1 回だけになり、二重正規化のオーバーヘッドが消える
+
+async function readFileImpl(senderId: number, path: string): Promise<string> {
+	const canonical = assertPathAllowed(senderId, path);
+	return await fsp.readFile(canonical, "utf8");
+}
+
+async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
+	const canonical = assertWritePathAllowed(senderId, path);
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	await fsp.writeFile(canonical, content, "utf8");
+	// 書き込み成功後にだけ transient capability を消費する。
+	// 失敗時は残り、renderer 側 withRetry で再試行できる。
+	consumeTransientWritePath(senderId, canonical);
+}
+
+async function writeNewFileImpl(senderId: number, path: string, content: string): Promise<void> {
+	const canonical = assertWritePathAllowed(senderId, path);
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	const fh = await fsp.open(canonical, "wx");
+	try {
+		await fh.writeFile(content, "utf8");
+	} finally {
+		await fh.close();
+	}
+	consumeTransientWritePath(senderId, canonical);
+}
+
+async function listDirectoryImpl(senderId: number, path: string): Promise<FileEntry[]> {
+	const canonical = assertPathAllowed(senderId, path);
+	const entries = await fsp.readdir(canonical, { withFileTypes: true });
+	// 戻り値の path は renderer が保持する workspacePath（raw 入力側）と表記を揃える。
+	// canonical（symlink 解決後）を返してしまうと、macOS の /var → /private/var、
+	// symlink workspace などで FileTree の `replacePrefix(workspacePath, ...)` /
+	// `startsWith(workspacePath)` 等の前提が崩れる。
+	// I/O は canonical で行う（TOCTOU 防止）一方、戻り値の path は input 表記に揃える。
+	const inputResolved = resolve(path);
+	return entries.map((entry) => ({
+		name: entry.name,
+		path: join(inputResolved, entry.name),
+		isDirectory: entry.isDirectory(),
+	}));
+}
+
+async function createFileImpl(senderId: number, path: string): Promise<void> {
+	const canonical = assertPathAllowed(senderId, path);
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	try {
+		const fh = await fsp.open(canonical, "wx");
+		await fh.close();
+	} catch (e) {
+		if (isErrnoCode(e, "EEXIST")) throw FsError.alreadyExists(canonical);
+		throw e;
+	}
+}
+
+async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
+	const canonical = assertPathAllowed(senderId, path);
+	// 親は recursive で先に作る。対象自体は非 recursive にすることで
+	// 「既存なら EEXIST」を atomic に得る（race-free）。
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	try {
+		await fsp.mkdir(canonical);
+	} catch (e) {
+		if (isErrnoCode(e, "EEXIST")) throw FsError.alreadyExists(canonical);
+		throw e;
+	}
+}
+
+async function pathExistsImpl(senderId: number, path: string): Promise<boolean> {
+	const canonical = assertPathAllowed(senderId, path);
+	return pathExistsAt(canonical);
+}
+
+async function fileExistsImpl(senderId: number, path: string): Promise<boolean> {
+	const canonical = assertPathAllowed(senderId, path);
+	try {
+		const stat = await fsp.stat(canonical);
+		return stat.isFile();
+	} catch (e) {
+		if (isErrnoCode(e, "ENOENT")) return false;
+		throw e;
+	}
+}
+
+async function renameEntryImpl(senderId: number, oldPath: string, newPath: string): Promise<void> {
+	const oldCanonical = assertPathAllowed(senderId, oldPath);
+	const newCanonical = assertPathAllowed(senderId, newPath);
+	if (!(await pathExistsAt(oldCanonical))) throw FsError.sourceNotFound(oldCanonical);
+	// fs.rename は target 既存時に上書きする default 挙動なので、
+	// 「Target already exists」を出すために事前 check が必要。
+	// 単一ユーザーの mem アプリのためレースは許容。
+	if (await pathExistsAt(newCanonical)) throw FsError.targetAlreadyExists(newCanonical);
+	await fsp.mkdir(dirname(newCanonical), { recursive: true });
+	await fsp.rename(oldCanonical, newCanonical);
+}
+
+async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
+	const canonical = assertPathAllowed(senderId, path);
+	if (!(await pathExistsAt(canonical))) throw FsError.notFound(canonical);
+	await shell.trashItem(canonical);
+}
 
 export function registerFsIpc(): void {
-	ipcMain.handle("fs:read", async (_event, path: string) => {
-		const content = memoryFs.get(path);
-		if (content === undefined) throw new Error(`File not found: ${path}`);
-		return content;
-	});
-
-	ipcMain.handle("fs:write", async (_event, path: string, content: string) => {
-		memoryFs.set(path, content);
-	});
-
-	ipcMain.handle("fs:write-new", async (_event, path: string, content: string) => {
-		if (memoryFs.has(path)) throw new Error(`File already exists: ${path}`);
-		memoryFs.set(path, content);
-	});
-
-	ipcMain.handle("fs:list", async (_event, _path: string): Promise<FileEntry[]> => []);
-
-	ipcMain.handle("fs:create-file", async (_event, path: string) => {
-		memoryFs.set(path, "");
-	});
-
-	ipcMain.handle("fs:create-directory", async (_event, _path: string) => {});
-
-	ipcMain.handle("fs:path-exists", async (_event, path: string) => memoryFs.has(path));
-	ipcMain.handle("fs:file-exists", async (_event, path: string) => memoryFs.has(path));
-
-	ipcMain.handle("fs:rename", async (_event, oldPath: string, newPath: string) => {
-		const value = memoryFs.get(oldPath);
-		if (value === undefined) throw new Error(`File not found: ${oldPath}`);
-		memoryFs.delete(oldPath);
-		memoryFs.set(newPath, value);
-	});
-
-	ipcMain.handle("fs:delete", async (_event, path: string) => {
-		memoryFs.delete(path);
-	});
+	ipcMain.handle("fs:read", (event, path: string) => readFileImpl(event.sender.id, path));
+	ipcMain.handle("fs:write", (event, path: string, content: string) =>
+		writeFileImpl(event.sender.id, path, content),
+	);
+	ipcMain.handle("fs:write-new", (event, path: string, content: string) =>
+		writeNewFileImpl(event.sender.id, path, content),
+	);
+	ipcMain.handle("fs:list", (event, path: string) => listDirectoryImpl(event.sender.id, path));
+	ipcMain.handle("fs:create-file", (event, path: string) => createFileImpl(event.sender.id, path));
+	ipcMain.handle("fs:create-directory", (event, path: string) =>
+		createDirectoryImpl(event.sender.id, path),
+	);
+	ipcMain.handle("fs:path-exists", (event, path: string) => pathExistsImpl(event.sender.id, path));
+	ipcMain.handle("fs:file-exists", (event, path: string) => fileExistsImpl(event.sender.id, path));
+	ipcMain.handle("fs:rename", (event, oldPath: string, newPath: string) =>
+		renameEntryImpl(event.sender.id, oldPath, newPath),
+	);
+	ipcMain.handle("fs:delete", (event, path: string) => deleteEntryImpl(event.sender.id, path));
 }
+
+export const __testing = {
+	readFileImpl,
+	writeFileImpl,
+	writeNewFileImpl,
+	listDirectoryImpl,
+	createFileImpl,
+	createDirectoryImpl,
+	pathExistsImpl,
+	fileExistsImpl,
+	renameEntryImpl,
+	deleteEntryImpl,
+};

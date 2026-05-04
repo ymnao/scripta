@@ -13,12 +13,13 @@ import {
 	onWindowCloseRequested,
 	openConflictWindow,
 	readFile,
+	workspaceSet,
 	writeFile,
 } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
-import { loadSettings, saveSidebarVisible, saveWorkspacePath } from "../../lib/store";
+import { loadSettings, saveSidebarVisible } from "../../lib/store";
 import { useGitSyncStore } from "../../stores/git-sync";
 import { useScratchpadStore } from "../../stores/scratchpad";
 import { useSettingsStore } from "../../stores/settings";
@@ -186,7 +187,6 @@ export function AppLayout() {
 	saveNowRef.current = saveNow;
 	const prevWorkspacePathRef = useRef(workspacePath);
 	const justSwitchedRef = useRef(false);
-	const userSetWorkspaceRef = useRef(false);
 
 	// Load persisted settings on mount
 	useEffect(() => {
@@ -197,12 +197,27 @@ export function AppLayout() {
 			if (cancelled) return;
 
 			if (!isNewWindow && settings.workspacePath) {
+				let registeredOnMain = false;
 				try {
+					await workspaceSet(settings.workspacePath);
+					registeredOnMain = true;
+					if (cancelled) return;
 					await listDirectory(settings.workspacePath);
 					if (cancelled) return;
 					setWorkspacePath(settings.workspacePath);
 				} catch {
-					void saveWorkspacePath(null);
+					// 段階別ハンドリング：
+					// - workspaceSet 自体の失敗（settings 永続化失敗・未承認扱い等）→
+					//   main 側 state は atomic で変化していないので、保存済み workspacePath を
+					//   削除してはいけない。何もしない
+					// - workspaceSet 成功後の listDirectory 失敗（パス消失・権限喪失等）→
+					//   main 側に登録済みなので fail-closed の整合性のため巻き戻す
+					// 加えて unmount / window close 後（cancelled）はロールバックしない
+					// （ユーザーの保存済み workspacePath を意図せず削除する副作用を防ぐ）
+					if (cancelled) return;
+					if (registeredOnMain) {
+						await workspaceSet(null).catch(() => {});
+					}
 				}
 			}
 
@@ -244,15 +259,9 @@ export function AppLayout() {
 		document.documentElement.style.setProperty("--editor-font-family", FONT_FAMILY_MAP[fontFamily]);
 	}, [fontFamily]);
 
-	// Persist workspace path changes (skip the initial restored value and new windows)
-	useEffect(() => {
-		if (loading || isNewWindow) return;
-		if (!userSetWorkspaceRef.current) {
-			userSetWorkspaceRef.current = true;
-			return;
-		}
-		void saveWorkspacePath(workspacePath);
-	}, [workspacePath, loading, isNewWindow]);
+	// workspacePath の永続化は main 側 workspace:set ハンドラが担うため、
+	// renderer 側で settings:set を呼ぶ必要はない（settings の workspacePath は
+	// reserved key として renderer からの書き込みを拒否する）。
 
 	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
 	useEffect(() => {
