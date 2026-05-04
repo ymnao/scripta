@@ -13,6 +13,7 @@ vi.mock("electron", () => ({
 
 import { shell } from "electron";
 import {
+	canonicalize,
 	clearWorkspaceRoots,
 	getTransientWritePathsForWindow,
 	registerTransientWritePath,
@@ -183,19 +184,23 @@ describe("listDirectoryImpl", () => {
 		const entries = await listDirectoryImpl(TEST_WIN, workspaceDir);
 		const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
 		expect(sorted).toHaveLength(3);
+		// listDirectoryImpl が assertPathAllowed から canonical（realpath 済み）を
+		// 受け取り、エントリの path にはその canonical を join するため、
+		// 期待値も canonicalize した workspaceDir を基準にする
+		const wsCanonical = canonicalize(workspaceDir);
 		expect(sorted[0]).toEqual({
 			name: "a.md",
-			path: join(workspaceDir, "a.md"),
+			path: join(wsCanonical, "a.md"),
 			isDirectory: false,
 		});
 		expect(sorted[1]).toEqual({
 			name: "b.md",
-			path: join(workspaceDir, "b.md"),
+			path: join(wsCanonical, "b.md"),
 			isDirectory: false,
 		});
 		expect(sorted[2]).toEqual({
 			name: "sub",
-			path: join(workspaceDir, "sub"),
+			path: join(wsCanonical, "sub"),
 			isDirectory: true,
 		});
 	});
@@ -345,12 +350,15 @@ describe("renameEntryImpl", () => {
 });
 
 describe("deleteEntryImpl", () => {
-	it("calls shell.trashItem for an existing file", async () => {
+	it("calls shell.trashItem for an existing file (with canonical path)", async () => {
 		const path = join(workspaceDir, "f.md");
 		await writeFile(path, "", "utf8");
 		await deleteEntryImpl(TEST_WIN, path);
 		expect(shell.trashItem).toHaveBeenCalledTimes(1);
-		expect(shell.trashItem).toHaveBeenCalledWith(path);
+		// trashItem には canonical（realpath 済み）が渡される — 判定と I/O で同じ
+		// パスを使うことで TOCTOU を防ぐ。symlink 差し替え攻撃で workspace 外の
+		// ファイルを誤削除しないことの担保
+		expect(shell.trashItem).toHaveBeenCalledWith(canonicalize(path));
 	});
 
 	it("throws Not found for missing entries", async () => {
