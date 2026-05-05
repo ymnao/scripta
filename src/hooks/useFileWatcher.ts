@@ -72,15 +72,28 @@ export function useFileWatcher({
 		};
 
 		const setup = async () => {
+			// subscribe を **startWatcher() の前に** 張る。逆順だと、main 側で
+			// chokidar が動き出してから IPC roundtrip が renderer に戻るまでの間に
+			// 起きた create/modify/delete が flush されたとき listener が未登録で
+			// 取りこぼす。onFsChange は ipcRenderer.on を即時に呼ぶ同期 API なので、
+			// この順序にすれば main が emit を始める時点で必ず listener が居る。
+			unlistenFn = onFsChange((batch) => {
+				if (!cancelled) handleEvents(batch);
+			});
 			try {
 				await startWatcher(workspacePath);
-				if (cancelled) return;
-				unlistenFn = onFsChange((batch) => {
-					if (!cancelled) handleEvents(batch);
-				});
+				// startWatcher 中に unmount された場合は cleanup の return が
+				// unlistenFn を確実に外すので、ここでは追加処理は不要。
 			} catch (err) {
 				console.error("Failed to set up file watcher:", err);
 				useToastStore.getState().addToast("warning", "ファイル監視の開始に失敗しました");
+				// startWatcher が失敗した場合（path-guard で reject 等）、main 側に
+				// session が無いため emit は起きないが、不要 listener を残さないために
+				// ここで明示的に外す。
+				if (unlistenFn) {
+					unlistenFn();
+					unlistenFn = null;
+				}
 			}
 		};
 

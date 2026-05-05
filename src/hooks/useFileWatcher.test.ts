@@ -186,6 +186,62 @@ describe("useFileWatcher", () => {
 		expect(startWatcher).toHaveBeenCalledWith("/workspace2");
 	});
 
+	it("subscribes before startWatcher to avoid losing early events", async () => {
+		// startWatcher を未解決のままにして、IPC 完了前に main から emit が来た状況を再現。
+		let resolveStart: () => void = () => {};
+		(startWatcher as Mock).mockImplementation(
+			() =>
+				new Promise<void>((res) => {
+					resolveStart = res;
+				}),
+		);
+
+		renderHook(() =>
+			useFileWatcher({
+				workspacePath: "/workspace",
+				onTreeChange,
+				onFileModified,
+				onFileDeleted,
+			}),
+		);
+
+		// effect の同期実行で onFsChange が登録されている（subscribe-first）
+		await vi.advanceTimersByTimeAsync(0);
+		expect(onFsChange).toHaveBeenCalled();
+		expect(fsChangeCallback).not.toBeNull();
+
+		// onFsChange が startWatcher より先に呼ばれた順序を保証
+		const onFsChangeOrder = (onFsChange as Mock).mock.invocationCallOrder[0];
+		const startWatcherOrder = (startWatcher as Mock).mock.invocationCallOrder[0];
+		expect(onFsChangeOrder).toBeLessThan(startWatcherOrder);
+
+		// startWatcher 完了前に main から event が届いてもちゃんと拾える
+		emitFsChange([{ kind: "modify", path: "/workspace/early.md" }]);
+		vi.advanceTimersByTime(300);
+		expect(onFileModified).toHaveBeenCalledWith("/workspace/early.md");
+
+		// あとから startWatcher が解決しても問題ない
+		resolveStart();
+		await vi.advanceTimersByTimeAsync(0);
+	});
+
+	it("removes the listener if startWatcher rejects", async () => {
+		(startWatcher as Mock).mockRejectedValueOnce(new Error("Permission denied"));
+
+		renderHook(() =>
+			useFileWatcher({
+				workspacePath: "/workspace",
+				onTreeChange,
+				onFileModified,
+				onFileDeleted,
+			}),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+
+		// startWatcher が失敗したら listener は外される
+		expect(fsChangeCallback).toBeNull();
+	});
+
 	it("does not fire callbacks after unmount", async () => {
 		const { unmount } = renderHook(() =>
 			useFileWatcher({
