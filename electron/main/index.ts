@@ -2,11 +2,10 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
-import { clearSearchForWindow } from "./ipc/search";
 import { getWorkspacePathFromSettings } from "./ipc/settings";
-import { stopWatcherForWindow } from "./ipc/watcher";
-import { approveWorkspacePath, unregisterWindow } from "./ipc/workspace";
+import { approveWorkspacePath } from "./ipc/workspace";
 import { isSafeExternalUrl } from "./utils/url";
+import { attachWindowLifecycle } from "./utils/window-lifecycle";
 
 const CSP_PROD = [
 	"default-src 'self'",
@@ -74,24 +73,12 @@ function createWindow(): void {
 		},
 	});
 	openWindows.add(mainWindow);
+	attachWindowLifecycle(mainWindow, () => {
+		openWindows.delete(mainWindow);
+	});
 
 	mainWindow.on("ready-to-show", () => {
 		mainWindow.show();
-	});
-
-	const closingWindowId = mainWindow.webContents.id;
-	mainWindow.on("closed", () => {
-		openWindows.delete(mainWindow);
-		// chokidar セッションを止めてからガード状態を解除する。順序を逆にすると、
-		// allowedRoots を消した直後に flush の webContents.send が走って `isDestroyed`
-		// チェックの前に起動した watcher が無関係なログを吐く可能性があるため。
-		stopWatcherForWindow(closingWindowId);
-		// 進行中の searchFilesImpl が gen 比較で早期 return できるよう、
-		// per-window 世代カウンタも片付ける（メモリリーク防止）。
-		clearSearchForWindow(closingWindowId);
-		// 該当ウィンドウの workspace root と未消費 transient capability を
-		// path-guard から一括削除する（unregisterWindow が内部で実行）。
-		unregisterWindow(closingWindowId);
 	});
 
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
