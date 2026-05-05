@@ -1,15 +1,22 @@
 import { existsSync } from "node:fs";
-import { sep } from "node:path";
+import { relative, sep } from "node:path";
 import type { FsKind } from "../../../src/types/workspace";
 
 export type { FsKind };
 
-// パスのいずれかの component が '.' で始まれば hidden。ただし root 自体は除外する
-// （ユーザーが `.dotted-workspace` のようなドット始まりディレクトリを開いた場合に
-// watcher 起動が空振りしないようにするため。旧 Tauri も同等の挙動）。
+// **root からの相対成分** のいずれかが '.' で始まれば hidden。
+// 絶対パス全体を見ると、root 自体が hidden な祖先の下（例: `/Users/me/.notes/project`）
+// にあった場合に root 配下のファイルも全部 hidden 扱いになり、watcher と
+// search の挙動が食い違ってしまう。search 側 (walkMdFiles) は root 配下の
+// エントリ名だけを見ているので、こちらも相対成分に揃える。
+//
+// root 自体（rel === ""）は hidden 扱いしない。root の外側（rel が `..` で始まる）も
+// hidden ではないとする — chokidar は root 配下しか emit しない前提だが、防御的に false。
 export function isHidden(p: string, root: string): boolean {
-	if (p === root) return false;
-	for (const part of p.split(sep)) {
+	const rel = relative(root, p);
+	if (rel === "") return false;
+	if (rel === ".." || rel.startsWith(`..${sep}`)) return false;
+	for (const part of rel.split(sep)) {
 		if (part.length > 0 && part.startsWith(".")) return true;
 	}
 	return false;

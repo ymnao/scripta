@@ -14,6 +14,11 @@ type Session = {
 	flushTimer: NodeJS.Timeout | null;
 	webContents: WebContents;
 	root: string;
+	// 停止後にも listener closure 経由で生き残った session に late event が飛んで
+	// くるため、flush / onFsEvent 先頭で短絡するためのフラグ。chokidar.close() は
+	// async だが、stopped は **synchronous に** true にすることで「stop した後の
+	// イベントは絶対に送らない」を保証する。
+	stopped: boolean;
 };
 
 const sessions = new Map<number, Session>();
@@ -21,6 +26,7 @@ const sessions = new Map<number, Session>();
 const BATCH_DEADLINE_MS = 500;
 
 function flush(session: Session): void {
+	if (session.stopped) return;
 	reclassifyDeleted(session.pending, existsSync);
 	const batch: FsChangeEvent[] = [];
 	for (const [path, kind] of session.pending) {
@@ -34,6 +40,7 @@ function flush(session: Session): void {
 }
 
 function onFsEvent(session: Session, kind: FsKind, path: string): void {
+	if (session.stopped) return;
 	if (isHidden(path, session.root)) return;
 	mergeEventKind(session.pending, path, kind);
 	// 「最初の event で deadline 設定、後続ではリセットしない」（旧 Rust 1:1）。
@@ -57,6 +64,7 @@ function startSession(webContents: WebContents, root: string): Session {
 		flushTimer: null,
 		webContents,
 		root,
+		stopped: false,
 	};
 
 	watcher.on("add", (p) => onFsEvent(session, "create", p));
@@ -74,10 +82,18 @@ function startSession(webContents: WebContents, root: string): Session {
 // window close / watcher:stop 共通の停止処理。pending は **捨てる**（旧 Rust の
 // stale event 防止と同じ判断 — explicit stop で前 workspace の遅延通知が次の
 // workspace に漏れる事故を防ぐ）。
+//
+// chokidar.close() は非同期で、close() 完了前に listener closure 経由で onFsEvent が
+// 走り得る。stopped フラグを **synchronous に** 立てることで、close 完了を待たずとも
+// 「stop した瞬間以降のイベントは renderer に届かない」を保証する（race 防止）。
 export function stopWatcherForWindow(windowId: number): void {
 	const session = sessions.get(windowId);
 	if (session === undefined) return;
-	if (session.flushTimer !== null) clearTimeout(session.flushTimer);
+	session.stopped = true;
+	if (session.flushTimer !== null) {
+		clearTimeout(session.flushTimer);
+		session.flushTimer = null;
+	}
 	void session.watcher.close().catch((err) => {
 		console.warn("[watcher] close failed:", err);
 	});

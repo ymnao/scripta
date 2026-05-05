@@ -28,6 +28,16 @@ describe("isHidden", () => {
 		// `.dotted-workspace` のような root を開いても hidden 扱いしない
 		expect(isHidden("/home/user/.dotted-workspace", "/home/user/.dotted-workspace")).toBe(false);
 	});
+
+	it("returns false when root has a hidden ancestor (only relative components matter)", () => {
+		// 旧実装は絶対パス全体を split していたため、root が `.notes` の下にあると
+		// 配下のファイルも全部 hidden 扱いになり search との整合が崩れていた。
+		const hiddenAncestorRoot = "/Users/me/.notes/project";
+		expect(isHidden("/Users/me/.notes/project/a.md", hiddenAncestorRoot)).toBe(false);
+		expect(isHidden("/Users/me/.notes/project/sub/b.md", hiddenAncestorRoot)).toBe(false);
+		// 一方、root より下の `.git` 等は依然 hidden
+		expect(isHidden("/Users/me/.notes/project/.git/config", hiddenAncestorRoot)).toBe(true);
+	});
 });
 
 describe("mergeEventKind", () => {
