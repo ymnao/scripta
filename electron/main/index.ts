@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
+import { clearSearchForWindow } from "./ipc/search";
 import { getWorkspacePathFromSettings } from "./ipc/settings";
 import { stopWatcherForWindow } from "./ipc/watcher";
 import { approveWorkspacePath, unregisterWindow } from "./ipc/workspace";
@@ -85,6 +86,9 @@ function createWindow(): void {
 		// allowedRoots を消した直後に flush の webContents.send が走って `isDestroyed`
 		// チェックの前に起動した watcher が無関係なログを吐く可能性があるため。
 		stopWatcherForWindow(closingWindowId);
+		// 進行中の searchFilesImpl が gen 比較で早期 return できるよう、
+		// per-window 世代カウンタも片付ける（メモリリーク防止）。
+		clearSearchForWindow(closingWindowId);
 		// 該当ウィンドウの workspace root と未消費 transient capability を
 		// path-guard から一括削除する（unregisterWindow が内部で実行）。
 		unregisterWindow(closingWindowId);

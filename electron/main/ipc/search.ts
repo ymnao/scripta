@@ -56,6 +56,17 @@ export function fuzzyMatch(query: string, target: string): boolean {
 	return qi === q.length;
 }
 
+// 連続入力で古い search を中断するための per-window 世代カウンタ。
+// 同じ window から新しい searchFilesImpl が呼ばれると gen を bump し、
+// 進行中の古い検索は async resumption ごとに gen を確認して早期 return する。
+// renderer 側 (SearchPanel.tsx) も requestId で stale を捨てているが、
+// IPC を投げ捨てるだけでは main の I/O は止まらない。
+const searchGeneration = new Map<number, number>();
+
+export function clearSearchForWindow(windowId: number): void {
+	searchGeneration.delete(windowId);
+}
+
 // 旧 Rust src-tauri/src/commands/search.rs の search_files を 1:1 ポート。
 // JS の String は UTF-16 code unit indexed なので、旧 Rust の「byte → UTF-16 変換段」
 // は不要。case-insensitive 時のみ buildLowerToOrigUtf16Map で
@@ -72,7 +83,13 @@ async function searchFilesImpl(
 	assertPathAllowed(senderId, workspacePath);
 	if (query === "") return [];
 
+	// 世代を sync に bump して、後発の searchFilesImpl が古い検索を中断できるようにする。
+	const myGen = (searchGeneration.get(senderId) ?? 0) + 1;
+	searchGeneration.set(senderId, myGen);
+	const isStale = (): boolean => searchGeneration.get(senderId) !== myGen;
+
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	if (isStale()) return [];
 	// input-base で byte 比較 sort（旧 Rust md_files.sort() 互換）。io はインデックス連動。
 	const order = io
 		.map((_, i) => i)
@@ -82,6 +99,9 @@ async function searchFilesImpl(
 	const results: SearchResult[] = [];
 
 	for (const idx of order) {
+		// ファイル間のチェックポイント。1 ファイルの per-line ループは fast なので
+		// その内側ではチェックしない（コストの方が大きい）。
+		if (isStale()) return [];
 		const ioPath = io[idx];
 		const inputPath = input[idx];
 		let content: string;

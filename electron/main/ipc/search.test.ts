@@ -425,4 +425,22 @@ describe("searchFilesImpl", () => {
 			/Permission denied/,
 		);
 	});
+
+	it("cancels older search when a newer search starts on the same window", async () => {
+		// 連続入力で古い search が止まらないと main の I/O が積み上がる。
+		// per-window 世代カウンタで先発の検索は早期 return する。
+		// 並走を確実にするため複数ファイルを置いて、collectMdFilesForWorkspace が
+		// 完了したタイミングで gen 比較が確実に偽になるようにする。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
+		}
+		const [r1, r2] = await Promise.all([
+			searchFilesImpl(TEST_WIN, workspaceDir, "hello"),
+			searchFilesImpl(TEST_WIN, workspaceDir, "hello"),
+		]);
+		// 後発の searchFilesImpl が sync に gen を bump するので、先発は
+		// collectMdFilesForWorkspace 直後の isStale check で必ず bail する。
+		expect(r1).toEqual([]);
+		expect(r2).toHaveLength(10);
+	});
 });

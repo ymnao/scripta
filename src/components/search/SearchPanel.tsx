@@ -6,7 +6,13 @@ import type { SearchResult } from "../../types/search";
 
 interface SearchPanelProps {
 	workspacePath: string;
-	onNavigate: (filePath: string, lineNumber: number, query: string) => void;
+	onNavigate: (
+		filePath: string,
+		lineNumber: number,
+		query: string,
+		matchStart?: number,
+		matchEnd?: number,
+	) => void;
 	inputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
@@ -143,7 +149,15 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 										type="button"
 										key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
 										className="search-panel-match"
-										onClick={() => onNavigate(match.filePath, match.lineNumber, query.trim())}
+										onClick={() =>
+											onNavigate(
+												match.filePath,
+												match.lineNumber,
+												query.trim(),
+												match.matchStart,
+												match.matchEnd,
+											)
+										}
 									>
 										<span className="search-panel-line-number">{match.lineNumber}</span>
 										<span className="search-panel-line-content">
