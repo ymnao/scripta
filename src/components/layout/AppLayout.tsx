@@ -149,7 +149,7 @@ export function AppLayout() {
 	const searchBarOpenRef = useRef(false);
 	searchBarOpenRef.current = searchBarOpen;
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
-	const pendingGoToLineRef = useRef<{ line: number; query?: string } | null>(null);
+	const pendingGoToLineRef = useRef<GoToLineRequest | null>(null);
 
 	const [content, setContent] = useState("");
 	const [editorKey, setEditorKey] = useState(0);
@@ -955,12 +955,22 @@ export function AppLayout() {
 	}, []);
 
 	const handleSearchNavigate = useCallback(
-		(filePath: string, lineNumber: number, query: string) => {
+		(
+			filePath: string,
+			lineNumber: number,
+			query: string,
+			matchStart?: number,
+			matchEnd?: number,
+		) => {
 			const state = useWorkspaceStore.getState();
+			const target: GoToLineRequest =
+				matchStart != null && matchEnd != null
+					? { line: lineNumber, query, columnStart: matchStart, columnEnd: matchEnd }
+					: { line: lineNumber, query };
 			if (state.activeTabPath === filePath) {
-				setGoToLine({ line: lineNumber, query });
+				setGoToLine(target);
 			} else {
-				pendingGoToLineRef.current = { line: lineNumber, query };
+				pendingGoToLineRef.current = target;
 				if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
 					openFileFromNewTab(filePath);
 				} else {

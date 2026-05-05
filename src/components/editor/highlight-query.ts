@@ -87,12 +87,15 @@ const highlightPlugin = ViewPlugin.fromClass(
 				while (pos < lowerText.length) {
 					const idx = lowerText.indexOf(lowerQuery, pos);
 					if (idx === -1) break;
+					const lowerEnd = idx + lowerQuery.length;
 					const origStart = lowerToOrig ? lowerToOrig[idx] : idx;
-					const origEnd = lowerToOrig
-						? lowerToOrig[idx + lowerQuery.length]
-						: idx + lowerQuery.length;
+					const origEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
 					builder.add(from + origStart, from + origEnd, highlightMark);
-					pos = idx + 1;
+					// 非重複マッチで進める。SearchPanel 側 (electron/main/ipc/search.ts の
+					// searchFilesImpl) も `pos = lowerEnd` で件数を出しているため、
+					// `idx + 1` で重複マッチを塗ると panel 件数とハイライト数がズレる
+					// （例: "aaaa" を "aa" で検索すると panel 2 件 / editor 3 ハイライト）。
+					pos = lowerEnd;
 				}
 			}
 

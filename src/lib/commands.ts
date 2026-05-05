@@ -75,6 +75,13 @@ export function searchFiles(
 	return withRetry(() => window.api.searchFiles(workspacePath, query, caseSensitive));
 }
 
+// in-flight searchFiles を main 側でキャンセルする。SearchPanel の useEffect
+// cleanup から呼ばれ、空クエリ / panel unmount / workspace 切替の各ケースで
+// 走り切ろうとしている全文検索を bail させる。fire-and-forget。
+export function cancelSearch(): Promise<void> {
+	return window.api.cancelSearch();
+}
+
 export function searchFilenames(workspacePath: string, query: string): Promise<string[]> {
 	return withRetry(() => window.api.searchFilenames(workspacePath, query));
 }

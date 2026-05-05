@@ -15,7 +15,13 @@ interface SidebarProps {
 	onShowFiles: () => void;
 	onShowSearch: () => void;
 	onShowUnresolved: () => void;
-	onSearchNavigate: (filePath: string, lineNumber: number, query: string) => void;
+	onSearchNavigate: (
+		filePath: string,
+		lineNumber: number,
+		query: string,
+		matchStart?: number,
+		matchEnd?: number,
+	) => void;
 	onFileSelect: (path: string) => void;
 	onFileOpenNewTab: (path: string) => void;
 	searchInputRef?: React.RefObject<HTMLInputElement | null>;

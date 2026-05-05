@@ -10,7 +10,7 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
-import { EditorSelection, EditorState, Prec } from "@codemirror/state";
+import { EditorSelection, EditorState, Prec, type SelectionRange } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
@@ -92,6 +92,10 @@ const markdownExtension = markdown({ base: markdownLanguage, codeLanguages: lang
 export interface GoToLineRequest {
 	line: number;
 	query?: string;
+	// 行内の UTF-16 code unit オフセット。検索結果からのナビゲーションで指定する。
+	// 同一行に複数マッチがあるとき、列位置がないとどの結果も同じ場所に飛ぶ。
+	columnStart?: number;
+	columnEnd?: number;
 }
 
 export interface CursorInfo {
@@ -178,15 +182,26 @@ export function MarkdownEditor({
 			const lineNum = Math.min(goToLine.line, view.state.doc.lines);
 			const lineInfo = view.state.doc.line(lineNum);
 
-			const pos = goToLine.query ? lineInfo.from : lineInfo.to;
+			let selection: SelectionRange;
+			if (goToLine.columnStart != null && goToLine.columnEnd != null) {
+				// 検索結果からのナビゲーション: 行内の正確な範囲を選択する。
+				// ファイルが変更されてマッチが消えた場合に備えて lineInfo の範囲に clamp。
+				const start = lineInfo.from + Math.min(goToLine.columnStart, lineInfo.length);
+				const end = lineInfo.from + Math.min(goToLine.columnEnd, lineInfo.length);
+				selection = EditorSelection.range(start, end);
+			} else {
+				const pos = goToLine.query ? lineInfo.from : lineInfo.to;
+				selection = EditorSelection.cursor(pos);
+			}
+			const head = selection.head;
 
 			view.dispatch({
-				selection: EditorSelection.cursor(pos),
+				selection,
 				effects: goToLine.query ? [setHighlightQuery.of(goToLine.query)] : [],
 			});
 
 			view.dispatch({
-				effects: EditorView.scrollIntoView(pos, { y: "center" }),
+				effects: EditorView.scrollIntoView(head, { y: "center" }),
 			});
 
 			view.focus();

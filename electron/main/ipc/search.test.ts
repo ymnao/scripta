@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,10 +9,16 @@ vi.mock("electron", () => ({
 }));
 
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
-import { __testing, extractWikilinks, fuzzyMatch, isPathTraversal } from "./search";
+import {
+	__testing,
+	cancelSearchForWindow,
+	extractWikilinks,
+	fuzzyMatch,
+	isPathTraversal,
+} from "./search";
 
 const TEST_WIN = 1;
-const { searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
+const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
 
 let workspaceDir = "";
 
@@ -272,5 +278,198 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		await expect(
 			scanUnresolvedWikilinksImpl(999 /* not registered */, workspaceDir),
 		).rejects.toThrow(/Permission denied/);
+	});
+});
+
+describe("searchFilesImpl", () => {
+	it("finds matches across multiple files", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "Hello World\nfoo bar\nhello again");
+		await writeFile(join(workspaceDir, "b.md"), "no match here");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		expect(out).toHaveLength(2);
+		expect(out[0].lineNumber).toBe(1);
+		expect(out[0].matchStart).toBe(0);
+		expect(out[0].matchEnd).toBe(5);
+		expect(out[0].lineContent).toBe("Hello World");
+		expect(out[1].lineNumber).toBe(3);
+		expect(out[1].lineContent).toBe("hello again");
+	});
+
+	it("is case-insensitive by default", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "Hello HELLO hElLo");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		expect(out).toHaveLength(3);
+		expect(out.map((r) => r.matchStart)).toEqual([0, 6, 12]);
+	});
+
+	it("is case-sensitive when caseSensitive=true", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "Hello HELLO hello");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "Hello", true);
+		expect(out).toHaveLength(1);
+		expect(out[0].matchStart).toBe(0);
+		expect(out[0].matchEnd).toBe(5);
+	});
+
+	it("keeps offsets aligned when toLowerCase changes length (Turkish İ)", async () => {
+		// "İ" (U+0130, 1 UTF-16 unit) → "i̇" (2 UTF-16 units)
+		// 元の line "İhello" の "hello" は UTF-16 offset 1〜6 にある。
+		// lower("İhello") = "i̇hello"、ここで "hello" は offset 2〜7。
+		// lowerToOrig 経由で 1〜6 に戻ることを確認する。
+		await writeFile(join(workspaceDir, "a.md"), "İhello");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		expect(out).toHaveLength(1);
+		expect(out[0].matchStart).toBe(1);
+		expect(out[0].matchEnd).toBe(6);
+		expect(out[0].lineContent).toBe("İhello");
+	});
+
+	it("returns correct UTF-16 offsets across multibyte chars", async () => {
+		// "あいう hello world" → "hello" は UTF-16 offset 4〜9（あ/い/う + space + hello）
+		await writeFile(join(workspaceDir, "a.md"), "あいう hello world");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		expect(out).toHaveLength(1);
+		expect(out[0].matchStart).toBe(4);
+		expect(out[0].matchEnd).toBe(9);
+	});
+
+	it("returns correct UTF-16 offsets for surrogate pairs", async () => {
+		// "😀hello world" → 😀 は 2 UTF-16 unit、"hello" は offset 2〜7
+		await writeFile(join(workspaceDir, "a.md"), "😀hello world");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		expect(out).toHaveLength(1);
+		expect(out[0].matchStart).toBe(2);
+		expect(out[0].matchEnd).toBe(7);
+	});
+
+	it("accumulates UTF-16 units for multiple surrogate pairs", async () => {
+		// "🎉🎊test" → 🎉🎊 で 4 UTF-16 unit、"test" は offset 4〜8
+		await writeFile(join(workspaceDir, "a.md"), "🎉🎊test");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "test");
+		expect(out).toHaveLength(1);
+		expect(out[0].matchStart).toBe(4);
+		expect(out[0].matchEnd).toBe(8);
+	});
+
+	it("returns [] for empty query", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "hello world");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "");
+		expect(out).toEqual([]);
+	});
+
+	it("returns [] when no match", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "hello world");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "xyz");
+		expect(out).toEqual([]);
+	});
+
+	it("excludes hidden directories", async () => {
+		await mkdir(join(workspaceDir, ".hidden"));
+		await writeFile(join(workspaceDir, ".hidden/secret.md"), "match here");
+		await writeFile(join(workspaceDir, "visible.md"), "match here");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		expect(out).toHaveLength(1);
+		expect(out[0].filePath).toContain("visible.md");
+	});
+
+	it("includes only .md files", async () => {
+		await writeFile(join(workspaceDir, "test.md"), "match");
+		await writeFile(join(workspaceDir, "test.txt"), "match");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		expect(out).toHaveLength(1);
+		expect(out[0].filePath).toContain("test.md");
+	});
+
+	it("recurses into subdirectories", async () => {
+		await mkdir(join(workspaceDir, "sub"));
+		await writeFile(join(workspaceDir, "sub/nested.md"), "deep match");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "deep");
+		expect(out).toHaveLength(1);
+		expect(out[0].filePath).toContain("nested.md");
+	});
+
+	it("captures all matches per single line (multi-match while-loop)", async () => {
+		// "ababab" 内に "ab" が 3 件、非重複で抽出される（pos = lowerEnd で進める）
+		await writeFile(join(workspaceDir, "a.md"), "ababab");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "ab");
+		expect(out).toHaveLength(3);
+		expect(out.map((r) => r.matchStart)).toEqual([0, 2, 4]);
+	});
+
+	it("returns input-base path even when workspace is reached via symlink", async () => {
+		// Stage 2 で確立した canonical / input 分離が searchFilesImpl にも効いていることを確認。
+		// symlink 経由のワークスペースでも、戻り値の filePath は input-base（symlink 側のパス）。
+		const realDir = await mkdtemp(join(tmpdir(), "scripta-search-real-"));
+		const linkDir = await mkdtemp(join(tmpdir(), "scripta-search-link-"));
+		// linkDir 自体は mkdtemp で作られた実ディレクトリなので、その中に link を張る。
+		const symlinkPath = join(linkDir, "ws-link");
+		try {
+			await writeFile(join(realDir, "note.md"), "hello world");
+			await symlink(realDir, symlinkPath, "dir");
+			clearWorkspaceRoots();
+			registerWorkspaceRoot(TEST_WIN, symlinkPath);
+			const out = await searchFilesImpl(TEST_WIN, symlinkPath, "hello");
+			expect(out).toHaveLength(1);
+			// filePath は input-base = symlinkPath 配下を指すべき（canonical = realDir 配下では「ない」）
+			expect(out[0].filePath.startsWith(symlinkPath)).toBe(true);
+			expect(out[0].filePath.startsWith(realDir)).toBe(false);
+		} finally {
+			await rm(realDir, { recursive: true, force: true });
+			await rm(linkDir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects unauthorized workspace path", async () => {
+		await expect(searchFilesImpl(999 /* not registered */, workspaceDir, "hello")).rejects.toThrow(
+			/Permission denied/,
+		);
+	});
+
+	it("rejects unauthorized workspace even with empty query (auth before short-circuit)", async () => {
+		// 早期 return が path-guard より前にあると、未認可 renderer が "" で
+		// 叩いて [] を取得できて IPC 認可挙動が崩れる。空クエリでも auth は必須。
+		await expect(searchFilesImpl(999 /* not registered */, workspaceDir, "")).rejects.toThrow(
+			/Permission denied/,
+		);
+	});
+
+	it("cancels older search when a newer search starts on the same window", async () => {
+		// 連続入力で古い search が止まらないと main の I/O が積み上がる。
+		// per-window 世代カウンタで先発の検索は早期 return する。
+		// 並走を確実にするため複数ファイルを置いて、collectMdFilesForWorkspace が
+		// 完了したタイミングで gen 比較が確実に偽になるようにする。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
+		}
+		const [r1, r2] = await Promise.all([
+			searchFilesImpl(TEST_WIN, workspaceDir, "hello"),
+			searchFilesImpl(TEST_WIN, workspaceDir, "hello"),
+		]);
+		// 後発の searchFilesImpl が sync に gen を bump するので、先発は
+		// collectMdFilesForWorkspace 直後の isStale check で必ず bail する。
+		expect(r1).toEqual([]);
+		expect(r2).toHaveLength(10);
+	});
+
+	it("cancelSearchForWindow stops in-flight search even when no newer search starts", async () => {
+		// 「新しい検索で古い検索を止める」だけだと、ユーザーがクエリを消したり
+		// panel を閉じたりした場合に main の I/O が走り切ってしまう。
+		// 明示的な cancelSearchForWindow が gen を bump し、
+		// 先発が isStale で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
+		}
+		// searchFilesImpl は sync に gen を 1 に set してから collectMdFiles を await する。
+		// その後同期的に cancelSearchForWindow を呼んで gen を 2 に bump すれば、
+		// resumption 時の isStale check で先発は bail する。
+		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow is a no-op when no search has run for the window", async () => {
+		// 未登録 window への cancel は静かに no-op になる（Map に entry がない）。
+		// renderer 側 useEffect cleanup が空打ちで送ってきても問題ないこと。
+		expect(() => cancelSearchForWindow(424242)).not.toThrow();
 	});
 });

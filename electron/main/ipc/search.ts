@@ -4,6 +4,7 @@ import { ipcMain } from "electron";
 import type { SearchResult } from "../../../src/types/search";
 import type { UnresolvedWikilink, WikilinkReference } from "../../../src/types/wikilink";
 import { assertPathAllowed } from "../utils/path-guard";
+import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
 
 // ワークスペース配下の `.md` ファイルを再帰的に収集する。
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
@@ -53,6 +54,97 @@ export function fuzzyMatch(query: string, target: string): boolean {
 		}
 	}
 	return qi === q.length;
+}
+
+// 連続入力で古い search を中断するための per-window 世代カウンタ。
+// 同じ window から新しい searchFilesImpl が呼ばれると gen を bump し、
+// 進行中の古い検索は async resumption ごとに gen を確認して早期 return する。
+// renderer 側 (SearchPanel.tsx) も requestId で stale を捨てているが、
+// IPC を投げ捨てるだけでは main の I/O は止まらない。
+const searchGeneration = new Map<number, number>();
+
+export function clearSearchForWindow(windowId: number): void {
+	searchGeneration.delete(windowId);
+}
+
+// 明示的な cancel: gen を bump して in-flight searchFilesImpl を bail させる。
+// renderer 側でクエリが空になった / panel が unmount された時に呼ばれる。
+// 「次の検索が始まる」を待たないと止まらない問題を解消。
+export function cancelSearchForWindow(windowId: number): void {
+	const cur = searchGeneration.get(windowId);
+	if (cur !== undefined) {
+		searchGeneration.set(windowId, cur + 1);
+	}
+}
+
+// 旧 Rust src-tauri/src/commands/search.rs の search_files を 1:1 ポート。
+// JS の String は UTF-16 code unit indexed なので、旧 Rust の「byte → UTF-16 変換段」
+// は不要。case-insensitive 時のみ buildLowerToOrigUtf16Map で
+// `lineLower` 上の position を `line` 上の position に逆引きする。
+async function searchFilesImpl(
+	senderId: number,
+	workspacePath: string,
+	query: string,
+	caseSensitive = false,
+): Promise<SearchResult[]> {
+	// 認可は空クエリでも先に通す（他 IPC ハンドラと整合）。早期 return が
+	// path-guard の前にあると、未認可 renderer が `""` で叩いて空配列を取得し、
+	// IPC 認可挙動が崩れる。
+	assertPathAllowed(senderId, workspacePath);
+	if (query === "") return [];
+
+	// 世代を sync に bump して、後発の searchFilesImpl が古い検索を中断できるようにする。
+	const myGen = (searchGeneration.get(senderId) ?? 0) + 1;
+	searchGeneration.set(senderId, myGen);
+	const isStale = (): boolean => searchGeneration.get(senderId) !== myGen;
+
+	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	if (isStale()) return [];
+	// input-base で byte 比較 sort（旧 Rust md_files.sort() 互換）。io はインデックス連動。
+	const order = io
+		.map((_, i) => i)
+		.sort((a, b) => (input[a] < input[b] ? -1 : input[a] > input[b] ? 1 : 0));
+
+	const querySearch = caseSensitive ? query : query.toLowerCase();
+	const results: SearchResult[] = [];
+
+	for (const idx of order) {
+		// ファイル間のチェックポイント。1 ファイルの per-line ループは fast なので
+		// その内側ではチェックしない（コストの方が大きい）。
+		if (isStale()) return [];
+		const ioPath = io[idx];
+		const inputPath = input[idx];
+		let content: string;
+		try {
+			content = await fsp.readFile(ioPath, "utf8");
+		} catch {
+			continue; // 旧 Rust: read_to_string Err → continue
+		}
+		// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
+		const lines = content.split(/\r?\n/);
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const lineSearch = caseSensitive ? line : line.toLowerCase();
+			const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+			let pos = 0;
+			while (true) {
+				const found = lineSearch.indexOf(querySearch, pos);
+				if (found === -1) break;
+				const lowerEnd = found + querySearch.length;
+				const matchStart = lowerToOrig ? lowerToOrig[found] : found;
+				const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
+				results.push({
+					filePath: inputPath,
+					lineNumber: i + 1,
+					lineContent: line,
+					matchStart,
+					matchEnd,
+				});
+				pos = lowerEnd; // 旧 Rust: search_start = lower_byte_end と同等
+			}
+		}
+	}
+	return results;
 }
 
 async function searchFilenamesImpl(
@@ -159,13 +251,17 @@ async function scanUnresolvedWikilinksImpl(
 export function registerSearchIpc(): void {
 	ipcMain.handle(
 		"search:files",
-		async (
-			_event,
-			_workspacePath: string,
-			_query: string,
-			_caseSensitive?: boolean,
-		): Promise<SearchResult[]> => [],
+		(
+			event,
+			workspacePath: string,
+			query: string,
+			caseSensitive?: boolean,
+		): Promise<SearchResult[]> =>
+			searchFilesImpl(event.sender.id, workspacePath, query, caseSensitive ?? false),
 	);
+	ipcMain.handle("search:cancel", (event): void => {
+		cancelSearchForWindow(event.sender.id);
+	});
 	ipcMain.handle(
 		"search:filenames",
 		(event, workspacePath: string, query: string): Promise<string[]> =>
@@ -179,6 +275,7 @@ export function registerSearchIpc(): void {
 }
 
 export const __testing = {
+	searchFilesImpl,
 	searchFilenamesImpl,
 	scanUnresolvedWikilinksImpl,
 };

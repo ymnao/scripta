@@ -60,6 +60,7 @@ const api: Api = Object.freeze({
 
 	searchFiles: (workspacePath, query, caseSensitive) =>
 		ipcRenderer.invoke("search:files", workspacePath, query, caseSensitive),
+	cancelSearch: () => ipcRenderer.invoke("search:cancel"),
 	searchFilenames: (workspacePath, query) =>
 		ipcRenderer.invoke("search:filenames", workspacePath, query),
 	scanUnresolvedWikilinks: (workspacePath) =>
