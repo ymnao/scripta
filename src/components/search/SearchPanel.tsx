@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { searchFiles } from "../../lib/commands";
+import { cancelSearch, searchFiles } from "../../lib/commands";
 import { addTrailingSep } from "../../lib/path";
 import type { SearchResult } from "../../types/search";
 
@@ -52,6 +52,9 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 			requestIdRef.current++;
 			setResults([]);
 			setSearched(false);
+			// 入力を全部消したときに in-flight の全文検索を main 側でも止める。
+			// requestId だけでは renderer で結果を捨てるだけで、main の I/O は走り切る。
+			cancelSearch().catch(() => {});
 			return;
 		}
 
@@ -71,7 +74,12 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 				});
 		}, 300);
 
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			// クエリ変更 / workspace 切替 / panel unmount で in-flight 検索を bail させる。
+			// timer 未発火なら main 側に送る検索自体がないので no-op だが、発火後は必須。
+			cancelSearch().catch(() => {});
+		};
 	}, [query, workspacePath, caseSensitive]);
 
 	const toggleCollapse = useCallback((filePath: string) => {

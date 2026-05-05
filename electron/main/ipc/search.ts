@@ -67,6 +67,16 @@ export function clearSearchForWindow(windowId: number): void {
 	searchGeneration.delete(windowId);
 }
 
+// 明示的な cancel: gen を bump して in-flight searchFilesImpl を bail させる。
+// renderer 側でクエリが空になった / panel が unmount された時に呼ばれる。
+// 「次の検索が始まる」を待たないと止まらない問題を解消。
+export function cancelSearchForWindow(windowId: number): void {
+	const cur = searchGeneration.get(windowId);
+	if (cur !== undefined) {
+		searchGeneration.set(windowId, cur + 1);
+	}
+}
+
 // 旧 Rust src-tauri/src/commands/search.rs の search_files を 1:1 ポート。
 // JS の String は UTF-16 code unit indexed なので、旧 Rust の「byte → UTF-16 変換段」
 // は不要。case-insensitive 時のみ buildLowerToOrigUtf16Map で
@@ -249,6 +259,9 @@ export function registerSearchIpc(): void {
 		): Promise<SearchResult[]> =>
 			searchFilesImpl(event.sender.id, workspacePath, query, caseSensitive ?? false),
 	);
+	ipcMain.handle("search:cancel", (event): void => {
+		cancelSearchForWindow(event.sender.id);
+	});
 	ipcMain.handle(
 		"search:filenames",
 		(event, workspacePath: string, query: string): Promise<string[]> =>

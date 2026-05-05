@@ -40,6 +40,7 @@ export function createApiMock(): Api {
 		onFsChange: vi.fn(() => () => {}),
 
 		searchFiles: vi.fn(async () => []),
+		cancelSearch: vi.fn(async () => {}),
 		searchFilenames: vi.fn(async () => []),
 		scanUnresolvedWikilinks: vi.fn(async () => []),
 

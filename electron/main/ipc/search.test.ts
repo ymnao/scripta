@@ -9,7 +9,13 @@ vi.mock("electron", () => ({
 }));
 
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
-import { __testing, extractWikilinks, fuzzyMatch, isPathTraversal } from "./search";
+import {
+	__testing,
+	cancelSearchForWindow,
+	extractWikilinks,
+	fuzzyMatch,
+	isPathTraversal,
+} from "./search";
 
 const TEST_WIN = 1;
 const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
@@ -442,5 +448,28 @@ describe("searchFilesImpl", () => {
 		// collectMdFilesForWorkspace 直後の isStale check で必ず bail する。
 		expect(r1).toEqual([]);
 		expect(r2).toHaveLength(10);
+	});
+
+	it("cancelSearchForWindow stops in-flight search even when no newer search starts", async () => {
+		// 「新しい検索で古い検索を止める」だけだと、ユーザーがクエリを消したり
+		// panel を閉じたりした場合に main の I/O が走り切ってしまう。
+		// 明示的な cancelSearchForWindow が gen を bump し、
+		// 先発が isStale で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
+		}
+		// searchFilesImpl は sync に gen を 1 に set してから collectMdFiles を await する。
+		// その後同期的に cancelSearchForWindow を呼んで gen を 2 に bump すれば、
+		// resumption 時の isStale check で先発は bail する。
+		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow is a no-op when no search has run for the window", async () => {
+		// 未登録 window への cancel は静かに no-op になる（Map に entry がない）。
+		// renderer 側 useEffect cleanup が空打ちで送ってきても問題ないこと。
+		expect(() => cancelSearchForWindow(424242)).not.toThrow();
 	});
 });
