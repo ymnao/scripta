@@ -417,4 +417,12 @@ describe("searchFilesImpl", () => {
 			/Permission denied/,
 		);
 	});
+
+	it("rejects unauthorized workspace even with empty query (auth before short-circuit)", async () => {
+		// 早期 return が path-guard より前にあると、未認可 renderer が "" で
+		// 叩いて [] を取得できて IPC 認可挙動が崩れる。空クエリでも auth は必須。
+		await expect(searchFilesImpl(999 /* not registered */, workspaceDir, "")).rejects.toThrow(
+			/Permission denied/,
+		);
+	});
 });

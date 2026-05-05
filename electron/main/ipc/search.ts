@@ -66,6 +66,10 @@ async function searchFilesImpl(
 	query: string,
 	caseSensitive = false,
 ): Promise<SearchResult[]> {
+	// 認可は空クエリでも先に通す（他 IPC ハンドラと整合）。早期 return が
+	// path-guard の前にあると、未認可 renderer が `""` で叩いて空配列を取得し、
+	// IPC 認可挙動が崩れる。
+	assertPathAllowed(senderId, workspacePath);
 	if (query === "") return [];
 
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
