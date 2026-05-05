@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { ipcMain, type WebContents } from "electron";
 import type { FsChangeEvent } from "../../../src/types/workspace";
@@ -13,7 +14,15 @@ type Session = {
 	pending: Map<string, FsKind>;
 	flushTimer: NodeJS.Timeout | null;
 	webContents: WebContents;
-	root: string;
+	// chokidar が emit する path の base（realpath 済み、path-guard と整合）。
+	// I/O 判定（isHidden, existsSync）と pending Map の key にはこちらを使う。
+	canonicalRoot: string;
+	// renderer 側 workspacePath（resolve(rawPath)）。emit 直前にこの prefix へ戻して
+	// renderer の表記と整合させる — fs.ts/listDirectoryImpl, search.ts と同じ方針。
+	// macOS の /var → /private/var alias や symlink 経由で workspace を開いた場合に
+	// canonical をそのまま送ってしまうと、renderer 側のタブ path 比較が一致せず
+	// 外部変更検知（modify/delete 反映）が壊れる。
+	inputRoot: string;
 	// 停止後にも listener closure 経由で生き残った session に late event が飛んで
 	// くるため、flush / onFsEvent 先頭で短絡するためのフラグ。chokidar.close() は
 	// async だが、stopped は **synchronous に** true にすることで「stop した後の
@@ -25,12 +34,25 @@ const sessions = new Map<number, Session>();
 
 const BATCH_DEADLINE_MS = 500;
 
+// canonical 表記（realpath 済み）を renderer 側の input 表記へ戻す。
+// chokidar が常に root 配下しか emit しない前提だが、relative が `..` を返した場合は
+// 防御的に元のパスをそのまま返す（emit はするが prefix 変換は諦める）。
+function toInputPath(canonical: string, canonicalRoot: string, inputRoot: string): string {
+	if (canonical === canonicalRoot) return inputRoot;
+	const rel = relative(canonicalRoot, canonical);
+	if (rel === "" || rel === ".." || rel.startsWith("..")) return canonical;
+	return join(inputRoot, rel);
+}
+
 function flush(session: Session): void {
 	if (session.stopped) return;
 	reclassifyDeleted(session.pending, existsSync);
 	const batch: FsChangeEvent[] = [];
 	for (const [path, kind] of session.pending) {
-		batch.push({ kind, path });
+		batch.push({
+			kind,
+			path: toInputPath(path, session.canonicalRoot, session.inputRoot),
+		});
 	}
 	session.pending.clear();
 	session.flushTimer = null;
@@ -41,7 +63,7 @@ function flush(session: Session): void {
 
 function onFsEvent(session: Session, kind: FsKind, path: string): void {
 	if (session.stopped) return;
-	if (isHidden(path, session.root)) return;
+	if (isHidden(path, session.canonicalRoot)) return;
 	mergeEventKind(session.pending, path, kind);
 	// 「最初の event で deadline 設定、後続ではリセットしない」（旧 Rust 1:1）。
 	// flushTimer === null は「pending が空 or 直前 flush 完了」を意味する。
@@ -50,12 +72,12 @@ function onFsEvent(session: Session, kind: FsKind, path: string): void {
 	}
 }
 
-function startSession(webContents: WebContents, root: string): Session {
-	const watcher = chokidar.watch(root, {
+function startSession(webContents: WebContents, canonicalRoot: string, inputRoot: string): Session {
+	const watcher = chokidar.watch(canonicalRoot, {
 		persistent: true,
 		ignoreInitial: true,
 		followSymlinks: false,
-		ignored: (p: string) => isHidden(p, root),
+		ignored: (p: string) => isHidden(p, canonicalRoot),
 	});
 
 	const session: Session = {
@@ -63,7 +85,8 @@ function startSession(webContents: WebContents, root: string): Session {
 		pending: new Map(),
 		flushTimer: null,
 		webContents,
-		root,
+		canonicalRoot,
+		inputRoot,
 		stopped: false,
 	};
 
@@ -105,8 +128,9 @@ export function registerWatcherIpc(): void {
 		// 必ず path-guard を通す。未承認 path で chokidar を起動させないため。
 		// canonical を chokidar に渡すことで TOCTOU 抑止 + workspace.ts の表記と整合する。
 		const canonical = assertPathAllowed(event.sender.id, rawPath);
+		const inputRoot = resolve(rawPath);
 		stopWatcherForWindow(event.sender.id);
-		sessions.set(event.sender.id, startSession(event.sender, canonical));
+		sessions.set(event.sender.id, startSession(event.sender, canonical, inputRoot));
 	});
 
 	ipcMain.handle("watcher:stop", async (event) => {

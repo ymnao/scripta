@@ -5,6 +5,7 @@
 // 偽装して「stop 後に late event が来てもイベントが renderer に届かない」
 // 「再 start 後の旧 session からの late event がリークしない」を確認する。
 import { EventEmitter } from "node:events";
+import { realpathSync, symlinkSync, unlinkSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -182,4 +183,48 @@ describe("watcher.ts: start/stop race", () => {
 			await rm(otherDir, { recursive: true, force: true });
 		}
 	});
+
+	// 回帰テスト：renderer 側はタブ/FileTree で input 表記の path を保持しているため、
+	// canonical（realpath 済み）の path をそのまま emit すると比較が一致せず外部変更検知が
+	// 壊れる。macOS の /var → /private/var alias や、symlink 経由で workspace を開いた
+	// ケースで顕在化する。fs.ts/listDirectoryImpl, search.ts と同じく canonical I/O →
+	// input emit に統一する必要がある。
+	//
+	// Windows は symlink に Developer Mode が必要で CI が EPERM になるためスキップ。
+	it.skipIf(process.platform === "win32")(
+		"emits input-form paths even when chokidar reports canonical (symlinked workspace)",
+		async () => {
+			const realDir = await mkdtemp(join(tmpdir(), "scripta-real-"));
+			const canonicalRealDir = realpathSync(realDir);
+			const symlinkDir = join(tmpdir(), `scripta-symlink-${process.pid}-${Date.now()}`);
+			symlinkSync(realDir, symlinkDir);
+			try {
+				clearWorkspaceRoots();
+				registerWorkspaceRoot(TEST_WIN, symlinkDir);
+				const start = getHandler("watcher:start");
+				await start({ sender: webContents }, symlinkDir);
+				expect(createdWatchers).toHaveLength(1);
+
+				// 実 chokidar は canonical 配下の path を emit する。
+				// reclassifyDeleted の挙動を避けるため kind は create/delete のみ使う
+				// （modify は disk 実体を見て delete 化される可能性があり、本テストの焦点外）。
+				createdWatchers[0].emit("add", join(canonicalRealDir, "note.md"));
+				createdWatchers[0].emit("unlink", join(canonicalRealDir, "sub", "deep.md"));
+				await vi.advanceTimersByTimeAsync(600);
+
+				expect(webContents.send).toHaveBeenCalledTimes(1);
+				expect(webContents.send).toHaveBeenCalledWith("watcher:fs-change", [
+					{ kind: "create", path: join(symlinkDir, "note.md") },
+					{ kind: "delete", path: join(symlinkDir, "sub", "deep.md") },
+				]);
+			} finally {
+				try {
+					unlinkSync(symlinkDir);
+				} catch {
+					// ignore
+				}
+				await rm(realDir, { recursive: true, force: true });
+			}
+		},
+	);
 });
