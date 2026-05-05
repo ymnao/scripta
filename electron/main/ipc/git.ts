@@ -1,55 +1,335 @@
+import { promises as fsp } from "node:fs";
+import { dirname, isAbsolute, join, resolve as pathResolve } from "node:path";
 import { BrowserWindow, ipcMain } from "electron";
 import type { ConflictContent, GitStatus } from "../../../src/types/git-sync";
+import { isErrnoCode } from "../utils/fs-errors";
+import { createGit, createGitNoCwd, extractGitErrorMessage } from "../utils/git-env";
+import {
+	isStageNotFound,
+	MAX_CONFLICT_CONTENT_SIZE,
+	validateRefName,
+	validateRelativePath,
+} from "../utils/git-validators";
+import { assertPathAllowed } from "../utils/path-guard";
+
+// 旧 Tauri 版 src-tauri/src/commands/git_sync.rs を simple-git ベースで 1:1 port。
+//
+// 設計の要点:
+// - すべての impl は冒頭で `assertPathAllowed(senderId, workspacePath)` を呼んで
+//   canonical を取得し、I/O はその canonical で実施する（fs.ts / search.ts と同方針）。
+// - simple-git の高水準 API（.commit / .pull / .push）は parsed result を返すが、
+//   旧 Rust は git の raw stdout を返していた。renderer 側 useGitSync.ts が
+//   stdout 文字列を parse する経路は無いが、エラーメッセージは旧版互換にしたい
+//   ため `git.raw([...])` を主軸に使う（特に `git show :2:path` には raw 必須）。
+// - エラーメッセージは git stderr をそのまま renderer に流す（LC_ALL=C で英語固定 →
+//   src/lib/errors.ts の `/conflict/i` `/nothing to commit/i` 等のパターンが機能する）。
+
+// `git status --porcelain` の prefix で conflict（unmerged stage）を判定する。
+// 旧 Rust commands/git_sync.rs と同集合。
+const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD "]);
+
+async function checkAvailableImpl(): Promise<boolean> {
+	try {
+		await createGitNoCwd().version();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
+	let canonical: string;
+	try {
+		canonical = assertPathAllowed(senderId, path);
+	} catch {
+		return false;
+	}
+	try {
+		const out = await createGit(canonical).raw(["rev-parse", "--is-inside-work-tree"]);
+		return out.trim() === "true";
+	} catch {
+		return false;
+	}
+}
+
+async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
+	const canonical = assertPathAllowed(senderId, path);
+	const git = createGit(canonical);
+	let branch = "";
+	try {
+		branch = (await git.raw(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+	} catch {
+		// HEAD が無い空 repo 等。空文字を維持。
+	}
+	const porcelain = await git.raw(["status", "--porcelain"]);
+	const lines = porcelain.split("\n").filter((l) => l.length > 0);
+	const conflictFiles = lines
+		.filter((l) => l.length >= 3 && CONFLICT_PREFIXES.has(l.slice(0, 3)))
+		.map((l) => l.slice(3));
+	let hasRemote = false;
+	try {
+		hasRemote = (await git.raw(["remote"])).trim().length > 0;
+	} catch {
+		// remote が読めない構成は false 扱い。
+	}
+	return { branch, changedFilesCount: lines.length, conflictFiles, hasRemote };
+}
+
+async function addAllImpl(senderId: number, path: string): Promise<void> {
+	const canonical = assertPathAllowed(senderId, path);
+	try {
+		await createGit(canonical).raw(["add", "-A"]);
+	} catch (e) {
+		throw new Error(extractGitErrorMessage(e));
+	}
+}
+
+async function commitImpl(senderId: number, path: string, message: string): Promise<string> {
+	const canonical = assertPathAllowed(senderId, path);
+	let out: string;
+	try {
+		out = (await createGit(canonical).raw(["commit", "-m", message])).trim();
+	} catch (e) {
+		throw new Error(extractGitErrorMessage(e));
+	}
+	// 旧 Rust は非ゼロ exit を必ずエラー扱いだったが、simple-git は stderr が
+	// 空だと success 扱いする（git commit が "nothing to commit" を stdout に
+	// 出すケース）。renderer 側 useGitSync.ts は msg.includes("nothing to commit")
+	// でハンドリングしているので、明示的に throw して旧 Tauri の Err 経路を
+	// 再現する。
+	if (/nothing (?:to commit|added to commit)/i.test(out)) {
+		throw new Error(out);
+	}
+	return out;
+}
+
+async function pullImpl(senderId: number, path: string, syncMethod: string): Promise<string> {
+	const canonical = assertPathAllowed(senderId, path);
+	if (syncMethod !== "merge" && syncMethod !== "rebase") {
+		throw new Error(`Invalid sync_method: ${syncMethod}. Expected "merge" or "rebase".`);
+	}
+	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull"];
+	try {
+		return (await createGit(canonical).raw(args)).trim();
+	} catch (e) {
+		const msg = extractGitErrorMessage(e);
+		// 初回 pull で upstream 未設定 → 旧 Rust と同じく成功扱い（空文字列を返す）。
+		if (msg.includes("no tracking information")) return "";
+		throw new Error(msg);
+	}
+}
+
+async function pushImpl(senderId: number, path: string): Promise<string> {
+	const canonical = assertPathAllowed(senderId, path);
+	const git = createGit(canonical);
+	try {
+		return (await git.raw(["push"])).trim();
+	} catch (e) {
+		const msg = extractGitErrorMessage(e);
+		// 初回 push で upstream 未設定 → 自動で `-u origin <branch>` を付けて再試行。
+		if (!(msg.includes("no upstream branch") || msg.includes("has no upstream"))) {
+			throw new Error(msg);
+		}
+		const branch = (await git.raw(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+		if (!branch) throw new Error(msg);
+		validateRefName(branch);
+		let remote = "origin";
+		try {
+			const r = (await git.raw(["remote"])).trim();
+			if (r) remote = r.split("\n")[0];
+		} catch {
+			// remote 取得失敗時は origin にフォールバック。
+		}
+		validateRefName(remote);
+		try {
+			return (await git.raw(["push", "-u", remote, branch])).trim();
+		} catch (e2) {
+			throw new Error(extractGitErrorMessage(e2));
+		}
+	}
+}
+
+async function getConflictedFilesImpl(senderId: number, path: string): Promise<string[]> {
+	const canonical = assertPathAllowed(senderId, path);
+	try {
+		const out = await createGit(canonical).raw(["diff", "--name-only", "--diff-filter=U"]);
+		return out.split("\n").filter((l) => l.length > 0);
+	} catch (e) {
+		throw new Error(extractGitErrorMessage(e));
+	}
+}
+
+async function getConflictContentImpl(
+	senderId: number,
+	path: string,
+	filePath: string,
+): Promise<ConflictContent> {
+	const canonical = assertPathAllowed(senderId, path);
+	validateRelativePath(filePath);
+	const git = createGit(canonical);
+	const fetchStage = async (n: 2 | 3, label: "ours" | "theirs"): Promise<string> => {
+		try {
+			// 旧 Rust と同じく `--` を付けない（git show は stage ref を pathspec
+			// と誤解しないため）。simple-git の高水準 .show() は内部で `--` を付ける
+			// 可能性があるため raw を使う。
+			const c = await git.raw(["show", `:${n}:${filePath}`]);
+			const bytes = Buffer.byteLength(c, "utf8");
+			if (bytes > MAX_CONFLICT_CONTENT_SIZE) {
+				throw new Error(
+					`Conflict content for ${label} (${bytes} bytes) exceeds ${MAX_CONFLICT_CONTENT_SIZE} byte limit`,
+				);
+			}
+			return c;
+		} catch (e) {
+			const msg = extractGitErrorMessage(e);
+			// modify/delete conflict（DU/UD）で stage が無いケースは empty で fallback。
+			if (isStageNotFound(msg)) return "";
+			throw new Error(msg);
+		}
+	};
+	return {
+		ours: await fetchStage(2, "ours"),
+		theirs: await fetchStage(3, "theirs"),
+	};
+}
+
+async function resolveConflictImpl(
+	senderId: number,
+	path: string,
+	filePath: string,
+	content: string,
+	resolution: "modify" | "delete",
+): Promise<void> {
+	const canonical = assertPathAllowed(senderId, path);
+	validateRelativePath(filePath);
+	if (resolution !== "modify" && resolution !== "delete") {
+		throw new Error(`Invalid resolution: ${resolution}. Expected "modify" or "delete".`);
+	}
+	const git = createGit(canonical);
+	if (resolution === "delete") {
+		try {
+			await git.raw(["rm", "-f", "--", filePath]);
+		} catch (e) {
+			throw new Error(extractGitErrorMessage(e));
+		}
+		return;
+	}
+	// modify — 旧 Rust safe_write_in_repo を 1:1 で port。
+	const target = pathResolve(canonical, filePath);
+	// 親ディレクトリが workspace 外（symlink-in-the-middle）に出ないことを再確認。
+	// assertPathAllowed が realpathBestEffort で symlink を解決し、bounds 違反なら throw。
+	assertPathAllowed(senderId, dirname(target));
+	// file_path 自身が symlink の場合は拒否（旧 Rust と同方針：別ファイルへの surprise write を防ぐ）。
+	try {
+		const st = await fsp.lstat(target);
+		if (st.isSymbolicLink()) {
+			throw new Error("file_path is a symbolic link; refusing to write");
+		}
+	} catch (e) {
+		if (!isErrnoCode(e, "ENOENT")) throw e;
+	}
+	await fsp.mkdir(dirname(target), { recursive: true });
+	await fsp.writeFile(target, content, "utf8");
+	try {
+		await git.raw(["add", "--", filePath]);
+	} catch (e) {
+		throw new Error(extractGitErrorMessage(e));
+	}
+}
+
+async function finishConflictResolutionImpl(senderId: number, path: string): Promise<string> {
+	const canonical = assertPathAllowed(senderId, path);
+	const git = createGit(canonical);
+	const gitDirRaw = (await git.raw(["rev-parse", "--git-dir"])).trim();
+	const gitDir = isAbsolute(gitDirRaw) ? gitDirRaw : pathResolve(canonical, gitDirRaw);
+	const exists = (sub: string): Promise<boolean> =>
+		fsp.access(join(gitDir, sub)).then(
+			() => true,
+			() => false,
+		);
+	// rebase 状態を merge より優先して判定（旧 Rust と同じ）。
+	const rebaseMerge = await exists("rebase-merge");
+	const rebaseApply = await exists("rebase-apply");
+	if (rebaseMerge || rebaseApply) {
+		try {
+			return (await git.raw(["rebase", "--continue"])).trim();
+		} catch (e) {
+			throw new Error(extractGitErrorMessage(e));
+		}
+	}
+	if (await exists("MERGE_HEAD")) {
+		try {
+			return (await git.raw(["commit", "--no-edit"])).trim();
+		} catch (e) {
+			throw new Error(extractGitErrorMessage(e));
+		}
+	}
+	throw new Error("Not in a merge or rebase state");
+}
+
+async function getLastCommitTimeImpl(senderId: number, path: string): Promise<string | null> {
+	let canonical: string;
+	try {
+		canonical = assertPathAllowed(senderId, path);
+	} catch {
+		return null;
+	}
+	try {
+		const out = (await createGit(canonical).raw(["log", "-1", "--format=%ci"])).trim();
+		return out.length > 0 ? out : null;
+	} catch {
+		// 空 repo（HEAD が無い）等は null。旧 Rust と同方針。
+		return null;
+	}
+}
 
 export function registerGitIpc(): void {
-	ipcMain.handle("git:check-available", async () => false);
-	ipcMain.handle("git:check-repo", async (_event, _path: string) => false);
-
-	ipcMain.handle(
-		"git:status",
-		async (_event, _path: string): Promise<GitStatus> => ({
-			branch: "",
-			changedFilesCount: 0,
-			conflictFiles: [],
-			hasRemote: false,
-		}),
+	ipcMain.handle("git:check-available", () => checkAvailableImpl());
+	ipcMain.handle("git:check-repo", (event, path: string) => checkRepoImpl(event.sender.id, path));
+	ipcMain.handle("git:status", (event, path: string) => statusImpl(event.sender.id, path));
+	ipcMain.handle("git:add-all", (event, path: string) => addAllImpl(event.sender.id, path));
+	ipcMain.handle("git:commit", (event, path: string, message: string) =>
+		commitImpl(event.sender.id, path, message),
 	);
-
-	ipcMain.handle("git:add-all", async (_event, _path: string) => {});
-	ipcMain.handle("git:commit", async (_event, _path: string, _message: string) => "");
-	ipcMain.handle("git:pull", async (_event, _path: string, _syncMethod: string) => "");
-	ipcMain.handle("git:push", async (_event, _path: string) => "");
-
-	ipcMain.handle(
-		"git:get-conflicted-files",
-		async (_event, _path: string): Promise<string[]> => [],
+	ipcMain.handle("git:pull", (event, path: string, syncMethod: string) =>
+		pullImpl(event.sender.id, path, syncMethod),
 	);
-	ipcMain.handle(
-		"git:get-conflict-content",
-		async (_event, _path: string, _filePath: string): Promise<ConflictContent> => ({
-			ours: "",
-			theirs: "",
-		}),
+	ipcMain.handle("git:push", (event, path: string) => pushImpl(event.sender.id, path));
+	ipcMain.handle("git:get-conflicted-files", (event, path: string) =>
+		getConflictedFilesImpl(event.sender.id, path),
+	);
+	ipcMain.handle("git:get-conflict-content", (event, path: string, filePath: string) =>
+		getConflictContentImpl(event.sender.id, path, filePath),
 	);
 	ipcMain.handle(
 		"git:resolve-conflict",
-		async (
-			_event,
-			_path: string,
-			_filePath: string,
-			_content: string,
-			_resolution: "modify" | "delete",
-		) => {},
+		(event, path: string, filePath: string, content: string, resolution: "modify" | "delete") =>
+			resolveConflictImpl(event.sender.id, path, filePath, content, resolution),
 	);
-	ipcMain.handle("git:finish-conflict-resolution", async (_event, _path: string) => "");
-	ipcMain.handle(
-		"git:get-last-commit-time",
-		async (_event, _path: string): Promise<string | null> => null,
+	ipcMain.handle("git:finish-conflict-resolution", (event, path: string) =>
+		finishConflictResolutionImpl(event.sender.id, path),
 	);
-
-	ipcMain.handle("git:emit-conflict-resolved", async () => {
+	ipcMain.handle("git:get-last-commit-time", (event, path: string) =>
+		getLastCommitTimeImpl(event.sender.id, path),
+	);
+	ipcMain.handle("git:emit-conflict-resolved", () => {
 		for (const win of BrowserWindow.getAllWindows()) {
 			win.webContents.send("git:conflict-resolved");
 		}
 	});
 }
+
+export const __testing = {
+	checkAvailableImpl,
+	checkRepoImpl,
+	statusImpl,
+	addAllImpl,
+	commitImpl,
+	pullImpl,
+	pushImpl,
+	getConflictedFilesImpl,
+	getConflictContentImpl,
+	resolveConflictImpl,
+	finishConflictResolutionImpl,
+	getLastCommitTimeImpl,
+};

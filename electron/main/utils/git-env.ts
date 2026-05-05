@@ -19,6 +19,24 @@ const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 	GIT_LITERAL_PATHSPECS: "1",
 };
 
+// simple-git 3.x の vulnerability ガード方針:
+// process.env を子プロセスに forward する都合上、ユーザー環境にある GIT_EDITOR /
+// GIT_ASKPASS / 等が触れた時点で reject される。本コードはこれらの値を意図的に
+// 制御している（GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS="" / SSH_ASKPASS="" で対話
+// 入力を deny、`core.hooksPath=NULL` で hooks を無効化）ので、対応する unsafe
+// フラグを明示的に opt-in する。攻撃者制御された値は他経路で防いでいるため、
+// 旧 Rust 実装と同じセマンティクスを再現する目的で許可する。
+const UNSAFE_FLAGS = {
+	allowUnsafeHooksPath: true,
+	allowUnsafeEditor: true,
+	allowUnsafeAskPass: true,
+	allowUnsafePager: true,
+	allowUnsafeCredentialHelper: true,
+	allowUnsafeConfigPaths: true,
+	allowUnsafeSshCommand: true,
+	allowUnsafeProtocolOverride: true,
+};
+
 // 与えられた canonical な repo path を baseDir にした SimpleGit instance を返す。
 // `core.hooksPath=/dev/null` で hooks を無効化（旧 Rust と同じ）、
 // `core.quotepath=false` で 非 ASCII path を 8 進エスケープしない。
@@ -28,12 +46,16 @@ export function createGit(canonicalRepoPath: string): SimpleGit {
 		binary: "git",
 		maxConcurrentProcesses: 1,
 		config: [`core.hooksPath=${NULL_HOOKS}`, "core.quotepath=false"],
+		unsafe: UNSAFE_FLAGS,
 	}).env({ ...process.env, ...GIT_ENV_OVERRIDES });
 }
 
 // `git --version` の存在確認用に baseDir 不要の instance を返す。
 export function createGitNoCwd(): SimpleGit {
-	return simpleGit({ binary: "git" }).env({ ...process.env, ...GIT_ENV_OVERRIDES });
+	return simpleGit({ binary: "git", unsafe: UNSAFE_FLAGS }).env({
+		...process.env,
+		...GIT_ENV_OVERRIDES,
+	});
 }
 
 // simple-git GitError は `message` に git の stderr を含む。
