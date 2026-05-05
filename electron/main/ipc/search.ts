@@ -1,6 +1,160 @@
+import { promises as fsp } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { ipcMain } from "electron";
 import type { SearchResult } from "../../../src/types/search";
-import type { UnresolvedWikilink } from "../../../src/types/wikilink";
+import type { UnresolvedWikilink, WikilinkReference } from "../../../src/types/wikilink";
+import { assertPathAllowed } from "../utils/path-guard";
+
+// ワークスペース配下の `.md` ファイルを再帰的に収集する。
+// I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
+// 2 つの基底パスを並走させる（fs.ts/listDirectoryImpl と同じ方針）。
+// `.` で始まるエントリ（ファイル / ディレクトリ）は早期に skip して、隠しディレクトリの
+// 中身を readdir しないようにする（旧 Rust collect_md_files の挙動 1:1）。
+type MdFiles = { io: string[]; input: string[] };
+
+async function walkMdFiles(ioDir: string, inputDir: string, out: MdFiles): Promise<void> {
+	const entries = await fsp.readdir(ioDir, { withFileTypes: true });
+	for (const ent of entries) {
+		if (ent.name.startsWith(".")) continue;
+		const ioPath = join(ioDir, ent.name);
+		const inPath = join(inputDir, ent.name);
+		if (ent.isDirectory()) {
+			await walkMdFiles(ioPath, inPath, out);
+		} else if (ent.name.endsWith(".md")) {
+			out.io.push(ioPath);
+			out.input.push(inPath);
+		}
+	}
+}
+
+// 各 IPC ハンドラ冒頭の「path-guard 通過 → ワークスペース全 .md 収集」を集約。
+async function collectMdFilesForWorkspace(
+	senderId: number,
+	workspacePath: string,
+): Promise<MdFiles> {
+	const canonical = assertPathAllowed(senderId, workspacePath);
+	const inputBase = resolve(workspacePath);
+	const out: MdFiles = { io: [], input: [] };
+	await walkMdFiles(canonical, inputBase, out);
+	return out;
+}
+
+// 各 query char が target に **順序どおり** 含まれるかを判定する fuzzy match。
+// 旧 Rust fuzzy_match (search.rs L159-175) と 1:1 互換。
+export function fuzzyMatch(query: string, target: string): boolean {
+	const q = query.toLowerCase();
+	const t = target.toLowerCase();
+	if (q.length === 0) return true;
+	let qi = 0;
+	for (const ch of t) {
+		if (ch === q[qi]) {
+			qi++;
+			if (qi === q.length) return true;
+		}
+	}
+	return qi === q.length;
+}
+
+async function searchFilenamesImpl(
+	senderId: number,
+	workspacePath: string,
+	query: string,
+): Promise<string[]> {
+	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	// byte 比較（旧 Rust の Vec<String>::sort = lexicographic byte compare 互換）。
+	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
+	input.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+	if (query === "") return input;
+	return input.filter((p) => fuzzyMatch(query, basename(p)));
+}
+
+// path traversal 文字を含むページ名を弾く（旧 Rust is_path_traversal L222-227 互換）。
+// `..something` のような正当な名前も弾く点まで一致させる（旧 Rust の `contains("..")`）。
+export function isPathTraversal(name: string): boolean {
+	return name.includes("/") || name.includes("\\") || name === "." || name.includes("..");
+}
+
+// 1 行から `[[inner]]` を順次抽出する。empty inner（`[[]]`）はスキップ。
+// byteOffset は `[[` 開始位置の **1-based UTF-8 byte 位置**（旧 Rust 互換、unique key 用）。
+export function* extractWikilinks(line: string): Generator<{ inner: string; byteOffset: number }> {
+	let i = 0;
+	while (true) {
+		const open = line.indexOf("[[", i);
+		if (open < 0) return;
+		const innerStart = open + 2;
+		if (innerStart >= line.length) return;
+		const close = line.indexOf("]]", innerStart);
+		if (close < 0) return;
+		const inner = line.slice(innerStart, close);
+		if (inner.length > 0) {
+			yield { inner, byteOffset: Buffer.byteLength(line.slice(0, open), "utf8") + 1 };
+		}
+		i = close + 2;
+	}
+}
+
+async function scanUnresolvedWikilinksImpl(
+	senderId: number,
+	workspacePath: string,
+): Promise<UnresolvedWikilink[]> {
+	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
+
+	// existing_pages は basename から `.md`（小文字一致のみ）を剥いで NFC 正規化した Set。
+	const existing = new Set<string>();
+	for (const p of inFiles) {
+		const name = basename(p);
+		if (!name.toLowerCase().endsWith(".md")) continue;
+		existing.add(name.slice(0, -3).normalize("NFC"));
+	}
+
+	const map = new Map<string, WikilinkReference[]>();
+	for (let idx = 0; idx < ioFiles.length; idx++) {
+		let text: string;
+		try {
+			text = await fsp.readFile(ioFiles[idx], "utf8");
+		} catch {
+			continue;
+		}
+		const lines = text.split(/\r?\n/);
+		let inCodeBlock = false;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const trimmed = line.replace(/^\s+/, "");
+			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+				inCodeBlock = !inCodeBlock;
+				continue;
+			}
+			if (inCodeBlock) continue;
+			for (const { inner, byteOffset } of extractWikilinks(line)) {
+				const pipe = inner.indexOf("|");
+				const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
+				if (page === "" || isPathTraversal(page)) continue;
+				const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
+				const normalized = stripped.normalize("NFC");
+				if (normalized === "" || existing.has(normalized)) continue;
+				const ref: WikilinkReference = {
+					filePath: inFiles[idx],
+					lineNumber: i + 1,
+					byteOffset,
+					lineContent: line,
+					contextBefore: lines.slice(Math.max(0, i - 3), i),
+					contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
+				};
+				const arr = map.get(normalized);
+				if (arr === undefined) map.set(normalized, [ref]);
+				else arr.push(ref);
+			}
+		}
+	}
+
+	const result: UnresolvedWikilink[] = [];
+	for (const [pageName, references] of map) {
+		result.push({ pageName, references });
+	}
+	// pageName の byte 比較で昇順（旧 Rust String::cmp と整合）。
+	result.sort((a, b) => (a.pageName < b.pageName ? -1 : a.pageName > b.pageName ? 1 : 0));
+	return result;
+}
 
 export function registerSearchIpc(): void {
 	ipcMain.handle(
@@ -14,10 +168,17 @@ export function registerSearchIpc(): void {
 	);
 	ipcMain.handle(
 		"search:filenames",
-		async (_event, _workspacePath: string, _query: string): Promise<string[]> => [],
+		(event, workspacePath: string, query: string): Promise<string[]> =>
+			searchFilenamesImpl(event.sender.id, workspacePath, query),
 	);
 	ipcMain.handle(
 		"search:unresolved-wikilinks",
-		async (_event, _workspacePath: string): Promise<UnresolvedWikilink[]> => [],
+		(event, workspacePath: string): Promise<UnresolvedWikilink[]> =>
+			scanUnresolvedWikilinksImpl(event.sender.id, workspacePath),
 	);
 }
+
+export const __testing = {
+	searchFilenamesImpl,
+	scanUnresolvedWikilinksImpl,
+};
