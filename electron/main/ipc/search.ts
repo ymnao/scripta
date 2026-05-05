@@ -4,6 +4,7 @@ import { ipcMain } from "electron";
 import type { SearchResult } from "../../../src/types/search";
 import type { UnresolvedWikilink, WikilinkReference } from "../../../src/types/wikilink";
 import { assertPathAllowed } from "../utils/path-guard";
+import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
 
 // ワークスペース配下の `.md` ファイルを再帰的に収集する。
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
@@ -53,6 +54,63 @@ export function fuzzyMatch(query: string, target: string): boolean {
 		}
 	}
 	return qi === q.length;
+}
+
+// 旧 Rust src-tauri/src/commands/search.rs の search_files を 1:1 ポート。
+// JS の String は UTF-16 code unit indexed なので、旧 Rust の「byte → UTF-16 変換段」
+// は不要。case-insensitive 時のみ buildLowerToOrigUtf16Map で
+// `lineLower` 上の position を `line` 上の position に逆引きする。
+async function searchFilesImpl(
+	senderId: number,
+	workspacePath: string,
+	query: string,
+	caseSensitive = false,
+): Promise<SearchResult[]> {
+	if (query === "") return [];
+
+	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	// input-base で byte 比較 sort（旧 Rust md_files.sort() 互換）。io はインデックス連動。
+	const order = io
+		.map((_, i) => i)
+		.sort((a, b) => (input[a] < input[b] ? -1 : input[a] > input[b] ? 1 : 0));
+
+	const querySearch = caseSensitive ? query : query.toLowerCase();
+	const results: SearchResult[] = [];
+
+	for (const idx of order) {
+		const ioPath = io[idx];
+		const inputPath = input[idx];
+		let content: string;
+		try {
+			content = await fsp.readFile(ioPath, "utf8");
+		} catch {
+			continue; // 旧 Rust: read_to_string Err → continue
+		}
+		// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
+		const lines = content.split(/\r?\n/);
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const lineSearch = caseSensitive ? line : line.toLowerCase();
+			const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+			let pos = 0;
+			while (true) {
+				const found = lineSearch.indexOf(querySearch, pos);
+				if (found === -1) break;
+				const lowerEnd = found + querySearch.length;
+				const matchStart = lowerToOrig ? lowerToOrig[found] : found;
+				const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
+				results.push({
+					filePath: inputPath,
+					lineNumber: i + 1,
+					lineContent: line,
+					matchStart,
+					matchEnd,
+				});
+				pos = lowerEnd; // 旧 Rust: search_start = lower_byte_end と同等
+			}
+		}
+	}
+	return results;
 }
 
 async function searchFilenamesImpl(
@@ -159,12 +217,13 @@ async function scanUnresolvedWikilinksImpl(
 export function registerSearchIpc(): void {
 	ipcMain.handle(
 		"search:files",
-		async (
-			_event,
-			_workspacePath: string,
-			_query: string,
-			_caseSensitive?: boolean,
-		): Promise<SearchResult[]> => [],
+		(
+			event,
+			workspacePath: string,
+			query: string,
+			caseSensitive?: boolean,
+		): Promise<SearchResult[]> =>
+			searchFilesImpl(event.sender.id, workspacePath, query, caseSensitive ?? false),
 	);
 	ipcMain.handle(
 		"search:filenames",
@@ -179,6 +238,7 @@ export function registerSearchIpc(): void {
 }
 
 export const __testing = {
+	searchFilesImpl,
 	searchFilenamesImpl,
 	scanUnresolvedWikilinksImpl,
 };
