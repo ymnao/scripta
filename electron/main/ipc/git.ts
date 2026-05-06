@@ -55,23 +55,25 @@ async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
 async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
 	const canonical = assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
-	let branch = "";
-	try {
-		branch = (await git.raw(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
-	} catch {
-		// HEAD が無い空 repo 等。空文字を維持。
-	}
-	const porcelain = await git.raw(["status", "--porcelain"]);
+	// 3 つの git 呼び出しは独立しているので並列化する。useGitSync の refresh
+	// で頻繁に呼ばれるホットパスのため、逐次（3 spawn 順次）→ 並列で 1/3 程度に短縮。
+	// branch / remote はエラーを許容（unborn HEAD / remote 未設定）するので
+	// catch で fallback。porcelain は失敗時に throw して呼び出し元へ伝える。
+	const [branch, porcelain, hasRemote] = await Promise.all([
+		git
+			.raw(["rev-parse", "--abbrev-ref", "HEAD"])
+			.then((b) => b.trim())
+			.catch(() => ""),
+		git.raw(["status", "--porcelain"]),
+		git
+			.raw(["remote"])
+			.then((r) => r.trim().length > 0)
+			.catch(() => false),
+	]);
 	const lines = porcelain.split("\n").filter((l) => l.length > 0);
 	const conflictFiles = lines
 		.filter((l) => l.length >= 3 && CONFLICT_PREFIXES.has(l.slice(0, 3)))
 		.map((l) => l.slice(3));
-	let hasRemote = false;
-	try {
-		hasRemote = (await git.raw(["remote"])).trim().length > 0;
-	} catch {
-		// remote が読めない構成は false 扱い。
-	}
 	return { branch, changedFilesCount: lines.length, conflictFiles, hasRemote };
 }
 
@@ -122,30 +124,33 @@ async function pullImpl(senderId: number, path: string, syncMethod: string): Pro
 async function pushImpl(senderId: number, path: string): Promise<string> {
 	const canonical = assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
+	let firstError: unknown;
 	try {
 		return (await git.raw(["push"])).trim();
 	} catch (e) {
-		const msg = extractGitErrorMessage(e);
-		// 初回 push で upstream 未設定 → 自動で `-u origin <branch>` を付けて再試行。
-		if (!(msg.includes("no upstream branch") || msg.includes("has no upstream"))) {
-			throw new Error(msg);
-		}
-		const branch = (await git.raw(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
-		if (!branch) throw new Error(msg);
-		validateRefName(branch);
-		let remote = "origin";
-		try {
-			const r = (await git.raw(["remote"])).trim();
-			if (r) remote = r.split("\n")[0];
-		} catch {
-			// remote 取得失敗時は origin にフォールバック。
-		}
-		validateRefName(remote);
-		try {
-			return (await git.raw(["push", "-u", remote, branch])).trim();
-		} catch (e2) {
-			throw new Error(extractGitErrorMessage(e2));
-		}
+		firstError = e;
+	}
+	const msg = extractGitErrorMessage(firstError);
+	// 初回 push で upstream 未設定 → 自動で `-u origin <branch>` を付けて再試行。
+	if (!(msg.includes("no upstream branch") || msg.includes("has no upstream"))) {
+		throw new Error(msg);
+	}
+	// branch / remote の取得は独立なので並列化（再試行経路の追加レイテンシを抑える）。
+	const [branch, remoteList] = await Promise.all([
+		git.raw(["rev-parse", "--abbrev-ref", "HEAD"]).then((b) => b.trim()),
+		git
+			.raw(["remote"])
+			.then((r) => r.trim())
+			.catch(() => ""),
+	]);
+	if (!branch) throw new Error(msg);
+	validateRefName(branch);
+	const remote = remoteList ? remoteList.split("\n")[0] : "origin";
+	validateRefName(remote);
+	try {
+		return (await git.raw(["push", "-u", remote, branch])).trim();
+	} catch (e) {
+		throw new Error(extractGitErrorMessage(e));
 	}
 }
 
@@ -187,10 +192,10 @@ async function getConflictContentImpl(
 			throw new Error(msg);
 		}
 	};
-	return {
-		ours: await fetchStage(2, "ours"),
-		theirs: await fetchStage(3, "theirs"),
-	};
+	// stage 2 / 3 は独立 git show なので並列で取得。conflict resolver を開く
+	// 直前のブロッキング処理のため、UX 改善に直結する。
+	const [ours, theirs] = await Promise.all([fetchStage(2, "ours"), fetchStage(3, "theirs")]);
+	return { ours, theirs };
 }
 
 async function resolveConflictImpl(
@@ -247,9 +252,13 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 			() => true,
 			() => false,
 		);
-	// rebase 状態を merge より優先して判定（旧 Rust と同じ）。
-	const rebaseMerge = await exists("rebase-merge");
-	const rebaseApply = await exists("rebase-apply");
+	// 3 つの marker file の存在チェックは独立なので並列で。3 stat → 1 往復。
+	// 判定は rebase 系を merge より優先（旧 Rust と同じ）。
+	const [rebaseMerge, rebaseApply, mergeHead] = await Promise.all([
+		exists("rebase-merge"),
+		exists("rebase-apply"),
+		exists("MERGE_HEAD"),
+	]);
 	if (rebaseMerge || rebaseApply) {
 		try {
 			return (await git.raw(["rebase", "--continue"])).trim();
@@ -257,7 +266,7 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 			throw new Error(extractGitErrorMessage(e));
 		}
 	}
-	if (await exists("MERGE_HEAD")) {
+	if (mergeHead) {
 		try {
 			return (await git.raw(["commit", "--no-edit"])).trim();
 		} catch (e) {
