@@ -195,15 +195,15 @@ export function workspaceSet(path: string | null): Promise<void> {
 	return window.api.workspaceSet(path);
 }
 
-export function emitConflictResolved(): Promise<void> {
-	return window.api.emitConflictResolved();
+export function emitConflictResolved(workspacePath: string): Promise<void> {
+	return window.api.emitConflictResolved(workspacePath);
 }
 
 export function onFsChange(cb: (events: FsChangeEvent[]) => void): () => void {
 	return window.api.onFsChange(cb);
 }
 
-export function onConflictResolved(cb: () => void): () => void {
+export function onConflictResolved(cb: (workspacePath: string) => void): () => void {
 	return window.api.onConflictResolved(cb);
 }
 

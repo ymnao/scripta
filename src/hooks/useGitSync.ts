@@ -367,12 +367,14 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 
 	// Listen for conflict resolution
 	useEffect(() => {
-		const handleConflictResolved = () => {
+		const handleConflictResolved = (resolvedWorkspacePath: string) => {
+			// 別 workspace の conflict 解消イベントで自分の paused 状態が
+			// 誤ってクリアされないよう、payload を照合する。
+			// （main 側は全 BrowserWindow に broadcast している）
+			if (!workspacePath || resolvedWorkspacePath !== workspacePath) return;
 			pausedRef.current = false;
-			if (workspacePath) {
-				void refreshStatus(workspacePath);
-				// Timer re-scheduling happens automatically via the settings-reactive useEffect
-			}
+			void refreshStatus(workspacePath);
+			// Timer re-scheduling happens automatically via the settings-reactive useEffect
 		};
 
 		const unlisten = onConflictResolved(handleConflictResolved);
