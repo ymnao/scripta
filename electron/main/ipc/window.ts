@@ -25,7 +25,15 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		return;
 	}
 
-	const parent = BrowserWindow.fromId(parentSenderId) ?? undefined;
+	// `BrowserWindow.fromId` は BrowserWindow.id を引数に取るが、event.sender.id
+	// は webContents.id（別の id 体系）。getAllWindows() を線形探索して
+	// webContents.id で照合するのが正しい。BrowserWindow.fromWebContents を
+	// 使う手もあるが、impl signature が webContents 受け取りに変わって
+	// テストの mock 構造が複雑になるため、senderId ベースのままで find する。
+	const parent =
+		BrowserWindow.getAllWindows().find(
+			(w) => !w.isDestroyed() && w.webContents.id === parentSenderId,
+		) ?? undefined;
 
 	const win = new BrowserWindow({
 		width: 900,
@@ -57,10 +65,22 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 	conflictWindows.set(canonical, win);
 
 	const search = `?conflict=true&workspacePath=${encodeURIComponent(workspacePath)}`;
-	if (process.env.ELECTRON_RENDERER_URL) {
-		await win.loadURL(`${process.env.ELECTRON_RENDERER_URL}${search}`);
-	} else {
-		await win.loadFile(join(__dirname, "../renderer/index.html"), { search });
+	try {
+		if (process.env.ELECTRON_RENDERER_URL) {
+			await win.loadURL(`${process.env.ELECTRON_RENDERER_URL}${search}`);
+		} else {
+			await win.loadFile(join(__dirname, "../renderer/index.html"), { search });
+		}
+	} catch (e) {
+		// load 失敗時に Map / allowedRoots を残すと、再 open は壊れた window を
+		// focus するだけになる。明示的に cleanup してから rethrow。
+		// real Electron では win.destroy() が closed event を発火し、
+		// attachWindowLifecycle 経由でも cleanup が走るが、両者とも冪等なため
+		// explicit に書いておく（test mock では closed event が発火しないため）。
+		conflictWindows.delete(canonical);
+		setActiveWorkspaceForWindow(win.webContents.id, null);
+		if (!win.isDestroyed()) win.destroy();
+		throw e;
 	}
 }
 
