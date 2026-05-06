@@ -29,6 +29,7 @@ const {
 	resolveConflictImpl,
 	finishConflictResolutionImpl,
 	getLastCommitTimeImpl,
+	emitConflictResolvedImpl,
 } = __testing;
 
 // すべての test fixture を集約。temp dir を mkdtemp + realpath で正規化したうえで
@@ -493,5 +494,27 @@ describe("path-guard cross-cutting", () => {
 	it("rejects when called from a different window's id", async () => {
 		const dir = await newWorkspace();
 		await expect(statusImpl(OTHER_WIN, dir)).rejects.toThrow(/Permission denied/);
+	});
+});
+
+describe("emitConflictResolvedImpl", () => {
+	it("succeeds when sender's allowedRoots contains the workspace", async () => {
+		const dir = await newWorkspace();
+		// 正規経路: 自 window の allowedRoots に登録されている path → throw しない
+		expect(() => emitConflictResolvedImpl(TEST_WIN, dir)).not.toThrow();
+	});
+
+	it("rejects emit for a workspace not in sender's allowedRoots", async () => {
+		await newWorkspace();
+		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-evict-")));
+		dirsToCleanup.push(outside);
+		// 別 window が偽装で他 workspace の path を流しても弾かれる
+		expect(() => emitConflictResolvedImpl(TEST_WIN, outside)).toThrow(/Permission denied/);
+	});
+
+	it("rejects emit from a window that has no workspace registered", async () => {
+		const dir = await newWorkspace();
+		// OTHER_WIN は何も登録されていない window → 自 workspace でも弾かれる
+		expect(() => emitConflictResolvedImpl(OTHER_WIN, dir)).toThrow(/Permission denied/);
 	});
 });

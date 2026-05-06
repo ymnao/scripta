@@ -276,6 +276,24 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 	throw new Error("Not in a merge or rebase state");
 }
 
+function emitConflictResolvedImpl(senderId: number, workspacePath: string): void {
+	// 認可: 送信元の allowedRoots に当該 workspace が含まれることを確認してから
+	// broadcast する。renderer は信頼できない前提なので、別 window から偽装
+	// emit で他 workspace の `pausedRef` を解除されないように防ぐ。
+	// 正規経路（conflict window）は createConflictWindow 内で
+	// `setActiveWorkspaceForWindow(childId, canonical)` 済みのため pass する。
+	assertPathAllowed(senderId, workspacePath);
+	// 該当 workspace のみ受信側で `pausedRef` をクリアできるよう、
+	// payload に workspace path を載せて broadcast する。受信側
+	// (useGitSync.ts) で照合し、別 workspace の未解決 conflict が
+	// このイベントで誤ってクリアされる回帰を防ぐ。
+	for (const win of BrowserWindow.getAllWindows()) {
+		if (!win.isDestroyed()) {
+			win.webContents.send("git:conflict-resolved", workspacePath);
+		}
+	}
+}
+
 async function getLastCommitTimeImpl(senderId: number, path: string): Promise<string | null> {
 	let canonical: string;
 	try {
@@ -321,14 +339,8 @@ export function registerGitIpc(): void {
 	ipcMain.handle("git:get-last-commit-time", (event, path: string) =>
 		getLastCommitTimeImpl(event.sender.id, path),
 	);
-	ipcMain.handle("git:emit-conflict-resolved", (_event, workspacePath: string) => {
-		// 該当 workspace のみ受信側で `pausedRef` をクリアできるよう、
-		// payload に workspace path を載せて broadcast する。受信側
-		// (useGitSync.ts) で照合し、別 workspace の未解決 conflict が
-		// このイベントで誤ってクリアされる回帰を防ぐ。
-		for (const win of BrowserWindow.getAllWindows()) {
-			win.webContents.send("git:conflict-resolved", workspacePath);
-		}
+	ipcMain.handle("git:emit-conflict-resolved", (event, workspacePath: string) => {
+		emitConflictResolvedImpl(event.sender.id, workspacePath);
 	});
 }
 
@@ -345,4 +357,5 @@ export const __testing = {
 	resolveConflictImpl,
 	finishConflictResolutionImpl,
 	getLastCommitTimeImpl,
+	emitConflictResolvedImpl,
 };
