@@ -10,8 +10,17 @@ vi.mock("../lib/commands", () => ({
 	gitCommit: vi.fn(),
 	gitPull: vi.fn(),
 	gitPush: vi.fn(),
-	onConflictResolved: vi.fn(() => () => {}),
+	// Capture-able mock: テストで callback を呼べるよう、最後に登録された
+	// handler を `lastConflictHandler` に保持する。
+	onConflictResolved: vi.fn((cb: (workspacePath: string) => void) => {
+		lastConflictHandler = cb;
+		return () => {
+			lastConflictHandler = undefined;
+		};
+	}),
 }));
+
+let lastConflictHandler: ((workspacePath: string) => void) | undefined;
 
 vi.mock("../lib/store", () => ({
 	saveGitSyncEnabled: vi.fn(),
@@ -426,6 +435,36 @@ describe("useGitSync", () => {
 
 		// Conflicts should now be cleared
 		expect(useGitSyncStore.getState().conflictFiles).toEqual([]);
+	});
+
+	it("ignores conflict-resolved broadcast for a different workspace", async () => {
+		// 別 window の解消イベントが broadcast で全 window に届いた時、
+		// 自分の workspace と一致しなければ paused をクリアしないことを確認する。
+		mockedGitStatus.mockResolvedValue({
+			branch: "main",
+			changedFilesCount: 1,
+			conflictFiles: ["file.md"],
+			hasRemote: false,
+		});
+
+		useGitSyncStore.setState({ gitSyncEnabled: true });
+		renderHook(() => useGitSync({ workspacePath: "/test/workspace-A" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(lastConflictHandler).toBeDefined();
+		// 初期化時に refreshStatus が走っているので、その後の呼び出し回数だけ
+		// カウントするため一旦リセット。
+		mockedGitStatus.mockClear();
+
+		// 別 workspace（B）の解消イベント → 何もしないはず
+		lastConflictHandler?.("/test/workspace-B");
+		await vi.advanceTimersByTimeAsync(0);
+		expect(mockedGitStatus).not.toHaveBeenCalled();
+
+		// 自分の workspace（A）の解消イベント → refreshStatus が走る
+		lastConflictHandler?.("/test/workspace-A");
+		await vi.advanceTimersByTimeAsync(0);
+		expect(mockedGitStatus).toHaveBeenCalledWith("/test/workspace-A");
 	});
 
 	it("manualSync re-checks conflicts and proceeds when resolved externally", async () => {

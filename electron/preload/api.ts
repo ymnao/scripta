@@ -76,8 +76,8 @@ export type Api = Readonly<{
 	) => Promise<void>;
 	gitFinishConflictResolution: (path: string) => Promise<string>;
 	gitGetLastCommitTime: (path: string) => Promise<string | null>;
-	emitConflictResolved: () => Promise<void>;
-	onConflictResolved: (cb: () => void) => Unsubscribe;
+	emitConflictResolved: (workspacePath: string) => Promise<void>;
+	onConflictResolved: (cb: (workspacePath: string) => void) => Unsubscribe;
 
 	onMenuEvent: (name: MenuEventName, cb: () => void) => Unsubscribe;
 

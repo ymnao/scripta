@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
 	closeWindow,
 	emitConflictResolved,
-	gitAddAll,
 	gitCheckRepo,
 	gitFinishConflictResolution,
 	gitGetConflictContent,
@@ -90,11 +89,14 @@ export function ConflictWindow() {
 		if (!workspacePath) return;
 
 		try {
-			await gitAddAll(workspacePath);
-			// Use git_finish_conflict_resolution which detects whether we're in a
-			// rebase (→ git rebase --continue) or merge (→ git commit --no-edit).
+			// 各 conflict ファイルは resolveConflict 時点で個別に `git add -- <file>`
+			// または `git rm -- <file>` 済み。ここで `git add -A` を呼ぶと、
+			// ユーザーが別途編集中だった無関係な未ステージ変更まで merge / rebase
+			// に巻き込んでしまうため呼ばない。
+			// gitFinishConflictResolution が rebase/merge を判定して --continue or
+			// --no-edit を実行する。
 			await gitFinishConflictResolution(workspacePath);
-			await emitConflictResolved();
+			await emitConflictResolved(workspacePath);
 			await closeWindow();
 		} catch (err) {
 			setError(String(err));
@@ -107,13 +109,13 @@ export function ConflictWindow() {
 		if (loading || error || files.length > 0) return;
 		void (async () => {
 			try {
-				await emitConflictResolved();
+				await emitConflictResolved(workspacePath);
 				await closeWindow();
 			} catch {
 				// Auto-close failure is non-fatal
 			}
 		})();
-	}, [loading, error, files]);
+	}, [loading, error, files, workspacePath]);
 
 	const allResolved = files.length > 0 && files.every((f) => resolvedFiles.has(f));
 

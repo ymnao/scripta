@@ -6,7 +6,6 @@ vi.mock("../../lib/commands", () => ({
 	gitGetConflictedFiles: vi.fn(),
 	gitGetConflictContent: vi.fn(),
 	gitResolveConflict: vi.fn(),
-	gitAddAll: vi.fn(),
 	gitFinishConflictResolution: vi.fn(),
 	emitConflictResolved: vi.fn().mockResolvedValue(undefined),
 	closeWindow: vi.fn().mockResolvedValue(undefined),
@@ -28,9 +27,11 @@ const mockedGitGetConflictedFiles = gitGetConflictedFiles as Mock;
 const mockEmit = emitConflictResolved as Mock;
 const mockClose = closeWindow as Mock;
 
+const TEST_WS = "/test/workspace";
+
 describe("ConflictWindow", () => {
 	beforeEach(() => {
-		vi.stubGlobal("location", { search: "?workspacePath=/test/workspace" });
+		vi.stubGlobal("location", { search: `?workspacePath=${TEST_WS}` });
 		mockEmit.mockClear();
 		mockClose.mockClear();
 	});
@@ -55,7 +56,8 @@ describe("ConflictWindow", () => {
 		expect(screen.getByText("コンフリクトファイルはありません")).toBeInTheDocument();
 
 		// Auto-close should have been triggered (emit + close)
-		expect(mockEmit).toHaveBeenCalled();
+		// emit には現在の workspacePath を渡して broadcast を workspace 単位にする
+		expect(mockEmit).toHaveBeenCalledWith(TEST_WS);
 		expect(mockClose).toHaveBeenCalled();
 	});
 

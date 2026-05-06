@@ -321,9 +321,13 @@ export function registerGitIpc(): void {
 	ipcMain.handle("git:get-last-commit-time", (event, path: string) =>
 		getLastCommitTimeImpl(event.sender.id, path),
 	);
-	ipcMain.handle("git:emit-conflict-resolved", () => {
+	ipcMain.handle("git:emit-conflict-resolved", (_event, workspacePath: string) => {
+		// 該当 workspace のみ受信側で `pausedRef` をクリアできるよう、
+		// payload に workspace path を載せて broadcast する。受信側
+		// (useGitSync.ts) で照合し、別 workspace の未解決 conflict が
+		// このイベントで誤ってクリアされる回帰を防ぐ。
 		for (const win of BrowserWindow.getAllWindows()) {
-			win.webContents.send("git:conflict-resolved");
+			win.webContents.send("git:conflict-resolved", workspacePath);
 		}
 	});
 }

@@ -84,8 +84,9 @@ const api: Api = Object.freeze({
 		ipcRenderer.invoke("git:resolve-conflict", path, filePath, content, resolution),
 	gitFinishConflictResolution: (path) => ipcRenderer.invoke("git:finish-conflict-resolution", path),
 	gitGetLastCommitTime: (path) => ipcRenderer.invoke("git:get-last-commit-time", path),
-	emitConflictResolved: () => ipcRenderer.invoke("git:emit-conflict-resolved"),
-	onConflictResolved: (cb) => subscribe<void>("git:conflict-resolved", () => cb()),
+	emitConflictResolved: (workspacePath) =>
+		ipcRenderer.invoke("git:emit-conflict-resolved", workspacePath),
+	onConflictResolved: (cb) => subscribe<string>("git:conflict-resolved", (path) => cb(path)),
 
 	onMenuEvent: (name, cb) => subscribe<void>(`menu:${name}`, () => cb()),
 
