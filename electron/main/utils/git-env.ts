@@ -36,13 +36,26 @@ const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 	PAGER: "cat",
 };
 
-// simple-git 3.x の vulnerability ガード方針:
-// process.env を子プロセスに forward する都合上、ユーザー環境にある GIT_EDITOR /
-// GIT_ASKPASS / 等が触れた時点で reject される。本コードはこれらの値を意図的に
-// 制御している（GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS="" / SSH_ASKPASS="" で対話
-// 入力を deny、`core.hooksPath=NULL` で hooks を無効化）ので、対応する unsafe
-// フラグを明示的に opt-in する。攻撃者制御された値は他経路で防いでいるため、
-// 旧 Rust 実装と同じセマンティクスを再現する目的で許可する。
+// simple-git 3.x の vulnerability ガード opt-in。フラグは 2 系統に分かれる：
+//
+// (A) 我々が GIT_ENV_OVERRIDES / config[] で **明示的に安全な値に固定** している
+//     ものを simple-git に通すための opt-in。固定値は本ファイル内で確認可能：
+//     - allowUnsafeHooksPath: `core.hooksPath=NULL` で hooks 無効化（config[] で固定）
+//     - allowUnsafeEditor:    `GIT_EDITOR=":"` 等で no-op editor（env で固定）
+//     - allowUnsafeAskPass:   `GIT_ASKPASS=""` / `SSH_ASKPASS=""` で対話入力 deny
+//     - allowUnsafePager:     `GIT_PAGER="cat"` / `PAGER="cat"` で pager 抑止
+//
+// (B) 我々は明示制御せず、ユーザーの普段の git 環境（`.gitconfig` / 環境変数）を
+//     **意図的に尊重** するもの。旧 Tauri 版の `std::process::Command::new("git")` は
+//     何の制約もなく process.env を継承していたため、UX 上ユーザーが手元の git で
+//     できることは Electron 内でも同等にできるのが要件。攻撃者制御値の流入は
+//     IPC 認可（assertPathAllowed）で workspace 単位に閉じ込めて防ぐ。
+//     - allowUnsafeCredentialHelper: ユーザーの credential.helper（macOS keychain 等）
+//     - allowUnsafeConfigPaths:      ユーザーの GIT_CONFIG_* / XDG_CONFIG_HOME を継承
+//     - allowUnsafeSshCommand:       ユーザーの GIT_SSH_COMMAND（カスタム鍵指定など）を継承
+//
+// `allowUnsafeProtocolOverride` は (A) (B) どちらにも該当しない（我々は -c 経由で
+// protocol.allow を設定せず、process.env 経路でも継承する必要がない）ため除外する。
 const UNSAFE_FLAGS = {
 	allowUnsafeHooksPath: true,
 	allowUnsafeEditor: true,
@@ -51,7 +64,6 @@ const UNSAFE_FLAGS = {
 	allowUnsafeCredentialHelper: true,
 	allowUnsafeConfigPaths: true,
 	allowUnsafeSshCommand: true,
-	allowUnsafeProtocolOverride: true,
 };
 
 // 与えられた canonical な repo path を baseDir にした SimpleGit instance を返す。

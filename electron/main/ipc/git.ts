@@ -1,5 +1,5 @@
 import { promises as fsp } from "node:fs";
-import { dirname, isAbsolute, join, resolve as pathResolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve as pathResolve } from "node:path";
 import { BrowserWindow, ipcMain } from "electron";
 import type { ConflictContent, GitStatus } from "../../../src/types/git-sync";
 import { isErrnoCode } from "../utils/fs-errors";
@@ -221,10 +221,8 @@ async function resolveConflictImpl(
 	}
 	// modify — 旧 Rust safe_write_in_repo を 1:1 で port。
 	const target = pathResolve(canonical, filePath);
-	// 親ディレクトリが workspace 外（symlink-in-the-middle）に出ないことを再確認。
-	// assertPathAllowed が realpathBestEffort で symlink を解決し、bounds 違反なら throw。
-	assertPathAllowed(senderId, dirname(target));
 	// file_path 自身が symlink の場合は拒否（旧 Rust と同方針：別ファイルへの surprise write を防ぐ）。
+	// lstat は symlink 自身を検査するため、canonical 化前の target に対して実行する必要がある。
 	try {
 		const st = await fsp.lstat(target);
 		if (st.isSymbolicLink()) {
@@ -233,9 +231,15 @@ async function resolveConflictImpl(
 	} catch (e) {
 		if (!isErrnoCode(e, "ENOENT")) throw e;
 	}
-	await fsp.mkdir(dirname(target), { recursive: true });
-	await fsp.writeFile(target, content, "utf8");
+	// 親ディレクトリの canonical を取得して、その配下で I/O する。fs.ts と同じく
+	// 「判定に使った canonical をそのまま実 I/O に使う」方針で TOCTOU を最小化。
+	// assertPathAllowed が realpathBestEffort で symlink を解決し、bounds 違反なら throw。
+	const canonicalParent = assertPathAllowed(senderId, dirname(target));
+	const canonicalTarget = join(canonicalParent, basename(target));
+	await fsp.mkdir(canonicalParent, { recursive: true });
+	await fsp.writeFile(canonicalTarget, content, "utf8");
 	try {
+		// `git add` は repo-relative path を期待する（git が repo root から自動的に解釈）。
 		await git.raw(["add", "--", filePath]);
 	} catch (e) {
 		throw new Error(extractGitErrorMessage(e));
