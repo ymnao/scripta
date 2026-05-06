@@ -416,6 +416,25 @@ describe("finishConflictResolutionImpl", () => {
 		expect(branch).toBe("feature");
 	});
 
+	it("does not hang when process.env GIT_EDITOR points to a blocking command", async () => {
+		// ユーザーの開発環境では `EDITOR=vim` 等が設定されていることが多く、
+		// `git rebase --continue` は default で commit message editor を起動するため、
+		// GIT_ENV_OVERRIDES が GIT_EDITOR を no-op (`:`) に上書きしない限り
+		// プロセスがハングする。`sleep 60` を envで指定しても 60 秒以内に
+		// 完走できることで、override が effective に作用していることを担保する。
+		vi.stubEnv("GIT_EDITOR", "sleep 60");
+		try {
+			const dir = await newWorkspace();
+			const file = await makeRebaseConflict(dir);
+			await resolveConflictImpl(TEST_WIN, dir, file, "resolved\n", "modify");
+			await finishConflictResolutionImpl(TEST_WIN, dir);
+			const branch = (await createGit(dir).raw(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+			expect(branch).toBe("feature");
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
 	it("throws when not in merge or rebase state", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "z.md", "z\n", "init");

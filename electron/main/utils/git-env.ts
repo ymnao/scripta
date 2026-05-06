@@ -11,12 +11,29 @@ import { type SimpleGit, simpleGit } from "simple-git";
 
 const NULL_HOOKS = platform() === "win32" ? "NUL" : "/dev/null";
 
+// `:` は POSIX shell の no-op builtin（exit 0 で即終了）。git は editor を
+// `/bin/sh -c "<editor> <file>"` で起動するため、`:` を渡すとファイル未編集
+// で 0 終了 → git は既存メッセージで commit を続行する。git for Windows も
+// bash を内蔵するので同様に動作する。
+//
+// 重要: process.env から `GIT_EDITOR` / `EDITOR` / `VISUAL` を継承すると、
+// `git rebase --continue` 等で editor が起動してハング or 失敗する。明示
+// 上書きしないと、ユーザーが普段使っている vim / nano / VS Code 等が呼ば
+// れて完了しない（`commit --no-edit` 経路は editor を呼ばないので影響なし）。
+const NOOP_EDITOR = ":";
+
 const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 	LC_ALL: "C",
 	GIT_TERMINAL_PROMPT: "0",
 	GIT_ASKPASS: "",
 	SSH_ASKPASS: "",
 	GIT_LITERAL_PATHSPECS: "1",
+	GIT_EDITOR: NOOP_EDITOR,
+	GIT_SEQUENCE_EDITOR: NOOP_EDITOR,
+	EDITOR: NOOP_EDITOR,
+	VISUAL: NOOP_EDITOR,
+	GIT_PAGER: "cat",
+	PAGER: "cat",
 };
 
 // simple-git 3.x の vulnerability ガード方針:
