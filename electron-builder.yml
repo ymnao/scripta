@@ -1,19 +1,15 @@
+# 旧 Tauri 版 (com.scripta.app) と bundleId を揃え、macOS Application Support /
+# Windows レジストリ等の保存先を継続させる（旧版設定の手動移行を不要にする）。
 appId: com.scripta.app
 productName: scripta
 copyright: Copyright © 2025 ymnao
 
 directories:
   output: release
-  buildResources: build
 
 files:
   - out/**/*
   - package.json
-
-asar: true
-
-# 旧 Tauri 版 (com.scripta.app) と bundleId を揃え、macOS の Application Support / Windows の
-# レジストリ等の保存先を同一に保つ。これにより旧版設定の手動移行を不要にする想定。
 
 mac:
   category: public.app-category.productivity
@@ -22,43 +18,26 @@ mac:
       arch:
         - x64
         - arm64
-    # zip は electron-updater が差分更新を取得するために必要 (`autoUpdater` は dmg ではなく
-    # zip / blockmap を参照する)。実際のリリースで自動アップデートを有効にする際に効く。
-    - target: zip
-      arch:
-        - x64
-        - arm64
-  icon: build/icon.icns
-  # 署名 / 公証は別 PR (Stage 6-5 想定) で追加する。それまでは CI で署名なしビルドのみを
-  # 行い、ローカルの開発者証明書を誤って拾わないように CI 側で
-  # CSC_IDENTITY_AUTO_DISCOVERY=false を設定する。
 
 win:
   target:
     - target: nsis
       arch:
         - x64
-  icon: build/icon.ico
 
 nsis:
   oneClick: false
-  perMachine: false
   allowToChangeInstallationDirectory: true
-  deleteAppDataOnUninstall: false
 
 linux:
   target:
     - AppImage
     - deb
   category: Office
-  icon: build/icon.png
   maintainer: ymnao
 
-# publish 設定は GitHub Releases を default 利用する。owner/repo は package.json および
-# git remote から electron-builder が自動推定するため明示しない (リリース切り替え後に
-# ymnao/scripta へ移っても修正不要)。
-# releaseType=draft により、tag push で生成された Release は draft 状態で停止する
-# → ユーザーが本文を整えて publish するまで自動アップデートチャンネルには載らない。
+# owner/repo は git remote から自動推定（リリース切り替え後の修正を不要にする）。
+# draft で停止し、本文を整えて手動 publish するまで自動アップデートチャンネルに載らない。
 publish:
   provider: github
   releaseType: draft
