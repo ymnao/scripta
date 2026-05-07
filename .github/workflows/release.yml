@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # tag push 時のみ draft Release を先行作成し、後続 matrix の `gh release upload` 先を確保する。
+  # workflow_dispatch では skip され、`dist` は CI artifact のみを残す（GH Releases には触らない）。
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+  dist:
+    needs: [create-release]
+    # workflow_dispatch では create-release が skipped、tag push 時は success を待つ。
+    if: |
+      always() && !cancelled() &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      # CSC_IDENTITY_AUTO_DISCOVERY=false で macOS の自動署名探索を無効化。本番証明書の
+      # 配線は別 PR (Stage 6 コードサイニング) で追加する。Windows / Linux は環境変数を
+      # 受け取っても害なし。
+      - name: Build distributables
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm dist
+
+      # CI artifact として残す: PR レビュー時の動作確認、tag push 失敗時の再アップロード両用。
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scripta-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.exe
+            release/*.blockmap
+            release/latest*.yml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # tag push 時のみ draft Release に追記。`--clobber` は同名アセット再アップロード時の
+      # 衝突を回避する（matrix を rerun した場合の安全弁）。
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.exe
+            release/*.blockmap
+            release/latest*.yml
+          )
+          if [ ${#files[@]} -gt 0 ]; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          fi

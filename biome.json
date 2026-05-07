@@ -41,6 +41,7 @@
 			"!**/node_modules",
 			"!**/dist",
 			"!**/out",
+			"!**/release",
 			"!**/.claude",
 			"!**/test-results",
 			"!**/playwright-report"
