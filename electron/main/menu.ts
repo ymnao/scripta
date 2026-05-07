@@ -82,26 +82,23 @@ export function buildMenuTemplate(handlers: MenuHandlers): MenuItemConstructorOp
 
 	// 旧 Tauri は View メニューを持たないが、Electron で View を完全に外すと
 	// Cmd+Shift+I (DevTools) / F11 (fullscreen) などの組み込みショートカットが効かなくなる。
-	// dev では DevTools / reload を出し、prod では zoom / fullscreen のみ提示する。
+	// dev では DevTools / reload を追加し、prod では zoom / fullscreen のみ提示する。
+	const viewBase: MenuItemConstructorOptions[] = [
+		{ role: "resetZoom" },
+		{ role: "zoomIn" },
+		{ role: "zoomOut" },
+		{ type: "separator" },
+		{ role: "togglefullscreen" },
+	];
 	const viewSubmenu: MenuItemConstructorOptions[] = is.dev
 		? [
 				{ role: "reload" },
 				{ role: "forceReload" },
 				{ role: "toggleDevTools" },
 				{ type: "separator" },
-				{ role: "resetZoom" },
-				{ role: "zoomIn" },
-				{ role: "zoomOut" },
-				{ type: "separator" },
-				{ role: "togglefullscreen" },
+				...viewBase,
 			]
-		: [
-				{ role: "resetZoom" },
-				{ role: "zoomIn" },
-				{ role: "zoomOut" },
-				{ type: "separator" },
-				{ role: "togglefullscreen" },
-			];
+		: viewBase;
 
 	const windowSubmenu: MenuItemConstructorOptions[] = isMac
 		? [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }]

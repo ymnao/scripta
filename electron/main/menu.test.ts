@@ -42,6 +42,16 @@ const findItem = (
 	return list?.find((i) => i.label === itemLabelOrRole || i.role === itemLabelOrRole);
 };
 
+const withPlatform = (platform: NodeJS.Platform, fn: () => void): void => {
+	const orig = process.platform;
+	Object.defineProperty(process, "platform", { value: platform });
+	try {
+		fn();
+	} finally {
+		Object.defineProperty(process, "platform", { value: orig });
+	}
+};
+
 beforeEach(() => {
 	mockIs.dev = false;
 	mockedSend.mockReset();
@@ -57,26 +67,18 @@ afterEach(() => {
 
 describe("buildMenuTemplate", () => {
 	it("includes app menu only on macOS", () => {
-		const orig = process.platform;
-		Object.defineProperty(process, "platform", { value: "darwin" });
-		try {
+		withPlatform("darwin", () => {
 			const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 			expect(tpl[0].label).toBe(app.name);
 			expect(tpl.find((t) => t.label === "File")).toBeDefined();
-		} finally {
-			Object.defineProperty(process, "platform", { value: orig });
-		}
+		});
 	});
 
 	it("omits app menu on Linux/Windows", () => {
-		const orig = process.platform;
-		Object.defineProperty(process, "platform", { value: "linux" });
-		try {
+		withPlatform("linux", () => {
 			const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 			expect(tpl[0].label).toBe("File");
-		} finally {
-			Object.defineProperty(process, "platform", { value: orig });
-		}
+		});
 	});
 
 	it("File > New Window invokes the injected handler with the configured accelerator", () => {
@@ -110,18 +112,14 @@ describe("buildMenuTemplate", () => {
 	});
 
 	it("App > Settings... emits menu:open-settings on macOS", () => {
-		const orig = process.platform;
-		Object.defineProperty(process, "platform", { value: "darwin" });
-		try {
+		withPlatform("darwin", () => {
 			const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 			const item = findItem(tpl, app.name, "Settings...");
 			expect(item).toBeDefined();
 			expect(item?.accelerator).toBe("CmdOrCtrl+,");
 			(item?.click as () => void)();
 			expect(mockedSend).toHaveBeenCalledWith("menu:open-settings");
-		} finally {
-			Object.defineProperty(process, "platform", { value: orig });
-		}
+		});
 	});
 
 	it("View menu hides reload/devTools items in production", () => {
