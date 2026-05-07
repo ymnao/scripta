@@ -130,6 +130,48 @@ describe("getValue / setValue / deleteValue", () => {
 	});
 });
 
+describe("persistSync", () => {
+	it("writes the cache to disk synchronously", async () => {
+		const { persistSync } = __testing;
+		const store = createStore(storePath);
+		setValue(store, "a", 1);
+		setValue(store, "b", "two");
+		persistSync(store);
+		// I/O is sync inside persistSync, so a subsequent async read must already see it
+		const raw = await readFile(storePath, "utf8");
+		expect(JSON.parse(raw)).toEqual({ a: 1, b: "two" });
+	});
+
+	it("creates intermediate directories", async () => {
+		const { persistSync } = __testing;
+		const nested = join(dir, "a", "b", "settings.json");
+		const store = createStore(nested);
+		setValue(store, "x", 1);
+		persistSync(store);
+		const raw = await readFile(nested, "utf8");
+		expect(JSON.parse(raw)).toEqual({ x: 1 });
+	});
+
+	it("is a no-op when the cache has not been loaded", async () => {
+		const { persistSync } = __testing;
+		const store = createStore(storePath);
+		persistSync(store);
+		await expect(readFile(storePath, "utf8")).rejects.toThrow();
+	});
+
+	it("preserves existing keys when persisting an additive change", async () => {
+		// close ハンドラから sync save するとき、未関係の他キーを消さないこと
+		const { persistSync } = __testing;
+		await writeFile(storePath, JSON.stringify({ original: true }), "utf8");
+		const store = createStore(storePath);
+		expect(load(store)).toEqual({ original: true });
+		setValue(store, "added", 1);
+		persistSync(store);
+		const raw = await readFile(storePath, "utf8");
+		expect(JSON.parse(raw)).toEqual({ original: true, added: 1 });
+	});
+});
+
 describe("persist", () => {
 	it("writes the cache to disk as JSON", async () => {
 		const store = createStore(storePath);
@@ -184,6 +226,12 @@ describe("RESERVED_KEYS", () => {
 		// renderer 側 settings:set("workspacePath", "/") のような任意上書きを防ぐ承認境界。
 		// この set に含まれているキーは settings:set / settings:delete ハンドラで reject される。
 		expect(RESERVED_KEYS.has("workspacePath")).toBe(true);
+	});
+
+	it("includes windowState (renderer must not be able to inject malicious bounds)", () => {
+		// 任意 renderer から壊れた bounds を書き込まれると、再起動時の setBounds で
+		// throw / 不可視ウィンドウになりうるため main 専用に制限する。
+		expect(RESERVED_KEYS.has("windowState")).toBe(true);
 	});
 });
 

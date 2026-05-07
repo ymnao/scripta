@@ -1,9 +1,10 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, ipcMain } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { isErrnoCode } from "../utils/fs-errors";
+import { normalizeWindowState, type WindowState } from "../utils/window-state";
 
 interface Store {
 	path: string;
@@ -104,6 +105,17 @@ async function persist(store: Store): Promise<void> {
 	});
 }
 
+// BrowserWindow の 'close' ハンドラからは sync 書き込みが必須。
+// fire-and-forget の writeFileAtomic はプロセス終了に間に合わず、
+// 直前の windowState 変更が永続化されないことがあるため。
+function persistSync(store: Store): void {
+	if (store.cache === null) return;
+	mkdirSync(dirname(store.path), { recursive: true });
+	writeFileAtomic.sync(store.path, JSON.stringify(store.cache, null, 2), {
+		encoding: "utf8",
+	});
+}
+
 // 「未設定（own property なし）」と「null/undefined を set 済み」をどちらも
 // null として返す。旧 Tauri 版（Option<Value>）も None / Some(Null) を区別
 // しない仕様だったので合わせる。own property のみを参照することで
@@ -152,7 +164,9 @@ export function getWorkspacePathFromSettings(): string | null {
 // workspacePath は workspace:set の承認境界（main 側 isWorkspacePathApproved）を
 // バイパスされる経路になりうるため main 専用にする。永続化は persistWorkspacePath
 // 経由で workspace:set ハンドラ側から行う。
-const RESERVED_KEYS: ReadonlySet<string> = new Set(["workspacePath"]);
+// windowState は BrowserWindow の挙動制御に直接使われる（壊れた bounds で
+// setBounds が throw → 初回起動から不可視ウィンドウになる）ので main 専用。
+const RESERVED_KEYS: ReadonlySet<string> = new Set(["workspacePath", "windowState"]);
 
 export async function persistWorkspacePath(path: string | null): Promise<void> {
 	const store = getMainStore();
@@ -162,6 +176,27 @@ export async function persistWorkspacePath(path: string | null): Promise<void> {
 		setValue(store, "workspacePath", path);
 	}
 	await persist(store);
+}
+
+export function getWindowState(): WindowState | null {
+	try {
+		const data = load(getMainStore());
+		return normalizeWindowState(data.windowState);
+	} catch {
+		return null;
+	}
+}
+
+export async function persistWindowState(state: WindowState): Promise<void> {
+	const store = getMainStore();
+	setValue(store, "windowState", state);
+	await persist(store);
+}
+
+export function persistWindowStateSync(state: WindowState): void {
+	const store = getMainStore();
+	setValue(store, "windowState", state);
+	persistSync(store);
 }
 
 export function registerSettingsIpc(): void {
@@ -204,6 +239,7 @@ export const __testing = {
 	createStore,
 	load,
 	persist,
+	persistSync,
 	getValue,
 	setValue,
 	deleteValue,

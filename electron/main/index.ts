@@ -2,10 +2,17 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
-import { getWorkspacePathFromSettings } from "./ipc/settings";
+import {
+	getWindowState,
+	getWorkspacePathFromSettings,
+	persistWindowState,
+	persistWindowStateSync,
+} from "./ipc/settings";
 import { approveWorkspacePath } from "./ipc/workspace";
+import { setApplicationMenu } from "./menu";
 import { isSafeExternalUrl } from "./utils/url";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
+import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
 const CSP_PROD = [
 	"default-src 'self'",
@@ -59,10 +66,21 @@ function isAllowedRendererUrl(url: string): boolean {
 	}
 }
 
-function createWindow(): void {
+interface CreateWindowOptions {
+	// メニューの "New Window" から呼ばれる場合は state 復元せずデフォルト bounds で開き、
+	// renderer 側 AppLayout に `?newWindow=true` を伝えて workspace 復元を抑止する。
+	// （旧 Tauri 版が同じ挙動。`AppLayout.tsx` の `isNewWindow` 分岐を参照）
+	newWindow?: boolean;
+}
+
+function createWindow(opts: CreateWindowOptions = {}): void {
+	const isNew = opts.newWindow === true;
+	const initial = isNew ? resolveInitialGeometry(null) : resolveInitialGeometry(getWindowState());
 	const mainWindow = new BrowserWindow({
-		width: 1200,
-		height: 800,
+		x: initial.bounds.x,
+		y: initial.bounds.y,
+		width: initial.bounds.width,
+		height: initial.bounds.height,
 		show: false,
 		titleBarStyle: "hiddenInset",
 		webPreferences: {
@@ -76,6 +94,26 @@ function createWindow(): void {
 	attachWindowLifecycle(mainWindow, () => {
 		openWindows.delete(mainWindow);
 	});
+	// New Window は state 永続化対象から外す（メイン window の bounds が上書きされる
+	// と「サブで一瞬開いただけ」のサイズで次回起動時にメイン window が起動する）
+	if (!isNew) {
+		attachWindowStateTracker(mainWindow, {
+			// 移動 / リサイズの最中は debounced async 書き込み（IPC を塞がない）
+			saveAsync: (state) => {
+				void persistWindowState(state).catch((e) => {
+					console.warn("[window-state] persistWindowState failed:", e);
+				});
+			},
+			// close 時のみ sync。プロセス終了に間に合わせるため。
+			saveSync: persistWindowStateSync,
+		});
+
+		// 起動直後のフラッシュを避けるため maximize / fullScreen は loadFile/URL の
+		// 後で適用する。BrowserWindow の constructor が x/y/width/height を受け取った
+		// 後に maximize() を呼ぶと、unmaximize 時に正しい normalBounds が残る。
+		if (initial.maximize) mainWindow.maximize();
+		if (initial.fullScreen) mainWindow.setFullScreen(true);
+	}
 
 	mainWindow.on("ready-to-show", () => {
 		mainWindow.show();
@@ -100,12 +138,17 @@ function createWindow(): void {
 		}
 	});
 
+	const search = isNew ? "?newWindow=true" : undefined;
 	if (process.env.ELECTRON_RENDERER_URL) {
-		void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL).catch((error) => {
+		const url = search
+			? `${process.env.ELECTRON_RENDERER_URL}${search}`
+			: process.env.ELECTRON_RENDERER_URL;
+		void mainWindow.loadURL(url).catch((error) => {
 			console.error("Failed to load renderer URL:", error);
 		});
 	} else {
-		void mainWindow.loadFile(join(__dirname, "../renderer/index.html")).catch((error) => {
+		const loadOpts = search ? { search } : undefined;
+		void mainWindow.loadFile(join(__dirname, "../renderer/index.html"), loadOpts).catch((error) => {
 			console.error("Failed to load renderer file:", error);
 		});
 	}
@@ -143,6 +186,7 @@ function approveSavedWorkspaceFromSettings(): void {
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("dev.scripta");
 	registerIpcHandlers();
+	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
 	approveSavedWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
