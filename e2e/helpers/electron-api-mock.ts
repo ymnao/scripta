@@ -169,10 +169,32 @@ function installApiMock(opts: {
 		const out: string[] = [];
 		const entries = store.directories[dirPath] ?? [];
 		for (const e of entries) {
+			// 本番 (electron/main/ipc/search.ts:19) と同じく `.` 始まりは早期 skip。
+			// `.git` / `.scripta` 等の隠しディレクトリの中身は再帰しない。
+			if (e.name.startsWith(".")) continue;
 			if (e.isDirectory) out.push(...collectMdFiles(e.path));
 			else if (e.name.endsWith(".md")) out.push(e.path);
 		}
 		return out;
+	};
+
+	// pageName / filePath を byte 比較で昇順する（本番 search.ts:106 / 158 / 247 と一致）。
+	// localeCompare はロケール依存で順序がズレる。
+	const byteCmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+	// 本番 fuzzyMatch (search.ts:45-57) と同じ two-pointer 走査。
+	const fuzzyMatch = (query: string, target: string): boolean => {
+		const q = query.toLowerCase();
+		const t = target.toLowerCase();
+		if (q.length === 0) return true;
+		let qi = 0;
+		for (const ch of t) {
+			if (ch === q[qi]) {
+				qi++;
+				if (qi === q.length) return true;
+			}
+		}
+		return qi === q.length;
 	};
 
 	const parentDir = (path: string): string => {
@@ -352,7 +374,9 @@ function installApiMock(opts: {
 			track("searchFiles", [workspacePath, rawQuery, caseSensitive ?? false]);
 			const query = caseSensitive ? rawQuery : rawQuery.toLowerCase();
 			if (!query) return [];
-			const mdFiles = collectMdFiles(workspacePath);
+			// 本番 search.ts:104-106 と同じく path の byte 比較で sort してから走査。
+			// 検索結果の順序が決定的になり、テスト assertion を安定させる。
+			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
 			const results: Array<{
 				filePath: string;
 				lineNumber: number;
@@ -363,7 +387,7 @@ function installApiMock(opts: {
 			for (const filePath of mdFiles) {
 				const content = store.files[filePath];
 				if (!content) continue;
-				const lines = content.split("\n");
+				const lines = content.split(/\r?\n/);
 				for (let i = 0; i < lines.length; i++) {
 					const line = lines[i];
 					const target = caseSensitive ? line : line.toLowerCase();
@@ -389,19 +413,11 @@ function installApiMock(opts: {
 		},
 		searchFilenames: async (workspacePath: string, query: string): Promise<string[]> => {
 			track("searchFilenames", [workspacePath, query]);
-			const mdFiles = collectMdFiles(workspacePath);
-			const q = query.toLowerCase();
-			if (!q) return mdFiles;
-			return mdFiles.filter((p) => {
-				const lower = p.toLowerCase();
-				let ti = 0;
-				for (const ch of q) {
-					const found = lower.indexOf(ch, ti);
-					if (found === -1) return false;
-					ti = found + 1;
-				}
-				return true;
-			});
+			// 本番 search.ts:158-160 と同じ: byte sort → 空クエリは全件、それ以外は basename に
+			// 対して fuzzyMatch（フルパスではない）。
+			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
+			if (query === "") return mdFiles;
+			return mdFiles.filter((p) => fuzzyMatch(query, baseName(p)));
 		},
 		scanUnresolvedWikilinks: async (workspacePath: string): Promise<unknown[]> => {
 			track("scanUnresolvedWikilinks", [workspacePath]);
