@@ -1,6 +1,6 @@
-import { request as httpsRequest } from "node:https";
 import { ipcMain } from "electron";
 import type { UpdateInfo } from "../../../src/types/update";
+import { httpFetch } from "../utils/http-fetch";
 import { compareSemver, parseSemver, stripVPrefix } from "../utils/semver-lite";
 
 // 旧 Tauri 版 src-tauri/src/commands/updater.rs `check_for_update_inner` を Node stdlib
@@ -49,68 +49,30 @@ export function compareVersions(currentVersion: string, release: GitHubRelease):
 }
 
 async function fetchLatestRelease(): Promise<GitHubRelease> {
-	const url = new URL(GITHUB_API_URL);
-	return new Promise<GitHubRelease>((resolve, reject) => {
-		const req = httpsRequest(
-			{
-				hostname: url.hostname,
-				port: 443,
-				path: `${url.pathname}${url.search}`,
-				method: "GET",
-				headers: {
-					"User-Agent": "scripta",
-					Accept: "application/vnd.github+json",
-				},
-				timeout: REQUEST_TIMEOUT_MS,
-			},
-			(res) => {
-				const chunks: Buffer[] = [];
-				let total = 0;
-				let settled = false;
-				res.on("data", (chunk: Buffer) => {
-					if (settled) return;
-					total += chunk.length;
-					if (total > MAX_RESPONSE_BYTES) {
-						settled = true;
-						res.destroy();
-						reject(new Error("Response too large"));
-						return;
-					}
-					chunks.push(chunk);
-				});
-				res.on("end", () => {
-					if (settled) return;
-					settled = true;
-					const status = res.statusCode ?? 0;
-					if (status < 200 || status >= 300) {
-						reject(new Error(`Failed to fetch releases: HTTP ${status}`));
-						return;
-					}
-					try {
-						const text = Buffer.concat(chunks).toString("utf8");
-						const json = JSON.parse(text) as unknown;
-						if (!isGitHubRelease(json)) {
-							reject(new Error("Failed to parse response: missing fields"));
-							return;
-						}
-						resolve(json);
-					} catch (e) {
-						reject(new Error(`Failed to parse response: ${(e as Error).message}`));
-					}
-				});
-				res.on("error", (e) => {
-					if (settled) return;
-					settled = true;
-					reject(e);
-				});
-			},
-		);
-		req.on("timeout", () => {
-			req.destroy(new Error("Request timeout"));
-		});
-		req.on("error", reject);
-		req.end();
+	const res = await httpFetch({
+		url: new URL(GITHUB_API_URL),
+		headers: {
+			"User-Agent": "scripta",
+			Accept: "application/vnd.github+json",
+		},
+		timeoutMs: REQUEST_TIMEOUT_MS,
+		maxBodyBytes: MAX_RESPONSE_BYTES,
+		// 100KB を超える GitHub release レスポンスは異常 → 切り詰めずに reject。
+		onMaxExceeded: "reject",
 	});
+	if (res.statusCode < 200 || res.statusCode >= 300) {
+		throw new Error(`Failed to fetch releases: HTTP ${res.statusCode}`);
+	}
+	let json: unknown;
+	try {
+		json = JSON.parse(res.body.toString("utf8"));
+	} catch (e) {
+		throw new Error(`Failed to parse response: ${(e as Error).message}`);
+	}
+	if (!isGitHubRelease(json)) {
+		throw new Error("Failed to parse response: missing fields");
+	}
+	return json;
 }
 
 export async function checkForUpdateInner(currentVersion: string): Promise<UpdateInfo> {

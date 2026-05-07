@@ -94,14 +94,17 @@ function installPdfWebRequestFilter(): void {
 	pdfWebRequestFilterInstalled = true;
 }
 
-// A4 サイズ + 20mm マージン（旧 Rust impl と同値、inch 換算: 20mm ≈ 0.787in）。
+// A4 サイズ + 20mm マージン（旧 Rust impl と同値）。Electron の printToPDF は
+// margins を inches で要求するため mm から換算する（1 inch = 25.4 mm）。
+const PDF_MARGIN_MM = 20;
+const PDF_MARGIN_INCHES = PDF_MARGIN_MM / 25.4;
 const PDF_OPTIONS = {
 	pageSize: "A4" as const,
 	margins: {
-		top: 0.787,
-		bottom: 0.787,
-		left: 0.787,
-		right: 0.787,
+		top: PDF_MARGIN_INCHES,
+		bottom: PDF_MARGIN_INCHES,
+		left: PDF_MARGIN_INCHES,
+		right: PDF_MARGIN_INCHES,
 	},
 	printBackground: true,
 	scale: 1.0,

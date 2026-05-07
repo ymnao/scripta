@@ -99,27 +99,6 @@ function* iterateAttributes(tag: string): Iterable<{ name: string; value: string
 	}
 }
 
-function extractOgMeta(html: string, property: string): string | null {
-	const expected = `og:${property}`.toLowerCase();
-	for (const segment of html.split("<")) {
-		const lower = segment.toLowerCase();
-		if (!lower.startsWith("meta")) continue;
-		// 厳密な属性走査で `property="og:..."` を確認する（`data-property="og:..."`
-		// や `og-property="og:..."` のような **属性名の部分一致** で誤マッチしない）。
-		let matched = false;
-		let content: string | null = null;
-		for (const attr of iterateAttributes(segment)) {
-			if (attr.name === "property" && attr.value.toLowerCase() === expected) matched = true;
-			else if (attr.name === "content") content = attr.value;
-		}
-		if (matched && content !== null) {
-			const decoded = decodeHtmlEntities(content);
-			if (decoded.length > 0) return decoded;
-		}
-	}
-	return null;
-}
-
 function extractTitleTag(html: string): string | null {
 	const lower = html.toLowerCase();
 	const start = lower.indexOf("<title");
@@ -137,10 +116,45 @@ function extractTitleTag(html: string): string | null {
 	return decoded.length > 0 ? decoded : null;
 }
 
+// og:* property 名と OgpData のキーの対応。new property を増やすときはここに 1 行
+// 追加するだけ。重複 og:* タグが現れた場合は **最初の出現** を採用する（旧 Rust
+// `extract_og_meta` と同じ semantics）。
+const OG_PROPERTY_KEYS = {
+	"og:title": "title",
+	"og:description": "description",
+	"og:image": "image",
+	"og:site_name": "siteName",
+} as const;
+
+type OgPropertyKey = (typeof OG_PROPERTY_KEYS)[keyof typeof OG_PROPERTY_KEYS];
+
 export function parseOgp(html: string, url: string): OgpData {
-	const title = extractOgMeta(html, "title") ?? extractTitleTag(html);
-	const description = extractOgMeta(html, "description");
-	const image = extractOgMeta(html, "image");
-	const siteName = extractOgMeta(html, "site_name");
-	return { title, description, image, siteName, url };
+	// HTML を 1 度だけ split して全 4 プロパティを **同時に** 抽出する（従来は
+	// extractOgMeta を 4 回呼んで 4 周 scan していた）。link card の hot path で
+	// 効くマイクロ最適化。
+	const found: Partial<Record<OgPropertyKey, string>> = {};
+	for (const segment of html.split("<")) {
+		const lower = segment.toLowerCase();
+		if (!lower.startsWith("meta")) continue;
+		let propValue: string | null = null;
+		let contentValue: string | null = null;
+		for (const attr of iterateAttributes(segment)) {
+			if (attr.name === "property") propValue = attr.value.toLowerCase();
+			else if (attr.name === "content") contentValue = attr.value;
+		}
+		if (propValue === null || contentValue === null) continue;
+		const targetKey = OG_PROPERTY_KEYS[propValue as keyof typeof OG_PROPERTY_KEYS];
+		if (!targetKey || found[targetKey] !== undefined) continue;
+		const decoded = decodeHtmlEntities(contentValue);
+		if (decoded.length > 0) found[targetKey] = decoded;
+	}
+
+	const title = found.title ?? extractTitleTag(html);
+	return {
+		title,
+		description: found.description ?? null,
+		image: found.image ?? null,
+		siteName: found.siteName ?? null,
+		url,
+	};
 }
