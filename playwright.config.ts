@@ -1,11 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// e2e は **renderer-only モード**（`vite --config vite.config.e2e.ts`）の Chromium に対して
-// 動かす。実 Electron は起動しない。`window.api` は addInitScript でモック注入するため、
-// 旧 Tauri 版の `tauri-mock.ts` 戦略を踏襲し、フロントエンドのテストを軽量に回す。
-//
-// 実 IPC や main プロセスのテストは Vitest 側（`electron/main/**/*.test.ts`）でカバー済み。
-// e2e は「フロントが期待通りの UI 挙動を示すか」だけを担う。
+// renderer-only モード（実 Electron は起動しない）。`window.api` は addInitScript で
+// モック注入する。実 IPC / main プロセスは Vitest 側でカバー。
 
 const PORT = 5174;
 

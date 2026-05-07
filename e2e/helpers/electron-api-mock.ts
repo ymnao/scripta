@@ -1,17 +1,9 @@
 import type { Page } from "@playwright/test";
+import type { MenuEventName } from "../../electron/preload/api";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
-// renderer-only モードの Playwright で `window.api` を addInitScript 経由でモック注入する
-// ヘルパー。旧 Tauri 版 `tauri-mock.ts` の Electron 移植版にあたる。
-//
-// - addInitScript は document / module 評価より先に走るため、`window.api` 利用箇所が
-//   走り出す前にこの mock がセットアップされる
-// - mock の state は `window.__E2E_API_MOCK__` に置き、テスト本体（Node 側）から
-//   `page.evaluate` で読み書きできる
-// - 検索 / wikilink スキャン等のロジックは実装と同等の挙動を簡略再現する。完全一致を
-//   目指すのではなく「フロントが期待通りに状態遷移するか」を回せるレベルが目標
-//
-// 参考: 旧版 /Users/nakiym/development/tools/scripta/e2e/helpers/tauri-mock.ts
+// renderer-only Playwright で `window.api` を addInitScript 注入するモック。
+// 旧 Tauri 版 `tauri-mock.ts` の Electron 移植版（参考: /Users/nakiym/development/tools/scripta/e2e/helpers/tauri-mock.ts）。
 
 export interface MockFileSystem {
 	files: Record<string, string>;
@@ -131,7 +123,7 @@ export class ElectronApiMock {
 		}, events);
 	}
 
-	async emitMenuEvent(name: "open-settings" | "open-help" | "export"): Promise<void> {
+	async emitMenuEvent(name: MenuEventName): Promise<void> {
 		await this.page.evaluate((n: string) => {
 			const store = window.__E2E_API_MOCK__;
 			if (!store) return;
@@ -142,9 +134,8 @@ export class ElectronApiMock {
 
 export const modKey = process.platform === "darwin" ? "Meta" : "Control";
 
-// addInitScript で page に注入する関数。**page (browser) のコンテキストで評価される**ため、
-// この関数の外側の変数 / import / TypeScript の型は実行時には参照できない。引数で渡せる
-// もの（serializable）だけを使う。型を緩めて runtime に必要な最小情報だけを使う。
+// addInitScript の callback は page (browser) コンテキストで serialize 評価される。
+// この関数の外側の変数 / import は実行時参照不可、payload は serializable に閉じる。
 function installApiMock(opts: {
 	fs: { files: Record<string, string>; directories: Record<string, FileEntry[]> };
 	dialogResult: string | null;
@@ -292,6 +283,8 @@ function installApiMock(opts: {
 		renameEntry: async (oldPath: string, newPath: string): Promise<void> => {
 			track("renameEntry", [oldPath, newPath]);
 			const prefix = `${oldPath}/`;
+			const remap = (entries: FileEntry[]): FileEntry[] =>
+				entries.map((e) => ({ ...e, path: newPath + e.path.slice(oldPath.length) }));
 			for (const k of Object.keys(store.files)) {
 				if (k.startsWith(prefix)) {
 					store.files[newPath + k.slice(oldPath.length)] = store.files[k];
@@ -304,19 +297,12 @@ function installApiMock(opts: {
 			}
 			for (const k of Object.keys(store.directories)) {
 				if (k.startsWith(prefix)) {
-					const newKey = newPath + k.slice(oldPath.length);
-					store.directories[newKey] = store.directories[k].map((e) => ({
-						...e,
-						path: newPath + e.path.slice(oldPath.length),
-					}));
+					store.directories[newPath + k.slice(oldPath.length)] = remap(store.directories[k]);
 					delete store.directories[k];
 				}
 			}
 			if (oldPath in store.directories) {
-				store.directories[newPath] = store.directories[oldPath].map((e) => ({
-					...e,
-					path: newPath + e.path.slice(oldPath.length),
-				}));
+				store.directories[newPath] = remap(store.directories[oldPath]);
 				delete store.directories[oldPath];
 			}
 			const parent = parentDir(oldPath);
@@ -419,6 +405,7 @@ function installApiMock(opts: {
 		},
 		scanUnresolvedWikilinks: async (workspacePath: string): Promise<unknown[]> => {
 			track("scanUnresolvedWikilinks", [workspacePath]);
+			const encoder = new TextEncoder();
 			const mdFiles = collectMdFiles(workspacePath);
 			const existingPages = new Set<string>();
 			for (const filePath of mdFiles) {
@@ -476,7 +463,7 @@ function installApiMock(opts: {
 						refs.push({
 							filePath,
 							lineNumber: i + 1,
-							byteOffset: new TextEncoder().encode(line.slice(0, m.index)).length + 1,
+							byteOffset: encoder.encode(line.slice(0, m.index)).length + 1,
 							lineContent: line,
 							contextBefore: lines.slice(Math.max(0, i - 3), i),
 							contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
@@ -485,9 +472,11 @@ function installApiMock(opts: {
 					}
 				}
 			}
+			// 実装側 (electron/main/ipc/search.ts) と同じバイト比較順を使う。
+			// localeCompare はロケール依存で順序がズレるためテスト assertion が脆くなる。
 			return Object.entries(unresolvedMap)
 				.map(([pageName, references]) => ({ pageName, references }))
-				.sort((a, b) => a.pageName.localeCompare(b.pageName));
+				.sort((a, b) => (a.pageName < b.pageName ? -1 : a.pageName > b.pageName ? 1 : 0));
 		},
 
 		fetchOgp: async (url: string): Promise<unknown> => {
@@ -569,7 +558,7 @@ function installApiMock(opts: {
 			};
 		},
 
-		onMenuEvent: (name: string, cb: () => void): (() => void) => {
+		onMenuEvent: (name: MenuEventName, cb: () => void): (() => void) => {
 			const list = store.menuListeners[name] ?? [];
 			list.push(cb);
 			store.menuListeners[name] = list;

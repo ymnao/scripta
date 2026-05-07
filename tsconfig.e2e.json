@@ -20,5 +20,11 @@
 		"noFallthroughCasesInSwitch": true,
 		"noUncheckedSideEffectImports": true
 	},
-	"include": ["e2e", "playwright.config.ts", "vite.config.e2e.ts", "src/types"]
+	"include": [
+		"e2e",
+		"playwright.config.ts",
+		"vite.config.e2e.ts",
+		"src/types",
+		"electron/preload/api.ts"
+	]
 }
