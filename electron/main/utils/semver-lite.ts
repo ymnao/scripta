@@ -35,6 +35,11 @@ export function parseSemver(v: string): ParsedVersion {
 		if (!/^\d+$/.test(part)) {
 			throw new Error(`Invalid version '${v}'`);
 		}
+		// SemVer §2: numeric identifier (major / minor / patch) は leading zero 禁止。
+		// "0" はそのまま OK だが "01" "00" は invalid（旧 Rust `semver` crate と挙動を揃える）。
+		if (part.length > 1 && part.startsWith("0")) {
+			throw new Error(`Invalid version '${v}'`);
+		}
 		const n = Number(part);
 		if (!Number.isInteger(n) || n < 0) {
 			throw new Error(`Invalid version '${v}'`);

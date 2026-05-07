@@ -177,7 +177,9 @@ async function fetchOgpImpl(url: string): Promise<OgpData> {
 	if (cached) return cached;
 
 	const { contentType, body } = await fetchWithRedirects(url);
-	if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+	// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
+	const lowerCt = contentType.toLowerCase();
+	if (!lowerCt.includes("text/html") && !lowerCt.includes("application/xhtml")) {
 		throw new Error(`Unsupported content type: ${contentType}`);
 	}
 	const html = body.toString("utf8");

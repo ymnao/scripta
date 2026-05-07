@@ -105,10 +105,11 @@ function expandIpv6(ip: string): number[] | null {
 	return segs;
 }
 
-// http(s).request の `lookup` 互換シグネチャ。Node の lookup と同じ呼び出し慣習を保ち、
-// 解決後 IP が global でなければ EACCES で reject する。`options.all === true` の
-// 配列モードも一応サポートしておく（http(s).request の内部 net.connect 経路では
-// 通常 single モード）。
+// http(s).request の `lookup` 互換シグネチャ。Node の `dns.lookup` 公開 API は
+// `(hostname, family, callback)` / `(hostname, options, callback)` / `(hostname, callback)`
+// の 3 形を受けるため、`options` は number / undefined / object のいずれにもなり得る。
+// 内部で全てオブジェクトに正規化して family 等の指定を保持しつつ、解決後 IP が
+// global でなければ EACCES で reject する。
 type LookupSingleCallback = (
 	err: NodeJS.ErrnoException | null,
 	address: string,
@@ -116,9 +117,12 @@ type LookupSingleCallback = (
 ) => void;
 type LookupAllCallback = (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void;
 
+// 入力 options は number (= family) / undefined / オブジェクト の 3 種を許容する。
+// `dns.LookupFunction` 相当（http.request の lookup 用フック）の幅広い呼び出しを
+// 受けられるようにし、内部処理の前に必ず LookupOptions オブジェクトに正規化する。
 export type SafeLookup = (
 	hostname: string,
-	options: LookupOptions,
+	options: LookupOptions | number | undefined,
 	callback: LookupSingleCallback | LookupAllCallback,
 ) => void;
 
@@ -128,11 +132,18 @@ function makeSsrfError(addr: string): NodeJS.ErrnoException {
 	return e;
 }
 
+function normalizeOptions(options: LookupOptions | number | undefined): LookupOptions {
+	if (typeof options === "number") return { family: options };
+	if (options === undefined || options === null) return {};
+	return options;
+}
+
 export const safeLookup: SafeLookup = (hostname, options, callback) => {
-	if (options.all === true) {
+	const opts = normalizeOptions(options);
+	if (opts.all === true) {
 		// `{all: true}` 時の callback は `(err, LookupAddress[]) => void`。TS の
 		// オーバーロード解決は options の値で narrow されないため明示キャスト。
-		const allOpts: LookupOptions & { all: true } = { ...options, all: true };
+		const allOpts: LookupOptions & { all: true } = { ...opts, all: true };
 		nodeLookup(hostname, allOpts, (err, addresses) => {
 			const cb = callback as LookupAllCallback;
 			if (err) return cb(err, []);
@@ -148,8 +159,9 @@ export const safeLookup: SafeLookup = (hostname, options, callback) => {
 	// `all: false` オーバーロードは options の number/object 引数に依存して narrow
 	// されるが、汎用 LookupOptions では narrow 不能。callback の `address` は
 	// 実装上 string になるが TS は `string | LookupAddress[]` と推論するため、
-	// branch を runtime で守った上で string にキャストする。
-	const singleOpts: LookupOptions = { ...options, all: false };
+	// branch を runtime で守った上で string にキャストする。family 等の元 options は
+	// `...opts` で保持して all のみ false を被せる。
+	const singleOpts: LookupOptions = { ...opts, all: false };
 	nodeLookup(hostname, singleOpts, (err, address, family) => {
 		const cb = callback as LookupSingleCallback;
 		if (err) return cb(err, "", 0);

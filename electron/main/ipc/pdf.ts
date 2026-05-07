@@ -70,14 +70,22 @@ export async function exportPdfImpl(
 			},
 		});
 
+		// race の timeout 用 setTimeout が load 成功後も生きていると、PDF 生成のたびに
+		// 最大 PDF_LOAD_TIMEOUT_MS の間 Node プロセスにタイマーが残り続ける。タイマー
+		// ID を保持して race 後に必ず clearTimeout する。
+		let loadTimeoutId: NodeJS.Timeout | undefined;
 		const loadPromise = win.loadFile(tmpHtmlPath);
-		const timeoutPromise = new Promise<never>((_, reject) =>
-			setTimeout(
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			loadTimeoutId = setTimeout(
 				() => reject(new Error("PDFエクスポートのページ読み込みがタイムアウトしました")),
 				PDF_LOAD_TIMEOUT_MS,
-			),
-		);
-		await Promise.race([loadPromise, timeoutPromise]);
+			);
+		});
+		try {
+			await Promise.race([loadPromise, timeoutPromise]);
+		} finally {
+			if (loadTimeoutId !== undefined) clearTimeout(loadTimeoutId);
+		}
 
 		// KaTeX 等のカスタムフォントが load 完了するのを待つ。document.fonts API が
 		// 無い環境（古い Chromium など）でも壊れないよう try/catch でガード。

@@ -70,6 +70,20 @@ describe("parseSemver - invalid", () => {
 	it("allows '0' as numeric prerelease", () => {
 		expect(parseSemver("1.0.0-0").prerelease).toEqual(["0"]);
 	});
+	it("rejects leading-zero in major / minor / patch (SemVer §2)", () => {
+		expect(() => parseSemver("01.2.3")).toThrow(/Invalid version/);
+		expect(() => parseSemver("1.02.3")).toThrow(/Invalid version/);
+		expect(() => parseSemver("1.2.03")).toThrow(/Invalid version/);
+		expect(() => parseSemver("00.0.0")).toThrow(/Invalid version/);
+	});
+	it("allows '0' in major / minor / patch", () => {
+		expect(parseSemver("0.0.0")).toEqual({
+			major: 0,
+			minor: 0,
+			patch: 0,
+			prerelease: [],
+		});
+	});
 });
 
 describe("compareSemver", () => {
