@@ -197,6 +197,32 @@ function installApiMock(opts: {
 		return qi === q.length;
 	};
 
+	// 本番 electron/main/utils/search-pure.ts の inline コピー。
+	// addInitScript 制約で import 不可、ロジックを 1:1 で複製する。
+	// `İ` (U+0130) → `i̇` のように toLowerCase で長さが変わる文字を含む行で、
+	// lower 側の indexOf 結果を元行の UTF-16 offset に逆引きする必要がある。
+	const isAsciiOnly = (text: string): boolean => {
+		for (let i = 0; i < text.length; i++) {
+			if (text.charCodeAt(i) > 127) return false;
+		}
+		return true;
+	};
+	const buildLowerToOrigUtf16Map = (text: string): number[] | null => {
+		if (isAsciiOnly(text)) return null;
+		const map: number[] = [];
+		let origOffset = 0;
+		for (const ch of text) {
+			const origLen = ch.length;
+			const lowerLen = ch.toLowerCase().length;
+			for (let i = 0; i < lowerLen; i++) {
+				map.push(origOffset);
+			}
+			origOffset += origLen;
+		}
+		map.push(origOffset);
+		return map;
+	};
+
 	const parentDir = (path: string): string => {
 		const i = path.lastIndexOf("/");
 		return i < 0 ? "" : path.slice(0, i);
@@ -372,8 +398,8 @@ function installApiMock(opts: {
 			caseSensitive?: boolean,
 		): Promise<unknown[]> => {
 			track("searchFiles", [workspacePath, rawQuery, caseSensitive ?? false]);
-			const query = caseSensitive ? rawQuery : rawQuery.toLowerCase();
-			if (!query) return [];
+			const querySearch = caseSensitive ? rawQuery : rawQuery.toLowerCase();
+			if (!querySearch) return [];
 			// 本番 search.ts:104-106 と同じく path の byte 比較で sort してから走査。
 			// 検索結果の順序が決定的になり、テスト assertion を安定させる。
 			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
@@ -390,19 +416,26 @@ function installApiMock(opts: {
 				const lines = content.split(/\r?\n/);
 				for (let i = 0; i < lines.length; i++) {
 					const line = lines[i];
-					const target = caseSensitive ? line : line.toLowerCase();
+					const lineSearch = caseSensitive ? line : line.toLowerCase();
+					// case-insensitive 時は lowercased 文字列上の position を元行の
+					// UTF-16 position に逆引きする（本番 search.ts:127-135 と一致）。
+					// `İ` 等の長さが変わる文字を含む行で matchStart/matchEnd がズレる問題を防ぐ。
+					const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
 					let pos = 0;
 					while (true) {
-						const idx = target.indexOf(query, pos);
-						if (idx === -1) break;
+						const found = lineSearch.indexOf(querySearch, pos);
+						if (found === -1) break;
+						const lowerEnd = found + querySearch.length;
+						const matchStart = lowerToOrig ? lowerToOrig[found] : found;
+						const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
 						results.push({
 							filePath,
 							lineNumber: i + 1,
 							lineContent: line,
-							matchStart: idx,
-							matchEnd: idx + query.length,
+							matchStart,
+							matchEnd,
 						});
-						pos = idx + query.length;
+						pos = lowerEnd;
 					}
 				}
 			}
@@ -444,7 +477,9 @@ function installApiMock(opts: {
 			for (const filePath of mdFiles) {
 				const content = store.files[filePath];
 				if (!content) continue;
-				const lines = content.split("\n");
+				// 本番 search.ts:210 と同じく \r\n / \n 両対応。CRLF Markdown で
+				// `\r` が lineContent / contextBefore / contextAfter に残る差異を防ぐ。
+				const lines = content.split(/\r?\n/);
 				let inCodeBlock = false;
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
