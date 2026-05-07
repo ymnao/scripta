@@ -101,7 +101,7 @@ export function registerWorkspaceIpc(): void {
 		// 補助ウィンドウ（New Window）は意図的に永続化を行わない。renderer の
 		// fetched workspace 値は不変で、in-memory の登録だけ更新する。
 		if (!volatileWorkspacePersistenceWindows.has(event.sender.id)) {
-			await persistWorkspacePath(path);
+			persistWorkspacePath(path);
 		}
 		setActiveWorkspaceForWindow(event.sender.id, path);
 	});

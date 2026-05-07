@@ -130,54 +130,13 @@ describe("getValue / setValue / deleteValue", () => {
 	});
 });
 
-describe("persistSync", () => {
+describe("persist (sync, single write path)", () => {
 	it("writes the cache to disk synchronously", async () => {
-		const { persistSync } = __testing;
 		const store = createStore(storePath);
 		setValue(store, "a", 1);
 		setValue(store, "b", "two");
-		persistSync(store);
-		// I/O is sync inside persistSync, so a subsequent async read must already see it
-		const raw = await readFile(storePath, "utf8");
-		expect(JSON.parse(raw)).toEqual({ a: 1, b: "two" });
-	});
-
-	it("creates intermediate directories", async () => {
-		const { persistSync } = __testing;
-		const nested = join(dir, "a", "b", "settings.json");
-		const store = createStore(nested);
-		setValue(store, "x", 1);
-		persistSync(store);
-		const raw = await readFile(nested, "utf8");
-		expect(JSON.parse(raw)).toEqual({ x: 1 });
-	});
-
-	it("is a no-op when the cache has not been loaded", async () => {
-		const { persistSync } = __testing;
-		const store = createStore(storePath);
-		persistSync(store);
-		await expect(readFile(storePath, "utf8")).rejects.toThrow();
-	});
-
-	it("preserves existing keys when persisting an additive change", async () => {
-		// close ハンドラから sync save するとき、未関係の他キーを消さないこと
-		const { persistSync } = __testing;
-		await writeFile(storePath, JSON.stringify({ original: true }), "utf8");
-		const store = createStore(storePath);
-		expect(load(store)).toEqual({ original: true });
-		setValue(store, "added", 1);
-		persistSync(store);
-		const raw = await readFile(storePath, "utf8");
-		expect(JSON.parse(raw)).toEqual({ original: true, added: 1 });
-	});
-});
-
-describe("persist", () => {
-	it("writes the cache to disk as JSON", async () => {
-		const store = createStore(storePath);
-		setValue(store, "a", 1);
-		setValue(store, "b", "two");
-		await persist(store);
+		persist(store);
+		// sync 完了直後に file が見えること（I/O が同期で完結している証左）
 		const raw = await readFile(storePath, "utf8");
 		expect(JSON.parse(raw)).toEqual({ a: 1, b: "two" });
 	});
@@ -186,22 +145,21 @@ describe("persist", () => {
 		const nested = join(dir, "a", "b", "settings.json");
 		const store = createStore(nested);
 		setValue(store, "x", 1);
-		await persist(store);
+		persist(store);
 		const raw = await readFile(nested, "utf8");
 		expect(JSON.parse(raw)).toEqual({ x: 1 });
 	});
 
 	it("is a no-op when the cache has not been loaded", async () => {
 		const store = createStore(storePath);
-		await persist(store);
-		// File should not have been created
+		persist(store);
 		await expect(readFile(storePath, "utf8")).rejects.toThrow();
 	});
 
-	it("survives a round-trip via a fresh store", async () => {
+	it("survives a round-trip via a fresh store", () => {
 		const writer = createStore(storePath);
 		setValue(writer, "k", "v");
-		await persist(writer);
+		persist(writer);
 
 		const reader = createStore(storePath);
 		expect(getValue(reader, "k")).toBe("v");
@@ -212,12 +170,28 @@ describe("persist", () => {
 		// rename 完了後にしか dst は見えないため、書き込み失敗時は古いファイルが温存される。
 		await writeFile(storePath, JSON.stringify({ original: true }), "utf8");
 		const store = createStore(storePath);
-		// 既存ファイルを読み込ませる
 		expect(load(store)).toEqual({ original: true });
 		setValue(store, "added", 1);
-		await persist(store);
+		persist(store);
 		const raw = await readFile(storePath, "utf8");
 		expect(JSON.parse(raw)).toEqual({ original: true, added: 1 });
+	});
+
+	it("multiple writes finish in invocation order; the last write wins", async () => {
+		// 複数経路（settings:save / persistWorkspacePath / persistWindowState）が
+		// 短時間に連発しても、sync 一本のため event loop で直列化され、最後に
+		// 呼んだ persist の cache snapshot が disk に残ることを担保する。旧設計の
+		// async 経路では `await mkdir` 後に古い JSON.stringify を後勝ちで disk
+		// に書き戻す race があった。
+		const store = createStore(storePath);
+		setValue(store, "x", 1);
+		persist(store);
+		setValue(store, "x", 2);
+		persist(store);
+		setValue(store, "x", 3);
+		persist(store);
+		const raw = await readFile(storePath, "utf8");
+		expect(JSON.parse(raw)).toEqual({ x: 3 });
 	});
 });
 

@@ -9,7 +9,7 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("./settings", () => ({
-	persistWorkspacePath: vi.fn(async () => {}),
+	persistWorkspacePath: vi.fn(),
 }));
 
 import { ipcMain } from "electron";

@@ -1,5 +1,4 @@
 import { mkdirSync, readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, ipcMain } from "electron";
 import writeFileAtomic from "write-file-atomic";
@@ -95,20 +94,20 @@ function load(store: Store): Record<string, unknown> {
 	return store.cache;
 }
 
-async function persist(store: Store): Promise<void> {
-	if (store.cache === null) return;
-	// write-file-atomic は tmp への write → fsync → rename を保証するため、
-	// 電源断やクラッシュで settings.json が破損した状態にならない。
-	await mkdir(dirname(store.path), { recursive: true });
-	await writeFileAtomic(store.path, JSON.stringify(store.cache, null, 2), {
-		encoding: "utf8",
-	});
-}
-
-// BrowserWindow の 'close' ハンドラからは sync 書き込みが必須。
-// fire-and-forget の writeFileAtomic はプロセス終了に間に合わず、
-// 直前の windowState 変更が永続化されないことがあるため。
-function persistSync(store: Store): void {
+// settings.json への書き込みは 1 種類の sync 関数に集約する。async と sync を
+// 併用すると次の race が起きる：（A）async 経路（旧 persist）が `await mkdir` の
+// 後に JSON.stringify した古い snapshot で writeFileAtomic を kick →（B）別経路
+// （windowState 同期保存 / 別の async settings:save）が完了 →（A）の writeFileAtomic
+// が遅れて完了して古い内容で上書き、というケース。
+//
+// settings.json は < 1KB かつ書き込み頻度も低い（renderer 操作 / window resize
+// debounce 500ms / workspace 切替）ので、writeFileAtomic.sync が常に <1ms で
+// 完了する。sync で event loop を atomic に占有することで、複数経路の書き込み
+// が重なっても直列化される。
+//
+// write-file-atomic は tmp への write → fsync → rename を保証するため、電源断や
+// クラッシュで settings.json が破損した状態にならない。
+function persist(store: Store): void {
 	if (store.cache === null) return;
 	mkdirSync(dirname(store.path), { recursive: true });
 	writeFileAtomic.sync(store.path, JSON.stringify(store.cache, null, 2), {
@@ -168,14 +167,14 @@ export function getWorkspacePathFromSettings(): string | null {
 // setBounds が throw → 初回起動から不可視ウィンドウになる）ので main 専用。
 const RESERVED_KEYS: ReadonlySet<string> = new Set(["workspacePath", "windowState"]);
 
-export async function persistWorkspacePath(path: string | null): Promise<void> {
+export function persistWorkspacePath(path: string | null): void {
 	const store = getMainStore();
 	if (path === null) {
 		deleteValue(store, "workspacePath");
 	} else {
 		setValue(store, "workspacePath", path);
 	}
-	await persist(store);
+	persist(store);
 }
 
 export function getWindowState(): WindowState | null {
@@ -187,15 +186,10 @@ export function getWindowState(): WindowState | null {
 	}
 }
 
-// async と sync を併用すると debounce 経由の async と close 経由の sync が同じ
-// settings.json に並走してレースする（古い async が後勝ちで disk を上書きする）。
-// 書き込み 1 回あたり JSON < 1KB の writeFileAtomic.sync は事実上瞬時のため
-// 同期一本に統一して順序保証を担保する。debounce 500ms により頻度も IPC を
-// ブロックしない範囲に収まる。
 export function persistWindowState(state: WindowState): void {
 	const store = getMainStore();
 	setValue(store, "windowState", state);
-	persistSync(store);
+	persist(store);
 }
 
 export function registerSettingsIpc(): void {
@@ -230,7 +224,7 @@ export function registerSettingsIpc(): void {
 		deleteValue(getMainStore(), key);
 	});
 	ipcMain.handle("settings:save", async () => {
-		await persist(getMainStore());
+		persist(getMainStore());
 	});
 }
 
@@ -238,7 +232,6 @@ export const __testing = {
 	createStore,
 	load,
 	persist,
-	persistSync,
 	getValue,
 	setValue,
 	deleteValue,
