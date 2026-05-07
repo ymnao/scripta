@@ -1,6 +1,7 @@
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { BrowserWindow, ipcMain, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
@@ -58,10 +59,19 @@ function shouldAllowPdfRequest(rawUrl: string): boolean {
 	if (protocol === "data:") return true;
 	if (protocol === "file:") {
 		// PDF 用 temp HTML は OS の tmpdir 配下に作るので、それ以外への file: 参照は弾く。
-		// `pathname` は decode 済みの POSIX パスで、tmpdir() の path prefix と比較する。
-		const path = decodeURIComponent(parsed.pathname);
+		// `URL.pathname` は POSIX 表現（Windows でも `/C:/...`）になる一方、`tmpdir()`
+		// は OS ネイティブ表現（Windows なら `C:\...`）。素朴に startsWith で比較すると
+		// Windows でメインフレームのロード自体（loadFile が file:///C:/... を発行する）
+		// まで弾いて pdf:export がタイムアウトするため、`fileURLToPath` で URL 側を
+		// OS ネイティブに正規化してから path.sep ベースで比較する。
+		let osPath: string;
+		try {
+			osPath = fileURLToPath(rawUrl);
+		} catch {
+			return false;
+		}
 		const tmpRoot = tmpdir();
-		return path === tmpRoot || path.startsWith(`${tmpRoot}/`);
+		return osPath === tmpRoot || osPath.startsWith(`${tmpRoot}${sep}`);
 	}
 	if (protocol !== "https:") {
 		// `http:` は SSRF リスクが高いので拒否（暗号化 + 認証された送信のみ許す）。

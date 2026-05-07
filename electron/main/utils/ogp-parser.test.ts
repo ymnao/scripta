@@ -140,6 +140,40 @@ describe("parseOgp", () => {
 		expect(ogp.image).toBe("https://e.com/i.png");
 	});
 
+	it("does not match <metadata> as <meta> (tag name boundary)", () => {
+		// SVG の <metadata> 要素を OGP として誤って拾わないこと。タグ名直後が
+		// `d`（name char）なので別タグと判定される必要がある。
+		const html = `
+		<html><head>
+			<svg><metadata property="og:title" content="Spoof Title"></metadata></svg>
+			<meta property="og:title" content="Real Title">
+		</head></html>
+		`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBe("Real Title");
+	});
+
+	it("does not match <titlebar> as <title> (tag name boundary)", () => {
+		// 架空の <titlebar> タグが <title> fallback に拾われないこと。
+		const html = `<html><head><titlebar>Spoof</titlebar></head></html>`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBeNull();
+	});
+
+	it("falls back to <title> even when <titlebar> appears first", () => {
+		// <titlebar> を skip して後続の <title> を拾えること。
+		const html = `<html><head><titlebar>Spoof</titlebar><title>Real</title></head></html>`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBe("Real");
+	});
+
+	it("matches <title> with attributes after tag name", () => {
+		// findTitleTagOpen が `<title lang="ja">` の `<title` を見つけられること。
+		const html = `<html><head><title lang="ja">日本語</title></head></html>`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBe("日本語");
+	});
+
 	it("title tag with attributes", () => {
 		const html = `<html><head><title lang="ja">日本語タイトル</title></head></html>`;
 		const ogp = parseOgp(html, "https://example.com");

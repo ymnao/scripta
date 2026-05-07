@@ -2,6 +2,7 @@
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // `new BrowserWindow(opts)` の捕捉と printToPDF / loadFile / executeJavaScript の
@@ -218,7 +219,13 @@ describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {
 	});
 	it("file: only allowed under OS tmpdir", () => {
 		const tmp = tmpdir();
-		expect(shouldAllowPdfRequest(`file://${tmp}/scripta-pdf-x/export.html`)).toBe(true);
+		// Node の loadFile が出す file:// URL は POSIX/Windows 両方で
+		// `new URL(...).pathname` が `/<drive>:/...` または `/var/...` の表記になる。
+		// shouldAllowPdfRequest は内部で `fileURLToPath` で OS ネイティブ表現へ
+		// 戻してから tmpdir prefix と比較するので、現在 OS のフォーマットの URL を
+		// pathToFileURL 経由で組んで test する。
+		const tmpUrlInside = pathToFileURL(join(tmp, "scripta-pdf-x", "export.html")).toString();
+		expect(shouldAllowPdfRequest(tmpUrlInside)).toBe(true);
 		expect(shouldAllowPdfRequest("file:///etc/passwd")).toBe(false);
 	});
 });

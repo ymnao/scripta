@@ -99,12 +99,33 @@ function* iterateAttributes(tag: string): Iterable<{ name: string; value: string
 	}
 }
 
+// `<title` の直後が「タグ名終端文字（空白 / `/` / `>`）」である開始位置を探す。
+// 単純な indexOf("<title") だと `<titlebar>` のような別タグを誤マッチしうる。
+function findTitleTagOpen(lowerHtml: string): number {
+	let from = 0;
+	while (true) {
+		const idx = lowerHtml.indexOf("<title", from);
+		if (idx < 0) return -1;
+		const next = lowerHtml[idx + 6];
+		if (next === undefined) return -1;
+		if (
+			next === " " ||
+			next === "\t" ||
+			next === "\n" ||
+			next === "\r" ||
+			next === "/" ||
+			next === ">"
+		) {
+			return idx;
+		}
+		from = idx + 1;
+	}
+}
+
 function extractTitleTag(html: string): string | null {
 	const lower = html.toLowerCase();
-	const start = lower.indexOf("<title");
+	const start = findTitleTagOpen(lower);
 	if (start < 0) return null;
-	// "<title" の直後に空白 / 属性 / `>` のいずれかが来る。`>` を探して開始タグの
-	// 終端を確定する（旧 Rust と同じ手順）。
 	const afterTagOpen = start + 6;
 	const closingBracket = html.indexOf(">", afterTagOpen);
 	if (closingBracket < 0) return null;
@@ -136,6 +157,23 @@ export function parseOgp(html: string, url: string): OgpData {
 	for (const segment of html.split("<")) {
 		const lower = segment.toLowerCase();
 		if (!lower.startsWith("meta")) continue;
+		// "meta" 直後がタグ名終端文字（空白 / `/` / `>`）でないと別タグ。
+		// 例: `<metadata property="og:title" ...>` を SVG が含んでいた場合に
+		// 誤って OGP として拾わない。segment は `<` で split 済みなので末尾は
+		// 通常 `>`（最後の segment は `>` を含まない可能性があるが、その場合は
+		// セグメント内に空白/タグ記号が無い → meta + 4 文字を超える可能性は薄い）。
+		const after = lower[4];
+		if (
+			after !== undefined &&
+			after !== " " &&
+			after !== "\t" &&
+			after !== "\n" &&
+			after !== "\r" &&
+			after !== "/" &&
+			after !== ">"
+		) {
+			continue;
+		}
 		let propValue: string | null = null;
 		let contentValue: string | null = null;
 		for (const attr of iterateAttributes(segment)) {
