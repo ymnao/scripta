@@ -33,6 +33,8 @@ jobs:
 
       - run: pnpm typecheck
 
+      - run: pnpm typecheck:e2e
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -41,6 +43,50 @@ jobs:
       - uses: ./.github/actions/setup-node-pnpm
 
       - run: pnpm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      # Playwright のブラウザバイナリは ~/.cache/ms-playwright に置かれる。
+      # キャッシュキーは @playwright/test の resolved version で固定し、
+      # 依存更新時のみ再ダウンロード。
+      - name: Resolve Playwright version
+        id: playwright-version
+        shell: bash
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browsers + system deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      # ブラウザは cache hit でもシステム依存（libnss3 等）はランナーに無いので
+      # 毎回入れる。`install-deps` は素早く終わる。
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+
+      - run: pnpm test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
 
   build:
     runs-on: ubuntu-latest
