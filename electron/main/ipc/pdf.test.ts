@@ -62,9 +62,15 @@ vi.mock("electron", () => {
 			return undefined;
 		},
 	});
+	const fakeSession = {
+		webRequest: {
+			onBeforeRequest: vi.fn(),
+		},
+	};
 	return {
 		BrowserWindow: MockBrowserWindow,
 		ipcMain: { handle: vi.fn() },
+		session: { fromPartition: vi.fn(() => fakeSession) },
 	};
 });
 
@@ -75,7 +81,7 @@ import {
 } from "../utils/path-guard";
 import { __testing } from "./pdf";
 
-const { exportPdfImpl } = __testing;
+const { exportPdfImpl, shouldAllowPdfRequest } = __testing;
 
 const SENDER_ID = 42;
 
@@ -171,5 +177,48 @@ describe("exportPdfImpl", () => {
 		expect(opts.pageSize).toBe("A4");
 		expect(opts.margins.top).toBeCloseTo(0.787, 3);
 		expect(opts.printBackground).toBe(true);
+	});
+});
+
+describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {
+	it("allows about:blank", () => {
+		expect(shouldAllowPdfRequest("about:blank")).toBe(true);
+	});
+	it("allows data: URIs", () => {
+		expect(shouldAllowPdfRequest("data:image/png;base64,iVBORw0K")).toBe(true);
+	});
+	it("allows https: to public hostname", () => {
+		expect(shouldAllowPdfRequest("https://example.com/image.png")).toBe(true);
+	});
+	it("blocks http: to public hostname (force https)", () => {
+		expect(shouldAllowPdfRequest("http://example.com/image.png")).toBe(false);
+	});
+	it("blocks https: to private IP literal (RFC 1918)", () => {
+		expect(shouldAllowPdfRequest("https://10.0.0.1/")).toBe(false);
+		expect(shouldAllowPdfRequest("https://192.168.1.1/")).toBe(false);
+	});
+	it("blocks https: to loopback IPv4", () => {
+		expect(shouldAllowPdfRequest("https://127.0.0.1/")).toBe(false);
+	});
+	it("blocks https: to cloud metadata service (169.254.169.254)", () => {
+		expect(shouldAllowPdfRequest("https://169.254.169.254/latest/meta-data/")).toBe(false);
+	});
+	it("blocks https: to IPv6 loopback", () => {
+		expect(shouldAllowPdfRequest("https://[::1]/")).toBe(false);
+	});
+	it("allows https: to global IP literal", () => {
+		expect(shouldAllowPdfRequest("https://1.1.1.1/")).toBe(true);
+	});
+	it("blocks chrome:// and other special schemes", () => {
+		expect(shouldAllowPdfRequest("chrome://settings")).toBe(false);
+		expect(shouldAllowPdfRequest("chrome-extension://abcd/")).toBe(false);
+	});
+	it("rejects unparseable URLs", () => {
+		expect(shouldAllowPdfRequest("not-a-url")).toBe(false);
+	});
+	it("file: only allowed under OS tmpdir", () => {
+		const tmp = tmpdir();
+		expect(shouldAllowPdfRequest(`file://${tmp}/scripta-pdf-x/export.html`)).toBe(true);
+		expect(shouldAllowPdfRequest("file:///etc/passwd")).toBe(false);
 	});
 });

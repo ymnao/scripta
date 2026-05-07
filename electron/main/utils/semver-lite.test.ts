@@ -38,9 +38,26 @@ describe("parseSemver - valid", () => {
 	it("parses prerelease", () => {
 		expect(parseSemver("1.0.0-beta.1").prerelease).toEqual(["beta", "1"]);
 	});
-	it("ignores build metadata", () => {
+	it("ignores build metadata for compare but validates syntax", () => {
 		expect(parseSemver("1.0.0+build.42").prerelease).toEqual([]);
 		expect(parseSemver("1.0.0-rc.1+abc").prerelease).toEqual(["rc", "1"]);
+		// SemVer §10: build identifier は numeric でも leading zero OK
+		expect(parseSemver("1.0.0+0001").prerelease).toEqual([]);
+		expect(parseSemver("1.0.0+sha.abc-def.42").prerelease).toEqual([]);
+	});
+});
+
+describe("parseSemver - build metadata invalid", () => {
+	it("rejects empty build metadata after +", () => {
+		expect(() => parseSemver("1.0.0+")).toThrow(/Invalid version/);
+	});
+	it("rejects empty build identifier", () => {
+		expect(() => parseSemver("1.0.0+build..42")).toThrow(/Invalid version/);
+		expect(() => parseSemver("1.0.0+.build")).toThrow(/Invalid version/);
+	});
+	it("rejects non-alphanumeric build identifier", () => {
+		expect(() => parseSemver("1.0.0+???")).toThrow(/Invalid version/);
+		expect(() => parseSemver("1.0.0+a$b")).toThrow(/Invalid version/);
 	});
 });
 

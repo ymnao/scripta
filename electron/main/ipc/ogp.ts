@@ -117,13 +117,21 @@ function fetchOnce(url: URL): Promise<FetchResult> {
 				res.on("close", () => {
 					if (settled) return;
 					settled = true;
-					// truncated で destroy() を呼んだ場合はここに入る。
-					resolve({
-						statusCode: res.statusCode ?? 0,
-						headers: res.headers,
-						body: Buffer.concat(chunks),
-						truncated,
-					});
+					// `end` を経由せずに close した場合は 2 種に分岐する:
+					//   (a) MAX_BODY_BYTES 超過で我々が destroy したケース → 部分 body を
+					//       「正常に切り詰めた結果」として resolve する（truncated=true）。
+					//   (b) サーバ側切断 / ネットワーク瞬断 / 早期 EOF → 部分 body は
+					//       不完全 HTML なので、parser に渡すと誤った OGP を返す。reject。
+					if (truncated) {
+						resolve({
+							statusCode: res.statusCode ?? 0,
+							headers: res.headers,
+							body: Buffer.concat(chunks),
+							truncated,
+						});
+					} else {
+						reject(new Error("Connection closed before response ended"));
+					}
 				});
 				res.on("error", (e) => {
 					if (settled) return;
@@ -161,8 +169,12 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 		if (res.statusCode < 200 || res.statusCode >= 300) {
 			throw new Error(`HTTP ${res.statusCode}`);
 		}
+		// Node の IncomingHttpHeaders は値が `string | string[] | undefined` を取る。
+		// 正常な HTTP では `Content-Type` ヘッダは 1 つなので Node は通常 string に
+		// 統合するが、複数返した実装では string[] になる。先頭要素を採用する。
 		const ctRaw = res.headers["content-type"];
-		const contentType = typeof ctRaw === "string" ? ctRaw : "";
+		const contentType =
+			typeof ctRaw === "string" ? ctRaw : Array.isArray(ctRaw) ? (ctRaw[0] ?? "") : "";
 		return { contentType, body: res.body };
 	}
 	throw new Error("Too many redirects");

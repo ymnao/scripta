@@ -18,9 +18,21 @@ export function parseSemver(v: string): ParsedVersion {
 	if (typeof v !== "string" || v.length === 0) {
 		throw new Error(`Invalid version '${v}'`);
 	}
-	// build metadata は比較に使わないので drop
+	// build metadata は比較に使わない（SemVer §10）が、文字種・空要素のバリデーションは
+	// 行う。`+???` のような不正値を有効として扱うと旧 Rust `semver` crate と挙動がズレる。
 	const buildIdx = v.indexOf("+");
 	const noBuild = buildIdx >= 0 ? v.slice(0, buildIdx) : v;
+	if (buildIdx >= 0) {
+		const build = v.slice(buildIdx + 1);
+		if (build.length === 0) throw new Error(`Invalid version '${v}'`);
+		for (const id of build.split(".")) {
+			// build identifier: [0-9A-Za-z-]+ で空要素不可。numeric の leading zero は
+			// SemVer §10 で **明示的に許容** されている（prerelease の §9 と異なる）。
+			if (id.length === 0 || !/^[0-9A-Za-z-]+$/.test(id)) {
+				throw new Error(`Invalid version '${v}'`);
+			}
+		}
+	}
 	// prerelease を分離
 	const dashIdx = noBuild.indexOf("-");
 	const core = dashIdx >= 0 ? noBuild.slice(0, dashIdx) : noBuild;

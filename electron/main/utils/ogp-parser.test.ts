@@ -105,6 +105,41 @@ describe("parseOgp", () => {
 		expect(ogp.title).toBe("Real Title");
 	});
 
+	it("does not match data-property as property (attribute boundary)", () => {
+		const html = `
+		<html><head>
+			<meta data-property="og:title" content="Spoof Title">
+			<meta property="og:title" content="Real Title">
+		</head></html>
+		`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBe("Real Title");
+	});
+
+	it("does not match data-content as content (attribute boundary)", () => {
+		// content 属性が無いケースは null を返す（data-content は誤マッチしない）。
+		const html = `<html><head><meta property="og:title" data-content="Spoof"></head></html>`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBeNull();
+	});
+
+	it("matches even when attributes have arbitrary order", () => {
+		const html = `<html><head><meta content="Reversed" property="og:title"></head></html>`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.title).toBe("Reversed");
+	});
+
+	it("does not confuse og:image with og:image_alt or similar", () => {
+		const html = `
+		<html><head>
+			<meta property="og:image_alt" content="alt text">
+			<meta property="og:image" content="https://e.com/i.png">
+		</head></html>
+		`;
+		const ogp = parseOgp(html, "https://example.com");
+		expect(ogp.image).toBe("https://e.com/i.png");
+	});
+
 	it("title tag with attributes", () => {
 		const html = `<html><head><title lang="ja">日本語タイトル</title></head></html>`;
 		const ogp = parseOgp(html, "https://example.com");
