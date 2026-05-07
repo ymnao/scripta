@@ -128,6 +128,61 @@ export class ElectronApiMock {
 		}, events);
 	}
 
+	/** ファイル作成 + create イベントを連動して発火（外部 fs 変更の再現） */
+	async simulateFileCreate(
+		filePath: string,
+		content: string,
+		parentDir: string,
+		fileName: string,
+	): Promise<void> {
+		await this.page.evaluate(
+			(args: { filePath: string; content: string; parentDir: string; fileName: string }) => {
+				const store = window.__E2E_API_MOCK__;
+				if (!store) return;
+				store.files[args.filePath] = args.content;
+				const parent = store.directories[args.parentDir];
+				if (parent) {
+					parent.push({ name: args.fileName, path: args.filePath, isDirectory: false });
+				}
+				const evs = [{ kind: "create" as const, path: args.filePath }];
+				for (const ln of store.fsListeners) ln(evs);
+			},
+			{ filePath, content, parentDir, fileName },
+		);
+	}
+
+	/** ファイル更新 + modify イベントを連動 */
+	async simulateFileModify(filePath: string, newContent: string): Promise<void> {
+		await this.page.evaluate(
+			(args: { filePath: string; newContent: string }) => {
+				const store = window.__E2E_API_MOCK__;
+				if (!store) return;
+				store.files[args.filePath] = args.newContent;
+				const evs = [{ kind: "modify" as const, path: args.filePath }];
+				for (const ln of store.fsListeners) ln(evs);
+			},
+			{ filePath, newContent },
+		);
+	}
+
+	/** ファイル削除 + delete イベントを連動 */
+	async simulateFileDelete(filePath: string, parentDir: string, fileName: string): Promise<void> {
+		await this.page.evaluate(
+			(args: { filePath: string; parentDir: string; fileName: string }) => {
+				const store = window.__E2E_API_MOCK__;
+				if (!store) return;
+				delete store.files[args.filePath];
+				const parent = store.directories[args.parentDir];
+				if (parent) {
+					store.directories[args.parentDir] = parent.filter((e) => e.name !== args.fileName);
+				}
+				const evs = [{ kind: "delete" as const, path: args.filePath }];
+				for (const ln of store.fsListeners) ln(evs);
+			},
+			{ filePath, parentDir, fileName },
+		);
+	}
+
 	async emitMenuEvent(name: MenuEventName): Promise<void> {
 		await this.page.evaluate((n: string) => {
 			const store = window.__E2E_API_MOCK__;
