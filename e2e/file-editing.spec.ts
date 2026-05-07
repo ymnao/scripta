@@ -44,7 +44,7 @@ test.describe("file editing", () => {
 		await waitForUnsaved(page);
 	});
 
-	test("debounce 後に autosave されて「保存済み」になる", async ({ page }) => {
+	test("debounce 後に autosave で正しい内容が書き込まれる", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
@@ -62,10 +62,14 @@ test.describe("file editing", () => {
 
 		const calls = await mock.getCalls("writeFile");
 		expect(calls.length).toBeGreaterThanOrEqual(1);
-		expect(calls.some((c) => c[0] === "/workspace/hello.md")).toBe(true);
+		// processContent (trimTrailingWhitespace + 末尾改行保証) 適用後のペイロード。
+		// 単純な「>= 1 回呼ばれた」だけでは内容ズレや誤ファイル書き込みが通ってしまう。
+		const last = calls[calls.length - 1];
+		expect(last[0]).toBe("/workspace/hello.md");
+		expect(last[1]).toBe("# Hello World updated\n");
 	});
 
-	test("Cmd+S で即座に保存される", async ({ page }) => {
+	test("Cmd+S で autosave debounce より先に保存される", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
@@ -81,9 +85,17 @@ test.describe("file editing", () => {
 		await waitForUnsaved(page);
 
 		await page.keyboard.press(`${modKey}+s`);
+		// autosave のデフォルト debounce は 2000ms。1000ms 以内に writeFile が
+		// 走ったことを確認することで、Cmd+S が debounce を待たず即座に saveNow を
+		// 呼んでいることを検証する。Cmd+S のハンドラが壊れて autosave 任せに
+		// なった場合、この poll が 1000ms で timeout して回帰を検知できる。
+		await expect
+			.poll(async () => (await mock.getCalls("writeFile")).length, { timeout: 1000 })
+			.toBe(1);
 		await waitForSaved(page);
 
 		const calls = await mock.getCalls("writeFile");
-		expect(calls.length).toBeGreaterThanOrEqual(1);
+		expect(calls[0][0]).toBe("/workspace/hello.md");
+		expect(calls[0][1]).toBe("# Hello World manual\n");
 	});
 });

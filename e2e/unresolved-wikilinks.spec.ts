@@ -40,7 +40,7 @@ test.describe("unresolved wikilinks panel", () => {
 		await expect(page.getByText("件の未解決リンク")).toBeVisible();
 	});
 
-	test("各リンクの参照件数バッジが表示される", async ({ page }) => {
+	test("各リンクの参照件数バッジが正しい値を表示する", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
@@ -48,11 +48,19 @@ test.describe("unresolved wikilinks panel", () => {
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("Show unresolved wikilinks").click();
 
-		await expect(page.getByText("missing-page")).toBeVisible();
-		await expect(page.getByText("another-missing")).toBeVisible();
+		// missing-page は note.md と ref.md で参照されるので "2"、
+		// another-missing は note.md のみなので "1"。
+		// .search-panel-file-header（行ルート）から hasText 一致でその行の
+		// .search-panel-file-count バッジを引く。
+		const missingPageRow = page.locator(".search-panel-file-header", {
+			has: page.getByText("missing-page", { exact: true }),
+		});
+		await expect(missingPageRow.locator(".search-panel-file-count")).toHaveText("2");
 
-		// missing-page は note.md と ref.md で 2 references
-		// another-missing は note.md のみ 1 reference
+		const anotherMissingRow = page.locator(".search-panel-file-header", {
+			has: page.getByText("another-missing", { exact: true }),
+		});
+		await expect(anotherMissingRow.locator(".search-panel-file-count")).toHaveText("1");
 	});
 
 	test("Cmd+Shift+U でパネルをトグルできる", async ({ page }) => {
@@ -69,7 +77,7 @@ test.describe("unresolved wikilinks panel", () => {
 		await expect(page.getByText("Files")).toBeVisible();
 	});
 
-	test("パネルからディレクトリピッカー経由でファイルを作成できる", async ({ page }) => {
+	test("パネルからディレクトリピッカー経由でファイルが正しいパスに作成される", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
@@ -84,13 +92,17 @@ test.describe("unresolved wikilinks panel", () => {
 
 		await page.getByRole("button", { name: "作成" }).click();
 
+		// another-missing は references を持つので buildInitialContent が中身を生成し
+		// writeNewFile（テンプレ込み）が呼ばれる。createFile は呼ばれない。
+		// パスは workspace ルート直下に pageName.md。誤ったパスや二重作成は弾く。
 		const createCalls = await mock.getCalls("createFile");
 		const writeNewCalls = await mock.getCalls("writeNewFile");
-		const totalCreates = createCalls.length + writeNewCalls.length;
-		expect(totalCreates).toBeGreaterThanOrEqual(1);
+		expect(createCalls).toHaveLength(0);
+		expect(writeNewCalls).toHaveLength(1);
+		expect(writeNewCalls[0][0]).toBe("/workspace/another-missing.md");
 	});
 
-	test("ソートトグルで名前順 / 件数順を切り替えられる", async ({ page }) => {
+	test("ソートトグルで表示順が名前順 / 件数順に切り替わる", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
@@ -98,11 +110,18 @@ test.describe("unresolved wikilinks panel", () => {
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("Show unresolved wikilinks").click();
 
-		await expect(page.getByText("missing-page")).toBeVisible();
+		const fileNames = page.locator(".search-panel-file-name");
 
+		// デフォルトは名前順: another-missing (a) → missing-page (m)
+		await expect(fileNames).toHaveText(["another-missing", "missing-page"]);
+
+		// 件数順に切り替え: missing-page (2) → another-missing (1)
 		await page.getByLabel("Sort by reference count").click();
+		await expect(fileNames).toHaveText(["missing-page", "another-missing"]);
 
+		// 名前順に戻す
 		await page.getByLabel("Sort by name").click();
+		await expect(fileNames).toHaveText(["another-missing", "missing-page"]);
 	});
 
 	test("missing wikilink が破線スタイルでレンダリングされる", async ({ page }) => {

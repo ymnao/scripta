@@ -23,10 +23,14 @@ test.describe("settings persistence", () => {
 		});
 
 		await page.goto("/");
-		// workspace は復元されるが sidebar は非表示なのでファイルツリーは見えない。
-		// アクティブタブが無い状態では NewTabContent (motto) が表示される。
-		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
+		// NewTabContent の "ワークスペース検索" は hasWorkspace=true のときだけ
+		// 描画される。これで workspace の復元成功を検出する。motto + test.md 非表示
+		// だけだと「workspace 復元失敗で空状態」と区別がつかず、本来検出したい
+		// 「sidebar=false が復元されたが workspace は読み込まれた」を取り逃す。
+		await expect(page.getByRole("button", { name: "ワークスペース検索" })).toBeVisible();
+		// sidebar 非表示なのでファイルツリーも sidebar 内の "Open folder" ボタンも出ない
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
+		await expect(page.getByLabel("Open folder")).not.toBeVisible();
 	});
 
 	test("起動時に sidebarVisible=true が復元される", async ({ page }) => {
