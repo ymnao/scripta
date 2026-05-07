@@ -79,15 +79,16 @@ export function resolveInitialGeometry(state: WindowState | null): InitialWindow
 }
 
 export interface AttachOptions {
-	saveAsync: (state: WindowState) => void;
-	saveSync: (state: WindowState) => void;
+	// 同期書き込みの想定。close ハンドラから fire-and-forget の async 書き込みを
+	// 行うと、プロセス終了が早まって永続化が間に合わないだけでなく、debounce
+	// 経由の async と close 経由の sync が同じファイルへ並走してレースが起きる
+	// （古い async が後勝ちで disk を上書きする）。debounce で頻度を 500ms に
+	// 抑えれば JSON < 1KB の `writeFileAtomic.sync` は事実上瞬時に終わるため、
+	// 単一の同期パスに統一する。
+	save: (state: WindowState) => void;
 	debounceMs?: number;
 }
 
-// resize / move は debounced async 書き込み、close は同期書き込みにする。
-// async のままだと close ハンドラから fire-and-forget で書いた writeFileAtomic が
-// プロセス終了に間に合わず、最後の状態が永続化されないことがある。
-// 同期 writeFileAtomic.sync は tmp → fsync → rename を sync で完了させる。
 export function attachWindowStateTracker(win: BrowserWindow, opts: AttachOptions): () => void {
 	const debounce = opts.debounceMs ?? 500;
 	let timer: NodeJS.Timeout | null = null;
@@ -101,32 +102,22 @@ export function attachWindowStateTracker(win: BrowserWindow, opts: AttachOptions
 		isFullScreen: win.isFullScreen(),
 	});
 
-	const flushAsync = (): void => {
-		timer = null;
-		if (win.isDestroyed()) return;
-		try {
-			opts.saveAsync(captureState());
-		} catch (e) {
-			console.warn("[window-state] saveAsync failed:", e);
-		}
-	};
-
-	const schedule = (): void => {
-		if (timer !== null) clearTimeout(timer);
-		timer = setTimeout(flushAsync, debounce);
-	};
-
-	const flushSyncOnClose = (): void => {
+	const flush = (): void => {
 		if (timer !== null) {
 			clearTimeout(timer);
 			timer = null;
 		}
 		if (win.isDestroyed()) return;
 		try {
-			opts.saveSync(captureState());
+			opts.save(captureState());
 		} catch (e) {
-			console.warn("[window-state] saveSync failed:", e);
+			console.warn("[window-state] save failed:", e);
 		}
+	};
+
+	const schedule = (): void => {
+		if (timer !== null) clearTimeout(timer);
+		timer = setTimeout(flush, debounce);
 	};
 
 	win.on("resize", schedule);
@@ -137,7 +128,7 @@ export function attachWindowStateTracker(win: BrowserWindow, opts: AttachOptions
 	win.on("leave-full-screen", schedule);
 	// 'close' は close 確定前に発火するため getNormalBounds が有効。
 	// 'closed' まで待つと getBounds 系 API がすでに無効になっている。
-	win.on("close", flushSyncOnClose);
+	win.on("close", flush);
 
 	return () => {
 		if (timer !== null) {

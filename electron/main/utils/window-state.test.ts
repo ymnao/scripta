@@ -241,21 +241,20 @@ describe("attachWindowStateTracker", () => {
 		vi.useRealTimers();
 	});
 
-	it("debounces async saves across rapid resize/move events", () => {
+	it("debounces saves across rapid resize/move events", () => {
 		const win = makeWin();
-		const saveAsync = vi.fn();
-		const saveSync = vi.fn();
-		attachWindowStateTracker(win, { saveAsync, saveSync, debounceMs: 100 });
+		const save = vi.fn();
+		attachWindowStateTracker(win, { save, debounceMs: 100 });
 
 		fire("resize");
 		fire("move");
 		fire("resize");
-		expect(saveAsync).not.toHaveBeenCalled();
+		expect(save).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(99);
-		expect(saveAsync).not.toHaveBeenCalled();
+		expect(save).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(2);
-		expect(saveAsync).toHaveBeenCalledTimes(1);
-		expect(saveAsync).toHaveBeenCalledWith({
+		expect(save).toHaveBeenCalledTimes(1);
+		expect(save).toHaveBeenCalledWith({
 			bounds: normalBounds,
 			isMaximized: false,
 			isFullScreen: false,
@@ -265,50 +264,49 @@ describe("attachWindowStateTracker", () => {
 	it("captures isMaximized / isFullScreen at flush time, not schedule time", () => {
 		// debounce 中に最大化が確定したら、その状態を保存する
 		const win = makeWin();
-		const saveAsync = vi.fn();
-		attachWindowStateTracker(win, { saveAsync, saveSync: vi.fn(), debounceMs: 50 });
+		const save = vi.fn();
+		attachWindowStateTracker(win, { save, debounceMs: 50 });
 		fire("resize");
 		isMaximizedFlag = true;
 		vi.advanceTimersByTime(60);
-		expect(saveAsync).toHaveBeenCalledWith(expect.objectContaining({ isMaximized: true }));
+		expect(save).toHaveBeenCalledWith(expect.objectContaining({ isMaximized: true }));
 	});
 
-	it("flushes synchronously on close (no debounce wait)", () => {
+	it("flushes immediately on close even if debounce is still pending", () => {
+		// race を防ぐため close と resize が同じ save 経路を通る。debounce 待機中に
+		// close が発火しても、保留分の delayed save と二重に発火しないこと。
 		const win = makeWin();
-		const saveAsync = vi.fn();
-		const saveSync = vi.fn();
-		attachWindowStateTracker(win, { saveAsync, saveSync, debounceMs: 100 });
+		const save = vi.fn();
+		attachWindowStateTracker(win, { save, debounceMs: 100 });
 		fire("resize");
 		fire("close");
-		// async は debounce window 内で発火しない（cancel 済み）
 		vi.advanceTimersByTime(200);
-		expect(saveAsync).not.toHaveBeenCalled();
-		expect(saveSync).toHaveBeenCalledTimes(1);
+		expect(save).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not call saveAsync after window is destroyed", () => {
+	it("does not call save after window is destroyed", () => {
 		// closed event の後に debounce が flush しても getNormalBounds は呼べない
 		const win = makeWin();
-		const saveAsync = vi.fn();
-		attachWindowStateTracker(win, { saveAsync, saveSync: vi.fn(), debounceMs: 50 });
+		const save = vi.fn();
+		attachWindowStateTracker(win, { save, debounceMs: 50 });
 		fire("resize");
 		isDestroyed = true;
 		vi.advanceTimersByTime(60);
-		expect(saveAsync).not.toHaveBeenCalled();
+		expect(save).not.toHaveBeenCalled();
 	});
 
-	it("does not call saveSync if the window is already destroyed at close time", () => {
+	it("does not call save if the window is already destroyed at close time", () => {
 		const win = makeWin();
-		const saveSync = vi.fn();
-		attachWindowStateTracker(win, { saveAsync: vi.fn(), saveSync, debounceMs: 50 });
+		const save = vi.fn();
+		attachWindowStateTracker(win, { save, debounceMs: 50 });
 		isDestroyed = true;
 		fire("close");
-		expect(saveSync).not.toHaveBeenCalled();
+		expect(save).not.toHaveBeenCalled();
 	});
 
 	it("subscribes to all expected window events", () => {
 		const win = makeWin();
-		attachWindowStateTracker(win, { saveAsync: vi.fn(), saveSync: vi.fn() });
+		attachWindowStateTracker(win, { save: vi.fn() });
 		expect(win.on).toHaveBeenCalledWith("resize", expect.any(Function));
 		expect(win.on).toHaveBeenCalledWith("move", expect.any(Function));
 		expect(win.on).toHaveBeenCalledWith("maximize", expect.any(Function));
@@ -320,25 +318,21 @@ describe("attachWindowStateTracker", () => {
 
 	it("dispose cancels pending debounced save", () => {
 		const win = makeWin();
-		const saveAsync = vi.fn();
-		const dispose = attachWindowStateTracker(win, {
-			saveAsync,
-			saveSync: vi.fn(),
-			debounceMs: 50,
-		});
+		const save = vi.fn();
+		const dispose = attachWindowStateTracker(win, { save, debounceMs: 50 });
 		fire("resize");
 		dispose();
 		vi.advanceTimersByTime(60);
-		expect(saveAsync).not.toHaveBeenCalled();
+		expect(save).not.toHaveBeenCalled();
 	});
 
-	it("swallows saveAsync exceptions to avoid crashing the window", () => {
+	it("swallows save exceptions to avoid crashing the window", () => {
 		const win = makeWin();
-		const saveAsync = vi.fn(() => {
+		const save = vi.fn(() => {
 			throw new Error("disk full");
 		});
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		attachWindowStateTracker(win, { saveAsync, saveSync: vi.fn(), debounceMs: 10 });
+		attachWindowStateTracker(win, { save, debounceMs: 10 });
 		fire("resize");
 		expect(() => vi.advanceTimersByTime(20)).not.toThrow();
 		expect(warn).toHaveBeenCalled();

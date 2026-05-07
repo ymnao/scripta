@@ -187,13 +187,12 @@ export function getWindowState(): WindowState | null {
 	}
 }
 
-export async function persistWindowState(state: WindowState): Promise<void> {
-	const store = getMainStore();
-	setValue(store, "windowState", state);
-	await persist(store);
-}
-
-export function persistWindowStateSync(state: WindowState): void {
+// async と sync を併用すると debounce 経由の async と close 経由の sync が同じ
+// settings.json に並走してレースする（古い async が後勝ちで disk を上書きする）。
+// 書き込み 1 回あたり JSON < 1KB の writeFileAtomic.sync は事実上瞬時のため
+// 同期一本に統一して順序保証を担保する。debounce 500ms により頻度も IPC を
+// ブロックしない範囲に収まる。
+export function persistWindowState(state: WindowState): void {
 	const store = getMainStore();
 	setValue(store, "windowState", state);
 	persistSync(store);

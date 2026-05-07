@@ -2,13 +2,8 @@ import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
-import {
-	getWindowState,
-	getWorkspacePathFromSettings,
-	persistWindowState,
-	persistWindowStateSync,
-} from "./ipc/settings";
-import { approveWorkspacePath } from "./ipc/workspace";
+import { getWindowState, getWorkspacePathFromSettings, persistWindowState } from "./ipc/settings";
+import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
 import { isSafeExternalUrl } from "./utils/url";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
@@ -94,19 +89,17 @@ function createWindow(opts: CreateWindowOptions = {}): void {
 	attachWindowLifecycle(mainWindow, () => {
 		openWindows.delete(mainWindow);
 	});
+	if (isNew) {
+		// 補助ウィンドウからの workspace:set では settings.json の workspacePath を
+		// 上書きさせない（startup の workspace 復元抑止と整合させる）。
+		markWorkspacePersistenceVolatile(mainWindow.webContents.id);
+	}
 	// New Window は state 永続化対象から外す（メイン window の bounds が上書きされる
 	// と「サブで一瞬開いただけ」のサイズで次回起動時にメイン window が起動する）
 	if (!isNew) {
-		attachWindowStateTracker(mainWindow, {
-			// 移動 / リサイズの最中は debounced async 書き込み（IPC を塞がない）
-			saveAsync: (state) => {
-				void persistWindowState(state).catch((e) => {
-					console.warn("[window-state] persistWindowState failed:", e);
-				});
-			},
-			// close 時のみ sync。プロセス終了に間に合わせるため。
-			saveSync: persistWindowStateSync,
-		});
+		// 書き込みは sync 一本（race を避けるため）。debounce 500ms により
+		// 頻度は drag/resize 連打中でも収束する。
+		attachWindowStateTracker(mainWindow, { save: persistWindowState });
 
 		// 起動直後のフラッシュを避けるため maximize / fullScreen は loadFile/URL の
 		// 後で適用する。BrowserWindow の constructor が x/y/width/height を受け取った

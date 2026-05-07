@@ -43,6 +43,21 @@ export function isWorkspacePathApproved(rawPath: string): boolean {
 // などの表記揺れで「同じ実体なのに別物扱い」となる事故が起こる。
 const windowWorkspaces = new Map<number, string>();
 
+// New Window (Cmd+Shift+N) で開かれた補助ウィンドウは「workspace を永続化しない」
+// 仕様（旧 Tauri / `AppLayout.tsx::isNewWindow` 参照）。renderer 側で startup の
+// 復元を抑止するだけでは、補助ウィンドウから picker で別フォルダを開いた瞬間に
+// `workspace:set` → `persistWorkspacePath` まで走り、メイン側 settings.json の
+// 既定 workspace を上書きしてしまう。
+//
+// この set に入っている webContents.id からの `workspace:set` では永続化を行わず、
+// in-memory の allowedRoots / windowWorkspaces 登録だけ行う。`unregisterWindow` で
+// 削除されるため、ウィンドウ close 後に id が再利用されても残らない。
+const volatileWorkspacePersistenceWindows = new Set<number>();
+
+export function markWorkspacePersistenceVolatile(webContentsId: number): void {
+	volatileWorkspacePersistenceWindows.add(webContentsId);
+}
+
 export function setActiveWorkspaceForWindow(webContentsId: number, path: string | null): void {
 	const canonical = path === null ? null : canonicalize(path);
 	const previous = windowWorkspaces.get(webContentsId);
@@ -64,6 +79,7 @@ export function setActiveWorkspaceForWindow(webContentsId: number, path: string 
 // ガードが緩む事故を防ぐ。
 export function unregisterWindow(webContentsId: number): void {
 	windowWorkspaces.delete(webContentsId);
+	volatileWorkspacePersistenceWindows.delete(webContentsId);
 	clearWorkspaceRootsForWindow(webContentsId);
 }
 
@@ -82,7 +98,11 @@ export function registerWorkspaceIpc(): void {
 		// renderer 側 settings:set("workspacePath", ...) で任意値を書き込めると、
 		// 次回起動の bootstrap が「未承認 path を approve」する抜け穴になるため、
 		// approve 通過後に main がここから書き込む。
-		await persistWorkspacePath(path);
+		// 補助ウィンドウ（New Window）は意図的に永続化を行わない。renderer の
+		// fetched workspace 値は不変で、in-memory の登録だけ更新する。
+		if (!volatileWorkspacePersistenceWindows.has(event.sender.id)) {
+			await persistWorkspacePath(path);
+		}
 		setActiveWorkspaceForWindow(event.sender.id, path);
 	});
 }
@@ -92,8 +112,11 @@ export const __testing = {
 	unregisterWindow,
 	getWindowWorkspaces: (): Map<number, string> => new Map(windowWorkspaces),
 	getApprovedWorkspacePaths: (): Set<string> => new Set(approvedWorkspacePaths),
+	getVolatileWorkspacePersistenceWindows: (): Set<number> =>
+		new Set(volatileWorkspacePersistenceWindows),
 	reset: (): void => {
 		windowWorkspaces.clear();
 		approvedWorkspacePaths.clear();
+		volatileWorkspacePersistenceWindows.clear();
 	},
 };

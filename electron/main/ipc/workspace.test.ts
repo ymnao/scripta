@@ -8,14 +8,27 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
+vi.mock("./settings", () => ({
+	persistWorkspacePath: vi.fn(async () => {}),
+}));
+
+import { ipcMain } from "electron";
 import { canonicalize, clearWorkspaceRoots, getWorkspaceRootsForWindow } from "../utils/path-guard";
-import { __testing, approveWorkspacePath, isWorkspacePathApproved } from "./workspace";
+import { persistWorkspacePath } from "./settings";
+import {
+	__testing,
+	approveWorkspacePath,
+	isWorkspacePathApproved,
+	markWorkspacePersistenceVolatile,
+	registerWorkspaceIpc,
+} from "./workspace";
 
 const {
 	setActiveWorkspaceForWindow,
 	unregisterWindow,
 	getWindowWorkspaces,
 	getApprovedWorkspacePaths,
+	getVolatileWorkspacePersistenceWindows,
 	reset,
 } = __testing;
 
@@ -127,6 +140,85 @@ describe("unregisterWindow", () => {
 		unregisterWindow(9999);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
 		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+	});
+});
+
+describe("markWorkspacePersistenceVolatile", () => {
+	it("records the window id and is cleared by unregisterWindow", () => {
+		markWorkspacePersistenceVolatile(WIN_A);
+		expect(getVolatileWorkspacePersistenceWindows().has(WIN_A)).toBe(true);
+		unregisterWindow(WIN_A);
+		expect(getVolatileWorkspacePersistenceWindows().has(WIN_A)).toBe(false);
+	});
+
+	it("is cleared by reset()", () => {
+		markWorkspacePersistenceVolatile(WIN_A);
+		markWorkspacePersistenceVolatile(WIN_B);
+		reset();
+		expect(getVolatileWorkspacePersistenceWindows().size).toBe(0);
+	});
+});
+
+describe("workspace:set IPC handler — persistence gating", () => {
+	type Handler = (event: { sender: { id: number } }, path: string | null) => Promise<void>;
+
+	const captureHandler = (): Handler => {
+		registerWorkspaceIpc();
+		const calls = vi.mocked(ipcMain.handle).mock.calls;
+		const entry = calls.find(([channel]) => channel === "workspace:set");
+		if (!entry) throw new Error("workspace:set was not registered");
+		return entry[1] as unknown as Handler;
+	};
+
+	beforeEach(() => {
+		vi.mocked(ipcMain.handle).mockReset();
+		vi.mocked(persistWorkspacePath).mockClear();
+	});
+
+	it("non-volatile windows: persists workspacePath", async () => {
+		approveWorkspacePath(dirA);
+		const handler = captureHandler();
+		await handler({ sender: { id: WIN_A } }, dirA);
+		expect(vi.mocked(persistWorkspacePath)).toHaveBeenCalledWith(dirA);
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+	});
+
+	it("volatile windows (New Window): does NOT persist workspacePath but still registers in-memory", async () => {
+		// 補助ウィンドウから picker でフォルダを開いた瞬間に settings.json の
+		// 既定 workspacePath が上書きされるバグの回帰防止
+		approveWorkspacePath(dirA);
+		markWorkspacePersistenceVolatile(WIN_A);
+		const handler = captureHandler();
+		await handler({ sender: { id: WIN_A } }, dirA);
+		expect(vi.mocked(persistWorkspacePath)).not.toHaveBeenCalled();
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+	});
+
+	it("rejects unapproved path even for volatile windows", async () => {
+		// volatile が approve バイパスにならないこと（信頼境界の確認）
+		markWorkspacePersistenceVolatile(WIN_A);
+		const handler = captureHandler();
+		await expect(handler({ sender: { id: WIN_A } }, dirA)).rejects.toThrow(/Permission denied/);
+		expect(vi.mocked(persistWorkspacePath)).not.toHaveBeenCalled();
+	});
+
+	it("after unregisterWindow, the same id is no longer volatile and persists again", async () => {
+		approveWorkspacePath(dirA);
+		markWorkspacePersistenceVolatile(WIN_A);
+		unregisterWindow(WIN_A);
+		const handler = captureHandler();
+		await handler({ sender: { id: WIN_A } }, dirA);
+		expect(vi.mocked(persistWorkspacePath)).toHaveBeenCalledTimes(1);
+	});
+
+	it("path === null (unregister) is allowed and gated by volatility flag", async () => {
+		setActiveWorkspaceForWindow(WIN_A, dirA);
+		markWorkspacePersistenceVolatile(WIN_A);
+		const handler = captureHandler();
+		await handler({ sender: { id: WIN_A } }, null);
+		// volatile なので null も persist されない
+		expect(vi.mocked(persistWorkspacePath)).not.toHaveBeenCalled();
+		expect(getWindowWorkspaces().has(WIN_A)).toBe(false);
 	});
 });
 
