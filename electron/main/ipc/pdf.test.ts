@@ -179,6 +179,23 @@ describe("exportPdfImpl", () => {
 		expect(opts.margins.top).toBeCloseTo(0.787, 3);
 		expect(opts.printBackground).toBe(true);
 	});
+
+	it("registers a 300s overall export timeout", async () => {
+		// 各ステージ（loadFile / fonts.ready / printToPDF）の個別 timeout は持たず、
+		// **export 全体** に 300s（旧 Tauri 版と同じ PDF_EXPORT_TIMEOUT_SECS=300）の
+		// 単一予算をかけていることを spy で確認する。fake timer + advance では microtask
+		// との同期が難しい（5s 内に進めきれず vitest test timeout に引っかかる）ため、
+		// 「300_000ms の setTimeout が 1 度発生していること」を回帰として固定する。
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+		try {
+			const outputPath = join(workspace, "spy.pdf");
+			await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+			const had300s = setTimeoutSpy.mock.calls.some((args) => args[1] === 300_000);
+			expect(had300s).toBe(true);
+		} finally {
+			setTimeoutSpy.mockRestore();
+		}
+	});
 });
 
 describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {

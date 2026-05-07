@@ -37,16 +37,21 @@ describe("ogp scheme validation", () => {
 describe("ogp SSRF defense via safeLookup", () => {
 	beforeEach(() => clearCache());
 	it("blocks private hostname (127.0.0.1) at connect", async () => {
-		// safeLookup が 127.0.0.1 を解決した瞬間に EACCES を返す。
-		// http.request の error イベントで reject される。
-		await expect(fetchOgpImpl("http://127.0.0.1/")).rejects.toThrow();
+		// safeLookup が 127.0.0.1 を解決した瞬間に EACCES を返す。エラー文に
+		// "SSRF blocked" が含まれることまで確認し、判定経路（DNS 失敗ではなく
+		// safeLookup の reject）を固定する。
+		await expect(fetchOgpImpl("http://127.0.0.1/")).rejects.toThrow(/SSRF blocked/);
 	});
-	it("blocks loopback v6 ::1", async () => {
-		await expect(fetchOgpImpl("http://[::1]/")).rejects.toThrow();
+	it("blocks loopback v6 ::1 via SSRF (not DNS failure)", async () => {
+		// IPv6 リテラル URL は `URL.hostname` が `[::1]` 表現で返るが、http-fetch が
+		// bracket を剥いて safeLookup に渡すので、ENOTFOUND ではなく SSRF として
+		// 弾かれることを確認する。ここで bracket 正規化が壊れると判定経路が
+		// 「DNS 失敗で結果的に reject」に静かに退化するので回帰として固定する。
+		await expect(fetchOgpImpl("http://[::1]/")).rejects.toThrow(/SSRF blocked/);
 	});
 	it("blocks link-local v4 169.254.169.254 (cloud metadata)", async () => {
 		// AWS / GCP / Azure などの metadata service への SSRF を防ぐケース。
-		await expect(fetchOgpImpl("http://169.254.169.254/")).rejects.toThrow();
+		await expect(fetchOgpImpl("http://169.254.169.254/")).rejects.toThrow(/SSRF blocked/);
 	});
 });
 

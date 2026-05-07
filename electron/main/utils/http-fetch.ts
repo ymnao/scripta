@@ -1,7 +1,7 @@
 import type { IncomingMessage, RequestOptions } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import type { SafeLookup } from "./ssrf-guard";
+import { type SafeLookup, stripIpBrackets } from "./ssrf-guard";
 
 // `https.request` を Promise でラップして、(a) timeout / (b) max body bytes /
 // (c) SSRF-safe lookup を 1 箇所に集約するヘルパ。
@@ -47,9 +47,16 @@ export function httpFetch(opts: HttpFetchOptions): Promise<HttpFetchResult> {
 		// `number | string` を許容するが overload 解決の都合で any 化が必要なため、
 		// 明示的に number 化して曖昧さを排除する。
 		const port = url.port.length > 0 ? Number(url.port) : isHttps ? 443 : 80;
+		// IPv6 リテラル URL は `new URL("http://[::1]/").hostname` が `"[::1]"` の
+		// **bracket 付き** で返る。一方 Node の `dns.lookup` / `RequestOptions.hostname`
+		// は **bracket なし** を要求するため正規化する。これをしないと safeLookup が
+		// `dns.lookup("[::1]")` を呼んで ENOTFOUND になり、SSRF 判定経路に到達せず
+		// 名前解決失敗で弾かれる（=「弾けている」のは SSRF 防御ではない）。公開 IPv6
+		// ホストへの fetch も同経路で壊れる。
+		const hostname = stripIpBrackets(url.hostname);
 		const reqOpts: RequestOptions = {
 			protocol: url.protocol,
-			hostname: url.hostname,
+			hostname,
 			port,
 			path: `${url.pathname || "/"}${url.search}`,
 			method: opts.method ?? "GET",

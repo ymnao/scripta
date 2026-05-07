@@ -36,7 +36,10 @@ import { isGlobalIp } from "../utils/ssrf-guard";
 // 4. transient capability を consume し、temp file / window を必ず破棄
 
 const PDF_PARTITION = "scripta-pdf-export";
-const PDF_LOAD_TIMEOUT_MS = 30_000;
+// **export 全体** の上限。loadFile / fonts.ready / printToPDF を 1 つの予算で見て、
+// 「重いが正常な文書」を誤 timeout させず、「load 後にハング」を永遠に待たない。
+// 旧 Tauri 版 commands/export.rs と同じ 5 分（PDF_EXPORT_TIMEOUT_SECS=300）を採用。
+const PDF_EXPORT_TIMEOUT_MS = 300_000;
 const POST_LOAD_IDLE_MS = 100;
 
 // PDF 用 partition の webRequest フィルタは process 寿命中 1 度だけ登録すれば
@@ -140,6 +143,7 @@ export async function exportPdfImpl(
 	await fsp.writeFile(tmpHtmlPath, html, "utf8");
 
 	let win: BrowserWindow | null = null;
+	let timeoutId: NodeJS.Timeout | undefined;
 	try {
 		win = new BrowserWindow({
 			width: 800,
@@ -152,37 +156,39 @@ export async function exportPdfImpl(
 				partition: PDF_PARTITION,
 			},
 		});
+		const w = win;
 
-		// race の timeout 用 setTimeout が load 成功後も生きていると、PDF 生成のたびに
-		// 最大 PDF_LOAD_TIMEOUT_MS の間 Node プロセスにタイマーが残り続ける。タイマー
-		// ID を保持して race 後に必ず clearTimeout する。
-		let loadTimeoutId: NodeJS.Timeout | undefined;
-		const loadPromise = win.loadFile(tmpHtmlPath);
+		// 「load → fonts.ready → idle → printToPDF」の各段に **個別の** タイムアウトを
+		// 持たせると、重いが正常な文書を early-timeout してしまう一方で「load 後に
+		// 固まる」ケースは無期限に待つという非対称な失敗モードになる。export 全体に
+		// 1 個の予算（PDF_EXPORT_TIMEOUT_MS = 300s、旧 Tauri 版と同じ）をかける。
+		const exportWork = (async (): Promise<Buffer> => {
+			await w.loadFile(tmpHtmlPath);
+			// KaTeX 等のカスタムフォントが load 完了するのを待つ。document.fonts API が
+			// 無い環境（古い Chromium など）でも壊れないよう try/catch でガード。
+			try {
+				await w.webContents.executeJavaScript(
+					`(typeof document !== "undefined" && document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true)`,
+					true,
+				);
+			} catch {
+				// ignore
+			}
+			await delay(POST_LOAD_IDLE_MS);
+			return await w.webContents.printToPDF(PDF_OPTIONS);
+		})();
+		// timeout が race に勝った後 exportWork が遅れて reject すると unhandled
+		// rejection になるので、最終的な結果を捨てる no-op handler を attach する。
+		exportWork.catch(() => {});
+
 		const timeoutPromise = new Promise<never>((_, reject) => {
-			loadTimeoutId = setTimeout(
-				() => reject(new Error("PDFエクスポートのページ読み込みがタイムアウトしました")),
-				PDF_LOAD_TIMEOUT_MS,
+			timeoutId = setTimeout(
+				() => reject(new Error("PDFエクスポートがタイムアウトしました")),
+				PDF_EXPORT_TIMEOUT_MS,
 			);
 		});
-		try {
-			await Promise.race([loadPromise, timeoutPromise]);
-		} finally {
-			if (loadTimeoutId !== undefined) clearTimeout(loadTimeoutId);
-		}
 
-		// KaTeX 等のカスタムフォントが load 完了するのを待つ。document.fonts API が
-		// 無い環境（古い Chromium など）でも壊れないよう try/catch でガード。
-		try {
-			await win.webContents.executeJavaScript(
-				`(typeof document !== "undefined" && document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true)`,
-				true,
-			);
-		} catch {
-			// ignore
-		}
-		await delay(POST_LOAD_IDLE_MS);
-
-		const buffer = await win.webContents.printToPDF(PDF_OPTIONS);
+		const buffer = await Promise.race([exportWork, timeoutPromise]);
 		if (buffer.length === 0) {
 			throw new Error("PDFファイルが空です");
 		}
@@ -190,6 +196,7 @@ export async function exportPdfImpl(
 		await writeFileAtomic(canonical, buffer);
 		consumeTransientWritePath(senderId, canonical);
 	} finally {
+		if (timeoutId !== undefined) clearTimeout(timeoutId);
 		if (win && !win.isDestroyed()) win.destroy();
 		await fsp.rm(tmpDirPath, { recursive: true, force: true }).catch(() => {});
 	}

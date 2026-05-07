@@ -1,13 +1,18 @@
+import { isIP } from "node:net";
 import { URL } from "node:url";
 import { ipcMain } from "electron";
 import type { OgpData } from "../../../src/types/ogp";
 import { httpFetch } from "../utils/http-fetch";
 import { parseOgp } from "../utils/ogp-parser";
-import { safeLookup } from "../utils/ssrf-guard";
+import { isGlobalIp, safeLookup, stripIpBrackets } from "../utils/ssrf-guard";
 
 // 旧 Tauri 版 src-tauri/src/commands/ogp.rs `fetch_ogp` を Node stdlib に移植。
-// SSRF 防御は `http(s).request({ lookup: safeLookup })` で接続時 IP を弾く方式で
-// 担保する（utils/ssrf-guard.ts 参照）。ureq の `Resolver` カスタマイズと等価。
+// SSRF 防御は 2 段構成で、両方を redirect 1 hop ごとに通す:
+//   (a) Pre-flight check: URL の hostname が **literal IP** の場合は isGlobalIp で
+//       直接判定。Node の `net.connect` は `host` が IP リテラルだと `dns.lookup` を
+//       スキップするため、(b) のみだと literal IP SSRF が貫通する。
+//   (b) Connect-time check: hostname が **DNS 名** の場合は `safeLookup` が
+//       接続時 lookup で解決後 IP を検証する（DNS rebinding/TOCTOU-safe）。
 // HTTP 層の Promise / timeout / body-limit boilerplate は utils/http-fetch.ts へ集約。
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -67,6 +72,12 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 		const parsed = new URL(current);
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 			throw new Error("Only http and https URLs are supported");
+		}
+		// (a) literal IP は safeLookup を通らないので、ここで isGlobalIp で直接弾く。
+		// hostname は IPv6 では bracket 付きで返るので bracket を剥いてから判定。
+		const bareHost = stripIpBrackets(parsed.hostname);
+		if (isIP(bareHost) && !isGlobalIp(bareHost)) {
+			throw new Error(`SSRF blocked: non-global IP ${bareHost}`);
 		}
 		const res = await httpFetch({
 			url: parsed,

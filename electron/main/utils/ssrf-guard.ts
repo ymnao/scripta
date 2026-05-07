@@ -19,6 +19,14 @@ export function isGlobalIp(ip: string): boolean {
 	return false;
 }
 
+// IPv6 リテラル URL の `URL.hostname` は `"[::1]"` の **bracket 付き** で返るが、
+// Node の `dns.lookup` / `RequestOptions.hostname` / `net.isIP` はいずれも bracket
+// なしを期待する。SSRF 判定 / 接続 / 表示で host を扱う箇所はこのヘルパで正規化する。
+export function stripIpBrackets(host: string): string {
+	if (host.startsWith("[") && host.endsWith("]")) return host.slice(1, -1);
+	return host;
+}
+
 function isGlobalIpv4(ip: string): boolean {
 	const parts = ip.split(".");
 	if (parts.length !== 4) return false;
