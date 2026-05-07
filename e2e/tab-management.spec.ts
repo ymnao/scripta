@@ -41,7 +41,7 @@ test.describe("tab management", () => {
 		await page.getByLabel("hello.md file").click();
 		await expect(page.getByRole("tab")).toHaveCount(1);
 
-		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
+		await page.getByLabel("notes.md file").click({ modifiers: [modKey] });
 		await expect(page.getByRole("tab")).toHaveCount(2);
 	});
 
@@ -67,7 +67,7 @@ test.describe("tab management", () => {
 		await page.getByLabel("hello.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
-		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
+		await page.getByLabel("notes.md file").click({ modifiers: [modKey] });
 		await expect(page.locator(".cm-content")).toContainText("Some notes here");
 
 		await page.getByRole("tab").filter({ hasText: "hello.md" }).click();
@@ -81,7 +81,7 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
+		await page.getByLabel("notes.md file").click({ modifiers: [modKey] });
 
 		await expect(page.getByRole("tab")).toHaveCount(2);
 
@@ -96,7 +96,7 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
+		await page.getByLabel("notes.md file").click({ modifiers: [modKey] });
 
 		await expect(page.getByRole("tab")).toHaveCount(2);
 
@@ -142,7 +142,7 @@ test.describe("tab management", () => {
 		await page.goto("/");
 		await page.getByLabel("Open folder").click();
 		await page.getByLabel("hello.md file").click();
-		await page.getByLabel("notes.md file").click({ modifiers: ["Meta"] });
+		await page.getByLabel("notes.md file").click({ modifiers: [modKey] });
 
 		await expect(page.getByRole("tab")).toHaveCount(2);
 		await expect(page.getByRole("tab", { selected: true })).toContainText("notes.md");
