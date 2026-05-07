@@ -44,8 +44,8 @@ test.describe("code block copy button", () => {
 		// 成功フィードバック（チェックマーク）
 		await expect(copyButton).toHaveClass(/cm-codeblock-copy-success/);
 
-		await page.waitForTimeout(100);
-		const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-		expect(clipboardText).toBe("const x = 1;");
+		await expect
+			.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+			.toBe("const x = 1;");
 	});
 });

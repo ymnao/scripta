@@ -94,9 +94,7 @@ test.describe("editor context menu", () => {
 		await rightClickOnLine(page);
 		await page.getByRole("menuitem", { name: "コピー" }).click();
 
-		await page.waitForTimeout(100);
-		const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-		expect(clipboardText).toBe("hello");
+		await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("hello");
 	});
 
 	test("選択外右クリックで選択が解除されカーソルが移動する", async ({ page }) => {
@@ -125,9 +123,7 @@ test.describe("editor context menu", () => {
 		await rightClickOnLine(page);
 		await page.getByRole("menuitem", { name: "切り取り" }).click();
 
-		await page.waitForTimeout(100);
-		const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-		expect(clipboardText).toBe("hello");
+		await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("hello");
 
 		await expect(editor).not.toContainText("hello");
 	});

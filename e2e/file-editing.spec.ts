@@ -62,7 +62,6 @@ test.describe("file editing", () => {
 
 		const calls = await mock.getCalls("writeFile");
 		expect(calls.length).toBeGreaterThanOrEqual(1);
-		// Electron mock の track 引数は positional array：[path, content]
 		expect(calls.some((c) => c[0] === "/workspace/hello.md")).toBe(true);
 	});
 

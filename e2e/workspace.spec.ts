@@ -72,7 +72,6 @@ test.describe("workspace", () => {
 
 		const calls = await mock.getCalls("showInFolder");
 		expect(calls).toHaveLength(1);
-		// Electron mock は positional 配列 [path]
 		expect(calls[0]).toEqual(["/workspace/hello.md"]);
 	});
 

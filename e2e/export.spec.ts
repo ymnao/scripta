@@ -24,7 +24,6 @@ test.describe("export dialog", () => {
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
-		// Tauri menu-export → Electron menu event "export"
 		await mock.emitMenuEvent("export");
 
 		const dialog = page.locator("dialog");
@@ -36,7 +35,6 @@ test.describe("export dialog", () => {
 
 		await dialog.getByRole("button", { name: "HTMLとしてエクスポート" }).click();
 
-		// writeFile が呼ばれるのを待つ。Electron mock は positional 配列 [path, content]
 		await expect
 			.poll(async () => {
 				const calls = await mock.getCalls("writeFile");
@@ -84,9 +82,8 @@ test.describe("export dialog", () => {
 		// ファイルを開かずに menu-export を発火 → ダイアログは出ない
 		await mock.emitMenuEvent("export");
 
-		await page.waitForTimeout(500);
 		const dialog = page.locator("dialog");
-		await expect(dialog).not.toBeVisible();
+		await expect(dialog).not.toBeVisible({ timeout: 500 });
 	});
 
 	test("プロンプトセクションに切り替えてエクスポートできる", async ({ page }) => {
@@ -152,7 +149,6 @@ test.describe("export dialog", () => {
 
 		await exportBtn.click();
 
-		// exportPdf が呼ばれるのを待つ。positional 配列 [html, outputPath]
 		await expect
 			.poll(async () => {
 				const calls = await mock.getCalls("exportPdf");

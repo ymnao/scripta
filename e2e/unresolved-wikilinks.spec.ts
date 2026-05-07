@@ -84,7 +84,6 @@ test.describe("unresolved wikilinks panel", () => {
 
 		await page.getByRole("button", { name: "作成" }).click();
 
-		// Electron 移植: createFile / writeNewFile （旧 create_file / write_new_file から rename）
 		const createCalls = await mock.getCalls("createFile");
 		const writeNewCalls = await mock.getCalls("writeNewFile");
 		const totalCreates = createCalls.length + writeNewCalls.length;

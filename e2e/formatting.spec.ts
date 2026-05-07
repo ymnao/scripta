@@ -44,7 +44,6 @@ test.describe("formatting shortcuts", () => {
 
 		const calls = await mock.getCalls("writeFile");
 		const lastCall = calls[calls.length - 1];
-		// Electron mock は positional 配列 [path, content]
 		expect(lastCall[1]).toContain("**world**");
 	});
 
