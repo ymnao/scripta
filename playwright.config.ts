@@ -11,7 +11,10 @@ export default defineConfig({
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
 	workers: process.env.CI ? "50%" : undefined,
-	reporter: process.env.CI ? [["dot"], ["github"]] : "html",
+	// CI でも HTML report を出す（`open: "never"` で自動オープンを防ぐ）。
+	// `.github/workflows/ci.yml` の e2e job がこの `playwright-report/` を artifact 化するので、
+	// reporter から外すと artifact が空になり、失敗時の解析パスが切れる。
+	reporter: process.env.CI ? [["dot"], ["github"], ["html", { open: "never" }]] : "html",
 	use: {
 		baseURL: `http://localhost:${PORT}`,
 		trace: "on-first-retry",

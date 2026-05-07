@@ -1,5 +1,10 @@
 import type { Page } from "@playwright/test";
-import type { MenuEventName } from "../../electron/preload/api";
+import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
+import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
+import type { OgpData } from "../../src/types/ogp";
+import type { SearchResult } from "../../src/types/search";
+import type { UpdateInfo } from "../../src/types/update";
+import type { UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
 // renderer-only Playwright で `window.api` を addInitScript 注入するモック。
@@ -232,7 +237,10 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
-	const api = {
+	// `Api` 型に固定することで preload 契約と乖離した瞬間に typecheck が落ちる。
+	// 緩い `unknown` / `string` のままだと preload 側のシグネチャが変わっても
+	// この helper は静かに古いまま放置されるため、foundation として固定する。
+	const api: Api = {
 		getVersion: (): string => {
 			track("getVersion", []);
 			return store.appVersion;
@@ -269,7 +277,7 @@ function installApiMock(opts: {
 			track("openDirectoryPicker", []);
 			return store.dialogResult;
 		},
-		showSaveDialog: async (opts: unknown): Promise<string | null> => {
+		showSaveDialog: async (opts: SaveDialogOptions): Promise<string | null> => {
 			track("showSaveDialog", [opts]);
 			return store.saveDialogResult;
 		},
@@ -277,6 +285,16 @@ function installApiMock(opts: {
 		workspaceSet: async (path: string | null): Promise<void> => {
 			track("workspaceSet", [path]);
 			store.activeWorkspace = path;
+			// 本番 electron/main/ipc/workspace.ts:104 と settings.ts:170 は
+			// `persistWorkspacePath(path)` で settings の workspacePath まで永続化する
+			// (path === null は delete、それ以外は set)。startup の loadSettings →
+			// AppLayout は settings.workspacePath を読んで workspace を復元するため、
+			// 永続化を再現しないと「reload で workspace が復元されない」差異が出る。
+			if (path === null) {
+				delete store.settings.workspacePath;
+			} else {
+				store.settings.workspacePath = path;
+			}
 		},
 
 		readFile: async (path: string): Promise<string> => {
@@ -396,20 +414,14 @@ function installApiMock(opts: {
 			workspacePath: string,
 			rawQuery: string,
 			caseSensitive?: boolean,
-		): Promise<unknown[]> => {
+		): Promise<SearchResult[]> => {
 			track("searchFiles", [workspacePath, rawQuery, caseSensitive ?? false]);
 			const querySearch = caseSensitive ? rawQuery : rawQuery.toLowerCase();
 			if (!querySearch) return [];
 			// 本番 search.ts:104-106 と同じく path の byte 比較で sort してから走査。
 			// 検索結果の順序が決定的になり、テスト assertion を安定させる。
 			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
-			const results: Array<{
-				filePath: string;
-				lineNumber: number;
-				lineContent: string;
-				matchStart: number;
-				matchEnd: number;
-			}> = [];
+			const results: SearchResult[] = [];
 			for (const filePath of mdFiles) {
 				const content = store.files[filePath];
 				if (!content) continue;
@@ -452,7 +464,7 @@ function installApiMock(opts: {
 			if (query === "") return mdFiles;
 			return mdFiles.filter((p) => fuzzyMatch(query, baseName(p)));
 		},
-		scanUnresolvedWikilinks: async (workspacePath: string): Promise<unknown[]> => {
+		scanUnresolvedWikilinks: async (workspacePath: string): Promise<UnresolvedWikilink[]> => {
 			track("scanUnresolvedWikilinks", [workspacePath]);
 			const encoder = new TextEncoder();
 			const mdFiles = collectMdFiles(workspacePath);
@@ -463,17 +475,7 @@ function installApiMock(opts: {
 					existingPages.add(file.slice(0, -3).normalize("NFC"));
 				}
 			}
-			const unresolvedMap: Record<
-				string,
-				Array<{
-					filePath: string;
-					lineNumber: number;
-					byteOffset: number;
-					lineContent: string;
-					contextBefore: string[];
-					contextAfter: string[];
-				}>
-			> = {};
+			const unresolvedMap: Record<string, UnresolvedWikilink["references"]> = {};
 			for (const filePath of mdFiles) {
 				const content = store.files[filePath];
 				if (!content) continue;
@@ -530,14 +532,14 @@ function installApiMock(opts: {
 				.sort((a, b) => (a.pageName < b.pageName ? -1 : a.pageName > b.pageName ? 1 : 0));
 		},
 
-		fetchOgp: async (url: string): Promise<unknown> => {
+		fetchOgp: async (url: string): Promise<OgpData> => {
 			track("fetchOgp", [url]);
 			return { title: null, description: null, image: null, siteName: null, url };
 		},
 		exportPdf: async (html: string, outputPath: string): Promise<void> => {
 			track("exportPdf", [html, outputPath]);
 		},
-		checkForUpdate: async (currentVersion: string): Promise<unknown> => {
+		checkForUpdate: async (currentVersion: string): Promise<UpdateInfo> => {
 			track("checkForUpdate", [currentVersion]);
 			return {
 				hasUpdate: false,
@@ -555,7 +557,7 @@ function installApiMock(opts: {
 			track("gitCheckRepo", [path]);
 			return false;
 		},
-		gitStatus: async (path: string): Promise<unknown> => {
+		gitStatus: async (path: string): Promise<GitStatus> => {
 			track("gitStatus", [path]);
 			return { branch: "", changedFilesCount: 0, conflictFiles: [], hasRemote: false };
 		},
@@ -566,7 +568,7 @@ function installApiMock(opts: {
 			track("gitCommit", [path, message]);
 			return "";
 		},
-		gitPull: async (path: string, syncMethod: string): Promise<string> => {
+		gitPull: async (path: string, syncMethod: SyncMethod): Promise<string> => {
 			track("gitPull", [path, syncMethod]);
 			return "";
 		},
@@ -578,7 +580,7 @@ function installApiMock(opts: {
 			track("gitGetConflictedFiles", [path]);
 			return [];
 		},
-		gitGetConflictContent: async (path: string, filePath: string): Promise<unknown> => {
+		gitGetConflictContent: async (path: string, filePath: string): Promise<ConflictContent> => {
 			track("gitGetConflictContent", [path, filePath]);
 			return { ours: "", theirs: "" };
 		},
@@ -635,5 +637,5 @@ function installApiMock(opts: {
 		},
 	};
 
-	(window as unknown as { api: typeof api }).api = api;
+	(window as unknown as { api: Api }).api = api;
 }
