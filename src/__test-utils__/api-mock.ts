@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { Api } from "../../electron/preload/api";
+import { buildScriptaAssetUrl } from "../../electron/preload/scripta-asset-url";
 
 /**
  * `window.api` の全メソッドを `vi.fn()` で埋めたデフォルトモックを返す。
@@ -17,7 +18,7 @@ export function createApiMock(): Api {
 
 		openExternal: vi.fn(async () => {}),
 		showInFolder: vi.fn(async () => {}),
-		convertFileSrc: vi.fn((path: string) => path),
+		convertFileSrc: vi.fn((path: string) => buildScriptaAssetUrl(path)),
 
 		openDirectoryPicker: vi.fn(async () => null),
 		showSaveDialog: vi.fn(async () => null),
