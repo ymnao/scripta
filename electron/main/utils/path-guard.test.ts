@@ -14,6 +14,7 @@ import {
 	getTransientWritePathsForWindow,
 	getWorkspaceRootsForWindow,
 	isPathAllowed,
+	isPathWithinAnyAllowedRoot,
 	registerTransientWritePath,
 	registerWorkspaceRoot,
 	unregisterWorkspaceRoot,
@@ -231,6 +232,47 @@ describe("isPathAllowed (window-scoped)", () => {
 			await rm(dotDir, { recursive: true, force: true });
 		}
 	});
+});
+
+describe("isPathWithinAnyAllowedRoot (process-wide)", () => {
+	it("returns false when no window has registered any root (fail-closed)", () => {
+		expect(isPathWithinAnyAllowedRoot("/anywhere/file")).toBe(false);
+	});
+
+	it("returns true if any window has registered a root containing the path", async () => {
+		const file = join(workspaceDir, "img.png");
+		await writeFile(file, "x", "utf8");
+		registerWorkspaceRoot(WIN_B, workspaceDir);
+		// scripta-asset:// プロトコルハンドラはどの window から発行されたかを区別できない
+		// ため、union として B 登録の root を A からのリクエストでも見える形で OK にする
+		expect(isPathWithinAnyAllowedRoot(file)).toBe(true);
+	});
+
+	it("returns false for paths outside any registered root", async () => {
+		const outsideFile = join(outsideDir, "leak.png");
+		await writeFile(outsideFile, "x", "utf8");
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		expect(isPathWithinAnyAllowedRoot(outsideFile)).toBe(false);
+	});
+
+	it("returns false for invalid input (boolean contract)", () => {
+		expect(isPathWithinAnyAllowedRoot("relative/path")).toBe(false);
+		expect(isPathWithinAnyAllowedRoot("")).toBe(false);
+		expect(isPathWithinAnyAllowedRoot("/tmp/\0evil")).toBe(false);
+	});
+
+	// fs.symlink は Windows で Developer Mode 無効時に EPERM になるため skip
+	it.skipIf(process.platform === "win32")(
+		"blocks symlink-based escape from any registered workspace",
+		async () => {
+			const link = join(workspaceDir, "escape");
+			await symlink(outsideDir, link);
+			const target = join(link, "secret.png");
+			await writeFile(target, "leaked", "utf8");
+			registerWorkspaceRoot(WIN_A, workspaceDir);
+			expect(isPathWithinAnyAllowedRoot(target)).toBe(false);
+		},
+	);
 });
 
 describe("assertPathAllowed (window-scoped)", () => {

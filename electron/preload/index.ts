@@ -1,6 +1,7 @@
 import { electronAPI } from "@electron-toolkit/preload";
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
 import type { Api } from "./api";
+import { buildScriptaAssetUrl } from "./scripta-asset-url";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 	const handler = (_event: IpcRendererEvent, payload: T) => {
@@ -36,7 +37,7 @@ const api: Api = Object.freeze({
 
 	openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
 	showInFolder: (path) => ipcRenderer.invoke("shell:show-in-folder", path),
-	convertFileSrc: (path) => path,
+	convertFileSrc: (path) => buildScriptaAssetUrl(path),
 
 	openDirectoryPicker: () => ipcRenderer.invoke("dialog:open-directory"),
 	showSaveDialog: (opts) => ipcRenderer.invoke("dialog:save", opts),

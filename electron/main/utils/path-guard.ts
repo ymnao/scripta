@@ -251,3 +251,22 @@ export function isPathAllowed(windowId: number, p: string): boolean {
 		return false;
 	}
 }
+
+// 全 window の登録 root を union で評価する process-wide 版。リクエスト元 webContents を
+// 特定できない経路（カスタムプロトコルハンドラ等）専用。現状の approve / register 設計
+// が「別ウィンドウ間で workspace を相互参照可」を許容している点を継承する（冒頭コメント
+// 参照）。approve を window-scoped 化する場合は本関数も window-scoped 版へ移行する。
+export function isPathWithinAnyAllowedRoot(p: string): boolean {
+	let target: string;
+	try {
+		target = realpathBestEffort(validatePath(p));
+	} catch {
+		return false;
+	}
+	for (const set of windowAllowedRoots.values()) {
+		for (const root of set) {
+			if (isPathInside(target, root)) return true;
+		}
+	}
+	return false;
+}
