@@ -1,5 +1,6 @@
-# 旧 Tauri 版 (com.scripta.app) と bundleId を揃え、macOS Application Support /
-# Windows レジストリ等の保存先を継続させる（旧版設定の手動移行を不要にする）。
+# 旧 Tauri 版と bundle ID を揃える (com.scripta.app: macOS bundle ID / Windows
+# レジストリ / Windows AUMID 用)。userData ディレクトリ名 (= app.getName) の
+# 継続は別途 electron/main/index.ts の app.setName("scripta") で行う。
 appId: com.scripta.app
 productName: scripta
 copyright: Copyright © 2025 ymnao
