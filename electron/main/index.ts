@@ -14,7 +14,13 @@ import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window
 // "scripta-next" のままだが、旧 Tauri 版 (productName = "scripta") の userData
 // ディレクトリ (~/Library/Application Support/scripta 等) を継続利用するため、
 // app.whenReady() で userData が確定する前に明示上書きする。
-app.setName("scripta");
+//
+// 互換維持が必要なのは packaged 配布物だけ。pnpm dev では package.json:name の
+// "scripta-next" のままにし、開発中の sidebar/workspacePath/window state 操作が
+// 本番アプリの設定を汚染するのを防ぐ。
+if (app.isPackaged) {
+	app.setName("scripta");
+}
 
 const CSP_PROD = [
 	"default-src 'self'",
