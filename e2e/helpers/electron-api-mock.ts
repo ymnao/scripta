@@ -593,6 +593,9 @@ function installApiMock(opts: {
 				.map(([pageName, references]) => ({ pageName, references }))
 				.sort((a, b) => (a.pageName < b.pageName ? -1 : a.pageName > b.pageName ? 1 : 0));
 		},
+		cancelWikilinkScan: async (): Promise<void> => {
+			track("cancelWikilinkScan", []);
+		},
 
 		fetchOgp: async (url: string): Promise<OgpData> => {
 			track("fetchOgp", [url]);

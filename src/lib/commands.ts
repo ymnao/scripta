@@ -90,6 +90,13 @@ export function scanUnresolvedWikilinks(workspacePath: string): Promise<Unresolv
 	return withRetry(() => window.api.scanUnresolvedWikilinks(workspacePath));
 }
 
+// in-flight scanUnresolvedWikilinks を main 側でキャンセルする。
+// UnresolvedLinksPanel の useEffect cleanup から呼ばれる。
+// SearchPanel の検索を巻き込まないために cancelSearch とは別 IPC。
+export function cancelWikilinkScan(): Promise<void> {
+	return window.api.cancelWikilinkScan();
+}
+
 export function showInFolder(path: string): Promise<void> {
 	return window.api.showInFolder(path);
 }

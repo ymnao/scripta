@@ -12,6 +12,7 @@ import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard"
 import {
 	__testing,
 	cancelSearchForWindow,
+	cancelWikilinkScanForWindow,
 	extractWikilinks,
 	fuzzyMatch,
 	isPathTraversal,
@@ -296,30 +297,42 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		expect(r2[0].pageName).toBe("missing");
 	});
 
-	it("cancelSearchForWindow stops in-flight wikilink scan", async () => {
-		// panel unmount / workspace 切替で renderer から `search:cancel` が送られる。
+	it("cancelWikilinkScanForWindow stops in-flight wikilink scan", async () => {
+		// panel unmount / workspace 切替で renderer から `wikilink:cancel` が送られる。
 		// 後発の scan が来なくても先発が isStale で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow does NOT cancel in-flight wikilink scan", async () => {
+		// regression guard: 共通化していた頃は SearchPanel cleanup 由来の
+		// `search:cancel` が wikilink scan も巻き込んで `[]` 化していた。逆方向の
+		// クロスキャンセルが起きないことを確認する。
 		for (let i = 0; i < 10; i++) {
 			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
 		}
 		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
 		cancelSearchForWindow(TEST_WIN);
 		const result = await promise;
-		expect(result).toEqual([]);
+		expect(result).toHaveLength(1);
+		expect(result[0].pageName).toBe("missing");
 	});
 
-	it("cancelSearchForWindow stops both in-flight search and wikilink scan", async () => {
-		// 案 A: `search:cancel` 1 本で両方止める。workspace 切替で
-		// renderer は cancelSearch() 1 回しか呼ばないので、両方 bail する必要がある。
+	it("cancelWikilinkScanForWindow does NOT cancel in-flight full-text search", async () => {
+		// regression guard: UnresolvedLinksPanel の cleanup で SearchPanel の
+		// 検索結果を空にしてしまう regression を防ぐ。検索が走り切ることを確認する。
 		for (let i = 0; i < 10; i++) {
-			await writeFile(join(workspaceDir, `f${i}.md`), "hello [[missing]] world");
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
 		}
-		const searchPromise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
-		const scanPromise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
-		cancelSearchForWindow(TEST_WIN);
-		const [sr, wr] = await Promise.all([searchPromise, scanPromise]);
-		expect(sr).toEqual([]);
-		expect(wr).toEqual([]);
+		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
 	});
 });
 

@@ -8,7 +8,7 @@ import {
 	Loader2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelSearch } from "../../lib/commands";
+import { cancelWikilinkScan } from "../../lib/commands";
 import { toRelativePath } from "../../lib/path";
 import { useWikilinkStore } from "../../stores/wikilink";
 import { useWorkspaceStore } from "../../stores/workspace";
@@ -39,7 +39,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 		return () => {
 			// workspace 切替 / panel unmount で in-flight scan を main 側でも止める。
 			// store 側 _scanId は renderer の結果を捨てるだけで、main の readFile ループは走り切る。
-			cancelSearch().catch(() => {});
+			cancelWikilinkScan().catch(() => {});
 		};
 	}, [workspacePath, scanVersion, scan]);
 
@@ -51,7 +51,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 		const timer = setTimeout(() => void scan(workspacePath), 2000);
 		return () => {
 			clearTimeout(timer);
-			cancelSearch().catch(() => {});
+			cancelWikilinkScan().catch(() => {});
 		};
 	}, [contentVersion, workspacePath, scan]);
 

@@ -56,13 +56,14 @@ export function fuzzyMatch(query: string, target: string): boolean {
 	return qi === q.length;
 }
 
-// 連続入力で古い search を中断するための per-window 世代カウンタ。
-// 同じ window から新しい searchFilesImpl が呼ばれると gen を bump し、
-// 進行中の古い検索は async resumption ごとに gen を確認して早期 return する。
-// renderer 側 (SearchPanel.tsx) も requestId で stale を捨てているが、
+// 連続入力で古い search / wikilink scan を中断するための per-window 世代カウンタ。
+// 同じ window から新しい同種 op が呼ばれると gen を bump し、
+// 進行中の古い op は async resumption ごとに gen を確認して早期 return する。
+// renderer 側 (SearchPanel.tsx 等) も requestId で stale を捨てているが、
 // IPC を投げ捨てるだけでは main の I/O は止まらない。
-// scanUnresolvedWikilinksImpl 用の世代は別管理（同種スキャンの先発のみ
-// 後発で打ち消す）。明示的 cancel (`search:cancel`) は両方 bump する。
+// search と wikilink scan は世代を独立管理する。共通化すると例えば
+// UnresolvedLinksPanel の cleanup で SearchPanel の検索結果まで `[]` にされる
+// クロスキャンセル regression が起きるため、cancel IPC も用途別に分ける。
 const searchGeneration = new Map<number, number>();
 const wikilinkGeneration = new Map<number, number>();
 
@@ -86,12 +87,17 @@ export function clearSearchForWindow(windowId: number): void {
 	wikilinkGeneration.delete(windowId);
 }
 
-// 明示的な cancel: gen を bump して in-flight な search / wikilink scan を bail させる。
-// renderer 側でクエリが空になった / panel が unmount された / workspace を切り替えた時に呼ばれる。
+// 明示的な cancel: gen を bump して in-flight searchFilesImpl を bail させる。
+// renderer 側でクエリが空になった / panel が unmount された時に呼ばれる。
 // 「次の検索が始まる」を待たないと止まらない問題を解消。
-// workspace スキャンは search も wikilink もまとめて止めたいので両方 bump する。
 export function cancelSearchForWindow(windowId: number): void {
 	bumpGeneration(searchGeneration, windowId);
+}
+
+// 明示的な cancel: gen を bump して in-flight scanUnresolvedWikilinksImpl を bail させる。
+// UnresolvedLinksPanel の cleanup から呼ばれる。
+// SearchPanel の searchFilesImpl は巻き込まない（クロスキャンセル防止）。
+export function cancelWikilinkScanForWindow(windowId: number): void {
 	bumpGeneration(wikilinkGeneration, windowId);
 }
 
@@ -293,6 +299,9 @@ export function registerSearchIpc(): void {
 		(event, workspacePath: string): Promise<UnresolvedWikilink[]> =>
 			scanUnresolvedWikilinksImpl(event.sender.id, workspacePath),
 	);
+	ipcMain.handle("wikilink:cancel", (event): void => {
+		cancelWikilinkScanForWindow(event.sender.id);
+	});
 }
 
 export const __testing = {
