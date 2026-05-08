@@ -14,7 +14,7 @@
 
 参照基準:
 
-- 旧 Tauri 版コマンド一覧: `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（30 コマンド）
+- 旧 Tauri 版コマンド一覧: `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（`commands::*` 31 個 + ルート定義の `clear_webview_browsing_data` で計 32）
 - 旧フロント側プラグイン使用: `@tauri-apps/api/{core,event,window,webviewWindow,app}` / `@tauri-apps/plugin-{shell,dialog,store}`
 - 新 Electron API 表面: `electron/preload/api.ts` の `Api` 型 + `electron/preload/index.ts` の `contextBridge.exposeInMainWorld`
 - 新フロント呼び出し: `src/lib/commands.ts`
@@ -74,7 +74,7 @@
 | `search_files` | `search:files` | ✅ | 純 JS で旧 Rust ロジックを 1:1 移植（`electron/main/ipc/search.ts`） |
 | `search_filenames` | `search:filenames` | ✅ | |
 | `scan_unresolved_wikilinks` | （`search:scan-unresolved-wikilinks` 等） | ✅ | |
-| なし | `search:cancel` | ✨ 新規 | 旧版にない cancellation API。`SearchPanel` の useEffect cleanup から呼ばれる |
+| なし | `search:cancel` | ✅（新規追加） | 旧版にない cancellation API。`SearchPanel` の useEffect cleanup から呼ばれる |
 
 ### 検証項目
 
@@ -180,8 +180,8 @@
 | App: About / Settings... / Hide / Quit | 同等 | ✅ |
 | File: New Window / エクスポート... | 同等 | ✅ |
 | Edit: Undo / Redo / Cut / Copy / Paste / Select All | 同等 | ✅ |
-| View: Reload / Toggle DevTools / Zoom | 同等 | ✅ |
-| Window: Minimize / Zoom / Close | 同等 | ✅ |
+| （旧版なし） | View: Reload / Toggle DevTools / Zoom | ✅（新規追加。Chromium 標準動作の補完目的、`menu.ts` コメント参照） |
+| （旧版なし） | Window: Minimize / Zoom / Close | ✅（新規追加。macOS 標準ウィンドウ操作の保全） |
 | Help: Keyboard Shortcuts | 同等 | ✅ |
 | menu イベントの renderer 配信 | `menu:open-settings` / `menu:open-help` / `menu:export` を focused window のみへ送信 | ✅ |
 
@@ -259,14 +259,13 @@
 
 ### 🔁 別段 follow-up（Stage 6 残項目）
 
-- 🔁 **コードサイニング / 公証**:
-  - macOS notarization: Apple Developer 証明書 / `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` 手配（ユーザー作業）。`electron-builder.yml: mac.notarize` 設定 + `release.yml` から `CSC_IDENTITY_AUTO_DISCOVERY=false` 解除 + `CSC_LINK` / `CSC_KEY_PASSWORD` secret 注入
-  - Windows EV 証明書: `electron-builder.yml: win.signtoolOptions` 設定
-- 🔁 **electron-updater 配線**（再掲、第 6 節参照）
-- 🔁 **リリース切り替え**:
-  - `ymnao/scripta` を `ymnao/scripta-tauri` 等にリネーム → 本リポジトリを `ymnao/scripta` として公開
-  - `electron/main/ipc/update.ts:GITHUB_API_URL` を `scripta-next` → `scripta` に戻す（コード内コメントで明示済み）
-  - `electron-builder.yml: publish` / `release.yml: gh release create/upload` は git remote 自動推定なので修正不要
+詳細な作業項目とリスト（証明書手配 / `electron-builder.yml` 修正点 / `release.yml` の secret 注入 / リリース切り替え時の更新箇所）は canonical な HANDOFF.md へ集約済。
+
+- canonical: `HANDOFF.md` の "未完了・次にやること > Stage 6 残項目" 節
+- 補足メモ: `HANDOFF.md` の "重要な判断・メモ > electron-updater 配線時の作業項目" / "リリース切り替え時の更新箇所"
+- `electron/main/ipc/update.ts:GITHUB_API_URL` の暫定値（`scripta-next`）はコード内コメントが canonical（リリース切り替え時に `scripta` へ戻す）
+
+本書（parity-checklist.md）では § 12 のリリース前ブロッカー早見表で、これらの完了が必須であることを参照する役割のみを担う。
 
 ---
 
@@ -276,28 +275,26 @@
 
 ### 必須（GO 条件）
 
+優先順位は「取り返しのつかなさ」と「ユーザー影響範囲」の積で決定。
+
 1. [ ] § 9 の **ローカル画像レンダリング** が packaged build で動く（または対処済み）
-2. [ ] § 10 の **packaged build 手動スモーク** が一通り pass
-3. [ ] § 11 の **コードサイニング / 公証** がパイプラインに組み込まれ、未署名警告が出ない
-4. [ ] § 7 の **旧 userData 互換**（`~/Library/Application Support/scripta/settings.json` の継承）が確認済み
-5. [ ] § 6 の **electron-updater 配線** + `update.ts:GITHUB_API_URL` のリポジトリ名切り替え
+   — メモアプリの中核機能、CSP `img-src` の差分が判明済で要対処
+2. [ ] § 7 の **旧 userData 互換**（`~/Library/Application Support/scripta/settings.json` の継承）が確認済み
+   — 既存ユーザーの workspace / window state を保全。落ちると **設定消失（取り返しのつかない regression）**
+3. [ ] § 4 の **Git remote 認証実機確認**（HTTPS credential helper / SSH agent で commit + pull + push が一往復成功）
+   — Git Sync は新版の中核機能、認証経路は packaged build でしか検証不能
+4. [ ] § 10 の **packaged build 手動スモーク** が一通り pass
+5. [ ] § 11 の **コードサイニング / 公証** がパイプラインに組み込まれ、ダウンロード後にユーザーが追加操作なしで起動できる（macOS Gatekeeper / Windows SmartScreen 不発）
+6. [ ] § 6 の **electron-updater 配線** + `update.ts:GITHUB_API_URL` のリポジトリ名切り替え
 
 ### 推奨（NICE-TO-HAVE）
 
-- [ ] § 4 の Git remote 認証実機確認（HTTPS credential helper / SSH agent）
 - [ ] § 5 の OGP DNS rebinding 強化（HANDOFF.md の "将来課題" 由来）
-- [ ] § 10 の Playwright `_electron` API ベース最小 e2e 追加
+- [ ] § 10 の Playwright `_electron` API ベース最小 e2e 追加（少なくとも 1 本: workspace 選択 → md open → write → 再起動して内容残存）
 
 ### Stage 5 から継続課題（リリース blocker ではない）
 
-`HANDOFF.md` の "Stage 5 から継続の課題" セクションに集約済:
-
-- realpath の async 化（Stage 1 から）
-- `scanUnresolvedWikilinks` の cancellation 対応（Stage 3 から）
-- approve リストの window-scoped 化（Stage 4 から、現状 global）
-- OGP fetch の hostname-based DNS rebinding 強化
-
-これらはリリース後の継続改善とする方針。
+`HANDOFF.md` の "Stage 5 から継続の課題" セクションに集約済（4 項目）。リリース後の継続改善とする。詳細はそちらを参照。
 
 ---
 
