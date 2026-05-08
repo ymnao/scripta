@@ -17,7 +17,7 @@
 - 旧 Tauri 版コマンド一覧: `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（`commands::*` 31 個 + ルート定義の `clear_webview_browsing_data` で計 32）
 - 旧フロント側プラグイン使用: `@tauri-apps/api/{core,event,window,webviewWindow,app}` / `@tauri-apps/plugin-{shell,dialog,store}`
 - 新 Electron API 表面: `electron/preload/api.ts` の `Api` 型 + `electron/preload/index.ts` の `contextBridge.exposeInMainWorld`
-- 新フロント呼び出し: `src/lib/commands.ts` を中心としたラッパー。ただし完全なフロント側 surface ではない点に注意。settings 系は `src/lib/store.ts` から `window.api.settingsGet/Set/Delete/Save` を直接呼び、export 系も `src/lib/export.ts` から `window.api.showSaveDialog` 等を直接呼ぶ。監査時はこれらも対象に含める
+- 新フロント呼び出し: `src/lib/commands.ts` を中心としたラッパー。ただし完全なフロント側 surface ではない点に注意。**`settings:*` 系のみ `src/lib/store.ts` から `window.api.settingsGet/Set/Delete/Save` を直接呼ぶ**（`commands.ts` を経由しない）。export 系（`src/lib/export.ts`）など他の機能はすべて `commands.ts` ラッパー経由なので、監査の索引としては「`commands.ts` + `store.ts`」の 2 箇所を見れば足りる
 
 ---
 
@@ -53,7 +53,7 @@
 | `start_watcher` | `watcher:start` | ✅ | `chokidar` ベース、`electron/main/ipc/watcher.ts` |
 | `stop_watcher` | `watcher:stop` | ✅ | |
 | イベント `fs-change` (Tauri `listen`) | `onFsChange` | ✅ | `webContents.send` ベース |
-| `open` (`@tauri-apps/plugin-dialog`、フォルダ選択) | `dialog:open-directory` | ✅ | `electron/main/ipc/dialog.ts:42-50` / **OS ネイティブ folder picker を通った path のみ `approveWorkspacePath` で main 側 approve リストに登録**。renderer が `workspace:set` を打つ際の信頼境界 |
+| `open` (`@tauri-apps/plugin-dialog`、フォルダ選択) | `dialog:open-directory` | 🟡 | `electron/main/ipc/dialog.ts:42-50` / **OS ネイティブ folder picker を通った path のみ `approveWorkspacePath` で main 側 approve リストに登録**。renderer が `workspace:set` を打つ際の信頼境界。**注: `approveWorkspacePath` 単体は `electron/main/ipc/workspace.test.ts` でカバーされているが、`dialog.ts` ハンドラ自体（`getOwnerWindow` / IPC 配線 / helper 呼び出しの結線）を直接検証する `dialog.test.ts` は未整備**。実機 / 周辺テスト依存 |
 
 ### 新版でのみ存在
 
@@ -133,16 +133,16 @@
 | `fetch_ogp` | `ogp:fetch` | ✅ `undici` + `cheerio`、SSRF 防御 |
 | `export_pdf` | `pdf:export` | ✅ 隠し BrowserWindow + `webContents.printToPDF` |
 | `open` (`@tauri-apps/plugin-shell`) | `shell:open-external` | ✅ scheme allowlist |
-| `save` (`@tauri-apps/plugin-dialog`、保存先選択) | `dialog:save` | ✅ `electron/main/ipc/dialog.ts:52-60` / **`registerTransientWritePath` で window-scoped な短命 write capability を発行**（書き込み成功で consume、window close で cleanup）。これにより workspace 外への保存も path-guard を維持しつつ許可 |
+| `save` (`@tauri-apps/plugin-dialog`、保存先選択) | `dialog:save` | 🟡 `electron/main/ipc/dialog.ts:52-60` / **`registerTransientWritePath` で window-scoped な短命 write capability を発行**（書き込み成功で consume、window close で cleanup）。これにより workspace 外への保存も path-guard を維持しつつ許可。**注: `registerTransientWritePath` 単体は `electron/main/utils/path-guard.test.ts` でカバーされているが、`dialog.ts` ハンドラ自体の直接テストは未整備** |
 
 ### エクスポート機能（フロント実装）
 
-旧版・新版ともに `src/lib/export.ts` + `src/components/common/ExportDialog.tsx` で 3 形式を提供。
+旧版・新版ともに `src/lib/export.ts` + `src/components/common/ExportDialog.tsx` で 3 形式を提供。新版の export.ts はすべて `src/lib/commands.ts` のラッパー経由で IPC を呼ぶ（`exportPdf` / `showSaveDialog` / `writeFile` を import; `src/lib/export.ts:1`）。`window.api.*` を直接は叩かない。
 
 | 形式 | 旧版 | 新版 | 状態 |
 |---|---|---|---|
-| **PDF** | `exportAsPdf` → `invoke("export_pdf")` | `exportAsPdf` → `window.api.exportPdf` (= `pdf:export`) | ✅ |
-| **HTML** | `exportAsHtml` → `plugin-dialog.save` + `plugin-fs.writeTextFile` | `exportAsHtml` → `window.api.showSaveDialog` + `window.api.writeFile`（または `dialog:save` の transient capability 経由で `fs:write`） | ✅ |
+| **PDF** | `exportAsPdf` → `invoke("export_pdf")` | `exportAsPdf` → `commands.exportPdf` → `pdf:export` | ✅ |
+| **HTML** | `exportAsHtml` → `plugin-dialog.save` + `plugin-fs.writeTextFile` | `exportAsHtml` → `commands.showSaveDialog` + `commands.writeFile` → `dialog:save`（transient write capability 発行）+ `fs:write`（path-guard 通過） | ✅ |
 | **Prompt（.md）** | `exportAsPrompt` → `plugin-dialog.save` + `plugin-fs.writeTextFile` | `exportAsPrompt` → 同上（`src/lib/export.ts:645`、`ExportDialog.tsx:122`） | ✅ |
 
 ### 検証項目
