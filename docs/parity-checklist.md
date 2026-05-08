@@ -230,7 +230,7 @@
 - `electron/main/index.ts`:
   - `protocol.registerSchemesAsPrivileged([{ scheme: "scripta-asset", privileges: { standard, secure, supportFetchAPI, stream } }])` を `app.whenReady` 前に呼ぶ
   - `app.whenReady` 内で `protocol.handle("scripta-asset", handler)` を登録
-  - ハンドラは hostname=`localhost` を要求し、`urlPathnameToFsPath(url.pathname)` で OS path に戻してから path-guard の process-wide チェック（`isPathWithinAnyAllowedRoot`）を通過した path のみ `net.fetch(pathToFileURL(path))` で配信
+  - ハンドラは hostname=`localhost` を要求し、`urlPathnameToFsPath(url.pathname)` で OS path に戻してから（Windows 上のみ drive letter 形式の leading `/` を除去、POSIX では `/C:/...` も合法絶対パスとして保持）path-guard の process-wide チェック（`isPathWithinAnyAllowedRoot`）を通過した path のみ `net.fetch(pathToFileURL(path))` で配信
   - 失敗時はステータスのみ返し本文に path を含めない（情報漏洩防止）
 - `electron/preload/scripta-asset-url.ts`: `buildScriptaAssetUrl` / `urlPathnameToFsPath` を切り出し（preload・main・テスト mock すべての canonical な実装。drift 防止）
 - `electron/preload/index.ts`: `convertFileSrc: (path) => buildScriptaAssetUrl(path)`

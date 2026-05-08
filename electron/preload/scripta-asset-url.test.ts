@@ -57,39 +57,51 @@ describe("buildScriptaAssetUrl", () => {
 });
 
 describe("urlPathnameToFsPath", () => {
-	it("Unix の pathname はそのまま返す", () => {
-		expect(urlPathnameToFsPath("/Users/foo/img.png")).toBe("/Users/foo/img.png");
+	it("Unix の pathname はそのまま返す（POSIX）", () => {
+		expect(urlPathnameToFsPath("/Users/foo/img.png", "darwin")).toBe("/Users/foo/img.png");
 	});
 
-	it("Windows drive letter 形式は leading / を除去する", () => {
-		expect(urlPathnameToFsPath("/C:/Users/img.png")).toBe("C:/Users/img.png");
-		expect(urlPathnameToFsPath("/c:/Users/img.png")).toBe("c:/Users/img.png");
+	it("Windows drive letter 形式は Windows 上でのみ leading / を除去する", () => {
+		expect(urlPathnameToFsPath("/C:/Users/img.png", "win32")).toBe("C:/Users/img.png");
+		expect(urlPathnameToFsPath("/c:/Users/img.png", "win32")).toBe("c:/Users/img.png");
+	});
+
+	it("POSIX では `/C:/...` を絶対パスとして保持する", () => {
+		// `/C:/Users/img.png` は POSIX では `C:` ディレクトリ配下を指す合法な絶対パス。
+		// 以前の platform 非依存の strip 実装ではこれを `C:/Users/img.png`（POSIX で
+		// 非絶対）に変換してしまい、後段 `validatePath` で 403 になる回帰があった。
+		expect(urlPathnameToFsPath("/C:/Users/img.png", "darwin")).toBe("/C:/Users/img.png");
+		expect(urlPathnameToFsPath("/C:/Users/img.png", "linux")).toBe("/C:/Users/img.png");
 	});
 
 	it("percent-encoded sequence を decode する", () => {
-		expect(urlPathnameToFsPath("/tmp/a%23b%3Fc.png")).toBe("/tmp/a#b?c.png");
-		expect(urlPathnameToFsPath("/Users/foo%20bar/img.png")).toBe("/Users/foo bar/img.png");
+		expect(urlPathnameToFsPath("/tmp/a%23b%3Fc.png", "darwin")).toBe("/tmp/a#b?c.png");
+		expect(urlPathnameToFsPath("/Users/foo%20bar/img.png", "darwin")).toBe(
+			"/Users/foo bar/img.png",
+		);
 	});
 
-	it("buildScriptaAssetUrl との round-trip が原形に戻る", () => {
+	it("buildScriptaAssetUrl との round-trip が原形に戻る（POSIX）", () => {
 		const cases = [
 			"/Users/foo/img.png",
 			"/tmp/a#b.png",
 			"/Users/foo bar/日本語.png",
 			"/tmp/100%done.png",
+			// POSIX では `/C:/...` も合法な絶対パス（C: はただのディレクトリ名）
+			"/C:/Users/img.png",
 		];
 		for (const original of cases) {
 			const built = buildScriptaAssetUrl(original);
 			const parsed = new URL(built);
-			const restored = urlPathnameToFsPath(parsed.pathname);
+			const restored = urlPathnameToFsPath(parsed.pathname, "darwin");
 			expect(restored).toBe(original);
 		}
 	});
 
-	it("Windows path の round-trip では `\\` → `/` 正規化を経由した値に戻る", () => {
+	it("Windows path の round-trip は `\\` → `/` 正規化を経由した値に戻る（Windows）", () => {
 		const built = buildScriptaAssetUrl("C:\\Users\\img.png");
 		const parsed = new URL(built);
-		const restored = urlPathnameToFsPath(parsed.pathname);
+		const restored = urlPathnameToFsPath(parsed.pathname, "win32");
 		// backslash は `/` 正規化済み
 		expect(restored).toBe("C:/Users/img.png");
 	});
