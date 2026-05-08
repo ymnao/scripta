@@ -1,26 +1,47 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, net, protocol, session, shell } from "electron";
+import { urlPathnameToFsPath } from "../preload/scripta-asset-url";
 import { registerIpcHandlers } from "./ipc";
 import { getWindowState, getWorkspacePathFromSettings, persistWindowState } from "./ipc/settings";
 import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
+import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
+
+// 旧 Tauri 版の `asset://localhost/<path>` 相当を提供するローカル画像配信用スキーム。
+// CSP `img-src` に許可するのは本スキームだけで、`file:` は許可しない。これによりファイル
+// アクセスは必ず `protocol.handle` のハンドラ → path-guard を経由する（任意 file 読み取り
+// 防止）。`registerSchemesAsPrivileged` は `app.ready` より前に呼ぶ必要がある（Electron）。
+const SCRIPTA_ASSET_SCHEME = "scripta-asset";
+protocol.registerSchemesAsPrivileged([
+	{
+		scheme: SCRIPTA_ASSET_SCHEME,
+		privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+	},
+]);
 
 // Electron は app.getPath("userData") を app.getName() (= packaged package.json
 // の name / productName) ベースで解決する。本リポジトリの package.json:name は
 // "scripta-next" のままだが、旧 Tauri 版 (productName = "scripta") の userData
 // ディレクトリ (~/Library/Application Support/scripta 等) を継続利用するため、
 // app.whenReady() で userData が確定する前に明示上書きする。
-app.setName("scripta");
+//
+// 互換維持が必要なのは packaged 配布物だけ。pnpm dev では package.json:name の
+// "scripta-next" のままにし、開発中の sidebar/workspacePath/window state 操作が
+// 本番アプリの設定を汚染するのを防ぐ。
+if (app.isPackaged) {
+	app.setName("scripta");
+}
 
 const CSP_PROD = [
 	"default-src 'self'",
 	"script-src 'self'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' https: data: blob:",
+	`img-src 'self' https: data: blob: ${SCRIPTA_ASSET_SCHEME}:`,
 	"font-src 'self' data:",
 	"connect-src 'self'",
 	"worker-src 'self' blob:",
@@ -32,7 +53,7 @@ const CSP_DEV = [
 	"default-src 'self'",
 	"script-src 'self' 'unsafe-inline'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' https: data: blob:",
+	`img-src 'self' https: data: blob: ${SCRIPTA_ASSET_SCHEME}:`,
 	"font-src 'self' data:",
 	"connect-src 'self' ws://localhost:* http://localhost:*",
 	"worker-src 'self' blob:",
@@ -168,6 +189,30 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
+// 失敗時は status のみ返し本文に path を含めない（拒否された path がレンダラ DevTools
+// から見える形だとワークスペース外パスの存在情報が漏れるため）。hostname を `localhost`
+// 固定にするのは、悪意あるレンダラが任意ホスト名で URL を組み立てた際の挙動を予測可能
+// にする目的（特権スキームでホスト名は意味を持たないが、表記の一貫性を強制する）。
+function registerScriptaAssetProtocol(): void {
+	protocol.handle(SCRIPTA_ASSET_SCHEME, async (request) => {
+		try {
+			const url = new URL(request.url);
+			if (url.hostname !== "localhost") {
+				return new Response(null, { status: 400 });
+			}
+			const path = urlPathnameToFsPath(url.pathname);
+			if (!isPathWithinAnyAllowedRoot(path)) {
+				console.warn(`[scripta-asset] denied outside workspace: ${path}`);
+				return new Response(null, { status: 403 });
+			}
+			return await net.fetch(pathToFileURL(path).toString());
+		} catch (error) {
+			console.error("[scripta-asset] failed:", error);
+			return new Response(null, { status: 500 });
+		}
+	});
+}
+
 function approveSavedWorkspaceFromSettings(): void {
 	// 起動時に「前回までの workspacePath」を approve リストへ入れる。
 	// register はしない（実際の register は renderer 側 AppLayout が
@@ -186,6 +231,7 @@ function approveSavedWorkspaceFromSettings(): void {
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
+	registerScriptaAssetProtocol();
 	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
 	approveSavedWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
