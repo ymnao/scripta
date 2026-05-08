@@ -12,6 +12,7 @@ import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard"
 import {
 	__testing,
 	cancelSearchForWindow,
+	cancelWikilinkScanForWindow,
 	extractWikilinks,
 	fuzzyMatch,
 	isPathTraversal,
@@ -278,6 +279,60 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		await expect(
 			scanUnresolvedWikilinksImpl(999 /* not registered */, workspaceDir),
 		).rejects.toThrow(/Permission denied/);
+	});
+
+	it("cancels older wikilink scan when a newer scan starts on the same window", async () => {
+		// searchFilesImpl と同じ意図: workspace が大きい状態で連続 scan を投げると
+		// main 側の I/O が積み上がる。後発が sync に gen を bump、先発は readFile ループ
+		// 直前の isStale check で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const [r1, r2] = await Promise.all([
+			scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir),
+			scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir),
+		]);
+		expect(r1).toEqual([]);
+		expect(r2).toHaveLength(1);
+		expect(r2[0].pageName).toBe("missing");
+	});
+
+	it("cancelWikilinkScanForWindow stops in-flight wikilink scan", async () => {
+		// panel unmount / workspace 切替で renderer から `wikilink:cancel` が送られる。
+		// 後発の scan が来なくても先発が isStale で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow does NOT cancel in-flight wikilink scan", async () => {
+		// regression guard: 共通化していた頃は SearchPanel cleanup 由来の
+		// `search:cancel` が wikilink scan も巻き込んで `[]` 化していた。逆方向の
+		// クロスキャンセルが起きないことを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(1);
+		expect(result[0].pageName).toBe("missing");
+	});
+
+	it("cancelWikilinkScanForWindow does NOT cancel in-flight full-text search", async () => {
+		// regression guard: UnresolvedLinksPanel の cleanup で SearchPanel の
+		// 検索結果を空にしてしまう regression を防ぐ。検索が走り切ることを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
+		}
+		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
 	});
 });
 

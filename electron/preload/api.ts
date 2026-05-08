@@ -54,6 +54,7 @@ export type Api = Readonly<{
 	cancelSearch: () => Promise<void>;
 	searchFilenames: (workspacePath: string, query: string) => Promise<string[]>;
 	scanUnresolvedWikilinks: (workspacePath: string) => Promise<UnresolvedWikilink[]>;
+	cancelWikilinkScan: () => Promise<void>;
 
 	fetchOgp: (url: string) => Promise<OgpData>;
 	exportPdf: (html: string, outputPath: string) => Promise<void>;
