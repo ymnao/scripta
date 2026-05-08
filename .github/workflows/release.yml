@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # tag を打つ前に package.json の version を bump し忘れていると、配布物に
+      # 0.0.0 が焼き込まれてアプリ内のアップデート判定 (electron/main/ipc/update.ts)
+      # が初回リリース以降ずっと誤検知し続ける。pre-flight で食い違いを検出する。
+      - name: Verify package.json version matches tag
+        shell: bash
+        run: |
+          pkg_version=$(jq -r .version package.json)
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::package.json version ($pkg_version) does not match tag ($tag_version). Bump package.json before tagging."
+            exit 1
+          fi
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+  dist:
+    needs: [create-release]
+    # workflow_dispatch では create-release が skipped、tag push 時は success を待つ。
+    if: |
+      always() && !cancelled() &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      # 本番証明書未配線。ローカル開発者証明書を誤って拾わないよう自動署名探索を切る。
+      - name: Build distributables
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm dist
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scripta-${{ matrix.os }}
+          # keep in sync with dist.steps[Attach to GitHub Release].files
+          path: |
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+            release/*.exe
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # `--clobber` で matrix rerun 時の同名アセット衝突を回避。
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          # keep in sync with dist.steps[Upload CI artifact].path
+          files=(
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+            release/*.exe
+          )
+          if [ ${#files[@]} -gt 0 ]; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          fi

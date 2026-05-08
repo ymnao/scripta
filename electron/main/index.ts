@@ -9,6 +9,13 @@ import { isSafeExternalUrl } from "./utils/url";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
+// Electron は app.getPath("userData") を app.getName() (= packaged package.json
+// の name / productName) ベースで解決する。本リポジトリの package.json:name は
+// "scripta-next" のままだが、旧 Tauri 版 (productName = "scripta") の userData
+// ディレクトリ (~/Library/Application Support/scripta 等) を継続利用するため、
+// app.whenReady() で userData が確定する前に明示上書きする。
+app.setName("scripta");
+
 const CSP_PROD = [
 	"default-src 'self'",
 	"script-src 'self'",
@@ -177,7 +184,7 @@ function approveSavedWorkspaceFromSettings(): void {
 }
 
 app.whenReady().then(() => {
-	electronApp.setAppUserModelId("dev.scripta");
+	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
 	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
 	approveSavedWorkspaceFromSettings();

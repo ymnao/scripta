@@ -1,0 +1,44 @@
+# 旧 Tauri 版と bundle ID を揃える (com.scripta.app: macOS bundle ID / Windows
+# レジストリ / Windows AUMID 用)。userData ディレクトリ名 (= app.getName) の
+# 継続は別途 electron/main/index.ts の app.setName("scripta") で行う。
+appId: com.scripta.app
+productName: scripta
+copyright: Copyright © 2025 ymnao
+
+directories:
+  output: release
+
+files:
+  - out/**/*
+  - package.json
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Office
+  maintainer: ymnao
+
+# owner/repo は git remote から自動推定（リリース切り替え後の修正を不要にする）。
+# draft で停止し、本文を整えて手動 publish するまで自動アップデートチャンネルに載らない。
+publish:
+  provider: github
+  releaseType: draft

@@ -7,6 +7,11 @@ dist/
 out/
 release/
 
+# electron-builder buildResources directory (icons / entitlements 等を含むため
+# version 管理する)。グローバル ~/.config/git/ignore の "build/" を negate する。
+!build/
+!build/**
+
 # Environment
 .env
 .env.local
