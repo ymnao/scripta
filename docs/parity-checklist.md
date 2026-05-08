@@ -215,29 +215,42 @@
 
 ---
 
-## 9. ファイル URL / 画像レンダリング ⚠️
+## 9. ファイル URL / 画像レンダリング 🟡
 
-### 既知差分（要実機検証）
+### 旧版との対応（保険実装で対応済 — issue #22, PR feat/scripta-asset-protocol）
 
 | 旧 Tauri | 新 Electron |
 |---|---|
-| `convertFileSrc(path)` → `asset://localhost/<path>` | `convertFileSrc(path)` → `path`（そのまま返す） |
-| CSP `img-src 'self' asset: https://asset.localhost https:` | CSP `img-src 'self' https: data: blob:` |
-| Tauri が `asset:` プロトコルハンドラを内蔵 | カスタムプロトコル登録なし |
+| `convertFileSrc(path)` → `asset://localhost/<path>` | `convertFileSrc(path)` → `scripta-asset://localhost/<encoded path>`（per-segment `encodeURIComponent` + Windows `\` → `/` 正規化 + leading `/` 付与で `new URL()` パース可能を保証） |
+| CSP `img-src 'self' asset: https://asset.localhost https:` | CSP `img-src 'self' https: data: blob: scripta-asset:` |
+| Tauri が `asset:` プロトコルハンドラを内蔵 | `scripta-asset://` をカスタムプロトコルとして main 側で登録（`protocol.handle` + `net.fetch`） |
 
-### 懸念
+### 実装
 
-- 新 CSP には `file:` が含まれない。`<img src="/Users/foo/img.png">` は `file:///Users/foo/img.png` として解決される可能性が高く、CSP `img-src 'self'` での `file:` 取り扱い次第ではブロックされる。
-- `images.test.ts` は `convertFileSrc` を `asset://localhost...` でモックしているため、テストは通るが実機挙動を保証しない。
+- `electron/main/index.ts`:
+  - `protocol.registerSchemesAsPrivileged([{ scheme: "scripta-asset", privileges: { standard, secure, supportFetchAPI, stream } }])` を `app.whenReady` 前に呼ぶ
+  - `app.whenReady` 内で `protocol.handle("scripta-asset", handler)` を登録
+  - ハンドラは hostname=`localhost` を要求し、`urlPathnameToFsPath(url.pathname)` で OS path に戻してから（Windows 上のみ drive letter 形式の leading `/` を除去、POSIX では `/C:/...` も合法絶対パスとして保持）path-guard の process-wide チェック（`isPathWithinAnyAllowedRoot`）を通過した path のみ `net.fetch(pathToFileURL(path))` で配信
+  - 失敗時はステータスのみ返し本文に path を含めない（情報漏洩防止）
+- `electron/preload/scripta-asset-url.ts`: `buildScriptaAssetUrl` / `urlPathnameToFsPath` を切り出し（preload・main・テスト mock すべての canonical な実装。drift 防止）
+- `electron/preload/index.ts`: `convertFileSrc: (path) => buildScriptaAssetUrl(path)`
+- `electron/main/utils/path-guard.ts`: `isPathWithinAnyAllowedRoot(p)` を追加（全 window の登録 root を union で見る。リクエスト元 webContents を特定できないプロトコルハンドラ専用）
+
+### 信頼境界
+
+- ファイル配信は「いずれかの window が register 済みの workspace 配下」のみに限定（fail-closed）
+- macOS の `/var → /private/var` 等の symlink 経由 escape は `realpath` 正規化で塞がれる
+- CSP `img-src` には `file:` を許可しないため、任意 file 読み取りには昇格しない
 
 ### 検証項目
 
-- [ ] **🟡 packaged build でローカル画像 `![](/path/to/img.png)` がレンダリングされるか実機確認**
-  - 失敗時の対応案:
-    1. CSP `img-src` に `file:` を追加（簡単だが任意 file 読み取りを許可してしまう）
-    2. カスタムプロトコル `scripta-asset://` を main 側で `protocol.registerFileProtocol` 登録（Tauri と同等の安全性、`convertFileSrc` の戻り値をそれに合わせる）
-    3. main 側で読み出して `data:` URL を返す（`convertFileSrc` を async 化）
-  - 推奨は 2（Tauri の挙動を 1:1 で再現でき、CSP も狭く保てる）
+- [ ] **🟡 packaged build でローカル画像 `![](/path/to/img.png)` がレンダリングされるか実機確認**（issue #26 のスモークと兼用）
+- [ ] **🟡 ワークスペース外 path 指定時に 403 で拒否されることを確認**（DevTools → Network で response status を確認）
+- [ ] **🟡 DevTools Console に CSP 違反エラーが出ないこと**
+
+### 既知の制約
+
+- 本リポジトリは macOS が一次ターゲットだが、`buildScriptaAssetUrl` は backslash 正規化と drive letter 形式に対応しているため Windows でも URL レベルでは valid。ただし packaged build での実機検証は未実施（issue #26 の手動スモーク内で対応）
 
 ---
 
@@ -299,8 +312,8 @@
 
 優先順位は「取り返しのつかなさ」と「ユーザー影響範囲」の積で決定。
 
-1. [ ] § 9 の **ローカル画像レンダリング** が packaged build で動く（または対処済み）
-   — メモアプリの中核機能、CSP `img-src` の差分が判明済で要対処
+1. [ ] § 9 の **ローカル画像レンダリング** が packaged build で動く（保険実装 `scripta-asset://` は merged 済み — issue #22。要実機検証）
+   — メモアプリの中核機能、`scripta-asset://` プロトコル経由でレンダリングされること / DevTools で CSP 違反が出ないこと / ワークスペース外 path が 403 で拒否されることを確認
 2. [ ] § 7 の **旧 userData 互換**（`~/Library/Application Support/scripta/settings.json` の継承）が確認済み
    — 既存ユーザーの workspace / window state を保全。落ちると **設定消失（取り返しのつかない regression）**
 3. [ ] § 4 の **Git remote 認証実機確認**（HTTPS credential helper / SSH agent で commit + pull + push が一往復成功）
