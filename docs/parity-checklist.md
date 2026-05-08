@@ -221,7 +221,7 @@
 
 | 旧 Tauri | 新 Electron |
 |---|---|
-| `convertFileSrc(path)` → `asset://localhost/<path>` | `convertFileSrc(path)` → `scripta-asset://localhost<path>` |
+| `convertFileSrc(path)` → `asset://localhost/<path>` | `convertFileSrc(path)` → `scripta-asset://localhost/<encoded path>`（per-segment `encodeURIComponent` + Windows `\` → `/` 正規化 + leading `/` 付与で `new URL()` パース可能を保証） |
 | CSP `img-src 'self' asset: https://asset.localhost https:` | CSP `img-src 'self' https: data: blob: scripta-asset:` |
 | Tauri が `asset:` プロトコルハンドラを内蔵 | `scripta-asset://` をカスタムプロトコルとして main 側で登録（`protocol.handle` + `net.fetch`） |
 
@@ -230,9 +230,10 @@
 - `electron/main/index.ts`:
   - `protocol.registerSchemesAsPrivileged([{ scheme: "scripta-asset", privileges: { standard, secure, supportFetchAPI, stream } }])` を `app.whenReady` 前に呼ぶ
   - `app.whenReady` 内で `protocol.handle("scripta-asset", handler)` を登録
-  - ハンドラは hostname=`localhost` を要求し、pathname を decode してから path-guard の process-wide チェック（`isPathWithinAnyAllowedRoot`）を通過した path のみ `net.fetch(pathToFileURL(path))` で配信
+  - ハンドラは hostname=`localhost` を要求し、`urlPathnameToFsPath(url.pathname)` で OS path に戻してから path-guard の process-wide チェック（`isPathWithinAnyAllowedRoot`）を通過した path のみ `net.fetch(pathToFileURL(path))` で配信
   - 失敗時はステータスのみ返し本文に path を含めない（情報漏洩防止）
-- `electron/preload/index.ts`: `convertFileSrc: (path) => 'scripta-asset://localhost${path}'`
+- `electron/preload/scripta-asset-url.ts`: `buildScriptaAssetUrl` / `urlPathnameToFsPath` を切り出し（preload・main・テスト mock すべての canonical な実装。drift 防止）
+- `electron/preload/index.ts`: `convertFileSrc: (path) => buildScriptaAssetUrl(path)`
 - `electron/main/utils/path-guard.ts`: `isPathWithinAnyAllowedRoot(p)` を追加（全 window の登録 root を union で見る。リクエスト元 webContents を特定できないプロトコルハンドラ専用）
 
 ### 信頼境界
@@ -249,7 +250,7 @@
 
 ### 既知の制約
 
-- `convertFileSrc` は `scripta-asset://localhost${path}` の単純テンプレート。Unix の `/Users/foo/img.png` のように `/` で始まる絶対パスは valid な URL を生成するが、Windows の `C:\Users\img.png` 形式は形式上 invalid な URL となる。Windows 対応は v1.0.0 までに別途対応する場合のみ着手（旧 Tauri は Windows で `https://asset.localhost/...` 経路に切り替えていたが、本リポジトリは macOS が一次ターゲット）
+- 本リポジトリは macOS が一次ターゲットだが、`buildScriptaAssetUrl` は backslash 正規化と drive letter 形式に対応しているため Windows でも URL レベルでは valid。ただし packaged build での実機検証は未実施（issue #26 の手動スモーク内で対応）
 
 ---
 

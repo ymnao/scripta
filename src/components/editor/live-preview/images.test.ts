@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { buildScriptaAssetUrl } from "../../../../electron/preload/scripta-asset-url";
 import { parentDir, resolveImageSrc } from "./images";
 
 vi.mock("../../../lib/commands", () => ({
-	convertFileSrc: (path: string) => `scripta-asset://localhost${path}`,
+	// production と同一ロジックでモックする。preload の `convertFileSrc` も同じ helper を
+	// 呼んでおり、ここで挙動を分岐させる理由はない（mock がドリフトしてバグを隠す事故防止）。
+	convertFileSrc: (path: string) => buildScriptaAssetUrl(path),
 }));
 
 vi.mock("../../../stores/workspace", () => ({
@@ -58,17 +61,31 @@ describe("resolveImageSrc", () => {
 
 	it("converts Unix absolute path via convertFileSrc", () => {
 		const result = resolveImageSrc("/home/user/img.png", null);
-		expect(result).toContain("scripta-asset://localhost/");
+		expect(result).toBe("scripta-asset://localhost/home/user/img.png");
+		// 旧実装は host が `localhostC` のような壊れた URL を生成していたため、
+		// hostname round-trip で必ず "localhost" になることを検証する。
+		expect(new URL(result).hostname).toBe("localhost");
 	});
 
 	it("converts Windows absolute path (backslash) via convertFileSrc", () => {
 		const result = resolveImageSrc("C:\\Users\\img.png", null);
-		expect(result).toBe("scripta-asset://localhostC:\\Users\\img.png");
+		// 旧実装 `scripta-asset://localhostC:\\Users\\img.png` は new URL で Invalid URL。
+		expect(new URL(result).hostname).toBe("localhost");
+		expect(result).toBe("scripta-asset://localhost/C%3A/Users/img.png");
 	});
 
 	it("converts Windows absolute path (forward slash) via convertFileSrc", () => {
 		const result = resolveImageSrc("C:/Users/img.png", null);
-		expect(result).toBe("scripta-asset://localhostC:/Users/img.png");
+		expect(new URL(result).hostname).toBe("localhost");
+		expect(result).toBe("scripta-asset://localhost/C%3A/Users/img.png");
+	});
+
+	it("encodes # / ? so the URL is not split into pathname/hash/search", () => {
+		const result = resolveImageSrc("/tmp/a#b?c.png", null);
+		const parsed = new URL(result);
+		expect(parsed.pathname).toBe("/tmp/a%23b%3Fc.png");
+		expect(parsed.hash).toBe("");
+		expect(parsed.search).toBe("");
 	});
 
 	it("returns raw URL when activeTabPath is null", () => {
@@ -82,7 +99,8 @@ describe("resolveImageSrc", () => {
 
 	it("resolves relative path from Windows activeTabPath", () => {
 		const result = resolveImageSrc("image.png", "C:\\Users\\docs\\note.md");
-		expect(result).toContain("C:\\Users\\docs\\image.png");
+		// `\` は URL pathname で `/` に正規化、`:` は per-segment encodeURIComponent で `%3A`
+		expect(result).toContain("C%3A/Users/docs/image.png");
 	});
 
 	it("normalizes ./ prefix in relative path", () => {
@@ -93,7 +111,7 @@ describe("resolveImageSrc", () => {
 
 	it("normalizes .\\ prefix in relative path", () => {
 		const result = resolveImageSrc(".\\image.png", "C:\\Users\\docs\\note.md");
-		expect(result).toContain("C:\\Users\\docs\\image.png");
+		expect(result).toContain("C%3A/Users/docs/image.png");
 		expect(result).not.toContain(".\\");
 	});
 

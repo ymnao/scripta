@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, net, protocol, session, shell } from "electron";
+import { urlPathnameToFsPath } from "../preload/scripta-asset-url";
 import { registerIpcHandlers } from "./ipc";
 import { getWindowState, getWorkspacePathFromSettings, persistWindowState } from "./ipc/settings";
 import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/workspace";
@@ -199,7 +200,7 @@ function registerScriptaAssetProtocol(): void {
 			if (url.hostname !== "localhost") {
 				return new Response(null, { status: 400 });
 			}
-			const path = decodeURIComponent(url.pathname);
+			const path = urlPathnameToFsPath(url.pathname);
 			if (!isPathWithinAnyAllowedRoot(path)) {
 				console.warn(`[scripta-asset] denied outside workspace: ${path}`);
 				return new Response(null, { status: 403 });
