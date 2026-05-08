@@ -26,7 +26,7 @@ Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite + Biome
 ## 開発コマンド
 
 ```bash
-# 依存インストール
+# 依存インストール（postinstall で electron バイナリ取得スクリプトが走る）
 pnpm install
 
 # 開発サーバー起動（Electron + Vite HMR）
@@ -58,6 +58,10 @@ pnpm test:e2e
 ```
 
 > 上記コマンドは Stage 0 で `package.json` を組むときに整える。Stage 0 完了までは未実装。
+
+### electron 42 の postinstall 補完
+
+electron 42.0.0 で npm パッケージの `postinstall` script が削除され（[supply-chain 対策](https://github.com/electron/electron/pull/49328)）、`pnpm install` 時に electron バイナリが取得されなくなった。`electron-vite@5.0.0` は lazy download に未対応で `getElectronPath` が `Electron uninstall` エラーで失敗する（上流追跡: [alex8088/electron-vite#904](https://github.com/alex8088/electron-vite/issues/904)）。本プロジェクトでは `package.json` の `scripts.postinstall` で `node node_modules/electron/install.js` を明示的に実行して補完している。`electron-vite` が lazy download に対応した時点で削除予定。
 
 ## アーキテクチャ概要
 
