@@ -17,7 +17,7 @@
 - 旧 Tauri 版コマンド一覧: `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（`commands::*` 31 個 + ルート定義の `clear_webview_browsing_data` で計 32）
 - 旧フロント側プラグイン使用: `@tauri-apps/api/{core,event,window,webviewWindow,app}` / `@tauri-apps/plugin-{shell,dialog,store}`
 - 新 Electron API 表面: `electron/preload/api.ts` の `Api` 型 + `electron/preload/index.ts` の `contextBridge.exposeInMainWorld`
-- 新フロント呼び出し: `src/lib/commands.ts`
+- 新フロント呼び出し: `src/lib/commands.ts` を中心としたラッパー。ただし完全なフロント側 surface ではない点に注意。settings 系は `src/lib/store.ts` から `window.api.settingsGet/Set/Delete/Save` を直接呼び、export 系も `src/lib/export.ts` から `window.api.showSaveDialog` 等を直接呼ぶ。監査時はこれらも対象に含める
 
 ---
 
@@ -47,23 +47,26 @@
 
 ## 2. ワークスペース・ファイルツリー・監視（Stage 2）
 
-| 旧コマンド | 新ハンドラ | 状態 | 備考 |
+| 旧コマンド / API | 新ハンドラ | 状態 | 備考 |
 |---|---|---|---|
 | `list_directory`（再掲） | `fs:list` | ✅ | |
 | `start_watcher` | `watcher:start` | ✅ | `chokidar` ベース、`electron/main/ipc/watcher.ts` |
 | `stop_watcher` | `watcher:stop` | ✅ | |
 | イベント `fs-change` (Tauri `listen`) | `onFsChange` | ✅ | `webContents.send` ベース |
+| `open` (`@tauri-apps/plugin-dialog`、フォルダ選択) | `dialog:open-directory` | ✅ | `electron/main/ipc/dialog.ts:42-50` / **OS ネイティブ folder picker を通った path のみ `approveWorkspacePath` で main 側 approve リストに登録**。renderer が `workspace:set` を打つ際の信頼境界 |
 
 ### 新版でのみ存在
 
 - `workspace:set` IPC（旧版は frontend 側 `loadSettings/saveWorkspacePath` で完結）
   - 役割: main 側に "approve list" を構築し、path-guard の判定基盤として機能。
   - 設計判断: 旧版は path-guard 自体が Rust 側 fs プラグインの permission 経由で行われていたが、新版はメインプロセスの自前 path-guard 実装に置換。
+  - 信頼境界: renderer から渡された任意の path は approve されない。OS ダイアログを経由した path のみ approve される（`dialog:open-directory` ハンドラ参照）。
 
 ### 検証項目
 
 - [ ] **🟡 chokidar の large workspace 挙動**: 数千ファイル規模のワークスペースで watcher が安定して動くか（FSEvents / inotify の上限到達時のフォールバック確認）
 - [ ] **🟡 fs-change イベント coalescing**: 連続書き込み時に旧版と同等の頻度で renderer に届くか（過剰イベントで UI が固まらないか）
+- [ ] **🟡 Open Folder の信頼境界**: packaged build で Sidebar の "フォルダを開く" → OS ダイアログ → 選択 → workspace 復元までが旧版と同等に動くか。renderer から `workspace:set` に approve されていない任意 path を直接渡しても拒否されることを DevTools Console で確認
 
 ---
 
@@ -121,19 +124,38 @@
 
 ---
 
-## 5. OGP / PDF / 外部リンク（Stage 5）
+## 5. OGP / エクスポート / 外部リンク（Stage 5）
 
-| 旧コマンド | 新ハンドラ | 状態 |
+### IPC コマンド
+
+| 旧コマンド / API | 新ハンドラ | 状態 |
 |---|---|---|
 | `fetch_ogp` | `ogp:fetch` | ✅ `undici` + `cheerio`、SSRF 防御 |
 | `export_pdf` | `pdf:export` | ✅ 隠し BrowserWindow + `webContents.printToPDF` |
 | `open` (`@tauri-apps/plugin-shell`) | `shell:open-external` | ✅ scheme allowlist |
+| `save` (`@tauri-apps/plugin-dialog`、保存先選択) | `dialog:save` | ✅ `electron/main/ipc/dialog.ts:52-60` / **`registerTransientWritePath` で window-scoped な短命 write capability を発行**（書き込み成功で consume、window close で cleanup）。これにより workspace 外への保存も path-guard を維持しつつ許可 |
+
+### エクスポート機能（フロント実装）
+
+旧版・新版ともに `src/lib/export.ts` + `src/components/common/ExportDialog.tsx` で 3 形式を提供。
+
+| 形式 | 旧版 | 新版 | 状態 |
+|---|---|---|---|
+| **PDF** | `exportAsPdf` → `invoke("export_pdf")` | `exportAsPdf` → `window.api.exportPdf` (= `pdf:export`) | ✅ |
+| **HTML** | `exportAsHtml` → `plugin-dialog.save` + `plugin-fs.writeTextFile` | `exportAsHtml` → `window.api.showSaveDialog` + `window.api.writeFile`（または `dialog:save` の transient capability 経由で `fs:write`） | ✅ |
+| **Prompt（.md）** | `exportAsPrompt` → `plugin-dialog.save` + `plugin-fs.writeTextFile` | `exportAsPrompt` → 同上（`src/lib/export.ts:645`、`ExportDialog.tsx:122`） | ✅ |
 
 ### 検証項目
 
 - [ ] **🟡 OGP の SSRF 防御**: プライベート IP / loopback / link-local を弾くか（`electron/main/ipc/ogp.ts` の hostname / IP チェック）
 - [ ] **🟡 OGP DNS rebinding 強化**: HANDOFF.md の "将来課題" に挙がっている item。ホスト名解決後 → connect 時の二重チェックが追加されたかは未確認
 - [ ] **🟡 PDF の絵文字 / 日本語フォント**: 旧版と同等に表示されるか（packaged build の `--font` オプションは Electron では効かないため、CSS 側の font-family 指定で吸収する設計）
+- [ ] **🟡 HTML エクスポートの保存先選択**: `dialog:save` 経由で workspace 外（例: `~/Desktop/`）に保存できるか
+- [ ] **🟡 Prompt エクスポート**: `~/Downloads/<title>-prompt.md` 等として保存できるか。custom template の有無で出力差分（`buildPromptFromTemplate` vs `buildPrompt`）が出るか
+- [ ] **🟡 transient write capability の境界**:
+  - SaveDialog で workspace 外パスを選択 → 直後の書き込みは成功すること
+  - 書き込み完了後、同じ window から **同じパスへの 2 回目の書き込みは拒否される** こと（consume-on-write 動作）
+  - SaveDialog を開いた window を閉じた後、別 window から同じパスに書き込もうとして拒否されること（cleanup-on-close 動作）
 - [ ] **🟡 `shell.openExternal` のスキーム検証**: 旧版は `https://` `http://` のみ許可していた。新 `electron/main/ipc/shell.ts` も同等か
 
 ---
@@ -235,12 +257,12 @@
 ### 検証項目
 
 - [ ] **🟡 packaged build に対する手動スモーク**: `pnpm dist` 後、生成された .dmg / .AppImage / .exe を起動して以下を確認:
-  - [ ] ワークスペースを開ける
+  - [ ] Sidebar の "フォルダを開く" ボタン → OS ダイアログ → ワークスペース復元（§ 2 dialog:open-directory 経路の信頼境界確認）
   - [ ] `.md` を読み書きできる
   - [ ] ファイル監視が反映される
   - [ ] 全文検索（Cmd+Shift+F）が動く
-  - [ ] Git status / commit / pull / push が動く
-  - [ ] エクスポート（PDF / HTML）が出力される
+  - [ ] Git status / commit / pull / push が動く（§ 4 必須 #3 と兼用）
+  - [ ] エクスポート全 3 形式が出力される（**PDF / HTML / Prompt(.md)**）。HTML / Prompt は workspace 外パス（例: `~/Desktop/`）への保存ダイアログ経由で、§ 5 transient write capability が機能することを確認
   - [ ] OGP リンクカードが表示される
   - [ ] アップデートチェックが API を叩く（`update.ts` の URL は現状 `scripta-next` を指す）
   - [ ] ウィンドウ位置 / サイズが次回起動時に復元される
