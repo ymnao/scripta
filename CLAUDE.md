@@ -61,7 +61,14 @@ pnpm test:e2e
 
 ### electron 42 の postinstall 補完
 
-electron 42.0.0 で npm パッケージの `postinstall` script が削除され（[supply-chain 対策](https://github.com/electron/electron/pull/49328)）、`pnpm install` 時に electron バイナリが取得されなくなった。`electron-vite@5.0.0` は lazy download に未対応で `getElectronPath` が `Electron uninstall` エラーで失敗する（上流追跡: [alex8088/electron-vite#904](https://github.com/alex8088/electron-vite/issues/904)）。本プロジェクトでは `package.json` の `scripts.postinstall` で `node node_modules/electron/install.js` を明示的に実行して補完している。`electron-vite` が lazy download に対応した時点で削除予定。
+electron 42.0.0 で npm パッケージの `postinstall` script が削除され（[supply-chain 対策](https://github.com/electron/electron/pull/49328)）、`pnpm install` 時に electron バイナリが取得されなくなった。`electron-vite@5.0.0` は lazy download に未対応で `getElectronPath` が `Electron uninstall` エラーで失敗する（上流追跡: [alex8088/electron-vite#904](https://github.com/alex8088/electron-vite/issues/904)）。
+
+本プロジェクトでは 2 段構えで対応:
+
+1. **`scripts.postinstall`** — fresh checkout / lockfile 変更時に `node node_modules/electron/install.js` を実行
+2. **バイナリ依存 script への chain** — pnpm 10 の lockfile-unchanged 高速パス（lifecycle scripts skip）で postinstall がスルーされるケースに備え、`dev` / `preview` / `dist` / `test:e2e` / `test:e2e:ui` の頭でも同じ install.js をチェーン実行する。`install.js` はバイナリ存在時に即 return する idempotent script（~20ms）なので chain コストは無視可能
+
+`electron-vite` が lazy download に対応した時点で両方とも削除予定。
 
 ## アーキテクチャ概要
 
