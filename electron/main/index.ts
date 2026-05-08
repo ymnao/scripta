@@ -177,7 +177,7 @@ function approveSavedWorkspaceFromSettings(): void {
 }
 
 app.whenReady().then(() => {
-	electronApp.setAppUserModelId("dev.scripta");
+	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
 	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
 	approveSavedWorkspaceFromSettings();

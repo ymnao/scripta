@@ -21,6 +21,19 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # tag を打つ前に package.json の version を bump し忘れていると、配布物に
+      # 0.0.0 が焼き込まれてアプリ内のアップデート判定 (electron/main/ipc/update.ts)
+      # が初回リリース以降ずっと誤検知し続ける。pre-flight で食い違いを検出する。
+      - name: Verify package.json version matches tag
+        shell: bash
+        run: |
+          pkg_version=$(jq -r .version package.json)
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::package.json version ($pkg_version) does not match tag ($tag_version). Bump package.json before tagging."
+            exit 1
+          fi
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
