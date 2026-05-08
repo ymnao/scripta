@@ -163,10 +163,11 @@ describe("getOwnerWindow フォールバック順", () => {
 
 	it("falls back to getAllWindows()[0] when fromWebContents and getFocusedWindow are null", async () => {
 		const first = fakeOwner("first");
-		const second = fakeOwner("second");
 		vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(null);
 		vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null);
-		vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([first, second]);
+		// 末尾要素を含めて [0] が選ばれることを保証する（length 1 の配列だと
+		// 「先頭」と「最後」の区別が付かないため、配列長 2 で先頭採用を確認）
+		vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([first, fakeOwner("ignored-tail")]);
 		mockOpen({ canceled: true, filePaths: [] });
 
 		const handler = captureHandler<OpenDirectoryHandler>("dialog:open-directory");
@@ -186,8 +187,8 @@ describe("getOwnerWindow フォールバック順", () => {
 		const handler = captureHandler<OpenDirectoryHandler>("dialog:open-directory");
 		await handler(fakeEvent(1));
 
-		// owner が null の場合、Electron の overload (opts only) で呼ぶ。
-		// null を第 1 引数で渡すと runtime で TypeError になるため、引数 1 つで呼ばれていることを検証する。
+		// owner に null を渡すと Electron の overload 解決で TypeError になるため、
+		// dialog.ts は 2 引数版ではなく 1 引数版（opts only）で呼ぶ実装になっている
 		const calls = vi.mocked(dialog.showOpenDialog).mock.calls;
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toHaveLength(1);
