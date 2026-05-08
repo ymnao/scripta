@@ -11,19 +11,14 @@ import { isSafeExternalUrl } from "./utils/url";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
-// 旧 Tauri 版の `asset://localhost/<path>` 相当をローカル画像描画用に提供する。
-// CSP の `img-src` に追加した `scripta-asset:` は、本プロトコルのハンドラ経由で
-// しか解決されないため、ファイルアクセスは main 側で path-guard を通じて
-// ワークスペース配下に閉じ込められる（CSP に `file:` を許可するより安全）。
-//
-// `registerSchemesAsPrivileged` は `app.ready` より前に呼ぶ必要がある。
-// - standard: URL pathname 解析を有効化（`scripta-asset://localhost/foo` の正規パース）
-// - secure: HTTPS 同等の信頼度として扱われ、mixed-content 警告を出さない
-// - supportFetchAPI: `protocol.handle` が Response を返せるようにする
-// - stream: 大きな画像でもチャンク転送できるように
+// 旧 Tauri 版の `asset://localhost/<path>` 相当を提供するローカル画像配信用スキーム。
+// CSP `img-src` に許可するのは本スキームだけで、`file:` は許可しない。これによりファイル
+// アクセスは必ず `protocol.handle` のハンドラ → path-guard を経由する（任意 file 読み取り
+// 防止）。`registerSchemesAsPrivileged` は `app.ready` より前に呼ぶ必要がある（Electron）。
+const SCRIPTA_ASSET_SCHEME = "scripta-asset";
 protocol.registerSchemesAsPrivileged([
 	{
-		scheme: "scripta-asset",
+		scheme: SCRIPTA_ASSET_SCHEME,
 		privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
 	},
 ]);
@@ -45,7 +40,7 @@ const CSP_PROD = [
 	"default-src 'self'",
 	"script-src 'self'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' https: data: blob: scripta-asset:",
+	`img-src 'self' https: data: blob: ${SCRIPTA_ASSET_SCHEME}:`,
 	"font-src 'self' data:",
 	"connect-src 'self'",
 	"worker-src 'self' blob:",
@@ -57,7 +52,7 @@ const CSP_DEV = [
 	"default-src 'self'",
 	"script-src 'self' 'unsafe-inline'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' https: data: blob: scripta-asset:",
+	`img-src 'self' https: data: blob: ${SCRIPTA_ASSET_SCHEME}:`,
 	"font-src 'self' data:",
 	"connect-src 'self' ws://localhost:* http://localhost:*",
 	"worker-src 'self' blob:",
@@ -193,20 +188,12 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
-// `scripta-asset://localhost/<absolute path>` を path-guard 越しにファイル配信する。
-// レンダラからのローカル画像 `<img src="scripta-asset://localhost/Users/foo/img.png">`
-// 等を解決するためのハンドラ。
-//
-// 信頼境界:
-// 1. ホスト名は `localhost` 固定（任意ホスト名で不正利用されないよう拒否）
-// 2. path-guard の process-wide チェックを通過した path のみ配信
-//    （いずれかの window が現に register している workspace 配下のみ）
-// 3. ファイル配信は `net.fetch` + `pathToFileURL` 経由（手動 readFile より安全で
-//    Range/streaming も Electron 側に任せられる）
-//
-// 失敗時は status のみ返し、本文には path を含めない（情報漏洩防止）。
+// 失敗時は status のみ返し本文に path を含めない（拒否された path がレンダラ DevTools
+// から見える形だとワークスペース外パスの存在情報が漏れるため）。hostname を `localhost`
+// 固定にするのは、悪意あるレンダラが任意ホスト名で URL を組み立てた際の挙動を予測可能
+// にする目的（特権スキームでホスト名は意味を持たないが、表記の一貫性を強制する）。
 function registerScriptaAssetProtocol(): void {
-	protocol.handle("scripta-asset", async (request) => {
+	protocol.handle(SCRIPTA_ASSET_SCHEME, async (request) => {
 		try {
 			const url = new URL(request.url);
 			if (url.hostname !== "localhost") {
