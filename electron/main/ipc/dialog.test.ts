@@ -107,22 +107,47 @@ describe("dialog:save", () => {
 		expect(vi.mocked(registerTransientWritePath)).not.toHaveBeenCalled();
 	});
 
-	it("registers transient write path with sender.id and returns the chosen path", async () => {
-		vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(fakeOwner("sender"));
+	it("forwards opts and owner to showSaveDialog, registers transient write, and returns the chosen path", async () => {
+		const owner = fakeOwner("sender");
+		vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(owner);
 		mockSave({ canceled: false, filePath: "/Users/me/Desktop/note.html" });
 
-		const handler = captureHandler<SaveHandler>("dialog:save");
-		const result = await handler(fakeEvent(7), {
+		const opts: SaveDialogOptions = {
 			defaultPath: "note.html",
 			filters: [{ name: "HTML", extensions: ["html"] }],
-		});
+		};
+		const handler = captureHandler<SaveHandler>("dialog:save");
+		const result = await handler(fakeEvent(7), opts);
 
 		expect(result).toBe("/Users/me/Desktop/note.html");
+		// HTML エクスポート等は defaultPath / filters が落ちると初期ファイル名や
+		// 拡張子フィルタが壊れる（regression 検出ポイント）
+		expect(vi.mocked(dialog.showSaveDialog)).toHaveBeenCalledWith(owner, opts);
 		expect(vi.mocked(registerTransientWritePath)).toHaveBeenCalledWith(
 			7,
 			"/Users/me/Desktop/note.html",
 		);
 		expect(vi.mocked(registerTransientWritePath)).toHaveBeenCalledTimes(1);
+	});
+
+	// showSaveDialog 専用 wrapper の owner 解決経路。フォールバックの 4 段は
+	// dialog:open-directory 側で網羅済みだが、null owner の overload 切り替えは
+	// dialog.ts:34 の独立 wrapper にあるため、save 側でも 1 引数版が呼ばれることを
+	// 別途確認しないと save の wrapper だけ壊れた regression を見落とす。
+	it("calls showSaveDialog without an owner argument when no windows exist", async () => {
+		vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(null);
+		vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null);
+		vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([]);
+		mockSave({ canceled: true, filePath: "" });
+
+		const opts: SaveDialogOptions = { defaultPath: "x.html" };
+		const handler = captureHandler<SaveHandler>("dialog:save");
+		await handler(fakeEvent(7), opts);
+
+		const calls = vi.mocked(dialog.showSaveDialog).mock.calls;
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toHaveLength(1);
+		expect(calls[0][0]).toEqual(opts);
 	});
 });
 
