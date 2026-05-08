@@ -53,7 +53,7 @@
 | `start_watcher` | `watcher:start` | ✅ | `chokidar` ベース、`electron/main/ipc/watcher.ts` |
 | `stop_watcher` | `watcher:stop` | ✅ | |
 | イベント `fs-change` (Tauri `listen`) | `onFsChange` | ✅ | `webContents.send` ベース |
-| `open` (`@tauri-apps/plugin-dialog`、フォルダ選択) | `dialog:open-directory` | 🟡 | `electron/main/ipc/dialog.ts:42-50` / **OS ネイティブ folder picker を通った path のみ `approveWorkspacePath` で main 側 approve リストに登録**。renderer が `workspace:set` を打つ際の信頼境界。**注: `approveWorkspacePath` 単体は `electron/main/ipc/workspace.test.ts` でカバーされているが、`dialog.ts` ハンドラ自体（`getOwnerWindow` / IPC 配線 / helper 呼び出しの結線）を直接検証する `dialog.test.ts` は未整備**。実機 / 周辺テスト依存 |
+| `open` (`@tauri-apps/plugin-dialog`、フォルダ選択) | `dialog:open-directory` | ✅ | `electron/main/ipc/dialog.ts:42-50` / **OS ネイティブ folder picker を通った path のみ `approveWorkspacePath` で main 側 approve リストに登録**。renderer が `workspace:set` を打つ際の信頼境界。`electron/main/ipc/dialog.test.ts` で IPC ハンドラ自体（cancel / 選択時の `approveWorkspacePath` 配線、`getOwnerWindow` の 4 段フォールバック）を直接検証 |
 
 ### 新版でのみ存在
 
@@ -133,7 +133,7 @@
 | `fetch_ogp` | `ogp:fetch` | ✅ `undici` + `cheerio`、SSRF 防御 |
 | `export_pdf` | `pdf:export` | ✅ 隠し BrowserWindow + `webContents.printToPDF` |
 | `open` (`@tauri-apps/plugin-shell`) | `shell:open-external` | ✅ scheme allowlist |
-| `save` (`@tauri-apps/plugin-dialog`、保存先選択) | `dialog:save` | 🟡 `electron/main/ipc/dialog.ts:52-60` / **`registerTransientWritePath` で window-scoped な短命 write capability を発行**（書き込み成功で consume、window close で cleanup）。これにより workspace 外への保存も path-guard を維持しつつ許可。**注: `registerTransientWritePath` 単体は `electron/main/utils/path-guard.test.ts` でカバーされているが、`dialog.ts` ハンドラ自体の直接テストは未整備** |
+| `save` (`@tauri-apps/plugin-dialog`、保存先選択) | `dialog:save` | ✅ `electron/main/ipc/dialog.ts:52-60` / **`registerTransientWritePath` で window-scoped な短命 write capability を発行**（書き込み成功で consume、window close で cleanup）。これにより workspace 外への保存も path-guard を維持しつつ許可。`electron/main/ipc/dialog.test.ts` で IPC ハンドラ自体（cancel / 選択時の `registerTransientWritePath(sender.id, path)` 配線）を直接検証 |
 
 ### エクスポート機能（フロント実装）
 
