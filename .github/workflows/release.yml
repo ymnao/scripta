@@ -70,6 +70,9 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm dist
 
+      # electron-updater 配線時には differential update 用の `*.zip` / `*.blockmap` /
+      # `latest*.yml` (mac は `latest-mac.yml`) を以下 glob と Attach step の glob に
+      # 追加し、electron-builder.yml の `mac.target: zip` も復活させる必要がある。
       - name: Upload CI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
