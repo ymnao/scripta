@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { parentDir, resolveImageSrc } from "./images";
 
 vi.mock("../../../lib/commands", () => ({
-	convertFileSrc: (path: string) => `asset://localhost${path}`,
+	convertFileSrc: (path: string) => `scripta-asset://localhost${path}`,
 }));
 
 vi.mock("../../../stores/workspace", () => ({
@@ -58,17 +58,17 @@ describe("resolveImageSrc", () => {
 
 	it("converts Unix absolute path via convertFileSrc", () => {
 		const result = resolveImageSrc("/home/user/img.png", null);
-		expect(result).toContain("asset://localhost/");
+		expect(result).toContain("scripta-asset://localhost/");
 	});
 
 	it("converts Windows absolute path (backslash) via convertFileSrc", () => {
 		const result = resolveImageSrc("C:\\Users\\img.png", null);
-		expect(result).toBe("asset://localhostC:\\Users\\img.png");
+		expect(result).toBe("scripta-asset://localhostC:\\Users\\img.png");
 	});
 
 	it("converts Windows absolute path (forward slash) via convertFileSrc", () => {
 		const result = resolveImageSrc("C:/Users/img.png", null);
-		expect(result).toBe("asset://localhostC:/Users/img.png");
+		expect(result).toBe("scripta-asset://localhostC:/Users/img.png");
 	});
 
 	it("returns raw URL when activeTabPath is null", () => {

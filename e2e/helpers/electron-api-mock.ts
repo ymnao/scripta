@@ -326,7 +326,7 @@ function installApiMock(opts: {
 		showInFolder: async (path: string): Promise<void> => {
 			track("showInFolder", [path]);
 		},
-		convertFileSrc: (path: string): string => path,
+		convertFileSrc: (path: string): string => `scripta-asset://localhost${path}`,
 
 		openDirectoryPicker: async (): Promise<string | null> => {
 			track("openDirectoryPicker", []);

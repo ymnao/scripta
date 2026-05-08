@@ -1,13 +1,32 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, net, protocol, session, shell } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getWindowState, getWorkspacePathFromSettings, persistWindowState } from "./ipc/settings";
 import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
+import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
+
+// 旧 Tauri 版の `asset://localhost/<path>` 相当をローカル画像描画用に提供する。
+// CSP の `img-src` に追加した `scripta-asset:` は、本プロトコルのハンドラ経由で
+// しか解決されないため、ファイルアクセスは main 側で path-guard を通じて
+// ワークスペース配下に閉じ込められる（CSP に `file:` を許可するより安全）。
+//
+// `registerSchemesAsPrivileged` は `app.ready` より前に呼ぶ必要がある。
+// - standard: URL pathname 解析を有効化（`scripta-asset://localhost/foo` の正規パース）
+// - secure: HTTPS 同等の信頼度として扱われ、mixed-content 警告を出さない
+// - supportFetchAPI: `protocol.handle` が Response を返せるようにする
+// - stream: 大きな画像でもチャンク転送できるように
+protocol.registerSchemesAsPrivileged([
+	{
+		scheme: "scripta-asset",
+		privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+	},
+]);
 
 // Electron は app.getPath("userData") を app.getName() (= packaged package.json
 // の name / productName) ベースで解決する。本リポジトリの package.json:name は
@@ -26,7 +45,7 @@ const CSP_PROD = [
 	"default-src 'self'",
 	"script-src 'self'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' https: data: blob:",
+	"img-src 'self' https: data: blob: scripta-asset:",
 	"font-src 'self' data:",
 	"connect-src 'self'",
 	"worker-src 'self' blob:",
@@ -38,7 +57,7 @@ const CSP_DEV = [
 	"default-src 'self'",
 	"script-src 'self' 'unsafe-inline'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' https: data: blob:",
+	"img-src 'self' https: data: blob: scripta-asset:",
 	"font-src 'self' data:",
 	"connect-src 'self' ws://localhost:* http://localhost:*",
 	"worker-src 'self' blob:",
@@ -174,6 +193,38 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
 
+// `scripta-asset://localhost/<absolute path>` を path-guard 越しにファイル配信する。
+// レンダラからのローカル画像 `<img src="scripta-asset://localhost/Users/foo/img.png">`
+// 等を解決するためのハンドラ。
+//
+// 信頼境界:
+// 1. ホスト名は `localhost` 固定（任意ホスト名で不正利用されないよう拒否）
+// 2. path-guard の process-wide チェックを通過した path のみ配信
+//    （いずれかの window が現に register している workspace 配下のみ）
+// 3. ファイル配信は `net.fetch` + `pathToFileURL` 経由（手動 readFile より安全で
+//    Range/streaming も Electron 側に任せられる）
+//
+// 失敗時は status のみ返し、本文には path を含めない（情報漏洩防止）。
+function registerScriptaAssetProtocol(): void {
+	protocol.handle("scripta-asset", async (request) => {
+		try {
+			const url = new URL(request.url);
+			if (url.hostname !== "localhost") {
+				return new Response(null, { status: 400 });
+			}
+			const path = decodeURIComponent(url.pathname);
+			if (!isPathWithinAnyAllowedRoot(path)) {
+				console.warn(`[scripta-asset] denied outside workspace: ${path}`);
+				return new Response(null, { status: 403 });
+			}
+			return await net.fetch(pathToFileURL(path).toString());
+		} catch (error) {
+			console.error("[scripta-asset] failed:", error);
+			return new Response(null, { status: 500 });
+		}
+	});
+}
+
 function approveSavedWorkspaceFromSettings(): void {
 	// 起動時に「前回までの workspacePath」を approve リストへ入れる。
 	// register はしない（実際の register は renderer 側 AppLayout が
@@ -192,6 +243,7 @@ function approveSavedWorkspaceFromSettings(): void {
 app.whenReady().then(() => {
 	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
+	registerScriptaAssetProtocol();
 	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
 	approveSavedWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL

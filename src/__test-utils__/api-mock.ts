@@ -17,7 +17,7 @@ export function createApiMock(): Api {
 
 		openExternal: vi.fn(async () => {}),
 		showInFolder: vi.fn(async () => {}),
-		convertFileSrc: vi.fn((path: string) => path),
+		convertFileSrc: vi.fn((path: string) => `scripta-asset://localhost${path}`),
 
 		openDirectoryPicker: vi.fn(async () => null),
 		showSaveDialog: vi.fn(async () => null),

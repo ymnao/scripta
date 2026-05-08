@@ -251,3 +251,28 @@ export function isPathAllowed(windowId: number, p: string): boolean {
 		return false;
 	}
 }
+
+// `scripta-asset://` プロトコルハンドラなど、リクエスト元の webContents を特定できない
+// 経路向けの全ウィンドウ横断チェック。現在いずれかの window が登録済みの workspace
+// 配下なら true を返す（プロセス全体の union を見る）。
+//
+// 信頼境界の補足: 現状の approve / register 設計は「同一プロセス内の別ウィンドウ間で
+// workspace を相互に覗ける」ことを許容している（path-guard.ts 冒頭コメント参照）。
+// 本関数も同じトレードオフを共有する。issue #32 で approve を window-scoped 化する
+// 際は本関数も window-scoped 版に置き換える。
+//
+// validatePath 失敗・realpath 失敗（既存しないパス等）も含めて全て false。
+export function isPathWithinAnyAllowedRoot(p: string): boolean {
+	let target: string;
+	try {
+		target = realpathBestEffort(validatePath(p));
+	} catch {
+		return false;
+	}
+	for (const set of windowAllowedRoots.values()) {
+		for (const root of set) {
+			if (isPathInside(target, root)) return true;
+		}
+	}
+	return false;
+}
