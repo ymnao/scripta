@@ -279,6 +279,48 @@ describe("scanUnresolvedWikilinksImpl", () => {
 			scanUnresolvedWikilinksImpl(999 /* not registered */, workspaceDir),
 		).rejects.toThrow(/Permission denied/);
 	});
+
+	it("cancels older wikilink scan when a newer scan starts on the same window", async () => {
+		// searchFilesImpl と同じ意図: workspace が大きい状態で連続 scan を投げると
+		// main 側の I/O が積み上がる。後発が sync に gen を bump、先発は readFile ループ
+		// 直前の isStale check で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const [r1, r2] = await Promise.all([
+			scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir),
+			scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir),
+		]);
+		expect(r1).toEqual([]);
+		expect(r2).toHaveLength(1);
+		expect(r2[0].pageName).toBe("missing");
+	});
+
+	it("cancelSearchForWindow stops in-flight wikilink scan", async () => {
+		// panel unmount / workspace 切替で renderer から `search:cancel` が送られる。
+		// 後発の scan が来なくても先発が isStale で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow stops both in-flight search and wikilink scan", async () => {
+		// 案 A: `search:cancel` 1 本で両方止める。workspace 切替で
+		// renderer は cancelSearch() 1 回しか呼ばないので、両方 bail する必要がある。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello [[missing]] world");
+		}
+		const searchPromise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		const scanPromise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelSearchForWindow(TEST_WIN);
+		const [sr, wr] = await Promise.all([searchPromise, scanPromise]);
+		expect(sr).toEqual([]);
+		expect(wr).toEqual([]);
+	});
 });
 
 describe("searchFilesImpl", () => {

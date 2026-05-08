@@ -8,6 +8,7 @@ import {
 	Loader2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cancelSearch } from "../../lib/commands";
 import { toRelativePath } from "../../lib/path";
 import { useWikilinkStore } from "../../stores/wikilink";
 import { useWorkspaceStore } from "../../stores/workspace";
@@ -35,6 +36,11 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 	useEffect(() => {
 		void scanVersion;
 		void scan(workspacePath);
+		return () => {
+			// workspace 切替 / panel unmount で in-flight scan を main 側でも止める。
+			// store 側 _scanId は renderer の結果を捨てるだけで、main の readFile ループは走り切る。
+			cancelSearch().catch(() => {});
+		};
 	}, [workspacePath, scanVersion, scan]);
 
 	// ファイル保存時はデバウンスして再スキャン（編集内容の追従）
@@ -43,7 +49,10 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 		if (prevContentVersionRef.current === contentVersion) return;
 		prevContentVersionRef.current = contentVersion;
 		const timer = setTimeout(() => void scan(workspacePath), 2000);
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			cancelSearch().catch(() => {});
+		};
 	}, [contentVersion, workspacePath, scan]);
 
 	const sortedLinks = useMemo(() => {

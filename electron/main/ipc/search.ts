@@ -61,20 +61,30 @@ export function fuzzyMatch(query: string, target: string): boolean {
 // 進行中の古い検索は async resumption ごとに gen を確認して早期 return する。
 // renderer 側 (SearchPanel.tsx) も requestId で stale を捨てているが、
 // IPC を投げ捨てるだけでは main の I/O は止まらない。
+// scanUnresolvedWikilinksImpl 用の世代は別管理（同種スキャンの先発のみ
+// 後発で打ち消す）。明示的 cancel (`search:cancel`) は両方 bump する。
 const searchGeneration = new Map<number, number>();
+const wikilinkGeneration = new Map<number, number>();
+
+function bumpGeneration(map: Map<number, number>, windowId: number): void {
+	const cur = map.get(windowId);
+	if (cur !== undefined) {
+		map.set(windowId, cur + 1);
+	}
+}
 
 export function clearSearchForWindow(windowId: number): void {
 	searchGeneration.delete(windowId);
+	wikilinkGeneration.delete(windowId);
 }
 
-// 明示的な cancel: gen を bump して in-flight searchFilesImpl を bail させる。
-// renderer 側でクエリが空になった / panel が unmount された時に呼ばれる。
+// 明示的な cancel: gen を bump して in-flight な search / wikilink scan を bail させる。
+// renderer 側でクエリが空になった / panel が unmount された / workspace を切り替えた時に呼ばれる。
 // 「次の検索が始まる」を待たないと止まらない問題を解消。
+// workspace スキャンは search も wikilink もまとめて止めたいので両方 bump する。
 export function cancelSearchForWindow(windowId: number): void {
-	const cur = searchGeneration.get(windowId);
-	if (cur !== undefined) {
-		searchGeneration.set(windowId, cur + 1);
-	}
+	bumpGeneration(searchGeneration, windowId);
+	bumpGeneration(wikilinkGeneration, windowId);
 }
 
 // 旧 Rust src-tauri/src/commands/search.rs の search_files を 1:1 ポート。
@@ -189,7 +199,14 @@ async function scanUnresolvedWikilinksImpl(
 	senderId: number,
 	workspacePath: string,
 ): Promise<UnresolvedWikilink[]> {
+	// searchFilesImpl と同じパターン: sync に gen を bump して、後発の scan が
+	// 古い scan を中断できるようにする。明示的 cancel (`search:cancel`) もここの gen を bump する。
+	const myGen = (wikilinkGeneration.get(senderId) ?? 0) + 1;
+	wikilinkGeneration.set(senderId, myGen);
+	const isStale = (): boolean => wikilinkGeneration.get(senderId) !== myGen;
+
 	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	if (isStale()) return [];
 
 	// existing_pages は basename から `.md`（小文字一致のみ）を剥いで NFC 正規化した Set。
 	const existing = new Set<string>();
@@ -201,6 +218,9 @@ async function scanUnresolvedWikilinksImpl(
 
 	const map = new Map<string, WikilinkReference[]>();
 	for (let idx = 0; idx < ioFiles.length; idx++) {
+		// ファイル間のチェックポイント。1 ファイルの per-line ループは sync なので
+		// その内側ではチェックしない（cost vs. 反応速度のバランス、searchFilesImpl と同方針）。
+		if (isStale()) return [];
 		let text: string;
 		try {
 			text = await fsp.readFile(ioFiles[idx], "utf8");
