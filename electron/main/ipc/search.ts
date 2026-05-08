@@ -73,6 +73,14 @@ function bumpGeneration(map: Map<number, number>, windowId: number): void {
 	}
 }
 
+// gen を sync に bump し、async resumption ごとの stale 判定クロージャを返す。
+// 後発の同種 op が起きると先発が isStale で bail する仕組みを 1 行で書けるようにする。
+function makeStaleChecker(map: Map<number, number>, windowId: number): () => boolean {
+	const myGen = (map.get(windowId) ?? 0) + 1;
+	map.set(windowId, myGen);
+	return () => map.get(windowId) !== myGen;
+}
+
 export function clearSearchForWindow(windowId: number): void {
 	searchGeneration.delete(windowId);
 	wikilinkGeneration.delete(windowId);
@@ -103,10 +111,7 @@ async function searchFilesImpl(
 	assertPathAllowed(senderId, workspacePath);
 	if (query === "") return [];
 
-	// 世代を sync に bump して、後発の searchFilesImpl が古い検索を中断できるようにする。
-	const myGen = (searchGeneration.get(senderId) ?? 0) + 1;
-	searchGeneration.set(senderId, myGen);
-	const isStale = (): boolean => searchGeneration.get(senderId) !== myGen;
+	const isStale = makeStaleChecker(searchGeneration, senderId);
 
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];
@@ -199,11 +204,7 @@ async function scanUnresolvedWikilinksImpl(
 	senderId: number,
 	workspacePath: string,
 ): Promise<UnresolvedWikilink[]> {
-	// searchFilesImpl と同じパターン: sync に gen を bump して、後発の scan が
-	// 古い scan を中断できるようにする。明示的 cancel (`search:cancel`) もここの gen を bump する。
-	const myGen = (wikilinkGeneration.get(senderId) ?? 0) + 1;
-	wikilinkGeneration.set(senderId, myGen);
-	const isStale = (): boolean => wikilinkGeneration.get(senderId) !== myGen;
+	const isStale = makeStaleChecker(wikilinkGeneration, senderId);
 
 	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];
