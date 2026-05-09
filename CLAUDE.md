@@ -65,8 +65,6 @@ pnpm test
 pnpm test:e2e
 ```
 
-> 上記コマンドは Stage 0 で `package.json` を組むときに整える。Stage 0 完了までは未実装。
-
 ### electron 42 への対応
 
 electron 42.0.0 のリリースに伴って 2 種類の workaround が必要になった。`electron-vite@5.0.0` が 42 に未対応のため過渡期の対応（[alex8088/electron-vite#904](https://github.com/alex8088/electron-vite/issues/904) が landed したら両方削除予定）。
@@ -113,10 +111,10 @@ scripta-next/
 │   └── types/                      # 型定義
 │
 ├── docs/                           # 仕様書・実装計画
-├── e2e/                            # Playwright e2e テスト
+├── e2e/                            # Playwright e2e テスト（renderer-only モード）
 ├── electron-builder.yml            # 配布用ビルド設定
 ├── package.json
-├── vite.config.ts
+├── electron.vite.config.ts         # electron-vite で renderer / main / preload を統合ビルド
 └── biome.json
 ```
 
@@ -181,9 +179,10 @@ scripta-next/
 
 ### Vite
 
-- `vite.config.ts` で `@tailwindcss/vite` と `@vitejs/plugin-react` を使用
+- `electron.vite.config.ts` で renderer / main / preload を統合ビルド（`electron-vite` 採用済み）
+- renderer 側は `@tailwindcss/vite` と `@vitejs/plugin-react` を使用
 - Electron 向けに `base: './'` を設定（パッケージング後の相対パス読み込み対応）
-- main / preload プロセスは別ビルド（`electron-vite` の利用を検討）
+- main / preload は `externalizeDepsPlugin` で依存を external 化（electron 42 対応で `rollupOptions.external` も明示、上記「electron 42 への対応」参照）
 
 ## ディレクトリ構成ルール
 
@@ -194,11 +193,11 @@ scripta-next/
 
 - フロントエンドのユニットテストは Vitest を使用
 - main プロセスのロジックも Vitest でカバーする（IPC ハンドラはピュア関数として切り出してテストする）
-- e2e テストは Playwright を使用（Electron 用には `playwright-electron` ではなく公式の `_electron` API を利用）
+- e2e テストは Playwright を使用（**現状は renderer-only モード** — Vite dev server を起動し `e2e/helpers/electron-api-mock.ts` で `window.api` を注入する構成。実 Electron / 実 main プロセスは起動せず、実 IPC payload のシリアライズ / contextBridge / preload の実装ミスは検出しない。実 Electron 起動の `_electron` API ベース e2e は v1.0.0 昇格条件として将来追加予定、`docs/parity-checklist.md` § 13 項目 5 参照）
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**
 
 ```bash
-# コミット前の検証（Stage 0 完了後に有効化）
+# コミット前の検証
 pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e
 ```
 
