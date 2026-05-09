@@ -15,7 +15,7 @@ vi.mock("node:dns", async () => {
 });
 
 import { promises as dnsPromises } from "node:dns";
-import { isGlobalIp, pinSafeLookup } from "./ssrf-guard";
+import { isGlobalIp, type PinnedLookup, pinSafeLookup } from "./ssrf-guard";
 
 const mockedLookup = vi.mocked(dnsPromises.lookup);
 
@@ -244,5 +244,56 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 		});
 		expect(result.address).toBe("93.184.216.34");
 		expect(mockedLookup).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("pinSafeLookup - family option contract", () => {
+	beforeEach(() => {
+		mockedLookup.mockReset();
+	});
+	// pin の lookup フックを Promise でラップして single 経路で呼び出すヘルパ。
+	function callSingle(
+		pin: PinnedLookup,
+		family?: number,
+	): Promise<{ address: string; family: number }> {
+		return new Promise((resolve, reject) => {
+			const opts = family === undefined ? {} : { family };
+			pin.lookup("any.example", opts, ((
+				err: NodeJS.ErrnoException | null,
+				address: string,
+				fam: number,
+			) => {
+				if (err) reject(err);
+				else resolve({ address, family: fam });
+			}) as Parameters<typeof pin.lookup>[2]);
+		});
+	}
+	it("accepts family: 0 (any) on IPv4 pin", async () => {
+		const pin = await pinSafeLookup("8.8.8.8");
+		await expect(callSingle(pin, 0)).resolves.toEqual({ address: "8.8.8.8", family: 4 });
+	});
+	it("accepts undefined family on IPv6 pin", async () => {
+		const pin = await pinSafeLookup("2001:4860:4860::8888");
+		await expect(callSingle(pin)).resolves.toEqual({
+			address: "2001:4860:4860::8888",
+			family: 6,
+		});
+	});
+	it("accepts matching family", async () => {
+		const pinV4 = await pinSafeLookup("8.8.8.8");
+		await expect(callSingle(pinV4, 4)).resolves.toEqual({ address: "8.8.8.8", family: 4 });
+		const pinV6 = await pinSafeLookup("2001:4860:4860::8888");
+		await expect(callSingle(pinV6, 6)).resolves.toEqual({
+			address: "2001:4860:4860::8888",
+			family: 6,
+		});
+	});
+	it("rejects family mismatch (IPv6 requested for IPv4 pin)", async () => {
+		const pin = await pinSafeLookup("8.8.8.8");
+		await expect(callSingle(pin, 6)).rejects.toThrow(/family mismatch/);
+	});
+	it("rejects family mismatch (IPv4 requested for IPv6 pin)", async () => {
+		const pin = await pinSafeLookup("2001:4860:4860::8888");
+		await expect(callSingle(pin, 4)).rejects.toThrow(/family mismatch/);
 	});
 });

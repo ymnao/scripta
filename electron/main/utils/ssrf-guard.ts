@@ -186,7 +186,20 @@ export async function pinSafeLookup(host: string): Promise<PinnedLookup> {
 		throw makeSsrfError(address);
 	}
 	const lookup: SafeLookup = (_hostname, options, callback) => {
-		if (normalizeOptions(options).all === true) {
+		const opts = normalizeOptions(options);
+		// 要求 family が pin と不一致なら失敗扱い。0 / undefined は any として通す。
+		// hints / verbatim は pin 後 DNS 経路を通らないので無視で問題なし。family を
+		// 尊重しないと「IPv6 を頼んだのに IPv4 が返る」silent contract 違反になる。
+		if (opts.family !== undefined && opts.family !== 0 && opts.family !== family) {
+			const err = new Error(
+				`pinned lookup family mismatch: requested ${opts.family}, pinned ${family}`,
+			) as NodeJS.ErrnoException;
+			err.code = "EAI_FAIL";
+			if (opts.all === true) (callback as LookupAllCallback)(err, []);
+			else (callback as LookupSingleCallback)(err, "", 0);
+			return;
+		}
+		if (opts.all === true) {
 			(callback as LookupAllCallback)(null, [{ address, family }]);
 		} else {
 			(callback as LookupSingleCallback)(null, address, family);

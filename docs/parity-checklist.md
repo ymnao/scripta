@@ -148,7 +148,7 @@
 ### 検証項目
 
 - [ ] **🟡 OGP の SSRF 防御**: プライベート IP / loopback / link-local を弾くか（`electron/main/ipc/ogp.ts` の hostname / IP チェック）
-- [x] **✅ OGP DNS rebinding 強化**: `pinSafeLookup` で hostname を 1 度だけ resolve → `isGlobalIp` で validate → 解決済み IP を pin して http(s).request の `lookup` フックに渡す（`electron/main/utils/ssrf-guard.ts:174-215`）。validation 後に攻撃者の DNS が応答を切替えても connect 時に再問い合わせが発生しないので影響しない。redirect も 1 hop ごとに再 pin（closes #29、`ssrf-guard.test.ts` の "DNS rebinding defense" describe 群で網羅）
+- [x] **✅ OGP DNS rebinding 強化**: `pinSafeLookup` で hostname を 1 度だけ resolve → `isGlobalIp` で validate → 解決済み IP を pin して http(s).request の `lookup` フックに渡す（`electron/main/utils/ssrf-guard.ts` の `pinSafeLookup`）。validation 後に攻撃者の DNS が応答を切替えても connect 時に再問い合わせが発生しないので影響しない。redirect も 1 hop ごとに再 pin（closes #29、`ssrf-guard.test.ts` の "DNS rebinding defense" describe 群で網羅）
 - [ ] **🟡 PDF の絵文字 / 日本語フォント**: 旧版と同等に表示されるか（packaged build の `--font` オプションは Electron では効かないため、CSS 側の font-family 指定で吸収する設計）
 - [ ] **🟡 HTML エクスポートの保存先選択**: `dialog:save` 経由で workspace 外（例: `~/Desktop/`）に保存できるか
 - [ ] **🟡 Prompt エクスポート**: `~/Downloads/<title>-prompt.md` 等として保存できるか。custom template の有無で出力差分（`buildPromptFromTemplate` vs `buildPrompt`）が出るか
