@@ -9,7 +9,7 @@ import { __testing } from "./ogp";
 
 const { fetchOgpImpl, cacheGet, cacheSet, clearCache, MAX_CACHE_ENTRIES } = __testing;
 
-// SSRF defense (safeLookup) が public IP のみ許可するため、local HTTP サーバを
+// SSRF defense (pinSafeLookup) が public IP のみ許可するため、local HTTP サーバを
 // 立てて round-trip を確認する integration test は接続段階で確実に reject される。
 // したがってここでは:
 //   - scheme 検証
@@ -17,6 +17,7 @@ const { fetchOgpImpl, cacheGet, cacheSet, clearCache, MAX_CACHE_ENTRIES } = __te
 //   - cache の TTL / capacity 動作
 // の 3 観点に絞って単体テストする。実 fetch path は e2e で確認するか、本物の
 // global URL を使う将来テストで担保する。
+// DNS rebinding 防御本体のテストは ssrf-guard.test.ts § "pinSafeLookup" を参照。
 
 describe("ogp scheme validation", () => {
 	beforeEach(() => clearCache());
@@ -34,17 +35,17 @@ describe("ogp scheme validation", () => {
 	});
 });
 
-describe("ogp SSRF defense via safeLookup", () => {
+describe("ogp SSRF defense via pinSafeLookup", () => {
 	beforeEach(() => clearCache());
-	it("blocks private hostname (127.0.0.1) at connect", async () => {
-		// safeLookup が 127.0.0.1 を解決した瞬間に EACCES を返す。エラー文に
-		// "SSRF blocked" が含まれることまで確認し、判定経路（DNS 失敗ではなく
-		// safeLookup の reject）を固定する。
+	it("blocks private hostname (127.0.0.1) at pin time", async () => {
+		// pinSafeLookup が literal IP 127.0.0.1 を isGlobalIp で弾き、connect 前に
+		// EACCES を返す。エラー文に "SSRF blocked" が含まれることまで確認し、判定
+		// 経路（DNS 失敗ではなく pin の reject）を固定する。
 		await expect(fetchOgpImpl("http://127.0.0.1/")).rejects.toThrow(/SSRF blocked/);
 	});
 	it("blocks loopback v6 ::1 via SSRF (not DNS failure)", async () => {
-		// IPv6 リテラル URL は `URL.hostname` が `[::1]` 表現で返るが、http-fetch が
-		// bracket を剥いて safeLookup に渡すので、ENOTFOUND ではなく SSRF として
+		// IPv6 リテラル URL は `URL.hostname` が `[::1]` 表現で返るが、ogp.ts が
+		// bracket を剥いて pinSafeLookup に渡すので、ENOTFOUND ではなく SSRF として
 		// 弾かれることを確認する。ここで bracket 正規化が壊れると判定経路が
 		// 「DNS 失敗で結果的に reject」に静かに退化するので回帰として固定する。
 		await expect(fetchOgpImpl("http://[::1]/")).rejects.toThrow(/SSRF blocked/);

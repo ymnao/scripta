@@ -1,17 +1,24 @@
 import type { LookupAddress, LookupOptions } from "node:dns";
-import { lookup as nodeLookup } from "node:dns";
-import { isIPv4, isIPv6 } from "node:net";
+import { promises as dnsPromises } from "node:dns";
+import { isIP, isIPv4, isIPv6 } from "node:net";
 
 // 旧 Tauri 版 src-tauri/src/commands/ogp.rs の `is_global_ip` / `SsrfSafeResolver` を
 // JS で 1:1 移植。グローバル到達可能 IP のみを許可する allowlist 方式で
 // プライベート / ループバック / リンクローカル / マルチキャスト 等を弾く。
 //
-// **TOCTOU 防御**:
-// 「事前に hostname を resolve → IP 検証 → 接続」の 3 手順を分離すると DNS rebinding
-// の窓ができる。`http(s).request({ lookup: safeLookup })` で **接続時の lookup
-// コールバック内で検証** することにより、attacker が public IP を返してから private
-// IP に切り替えても、実際に接続される IP がチェックされる経路に閉じ込められる。
-// 各リダイレクトも別 request として safeLookup を通るので 1 hop ごとに同じ防御が効く。
+// **DNS rebinding 防御 (pinSafeLookup)**:
+// 「事前に hostname を resolve → IP 検証 → 接続」を分離すると、validation 後に
+// 攻撃者の DNS が返答を切り替える窓が開く可能性がある（TOCTOU）。本モジュールでは
+// `pinSafeLookup` で **解決済み IP を 1 度だけ取得して pin** し、http(s).request の
+// `lookup` フックには pin を返すだけの sync コールバックを渡す。これにより:
+//   1. dns.lookup の呼び出しは pin 作成時の 1 回のみ（攻撃者の rebind は反映されない）
+//   2. connect 時に Node が呼ぶ lookup フックは保存済み IP を即時返却（追加 DNS なし）
+//   3. 各 redirect は別 hop として再 pin されるので 1 hop ごとに同じ防御が効く
+//
+// IP リテラルは Node の `net.connect` が dns.lookup を経由せず直接 connect する
+// 経路があり、`lookup` フックだけでは literal-IP SSRF を貫通させてしまう。pin 作成
+// 時に `isIP` で検出して isGlobalIp 判定を pin 内に集約することで「pinSafeLookup を
+// 通った時点で安全」と単一不変条件で保証する。
 
 export function isGlobalIp(ip: string): boolean {
 	if (isIPv4(ip)) return isGlobalIpv4(ip);
@@ -146,35 +153,88 @@ function normalizeOptions(options: LookupOptions | number | undefined): LookupOp
 	return options;
 }
 
-export const safeLookup: SafeLookup = (hostname, options, callback) => {
-	const opts = normalizeOptions(options);
-	if (opts.all === true) {
-		// `{all: true}` 時の callback は `(err, LookupAddress[]) => void`。TS の
-		// オーバーロード解決は options の値で narrow されないため明示キャスト。
-		const allOpts: LookupOptions & { all: true } = { ...opts, all: true };
-		nodeLookup(hostname, allOpts, (err, addresses) => {
-			const cb = callback as LookupAllCallback;
-			if (err) return cb(err, []);
-			for (const a of addresses) {
-				if (!isGlobalIp(a.address)) {
-					return cb(makeSsrfError(a.address), []);
-				}
-			}
-			cb(null, addresses);
-		});
-		return;
+// dns.lookup は内部で libuv worker thread の getaddrinfo を呼ぶため AbortSignal や
+// cancel API を持たない。timeout 経過時は Promise.race で JS 側を unblock し、
+// 背景の worker は名前解決完了まで動き続ける（worker thread を消費するが OGP fetch
+// の per-request budget を守るのが本来の目的なのでそれで十分）。
+async function lookupWithTimeout(
+	host: string,
+	timeoutMs: number,
+): Promise<{ address: string; family: number }> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			dnsPromises.lookup(host),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					const err = new Error(`DNS lookup timeout after ${timeoutMs}ms`) as NodeJS.ErrnoException;
+					err.code = "ETIMEDOUT";
+					reject(err);
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
 	}
-	// `all: false` オーバーロードは options の number/object 引数に依存して narrow
-	// されるが、汎用 LookupOptions では narrow 不能。callback の `address` は
-	// 実装上 string になるが TS は `string | LookupAddress[]` と推論するため、
-	// branch を runtime で守った上で string にキャストする。family 等の元 options は
-	// `...opts` で保持して all のみ false を被せる。
-	const singleOpts: LookupOptions = { ...opts, all: false };
-	nodeLookup(hostname, singleOpts, (err, address, family) => {
-		const cb = callback as LookupSingleCallback;
-		if (err) return cb(err, "", 0);
-		const addr = address as string;
-		if (!isGlobalIp(addr)) return cb(makeSsrfError(addr), "", 0);
-		cb(null, addr, family);
-	});
-};
+}
+
+export interface PinnedLookup {
+	// http(s).request({ lookup }) に渡す sync コールバック。dns.lookup を呼ばず、
+	// pin 作成時に validate された IP を即時返却する。
+	lookup: SafeLookup;
+	// pin された IP（IPv4 / IPv6 リテラル）。
+	address: string;
+	// dns.LookupAddress.family と同じ値（4 または 6）。
+	family: number;
+}
+
+// `host` を 1 度だけ解決して global IP に validate し、その IP に固定された
+// `lookup` フックを返す。host は URL.hostname の bracket を剥いた形で渡す。
+// IPv4 / IPv6 リテラルは dns.lookup を使わず isGlobalIp で直接判定する。
+//
+// `timeoutMs` は DNS 解決の上限。dns.lookup は libuv worker thread 内の
+// getaddrinfo を直接呼ぶため AbortSignal を持たず、Promise.race でしか中断
+// できない。timeout 後も worker は名前解決完了まで動き続けるが、JS 側は
+// ETIMEDOUT を投げて呼び出し元の per-request budget を守る。literal IP の
+// 場合は dns.lookup 不要なので timeoutMs は無視される。
+//
+// 戻り値の `lookup` を `http(s).request({ lookup })` に渡せば、Node は pin された
+// IP に直接 connect する（DNS 再問い合わせは入らない）。Host ヘッダ / SNI / 証明書
+// 検証は元の URL.hostname がそのまま使われるので、HTTPS の name validation は維持。
+export async function pinSafeLookup(host: string, timeoutMs: number): Promise<PinnedLookup> {
+	const literalFamily = isIP(host); // 0 (= not IP) / 4 / 6
+	let address: string;
+	let family: number;
+	if (literalFamily !== 0) {
+		address = host;
+		family = literalFamily;
+	} else {
+		const resolved = await lookupWithTimeout(host, timeoutMs);
+		address = resolved.address;
+		family = resolved.family;
+	}
+	if (!isGlobalIp(address)) {
+		throw makeSsrfError(address);
+	}
+	const lookup: SafeLookup = (_hostname, options, callback) => {
+		const opts = normalizeOptions(options);
+		// 要求 family が pin と不一致なら失敗扱い。0 / undefined は any として通す。
+		// hints / verbatim は pin 後 DNS 経路を通らないので無視で問題なし。family を
+		// 尊重しないと「IPv6 を頼んだのに IPv4 が返る」silent contract 違反になる。
+		if (opts.family !== undefined && opts.family !== 0 && opts.family !== family) {
+			const err = new Error(
+				`pinned lookup family mismatch: requested ${opts.family}, pinned ${family}`,
+			) as NodeJS.ErrnoException;
+			err.code = "EAI_FAIL";
+			if (opts.all === true) (callback as LookupAllCallback)(err, []);
+			else (callback as LookupSingleCallback)(err, "", 0);
+			return;
+		}
+		if (opts.all === true) {
+			(callback as LookupAllCallback)(null, [{ address, family }]);
+		} else {
+			(callback as LookupSingleCallback)(null, address, family);
+		}
+	};
+	return { lookup, address, family };
+}

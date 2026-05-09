@@ -1,18 +1,16 @@
-import { isIP } from "node:net";
 import { URL } from "node:url";
 import { ipcMain } from "electron";
 import type { OgpData } from "../../../src/types/ogp";
 import { httpFetch } from "../utils/http-fetch";
 import { parseOgp } from "../utils/ogp-parser";
-import { isGlobalIp, safeLookup, stripIpBrackets } from "../utils/ssrf-guard";
+import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
 
 // 旧 Tauri 版 src-tauri/src/commands/ogp.rs `fetch_ogp` を Node stdlib に移植。
-// SSRF 防御は 2 段構成で、両方を redirect 1 hop ごとに通す:
-//   (a) Pre-flight check: URL の hostname が **literal IP** の場合は isGlobalIp で
-//       直接判定。Node の `net.connect` は `host` が IP リテラルだと `dns.lookup` を
-//       スキップするため、(b) のみだと literal IP SSRF が貫通する。
-//   (b) Connect-time check: hostname が **DNS 名** の場合は `safeLookup` が
-//       接続時 lookup で解決後 IP を検証する（DNS rebinding/TOCTOU-safe）。
+// SSRF 防御は redirect 1 hop ごとに `pinSafeLookup` で hostname を 1 度だけ解決し、
+// 解決済み IP を pin して http(s).request の `lookup` フックに渡す。これにより:
+//   - DNS 名: 1 回の dns.lookup → isGlobalIp 検証 → 以後の connect は pin された IP
+//     を使う（rebinding 攻撃が validation 後に DNS 応答を切替えても影響しない）
+//   - literal IP: dns.lookup をスキップし isGlobalIp 直接判定で pin 生成
 // HTTP 層の Promise / timeout / body-limit boilerplate は utils/http-fetch.ts へ集約。
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -73,22 +71,25 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 			throw new Error("Only http and https URLs are supported");
 		}
-		// (a) literal IP は safeLookup を通らないので、ここで isGlobalIp で直接弾く。
-		// hostname は IPv6 では bracket 付きで返るので bracket を剥いてから判定。
+		// hostname の DNS 解決と SSRF 検証を 1 回で済ませて IP を pin する。
+		// hostname は IPv6 リテラルでは bracket 付きで返るので剥いてから渡す。
+		// 1 hop の総 budget は REQUEST_TIMEOUT_MS（旧 safeLookup 経路の socket timeout
+		// 同等）。DNS で消費した時間を差し引いた残りを HTTP timeout として渡し、
+		// 「DNS + HTTP で 1 hop あたり最大 REQUEST_TIMEOUT_MS」を維持する。
 		const bareHost = stripIpBrackets(parsed.hostname);
-		if (isIP(bareHost) && !isGlobalIp(bareHost)) {
-			throw new Error(`SSRF blocked: non-global IP ${bareHost}`);
-		}
+		const hopStart = Date.now();
+		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS);
+		const httpTimeout = Math.max(1, REQUEST_TIMEOUT_MS - (Date.now() - hopStart));
 		const res = await httpFetch({
 			url: parsed,
 			headers: {
 				"User-Agent": "scripta",
 				Accept: "text/html,application/xhtml+xml",
 			},
-			timeoutMs: REQUEST_TIMEOUT_MS,
+			timeoutMs: httpTimeout,
 			maxBodyBytes: MAX_BODY_BYTES,
 			onMaxExceeded: "truncate",
-			lookup: safeLookup,
+			lookup: pin.lookup,
 		});
 		if (res.statusCode >= 300 && res.statusCode < 400) {
 			const loc = res.headers.location;
