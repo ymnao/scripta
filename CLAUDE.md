@@ -2,11 +2,15 @@
 
 > **このリポジトリの位置づけ**
 >
-> このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta`）を **Electron へ全書き直し** するためのプロジェクト。
-> リリースタイミングで本リポジトリが新 `scripta` として公開される予定。それまでは作業用の仮ディレクトリ名 `scripta-next` で進行する。
+> このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta`）を **Electron へ全書き直し** したプロジェクト。
 >
 > 旧リポジトリ（参照専用）: `/Users/nakiym/development/tools/scripta`
-> 旧リポジトリは現在も本番稼働しており、機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
+> 旧リポジトリは新版が安定稼働するまで稼働継続するため、機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
+>
+> <!-- 以下はリポジトリリネーム（issue #28）完了時に削除/更新する: -->
+> <!-- - 現状の作業ディレクトリ名は `scripta-next`（リネーム前）。リネーム後は `scripta` に統一される。 -->
+> <!-- - GitHub remote URL は `ymnao/scripta-next` → `ymnao/scripta`（旧 Tauri 版は `ymnao/scripta-tauri` 等へリネーム予定）。 -->
+> <!-- - `electron/main/ipc/update.ts:GITHUB_API_URL` も同タイミングで `scripta` へ戻す。 -->
 
 ## プロジェクト概要
 

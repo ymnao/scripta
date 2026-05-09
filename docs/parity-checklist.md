@@ -2,7 +2,7 @@
 
 > Stage 6 完了判定の一部。本リポジトリ（Electron 版）が旧 `ymnao/scripta`（Tauri 版、`/Users/nakiym/development/tools/scripta`）と同等以上であることを、リリース切り替え前に検証する。
 >
-> 各項目には **状態ラベル**（✅ 移植済 / 🟡 要実機検証 / ⚠️ 既知差分 / ⛔ 未実装 / 🔁 別段 follow-up）と参照ファイルパスを記載する。
+> 各項目には **状態ラベル**（✅ 移植済 / 🟡 要実機検証 / ⚠️ 既知差分 / ⛔ 未実装）と参照ファイルパスを記載する。
 
 ## 0. 凡例
 
@@ -10,7 +10,6 @@
 - **🟡 要実機検証**: 実装は存在するが、`pnpm dist` パッケージビルドで動作確認が必要（renderer-only e2e ではカバーできない領域）
 - **⚠️ 既知差分**: 旧版と挙動が異なることが判明している。要判断（許容 / 修正）
 - **⛔ 未実装**: 旧版に存在するが新版未着手。リリース blocker 候補
-- **🔁 別段 follow-up**: Stage 6 残項目として既に把握済（コードサイニング / electron-updater 配線 等）
 
 参照基準:
 
@@ -171,11 +170,12 @@
 
 ### 既知差分
 
-- ⚠️ **`update.ts:GITHUB_API_URL`** は現在 `ymnao/scripta-next` を指している。リリース切り替え時に `ymnao/scripta` へ戻す必要あり（コメント記載済み、`docs/migration-plan.md` Stage 6 リリース切り替え項目で対応）。
+- ⚠️ **`update.ts:GITHUB_API_URL`** は現在 `ymnao/scripta-next` を指している。リポジトリリネーム時に `ymnao/scripta` へ戻す必要あり（コメント記載済み、`docs/migration-plan.md` Stage 6 リリース切り替え項目で対応）。
 
-### 🔁 別段 follow-up（Stage 6 残項目）
+### 運用方針
 
-- 🔁 **electron-updater 配線**: 現在は GitHub API ポーリングのみで、自動ダウンロード / インストールは未実装。`pnpm install electron-updater` 後に `update.ts` を `autoUpdater` イベント配線へ置換する。`release.yml` の `# keep in sync` glob と `electron-builder.yml: mac.target: zip` を併せて更新（PR #20 の TODO 参照）。
+- **update 存在確認のみで運用、auto-download / auto-install は scope 外**（旧 Tauri 版もそうだった）。GitHub Releases API ポーリングで latest tag を取得し、新しいバージョンがあれば UI 上で通知してユーザーに手動アップデートを促す形を維持する。
+- `electron-updater` は導入しない。導入すると：(a) コードサイニング必須、(b) `release.yml` の secret 注入、(c) `electron-builder.yml: mac.target: zip` 等の付帯対応、(d) 配信チャンネル設計、までが芋づるで必要になる。本プロジェクトはコードサイニングを採用しない方針（§ 11 / § 12 参照）なので一貫して「存在確認のみ」とする。
 
 ---
 
@@ -283,7 +283,7 @@
 
 ---
 
-## 11. 配布 / コードサイニング 🔁
+## 11. 配布
 
 ### Stage 6-4 完了済（PR #19, #20）
 
@@ -292,21 +292,18 @@
 - ✅ `package.json:version` と tag の事前一致 verify
 - ✅ AUMID `com.scripta.app` / `app.setName("scripta")`（packaged のみ）
 
-### 🔁 別段 follow-up（Stage 6 残項目）
+### 運用方針
 
-詳細な作業項目とリスト（証明書手配 / `electron-builder.yml` 修正点 / `release.yml` の secret 注入 / リリース切り替え時の更新箇所）は canonical な HANDOFF.md へ集約済。
-
-- canonical: `HANDOFF.md` の "未完了・次にやること > Stage 6 残項目" 節
-- 補足メモ: `HANDOFF.md` の "重要な判断・メモ > electron-updater 配線時の作業項目" / "リリース切り替え時の更新箇所"
-- `electron/main/ipc/update.ts:GITHUB_API_URL` の暫定値（`scripta-next`）はコード内コメントが canonical（リリース切り替え時に `scripta` へ戻す）
-
-本書（parity-checklist.md）では § 12 のリリース前ブロッカー早見表で、これらの完了が必須であることを参照する役割のみを担う。
+- **未署名で出荷**（旧 Tauri 版同等の方針）。コードサイニング / 公証は採用しない。macOS Gatekeeper / Windows SmartScreen の警告は受容し、README とリリースノートで起動手順を案内する。
+- `update.ts:GITHUB_API_URL` の `scripta-next` → `scripta` への切り替えはリポジトリリネーム時に行う（コード内コメントが canonical）。
 
 ---
 
 ## 12. リリース前ブロッカー早見表
 
-リリース切り替え（旧 `ymnao/scripta` → 本リポジトリ）の最終 GO/NO-GO チェックリスト。
+v0.2.0 リリース（旧 `ymnao/scripta` 同等性能を満たすことの確認）の最終 GO/NO-GO チェックリスト。
+
+> コードサイニングと electron-updater 配線は **採用せず**（§ 6 / § 11 参照）。未署名で出荷する旧 Tauri 版と同等の方針。Gatekeeper / SmartScreen 警告は受容する。
 
 ### 必須（GO 条件）
 
@@ -319,12 +316,10 @@
 3. [ ] § 4 の **Git remote 認証実機確認**（HTTPS credential helper / SSH agent で commit + pull + push が一往復成功）
    — Git Sync は新版の中核機能、認証経路は packaged build でしか検証不能
 4. [ ] § 10 の **packaged build 手動スモーク** が一通り pass
-5. [ ] § 11 の **コードサイニング / 公証** がパイプラインに組み込まれ、ダウンロード後にユーザーが追加操作なしで起動できる（macOS Gatekeeper / Windows SmartScreen 不発）
-6. [ ] § 6 の **electron-updater 配線** + `update.ts:GITHUB_API_URL` のリポジトリ名切り替え
 
 ### 推奨（NICE-TO-HAVE）
 
-- [x] § 5 の OGP DNS rebinding 強化（PR #29 で対応済）
+- [x] § 5 の OGP DNS rebinding 強化（PR #39 で対応済、closes #29）
 - [ ] § 10 の Playwright `_electron` API ベース最小 e2e 追加（少なくとも 1 本: workspace 選択 → md open → write → 再起動して内容残存）
 
 ### Stage 5 から継続課題（リリース blocker ではない）
@@ -333,6 +328,33 @@
 
 ---
 
-## 13. 更新履歴
+## 13. v1.0.0 昇格 checklist
+
+v1.0.0 は「完璧の象徴」として温存する方針。初期リリースは v0.2.0 とし、以下 6 項目すべてが pass した時点で v1.0.0 へ昇格する。
+
+1. [ ] **`HANDOFF.md` "Stage 5 から継続課題" がすべて closed**
+   — 4 項目（後続 issue 化済）の対応完了。リリース後の継続改善が一通り片付いた状態。
+2. [ ] **§ 12 必須 + 推奨 すべて close**
+   — § 12 必須 4 項目（ローカル画像 / userData 互換 / Git 認証 / packaged build スモーク）と推奨 2 項目（OGP DNS rebinding ✅ / Playwright `_electron` 最小 e2e）の全クローズ。
+3. [ ] **§ 9 ローカル画像が "保険実装" でなく確証ある状態**
+   — `scripta-asset://` プロトコルの packaged build 動作が複数 OS（少なくとも macOS / Windows）で確認済み、CSP 違反 / 403 拒否境界が実機検証ベースで検証済みの状態。issue #26 のスモークが 1 度走っただけでなく、回帰しないことを e2e（推奨項目）でガードしている。
+4. [ ] **v0.2.0 リリースから 14 日以上経過 / 重大 regression 0 件**
+   — 出荷後の stability period。データ消失・起動不能・主要機能停止クラスの regression が 14 日間 0 件であること。Hotfix リリース（v0.2.x）は許容するが、v0.2.0 から再起算する。
+5. [ ] **Playwright `_electron` API ベース最小 e2e 1 本以上**
+   — § 10 の renderer-only モード単独では実 IPC payload のシリアライズ / contextBridge / preload 実装ミスを検出できない。最低 1 本の実 Electron 起動 e2e で「workspace 選択 → md open → write → 再起動して内容残存」を覆う。
+6. [ ] **Dependabot 残債ゼロ**
+   — open な Dependabot PR が 0 件。security advisory（pnpm audit / GitHub security tab）も clean。
+
+### 昇格時の作業
+
+- `package.json:version` を `1.0.0` に bump
+- `CHANGELOG.md` に v1.0.0 セクション（v0.2.0 → v1.0.0 の累積差分要約）
+- tag push → `release.yml` で配布バイナリ生成
+- README とリリースノートで v1.0.0 昇格条件 6 項目の達成を明記
+
+---
+
+## 14. 更新履歴
 
 - 2026-05-08: 初版作成（Stage 6-4 完了直後、`9f32815` / `dcbc68b` を取り込んだ状態で audit）。
+- 2026-05-09: v0.2.0 リリース方針確定（issue #24）。コードサイニング / electron-updater 採用せず方針を § 6 / § 11 / § 12 に反映。§ 13 v1.0.0 昇格 checklist 6 項目を追加。
