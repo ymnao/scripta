@@ -2,11 +2,19 @@
 
 > **このリポジトリの位置づけ**
 >
-> このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta`）を **Electron へ全書き直し** するためのプロジェクト。
-> リリースタイミングで本リポジトリが新 `scripta` として公開される予定。それまでは作業用の仮ディレクトリ名 `scripta-next` で進行する。
+> このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta`）を **Electron へ全書き直し** したプロジェクト。
 >
 > 旧リポジトリ（参照専用）: `/Users/nakiym/development/tools/scripta`
-> 旧リポジトリは現在も本番稼働しており、機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
+> 旧リポジトリは新版への移行完了まで稼働継続するため、機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
+
+> **TODO（リポジトリリネーム時に更新、[issue #28](https://github.com/ymnao/scripta-next/issues/28)）**
+>
+> 現状の作業ディレクトリ名は `scripta-next`（リネーム前）。issue #28 完了時に以下を更新する:
+>
+> - 作業ディレクトリ名を `scripta` に統一
+> - GitHub remote URL: `ymnao/scripta-next` → `ymnao/scripta`（旧 Tauri 版は `ymnao/scripta-tauri` 等へリネーム）
+> - `electron/main/ipc/update.ts:GITHUB_API_URL` を `scripta` へ戻す
+> - 本 TODO blockquote 自体を削除
 
 ## プロジェクト概要
 
@@ -21,7 +29,7 @@ Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite + Biome
 - 旧 Tauri 版のフロントエンド（`src/components/`, `src/stores/`, `src/hooks/`, `src/lib/` の一部, `src/types/`）はほぼそのまま流用する
 - バックエンド境界（`src/lib/commands.ts`）を Electron IPC へ差し替えることが移行の中心作業となる
 - Stage 0 ではバックエンド処理を全てモック実装にして、まず frontend が Chromium で動作することを検証する
-- Rust コードはこのリポジトリには持ち込まない。検索など性能が必要なものは外部バイナリ（`ripgrep` 等）を sidecar として同梱する
+- Rust コードはこのリポジトリには持ち込まない。全文検索など性能が必要なものも純 JS で実装する（旧 Rust ロジックを 1:1 移植、`docs/migration-plan.md` Stage 3 参照）
 
 ## 開発コマンド
 
@@ -57,8 +65,6 @@ pnpm test
 pnpm test:e2e
 ```
 
-> 上記コマンドは Stage 0 で `package.json` を組むときに整える。Stage 0 完了までは未実装。
-
 ### electron 42 への対応
 
 electron 42.0.0 のリリースに伴って 2 種類の workaround が必要になった。`electron-vite@5.0.0` が 42 に未対応のため過渡期の対応（[alex8088/electron-vite#904](https://github.com/alex8088/electron-vite/issues/904) が landed したら両方削除予定）。
@@ -86,11 +92,11 @@ scripta-next/
 │   │   ├── ipc/                    # IPC ハンドラ（旧 src-tauri/src/commands に対応）
 │   │   │   ├── file.ts             # ファイル読み書き・作成・削除
 │   │   │   ├── workspace.ts        # フォルダ走査・ツリー取得
-│   │   │   ├── search.ts           # 全文検索・ファイル名検索（ripgrep sidecar）
+│   │   │   ├── search.ts           # 全文検索・ファイル名検索（純 JS、旧 Rust ロジックを 1:1 移植）
 │   │   │   ├── git.ts              # Git 操作（simple-git）
-│   │   │   ├── ogp.ts              # OGP メタデータ取得（undici + cheerio）
+│   │   │   ├── ogp.ts              # OGP メタデータ取得（自前 http-fetch + 自前 ogp-parser、SSRF 防御）
 │   │   │   ├── pdf.ts              # PDF エクスポート（webContents.printToPDF）
-│   │   │   ├── updater.ts          # アップデートチェック（electron-updater）
+│   │   │   ├── update.ts           # アップデートチェック（GitHub Releases API ポーリング、存在確認のみ）
 │   │   │   └── watcher.ts          # ファイル変更監視（chokidar）
 │   │   └── menu.ts                 # アプリケーションメニュー
 │   └── preload/                    # プリロードスクリプト（contextBridge で window.api を公開）
@@ -105,10 +111,10 @@ scripta-next/
 │   └── types/                      # 型定義
 │
 ├── docs/                           # 仕様書・実装計画
-├── e2e/                            # Playwright e2e テスト
+├── e2e/                            # Playwright e2e テスト（renderer-only モード）
 ├── electron-builder.yml            # 配布用ビルド設定
 ├── package.json
-├── vite.config.ts
+├── electron.vite.config.ts         # electron-vite で renderer / main / preload を統合ビルド
 └── biome.json
 ```
 
@@ -173,9 +179,10 @@ scripta-next/
 
 ### Vite
 
-- `vite.config.ts` で `@tailwindcss/vite` と `@vitejs/plugin-react` を使用
+- `electron.vite.config.ts` で renderer / main / preload を統合ビルド（`electron-vite` 採用済み）
+- renderer 側は `@tailwindcss/vite` と `@vitejs/plugin-react` を使用
 - Electron 向けに `base: './'` を設定（パッケージング後の相対パス読み込み対応）
-- main / preload プロセスは別ビルド（`electron-vite` の利用を検討）
+- main / preload は `externalizeDepsPlugin` で依存を external 化（electron 42 対応で `rollupOptions.external` も明示、上記「electron 42 への対応」参照）
 
 ## ディレクトリ構成ルール
 
@@ -186,11 +193,11 @@ scripta-next/
 
 - フロントエンドのユニットテストは Vitest を使用
 - main プロセスのロジックも Vitest でカバーする（IPC ハンドラはピュア関数として切り出してテストする）
-- e2e テストは Playwright を使用（Electron 用には `playwright-electron` ではなく公式の `_electron` API を利用）
+- e2e テストは Playwright を使用（**現状は renderer-only モード** — Vite dev server を起動し `e2e/helpers/electron-api-mock.ts` で `window.api` を注入する構成。実 Electron / 実 main プロセスは起動せず、実 IPC payload のシリアライズ / contextBridge / preload の実装ミスは検出しない。実 Electron 起動の `_electron` API ベース e2e は v1.0.0 昇格条件として将来追加予定、`docs/parity-checklist.md` § 13 項目 5 参照）
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**
 
 ```bash
-# コミット前の検証（Stage 0 完了後に有効化）
+# コミット前の検証
 pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e
 ```
 
