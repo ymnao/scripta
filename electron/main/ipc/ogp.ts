@@ -73,8 +73,11 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 		}
 		// hostname の DNS 解決と SSRF 検証を 1 回で済ませて IP を pin する。
 		// hostname は IPv6 リテラルでは bracket 付きで返るので剥いてから渡す。
+		// DNS lookup と HTTP それぞれに REQUEST_TIMEOUT_MS の budget を割り当てる
+		// （旧 safeLookup 経路は socket timeout が DNS 段階を含んでいたが、pin 経路は
+		// dns.lookup を pre-await するため明示 timeout が必要）。
 		const bareHost = stripIpBrackets(parsed.hostname);
-		const pin = await pinSafeLookup(bareHost);
+		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS);
 		const res = await httpFetch({
 			url: parsed,
 			headers: {

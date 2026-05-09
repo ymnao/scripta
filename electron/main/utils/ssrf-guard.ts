@@ -153,6 +153,31 @@ function normalizeOptions(options: LookupOptions | number | undefined): LookupOp
 	return options;
 }
 
+// dns.lookup は内部で libuv worker thread の getaddrinfo を呼ぶため AbortSignal や
+// cancel API を持たない。timeout 経過時は Promise.race で JS 側を unblock し、
+// 背景の worker は名前解決完了まで動き続ける（worker thread を消費するが OGP fetch
+// の per-request budget を守るのが本来の目的なのでそれで十分）。
+async function lookupWithTimeout(
+	host: string,
+	timeoutMs: number,
+): Promise<{ address: string; family: number }> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			dnsPromises.lookup(host),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					const err = new Error(`DNS lookup timeout after ${timeoutMs}ms`) as NodeJS.ErrnoException;
+					err.code = "ETIMEDOUT";
+					reject(err);
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
 export interface PinnedLookup {
 	// http(s).request({ lookup }) に渡す sync コールバック。dns.lookup を呼ばず、
 	// pin 作成時に validate された IP を即時返却する。
@@ -167,10 +192,16 @@ export interface PinnedLookup {
 // `lookup` フックを返す。host は URL.hostname の bracket を剥いた形で渡す。
 // IPv4 / IPv6 リテラルは dns.lookup を使わず isGlobalIp で直接判定する。
 //
+// `timeoutMs` は DNS 解決の上限。dns.lookup は libuv worker thread 内の
+// getaddrinfo を直接呼ぶため AbortSignal を持たず、Promise.race でしか中断
+// できない。timeout 後も worker は名前解決完了まで動き続けるが、JS 側は
+// ETIMEDOUT を投げて呼び出し元の per-request budget を守る。literal IP の
+// 場合は dns.lookup 不要なので timeoutMs は無視される。
+//
 // 戻り値の `lookup` を `http(s).request({ lookup })` に渡せば、Node は pin された
 // IP に直接 connect する（DNS 再問い合わせは入らない）。Host ヘッダ / SNI / 証明書
 // 検証は元の URL.hostname がそのまま使われるので、HTTPS の name validation は維持。
-export async function pinSafeLookup(host: string): Promise<PinnedLookup> {
+export async function pinSafeLookup(host: string, timeoutMs: number): Promise<PinnedLookup> {
 	const literalFamily = isIP(host); // 0 (= not IP) / 4 / 6
 	let address: string;
 	let family: number;
@@ -178,7 +209,7 @@ export async function pinSafeLookup(host: string): Promise<PinnedLookup> {
 		address = host;
 		family = literalFamily;
 	} else {
-		const resolved = await dnsPromises.lookup(host);
+		const resolved = await lookupWithTimeout(host, timeoutMs);
 		address = resolved.address;
 		family = resolved.family;
 	}

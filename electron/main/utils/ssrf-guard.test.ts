@@ -19,6 +19,11 @@ import { isGlobalIp, type PinnedLookup, pinSafeLookup } from "./ssrf-guard";
 
 const mockedLookup = vi.mocked(dnsPromises.lookup);
 
+// テストでは dns.lookup を mock するか literal IP 経路を通るため、現実的な
+// タイムアウト発火は起きない。ただし pinSafeLookup は timeoutMs を必須引数と
+// するので、共通の sentinel として 5s を渡す。
+const T = 5_000;
+
 describe("isGlobalIp - IPv4 non-global", () => {
 	it("rejects loopback", () => {
 		expect(isGlobalIp("127.0.0.1")).toBe(false);
@@ -138,25 +143,25 @@ describe("pinSafeLookup - literal IP fast-path (no DNS lookup)", () => {
 		mockedLookup.mockReset();
 	});
 	it("pins literal IPv4 without invoking dns.lookup", async () => {
-		const pin = await pinSafeLookup("8.8.8.8");
+		const pin = await pinSafeLookup("8.8.8.8", T);
 		expect(pin.address).toBe("8.8.8.8");
 		expect(pin.family).toBe(4);
 		expect(mockedLookup).not.toHaveBeenCalled();
 	});
 	it("pins literal IPv6 without invoking dns.lookup", async () => {
-		const pin = await pinSafeLookup("2001:4860:4860::8888");
+		const pin = await pinSafeLookup("2001:4860:4860::8888", T);
 		expect(pin.address).toBe("2001:4860:4860::8888");
 		expect(pin.family).toBe(6);
 		expect(mockedLookup).not.toHaveBeenCalled();
 	});
 	it("rejects literal private IPv4 with SSRF error", async () => {
-		await expect(pinSafeLookup("127.0.0.1")).rejects.toThrow(/SSRF blocked/);
-		await expect(pinSafeLookup("169.254.169.254")).rejects.toThrow(/SSRF blocked/);
-		await expect(pinSafeLookup("10.0.0.1")).rejects.toThrow(/SSRF blocked/);
+		await expect(pinSafeLookup("127.0.0.1", T)).rejects.toThrow(/SSRF blocked/);
+		await expect(pinSafeLookup("169.254.169.254", T)).rejects.toThrow(/SSRF blocked/);
+		await expect(pinSafeLookup("10.0.0.1", T)).rejects.toThrow(/SSRF blocked/);
 	});
 	it("rejects literal private IPv6 with SSRF error", async () => {
-		await expect(pinSafeLookup("::1")).rejects.toThrow(/SSRF blocked/);
-		await expect(pinSafeLookup("fe80::1")).rejects.toThrow(/SSRF blocked/);
+		await expect(pinSafeLookup("::1", T)).rejects.toThrow(/SSRF blocked/);
+		await expect(pinSafeLookup("fe80::1", T)).rejects.toThrow(/SSRF blocked/);
 	});
 });
 
@@ -166,7 +171,7 @@ describe("pinSafeLookup - hostname resolution", () => {
 	});
 	it("resolves hostname via dns.lookup and pins the result", async () => {
 		mockedLookup.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 });
-		const pin = await pinSafeLookup("example.com");
+		const pin = await pinSafeLookup("example.com", T);
 		expect(pin.address).toBe("93.184.216.34");
 		expect(pin.family).toBe(4);
 		expect(mockedLookup).toHaveBeenCalledTimes(1);
@@ -175,13 +180,20 @@ describe("pinSafeLookup - hostname resolution", () => {
 		// 攻撃者の DNS が初回から private IP を返してきても、pin 作成段階で
 		// isGlobalIp によって弾かれる。
 		mockedLookup.mockResolvedValueOnce({ address: "169.254.169.254", family: 4 });
-		await expect(pinSafeLookup("malicious.example")).rejects.toThrow(/SSRF blocked/);
+		await expect(pinSafeLookup("malicious.example", T)).rejects.toThrow(/SSRF blocked/);
 	});
 	it("propagates dns.lookup ENOTFOUND as DNS error (not SSRF)", async () => {
 		const err = new Error("getaddrinfo ENOTFOUND") as NodeJS.ErrnoException;
 		err.code = "ENOTFOUND";
 		mockedLookup.mockRejectedValueOnce(err);
-		await expect(pinSafeLookup("nonexistent.invalid")).rejects.toThrow(/ENOTFOUND/);
+		await expect(pinSafeLookup("nonexistent.invalid", T)).rejects.toThrow(/ENOTFOUND/);
+	});
+	it("rejects with ETIMEDOUT when dns.lookup exceeds timeout", async () => {
+		// dns.lookup を「永遠に resolve しない」mock にする。Promise.race の
+		// タイマー側が先に発火することを確認。タイマーは小さい値（30ms）にして
+		// テストの実時間を抑える。
+		mockedLookup.mockImplementation(() => new Promise(() => {}));
+		await expect(pinSafeLookup("slow.example", 30)).rejects.toThrow(/timeout/i);
 	});
 });
 
@@ -197,7 +209,7 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 		mockedLookup
 			.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 })
 			.mockResolvedValue({ address: "169.254.169.254", family: 4 });
-		const pin = await pinSafeLookup("rebind.example");
+		const pin = await pinSafeLookup("rebind.example", T);
 		expect(pin.address).toBe("93.184.216.34");
 		// pin の lookup フックを何度呼んでも dns.lookup は再発火しない
 		for (let i = 0; i < 3; i++) {
@@ -214,7 +226,7 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 	});
 	it("pinned lookup honors all:true option without re-querying DNS", async () => {
 		mockedLookup.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 });
-		const pin = await pinSafeLookup("rebind.example");
+		const pin = await pinSafeLookup("rebind.example", T);
 		const addresses = await new Promise<Array<{ address: string; family: number }>>(
 			(resolve, reject) => {
 				// SafeLookup の callback union は options で narrow されないため、
@@ -235,7 +247,7 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 		// Node の HTTP keep-alive や redirect 等で異なる hostname で呼ばれても、
 		// 同じ pin を使う限りは保存済み IP に固定される（hostname 引数は無視）。
 		mockedLookup.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 });
-		const pin = await pinSafeLookup("rebind.example");
+		const pin = await pinSafeLookup("rebind.example", T);
 		const result = await new Promise<{ address: string; family: number }>((resolve, reject) => {
 			pin.lookup("totally-different-host.example", { all: false }, (err, address, family) => {
 				if (err) reject(err);
@@ -269,31 +281,31 @@ describe("pinSafeLookup - family option contract", () => {
 		});
 	}
 	it("accepts family: 0 (any) on IPv4 pin", async () => {
-		const pin = await pinSafeLookup("8.8.8.8");
+		const pin = await pinSafeLookup("8.8.8.8", T);
 		await expect(callSingle(pin, 0)).resolves.toEqual({ address: "8.8.8.8", family: 4 });
 	});
 	it("accepts undefined family on IPv6 pin", async () => {
-		const pin = await pinSafeLookup("2001:4860:4860::8888");
+		const pin = await pinSafeLookup("2001:4860:4860::8888", T);
 		await expect(callSingle(pin)).resolves.toEqual({
 			address: "2001:4860:4860::8888",
 			family: 6,
 		});
 	});
 	it("accepts matching family", async () => {
-		const pinV4 = await pinSafeLookup("8.8.8.8");
+		const pinV4 = await pinSafeLookup("8.8.8.8", T);
 		await expect(callSingle(pinV4, 4)).resolves.toEqual({ address: "8.8.8.8", family: 4 });
-		const pinV6 = await pinSafeLookup("2001:4860:4860::8888");
+		const pinV6 = await pinSafeLookup("2001:4860:4860::8888", T);
 		await expect(callSingle(pinV6, 6)).resolves.toEqual({
 			address: "2001:4860:4860::8888",
 			family: 6,
 		});
 	});
 	it("rejects family mismatch (IPv6 requested for IPv4 pin)", async () => {
-		const pin = await pinSafeLookup("8.8.8.8");
+		const pin = await pinSafeLookup("8.8.8.8", T);
 		await expect(callSingle(pin, 6)).rejects.toThrow(/family mismatch/);
 	});
 	it("rejects family mismatch (IPv4 requested for IPv6 pin)", async () => {
-		const pin = await pinSafeLookup("2001:4860:4860::8888");
+		const pin = await pinSafeLookup("2001:4860:4860::8888", T);
 		await expect(callSingle(pin, 4)).rejects.toThrow(/family mismatch/);
 	});
 });
