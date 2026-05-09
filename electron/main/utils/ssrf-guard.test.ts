@@ -1,18 +1,23 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// `node:dns.lookup` を最小モック化する。pinSafeLookup の hostname 経路だけが
+// `dns.promises.lookup` を最小モック化する。pinSafeLookup の hostname 経路だけが
 // この mock に依存し、`isGlobalIp` 系の純粋関数テストは何も呼ばないので影響しない。
 vi.mock("node:dns", async () => {
 	const actual = await vi.importActual<typeof import("node:dns")>("node:dns");
 	return {
 		...actual,
-		lookup: vi.fn(),
+		promises: {
+			...actual.promises,
+			lookup: vi.fn(),
+		},
 	};
 });
 
-import { lookup as nodeLookup } from "node:dns";
+import { promises as dnsPromises } from "node:dns";
 import { isGlobalIp, pinSafeLookup } from "./ssrf-guard";
+
+const mockedLookup = vi.mocked(dnsPromises.lookup);
 
 describe("isGlobalIp - IPv4 non-global", () => {
 	it("rejects loopback", () => {
@@ -128,42 +133,21 @@ describe("isGlobalIp - invalid input", () => {
 	});
 });
 
-// `nodeLookup` mock を「callCount に応じて違う IP を返す」シーケンスで設定する
-// ヘルパ。第 N 回呼び出しで sequence[N-1] のレコードを返す。dns.lookup の
-// `(hostname, options, callback)` シグネチャを満たすシグネチャに正規化済み。
-function mockDnsLookupSequence(sequence: Array<{ address: string; family: number }>): void {
-	let n = 0;
-	vi.mocked(nodeLookup).mockImplementation(((
-		_hostname: string,
-		optionsOrCallback: unknown,
-		maybeCallback?: unknown,
-	) => {
-		const cb =
-			typeof optionsOrCallback === "function"
-				? (optionsOrCallback as (e: Error | null, a: string, f: number) => void)
-				: (maybeCallback as (e: Error | null, a: string, f: number) => void);
-		const idx = Math.min(n, sequence.length - 1);
-		n++;
-		const r = sequence[idx];
-		cb(null, r.address, r.family);
-	}) as unknown as typeof nodeLookup);
-}
-
 describe("pinSafeLookup - literal IP fast-path (no DNS lookup)", () => {
 	beforeEach(() => {
-		vi.mocked(nodeLookup).mockReset();
+		mockedLookup.mockReset();
 	});
 	it("pins literal IPv4 without invoking dns.lookup", async () => {
 		const pin = await pinSafeLookup("8.8.8.8");
 		expect(pin.address).toBe("8.8.8.8");
 		expect(pin.family).toBe(4);
-		expect(nodeLookup).not.toHaveBeenCalled();
+		expect(mockedLookup).not.toHaveBeenCalled();
 	});
 	it("pins literal IPv6 without invoking dns.lookup", async () => {
 		const pin = await pinSafeLookup("2001:4860:4860::8888");
 		expect(pin.address).toBe("2001:4860:4860::8888");
 		expect(pin.family).toBe(6);
-		expect(nodeLookup).not.toHaveBeenCalled();
+		expect(mockedLookup).not.toHaveBeenCalled();
 	});
 	it("rejects literal private IPv4 with SSRF error", async () => {
 		await expect(pinSafeLookup("127.0.0.1")).rejects.toThrow(/SSRF blocked/);
@@ -178,51 +162,41 @@ describe("pinSafeLookup - literal IP fast-path (no DNS lookup)", () => {
 
 describe("pinSafeLookup - hostname resolution", () => {
 	beforeEach(() => {
-		vi.mocked(nodeLookup).mockReset();
+		mockedLookup.mockReset();
 	});
 	it("resolves hostname via dns.lookup and pins the result", async () => {
-		mockDnsLookupSequence([{ address: "93.184.216.34", family: 4 }]);
+		mockedLookup.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 });
 		const pin = await pinSafeLookup("example.com");
 		expect(pin.address).toBe("93.184.216.34");
 		expect(pin.family).toBe(4);
-		expect(nodeLookup).toHaveBeenCalledTimes(1);
+		expect(mockedLookup).toHaveBeenCalledTimes(1);
 	});
 	it("rejects when dns.lookup returns private IP", async () => {
 		// 攻撃者の DNS が初回から private IP を返してきても、pin 作成段階で
 		// isGlobalIp によって弾かれる。
-		mockDnsLookupSequence([{ address: "169.254.169.254", family: 4 }]);
+		mockedLookup.mockResolvedValueOnce({ address: "169.254.169.254", family: 4 });
 		await expect(pinSafeLookup("malicious.example")).rejects.toThrow(/SSRF blocked/);
 	});
 	it("propagates dns.lookup ENOTFOUND as DNS error (not SSRF)", async () => {
-		vi.mocked(nodeLookup).mockImplementation(((
-			_hostname: string,
-			optionsOrCallback: unknown,
-			maybeCallback?: unknown,
-		) => {
-			const cb =
-				typeof optionsOrCallback === "function"
-					? (optionsOrCallback as (e: NodeJS.ErrnoException, a: string, f: number) => void)
-					: (maybeCallback as (e: NodeJS.ErrnoException, a: string, f: number) => void);
-			const err = new Error("getaddrinfo ENOTFOUND") as NodeJS.ErrnoException;
-			err.code = "ENOTFOUND";
-			cb(err, "", 0);
-		}) as unknown as typeof nodeLookup);
+		const err = new Error("getaddrinfo ENOTFOUND") as NodeJS.ErrnoException;
+		err.code = "ENOTFOUND";
+		mockedLookup.mockRejectedValueOnce(err);
 		await expect(pinSafeLookup("nonexistent.invalid")).rejects.toThrow(/ENOTFOUND/);
 	});
 });
 
 describe("pinSafeLookup - DNS rebinding defense", () => {
 	beforeEach(() => {
-		vi.mocked(nodeLookup).mockReset();
+		mockedLookup.mockReset();
 	});
 	it("dns.lookup is invoked exactly once per pin (rebind on later calls is irrelevant)", async () => {
 		// 攻撃シナリオ: 攻撃者の DNS が 1 回目に public IP、2 回目以降に private IP を
 		// 返す。pinSafeLookup は 1 度しか dns.lookup を呼ばないので、後続の rebind は
-		// connect 経路に到達しない。
-		mockDnsLookupSequence([
-			{ address: "93.184.216.34", family: 4 }, // 公開 IP（攻撃者のおとり）
-			{ address: "169.254.169.254", family: 4 }, // 切替えられた private IP
-		]);
+		// connect 経路に到達しない。後続の mockResolvedValue は「もし 2 回目が起きたら
+		// rebind が成立してしまう」シナリオを再現するための仕掛け。
+		mockedLookup
+			.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 })
+			.mockResolvedValue({ address: "169.254.169.254", family: 4 });
 		const pin = await pinSafeLookup("rebind.example");
 		expect(pin.address).toBe("93.184.216.34");
 		// pin の lookup フックを何度呼んでも dns.lookup は再発火しない
@@ -236,10 +210,10 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 			expect(result.address).toBe("93.184.216.34");
 			expect(result.family).toBe(4);
 		}
-		expect(nodeLookup).toHaveBeenCalledTimes(1);
+		expect(mockedLookup).toHaveBeenCalledTimes(1);
 	});
 	it("pinned lookup honors all:true option without re-querying DNS", async () => {
-		mockDnsLookupSequence([{ address: "93.184.216.34", family: 4 }]);
+		mockedLookup.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 });
 		const pin = await pinSafeLookup("rebind.example");
 		const addresses = await new Promise<Array<{ address: string; family: number }>>(
 			(resolve, reject) => {
@@ -255,12 +229,12 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 			},
 		);
 		expect(addresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
-		expect(nodeLookup).toHaveBeenCalledTimes(1);
+		expect(mockedLookup).toHaveBeenCalledTimes(1);
 	});
 	it("pinned lookup returns the saved IP regardless of hostname argument", async () => {
 		// Node の HTTP keep-alive や redirect 等で異なる hostname で呼ばれても、
 		// 同じ pin を使う限りは保存済み IP に固定される（hostname 引数は無視）。
-		mockDnsLookupSequence([{ address: "93.184.216.34", family: 4 }]);
+		mockedLookup.mockResolvedValueOnce({ address: "93.184.216.34", family: 4 });
 		const pin = await pinSafeLookup("rebind.example");
 		const result = await new Promise<{ address: string; family: number }>((resolve, reject) => {
 			pin.lookup("totally-different-host.example", { all: false }, (err, address, family) => {
@@ -269,6 +243,6 @@ describe("pinSafeLookup - DNS rebinding defense", () => {
 			});
 		});
 		expect(result.address).toBe("93.184.216.34");
-		expect(nodeLookup).toHaveBeenCalledTimes(1);
+		expect(mockedLookup).toHaveBeenCalledTimes(1);
 	});
 });

@@ -1,6 +1,6 @@
 import type { LookupAddress, LookupOptions } from "node:dns";
-import { lookup as nodeLookup } from "node:dns";
-import { isIPv4, isIPv6 } from "node:net";
+import { promises as dnsPromises } from "node:dns";
+import { isIP, isIPv4, isIPv6 } from "node:net";
 
 // 旧 Tauri 版 src-tauri/src/commands/ogp.rs の `is_global_ip` / `SsrfSafeResolver` を
 // JS で 1:1 移植。グローバル到達可能 IP のみを許可する allowlist 方式で
@@ -13,13 +13,12 @@ import { isIPv4, isIPv6 } from "node:net";
 // `lookup` フックには pin を返すだけの sync コールバックを渡す。これにより:
 //   1. dns.lookup の呼び出しは pin 作成時の 1 回のみ（攻撃者の rebind は反映されない）
 //   2. connect 時に Node が呼ぶ lookup フックは保存済み IP を即時返却（追加 DNS なし）
-//   3. lookup フックは念のため毎回 isGlobalIp で再検証（メモリ書換え系に対する保険）
-//   4. 各 redirect は別 hop として再 pin されるので 1 hop ごとに同じ防御が効く
+//   3. 各 redirect は別 hop として再 pin されるので 1 hop ごとに同じ防御が効く
 //
-// IP リテラルが host に渡された場合は dns.lookup をスキップし、isGlobalIp 判定のみで
-// pin を生成する（Node の `net.connect` は host が IP リテラルだと lookup を呼ばない
-// 経路があり、フックだけでは literal-IP SSRF を貫通させてしまう。pin 内に検証を
-// 集約することで「pinSafeLookup を通った時点で安全」と単一不変条件で保証する）。
+// IP リテラルは Node の `net.connect` が dns.lookup を経由せず直接 connect する
+// 経路があり、`lookup` フックだけでは literal-IP SSRF を貫通させてしまう。pin 作成
+// 時に `isIP` で検出して isGlobalIp 判定を pin 内に集約することで「pinSafeLookup を
+// 通った時点で安全」と単一不変条件で保証する。
 
 export function isGlobalIp(ip: string): boolean {
 	if (isIPv4(ip)) return isGlobalIpv4(ip);
@@ -172,21 +171,14 @@ export interface PinnedLookup {
 // IP に直接 connect する（DNS 再問い合わせは入らない）。Host ヘッダ / SNI / 証明書
 // 検証は元の URL.hostname がそのまま使われるので、HTTPS の name validation は維持。
 export async function pinSafeLookup(host: string): Promise<PinnedLookup> {
+	const literalFamily = isIP(host); // 0 (= not IP) / 4 / 6
 	let address: string;
 	let family: number;
-	if (isIPv4(host)) {
+	if (literalFamily !== 0) {
 		address = host;
-		family = 4;
-	} else if (isIPv6(host)) {
-		address = host;
-		family = 6;
+		family = literalFamily;
 	} else {
-		const resolved = await new Promise<{ address: string; family: number }>((resolve, reject) => {
-			nodeLookup(host, { all: false }, (err, addr, fam) => {
-				if (err) reject(err);
-				else resolve({ address: addr, family: fam });
-			});
-		});
+		const resolved = await dnsPromises.lookup(host);
 		address = resolved.address;
 		family = resolved.family;
 	}
@@ -194,20 +186,11 @@ export async function pinSafeLookup(host: string): Promise<PinnedLookup> {
 		throw makeSsrfError(address);
 	}
 	const lookup: SafeLookup = (_hostname, options, callback) => {
-		const opts = normalizeOptions(options);
-		// pin 作成時に validate 済みだが、念のため connect ごとに再検証する。
-		// マイクロ秒オーダの allowlist 判定なので overhead は無視可能。
-		if (!isGlobalIp(address)) {
-			const err = makeSsrfError(address);
-			if (opts.all === true) (callback as LookupAllCallback)(err, []);
-			else (callback as LookupSingleCallback)(err, "", 0);
-			return;
-		}
-		if (opts.all === true) {
+		if (normalizeOptions(options).all === true) {
 			(callback as LookupAllCallback)(null, [{ address, family }]);
-			return;
+		} else {
+			(callback as LookupSingleCallback)(null, address, family);
 		}
-		(callback as LookupSingleCallback)(null, address, family);
 	};
 	return { lookup, address, family };
 }
