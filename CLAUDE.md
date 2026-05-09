@@ -94,7 +94,7 @@ scripta-next/
 │   │   │   ├── workspace.ts        # フォルダ走査・ツリー取得
 │   │   │   ├── search.ts           # 全文検索・ファイル名検索（純 JS、旧 Rust ロジックを 1:1 移植）
 │   │   │   ├── git.ts              # Git 操作（simple-git）
-│   │   │   ├── ogp.ts              # OGP メタデータ取得（undici + cheerio）
+│   │   │   ├── ogp.ts              # OGP メタデータ取得（自前 http-fetch + 自前 ogp-parser、SSRF 防御）
 │   │   │   ├── pdf.ts              # PDF エクスポート（webContents.printToPDF）
 │   │   │   ├── update.ts           # アップデートチェック（GitHub Releases API ポーリング、存在確認のみ）
 │   │   │   └── watcher.ts          # ファイル変更監視（chokidar）

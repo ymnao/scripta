@@ -129,7 +129,7 @@
 
 | 旧コマンド / API | 新ハンドラ | 状態 |
 |---|---|---|
-| `fetch_ogp` | `ogp:fetch` | ✅ `undici` + `cheerio`、SSRF 防御 |
+| `fetch_ogp` | `ogp:fetch` | ✅ 自前 HTTP ラッパー（`electron/main/utils/http-fetch.ts`）+ 自前 OGP パーサ（`electron/main/utils/ogp-parser.ts`、旧 Rust `parse_ogp` を 1:1 移植）、SSRF 防御（`pinSafeLookup`） |
 | `export_pdf` | `pdf:export` | ✅ 隠し BrowserWindow + `webContents.printToPDF` |
 | `open` (`@tauri-apps/plugin-shell`) | `shell:open-external` | ✅ scheme allowlist |
 | `save` (`@tauri-apps/plugin-dialog`、保存先選択) | `dialog:save` | ✅ `electron/main/ipc/dialog.ts:52-60` / **`registerTransientWritePath` で window-scoped な短命 write capability を発行**（書き込み成功で consume、window close で cleanup）。これにより workspace 外への保存も path-guard を維持しつつ許可。`electron/main/ipc/dialog.test.ts` で IPC ハンドラ自体（cancel / 選択時の `registerTransientWritePath(sender.id, path)` 配線）を直接検証 |
