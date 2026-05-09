@@ -29,7 +29,7 @@ Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite + Biome
 - 旧 Tauri 版のフロントエンド（`src/components/`, `src/stores/`, `src/hooks/`, `src/lib/` の一部, `src/types/`）はほぼそのまま流用する
 - バックエンド境界（`src/lib/commands.ts`）を Electron IPC へ差し替えることが移行の中心作業となる
 - Stage 0 ではバックエンド処理を全てモック実装にして、まず frontend が Chromium で動作することを検証する
-- Rust コードはこのリポジトリには持ち込まない。検索など性能が必要なものは外部バイナリ（`ripgrep` 等）を sidecar として同梱する
+- Rust コードはこのリポジトリには持ち込まない。全文検索など性能が必要なものも純 JS で実装する（旧 Rust ロジックを 1:1 移植、`docs/migration-plan.md` Stage 3 参照）
 
 ## 開発コマンド
 
@@ -94,11 +94,11 @@ scripta-next/
 │   │   ├── ipc/                    # IPC ハンドラ（旧 src-tauri/src/commands に対応）
 │   │   │   ├── file.ts             # ファイル読み書き・作成・削除
 │   │   │   ├── workspace.ts        # フォルダ走査・ツリー取得
-│   │   │   ├── search.ts           # 全文検索・ファイル名検索（ripgrep sidecar）
+│   │   │   ├── search.ts           # 全文検索・ファイル名検索（純 JS、旧 Rust ロジックを 1:1 移植）
 │   │   │   ├── git.ts              # Git 操作（simple-git）
 │   │   │   ├── ogp.ts              # OGP メタデータ取得（undici + cheerio）
 │   │   │   ├── pdf.ts              # PDF エクスポート（webContents.printToPDF）
-│   │   │   ├── updater.ts          # アップデートチェック（electron-updater）
+│   │   │   ├── update.ts           # アップデートチェック（GitHub Releases API ポーリング、存在確認のみ）
 │   │   │   └── watcher.ts          # ファイル変更監視（chokidar）
 │   │   └── menu.ts                 # アプリケーションメニュー
 │   └── preload/                    # プリロードスクリプト（contextBridge で window.api を公開）
