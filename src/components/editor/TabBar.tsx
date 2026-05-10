@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, type LucideIcon, Plus, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getFileIcon } from "../../lib/file-icon";
@@ -9,10 +9,38 @@ const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navi
 
 const DRAG_THRESHOLD = 5;
 
-// Electron frameless window のドラッグ領域指定。Tauri の `data-tauri-drag-region`
-// は Electron では機能しないため、CSS `-webkit-app-region` で置き換える。
-const DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "drag" } as CSSProperties;
-const NO_DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "no-drag" } as CSSProperties;
+// Electron frameless window のドラッグ領域指定。Tauri の `data-tauri-drag-region` は
+// Electron では機能しないため、CSS `-webkit-app-region` で置き換える（型は src/types/css.d.ts）。
+const DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "drag" };
+const NO_DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "no-drag" };
+
+const ICON_BUTTON_CLASS =
+	"rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10";
+
+function TabBarIconButton({
+	icon: Icon,
+	label,
+	onClick,
+	disabled,
+}: {
+	icon: LucideIcon;
+	label: string;
+	onClick: () => void;
+	disabled?: boolean;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			disabled={disabled}
+			aria-label={label}
+			title={label}
+			className={`${ICON_BUTTON_CLASS} ${disabled ? "opacity-30" : ""}`}
+		>
+			<Icon size={14} />
+		</button>
+	);
+}
 
 interface TabBarProps {
 	onCloseTab: (id: number) => void;
@@ -161,24 +189,18 @@ export function TabBar({
 			style={DRAG_REGION_STYLE}
 		>
 			<div className="flex shrink-0 items-center gap-0.5 px-1" style={NO_DRAG_REGION_STYLE}>
-				<button
-					type="button"
+				<TabBarIconButton
+					icon={ChevronLeft}
+					label="戻る"
 					onClick={onGoBack}
 					disabled={!canGoBack}
-					aria-label="戻る"
-					className={`rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${!canGoBack ? "opacity-30" : ""}`}
-				>
-					<ChevronLeft size={14} />
-				</button>
-				<button
-					type="button"
+				/>
+				<TabBarIconButton
+					icon={ChevronRight}
+					label="進む"
 					onClick={onGoForward}
 					disabled={!canGoForward}
-					aria-label="進む"
-					className={`rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${!canGoForward ? "opacity-30" : ""}`}
-				>
-					<ChevronRight size={14} />
-				</button>
+				/>
 			</div>
 			<div
 				className="flex items-center overflow-x-auto border-l border-border"
@@ -307,16 +329,9 @@ export function TabBar({
 				})}
 			</div>
 			<div className="flex shrink-0 items-center px-1" style={NO_DRAG_REGION_STYLE}>
-				<button
-					type="button"
-					onClick={openNewTab}
-					aria-label="新しいタブ"
-					title="新しいタブ"
-					className="rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
-				>
-					<Plus size={14} />
-				</button>
+				<TabBarIconButton icon={Plus} label="新しいタブ" onClick={openNewTab} />
 			</div>
+			{/* 右端の余白は drag 領域として残す（no-drag に含めるとここでウィンドウを掴めなくなる）。 */}
 			<div className="flex-1" />
 		</div>
 	);

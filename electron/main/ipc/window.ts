@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, session } from "electron";
 import { canonicalize, isPathAllowed } from "../utils/path-guard";
+import { TITLE_BAR_OPTIONS } from "../utils/window-defaults";
 import { attachWindowLifecycle } from "../utils/window-lifecycle";
 import { setActiveWorkspaceForWindow } from "./workspace";
 
@@ -40,9 +41,7 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		height: 600,
 		show: false,
 		title: "コンフリクト解消",
-		titleBarStyle: "hiddenInset",
-		// メインウィンドウと同じ traffic light 位置（タブバー高さ 36px の中央）
-		trafficLightPosition: { x: 16, y: 12 },
+		...TITLE_BAR_OPTIONS,
 		// `parent` を指定すると親 close で子も追従して close（旧 Tauri と同じ挙動）。
 		parent,
 		modal: false,

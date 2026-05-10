@@ -9,6 +9,7 @@ import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/wo
 import { setApplicationMenu } from "./menu";
 import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
+import { TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
@@ -105,10 +106,7 @@ function createWindow(opts: CreateWindowOptions = {}): void {
 		width: initial.bounds.width,
 		height: initial.bounds.height,
 		show: false,
-		titleBarStyle: "hiddenInset",
-		// `TabBar.tsx` の `h-9` (36px) に合わせて traffic light を上下中央寄せ。
-		// 12px button + (36 - 12) / 2 = y:12 で center 18px = タブ高 36 / 2。
-		trafficLightPosition: { x: 16, y: 12 },
+		...TITLE_BAR_OPTIONS,
 		webPreferences: {
 			preload: join(__dirname, "../preload/index.js"),
 			contextIsolation: true,
