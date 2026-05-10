@@ -106,6 +106,9 @@ function createWindow(opts: CreateWindowOptions = {}): void {
 		height: initial.bounds.height,
 		show: false,
 		titleBarStyle: "hiddenInset",
+		// `TabBar.tsx` の `h-9` (36px) に合わせて traffic light を上下中央寄せ。
+		// 12px button + (36 - 12) / 2 = y:12 で center 18px = タブ高 36 / 2。
+		trafficLightPosition: { x: 16, y: 12 },
 		webPreferences: {
 			preload: join(__dirname, "../preload/index.js"),
 			contextIsolation: true,

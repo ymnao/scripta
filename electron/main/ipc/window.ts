@@ -41,6 +41,8 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		show: false,
 		title: "コンフリクト解消",
 		titleBarStyle: "hiddenInset",
+		// メインウィンドウと同じ traffic light 位置（タブバー高さ 36px の中央）
+		trafficLightPosition: { x: 16, y: 12 },
 		// `parent` を指定すると親 close で子も追従して close（旧 Tauri と同じ挙動）。
 		parent,
 		modal: false,

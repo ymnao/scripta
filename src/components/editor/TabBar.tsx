@@ -1,5 +1,5 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getFileIcon } from "../../lib/file-icon";
 import { isNewTabPath } from "../../lib/path";
@@ -8,6 +8,11 @@ import { useWorkspaceStore } from "../../stores/workspace";
 const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
 
 const DRAG_THRESHOLD = 5;
+
+// Electron frameless window のドラッグ領域指定。Tauri の `data-tauri-drag-region`
+// は Electron では機能しないため、CSS `-webkit-app-region` で置き換える。
+const DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "drag" } as CSSProperties;
+const NO_DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "no-drag" } as CSSProperties;
 
 interface TabBarProps {
 	onCloseTab: (id: number) => void;
@@ -28,8 +33,12 @@ export function TabBar({
 	onGoForward,
 	onReorderTab,
 }: TabBarProps) {
-	const { tabs, activeTabId } = useWorkspaceStore(
-		useShallow((s) => ({ tabs: s.tabs, activeTabId: s.activeTabId })),
+	const { tabs, activeTabId, openNewTab } = useWorkspaceStore(
+		useShallow((s) => ({
+			tabs: s.tabs,
+			activeTabId: s.activeTabId,
+			openNewTab: s.openNewTab,
+		})),
 	);
 
 	const [dragState, setDragState] = useState<{
@@ -148,9 +157,10 @@ export function TabBar({
 
 	return (
 		<div
-			className={`flex h-7 shrink-0 border-b border-border bg-bg-primary ${isMac ? "pl-20" : ""}`}
+			className={`flex h-9 shrink-0 border-b border-border bg-bg-primary ${isMac ? "pl-20" : ""}`}
+			style={DRAG_REGION_STYLE}
 		>
-			<div className="flex shrink-0 items-center gap-0.5 px-1">
+			<div className="flex shrink-0 items-center gap-0.5 px-1" style={NO_DRAG_REGION_STYLE}>
 				<button
 					type="button"
 					onClick={onGoBack}
@@ -175,6 +185,7 @@ export function TabBar({
 				role="tablist"
 				aria-label="Editor tabs"
 				ref={tablistRef}
+				style={NO_DRAG_REGION_STYLE}
 			>
 				{tabs.map((tab, index) => {
 					const isActive = tab.id === activeTabId;
@@ -295,7 +306,18 @@ export function TabBar({
 					);
 				})}
 			</div>
-			<div data-tauri-drag-region className="flex-1" />
+			<div className="flex shrink-0 items-center px-1" style={NO_DRAG_REGION_STYLE}>
+				<button
+					type="button"
+					onClick={openNewTab}
+					aria-label="新しいタブ"
+					title="新しいタブ"
+					className="rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
+				>
+					<Plus size={14} />
+				</button>
+			</div>
+			<div className="flex-1" />
 		</div>
 	);
 }
