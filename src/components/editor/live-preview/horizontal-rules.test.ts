@@ -58,10 +58,19 @@ describe("buildDecorations", () => {
 		expect(widgets).toHaveLength(3);
 	});
 
-	it("keeps decoration when cursor is on HR line", () => {
+	it("skips decoration when cursor is on HR line", () => {
 		const doc = "text\n\n---";
 		const hrPos = doc.indexOf("---");
 		const view = createViewForTest(doc, hrPos);
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(0);
+	});
+
+	it("keeps decoration when editor is unfocused even with cursor on HR line", () => {
+		const doc = "text\n\n---";
+		const hrPos = doc.indexOf("---");
+		const view = createViewForTest(doc, hrPos, undefined, false);
 		const decos = collectDecorations(buildDecorations(view));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
