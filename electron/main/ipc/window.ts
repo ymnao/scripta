@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, session } from "electron";
 import { canonicalize, isPathAllowed } from "../utils/path-guard";
-import { TITLE_BAR_OPTIONS } from "../utils/window-defaults";
 import { attachWindowLifecycle } from "../utils/window-lifecycle";
 import { setActiveWorkspaceForWindow } from "./workspace";
 
@@ -41,7 +40,9 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		height: 600,
 		show: false,
 		title: "コンフリクト解消",
-		...TITLE_BAR_OPTIONS,
+		// drag region / タブストリップを持たないため trafficLightPosition は設定せず
+		// macOS デフォルトに任せる（main window 用の調整値を流用しない）。
+		titleBarStyle: "hiddenInset",
 		// `parent` を指定すると親 close で子も追従して close（旧 Tauri と同じ挙動）。
 		parent,
 		modal: false,

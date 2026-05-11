@@ -61,11 +61,12 @@ export function TabBar({
 	onGoForward,
 	onReorderTab,
 }: TabBarProps) {
-	const { tabs, activeTabId, openNewTab } = useWorkspaceStore(
+	const { tabs, activeTabId, openNewTab, workspacePath } = useWorkspaceStore(
 		useShallow((s) => ({
 			tabs: s.tabs,
 			activeTabId: s.activeTabId,
 			openNewTab: s.openNewTab,
+			workspacePath: s.workspacePath,
 		})),
 	);
 
@@ -329,7 +330,12 @@ export function TabBar({
 				})}
 			</div>
 			<div className="flex shrink-0 items-center px-1" style={NO_DRAG_REGION_STYLE}>
-				<TabBarIconButton icon={Plus} label="新しいタブ" onClick={openNewTab} />
+				<TabBarIconButton
+					icon={Plus}
+					label="新しいタブ"
+					onClick={openNewTab}
+					disabled={!workspacePath}
+				/>
 			</div>
 			{/* 右端の余白は drag 領域として残す（no-drag に含めるとここでウィンドウを掴めなくなる）。 */}
 			<div className="flex-1" />
