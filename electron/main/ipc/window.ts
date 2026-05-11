@@ -40,6 +40,8 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		height: 600,
 		show: false,
 		title: "コンフリクト解消",
+		// drag region / タブストリップを持たないため trafficLightPosition は設定せず
+		// macOS デフォルトに任せる（main window 用の調整値を流用しない）。
 		titleBarStyle: "hiddenInset",
 		// `parent` を指定すると親 close で子も追従して close（旧 Tauri と同じ挙動）。
 		parent,

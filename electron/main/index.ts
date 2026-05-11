@@ -9,6 +9,7 @@ import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/wo
 import { setApplicationMenu } from "./menu";
 import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
+import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
@@ -105,7 +106,7 @@ function createWindow(opts: CreateWindowOptions = {}): void {
 		width: initial.bounds.width,
 		height: initial.bounds.height,
 		show: false,
-		titleBarStyle: "hiddenInset",
+		...MAIN_WINDOW_TITLE_BAR_OPTIONS,
 		webPreferences: {
 			preload: join(__dirname, "../preload/index.js"),
 			contextIsolation: true,

@@ -1,5 +1,5 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, type LucideIcon, Plus, X } from "lucide-react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getFileIcon } from "../../lib/file-icon";
 import { isNewTabPath } from "../../lib/path";
@@ -8,6 +8,39 @@ import { useWorkspaceStore } from "../../stores/workspace";
 const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
 
 const DRAG_THRESHOLD = 5;
+
+// Electron frameless window のドラッグ領域指定。Tauri の `data-tauri-drag-region` は
+// Electron では機能しないため、CSS `-webkit-app-region` で置き換える（型は src/types/css.d.ts）。
+const DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "drag" };
+const NO_DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "no-drag" };
+
+const ICON_BUTTON_CLASS =
+	"rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10";
+
+function TabBarIconButton({
+	icon: Icon,
+	label,
+	onClick,
+	disabled,
+}: {
+	icon: LucideIcon;
+	label: string;
+	onClick: () => void;
+	disabled?: boolean;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			disabled={disabled}
+			aria-label={label}
+			title={label}
+			className={`${ICON_BUTTON_CLASS} ${disabled ? "opacity-30" : ""}`}
+		>
+			<Icon size={14} />
+		</button>
+	);
+}
 
 interface TabBarProps {
 	onCloseTab: (id: number) => void;
@@ -28,8 +61,13 @@ export function TabBar({
 	onGoForward,
 	onReorderTab,
 }: TabBarProps) {
-	const { tabs, activeTabId } = useWorkspaceStore(
-		useShallow((s) => ({ tabs: s.tabs, activeTabId: s.activeTabId })),
+	const { tabs, activeTabId, openNewTab, workspacePath } = useWorkspaceStore(
+		useShallow((s) => ({
+			tabs: s.tabs,
+			activeTabId: s.activeTabId,
+			openNewTab: s.openNewTab,
+			workspacePath: s.workspacePath,
+		})),
 	);
 
 	const [dragState, setDragState] = useState<{
@@ -148,33 +186,29 @@ export function TabBar({
 
 	return (
 		<div
-			className={`flex h-7 shrink-0 border-b border-border bg-bg-primary ${isMac ? "pl-20" : ""}`}
+			className={`flex h-9 shrink-0 border-b border-border bg-bg-primary ${isMac ? "pl-20" : ""}`}
+			style={DRAG_REGION_STYLE}
 		>
-			<div className="flex shrink-0 items-center gap-0.5 px-1">
-				<button
-					type="button"
+			<div className="flex shrink-0 items-center gap-0.5 px-1" style={NO_DRAG_REGION_STYLE}>
+				<TabBarIconButton
+					icon={ChevronLeft}
+					label="戻る"
 					onClick={onGoBack}
 					disabled={!canGoBack}
-					aria-label="戻る"
-					className={`rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${!canGoBack ? "opacity-30" : ""}`}
-				>
-					<ChevronLeft size={14} />
-				</button>
-				<button
-					type="button"
+				/>
+				<TabBarIconButton
+					icon={ChevronRight}
+					label="進む"
 					onClick={onGoForward}
 					disabled={!canGoForward}
-					aria-label="進む"
-					className={`rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${!canGoForward ? "opacity-30" : ""}`}
-				>
-					<ChevronRight size={14} />
-				</button>
+				/>
 			</div>
 			<div
 				className="flex items-center overflow-x-auto border-l border-border"
 				role="tablist"
 				aria-label="Editor tabs"
 				ref={tablistRef}
+				style={NO_DRAG_REGION_STYLE}
 			>
 				{tabs.map((tab, index) => {
 					const isActive = tab.id === activeTabId;
@@ -295,7 +329,16 @@ export function TabBar({
 					);
 				})}
 			</div>
-			<div data-tauri-drag-region className="flex-1" />
+			<div className="flex shrink-0 items-center px-1" style={NO_DRAG_REGION_STYLE}>
+				<TabBarIconButton
+					icon={Plus}
+					label="新しいタブ"
+					onClick={openNewTab}
+					disabled={!workspacePath}
+				/>
+			</div>
+			{/* 右端の余白は drag 領域として残す（no-drag に含めるとここでウィンドウを掴めなくなる）。 */}
+			<div className="flex-1" />
 		</div>
 	);
 }
