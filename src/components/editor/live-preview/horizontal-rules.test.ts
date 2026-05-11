@@ -67,6 +67,14 @@ describe("buildDecorations", () => {
 		expect(widgets).toHaveLength(0);
 	});
 
+	it("keeps decoration when focused but cursor is on a different line", () => {
+		const doc = "text\n\n---";
+		const view = createViewForTest(doc, doc.indexOf("text"));
+		const decos = collectDecorations(buildDecorations(view));
+		const widgets = widgetDecorations(decos);
+		expect(widgets).toHaveLength(1);
+	});
+
 	it("keeps decoration when editor is unfocused even with cursor on HR line", () => {
 		const doc = "text\n\n---";
 		const hrPos = doc.indexOf("---");

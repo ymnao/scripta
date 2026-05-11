@@ -44,8 +44,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 				// カーソルがフォーカスされた行に HR がある場合は raw `---` のままにする。
 				// widget で replace するとカーソル進入時に表示が崩れる（左端の白い点滅）。
-				const lineNumber = state.doc.lineAt(node.from).number;
-				if (cursorLines.has(lineNumber)) return;
+				// フォーカス外し時は cursorLines が空なので lineAt 呼び出しごと省略。
+				if (cursorLines.size > 0) {
+					const lineNumber = state.doc.lineAt(node.from).number;
+					if (cursorLines.has(lineNumber)) return;
+				}
 
 				ranges.push(
 					Decoration.replace({
