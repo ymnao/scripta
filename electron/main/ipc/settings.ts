@@ -261,9 +261,9 @@ export function registerSettingsIpc(): void {
 			throw new Error("Invalid settings value: not JSON-serializable");
 		}
 		const store = getMainStore();
-		// FileTree フィルタは chokidar 再起動 + 全 window への broadcast を伴うため、
+		// FileTree フィルタ変更は全 window に `workspace:reload-tree` を broadcast するため、
 		// 値変化のない write は no-op として swallow する（同じ string を渡された場合の
-		// 無駄な restart / reload を防ぐ）。filter 対象外のキーは従来どおり set のみ。
+		// 無駄な reload を防ぐ）。filter 対象外のキーは従来どおり set のみ。
 		const notifyFilter = isFileTreeFilterKey(key) && readCurrentValue(store, key) !== value;
 		setValue(store, key, value);
 		if (notifyFilter) emitFileTreeFilterChange();

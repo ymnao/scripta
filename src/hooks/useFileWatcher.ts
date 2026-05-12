@@ -99,7 +99,8 @@ export function useFileWatcher({
 
 		void setup();
 
-		// 設定経由で main 側 watcher が restart された際に renderer 側 tree も再 fetch する。
+		// FileTree フィルタ設定が変わったとき main 側から `workspace:reload-tree` が来る。
+		// watcher 自体は再起動されないので、renderer の FileTree を再 fetch するだけでよい。
 		const unlistenReload = onWorkspaceReloadTree(() => {
 			if (!cancelled) onTreeChangeRef.current();
 		});

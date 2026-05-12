@@ -336,8 +336,9 @@ describe("load() filters unsafe keys from existing settings.json", () => {
 
 describe("file-tree filter listener emission via settings:set / settings:delete", () => {
 	// IPC ハンドラ経由で listener が発火することを確認する。これにより設定変更が
-	// 確実に watcher.ts の chokidar restart + workspace:reload-tree broadcast を
-	// kick できる統合経路を担保する。
+	// 確実に watcher.ts 側の `workspace:reload-tree` broadcast 経路を kick できる
+	// 統合点を担保する（chokidar の再起動は伴わない — watcher は user 設定から
+	// 切り離されており、設定変更で監視範囲は変わらない）。
 	type Handler = (event: unknown, ...args: unknown[]) => Promise<unknown> | unknown;
 	let handlers: Map<string, Handler>;
 
