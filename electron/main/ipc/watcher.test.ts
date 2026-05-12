@@ -43,9 +43,10 @@ describe("isWatcherIgnored", () => {
 		expect(isWatcherIgnored("/etc/passwd", root)).toBe(false);
 	});
 
-	it("does not ignore a file literally named `.git` (file vs dir distinction is at path-component level)", () => {
-		// 厳密には `.git` という名前のファイルも除外されるが、git repo 内で発生し得ないケース
-		// として扱う。文字列レベルで判定するため file/dir 区別は不要。
+	it("also ignores a path literally named `.git` (file/dir distinction is at path-component level)", () => {
+		// 文字列レベルで path component を判定するため、`.git` という名前なら file/dir どちらでも
+		// ignore 対象になる。git repo 内で `.git` という名前のファイルが発生するケースは
+		// 通常ないため、過剰除外は実害なしと判断。
 		expect(isWatcherIgnored("/home/user/workspace/.git", root)).toBe(true);
 	});
 });

@@ -54,8 +54,8 @@ interface GitignoreMatcher {
 }
 
 // 同一 content 文字列に対する matcher コンパイル結果を 1 枠だけキャッシュする。
-// 設定が変わらなければ getFileTreeFilterOptions() は cache から同じ string 参照を
-// 返すため、listDirectory / chokidar の ignored callback など hot path で
+// 文字列はプリミティブなので `memoKey === content` は値比較になる。設定が変わらなければ
+// 同じ content が渡るため listDirectory / chokidar の ignored callback など hot path で
 // 毎回 RegExp を再構築せずに済む。
 let memoKey: string | null = null;
 let memoMatcher: GitignoreMatcher | null = null;

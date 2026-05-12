@@ -212,7 +212,8 @@ export function getFileTreeFilterOptions(): EntryFilterOptions {
 }
 
 // FileTree フィルタ設定（showHidden / excludePatterns）変更時に発火する。watcher.ts が
-// chokidar 再起動 + renderer broadcast をここで購読する。
+// 全 window への `workspace:reload-tree` broadcast を購読する（chokidar の再起動は伴わない —
+// watcher は user 設定から切り離されており、設定変更で監視範囲は変わらないため）。
 const fileTreeFilterListeners: Set<() => void> = new Set();
 
 export function onFileTreeFilterChange(listener: () => void): () => void {
