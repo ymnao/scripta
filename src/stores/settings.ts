@@ -1,8 +1,11 @@
 import { create } from "zustand";
-import type { FontFamily } from "../lib/store";
 import {
+	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+	type FontFamily,
 	saveAutoSaveDelay,
 	saveAutoUpdateCheck,
+	saveFileTreeExcludePatterns,
+	saveFileTreeShowHidden,
 	saveFontFamily,
 	saveFontSize,
 	saveHighlightActiveLine,
@@ -22,6 +25,8 @@ interface SettingsValues {
 	showLinkCards: boolean;
 	scratchpadVolatile: boolean;
 	autoUpdateCheck: boolean;
+	fileTreeShowHidden: boolean;
+	fileTreeExcludePatterns: string;
 }
 
 interface SettingsState extends SettingsValues {
@@ -34,6 +39,8 @@ interface SettingsState extends SettingsValues {
 	setShowLinkCards: (show: boolean) => void;
 	setScratchpadVolatile: (volatile: boolean) => void;
 	setAutoUpdateCheck: (enabled: boolean) => void;
+	setFileTreeShowHidden: (show: boolean) => void;
+	setFileTreeExcludePatterns: (patterns: string) => void;
 	/** Set state without persisting — used for initial hydration from store */
 	hydrate: (values: Partial<SettingsValues>) => void;
 }
@@ -48,6 +55,8 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	showLinkCards: true,
 	scratchpadVolatile: true,
 	autoUpdateCheck: true,
+	fileTreeShowHidden: false,
+	fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 	setShowLineNumbers: (show: boolean) => {
 		void saveShowLineNumbers(show);
 		set({ showLineNumbers: show });
@@ -83,6 +92,14 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 	setAutoUpdateCheck: (enabled: boolean) => {
 		void saveAutoUpdateCheck(enabled);
 		set({ autoUpdateCheck: enabled });
+	},
+	setFileTreeShowHidden: (show: boolean) => {
+		void saveFileTreeShowHidden(show);
+		set({ fileTreeShowHidden: show });
+	},
+	setFileTreeExcludePatterns: (patterns: string) => {
+		void saveFileTreeExcludePatterns(patterns);
+		set({ fileTreeExcludePatterns: patterns });
 	},
 	hydrate: (values: Partial<SettingsValues>) => {
 		set(values);

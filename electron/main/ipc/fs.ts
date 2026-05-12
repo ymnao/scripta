@@ -2,12 +2,15 @@ import { promises as fsp } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ipcMain, shell } from "electron";
 import type { FileEntry } from "../../../src/types/workspace";
+import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
 	consumeTransientWritePath,
+	findContainingWorkspaceRoot,
 } from "../utils/path-guard";
+import { getFileTreeFilterOptions } from "./settings";
 
 async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
@@ -54,7 +57,18 @@ async function writeNewFileImpl(senderId: number, path: string, content: string)
 	consumeTransientWritePath(senderId, canonical);
 }
 
-async function listDirectoryImpl(senderId: number, path: string): Promise<FileEntry[]> {
+interface ListDirectoryOptions {
+	// FileTree 用の opt-in: 設定 fileTreeShowHidden / fileTreeExcludePatterns を適用する。
+	// DirectoryPicker / scripta-config / scratchpad-archive など FileTree 以外の
+	// 用途では false にして、隠しディレクトリへの直接アクセスを可能にする。
+	applyFileTreeFilter?: boolean;
+}
+
+async function listDirectoryImpl(
+	senderId: number,
+	path: string,
+	opts: ListDirectoryOptions = {},
+): Promise<FileEntry[]> {
 	const canonical = assertPathAllowed(senderId, path);
 	const entries = await fsp.readdir(canonical, { withFileTypes: true });
 	// 戻り値の path は renderer が保持する workspacePath（raw 入力側）と表記を揃える。
@@ -63,11 +77,20 @@ async function listDirectoryImpl(senderId: number, path: string): Promise<FileEn
 	// `startsWith(workspacePath)` 等の前提が崩れる。
 	// I/O は canonical で行う（TOCTOU 防止）一方、戻り値の path は input 表記に揃える。
 	const inputResolved = resolve(path);
-	return entries.map((entry) => ({
-		name: entry.name,
-		path: join(inputResolved, entry.name),
-		isDirectory: entry.isDirectory(),
-	}));
+	// gitignore 仕様の `/build/`（root アンカー）等を正しく評価するため、フィルタには
+	// listing 中の directory ではなく workspace root を渡す。opts は renderer 由来なので
+	// boolean に厳密に絞り込んで使う。
+	const applyFilter = opts.applyFileTreeFilter === true;
+	const workspaceRoot = applyFilter ? findContainingWorkspaceRoot(senderId, canonical) : null;
+	const filter =
+		workspaceRoot !== null ? createEntryFilter(getFileTreeFilterOptions(), workspaceRoot) : null;
+	return entries
+		.filter((entry) => filter?.(join(canonical, entry.name), entry.isDirectory()) ?? true)
+		.map((entry) => ({
+			name: entry.name,
+			path: join(inputResolved, entry.name),
+			isDirectory: entry.isDirectory(),
+		}));
 }
 
 async function createFileImpl(senderId: number, path: string): Promise<void> {
@@ -137,7 +160,9 @@ export function registerFsIpc(): void {
 	ipcMain.handle("fs:write-new", (event, path: string, content: string) =>
 		writeNewFileImpl(event.sender.id, path, content),
 	);
-	ipcMain.handle("fs:list", (event, path: string) => listDirectoryImpl(event.sender.id, path));
+	ipcMain.handle("fs:list", (event, path: string, opts?: ListDirectoryOptions) =>
+		listDirectoryImpl(event.sender.id, path, opts),
+	);
 	ipcMain.handle("fs:create-file", (event, path: string) => createFileImpl(event.sender.id, path));
 	ipcMain.handle("fs:create-directory", (event, path: string) =>
 		createDirectoryImpl(event.sender.id, path),

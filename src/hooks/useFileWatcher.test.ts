@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { onFsChange, startWatcher, stopWatcher } from "../lib/commands";
+import { onFsChange, onWorkspaceReloadTree, startWatcher, stopWatcher } from "../lib/commands";
 import type { FsChangeEvent } from "../types/workspace";
 import { useFileWatcher } from "./useFileWatcher";
 
@@ -8,9 +8,11 @@ vi.mock("../lib/commands", () => ({
 	startWatcher: vi.fn().mockResolvedValue(undefined),
 	stopWatcher: vi.fn().mockResolvedValue(undefined),
 	onFsChange: vi.fn(),
+	onWorkspaceReloadTree: vi.fn(),
 }));
 
 let fsChangeCallback: ((events: FsChangeEvent[]) => void) | null = null;
+let reloadTreeCallback: (() => void) | null = null;
 
 function emitFsChange(events: FsChangeEvent[]) {
 	if (fsChangeCallback) {
@@ -26,11 +28,18 @@ describe("useFileWatcher", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		fsChangeCallback = null;
+		reloadTreeCallback = null;
 		vi.clearAllMocks();
 		(onFsChange as Mock).mockImplementation((cb: (events: FsChangeEvent[]) => void) => {
 			fsChangeCallback = cb;
 			return () => {
 				fsChangeCallback = null;
+			};
+		});
+		(onWorkspaceReloadTree as Mock).mockImplementation((cb: () => void) => {
+			reloadTreeCallback = cb;
+			return () => {
+				reloadTreeCallback = null;
 			};
 		});
 	});
@@ -261,5 +270,39 @@ describe("useFileWatcher", () => {
 		// Callbacks should not fire after unmount (cancelled + timer cleared)
 		expect(onFileModified).not.toHaveBeenCalled();
 		expect(onTreeChange).not.toHaveBeenCalled();
+	});
+
+	it("fires onTreeChange when workspace:reload-tree event is received", async () => {
+		renderHook(() =>
+			useFileWatcher({
+				workspacePath: "/workspace",
+				onTreeChange,
+				onFileModified,
+				onFileDeleted,
+			}),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(onWorkspaceReloadTree).toHaveBeenCalled();
+		expect(reloadTreeCallback).not.toBeNull();
+
+		reloadTreeCallback?.();
+		expect(onTreeChange).toHaveBeenCalledTimes(1);
+	});
+
+	it("unsubscribes onWorkspaceReloadTree on unmount", async () => {
+		const { unmount } = renderHook(() =>
+			useFileWatcher({
+				workspacePath: "/workspace",
+				onTreeChange,
+				onFileModified,
+				onFileDeleted,
+			}),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(reloadTreeCallback).not.toBeNull();
+
+		unmount();
+		expect(reloadTreeCallback).toBeNull();
 	});
 });

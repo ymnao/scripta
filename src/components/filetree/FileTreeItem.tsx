@@ -72,7 +72,7 @@ export function FileTreeItem({
 	const loadChildren = useCallback(() => {
 		setLoading(true);
 		setLoadError(false);
-		listDirectory(entry.path)
+		listDirectory(entry.path, { applyFileTreeFilter: true })
 			.then((entries) => {
 				if (!isMountedRef.current) return;
 				setChildren(entries);
@@ -112,7 +112,7 @@ export function FileTreeItem({
 		prevRefreshKeyRef.current = refreshKey;
 		if (!entry.isDirectory || !expanded || !loaded) return;
 		let ignore = false;
-		listDirectory(entry.path)
+		listDirectory(entry.path, { applyFileTreeFilter: true })
 			.then((entries) => {
 				if (ignore || !isMountedRef.current) return;
 				setChildren(entries);

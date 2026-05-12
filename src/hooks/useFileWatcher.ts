@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { onFsChange, startWatcher, stopWatcher } from "../lib/commands";
+import { onFsChange, onWorkspaceReloadTree, startWatcher, stopWatcher } from "../lib/commands";
 import { useToastStore } from "../stores/toast";
 import type { FsChangeEvent } from "../types/workspace";
 
@@ -99,6 +99,11 @@ export function useFileWatcher({
 
 		void setup();
 
+		// 設定経由で main 側 watcher が restart された際に renderer 側 tree も再 fetch する。
+		const unlistenReload = onWorkspaceReloadTree(() => {
+			if (!cancelled) onTreeChangeRef.current();
+		});
+
 		return () => {
 			cancelled = true;
 			if (batchTimer !== null) {
@@ -107,6 +112,7 @@ export function useFileWatcher({
 			if (unlistenFn) {
 				unlistenFn();
 			}
+			unlistenReload();
 			stopWatcher().catch((err) => {
 				console.error("Failed to stop file watcher:", err);
 			});

@@ -1,5 +1,6 @@
 import { describe, expect, it, type Mock } from "vitest";
 import {
+	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 	loadSettings,
 	saveAutoSaveDelay,
 	saveFontFamily,
@@ -41,6 +42,8 @@ describe("store", () => {
 				autoPullOnStartup: false,
 				scratchpadVolatile: true,
 				autoUpdateCheck: true,
+				fileTreeShowHidden: false,
+				fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 			});
 		});
 
@@ -83,6 +86,8 @@ describe("store", () => {
 				autoPullOnStartup: false,
 				scratchpadVolatile: true,
 				autoUpdateCheck: true,
+				fileTreeShowHidden: false,
+				fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 			});
 		});
 

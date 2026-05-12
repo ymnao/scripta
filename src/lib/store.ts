@@ -1,8 +1,12 @@
+import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
 
+export { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS };
+
 export type ThemePreference = "system" | "light" | "dark";
 export type FontFamily = "monospace" | "sans-serif" | "serif";
+
 interface AppSettings {
 	workspacePath: string | null;
 	themePreference: ThemePreference;
@@ -24,6 +28,8 @@ interface AppSettings {
 	autoPullOnStartup: boolean;
 	scratchpadVolatile: boolean;
 	autoUpdateCheck: boolean;
+	fileTreeShowHidden: boolean;
+	fileTreeExcludePatterns: string;
 }
 
 const DEFAULTS: AppSettings = {
@@ -47,6 +53,8 @@ const DEFAULTS: AppSettings = {
 	autoPullOnStartup: GIT_SYNC_DEFAULTS.autoPullOnStartup,
 	scratchpadVolatile: true,
 	autoUpdateCheck: true,
+	fileTreeShowHidden: false,
+	fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 };
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -174,6 +182,18 @@ export async function loadSettings(): Promise<AppSettings> {
 		const autoUpdateCheck: boolean =
 			typeof rawAutoUpdateCheck === "boolean" ? rawAutoUpdateCheck : DEFAULTS.autoUpdateCheck;
 
+		const rawFileTreeShowHidden = await window.api.settingsGet("fileTreeShowHidden");
+		const fileTreeShowHidden: boolean =
+			typeof rawFileTreeShowHidden === "boolean"
+				? rawFileTreeShowHidden
+				: DEFAULTS.fileTreeShowHidden;
+
+		const rawFileTreeExcludePatterns = await window.api.settingsGet("fileTreeExcludePatterns");
+		const fileTreeExcludePatterns: string =
+			typeof rawFileTreeExcludePatterns === "string"
+				? rawFileTreeExcludePatterns
+				: DEFAULTS.fileTreeExcludePatterns;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -195,6 +215,8 @@ export async function loadSettings(): Promise<AppSettings> {
 			autoPullOnStartup,
 			scratchpadVolatile,
 			autoUpdateCheck,
+			fileTreeShowHidden,
+			fileTreeExcludePatterns,
 		};
 	} catch {
 		return { ...DEFAULTS };
@@ -237,6 +259,9 @@ export const saveScratchpadVolatile = (volatile: boolean) =>
 	saveSetting("scratchpadVolatile", volatile);
 export const saveAutoUpdateCheck = (enabled: boolean) => saveSetting("autoUpdateCheck", enabled);
 export const saveLastUpdateCheck = (timestamp: number) => saveSetting("lastUpdateCheck", timestamp);
+export const saveFileTreeShowHidden = (show: boolean) => saveSetting("fileTreeShowHidden", show);
+export const saveFileTreeExcludePatterns = (patterns: string) =>
+	saveSetting("fileTreeExcludePatterns", patterns);
 
 export async function loadLastUpdateCheck(): Promise<number> {
 	try {

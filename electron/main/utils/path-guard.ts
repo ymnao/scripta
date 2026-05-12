@@ -141,6 +141,18 @@ export function getWorkspaceRootsForWindow(windowId: number): string[] {
 	return set ? [...set] : [];
 }
 
+// 該当 window が登録している workspace root のうち canonical を含むものを 1 つ返す。
+// 見つからなければ null。fs IPC でフィルタリングのアンカーとして使う：
+// `assertPathAllowed` 成功直後に呼べば、その path を含む root が必ず存在する。
+export function findContainingWorkspaceRoot(windowId: number, canonical: string): string | null {
+	const set = windowAllowedRoots.get(windowId);
+	if (set === undefined) return null;
+	for (const root of set) {
+		if (isPathInside(canonical, root)) return root;
+	}
+	return null;
+}
+
 export function registerTransientWritePath(windowId: number, p: string): void {
 	const canonical = canonicalize(p);
 	let set = transientWritePaths.get(windowId);
@@ -191,12 +203,7 @@ function isPathInside(child: string, parent: string): boolean {
 }
 
 function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
-	const set = windowAllowedRoots.get(windowId);
-	if (set === undefined) return false;
-	for (const root of set) {
-		if (isPathInside(target, root)) return true;
-	}
-	return false;
+	return findContainingWorkspaceRoot(windowId, target) !== null;
 }
 
 // Fail-closed: ウィンドウ未登録時はすべて拒否する。

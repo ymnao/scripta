@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { app, ipcMain } from "electron";
 import writeFileAtomic from "write-file-atomic";
+import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, type EntryFilterOptions } from "../utils/entry-filter";
 import { isErrnoCode } from "../utils/fs-errors";
 import { normalizeWindowState, type WindowState } from "../utils/window-state";
 
@@ -192,6 +193,54 @@ export function persistWindowState(state: WindowState): void {
 	persist(store);
 }
 
+export function getFileTreeFilterOptions(): EntryFilterOptions {
+	try {
+		const data = load(getMainStore());
+		const showHidden =
+			typeof data.fileTreeShowHidden === "boolean" ? data.fileTreeShowHidden : false;
+		const excludePatterns =
+			typeof data.fileTreeExcludePatterns === "string"
+				? data.fileTreeExcludePatterns
+				: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS;
+		return { showHidden, excludePatterns };
+	} catch {
+		return {
+			showHidden: false,
+			excludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+		};
+	}
+}
+
+// FileTree フィルタ設定（showHidden / excludePatterns）変更時に発火する。watcher.ts が
+// chokidar 再起動 + renderer broadcast をここで購読する。
+const fileTreeFilterListeners: Set<() => void> = new Set();
+
+export function onFileTreeFilterChange(listener: () => void): () => void {
+	fileTreeFilterListeners.add(listener);
+	return () => {
+		fileTreeFilterListeners.delete(listener);
+	};
+}
+
+function emitFileTreeFilterChange(): void {
+	for (const listener of fileTreeFilterListeners) {
+		try {
+			listener();
+		} catch (error) {
+			console.warn("[settings] file-tree filter listener failed:", error);
+		}
+	}
+}
+
+function isFileTreeFilterKey(key: string): boolean {
+	return key === "fileTreeShowHidden" || key === "fileTreeExcludePatterns";
+}
+
+function readCurrentValue(store: Store, key: string): unknown {
+	const data = load(store);
+	return Object.hasOwn(data, key) ? data[key] : undefined;
+}
+
 export function registerSettingsIpc(): void {
 	ipcMain.handle("settings:get", async (_event, key: unknown): Promise<unknown> => {
 		// 不正キーは throw せず null。renderer は「未設定」として既定値にフォールバックする
@@ -210,7 +259,13 @@ export function registerSettingsIpc(): void {
 		if (!isJsonSerializable(value)) {
 			throw new Error("Invalid settings value: not JSON-serializable");
 		}
-		setValue(getMainStore(), key, value);
+		const store = getMainStore();
+		// FileTree フィルタは chokidar 再起動 + 全 window への broadcast を伴うため、
+		// 値変化のない write は no-op として swallow する（同じ string を渡された場合の
+		// 無駄な restart / reload を防ぐ）。filter 対象外のキーは従来どおり set のみ。
+		const notifyFilter = isFileTreeFilterKey(key) && readCurrentValue(store, key) !== value;
+		setValue(store, key, value);
+		if (notifyFilter) emitFileTreeFilterChange();
 	});
 	ipcMain.handle("settings:delete", async (_event, key: unknown) => {
 		if (!isSafeSettingsKey(key)) {
@@ -221,7 +276,10 @@ export function registerSettingsIpc(): void {
 		if (RESERVED_KEYS.has(key)) {
 			throw new Error(`Permission denied: settings key "${key}" is reserved`);
 		}
-		deleteValue(getMainStore(), key);
+		const store = getMainStore();
+		const notifyFilter = isFileTreeFilterKey(key) && readCurrentValue(store, key) !== undefined;
+		deleteValue(store, key);
+		if (notifyFilter) emitFileTreeFilterChange();
 	});
 	ipcMain.handle("settings:save", async () => {
 		persist(getMainStore());
@@ -239,4 +297,9 @@ export const __testing = {
 	isSafeSettingsKey,
 	isJsonSerializable,
 	FORBIDDEN_SETTINGS_KEYS,
+	emitFileTreeFilterChange,
+	resetForTests(): void {
+		mainStore = null;
+		fileTreeFilterListeners.clear();
+	},
 };

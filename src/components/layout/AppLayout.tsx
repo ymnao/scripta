@@ -233,6 +233,8 @@ export function AppLayout() {
 				showLinkCards: settings.showLinkCards,
 				scratchpadVolatile: settings.scratchpadVolatile,
 				autoUpdateCheck: settings.autoUpdateCheck,
+				fileTreeShowHidden: settings.fileTreeShowHidden,
+				fileTreeExcludePatterns: settings.fileTreeExcludePatterns,
 			});
 			hydrateGitSync({
 				gitSyncEnabled: settings.gitSyncEnabled,
