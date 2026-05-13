@@ -1,0 +1,40 @@
+# pnpm 11 設定の正準ロケーション（pnpm 11 で `package.json:pnpm` からの移行が推奨）。
+# 単一パッケージリポジトリだが、settings の集約先として本ファイルを使う。
+# 各 setting の意味は https://pnpm.io/settings 参照。
+
+# 単一パッケージでも `packages` に root を含めておくことで、pnpm が本ファイルを
+# workspace manifest として解釈した際に「対象パッケージなし」扱いにならないようにする。
+packages:
+  - "."
+
+# pnpm 11 既定値の明示宣言。デフォルトが変わっても本リポジトリのポスチャを固定する。
+#
+# 注意: `minimumReleaseAge` を **明示設定すると** `minimumReleaseAgeStrict` が自動で true
+# になり、組み込み既定 (`false`) より厳しい挙動になる（24h 未満のバージョンしか range 内に
+# 存在しない場合は fallback せずに resolution 失敗）。本リポジトリの依存はほぼ stable lib
+# で 24h 未満リリースが唯一解になるケースは稀なため、fail-loud な strict 挙動を選んでいる。
+# pnpm 11 の built-in default 相当に戻したい場合は `minimumReleaseAgeStrict: false` を追記する。
+minimumReleaseAge: 1440
+blockExoticSubdeps: true
+strictDepBuilds: true
+
+# strictDepBuilds=true 下で build script の実行を許可する依存。
+#
+# pnpm 11 の判定は registry メタデータ / lockfile resolution に基づくため、`package.json`
+# の `scripts` フィールドをローカルで grep しても網羅できない（biome / electron は
+# scripts=null だが pnpm はブロックする）。ここのリストは `pnpm install --frozen-lockfile`
+# で `[ERR_PNPM_IGNORED_BUILDS]` に出てきた package を都度足して維持する。
+allowBuilds:
+  "@biomejs/biome": true
+  esbuild: true
+  electron: true
+  electron-winstaller: true
+
+# `$@codemirror/state` は「direct dep の version を全 transitive にも強制」の self-ref 記法。
+# CodeMirror の state が複数バージョン共存すると runtime で破綻するため強制統一する。
+overrides:
+  "@codemirror/state": $@codemirror/state
+  "@lezer/common": ^1.5.2
+
+patchedDependencies:
+  style-mod@4.1.3: patches/style-mod@4.1.3.patch
