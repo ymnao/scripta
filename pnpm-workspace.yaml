@@ -2,6 +2,11 @@
 # 単一パッケージリポジトリだが、settings の集約先として本ファイルを使う。
 # 各 setting の意味は https://pnpm.io/settings 参照。
 
+# 単一パッケージでも `packages` に root を含めておくことで、pnpm が本ファイルを
+# workspace manifest として解釈した際に「対象パッケージなし」扱いにならないようにする。
+packages:
+  - "."
+
 # pnpm 11 既定値の明示宣言。デフォルトが変わっても本リポジトリのポスチャを固定する。
 #
 # 注意: `minimumReleaseAge` を **明示設定すると** `minimumReleaseAgeStrict` が自動で true
