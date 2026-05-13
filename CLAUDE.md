@@ -31,19 +31,11 @@ Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite + Biome
 - Stage 0 ではバックエンド処理を全てモック実装にして、まず frontend が Chromium で動作することを検証する
 - Rust コードはこのリポジトリには持ち込まない。全文検索など性能が必要なものも純 JS で実装する（旧 Rust ロジックを 1:1 移植、`docs/migration-plan.md` Stage 3 参照）
 
-## パッケージマネージャ / セキュリティ方針
+## パッケージマネージャ
 
-**pnpm 11.1.1** を採用。Node.js は **22.12.0 以上必須**（pnpm 11 自体が Node 22+ を要求し、`engines.node` も `>=22.12.0` に揃えてある）。
+**pnpm 11.1.1**、Node.js **22.12.0 以上必須**（pnpm 11 が Node 22+ 要求）。
 
-npm サプライチェーン攻撃（Shai-Hulud worm 系列など、2025〜2026 年に多発）への防御を目的に、pnpm 11 のセキュリティ既定値を `pnpm-workspace.yaml` で **明示宣言** している:
-
-- `minimumReleaseAge: 1440` — 新規 publish から 24 時間経過まで該当 version を resolve しない
-- `blockExoticSubdeps: true` — transitive dependency に git / tarball URL / GitHub gist など exotic source を禁止
-- `strictDepBuilds: true` + `allowBuilds` — 明示登録された依存だけが install 時に build script を実行可能
-
-設定の正準ロケーションは `pnpm-workspace.yaml`（pnpm 11 で `package.json:pnpm` フィールドからの移行が推奨）。`overrides` / `patchedDependencies` も同ファイルに集約。`.npmrc` は registry / auth 専用（本リポジトリには未配置）。
-
-緊急 hotfix を即取り込みたい場合は `minimumReleaseAge` を 0 に一時的に下げて `pnpm install` し、その後元に戻す運用。
+設定の正準ロケーションは `pnpm-workspace.yaml`（`package.json:pnpm` フィールドは pnpm 11 で workspace.yaml への移行が推奨）。`overrides` / `patchedDependencies` / `allowBuilds` を同ファイルに集約。pnpm 11 の既定値（`minimumReleaseAge` / `blockExoticSubdeps` / `strictDepBuilds`）はそのまま採用しているが、将来デフォルトが変わっても本リポジトリでは固定されるよう明示宣言してある。
 
 ## 開発コマンド
 
