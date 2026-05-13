@@ -1,7 +1,7 @@
 {
 	"name": "scripta-next",
 	"private": true,
-	"version": "0.0.0",
+	"version": "0.2.0",
 	"license": "MIT",
 	"main": "out/main/index.js",
 	"packageManager": "pnpm@11.1.1",
