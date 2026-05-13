@@ -87,10 +87,10 @@ importers:
         version: 2.4.14
       '@electron-toolkit/preload':
         specifier: ^3.0.2
-        version: 3.0.2(electron@42.0.0)
+        version: 3.0.2(electron@42.0.1)
       '@electron-toolkit/utils':
         specifier: ^4.0.0
-        version: 4.0.0(electron@42.0.0)
+        version: 4.0.0(electron@42.0.1)
       '@playwright/test':
         specifier: ^1.59.1
         version: 1.59.1
@@ -128,8 +128,8 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(vite@8.0.11(@types/node@25.7.0)(jiti@2.6.1))
       electron:
-        specifier: ^42.0.0
-        version: 42.0.0
+        specifier: ^42.0.1
+        version: 42.0.1
       electron-builder:
         specifier: ^26.8.1
         version: 26.8.1(electron-builder-squirrel-windows@26.8.1)
@@ -1844,8 +1844,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@42.0.0:
-    resolution: {integrity: sha512-in5jnW/Ywy3Rh3FPr4MR80exPEkywKYAmDJRZ/gIKlr8VXEi3zXgiAZbf0Si7KRccHTF2y8euVMRz7M6HqTjMA==}
+  electron@42.0.1:
+    resolution: {integrity: sha512-d8HnycE970DGESe91Nj30eonFBUcAI9EZ1TwUGJVzSAnJZdh0BkFEinAXjdklvDYst+bVDc8HsksCuqVLrnqdg==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -2651,6 +2651,11 @@ packages:
 
   semver@7.7.4:
     resolution: {integrity: sha512-vFKC2IEtQnVhpT78h1Yp8wzwrf8CM+MzKMHGJZfBtzhZNycRFnXsHk6E5TxIkkMsgNS7mdX3AGB7x2QM2di4lA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+  semver@7.8.0:
+    resolution: {integrity: sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA==}
     engines: {node: '>=10'}
     hasBin: true
 
@@ -3575,13 +3580,13 @@ snapshots:
       ajv: 6.15.0
       ajv-keywords: 3.5.2(ajv@6.15.0)
 
-  '@electron-toolkit/preload@3.0.2(electron@42.0.0)':
+  '@electron-toolkit/preload@3.0.2(electron@42.0.1)':
     dependencies:
-      electron: 42.0.0
+      electron: 42.0.1
 
-  '@electron-toolkit/utils@4.0.0(electron@42.0.0)':
+  '@electron-toolkit/utils@4.0.0(electron@42.0.1)':
     dependencies:
-      electron: 42.0.0
+      electron: 42.0.1
 
   '@electron/asar@3.4.1':
     dependencies:
@@ -3615,7 +3620,7 @@ snapshots:
       env-paths: 3.0.0
       graceful-fs: 4.2.11
       progress: 2.0.3
-      semver: 7.7.4
+      semver: 7.8.0
       sumchecker: 3.0.1
     optionalDependencies:
       undici: 7.25.0
@@ -5050,7 +5055,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@42.0.0:
+  electron@42.0.1:
     dependencies:
       '@electron/get': 5.0.0
       '@types/node': 24.12.4
@@ -5884,6 +5889,8 @@ snapshots:
   semver@6.3.1: {}
 
   semver@7.7.4: {}
+
+  semver@7.8.0: {}
 
   serialize-error@7.0.1:
     dependencies:
