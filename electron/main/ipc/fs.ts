@@ -57,17 +57,10 @@ async function writeNewFileImpl(senderId: number, path: string, content: string)
 	consumeTransientWritePath(senderId, canonical);
 }
 
-interface ListDirectoryOptions {
-	// FileTree 用の opt-in: 設定 fileTreeShowHidden / fileTreeExcludePatterns を適用する。
-	// DirectoryPicker / scripta-config / scratchpad-archive など FileTree 以外の
-	// 用途では false にして、隠しディレクトリへの直接アクセスを可能にする。
-	applyFileTreeFilter?: boolean;
-}
-
 async function listDirectoryImpl(
 	senderId: number,
 	path: string,
-	opts: ListDirectoryOptions = {},
+	opts?: unknown,
 ): Promise<FileEntry[]> {
 	const canonical = assertPathAllowed(senderId, path);
 	const entries = await fsp.readdir(canonical, { withFileTypes: true });
@@ -78,9 +71,14 @@ async function listDirectoryImpl(
 	// I/O は canonical で行う（TOCTOU 防止）一方、戻り値の path は input 表記に揃える。
 	const inputResolved = resolve(path);
 	// gitignore 仕様の `/build/`（root アンカー）等を正しく評価するため、フィルタには
-	// listing 中の directory ではなく workspace root を渡す。opts は renderer 由来なので
-	// boolean に厳密に絞り込んで使う。
-	const applyFilter = opts.applyFileTreeFilter === true;
+	// listing 中の directory ではなく workspace root を渡す。opts は IPC 経由 renderer 由来
+	// （null / 文字列 / 配列等が渡りうる）なので、plain object かを確認したうえで boolean
+	// 比較で fail-closed に判定する。
+	const applyFilter =
+		typeof opts === "object" &&
+		opts !== null &&
+		!Array.isArray(opts) &&
+		(opts as Record<string, unknown>).applyFileTreeFilter === true;
 	const workspaceRoot = applyFilter ? findContainingWorkspaceRoot(senderId, canonical) : null;
 	const filter =
 		workspaceRoot !== null ? createEntryFilter(getFileTreeFilterOptions(), workspaceRoot) : null;
@@ -160,7 +158,7 @@ export function registerFsIpc(): void {
 	ipcMain.handle("fs:write-new", (event, path: string, content: string) =>
 		writeNewFileImpl(event.sender.id, path, content),
 	);
-	ipcMain.handle("fs:list", (event, path: string, opts?: ListDirectoryOptions) =>
+	ipcMain.handle("fs:list", (event, path: string, opts?: unknown) =>
 		listDirectoryImpl(event.sender.id, path, opts),
 	);
 	ipcMain.handle("fs:create-file", (event, path: string) => createFileImpl(event.sender.id, path));

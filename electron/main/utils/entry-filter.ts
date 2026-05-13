@@ -114,6 +114,7 @@ function parsePatternLine(rawLine: string): ParsedRule | null {
 
 	let anchored = false;
 	if (line.startsWith("**/")) {
+		// `**/foo` も `**/foo/bar` も「どこでも match」(anchored=false) のまま続ける。
 		line = line.slice(3);
 	} else if (line.startsWith("/")) {
 		anchored = true;

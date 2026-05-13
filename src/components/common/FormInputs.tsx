@@ -148,6 +148,9 @@ function useDraftCommit(
 	const [draft, setDraft] = useState(value);
 	const draftRef = useRef(draft);
 	const valueRef = useRef(value);
+	// onChange の参照変化で cleanup が走らないように ref に退避し、cleanup effect の
+	// deps を `[]` にして unmount-only に固定する。
+	const onChangeRef = useRef(onChange);
 
 	useEffect(() => {
 		setDraft(value);
@@ -159,12 +162,16 @@ function useDraftCommit(
 	}, [draft]);
 
 	useEffect(() => {
+		onChangeRef.current = onChange;
+	}, [onChange]);
+
+	useEffect(() => {
 		return () => {
 			if (draftRef.current !== valueRef.current) {
-				onChange(draftRef.current);
+				onChangeRef.current(draftRef.current);
 			}
 		};
-	}, [onChange]);
+	}, []);
 
 	return {
 		draft,

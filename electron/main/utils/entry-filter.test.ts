@@ -108,6 +108,15 @@ describe("createEntryFilter", () => {
 			expect(filter("/workspace/foobar", false)).toBe(true);
 		});
 
+		it("treats `**/foo/bar` (multi-segment after **/) as matches-anywhere", () => {
+			const filter = createEntryFilter({ showHidden: true, excludePatterns: "**/foo/bar\n" }, ROOT);
+			expect(filter("/workspace/foo/bar", true)).toBe(false);
+			expect(filter("/workspace/sub/foo/bar", true)).toBe(false);
+			expect(filter("/workspace/a/b/foo/bar", true)).toBe(false);
+			// `foo/bar` の "bar" は連続したパス要素である必要がある
+			expect(filter("/workspace/foo/x/bar", true)).toBe(true);
+		});
+
 		it("treats leading `/` as root-anchored", () => {
 			const filter = createEntryFilter({ showHidden: true, excludePatterns: "/foo\n" }, ROOT);
 			expect(filter("/workspace/foo", true)).toBe(false);
