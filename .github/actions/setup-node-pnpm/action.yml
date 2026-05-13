@@ -5,9 +5,10 @@ inputs:
   node-version:
     description: Node.js version to use
     required: false
-    # 22.12 系の最新 patch を取得する。22.13 / 22.14 等が出てもここではそれを取らない
-    # （明示更新で確認するため）。`engines.node (>=22.12.0)` の下限を確実に満たす。
-    default: "22.12"
+    # 22.13 系の最新 patch を取得する。22.14 以降が出てもここではそれを取らない
+    # （明示更新で確認するため）。pnpm 11.1.1 の `engines.node (>=22.13)` と
+    # 本リポジトリの `engines.node (>=22.13.0)` の双方を確実に満たす。
+    default: "22.13"
 
 runs:
   using: composite

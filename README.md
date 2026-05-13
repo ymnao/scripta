@@ -48,7 +48,7 @@ v0.2.0 リリース後、[Releases](https://github.com/ymnao/scripta-next/releas
 
 ### 前提条件
 
-- Node.js `>=22.12.0`（pnpm 11 / Vite 8 / electron-vite 5 / Vitest 4 の要件）
+- Node.js `>=22.13.0`（pnpm 11 の要件、Vite 8 / electron-vite 5 / Vitest 4 はもう少し緩い）
 - pnpm >= 11
 
 ### コマンド
