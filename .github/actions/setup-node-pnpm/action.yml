@@ -5,7 +5,9 @@ inputs:
   node-version:
     description: Node.js version to use
     required: false
-    default: "22"
+    # 22.12 系の最新 patch を取得する。22.13 / 22.14 等が出てもここではそれを取らない
+    # （明示更新で確認するため）。`engines.node (>=22.12.0)` の下限を確実に満たす。
+    default: "22.12"
 
 runs:
   using: composite
@@ -13,9 +15,6 @@ runs:
     # pnpm のバージョンは package.json の packageManager フィールドから自動取得される。
     # version を with で明示しないことで package.json との二重管理を避け、再現性は packageManager に一元化する。
     - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
-
-    # node-version "22" は 22 系の最新を取得する。pnpm 11 と本リポジトリの
-    # engines.node (>=22.12.0) の双方を確実に満たす。
     - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
       with:
         node-version: ${{ inputs.node-version }}
