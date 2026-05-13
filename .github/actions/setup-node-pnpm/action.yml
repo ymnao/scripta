@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # pnpm のバージョンは package.json の packageManager フィールド（pnpm@10.30.0）から自動取得される。
+    # pnpm のバージョンは package.json の packageManager フィールド（pnpm@11.1.1）から自動取得される。
     # version を with で明示しないことで package.json との二重管理を避け、再現性は packageManager に一元化する。
     - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
 

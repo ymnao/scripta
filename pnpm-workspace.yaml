@@ -1,0 +1,51 @@
+# pnpm 11 設定。npm サプライチェーン攻撃（Shai-Hulud worm 系列など）への防御を目的に、
+# pnpm 11 が導入したセキュリティ既定値を **明示** で宣言する。デフォルト値と同じだが、
+# 明示することで「攻撃対策として意図的に有効化している」という方針が読み取れ、
+# 将来 pnpm のデフォルトが変わっても本リポジトリのポスチャは固定される。
+#
+# 単一パッケージリポジトリだが、pnpm 11 では設定の正準ロケーションが本ファイルに
+# 統合されたため `package.json:pnpm` フィールドから移行している。
+#
+# 参照:
+#   - https://pnpm.io/blog/releases/11.0
+#   - https://pnpm.io/supply-chain-security
+#   - https://pnpm.io/settings
+
+# 新規 publish から 24 時間（1440 分）経過するまで該当バージョンを resolve しない。
+# Shai-Hulud のような自己増殖型攻撃は publish 直後の数時間が最も拡散しやすいので、
+# その窓を埋める。緊急セキュリティ修正の即時取り込みが必要な場面では一時的に下げる。
+minimumReleaseAge: 1440
+
+# transitive dependency に git / tarball URL / GitHub gist など「exotic」なソースを
+# 禁止し、registry（npmjs.org または認証済みプロキシ）のみに限定する。
+# 攻撃者が「悪意ある tarball を sub-dep として隠す」古典的手口を遮断する。
+blockExoticSubdeps: true
+
+# allowBuilds に明示登録された依存だけが install 時に build script を実行できる。
+# 未登録の依存に postinstall script が紛れ込んでも実行されない（pnpm 10 までの
+# onlyBuiltDependencies の動作を strict 化したもの）。
+strictDepBuilds: true
+
+# build script の実行を許可する依存。pnpm 11 で onlyBuiltDependencies の置き換え。
+# - @biomejs/biome: native binary を取得する postinstall
+# - esbuild: native binary を取得する postinstall（複数の dep が transitive で要求）
+# - electron: postinstall は削除済みだが将来再有効化される可能性に備え許可枠を残す
+#   （詳細は CLAUDE.md「electron 42 への対応」を参照）
+allowBuilds:
+  "@biomejs/biome": true
+  esbuild: true
+  electron: true
+
+# 直接依存と sub-dep のバージョン揃え:
+# - $@codemirror/state は「direct dep として宣言した version を全 transitive にも強制」
+#   の self-ref 記法。CodeMirror の state が複数バージョン共存すると runtime で破綻する
+#   ため強制統一する。
+# - @lezer/common は古い lezer 系 dep が ^1.0 で broad に取りに行く可能性があるため
+#   ^1.5.2 にピン。
+overrides:
+  "@codemirror/state": $@codemirror/state
+  "@lezer/common": ^1.5.2
+
+# 直接パッチを当てている依存。
+patchedDependencies:
+  style-mod@4.1.3: patches/style-mod@4.1.3.patch
