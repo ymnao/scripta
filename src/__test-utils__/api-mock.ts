@@ -39,6 +39,7 @@ export function createApiMock(): Api {
 		startWatcher: vi.fn(async () => {}),
 		stopWatcher: vi.fn(async () => {}),
 		onFsChange: vi.fn(() => () => {}),
+		onWorkspaceReloadTree: vi.fn(() => () => {}),
 
 		searchFiles: vi.fn(async () => []),
 		cancelSearch: vi.fn(async () => {}),

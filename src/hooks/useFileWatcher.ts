@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { onFsChange, startWatcher, stopWatcher } from "../lib/commands";
+import { onFsChange, onWorkspaceReloadTree, startWatcher, stopWatcher } from "../lib/commands";
 import { useToastStore } from "../stores/toast";
 import type { FsChangeEvent } from "../types/workspace";
 
@@ -99,6 +99,12 @@ export function useFileWatcher({
 
 		void setup();
 
+		// FileTree フィルタ設定が変わったとき main 側から `workspace:reload-tree` が来る。
+		// watcher 自体は再起動されないので、renderer の FileTree を再 fetch するだけでよい。
+		const unlistenReload = onWorkspaceReloadTree(() => {
+			if (!cancelled) onTreeChangeRef.current();
+		});
+
 		return () => {
 			cancelled = true;
 			if (batchTimer !== null) {
@@ -107,6 +113,7 @@ export function useFileWatcher({
 			if (unlistenFn) {
 				unlistenFn();
 			}
+			unlistenReload();
 			stopWatcher().catch((err) => {
 				console.error("Failed to stop file watcher:", err);
 			});

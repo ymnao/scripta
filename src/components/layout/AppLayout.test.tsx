@@ -38,11 +38,13 @@ vi.mock("../../lib/commands", () => ({
 	openConflictWindow: vi.fn().mockResolvedValue(undefined),
 	closeWindow: vi.fn().mockResolvedValue(undefined),
 	onFsChange: vi.fn(),
+	onWorkspaceReloadTree: vi.fn(() => () => {}),
 	onMenuEvent: vi.fn(() => () => {}),
 	onWindowCloseRequested: vi.fn(),
 }));
 
 vi.mock("../../lib/store", () => ({
+	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS: "",
 	loadSettings: vi.fn().mockResolvedValue({
 		workspacePath: null,
 		themePreference: "system",
@@ -64,6 +66,8 @@ vi.mock("../../lib/store", () => ({
 		autoPullOnStartup: false,
 		scratchpadVolatile: true,
 		autoUpdateCheck: true,
+		fileTreeShowHidden: false,
+		fileTreeExcludePatterns: "",
 	}),
 	saveThemePreference: vi.fn().mockResolvedValue(undefined),
 	saveSidebarVisible: vi.fn().mockResolvedValue(undefined),
@@ -86,6 +90,8 @@ vi.mock("../../lib/store", () => ({
 	saveAutoUpdateCheck: vi.fn().mockResolvedValue(undefined),
 	loadLastUpdateCheck: vi.fn().mockResolvedValue(0),
 	saveLastUpdateCheck: vi.fn().mockResolvedValue(undefined),
+	saveFileTreeShowHidden: vi.fn().mockResolvedValue(undefined),
+	saveFileTreeExcludePatterns: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../hooks/useGitSync", () => ({

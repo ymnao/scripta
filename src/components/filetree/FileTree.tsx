@@ -103,7 +103,7 @@ export function FileTree({
 			const id = ++loadIdRef.current;
 			setError(null);
 			if (!silent) setLoading(true);
-			listDirectory(workspacePath)
+			listDirectory(workspacePath, { applyFileTreeFilter: true })
 				.then((result) => {
 					if (loadIdRef.current !== id) return;
 					setEntries(result);
