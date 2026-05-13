@@ -7,13 +7,16 @@ minimumReleaseAge: 1440
 blockExoticSubdeps: true
 strictDepBuilds: true
 
-# strictDepBuilds=true 下で install / postinstall / preinstall を実行できる依存。
-# 新しい依存追加で `[ERR_PNPM_IGNORED_BUILDS]` が出たらここに足す。
-# - esbuild: postinstall でプラットフォーム binary を取得
-# - electron-winstaller: install で 7z アーキを選択（dist target が Windows のとき）
-# electron の postinstall は 42 で削除済みなので登録不要（CLAUDE.md「electron 42 への対応」）。
+# strictDepBuilds=true 下で build script の実行を許可する依存。
+#
+# pnpm 11 の判定は registry メタデータ / lockfile resolution に基づくため、`package.json`
+# の `scripts` フィールドをローカルで grep しても網羅できない（biome / electron は
+# scripts=null だが pnpm はブロックする）。ここのリストは `pnpm install --frozen-lockfile`
+# で `[ERR_PNPM_IGNORED_BUILDS]` に出てきた package を都度足して維持する。
 allowBuilds:
+  "@biomejs/biome": true
   esbuild: true
+  electron: true
   electron-winstaller: true
 
 # `$@codemirror/state` は「direct dep の version を全 transitive にも強制」の self-ref 記法。
