@@ -35,7 +35,7 @@ Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite + Biome
 
 **pnpm 11.1.1**、Node.js **22.12.0 以上必須**（pnpm 11 が Node 22+ 要求）。
 
-設定の正準ロケーションは `pnpm-workspace.yaml`（`package.json:pnpm` フィールドは pnpm 11 で workspace.yaml への移行が推奨）。`overrides` / `patchedDependencies` / `allowBuilds` を同ファイルに集約。pnpm 11 の既定値（`minimumReleaseAge` / `blockExoticSubdeps` / `strictDepBuilds`）はそのまま採用しているが、将来デフォルトが変わっても本リポジトリでは固定されるよう明示宣言してある。
+設定の正準ロケーションは `pnpm-workspace.yaml`（`package.json:pnpm` フィールドは pnpm 11 で workspace.yaml への移行が推奨）。`overrides` / `patchedDependencies` / `allowBuilds` を同ファイルに集約。pnpm 11 の既定値（`minimumReleaseAge` / `blockExoticSubdeps` / `strictDepBuilds`）を明示宣言し、デフォルトが変わっても本リポジトリのポスチャを固定している。`minimumReleaseAge` の明示設定は副作用として `minimumReleaseAgeStrict=true`（24h 未満版しか無い場合は fallback せず失敗）を有効化するが、これは意図した挙動（詳細は `pnpm-workspace.yaml` のコメント参照）。
 
 ## 開発コマンド
 

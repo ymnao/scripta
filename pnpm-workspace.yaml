@@ -3,6 +3,12 @@
 # 各 setting の意味は https://pnpm.io/settings 参照。
 
 # pnpm 11 既定値の明示宣言。デフォルトが変わっても本リポジトリのポスチャを固定する。
+#
+# 注意: `minimumReleaseAge` を **明示設定すると** `minimumReleaseAgeStrict` が自動で true
+# になり、組み込み既定 (`false`) より厳しい挙動になる（24h 未満のバージョンしか range 内に
+# 存在しない場合は fallback せずに resolution 失敗）。本リポジトリの依存はほぼ stable lib
+# で 24h 未満リリースが唯一解になるケースは稀なため、fail-loud な strict 挙動を選んでいる。
+# pnpm 11 の built-in default 相当に戻したい場合は `minimumReleaseAgeStrict: false` を追記する。
 minimumReleaseAge: 1440
 blockExoticSubdeps: true
 strictDepBuilds: true
