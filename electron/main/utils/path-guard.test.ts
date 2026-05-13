@@ -11,6 +11,7 @@ import {
 	clearWorkspaceRoots,
 	clearWorkspaceRootsForWindow,
 	consumeTransientWritePath,
+	findContainingWorkspaceRoot,
 	getTransientWritePathsForWindow,
 	getWorkspaceRootsForWindow,
 	isPathAllowed,
@@ -379,5 +380,40 @@ describe("transient write paths (window-scoped, write-only capability)", () => {
 		clearWorkspaceRoots();
 		expect(getTransientWritePathsForWindow(WIN_A)).toEqual([]);
 		expect(getTransientWritePathsForWindow(WIN_B)).toEqual([]);
+	});
+});
+
+describe.skipIf(process.platform === "win32")("findContainingWorkspaceRoot", () => {
+	it("returns null when window has no registered roots", async () => {
+		expect(findContainingWorkspaceRoot(WIN_A, join(workspaceDir, "x"))).toBeNull();
+	});
+
+	it("returns the root when a single root contains the target", async () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		const canonical = canonicalize(join(workspaceDir, "sub", "x.md"));
+		expect(findContainingWorkspaceRoot(WIN_A, canonical)).toBe(canonicalize(workspaceDir));
+	});
+
+	it("returns the longest matching root when multiple roots contain the target (nested)", async () => {
+		const nested = join(workspaceDir, "sub");
+		await mkdir(nested);
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		registerWorkspaceRoot(WIN_A, nested);
+		const canonical = canonicalize(join(nested, "x.md"));
+		// 親 + 子両方が match するが、最長一致（nested 側）が anchor として返る
+		expect(findContainingWorkspaceRoot(WIN_A, canonical)).toBe(canonicalize(nested));
+	});
+
+	it("returns null when target is outside all registered roots", () => {
+		registerWorkspaceRoot(WIN_A, workspaceDir);
+		const outside = canonicalize(join(outsideDir, "x.md"));
+		expect(findContainingWorkspaceRoot(WIN_A, outside)).toBeNull();
+	});
+
+	it("is window-scoped (does not see other windows' roots)", () => {
+		registerWorkspaceRoot(WIN_B, workspaceDir);
+		const canonical = canonicalize(join(workspaceDir, "x.md"));
+		expect(findContainingWorkspaceRoot(WIN_A, canonical)).toBeNull();
+		expect(findContainingWorkspaceRoot(WIN_B, canonical)).toBe(canonicalize(workspaceDir));
 	});
 });

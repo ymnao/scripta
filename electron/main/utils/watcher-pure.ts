@@ -4,20 +4,17 @@ import type { FsKind } from "../../../src/types/workspace";
 
 export type { FsKind };
 
-// **root からの相対成分** のいずれかが '.' で始まれば hidden。
-// 絶対パス全体を見ると、root 自体が hidden な祖先の下（例: `/Users/me/.notes/project`）
-// にあった場合に root 配下のファイルも全部 hidden 扱いになり、watcher と
-// search の挙動が食い違ってしまう。search 側 (walkMdFiles) は root 配下の
-// エントリ名だけを見ているので、こちらも相対成分に揃える。
-//
-// root 自体（rel === ""）は hidden 扱いしない。root の外側（rel が `..` で始まる）も
-// hidden ではないとする — chokidar は root 配下しか emit しない前提だが、防御的に false。
-export function isHidden(p: string, root: string): boolean {
-	const rel = relative(root, p);
+// 性能対策のためのハードコード除外。watcher の役割は外部変更の検知（タブの reload /
+// conflict 経路）なので、ユーザー設定の FileTree フィルタには紐付けない。`.git/` 配下は
+// git 操作で大量のファイル変更が走るため、tracking してもユーザー価値がなくノイズになる。
+// `.gitignore` や `.scripta/scratchpads/*.md` のような hidden path は通常通り監視する
+// （ユーザーが開いて編集する可能性がある）。
+export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolean {
+	const rel = relative(canonicalRoot, absPath);
 	if (rel === "") return false;
 	if (rel === ".." || rel.startsWith(`..${sep}`)) return false;
 	for (const part of rel.split(sep)) {
-		if (part.length > 0 && part.startsWith(".")) return true;
+		if (part === ".git") return true;
 	}
 	return false;
 }

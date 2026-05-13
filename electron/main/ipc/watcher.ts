@@ -1,10 +1,16 @@
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { ipcMain, type WebContents } from "electron";
+import { BrowserWindow, ipcMain, type WebContents } from "electron";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { assertPathAllowed } from "../utils/path-guard";
-import { type FsKind, isHidden, mergeEventKind, reclassifyDeleted } from "../utils/watcher-pure";
+import {
+	type FsKind,
+	isWatcherIgnored,
+	mergeEventKind,
+	reclassifyDeleted,
+} from "../utils/watcher-pure";
+import { onFileTreeFilterChange } from "./settings";
 
 // session は webContents.id（windowId 相当）で索引する。各 window は同時に 1 つしか
 // watcher を持たない（旧 Tauri の WatcherState と同じ前提）。watcher:start で既存
@@ -15,18 +21,13 @@ type Session = {
 	flushTimer: NodeJS.Timeout | null;
 	webContents: WebContents;
 	// chokidar が emit する path の base（realpath 済み、path-guard と整合）。
-	// I/O 判定（isHidden, existsSync）と pending Map の key にはこちらを使う。
 	canonicalRoot: string;
 	// renderer 側 workspacePath（resolve(rawPath)）。emit 直前にこの prefix へ戻して
-	// renderer の表記と整合させる — fs.ts/listDirectoryImpl, search.ts と同じ方針。
-	// macOS の /var → /private/var alias や symlink 経由で workspace を開いた場合に
-	// canonical をそのまま送ってしまうと、renderer 側のタブ path 比較が一致せず
-	// 外部変更検知（modify/delete 反映）が壊れる。
+	// renderer の表記と整合させる。canonical をそのまま送ると macOS の /var → /private/var
+	// alias / symlink workspace でタブ path 比較が一致せず外部変更検知が壊れる。
 	inputRoot: string;
-	// 停止後にも listener closure 経由で生き残った session に late event が飛んで
-	// くるため、flush / onFsEvent 先頭で短絡するためのフラグ。chokidar.close() は
-	// async だが、stopped は **synchronous に** true にすることで「stop した後の
-	// イベントは絶対に送らない」を保証する。
+	// chokidar.close() は async だが、stopped は **synchronous** に true にすることで
+	// 「stop 後のイベントは絶対に renderer に届かない」を close 完了を待たずに保証する。
 	stopped: boolean;
 };
 
@@ -63,7 +64,6 @@ function flush(session: Session): void {
 
 function onFsEvent(session: Session, kind: FsKind, path: string): void {
 	if (session.stopped) return;
-	if (isHidden(path, session.canonicalRoot)) return;
 	mergeEventKind(session.pending, path, kind);
 	// 「最初の event で deadline 設定、後続ではリセットしない」（旧 Rust 1:1）。
 	// flushTimer === null は「pending が空 or 直前 flush 完了」を意味する。
@@ -77,7 +77,7 @@ function startSession(webContents: WebContents, canonicalRoot: string, inputRoot
 		persistent: true,
 		ignoreInitial: true,
 		followSymlinks: false,
-		ignored: (p: string) => isHidden(p, canonicalRoot),
+		ignored: (p) => isWatcherIgnored(p, canonicalRoot),
 	});
 
 	const session: Session = {
@@ -123,6 +123,18 @@ export function stopWatcherForWindow(windowId: number): void {
 	sessions.delete(windowId);
 }
 
+// FileTree フィルタ設定が変わったとき、watcher 側は **何もしない**。watcher は
+// 「外部変更を漏れなく renderer に届ける」役割で、UI の表示有無とは独立しているため。
+// chokidar の ignored は performance 用のハードコードリストのみで、ユーザー設定の影響を
+// 受けない。代わりに renderer の FileTree が新しい filter で再 fetch するよう event を
+// broadcast する（既存の bumpFileTreeVersion 経路を再利用）。
+function broadcastReloadTree(): void {
+	for (const win of BrowserWindow.getAllWindows()) {
+		if (win.webContents.isDestroyed()) continue;
+		win.webContents.send("workspace:reload-tree");
+	}
+}
+
 export function registerWatcherIpc(): void {
 	ipcMain.handle("watcher:start", async (event, rawPath: string) => {
 		// 必ず path-guard を通す。未承認 path で chokidar を起動させないため。
@@ -136,4 +148,6 @@ export function registerWatcherIpc(): void {
 	ipcMain.handle("watcher:stop", async (event) => {
 		stopWatcherForWindow(event.sender.id);
 	});
+
+	onFileTreeFilterChange(broadcastReloadTree);
 }

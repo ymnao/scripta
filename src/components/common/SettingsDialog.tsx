@@ -11,7 +11,7 @@ import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import type { SyncMethod } from "../../types/git-sync";
 import { DialogBase } from "./DialogBase";
-import { NumberInput, SelectInput, TextInput, Toggle } from "./FormInputs";
+import { NumberInput, SelectInput, TextareaInput, TextInput, Toggle } from "./FormInputs";
 import { SidebarDialogLayout } from "./SidebarDialogLayout";
 
 export const KOFI_URL = "https://ko-fi.com/yamanao";
@@ -41,13 +41,22 @@ const syncMethodOptions: { value: SyncMethod; label: string }[] = [
 	{ value: "rebase", label: "Rebase" },
 ];
 
-type Section = "appearance" | "editor" | "save" | "scratchpad" | "git-sync" | "workspace" | "about";
+type Section =
+	| "appearance"
+	| "editor"
+	| "save"
+	| "scratchpad"
+	| "file-tree"
+	| "git-sync"
+	| "workspace"
+	| "about";
 
 const baseSections: { key: Section; label: string }[] = [
 	{ key: "appearance", label: "外観" },
 	{ key: "editor", label: "エディタ" },
 	{ key: "save", label: "保存" },
 	{ key: "scratchpad", label: "スクラッチパッド" },
+	{ key: "file-tree", label: "ファイルツリー" },
 ];
 
 interface TemplateFileStatus {
@@ -238,6 +247,10 @@ export function SettingsDialog({
 	const setScratchpadVolatile = useSettingsStore((s) => s.setScratchpadVolatile);
 	const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
 	const setAutoUpdateCheck = useSettingsStore((s) => s.setAutoUpdateCheck);
+	const fileTreeShowHidden = useSettingsStore((s) => s.fileTreeShowHidden);
+	const setFileTreeShowHidden = useSettingsStore((s) => s.setFileTreeShowHidden);
+	const fileTreeExcludePatterns = useSettingsStore((s) => s.fileTreeExcludePatterns);
+	const setFileTreeExcludePatterns = useSettingsStore((s) => s.setFileTreeExcludePatterns);
 
 	const gitSyncEnabled = useGitSyncStore((s) => s.gitSyncEnabled);
 	const setGitSyncEnabled = useGitSyncStore((s) => s.setGitSyncEnabled);
@@ -363,6 +376,26 @@ export function SettingsDialog({
 						<p className="px-1 text-[10px] leading-relaxed text-text-secondary">
 							有効にすると、日付が変わったときにスクラッチパッドの内容を自動的にアーカイブしてクリアします。
 						</p>
+					</>
+				)}
+
+				{validSection === "file-tree" && (
+					<>
+						<Toggle
+							id="file-tree-show-hidden-toggle"
+							label="隠しファイルを表示"
+							checked={fileTreeShowHidden}
+							onChange={setFileTreeShowHidden}
+						/>
+						<TextareaInput
+							id="file-tree-exclude-patterns-input"
+							label="追加で除外するパターン"
+							value={fileTreeExcludePatterns}
+							onChange={setFileTreeExcludePatterns}
+							rows={6}
+							placeholder={".DS_Store\nThumbs.db\n.git/"}
+							helperText="gitignore 風の構文（1 行 1 パターン、# コメント、! で除外解除、行末 / でディレクトリ限定、* / ** / ? のワイルドカード対応）。最後に書いたルールが勝つ単純な評価で、gitignore 厳密な「親除外配下を ! で再包含できない」挙動は実装していません。本設定は FileTree の表示にのみ影響し、開いているタブの外部変更検知（自動 reload / conflict 警告）はここで除外しても引き続き機能します。"
+						/>
 					</>
 				)}
 

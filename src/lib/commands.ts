@@ -1,4 +1,8 @@
-import type { MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
+import type {
+	ListDirectoryOptions,
+	MenuEventName,
+	SaveDialogOptions,
+} from "../../electron/preload/api";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
@@ -27,8 +31,8 @@ export function writeFile(path: string, content: string): Promise<void> {
 	return withRetry(() => window.api.writeFile(path, content));
 }
 
-export function listDirectory(path: string): Promise<FileEntry[]> {
-	return withRetry(() => window.api.listDirectory(path));
+export function listDirectory(path: string, opts?: ListDirectoryOptions): Promise<FileEntry[]> {
+	return withRetry(() => window.api.listDirectory(path, opts));
 }
 
 export function createFile(path: string): Promise<void> {
@@ -208,6 +212,10 @@ export function emitConflictResolved(workspacePath: string): Promise<void> {
 
 export function onFsChange(cb: (events: FsChangeEvent[]) => void): () => void {
 	return window.api.onFsChange(cb);
+}
+
+export function onWorkspaceReloadTree(cb: () => void): () => void {
+	return window.api.onWorkspaceReloadTree(cb);
 }
 
 export function onConflictResolved(cb: (workspacePath: string) => void): () => void {

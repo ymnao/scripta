@@ -47,7 +47,7 @@ const api: Api = Object.freeze({
 	readFile: (path) => ipcRenderer.invoke("fs:read", path),
 	writeFile: (path, content) => ipcRenderer.invoke("fs:write", path, content),
 	writeNewFile: (path, content) => ipcRenderer.invoke("fs:write-new", path, content),
-	listDirectory: (path) => ipcRenderer.invoke("fs:list", path),
+	listDirectory: (path, opts) => ipcRenderer.invoke("fs:list", path, opts),
 	createFile: (path) => ipcRenderer.invoke("fs:create-file", path),
 	createDirectory: (path) => ipcRenderer.invoke("fs:create-directory", path),
 	pathExists: (path) => ipcRenderer.invoke("fs:path-exists", path),
@@ -58,6 +58,7 @@ const api: Api = Object.freeze({
 	startWatcher: (path) => ipcRenderer.invoke("watcher:start", path),
 	stopWatcher: () => ipcRenderer.invoke("watcher:stop"),
 	onFsChange: (cb) => subscribe("watcher:fs-change", cb),
+	onWorkspaceReloadTree: (cb) => subscribe<void>("workspace:reload-tree", () => cb()),
 
 	searchFiles: (workspacePath, query, caseSensitive) =>
 		ipcRenderer.invoke("search:files", workspacePath, query, caseSensitive),

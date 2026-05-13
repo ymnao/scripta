@@ -10,6 +10,12 @@ export type SaveDialogOptions = {
 	filters?: Array<{ name: string; extensions: string[] }>;
 };
 
+// FileTree 専用 opt-in。設定 fileTreeShowHidden / fileTreeExcludePatterns を main 側で適用する。
+// DirectoryPicker / config 用ディレクトリ scan など、FileTree 以外の listDirectory では指定しない。
+export type ListDirectoryOptions = {
+	applyFileTreeFilter?: boolean;
+};
+
 export type Unsubscribe = () => void;
 
 export type MenuEventName = "open-settings" | "open-help" | "export";
@@ -34,7 +40,7 @@ export type Api = Readonly<{
 	readFile: (path: string) => Promise<string>;
 	writeFile: (path: string, content: string) => Promise<void>;
 	writeNewFile: (path: string, content: string) => Promise<void>;
-	listDirectory: (path: string) => Promise<FileEntry[]>;
+	listDirectory: (path: string, opts?: ListDirectoryOptions) => Promise<FileEntry[]>;
 	createFile: (path: string) => Promise<void>;
 	createDirectory: (path: string) => Promise<void>;
 	pathExists: (path: string) => Promise<boolean>;
@@ -45,6 +51,7 @@ export type Api = Readonly<{
 	startWatcher: (path: string) => Promise<void>;
 	stopWatcher: () => Promise<void>;
 	onFsChange: (cb: (events: FsChangeEvent[]) => void) => Unsubscribe;
+	onWorkspaceReloadTree: (cb: () => void) => Unsubscribe;
 
 	searchFiles: (
 		workspacePath: string,

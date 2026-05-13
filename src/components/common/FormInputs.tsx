@@ -139,6 +139,49 @@ export function SelectInput<T extends string | number>({
 	);
 }
 
+// アンマウント時の未コミット draft を救出するため、value/onChange を ref 経由で
+// 効果クリーンアップに渡す。TextInput / TextareaInput の commit-on-blur 動作で共有。
+function useDraftCommit(
+	value: string,
+	onChange: (value: string) => void,
+): { draft: string; setDraft: (v: string) => void; commit: () => void } {
+	const [draft, setDraft] = useState(value);
+	const draftRef = useRef(draft);
+	const valueRef = useRef(value);
+	// onChange の参照変化で cleanup が走らないように ref に退避し、cleanup effect の
+	// deps を `[]` にして unmount-only に固定する。
+	const onChangeRef = useRef(onChange);
+
+	useEffect(() => {
+		setDraft(value);
+		valueRef.current = value;
+	}, [value]);
+
+	useEffect(() => {
+		draftRef.current = draft;
+	}, [draft]);
+
+	useEffect(() => {
+		onChangeRef.current = onChange;
+	}, [onChange]);
+
+	useEffect(() => {
+		return () => {
+			if (draftRef.current !== valueRef.current) {
+				onChangeRef.current(draftRef.current);
+			}
+		};
+	}, []);
+
+	return {
+		draft,
+		setDraft,
+		commit: () => {
+			if (draft !== value) onChange(draft);
+		},
+	};
+}
+
 export function TextInput({
 	id,
 	label,
@@ -152,33 +195,7 @@ export function TextInput({
 	onChange: (value: string) => void;
 	disabled?: boolean;
 }) {
-	const [draft, setDraft] = useState(value);
-	const draftRef = useRef(draft);
-	const valueRef = useRef(value);
-
-	useEffect(() => {
-		setDraft(value);
-		valueRef.current = value;
-	}, [value]);
-
-	useEffect(() => {
-		draftRef.current = draft;
-	}, [draft]);
-
-	// Commit unsaved draft on unmount (e.g. dialog closed via Esc)
-	useEffect(() => {
-		return () => {
-			if (draftRef.current !== valueRef.current) {
-				onChange(draftRef.current);
-			}
-		};
-	}, [onChange]);
-
-	const commit = () => {
-		if (draft !== value) {
-			onChange(draft);
-		}
-	};
+	const { draft, setDraft, commit } = useDraftCommit(value, onChange);
 
 	return (
 		<div className="flex items-center justify-between rounded-md bg-bg-secondary px-3 py-2">
@@ -200,6 +217,47 @@ export function TextInput({
 				disabled={disabled}
 				className="ml-2 min-w-0 flex-1 rounded border border-border bg-bg-primary px-2 py-0.5 text-xs text-text-primary outline-none focus:border-blue-500 disabled:opacity-50"
 			/>
+		</div>
+	);
+}
+
+export function TextareaInput({
+	id,
+	label,
+	value,
+	onChange,
+	placeholder,
+	rows = 5,
+	helperText,
+}: {
+	id: string;
+	label: string;
+	value: string;
+	onChange: (value: string) => void;
+	placeholder?: string;
+	rows?: number;
+	helperText?: string;
+}) {
+	const { draft, setDraft, commit } = useDraftCommit(value, onChange);
+
+	return (
+		<div className="rounded-md bg-bg-secondary px-3 py-2">
+			<label htmlFor={id} className="block text-xs font-medium text-text-primary">
+				{label}
+			</label>
+			<textarea
+				id={id}
+				value={draft}
+				onChange={(e) => setDraft(e.target.value)}
+				onBlur={commit}
+				placeholder={placeholder}
+				rows={rows}
+				spellCheck={false}
+				className="mt-1.5 block w-full rounded border border-border bg-bg-primary px-2 py-1 font-mono text-[11px] leading-relaxed text-text-primary outline-none focus:border-blue-500"
+			/>
+			{helperText !== undefined && (
+				<p className="mt-1 text-[10px] leading-relaxed text-text-secondary">{helperText}</p>
+			)}
 		</div>
 	);
 }

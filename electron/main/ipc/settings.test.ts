@@ -9,7 +9,8 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
-import { __testing } from "./settings";
+import { ipcMain } from "electron";
+import { __testing, onFileTreeFilterChange, registerSettingsIpc } from "./settings";
 
 const {
 	createStore,
@@ -22,6 +23,7 @@ const {
 	isSafeSettingsKey,
 	isJsonSerializable,
 	FORBIDDEN_SETTINGS_KEYS,
+	resetForTests,
 } = __testing;
 
 let dir = "";
@@ -329,5 +331,115 @@ describe("load() filters unsafe keys from existing settings.json", () => {
 		// 主要な確認：global Object.prototype が汚染されていない
 		// （仮に load が __proto__ を取り込んでいたら polluted が leak する）
 		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+	});
+});
+
+describe("file-tree filter listener emission via settings:set / settings:delete", () => {
+	// IPC ハンドラ経由で listener が発火することを確認する。これにより設定変更が
+	// 確実に watcher.ts 側の `workspace:reload-tree` broadcast 経路を kick できる
+	// 統合点を担保する（chokidar の再起動は伴わない — watcher は user 設定から
+	// 切り離されており、設定変更で監視範囲は変わらない）。
+	type Handler = (event: unknown, ...args: unknown[]) => Promise<unknown> | unknown;
+	let handlers: Map<string, Handler>;
+
+	beforeEach(() => {
+		resetForTests();
+		vi.mocked(ipcMain.handle).mockClear();
+		handlers = new Map();
+		// IpcMainInvokeEvent は実 Electron 由来の複雑な型なので、テストでは
+		// fakeEvent (`{ sender: { id } }`) で代用する。mock シグネチャは never キャストで揃える。
+		vi.mocked(ipcMain.handle).mockImplementation(((channel: string, handler: Handler) => {
+			handlers.set(channel, handler);
+		}) as never);
+		registerSettingsIpc();
+	});
+
+	const fakeEvent = { sender: { id: 1 } } as never;
+
+	it("fires listener when fileTreeShowHidden value actually changes", async () => {
+		const listener = vi.fn();
+		onFileTreeFilterChange(listener);
+		const set = handlers.get("settings:set");
+		if (!set) throw new Error("settings:set handler not registered");
+
+		await set(fakeEvent, "fileTreeShowHidden", true);
+		expect(listener).toHaveBeenCalledTimes(1);
+
+		// 同じ値で再 set → 発火しない（no-op detection）
+		await set(fakeEvent, "fileTreeShowHidden", true);
+		expect(listener).toHaveBeenCalledTimes(1);
+
+		// 別の値 → 発火
+		await set(fakeEvent, "fileTreeShowHidden", false);
+		expect(listener).toHaveBeenCalledTimes(2);
+	});
+
+	it("fires listener when fileTreeExcludePatterns value changes", async () => {
+		const listener = vi.fn();
+		onFileTreeFilterChange(listener);
+		const set = handlers.get("settings:set");
+		if (!set) throw new Error("settings:set handler not registered");
+
+		await set(fakeEvent, "fileTreeExcludePatterns", ".DS_Store\n");
+		expect(listener).toHaveBeenCalledTimes(1);
+
+		// 同じパターン文字列 → 発火しない
+		await set(fakeEvent, "fileTreeExcludePatterns", ".DS_Store\n");
+		expect(listener).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not fire listener for non-filter keys", async () => {
+		const listener = vi.fn();
+		onFileTreeFilterChange(listener);
+		const set = handlers.get("settings:set");
+		if (!set) throw new Error("settings:set handler not registered");
+
+		await set(fakeEvent, "fontSize", 16);
+		await set(fakeEvent, "showLineNumbers", false);
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it("fires listener on settings:delete only when the key actually had a value", async () => {
+		const listener = vi.fn();
+		onFileTreeFilterChange(listener);
+		const set = handlers.get("settings:set");
+		const del = handlers.get("settings:delete");
+		if (!set || !del) throw new Error("handlers not registered");
+
+		// 未設定キーの delete は発火しない
+		await del(fakeEvent, "fileTreeShowHidden");
+		expect(listener).not.toHaveBeenCalled();
+
+		// 値を入れてから delete → 発火
+		await set(fakeEvent, "fileTreeShowHidden", true);
+		expect(listener).toHaveBeenCalledTimes(1);
+		await del(fakeEvent, "fileTreeShowHidden");
+		expect(listener).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not fire listener for non-filter key deletion", async () => {
+		const listener = vi.fn();
+		onFileTreeFilterChange(listener);
+		const set = handlers.get("settings:set");
+		const del = handlers.get("settings:delete");
+		if (!set || !del) throw new Error("handlers not registered");
+
+		await set(fakeEvent, "fontSize", 16);
+		await del(fakeEvent, "fontSize");
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it("unsubscribe stops further listener invocations", async () => {
+		const listener = vi.fn();
+		const unsubscribe = onFileTreeFilterChange(listener);
+		const set = handlers.get("settings:set");
+		if (!set) throw new Error("settings:set handler not registered");
+
+		await set(fakeEvent, "fileTreeShowHidden", true);
+		expect(listener).toHaveBeenCalledTimes(1);
+
+		unsubscribe();
+		await set(fakeEvent, "fileTreeShowHidden", false);
+		expect(listener).toHaveBeenCalledTimes(1);
 	});
 });

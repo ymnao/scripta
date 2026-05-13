@@ -377,8 +377,11 @@ function installApiMock(opts: {
 				store.directories[parent].push({ name: baseName(path), path, isDirectory: false });
 			}
 		},
-		listDirectory: async (path: string): Promise<FileEntry[]> => {
-			track("listDirectory", [path]);
+		listDirectory: async (
+			path: string,
+			opts?: { applyFileTreeFilter?: boolean },
+		): Promise<FileEntry[]> => {
+			track("listDirectory", [path, opts ?? null]);
 			if (path in store.directories) return store.directories[path];
 			throw new Error(`Directory not found: ${path}`);
 		},
@@ -470,6 +473,11 @@ function installApiMock(opts: {
 			return () => {
 				store.fsListeners = store.fsListeners.filter((x) => x !== cb);
 			};
+		},
+		onWorkspaceReloadTree: (_cb: () => void): (() => void) => {
+			// e2e mock では FileTree フィルタ設定変更を発火しない（実 main プロセスを
+			// 起動しない renderer-only モードのため）。listener は no-op を返す。
+			return () => {};
 		},
 
 		searchFiles: async (

@@ -54,7 +54,7 @@ describe("FileTree", () => {
 			expect(screen.getByText("docs")).toBeInTheDocument();
 		});
 
-		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace");
+		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace", { applyFileTreeFilter: true });
 		expect(screen.getByText("hello.md")).toBeInTheDocument();
 		expect(screen.getByText("notes.md")).toBeInTheDocument();
 	});
@@ -102,7 +102,9 @@ describe("FileTree", () => {
 			expect(screen.getByText("readme.md")).toBeInTheDocument();
 		});
 
-		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace/docs");
+		expect(mockedListDirectory).toHaveBeenCalledWith("/workspace/docs", {
+			applyFileTreeFilter: true,
+		});
 	});
 
 	it("shows loading state before entries are fetched", () => {

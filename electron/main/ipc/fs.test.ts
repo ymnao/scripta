@@ -215,6 +215,32 @@ describe("listDirectoryImpl", () => {
 	it("rejects list from another window (window-scoped guard)", async () => {
 		await expect(listDirectoryImpl(OTHER_WIN, workspaceDir)).rejects.toThrow(/Permission denied/);
 	});
+
+	// 本テスト環境では electron.app が mock 未提供のため getFileTreeFilterOptions()
+	// は catch ブランチで既定値（showHidden=false + DEFAULT_FILE_TREE_EXCLUDE_PATTERNS）を返す。
+	// FileTree 用の opt-in を渡したケースだけ dotfile / .git/ が除外され、デフォルト呼び出しでは
+	// すべて返す（DirectoryPicker / scripta-config 経路の挙動を保証）。
+	it("filters hidden files only when applyFileTreeFilter=true", async () => {
+		await writeFile(join(workspaceDir, "regular.md"), "", "utf8");
+		await writeFile(join(workspaceDir, ".gitignore"), "", "utf8");
+		await writeFile(join(workspaceDir, ".DS_Store"), "", "utf8");
+		await mkdir(join(workspaceDir, ".git"));
+		await mkdir(join(workspaceDir, "docs"));
+
+		const filtered = await listDirectoryImpl(TEST_WIN, workspaceDir, {
+			applyFileTreeFilter: true,
+		});
+		expect(filtered.map((e) => e.name).sort()).toEqual(["docs", "regular.md"]);
+
+		const unfiltered = await listDirectoryImpl(TEST_WIN, workspaceDir);
+		expect(unfiltered.map((e) => e.name).sort()).toEqual([
+			".DS_Store",
+			".git",
+			".gitignore",
+			"docs",
+			"regular.md",
+		]);
+	});
 });
 
 describe("createFileImpl", () => {

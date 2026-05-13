@@ -141,6 +141,22 @@ export function getWorkspaceRootsForWindow(windowId: number): string[] {
 	return set ? [...set] : [];
 }
 
+// 該当 window が登録している workspace root のうち canonical を含むものを返す。
+// 複数 root が canonical を含む場合（nested workspace 等）は **最長一致** = 最も具体的な
+// root を返す。FileTree フィルタの root-anchored パターン（`/foo`, `build/output` 等）の
+// 評価がズレないようにするため。見つからなければ null。fs IPC のフィルタアンカーとして使う:
+// `assertPathAllowed` 成功直後に呼べば、その path を含む root が必ず存在する。
+export function findContainingWorkspaceRoot(windowId: number, canonical: string): string | null {
+	const set = windowAllowedRoots.get(windowId);
+	if (set === undefined) return null;
+	let best: string | null = null;
+	for (const root of set) {
+		if (!isPathInside(canonical, root)) continue;
+		if (best === null || root.length > best.length) best = root;
+	}
+	return best;
+}
+
 export function registerTransientWritePath(windowId: number, p: string): void {
 	const canonical = canonicalize(p);
 	let set = transientWritePaths.get(windowId);
@@ -191,12 +207,7 @@ function isPathInside(child: string, parent: string): boolean {
 }
 
 function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
-	const set = windowAllowedRoots.get(windowId);
-	if (set === undefined) return false;
-	for (const root of set) {
-		if (isPathInside(target, root)) return true;
-	}
-	return false;
+	return findContainingWorkspaceRoot(windowId, target) !== null;
 }
 
 // Fail-closed: ウィンドウ未登録時はすべて拒否する。

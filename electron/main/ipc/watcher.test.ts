@@ -3,40 +3,51 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { type FsKind, isHidden, mergeEventKind, reclassifyDeleted } from "../utils/watcher-pure";
+import {
+	type FsKind,
+	isWatcherIgnored,
+	mergeEventKind,
+	reclassifyDeleted,
+} from "../utils/watcher-pure";
 
-describe("isHidden", () => {
+describe("isWatcherIgnored", () => {
 	const root = "/home/user/workspace";
 
-	it("returns false for non-hidden paths under root", () => {
-		expect(isHidden("/home/user/workspace/notes/a.md", root)).toBe(false);
+	it("ignores `.git` directory and its descendants (performance hardcode)", () => {
+		expect(isWatcherIgnored("/home/user/workspace/.git", root)).toBe(true);
+		expect(isWatcherIgnored("/home/user/workspace/.git/HEAD", root)).toBe(true);
+		expect(isWatcherIgnored("/home/user/workspace/.git/objects/abc", root)).toBe(true);
+		// nested `.git` somewhere down the tree（submodule のようなケース）も除外
+		expect(isWatcherIgnored("/home/user/workspace/sub/.git/config", root)).toBe(true);
 	});
 
-	it("returns true for paths containing a dot-prefixed component", () => {
-		expect(isHidden("/home/user/workspace/.git/config", root)).toBe(true);
+	it("does NOT ignore other hidden files / dirs (correctness — they must be watched)", () => {
+		// 旧実装の `isHidden` はこれらも除外していたが、ユーザーが開いて編集する可能性がある
+		// hidden path（`.gitignore` / `.scripta/scratchpads/*.md` 等）は監視対象。
+		expect(isWatcherIgnored("/home/user/workspace/.gitignore", root)).toBe(false);
+		expect(isWatcherIgnored("/home/user/workspace/.DS_Store", root)).toBe(false);
+		expect(isWatcherIgnored("/home/user/workspace/.scripta", root)).toBe(false);
+		expect(isWatcherIgnored("/home/user/workspace/.scripta/scratchpads/today.md", root)).toBe(
+			false,
+		);
+		expect(isWatcherIgnored("/home/user/workspace/.env", root)).toBe(false);
 	});
 
-	it("returns true for hidden file directly under root", () => {
-		expect(isHidden("/home/user/workspace/.hidden", root)).toBe(true);
+	it("does not ignore non-hidden paths", () => {
+		expect(isWatcherIgnored("/home/user/workspace/notes/a.md", root)).toBe(false);
+		expect(isWatcherIgnored("/home/user/workspace/README.md", root)).toBe(false);
 	});
 
-	it("returns true for hidden component in subdirectory", () => {
-		expect(isHidden("/home/user/workspace/sub/.config/settings.json", root)).toBe(true);
+	it("does not ignore root itself or paths outside root (defensive)", () => {
+		expect(isWatcherIgnored("/home/user/workspace", root)).toBe(false);
+		expect(isWatcherIgnored("/etc/passwd", root)).toBe(false);
 	});
 
-	it("returns false when only root itself starts with dot (root excluded)", () => {
-		// `.dotted-workspace` のような root を開いても hidden 扱いしない
-		expect(isHidden("/home/user/.dotted-workspace", "/home/user/.dotted-workspace")).toBe(false);
-	});
-
-	it("returns false when root has a hidden ancestor (only relative components matter)", () => {
-		// 旧実装は絶対パス全体を split していたため、root が `.notes` の下にあると
-		// 配下のファイルも全部 hidden 扱いになり search との整合が崩れていた。
-		const hiddenAncestorRoot = "/Users/me/.notes/project";
-		expect(isHidden("/Users/me/.notes/project/a.md", hiddenAncestorRoot)).toBe(false);
-		expect(isHidden("/Users/me/.notes/project/sub/b.md", hiddenAncestorRoot)).toBe(false);
-		// 一方、root より下の `.git` 等は依然 hidden
-		expect(isHidden("/Users/me/.notes/project/.git/config", hiddenAncestorRoot)).toBe(true);
+	it("also ignores a path literally named `.git` (file/dir distinction is at path-component level)", () => {
+		// 文字列レベルで path component を判定するため、`.git` という名前なら file/dir どちらでも
+		// ignore 対象になる。git repo 内で `.git` という名前のファイルが発生するケースは
+		// 通常ないため、過剰除外は実害なしと判断。
+		expect(isWatcherIgnored("/home/user/workspace/.git", root)).toBe(true);
 	});
 });
 
