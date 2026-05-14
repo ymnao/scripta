@@ -309,7 +309,7 @@
 
 v0.2.0 リリース（旧 `ymnao/scripta` との機能パリティ確認）の最終 GO/NO-GO チェックリスト。
 
-> **リリース運用**: `release/v0.2.0` の commit（version bump + CHANGELOG）を main に merge した後、**tag `v0.2.0` を push する前に** 以下「必須」4 項目を手動検証で pass させる。各項目を `[x]` に更新し、検証ログ（macOS / Windows / Linux のスクリーンショットや出力）を Release Notes に追記してから `git push origin v0.2.0` で `release.yml` を起動する。
+> **リリース運用**: `release/v0.2.0` の commit（version bump + CHANGELOG）を main に merge した後、**tag `v0.2.0` を push する前に** 以下「必須」4 項目を手動検証で pass させ、各項目を `[x]` に更新する。次に `git push origin v0.2.0` で `release.yml` を起動 → tag push をトリガに draft Release が `--generate-notes` 付きで自動生成され、各 OS の配布物（dmg / exe / AppImage / deb）が matrix dist で添付される。最後に **生成された draft Release の本文に検証ログ（macOS / Windows / Linux のスクリーンショットや出力）を追記** してから publish する。
 
 > コードサイニングと electron-updater 配線は **採用せず**（§ 6 / § 11 参照）。未署名で出荷する旧 Tauri 版と同等の方針。Gatekeeper / SmartScreen 警告は受容する。
 
