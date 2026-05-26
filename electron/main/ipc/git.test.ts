@@ -293,8 +293,7 @@ describe("pushImpl", () => {
 	it("propagates network error stderr (renderer ネットワークパターン用)", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "n.md", "n\n", "init");
-		// `.invalid` TLD の DNS lookup タイムアウトに依存して flaky だったため、
-		// 即時 ECONNREFUSED が返る 127.0.0.1:1 (予約 port) へ変更 (#59)
+		// 127.0.0.1:1 は予約 port で確実に listen していないため即時 ECONNREFUSED が返る
 		await createGit(dir).raw(["remote", "add", "origin", "http://127.0.0.1:1/x.git"]);
 		await expect(pushImpl(TEST_WIN, dir)).rejects.toThrow(
 			/could not resolve host|unable to access|connection|network/i,
