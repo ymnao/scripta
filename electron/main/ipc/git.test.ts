@@ -9,6 +9,7 @@ vi.mock("electron", () => ({
 	BrowserWindow: { getAllWindows: () => [] },
 }));
 
+import { isNetworkError } from "../../../src/lib/errors";
 import { createGit } from "../utils/git-env";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import { __testing } from "./git";
@@ -308,9 +309,16 @@ describe("pushImpl", () => {
 		for (const k of proxyKeys) delete process.env[k];
 		try {
 			await createGit(dir).raw(["remote", "add", "origin", "https://127.0.0.1:1/x.git"]);
-			await expect(pushImpl(TEST_WIN, dir)).rejects.toThrow(
-				/could not resolve host|unable to access|connection|network/i,
+			// renderer 側 isNetworkError と同じ判定を使うことで、テストの意図
+			// (network error の stderr が renderer の判定にかかること) と一致させる。
+			// `unable to access` 単独などの非ネットワーク原因が誤検知されない。
+			const err = await pushImpl(TEST_WIN, dir).then(
+				() => {
+					throw new Error("expected pushImpl to reject");
+				},
+				(e: unknown) => e,
 			);
+			expect(isNetworkError(err), `unexpected error: ${(err as Error)?.message}`).toBe(true);
 		} finally {
 			for (const [k, v] of Object.entries(savedProxy)) {
 				if (v === undefined) delete process.env[k];
