@@ -9,6 +9,7 @@ vi.mock("electron", () => ({
 	BrowserWindow: { getAllWindows: () => [] },
 }));
 
+import { isNetworkError } from "../../../src/lib/errors";
 import { createGit } from "../utils/git-env";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import { __testing } from "./git";
@@ -293,15 +294,37 @@ describe("pushImpl", () => {
 	it("propagates network error stderr (renderer ネットワークパターン用)", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "n.md", "n\n", "init");
-		await createGit(dir).raw([
-			"remote",
-			"add",
-			"origin",
-			"https://invalid-host-do-not-exist.example.invalid/x.git",
-		]);
-		await expect(pushImpl(TEST_WIN, dir)).rejects.toThrow(
-			/could not resolve host|unable to access|connection|network/i,
-		);
+		// 127.0.0.1:1 は通常 listen されない低番 port のため即時 ECONNREFUSED が期待される。
+		// createGit は process.env を継承するため、proxy 環境変数があると proxy 経由になり
+		// 挙動が変わる。本テスト中だけ unset して決定論性を保つ。
+		const proxyKeys = [
+			"http_proxy",
+			"https_proxy",
+			"HTTP_PROXY",
+			"HTTPS_PROXY",
+			"all_proxy",
+			"ALL_PROXY",
+		];
+		const savedProxy = Object.fromEntries(proxyKeys.map((k) => [k, process.env[k]]));
+		for (const k of proxyKeys) delete process.env[k];
+		try {
+			await createGit(dir).raw(["remote", "add", "origin", "https://127.0.0.1:1/x.git"]);
+			// renderer 側 isNetworkError と同じ判定を使うことで、テストの意図
+			// (network error の stderr が renderer の判定にかかること) と一致させる。
+			// `unable to access` 単独などの非ネットワーク原因が誤検知されない。
+			const err = await pushImpl(TEST_WIN, dir).then(
+				() => {
+					throw new Error("expected pushImpl to reject");
+				},
+				(e: unknown) => e,
+			);
+			expect(isNetworkError(err), `unexpected error: ${(err as Error)?.message}`).toBe(true);
+		} finally {
+			for (const [k, v] of Object.entries(savedProxy)) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+		}
 	});
 });
 
