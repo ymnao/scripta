@@ -294,7 +294,7 @@ describe("pushImpl", () => {
 	it("propagates network error stderr (renderer ネットワークパターン用)", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "n.md", "n\n", "init");
-		// 127.0.0.1:1 は予約 port で通常 listen されないため即時 ECONNREFUSED が期待される。
+		// 127.0.0.1:1 は通常 listen されない低番 port のため即時 ECONNREFUSED が期待される。
 		// createGit は process.env を継承するため、proxy 環境変数があると proxy 経由になり
 		// 挙動が変わる。本テスト中だけ unset して決定論性を保つ。
 		const proxyKeys = [
