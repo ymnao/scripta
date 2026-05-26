@@ -35,6 +35,10 @@ allowBuilds:
 # 破綻し、TypeScript の private property declaration 衝突 (例: `EditorView.dispatchTransactions`)
 # でビルドも壊れるため強制統一する。
 #
+# `dompurify` も同じく self-ref で direct version (^3.4.5) に統一する。mermaid 11.x が
+# transitive で 3.4.2 を pin しており、override 無しだと 3.4.2 / 3.4.5 が共存して bundle に
+# 約 +60KB の冗長が乗る。dompurify 3.x の API は安定しており minor 統一で副作用なし。
+#
 # `brace-expansion` は GHSA-jxxr-4gwj-5jf2（DoS、>=5.0.0 <5.0.6）対応。transitive dep として
 # minimatch 等から間接的に入るため、direct でない pin を override で強制する。selector を
 # `brace-expansion@^5.0.0` に絞り、advisory 対象外の v1/v2 など旧 major が将来 transitive と
@@ -42,6 +46,7 @@ allowBuilds:
 overrides:
   "@codemirror/state": $@codemirror/state
   "@codemirror/view": $@codemirror/view
+  dompurify: $dompurify
   "@lezer/common": ^1.5.2
   "brace-expansion@^5.0.0": ^5.0.6
 
