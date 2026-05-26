@@ -307,7 +307,7 @@ describe("pushImpl", () => {
 		const savedProxy = Object.fromEntries(proxyKeys.map((k) => [k, process.env[k]]));
 		for (const k of proxyKeys) delete process.env[k];
 		try {
-			await createGit(dir).raw(["remote", "add", "origin", "http://127.0.0.1:1/x.git"]);
+			await createGit(dir).raw(["remote", "add", "origin", "https://127.0.0.1:1/x.git"]);
 			await expect(pushImpl(TEST_WIN, dir)).rejects.toThrow(
 				/could not resolve host|unable to access|connection|network/i,
 			);
