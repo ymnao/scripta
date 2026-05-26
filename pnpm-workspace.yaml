@@ -36,12 +36,14 @@ allowBuilds:
 # でビルドも壊れるため強制統一する。
 #
 # `brace-expansion` は GHSA-jxxr-4gwj-5jf2（DoS、>=5.0.0 <5.0.6）対応。transitive dep として
-# minimatch 等から間接的に入るため、direct でない pin を override で強制する。
+# minimatch 等から間接的に入るため、direct でない pin を override で強制する。selector を
+# `brace-expansion@^5.0.0` に絞り、advisory 対象外の v1/v2 など旧 major が将来 transitive と
+# して入る余地を残す（semver 互換性を破壊しない）。
 overrides:
   "@codemirror/state": $@codemirror/state
   "@codemirror/view": $@codemirror/view
   "@lezer/common": ^1.5.2
-  brace-expansion: ^5.0.6
+  "brace-expansion@^5.0.0": ^5.0.6
 
 patchedDependencies:
   style-mod@4.1.3: patches/style-mod@4.1.3.patch
