@@ -293,11 +293,30 @@ describe("pushImpl", () => {
 	it("propagates network error stderr (renderer ネットワークパターン用)", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "n.md", "n\n", "init");
-		// 127.0.0.1:1 は予約 port で確実に listen していないため即時 ECONNREFUSED が返る
-		await createGit(dir).raw(["remote", "add", "origin", "http://127.0.0.1:1/x.git"]);
-		await expect(pushImpl(TEST_WIN, dir)).rejects.toThrow(
-			/could not resolve host|unable to access|connection|network/i,
-		);
+		// 127.0.0.1:1 は予約 port で通常 listen されないため即時 ECONNREFUSED が期待される。
+		// createGit は process.env を継承するため、proxy 環境変数があると proxy 経由になり
+		// 挙動が変わる。本テスト中だけ unset して決定論性を保つ。
+		const proxyKeys = [
+			"http_proxy",
+			"https_proxy",
+			"HTTP_PROXY",
+			"HTTPS_PROXY",
+			"all_proxy",
+			"ALL_PROXY",
+		];
+		const savedProxy = Object.fromEntries(proxyKeys.map((k) => [k, process.env[k]]));
+		for (const k of proxyKeys) delete process.env[k];
+		try {
+			await createGit(dir).raw(["remote", "add", "origin", "http://127.0.0.1:1/x.git"]);
+			await expect(pushImpl(TEST_WIN, dir)).rejects.toThrow(
+				/could not resolve host|unable to access|connection|network/i,
+			);
+		} finally {
+			for (const [k, v] of Object.entries(savedProxy)) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+		}
 	});
 });
 
