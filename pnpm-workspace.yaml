@@ -45,5 +45,19 @@ overrides:
   "@lezer/common": ^1.5.2
   "brace-expansion@^5.0.0": ^5.0.6
 
+# 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
+#
+# - **`katex`** (dual-resolution allow): 本リポは direct で `^0.17.0` を pin するが、
+#   `mermaid@11.x` が dependencies として `katex@^0.16.25` を持つため（peerDependency
+#   ではなく direct dep）、`pnpm dedupe` で `0.17.0` には合流不可。`katex` を `^0.17.0`
+#   で override 強制すると mermaid 内部の math 描画 (mermaid graph の数式ラベル) が
+#   breaks する可能性があり、mermaid 上流が `katex@^0.17` をサポートする
+#   (mermaid 12.x 目処 / 2026-05 時点で上流 issue 未起票) まで dual-resolution を許容する。
+#   実害評価: 本体 TeX 描画 (Live Preview / PDF export) は 0.17.0 のみ呼ばれ、mermaid
+#   経由の 0.16.x は mermaid graph 内の数式ラベル描画にのみ使用される。bundle 増は
+#   ~280KB (gzip 後 ~80KB) 程度、Phase 6 packaged build スモークで実機確認。
+#   解消条件: mermaid が `katex@^0.17` 以上を peer/dep として宣言した時点でこの
+#   コメントごと削除し、`pnpm dedupe` で 0.17.0 へ統合する。
+
 patchedDependencies:
   style-mod@4.1.3: patches/style-mod@4.1.3.patch
