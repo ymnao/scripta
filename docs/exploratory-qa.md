@@ -69,7 +69,7 @@ pnpm dist
 - [ ] **画像**: 相対パス `![](img.png)` / 絶対パス / **wikilink-image** `![[img.png]]` (旧 Tauri 版の `convertFileSrc` 経由 → 新版は `scripta-asset://`)
 - [ ] **リンク**: 内部 wikilink `[[foo]]` / 外部 URL クリックでブラウザ起動
 - [ ] **OGP リンクカード**: 外部 URL のメタ情報取得とプレビュー (sanitize 効いているか)
-- [ ] **ヒント**: PDF 改ページバグは #93 で調査中。Live Preview の数式描画は #79 が CSS CDN URL のずれを指摘済み (CDN は 0.16.33 固定だがブラウザ表示は別 path)
+- [ ] **ヒント**: PDF 改ページバグは #93 で調査中。#79 は PDF export 用 HTML の KaTeX CSS を CDN から読み込む実装が対象（Live Preview は同梱 CSS を使用）。
 
 ### 2.5 Export (PDF / HTML)
 
