@@ -35,7 +35,7 @@ pnpm dist
 - [ ] 初回起動（settings.json なし）でデフォルト状態が表示されるか
 - [ ] ワークスペースを開く → 再起動 → 同じワークスペースが復元されるか
 - [ ] ワークスペースパスに **スペース / 日本語 / 特殊文字** を含むディレクトリを試す
-- [ ] 存在しないワークスペースパス（手動で `settings.json` を編集して指定）を開いた時のエラー挙動
+- [ ] 存在しないワークスペースパス（手動で `settings.json` を編集して指定。macOS packaged build: `~/Library/Application Support/scripta/settings.json`）を開いた時のエラー挙動
 - [ ] 複数ワークスペースを連続切替（5 回くらい）して状態がリークしないか
 - [ ] **ヒント**: 過去の Tauri 版で settings migration 周りに細かい挙動差があった (Phase 4 で精査予定)
 
