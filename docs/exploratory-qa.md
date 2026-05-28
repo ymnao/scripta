@@ -62,7 +62,7 @@ pnpm dist
 ### 2.4 Live Preview（数式 / コード / リンク / 画像）
 
 - [ ] **KaTeX 数式**: `$$...$$` / `$...$` インライン + ディスプレイ
-- [ ] KaTeX で **`\\` (改行) / `\begin{align}` / `\cases`** などの複雑構文
+- [ ] KaTeX で **`\\` (改行) / `\begin{align}...\end{align}` / `\begin{cases}...\end{cases}`** などの複雑構文
 - [ ] **Mermaid**: flowchart / sequence / class / gantt / pie / journey / gitGraph / ER 全 8 種
   - 注: 8 種すべての確認は Phase 1 #82 C の safety net で網羅する。今は「ぱっと見」で OK
 - [ ] **コードブロック**: 主要言語 (TypeScript / Python / Rust / Bash) の syntax highlighting
