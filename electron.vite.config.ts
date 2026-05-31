@@ -15,10 +15,23 @@ const root = import.meta.dirname;
 // 上流の慣例どおり electron は runtime に CLI が hijack するモジュールなので external 必須。
 const externalElectron = ["electron", /^electron\/.+/] as const;
 
+// Chromium 固定（Electron 42 = Chromium 134+ / 同梱 Node.js 22 系）に伴い、
+// 多 WebView 互換のための保守的 transpile を解除して build target を実態へ揃える。
+//   - renderer は Chromium 134+ 実行なので esnext。
+//   - main / preload は Node.js 実行のため node 系ターゲットが必須
+//     （electron-vite が main/preload の build.target を "node?" に制約しており esnext は拒否される）。
+//     Electron 42 同梱 Node は >= 22.12 のため node22 を明示。
+// なお electron-vite v5 の getElectronNodeTarget() は Electron 39 までしかマップを持たず、
+// 42 では stale fallback で node16.17 に解決される。ここで明示することでその過度な
+// down-level 化も同時に矯正する。
+const RENDERER_TARGET = "esnext" as const;
+const NODE_TARGET = "node22" as const;
+
 export default defineConfig({
 	main: {
 		plugins: [externalizeDepsPlugin()],
 		build: {
+			target: NODE_TARGET,
 			rollupOptions: {
 				input: join(root, "electron/main/index.ts"),
 				external: [...externalElectron],
@@ -32,6 +45,7 @@ export default defineConfig({
 	preload: {
 		plugins: [externalizeDepsPlugin()],
 		build: {
+			target: NODE_TARGET,
 			rollupOptions: {
 				input: join(root, "electron/preload/index.ts"),
 				external: [...externalElectron],
@@ -46,6 +60,7 @@ export default defineConfig({
 		root,
 		plugins: [react(), tailwindcss()],
 		build: {
+			target: RENDERER_TARGET,
 			rollupOptions: {
 				input: join(root, "index.html"),
 			},
