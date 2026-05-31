@@ -96,3 +96,16 @@ jobs:
       - uses: ./.github/actions/setup-node-pnpm
 
       - run: pnpm build
+
+  # Tauri / WKWebView 残骸検出ガード (Issue #82 / Phase 1 PR-2 で導入)。
+  # Phase 1 時点では既存残骸が大量にあるため意図的に fail する。Phase 2-5
+  # 完了で green 化する前提で、それまでは merge を blocking しないよう
+  # continue-on-error: true で運用。Phase 5 完了 PR で除去すること。
+  # pnpm setup なしで bash + git grep のみで動くため step は最小。
+  tauri-residue:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - run: bash scripts/check-tauri-residue.sh

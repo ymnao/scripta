@@ -204,8 +204,13 @@ scripta-next/
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**
 
 ```bash
-# コミット前の検証
-pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e
+# コミット前の検証 (format / lint / typecheck / unit / e2e の chain)
+pnpm verify
+
+# 補助: Tauri 残骸検出 (Issue #82 / Phase 1 PR-2 で導入)
+# Phase 1 時点では既存残骸が大量にあるため意図的に fail する。Phase 2-5
+# 完了後に green 化し、verify chain へ合流させる予定。
+pnpm check:tauri-residue
 ```
 
 ## Issue・PR
