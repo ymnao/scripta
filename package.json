@@ -23,7 +23,9 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:e2e": "node node_modules/electron/install.js && playwright test",
-		"test:e2e:ui": "node node_modules/electron/install.js && playwright test --ui"
+		"test:e2e:ui": "node node_modules/electron/install.js && playwright test --ui",
+		"check:legacy-residue": "bash scripts/check-legacy-residue.sh",
+		"verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm typecheck:e2e && pnpm test && pnpm test:e2e && pnpm build"
 	},
 	"dependencies": {
 		"@codemirror/autocomplete": "^6.20.2",
