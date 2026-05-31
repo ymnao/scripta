@@ -32,76 +32,76 @@ pnpm dist
 
 ### 2.1 起動 / ワークスペース管理
 
-- [x] 初回起動（settings.json なし）でデフォルト状態が表示されるか
-- [x] ワークスペースを開く → 再起動 → 同じワークスペースが復元されるか
-- [x] ワークスペースパスに **スペース / 日本語 / 特殊文字** を含むディレクトリを試す
-- [x] 存在しないワークスペースパス（手動で `settings.json` を編集して指定。macOS packaged build: `~/Library/Application Support/scripta/settings.json`）を開いた時のエラー挙動
-- [x] 複数ワークスペースを連続切替（5 回くらい）して状態がリークしないか
-- [x] **ヒント**: 過去の Tauri 版で settings migration 周りに細かい挙動差があった (Phase 4 で精査予定)
+- [ ] 初回起動（settings.json なし）でデフォルト状態が表示されるか
+- [ ] ワークスペースを開く → 再起動 → 同じワークスペースが復元されるか
+- [ ] ワークスペースパスに **スペース / 日本語 / 特殊文字** を含むディレクトリを試す
+- [ ] 存在しないワークスペースパス（手動で `settings.json` を編集して指定。macOS packaged build: `~/Library/Application Support/scripta/settings.json`）を開いた時のエラー挙動
+- [ ] 複数ワークスペースを連続切替（5 回くらい）して状態がリークしないか
+- [ ] **ヒント**: 過去の Tauri 版で settings migration 周りに細かい挙動差があった (Phase 4 で精査予定)
 
 ### 2.2 ファイルツリー / ファイル操作
 
-- [x] 大量ファイル（**100+ files、5 階層以上**）のワークスペースでツリー表示
-- [x] ファイル名検索 / 全文検索のレスポンス時間
-- [x] **隠しファイル / gitignore パターン**で除外したファイルが本当に出ないか (issue #45)
-- [x] ファイル新規作成 → 即座にツリー反映されるか (chokidar watcher)
-- [x] ファイルを外部エディタで編集 → アプリ側でリロード反映されるか
-- [x] ファイル名に **絵文字 / 記号** を含めて新規作成
-- [x] ファイル削除（ゴミ箱移動）→ macOS Finder のゴミ箱に入るか
-- [x] **ヒント**: chokidar の挙動は OS で差がある。 macOS で試して怪しければ Linux でも試したいところだが本 QA では macOS のみで OK
+- [ ] 大量ファイル（**100+ files、5 階層以上**）のワークスペースでツリー表示
+- [ ] ファイル名検索 / 全文検索のレスポンス時間
+- [ ] **隠しファイル / gitignore パターン**で除外したファイルが本当に出ないか (issue #45)
+- [ ] ファイル新規作成 → 即座にツリー反映されるか (chokidar watcher)
+- [ ] ファイルを外部エディタで編集 → アプリ側でリロード反映されるか
+- [ ] ファイル名に **絵文字 / 記号** を含めて新規作成
+- [ ] ファイル削除（ゴミ箱移動）→ macOS Finder のゴミ箱に入るか
+- [ ] **ヒント**: chokidar の挙動は OS で差がある。 macOS で試して怪しければ Linux でも試したいところだが本 QA では macOS のみで OK
 
 ### 2.3 エディタ / Markdown 編集
 
-- [x] **日本語入力 (IME)**: 変換中に他のキー操作（矢印 / Esc / Tab）を混ぜる
-- [x] **絵文字 / サロゲートペア** を含む文字を編集 / 削除（バックスペースで 1 動作で消えるか）
-- [x] 巨大ファイル（**10MB+ / 10000+ 行**）を開いてスクロール / 検索
-- [x] 同じファイルを 2 タブで開いて両方編集（衝突挙動）
-- [x] **Undo / Redo を 100 回連続** で打鍵してクラッシュしないか
-- [x] **ヒント**: テーブル / リスト / 見出しショートカットは既知 bug 7 件カバー済み (#88-#92)。これら以外で異常な挙動がないか
+- [ ] **日本語入力 (IME)**: 変換中に他のキー操作（矢印 / Esc / Tab）を混ぜる
+- [ ] **絵文字 / サロゲートペア** を含む文字を編集 / 削除（バックスペースで 1 動作で消えるか）
+- [ ] 巨大ファイル（**10MB+ / 10000+ 行**）を開いてスクロール / 検索
+- [ ] 同じファイルを 2 タブで開いて両方編集（衝突挙動）
+- [ ] **Undo / Redo を 100 回連続** で打鍵してクラッシュしないか
+- [ ] **ヒント**: テーブル / リスト / 見出しショートカットは既知 bug 7 件カバー済み (#88-#92)。これら以外で異常な挙動がないか
 
 ### 2.4 Live Preview（数式 / コード / リンク / 画像）
 
-- [x] **KaTeX 数式**: `$$...$$` / `$...$` インライン + ディスプレイ
-- [x] KaTeX で **`\\` (改行) / `\begin{align}...\end{align}` / `\begin{cases}...\end{cases}`** などの複雑構文
-- [x] **Mermaid**: flowchart / sequence / class / gantt / pie / journey / gitGraph / ER 全 8 種
+- [ ] **KaTeX 数式**: `$$...$$` / `$...$` インライン + ディスプレイ
+- [ ] KaTeX で **`\\` (改行) / `\begin{align}...\end{align}` / `\begin{cases}...\end{cases}`** などの複雑構文
+- [ ] **Mermaid**: flowchart / sequence / class / gantt / pie / journey / gitGraph / ER 全 8 種
   - 注: 8 種すべての確認は Phase 1 #82 C の safety net で網羅する。今は「ぱっと見」で OK
-- [x] **コードブロック**: 主要言語 (TypeScript / Python / Rust / Bash) の syntax highlighting
-- [x] **画像**: 相対パス `![](img.png)` / 絶対パス / **wikilink-image** `![[img.png]]` (旧 Tauri 版の `convertFileSrc` 経由 → 新版は `scripta-asset://`)
-- [x] **リンク**: 内部 wikilink `[[foo]]` / 外部 URL クリックでブラウザ起動
+- [ ] **コードブロック**: 主要言語 (TypeScript / Python / Rust / Bash) の syntax highlighting
+- [ ] **画像**: 相対パス `![](img.png)` / 絶対パス / **wikilink-image** `![[img.png]]` (旧 Tauri 版の `convertFileSrc` 経由 → 新版は `scripta-asset://`)
+- [ ] **リンク**: 内部 wikilink `[[foo]]` / 外部 URL クリックでブラウザ起動
 - [ ] **OGP リンクカード**: 外部 URL のメタ情報取得とプレビュー (sanitize 効いているか)
 - [ ] **ヒント**: PDF 改ページバグは #93 で調査中。#79 は PDF export 用 HTML の KaTeX CSS を CDN から読み込む実装が対象（Live Preview は同梱 CSS を使用）。
 
 ### 2.5 Export (PDF / HTML)
 
-- [x] 数式を含む Markdown → PDF export → ビューア（macOS Preview）で表示
-- [x] Mermaid 図を含む Markdown → PDF / HTML export
-- [x] 画像（相対パス / wikilink-image）を含む Markdown → PDF export で画像が出るか
-- [x] PDF export の **ファイル名** に日本語 / 絵文字 / 特殊文字を含めて保存
-- [x] HTML export → 出力 HTML を別タブで開き、CSS / 数式 / 画像が独立して表示できるか
+- [ ] 数式を含む Markdown → PDF export → ビューア（macOS Preview）で表示
+- [ ] Mermaid 図を含む Markdown → PDF / HTML export
+- [ ] 画像（相対パス / wikilink-image）を含む Markdown → PDF export で画像が出るか
+- [ ] PDF export の **ファイル名** に日本語 / 絵文字 / 特殊文字を含めて保存
+- [ ] HTML export → 出力 HTML を別タブで開き、CSS / 数式 / 画像が独立して表示できるか
 - [ ] **ヒント**: 既知 bug は #79 (CSS CDN URL 古い) / #93 (改ページ過剰)。これ以外の異常 (フォントずれ / 改行位置 / 表崩れ) を見たい
 
 ### 2.6 Git Sync
 
-- [x] Git 管理下のワークスペースを開いて status 表示
-- [x] commit / push / pull を試す
-- [x] HTTPS remote の認証（macOS keychain 連携 / token prompt）
-- [x] SSH remote の認証（ssh-agent 連携）
-- [x] conflict 発生時の挙動（`conflict-resolver` ウィンドウ）
+- [ ] Git 管理下のワークスペースを開いて status 表示
+- [ ] commit / push / pull を試す
+- [ ] HTTPS remote の認証（macOS keychain 連携 / token prompt）
+- [ ] SSH remote の認証（ssh-agent 連携）
+- [ ] conflict 発生時の挙動（`conflict-resolver` ウィンドウ）
 - [ ] **ヒント**: parity-checklist § 4 で「Git remote 認証実機」が要検証。Phase 6 でやる予定だが、簡単に確かめておきたい
 
 ### 2.7 設定 / テーマ
 
-- [x] テーマ切替 (light / dark / system) → 再起動後も保持
-- [x] **system テーマ** で OS のテーマを切り替えた時の即時反映
-- [x] フォントサイズ / フォントファミリ変更 → 再起動後も保持
-- [x] **設定ダイアログを開き直して** 値が保存されているか
+- [ ] テーマ切替 (light / dark / system) → 再起動後も保持
+- [ ] **system テーマ** で OS のテーマを切り替えた時の即時反映
+- [ ] フォントサイズ / フォントファミリ変更 → 再起動後も保持
+- [ ] **設定ダイアログを開き直して** 値が保存されているか
 - [ ] **ヒント**: 設定永続化は Phase 1 #82 C の safety net で網羅予定。今は visual に保存ボタンが動くかだけ
 
 ### 2.8 ウィンドウ管理 / メニュー
 
-- [x] アプリケーションメニュー (Cmd+, / Cmd+Q / Cmd+W) が機能するか
-- [x] フルスクリーン / Mission Control での挙動
-- [x] **複数ウィンドウ** を開いて conflict-resolver と main ウィンドウの labels 衝突
+- [ ] アプリケーションメニュー (Cmd+, / Cmd+Q / Cmd+W) が機能するか
+- [ ] フルスクリーン / Mission Control での挙動
+- [ ] **複数ウィンドウ** を開いて conflict-resolver と main ウィンドウの labels 衝突
 - [ ] アプリ終了時の確認ダイアログ (未保存変更ありの場合)
 
 ### 2.9 アップデートチェック

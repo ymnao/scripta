@@ -35,7 +35,7 @@ Tauri → Electron 移行に伴うコード整理 (Tauri 完全除去、Issue #8
   - `Accepted` — 合意済み・有効
   - `Deprecated` — 過去の決定だが置き換えられた (Superseded by ADR-XXXX を併記)
   - `Rejected` — 検討したが採用せず
-- **書き換え禁止**: 一度 `Accepted` になった ADR は変更しない。方針変更時は **新規 ADR を起こして supersede する**。元 ADR は `Deprecated` に書き換え、Status 行のみ更新可
+- **書き換え禁止**: 一度 `Accepted` になった ADR の本文 (Context / Decision / Consequences) は変更しない。方針変更時は **新規 ADR を起こして supersede する**。元 ADR は `Deprecated` に書き換える際、ヘッダの **Status 行と `Superseded by` 行のみ更新可** (テンプレート `docs/adr/template.md` の `Superseded by: ADR-YYYY` 欄を埋める)。本文は元の判断当時の文脈を保つため凍結する
 - **コード側からの参照**: 必要なら `// see docs/adr/0001-...md` の形でリンクして良い (ただし「`docs/adr/` を見る」というメタ参照に留め、判断内容のコピーは置かない)
 - **ADR 番号**: 0000 を本 ADR、0001 以降を実際の設計判断に使う
 
