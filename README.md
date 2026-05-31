@@ -85,6 +85,7 @@ pnpm test:e2e
 - [仕様書](docs/specification.md) — Electron 版の機能仕様
 - [移行計画](docs/migration-plan.md) — Tauri → Electron 移行の Stage ロードマップ
 - [パリティチェックリスト](docs/parity-checklist.md) — 旧 Tauri 版との機能パリティ確認、リリース前ブロッカー、v1.0.0 昇格条件
+- [ADR (Architecture Decision Records)](docs/adr/) — 設計判断の恒久記録（運用方針は [ADR-0000](docs/adr/0000-record-architecture-decisions.md)）
 - [開発ガイドライン](CLAUDE.md) — コーディング規約・アーキテクチャ概要
 
 ## ライセンス
