@@ -1,34 +1,7 @@
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView, ViewPlugin } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { FontFamily } from "../../lib/store";
-
-/**
- * IME コンポジション中にエディタへ cm-composing クラスを付与する。
- * drawSelection 有効時でも WKWebView 上の CJK IME で
- * .cm-selectionBackground が残る場合があるため、CSS で抑制する。
- */
-export const composingClass = ViewPlugin.fromClass(
-	class {
-		private view: EditorView;
-		constructor(view: EditorView) {
-			this.view = view;
-			view.contentDOM.addEventListener("compositionstart", this.onStart);
-			view.contentDOM.addEventListener("compositionend", this.onEnd);
-		}
-		private onStart = () => {
-			this.view.dom.classList.add("cm-composing");
-		};
-		private onEnd = () => {
-			this.view.dom.classList.remove("cm-composing");
-		};
-		destroy() {
-			this.view.contentDOM.removeEventListener("compositionstart", this.onStart);
-			this.view.contentDOM.removeEventListener("compositionend", this.onEnd);
-			this.view.dom.classList.remove("cm-composing");
-		}
-	},
-);
 
 export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	monospace: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
@@ -92,9 +65,6 @@ export const staticEditorTheme = EditorView.theme({
 	},
 	".cm-selectionBackground": {
 		background: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent) !important",
-	},
-	"&.cm-composing .cm-selectionBackground": {
-		background: "transparent !important",
 	},
 	".cm-heading-1": {
 		fontSize: "1.8em",

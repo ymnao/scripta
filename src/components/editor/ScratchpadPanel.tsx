@@ -10,12 +10,7 @@ import { useAutoSave } from "../../hooks/useAutoSave";
 import { readFile } from "../../lib/commands";
 import { getScratchpadPath } from "../../lib/scripta-config";
 import { useSettingsStore } from "../../stores/settings";
-import {
-	codeHighlightStyle,
-	composingClass,
-	createDynamicEditorTheme,
-	staticEditorTheme,
-} from "./editor-theme";
+import { codeHighlightStyle, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
 	blockquoteDecoration,
 	codeBlockDecoration,
@@ -204,7 +199,6 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	const extensions = useMemo(
 		() => [
 			listKeymap,
-			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize, "4px 12px"),
