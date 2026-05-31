@@ -120,7 +120,7 @@
 
 ### 2.1 grep 条件
 
-`git grep -niE` パターン:
+本ドキュメントの初回 grep (本表の baseline) に使ったパターン:
 
 ```
 tauri | wkwebview | __TAURI | webviewWindow | @tauri-apps | src-tauri
@@ -128,7 +128,9 @@ tauri:// | tauri-plugin | data-tauri- | convertFileSrc | WebviewWindow
 appWindow | tauri.conf | WebKit
 ```
 
-対象スコープ: `src/**` / `electron/**` / `electron-builder.yml` / `package.json` / `electron.vite.config.ts` / `biome.json` / `tsconfig*.json` / `vitest.config.ts` / `playwright.config.ts` / `.github/**`
+対象スコープ: `src/**` / `electron/**` / `electron-builder.yml` / `package.json` / `pnpm-workspace.yaml` / `electron.vite.config.ts` / `vite.config.e2e.ts` / `biome.json` / `tsconfig*.json` / `vitest.config.ts` / `playwright.config.ts` / `.github/**`
+
+**CI ガード (`scripts/check-legacy-residue.sh`) との差分**: CI ガードは `WebKit` を FORBIDDEN から除外している。`-webkit-` prefix CSS と `WebkitAppRegion` 等 Chromium 用 CSS が false positive として大量に検出されるのを避けるため (§2.6 参照)。WKWebView は別 keyword `wkwebview` で引き続き捕捉。CI ガードが検出しない `WebKit` 系コメント (例: `src/lib/ime.ts:4` の Safari/WebKit 言及、`src/lib/export.ts:496` の older WebKit compatibility) は Phase 3 で手動書換 (§2.5 参照)。
 
 ### 2.2 集計
 
@@ -139,7 +141,7 @@ appWindow | tauri.conf | WebKit
 | **C** ドキュメンタリーコメント | 41 行 (31 ファイル) | 「旧 Tauri 版」「src-tauri」言及 |
 | **D** false positive (保持) | 12 行 (6 ファイル) | `-webkit-` prefix だが Chromium 用 CSS |
 
-合計 grep hit 数は約 90+ 行。これは Phase 2-5 の質的進捗指標として `scripts/check-tauri-residue.sh` (Phase 1 PR-2) で監視する。
+合計 grep hit 数は約 90+ 行 (本表 baseline)。CI ガード (`scripts/check-legacy-residue.sh`、Phase 1 PR-2) は `WebKit` 除外で約 84 行検出。これは Phase 2-5 の質的進捗指標として監視する。
 
 ### 2.3 A: 純 dead code (削除可) — Phase 2 担当
 
@@ -239,9 +241,11 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 **作業**: Phase 3 で各コメントを削除 (仕様だけ残す書き換え or 完全削除)。`ime.ts:4` は **ロジック保持・コメント書換のみ**（Safari/WebKit でも該当する正当な仕様だが、Tauri に紐付けて読ませる必要はない）。
 
+**CI ガード検出範囲との関係**: `src/index.css:81` (`WKWebView compat`) は `wkwebview` keyword で CI 検出される。`src/lib/ime.ts:4` (`Safari/WebKit`) は CI ガード非対象 (§2.1 / §2.6 参照、`WebKit` を FORBIDDEN から除外)。Phase 3 では CI ガード ≠ 1:1 なので **本表を正として手動チェック** すること。
+
 ### 2.6 D: false positive (保持) — Phase 6 で部分検討
 
-`-webkit-` prefix は Chromium も使用するため、以下は Tauri/WKWebView 残骸ではない。CI ガード (PR-2) では grep 除外パターンに追加する。
+`-webkit-` prefix は Chromium も使用するため、以下は Tauri/WKWebView 残骸ではない。CI ガード (`scripts/check-legacy-residue.sh`、PR-2) では **`WebKit` keyword 自体を FORBIDDEN から除外** することで以下を自然にスキップ (個別 path exclude 不要)。
 
 | ファイル | 行 | 内容 | 判定 |
 |---|---|---|---|
