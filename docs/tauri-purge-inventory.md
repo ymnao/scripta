@@ -107,7 +107,12 @@
 | `@tauri-apps/plugin-dialog::save` | 保存先ダイアログ | `window.api.showSaveDialog(opts)` | |
 | `@tauri-apps/plugin-store::load` + `Store` | 設定 `settings.json` の I/O | `window.api.settingsGet/Set/Delete/Save` | userData 互換維持判断は § 3 |
 
-新版 `package.json` には `@tauri-apps/*` 依存はゼロ（`HANDOFF.md` / `docs/parity-checklist.md` 以外に `@tauri-apps` 文字列なし）。
+新版 `package.json` には `@tauri-apps/*` 依存はゼロ (依存削除済み)。
+
+リポジトリ内の `@tauri-apps` 文字列の残存箇所は以下に限られ、コード / ビルド設定への参照は無い:
+
+- 本ドキュメント §1.2 のマッピング表 (移行記録としての言及)
+- `docs/parity-checklist.md` の移行履歴セクション
 
 ---
 
@@ -130,7 +135,7 @@ appWindow | tauri.conf | WebKit
 | 分類 | hit 数 | 説明 |
 |---|---|---|
 | **A** 純 dead code | 30+ 行 | Chromium 固定で常に false の分岐・関数 |
-| **B** 構造的レガシー | 8 箇所 (6 ファイル) | `convertFileSrc` API 名 |
+| **B** 構造的レガシー | 14 行 (7 ファイル) | `convertFileSrc` API 名 |
 | **C** ドキュメンタリーコメント | 41 行 (31 ファイル) | 「旧 Tauri 版」「src-tauri」言及 |
 | **D** false positive (保持) | 12 行 (6 ファイル) | `-webkit-` prefix だが Chromium 用 CSS |
 
@@ -178,18 +183,21 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 #### B-1. `convertFileSrc` API 名 (Tauri `@tauri-apps/api/core` 由来)
 
-新版でも同名関数として残存。`buildScriptaAssetUrl` を内部呼び出ししているだけなので、preload の API 名・ラッパー名を `buildAssetUrl` (HANDOFF 既定) にリネームすれば波及は限定的。
+新版でも同名関数として残存。`buildScriptaAssetUrl` を内部呼び出ししているだけなので、preload の API 名・ラッパー名を `buildAssetUrl` にリネームすれば波及は限定的。リネーム判断は Phase 3 で ADR 化 (ADR-0003 候補)。
 
 | ファイル | 行 | 内容 |
 |---|---|---|
 | `electron/preload/api.ts` | 33 | `convertFileSrc: (path: string) => string;` 型宣言 |
 | `electron/preload/index.ts` | 40 | 実装 (`buildScriptaAssetUrl(path)` を返すだけ) |
-| `src/lib/commands.ts` | 193-195 | renderer 側 wrapper `convertFileSrc` |
+| `electron/preload/scripta-asset-url.ts` | 1 | コメント (`// preload の \`convertFileSrc\` と main の protocol handler...`) |
+| `src/lib/commands.ts` | 193, 194 | renderer 側 wrapper `convertFileSrc` (関数宣言 + 本体) |
 | `src/__test-utils__/api-mock.ts` | 21 | test mock |
-| `src/components/editor/live-preview/images.ts` | 12, 41, 53 | call sites (`import { convertFileSrc }`) |
-| `src/components/editor/live-preview/images.test.ts` | 6, 8, 62, 70, 77 | テスト mock + テスト名 |
+| `src/components/editor/live-preview/images.ts` | 12, 41, 53 | call sites (`import { convertFileSrc }` + 2 呼び出し) |
+| `src/components/editor/live-preview/images.test.ts` | 6, 8, 62, 70, 77 | テストファイル冒頭コメント + mock + テスト名 3 件 |
 
-**作業**: Phase 3 で `convertFileSrc` → `buildAssetUrl` 一括リネーム。テスト名 (`"converts Unix absolute path via convertFileSrc"` 等) も書き換え。
+合計: **14 行 / 7 ファイル**
+
+**作業**: Phase 3 で `convertFileSrc` → `buildAssetUrl` 一括リネーム。`scripta-asset-url.ts:1` のコメントとテスト名 (`"converts Unix absolute path via convertFileSrc"` 等) も書き換え対象。
 
 ### 2.5 C: ドキュメンタリーコメント (完全削除) — Phase 3 担当
 

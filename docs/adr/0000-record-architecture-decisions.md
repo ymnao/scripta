@@ -5,7 +5,7 @@
 
 ## Context
 
-Tauri → Electron 移行に伴うコード整理 (Tauri 完全除去、Issue #81) では、新版コード中に散在する「旧 Tauri 版 X の Y を Z で置換」型のドキュメンタリーコメントを **完全削除** する方針を取った (HANDOFF.md「コード内コメントは『完全削除』方針」参照)。
+Tauri → Electron 移行に伴うコード整理 (Tauri 完全除去、Issue #81 / Phase 1 = Issue #82) では、新版コード中に散在する「旧 Tauri 版 X の Y を Z で置換」型のドキュメンタリーコメントを **完全削除** する方針を取った (詳細は Issue #82 サブタスク C の本文と `docs/tauri-purge-inventory.md` §2.5 を参照)。
 
 この方針には以下のトレードオフがある:
 
