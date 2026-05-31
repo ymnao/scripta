@@ -22,8 +22,8 @@ const externalElectron = ["electron", /^electron\/.+/] as const;
 //     down-level される（esnext は「変換しない」指定で素通りし、起動時 parse error になり得る）。
 //   - main / preload は Node.js 実行のため node 系ターゲットが必須
 //     （electron-vite が main/preload の build.target を "node?" に制約しており esnext は拒否される）。
-//     Electron 42 同梱 Node は v24.15 系のため node24 を明示。なお package.json:electron の
-//     engines.node ">= 22.12" は npm script を回すホスト Node 条件であって runtime 版ではない。
+//     Electron 42 同梱 Node は v24.15 系のため node24 を明示。これは同梱 runtime の Node 版で
+//     あり、各 package.json の engines.node（npm script を回すホスト Node 条件）とは別物。
 // なお electron-vite v5 の getElectronNodeTarget() は Electron 39 までしかマップを持たず、
 // 42 では stale fallback で node16.17 に解決される。ここで明示することでその過度な
 // down-level 化も同時に矯正する。
