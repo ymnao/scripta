@@ -46,6 +46,15 @@ export function writeWorkspaceFiles(
 	}
 }
 
+// workspace を「初期化済み」扱いにして SetupWizardDialog の自動表示を抑止する。
+// 判定は `<workspace>/.scripta/initialized.json` の存在（src/lib/scripta-config.ts）。
+// ファイルツリー操作を伴うテストでは、この modal が click を遮るため事前に置く。
+export function markInitialized(workspaceDir: string): void {
+	writeWorkspaceFiles(workspaceDir, {
+		".scripta/initialized.json": JSON.stringify({ initializedAt: "2026-01-01T00:00:00.000Z" }),
+	});
+}
+
 // 最小の有効な PNG（1x1 透明）。asset protocol / 画像描画テストの fixture 画像。
 // 外部ファイルを持たずテスト内で完結させるため base64 を埋め込む。
 const PNG_1X1_TRANSPARENT_BASE64 =

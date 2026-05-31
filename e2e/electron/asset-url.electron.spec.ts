@@ -1,7 +1,7 @@
 import { join } from "node:path";
-import { expect, test } from "./helpers/launch";
-import { seedSettings, tinyPng, writeWorkspaceFiles } from "./helpers/fixtures";
 import type { Page } from "@playwright/test";
+import { seedSettings, tinyPng, writeWorkspaceFiles } from "./helpers/fixtures";
+import { expect, test } from "./helpers/launch";
 
 // 領域5: Asset URL（`scripta-asset://` protocol + path-guard）。
 // workspace 内画像が protocol 越しに配信され、workspace 外パスは path-guard で

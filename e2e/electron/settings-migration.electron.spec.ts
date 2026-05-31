@@ -1,5 +1,5 @@
-import { expect, test } from "./helpers/launch";
 import { readSettings, seedSettings } from "./helpers/fixtures";
+import { expect, test } from "./helpers/launch";
 
 // 領域8: Settings migration（旧 Tauri 版互換）。
 // store.ts:66-85 の legacy `theme` → `themePreference` キー移行を実 main 越しに踏む。

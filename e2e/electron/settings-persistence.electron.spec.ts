@@ -1,5 +1,5 @@
-import { expect, modKey, test } from "./helpers/launch";
 import { readSettings, seedSettings, writeWorkspaceFiles } from "./helpers/fixtures";
+import { expect, modKey, test } from "./helpers/launch";
 
 // 領域4: 設定永続化（実 main + 実 userData）。
 // mock では `settingsGet` の返り値を差し替えるだけで、実 main の settings.json
@@ -47,9 +47,7 @@ test.describe("settings persistence (electron)", () => {
 
 		// 2 回目: 同じ userData で再起動 → sidebar=false が復元される。
 		const second = await launch(userDataDir);
-		await expect(
-			second.page.getByRole("button", { name: "ワークスペース検索" }),
-		).toBeVisible();
+		await expect(second.page.getByRole("button", { name: "ワークスペース検索" })).toBeVisible();
 		await expect(second.page.getByLabel("test.md file")).not.toBeVisible();
 	});
 });

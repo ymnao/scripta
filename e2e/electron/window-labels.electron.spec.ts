@@ -1,5 +1,5 @@
-import { expect, test } from "./helpers/launch";
 import { seedSettings, writeWorkspaceFiles } from "./helpers/fixtures";
+import { expect, test } from "./helpers/launch";
 
 // 領域7: Window labels（conflict-resolver の単一インスタンス管理）。
 // 旧 Tauri 版 `WebviewWindow.getByLabel("conflict-resolver")` 互換の挙動を

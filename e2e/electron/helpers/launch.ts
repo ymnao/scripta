@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
-	type ElectronApplication,
-	type Page,
-	_electron as electron,
 	test as base,
+	type ElectronApplication,
+	_electron as electron,
+	type Page,
 } from "@playwright/test";
 
 // build 成果物の main エントリ。packaged build に最も近い形で起動するため
@@ -52,6 +52,10 @@ interface ScriptaFixtures {
 }
 
 export const test = base.extend<ScriptaFixtures>({
+	// 依存 fixture を持たないため第 1 引数は空 destructure `{}`（Playwright は第 1 引数を
+	// object pattern に限定し、その destructure 名から依存を解決する。依存なしは `{}` が
+	// 唯一の書き方で Playwright 公式もこの形）。biome の noEmptyPattern はこの Playwright
+	// 由来の構造を誤検出するため、本ファイルに限り biome.json の override で当該ルールを off。
 	userDataDir: async ({}, use) => {
 		const dir = mkdtempSync(join(tmpdir(), "scripta-e2e-userdata-"));
 		await use(dir);
