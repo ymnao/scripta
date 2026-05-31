@@ -25,12 +25,7 @@ import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
 import { ContextMenu } from "../filetree/ContextMenu";
-import {
-	codeHighlightStyle,
-	composingClass,
-	createDynamicEditorTheme,
-	staticEditorTheme,
-} from "./editor-theme";
+import { codeHighlightStyle, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
 import {
 	insertHorizontalRule,
 	toggleBold,
@@ -236,7 +231,6 @@ export function MarkdownEditor({
 		() => [
 			listKeymap,
 			tableKeymap,
-			composingClass,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize),
