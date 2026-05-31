@@ -15,7 +15,7 @@ describe("validateRelativePath", () => {
 		expect(() => validateRelativePath("/etc/passwd")).toThrow(/must be relative/);
 		// Windows-style absolute paths are not absolute on POSIX runtime, so we only
 		// rely on the cross-platform `isAbsolute()` semantics. POSIX absolute is enough
-		// to cover the original Rust intent (path traversal).
+		// to cover the intended path-traversal guard.
 	});
 
 	it("rejects path traversal segments", () => {
@@ -35,7 +35,7 @@ describe("validateRelativePath", () => {
 		expect(() => validateRelativePath("日本語ファイル.md")).not.toThrow();
 		expect(() => validateRelativePath("a/b/c.md")).not.toThrow();
 		// 名前自体に `..` が含まれていても、独立した segment でなければ許可
-		// （旧 Rust もセグメント単位で `==".."` で比較）
+		// （セグメント単位で `==".."` 比較するため）
 		expect(() => validateRelativePath("..backup/file.md")).not.toThrow();
 	});
 });

@@ -64,8 +64,8 @@ export function useFileWatcher({
 				}
 			}
 			// Fixed-deadline batching: the timer starts on the first event arrival
-			// and is NOT reset by subsequent events. This matches the Rust-side
-			// batching policy (500ms deadline from first event).
+			// and is NOT reset by subsequent events (the deadline runs from the
+			// first event, not the latest).
 			if (batchTimer === null) {
 				batchTimer = setTimeout(flush, 300);
 			}

@@ -233,7 +233,7 @@ describe("pullImpl", () => {
 	it("returns empty string for repo with no tracking info", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "z.md", "z\n", "init");
-		// remote 無し / no upstream → 旧 Rust 互換で空文字列
+		// remote 無し / no upstream → 空文字列を返す契約
 		const result = await pullImpl(TEST_WIN, dir, "merge");
 		expect(result).toBe("");
 	});
