@@ -16,7 +16,7 @@
 - 旧 Tauri 版コマンド一覧: `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（`commands::*` 31 個 + ルート定義の `clear_webview_browsing_data` で計 32）
 - 旧フロント側プラグイン使用: `@tauri-apps/api/{core,event,window,webviewWindow,app}` / `@tauri-apps/plugin-{shell,dialog,store}`
 - 新 Electron API 表面: `electron/preload/api.ts` の `Api` 型 + `electron/preload/index.ts` の `contextBridge.exposeInMainWorld`
-- 新フロント呼び出し: `src/lib/commands.ts` を中心としたラッパー。ただし完全なフロント側 surface ではない点に注意。**`settings:*` 系のみ `src/lib/store.ts` から `window.api.settingsGet/Set/Delete/Save` を直接呼ぶ**（`commands.ts` を経由しない）。export 系（`src/lib/export.ts`）など他の機能はすべて `commands.ts` ラッパー経由なので、監査の索引としては「`commands.ts` + `store.ts`」の 2 箇所を見れば足りる
+- 新フロント呼び出し: `src/lib/commands.ts` のラッパーに集約。`settings:*` 系も `commands.ts` の `settingsGet/Set/Delete/Save` 経由に統一済み（旧: `src/lib/store.ts` が `window.api.settings*` を直呼び → Phase 3 PR-3-3 で経由化、`ADR-0007`）。renderer から `window.api.*` を直呼びする箇所は無く、監査の索引は **`commands.ts` の 1 箇所**で足りる
 
 ---
 

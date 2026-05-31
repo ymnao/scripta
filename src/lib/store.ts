@@ -1,6 +1,7 @@
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
+import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
 
 export { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS };
 
@@ -59,13 +60,13 @@ const DEFAULTS: AppSettings = {
 
 export async function loadSettings(): Promise<AppSettings> {
 	try {
-		const rawWorkspacePath = await window.api.settingsGet("workspacePath");
+		const rawWorkspacePath = await settingsGet("workspacePath");
 		const workspacePath: string | null =
 			typeof rawWorkspacePath === "string" ? rawWorkspacePath : DEFAULTS.workspacePath;
 
 		// Migration: convert legacy "theme" key to "themePreference"
 		let themePreference: ThemePreference = DEFAULTS.themePreference;
-		const rawThemePreference = await window.api.settingsGet("themePreference");
+		const rawThemePreference = await settingsGet("themePreference");
 		if (
 			rawThemePreference === "system" ||
 			rawThemePreference === "light" ||
@@ -74,63 +75,63 @@ export async function loadSettings(): Promise<AppSettings> {
 			themePreference = rawThemePreference;
 		} else {
 			// Migrate from legacy "theme" key
-			const rawTheme = await window.api.settingsGet("theme");
+			const rawTheme = await settingsGet("theme");
 			if (rawTheme === "light" || rawTheme === "dark") {
 				themePreference = rawTheme;
 			}
 			// Persist migrated value and remove legacy key
-			await window.api.settingsSet("themePreference", themePreference);
-			await window.api.settingsDelete("theme");
-			await window.api.settingsSave();
+			await settingsSet("themePreference", themePreference);
+			await settingsDelete("theme");
+			await settingsSave();
 		}
 
-		const rawSidebarVisible = await window.api.settingsGet("sidebarVisible");
+		const rawSidebarVisible = await settingsGet("sidebarVisible");
 		const sidebarVisible: boolean =
 			typeof rawSidebarVisible === "boolean" ? rawSidebarVisible : DEFAULTS.sidebarVisible;
 
-		const rawShowLineNumbers = await window.api.settingsGet("showLineNumbers");
+		const rawShowLineNumbers = await settingsGet("showLineNumbers");
 		const showLineNumbers: boolean =
 			typeof rawShowLineNumbers === "boolean" ? rawShowLineNumbers : DEFAULTS.showLineNumbers;
 
-		const rawFontSize = await window.api.settingsGet("fontSize");
+		const rawFontSize = await settingsGet("fontSize");
 		const fontSize: number =
 			typeof rawFontSize === "number" && rawFontSize >= 8 && rawFontSize <= 32
 				? rawFontSize
 				: DEFAULTS.fontSize;
 
-		const rawAutoSaveDelay = await window.api.settingsGet("autoSaveDelay");
+		const rawAutoSaveDelay = await settingsGet("autoSaveDelay");
 		const autoSaveDelay: number =
 			typeof rawAutoSaveDelay === "number" && rawAutoSaveDelay >= 500 && rawAutoSaveDelay <= 10000
 				? rawAutoSaveDelay
 				: DEFAULTS.autoSaveDelay;
 
-		const rawHighlightActiveLine = await window.api.settingsGet("highlightActiveLine");
+		const rawHighlightActiveLine = await settingsGet("highlightActiveLine");
 		const highlightActiveLine: boolean =
 			typeof rawHighlightActiveLine === "boolean"
 				? rawHighlightActiveLine
 				: DEFAULTS.highlightActiveLine;
 
-		const rawFontFamily = await window.api.settingsGet("fontFamily");
+		const rawFontFamily = await settingsGet("fontFamily");
 		const fontFamily: FontFamily =
 			rawFontFamily === "monospace" || rawFontFamily === "sans-serif" || rawFontFamily === "serif"
 				? rawFontFamily
 				: DEFAULTS.fontFamily;
 
-		const rawTrimTrailingWhitespace = await window.api.settingsGet("trimTrailingWhitespace");
+		const rawTrimTrailingWhitespace = await settingsGet("trimTrailingWhitespace");
 		const trimTrailingWhitespace: boolean =
 			typeof rawTrimTrailingWhitespace === "boolean"
 				? rawTrimTrailingWhitespace
 				: DEFAULTS.trimTrailingWhitespace;
 
-		const rawShowLinkCards = await window.api.settingsGet("showLinkCards");
+		const rawShowLinkCards = await settingsGet("showLinkCards");
 		const showLinkCards: boolean =
 			typeof rawShowLinkCards === "boolean" ? rawShowLinkCards : DEFAULTS.showLinkCards;
 
-		const rawGitSyncEnabled = await window.api.settingsGet("gitSyncEnabled");
+		const rawGitSyncEnabled = await settingsGet("gitSyncEnabled");
 		const gitSyncEnabled: boolean =
 			typeof rawGitSyncEnabled === "boolean" ? rawGitSyncEnabled : DEFAULTS.gitSyncEnabled;
 
-		const rawAutoCommitInterval = await window.api.settingsGet("autoCommitInterval");
+		const rawAutoCommitInterval = await settingsGet("autoCommitInterval");
 		const autoCommitInterval: number =
 			typeof rawAutoCommitInterval === "number" &&
 			rawAutoCommitInterval >= 0 &&
@@ -138,7 +139,7 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawAutoCommitInterval
 				: DEFAULTS.autoCommitInterval;
 
-		const rawAutoPullInterval = await window.api.settingsGet("autoPullInterval");
+		const rawAutoPullInterval = await settingsGet("autoPullInterval");
 		const autoPullInterval: number =
 			typeof rawAutoPullInterval === "number" &&
 			rawAutoPullInterval >= 0 &&
@@ -146,7 +147,7 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawAutoPullInterval
 				: DEFAULTS.autoPullInterval;
 
-		const rawAutoPushInterval = await window.api.settingsGet("autoPushInterval");
+		const rawAutoPushInterval = await settingsGet("autoPushInterval");
 		const autoPushInterval: number =
 			typeof rawAutoPushInterval === "number" &&
 			rawAutoPushInterval >= 0 &&
@@ -154,41 +155,41 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawAutoPushInterval
 				: DEFAULTS.autoPushInterval;
 
-		const rawPullBeforePush = await window.api.settingsGet("pullBeforePush");
+		const rawPullBeforePush = await settingsGet("pullBeforePush");
 		const pullBeforePush: boolean =
 			typeof rawPullBeforePush === "boolean" ? rawPullBeforePush : DEFAULTS.pullBeforePush;
 
-		const rawSyncMethod = await window.api.settingsGet("syncMethod");
+		const rawSyncMethod = await settingsGet("syncMethod");
 		const syncMethod: SyncMethod =
 			rawSyncMethod === "merge" || rawSyncMethod === "rebase" ? rawSyncMethod : DEFAULTS.syncMethod;
 
-		const rawCommitMessage = await window.api.settingsGet("commitMessage");
+		const rawCommitMessage = await settingsGet("commitMessage");
 		const trimmedCommitMessage =
 			typeof rawCommitMessage === "string" ? rawCommitMessage.trim() : "";
 		const commitMessage: string =
 			trimmedCommitMessage.length > 0 ? trimmedCommitMessage : DEFAULTS.commitMessage;
 
-		const rawAutoPullOnStartup = await window.api.settingsGet("autoPullOnStartup");
+		const rawAutoPullOnStartup = await settingsGet("autoPullOnStartup");
 		const autoPullOnStartup: boolean =
 			typeof rawAutoPullOnStartup === "boolean" ? rawAutoPullOnStartup : DEFAULTS.autoPullOnStartup;
 
-		const rawScratchpadVolatile = await window.api.settingsGet("scratchpadVolatile");
+		const rawScratchpadVolatile = await settingsGet("scratchpadVolatile");
 		const scratchpadVolatile: boolean =
 			typeof rawScratchpadVolatile === "boolean"
 				? rawScratchpadVolatile
 				: DEFAULTS.scratchpadVolatile;
 
-		const rawAutoUpdateCheck = await window.api.settingsGet("autoUpdateCheck");
+		const rawAutoUpdateCheck = await settingsGet("autoUpdateCheck");
 		const autoUpdateCheck: boolean =
 			typeof rawAutoUpdateCheck === "boolean" ? rawAutoUpdateCheck : DEFAULTS.autoUpdateCheck;
 
-		const rawFileTreeShowHidden = await window.api.settingsGet("fileTreeShowHidden");
+		const rawFileTreeShowHidden = await settingsGet("fileTreeShowHidden");
 		const fileTreeShowHidden: boolean =
 			typeof rawFileTreeShowHidden === "boolean"
 				? rawFileTreeShowHidden
 				: DEFAULTS.fileTreeShowHidden;
 
-		const rawFileTreeExcludePatterns = await window.api.settingsGet("fileTreeExcludePatterns");
+		const rawFileTreeExcludePatterns = await settingsGet("fileTreeExcludePatterns");
 		const fileTreeExcludePatterns: string =
 			typeof rawFileTreeExcludePatterns === "string"
 				? rawFileTreeExcludePatterns
@@ -225,8 +226,8 @@ export async function loadSettings(): Promise<AppSettings> {
 
 async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
-		await window.api.settingsSet(key, value);
-		await window.api.settingsSave();
+		await settingsSet(key, value);
+		await settingsSave();
 	} catch {
 		// Ignore save errors — app should continue working
 	}
@@ -265,7 +266,7 @@ export const saveFileTreeExcludePatterns = (patterns: string) =>
 
 export async function loadLastUpdateCheck(): Promise<number> {
 	try {
-		const raw = await window.api.settingsGet("lastUpdateCheck");
+		const raw = await settingsGet("lastUpdateCheck");
 		return typeof raw === "number" ? raw : 0;
 	} catch {
 		return 0;

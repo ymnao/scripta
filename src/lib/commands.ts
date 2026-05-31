@@ -16,9 +16,9 @@
  * - **retry なし**（`window.api.*` への 1:1 typed forward）: 上記以外。retry が
  *   無益（冪等でない write / イベント購読）か、即時失敗で十分なもの。
  *
- * この層は旧 Tauri 版の `invoke()` ラッパーの後継だが、Electron では `window.api`
- * 自体が typed な境界であるため、本層の存在価値は上記 2 点（疎結合 + retry）に
- * 再定義される。設計判断の詳細は ADR-0007 を参照。
+ * Electron では `window.api` 自体が typed な境界であるため、本層の存在価値は
+ * 上記 2 点（疎結合 + retry）にある。retry なし forward を呼び出し元へ inline
+ * せず本層に残す設計判断の経緯と根拠は ADR-0007 を参照。
  */
 import type {
 	ListDirectoryOptions,
@@ -214,6 +214,22 @@ export function openConflictWindow(workspacePath: string): Promise<void> {
 
 export function buildAssetUrl(path: string): string {
 	return window.api.buildAssetUrl(path);
+}
+
+export function settingsGet(key: string): Promise<unknown> {
+	return window.api.settingsGet(key);
+}
+
+export function settingsSet(key: string, value: unknown): Promise<void> {
+	return window.api.settingsSet(key, value);
+}
+
+export function settingsDelete(key: string): Promise<void> {
+	return window.api.settingsDelete(key);
+}
+
+export function settingsSave(): Promise<void> {
+	return window.api.settingsSave();
 }
 
 export function openDirectoryPicker(): Promise<string | null> {
