@@ -185,7 +185,7 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 #### B-1. `convertFileSrc` API 名 (Tauri `@tauri-apps/api/core` 由来)
 
-**✅ 完了 (Phase 3 PR-3-1)**。preload の API 名・renderer ラッパー名を `buildAssetUrl` にリネーム済み（内部 helper `buildScriptaAssetUrl` と命名を統一）。下表は rename **前** の残存箇所（baseline 記録）。プロトコル設計とリネームの根拠は ADR-0002 (scripta-asset protocol) に記録。
+**✅ 完了 (Phase 3 PR-3-1)**。preload の API 名・renderer ラッパー名を `buildAssetUrl` にリネーム済み（内部 helper `buildScriptaAssetUrl` と命名を統一）。下表は rename **前** の残存箇所（baseline 記録）。プロトコル設計とリネームの根拠は scripta-asset protocol の ADR（Phase 3 PR-3-5 で起票）に記録。
 
 | ファイル | 行 | 内容 |
 |---|---|---|
