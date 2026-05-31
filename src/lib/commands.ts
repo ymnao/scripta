@@ -190,8 +190,8 @@ export function openConflictWindow(workspacePath: string): Promise<void> {
 	return window.api.openConflictWindow(workspacePath);
 }
 
-export function convertFileSrc(path: string): string {
-	return window.api.convertFileSrc(path);
+export function buildAssetUrl(path: string): string {
+	return window.api.buildAssetUrl(path);
 }
 
 export function openDirectoryPicker(): Promise<string | null> {

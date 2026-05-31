@@ -7,13 +7,12 @@ import { expect, test } from "./helpers/launch";
 // workspace 内画像が protocol 越しに配信され、workspace 外パスは path-guard で
 // 拒否される（403 → img error）ことを実 main で踏む。mock では protocol handler /
 // `isPathWithinAnyAllowedRoot` の実挙動を検出できない。
-// Phase 3 で `convertFileSrc` → `buildAssetUrl` rename 予定（ADR-0003 候補）の baseline。
 
-// fs パスを convertFileSrc で scripta-asset URL 化し、<img> として実ロードを試みる。
+// fs パスを buildAssetUrl で scripta-asset URL 化し、<img> として実ロードを試みる。
 // CSP img-src が scripta-asset: を許可するため、許可パスは load、拒否パスは error になる。
 function tryLoadAsset(page: Page, fsPath: string): Promise<boolean> {
 	return page.evaluate((p) => {
-		const src = window.api.convertFileSrc(p);
+		const src = window.api.buildAssetUrl(p);
 		return new Promise<boolean>((resolve) => {
 			const img = new Image();
 			img.onload = () => resolve(img.naturalWidth > 0);
