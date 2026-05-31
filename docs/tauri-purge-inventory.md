@@ -201,9 +201,11 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 **作業**: ✅ PR-3-1 で `convertFileSrc` → `buildAssetUrl` 一括リネーム完了。`scripta-asset-url.ts:1` のコメントとテスト名 (`"converts Unix absolute path via convertFileSrc"` 等) も書き換え済み。コード全体で `convertFileSrc` は 0 hit（CI ガード FORBIDDEN には再導入防止として残置）。
 
-### 2.5 C: ドキュメンタリーコメント (完全削除) — Phase 3 担当
+### 2.5 C: ドキュメンタリーコメント (完全削除) — ✅ Phase 3 (PR-3-4) 完了
 
 「旧 Tauri 版」/「src-tauri」/「tauri-plugin-store」/「`{ payload }` 形式」等の言及。**完全削除方針** (marker convention は採用せず、必要な根拠は `docs/adr/` に集約)。
+
+**✅ PR-3-4 で下表の全コメントを Tauri/Rust-free 化済み（`fs-errors.ts` 含む）。以下は削除前 baseline 記録（行番号は削除前のもの）。**
 
 `electron/main/ipc/git.ts:15` の例:
 - ❌ 削除前: `// 旧 Tauri 版 src-tauri/src/commands/git_sync.rs を simple-git ベースで 1:1 port。`
@@ -239,9 +241,9 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 | `src/lib/path.test.ts` | 44 | 1 | Tauri uses consistent separators |
 | `src/stores/theme.ts` | 20 | 1 | tauri-plugin-store 言及 |
 
-**作業**: Phase 3 で各コメントを削除 (仕様だけ残す書き換え or 完全削除)。`ime.ts:4` は **ロジック保持・コメント書換のみ**（Safari/WebKit でも該当する正当な仕様だが、Tauri に紐付けて読ませる必要はない）。
+**作業**: ✅ PR-3-4 完了。各コメントを Tauri/Rust-free に書き換え（仕様は保持）。`ime.ts:4` は **ロジック保持・コメント書換のみ**（Safari/WebKit でも該当する正当な仕様だが、Tauri に紐付けて読ませない）。
 
-**CI ガード検出範囲との関係**: `src/index.css:81` (`WKWebView compat`) は `wkwebview` keyword で CI 検出される。`src/lib/ime.ts:4` (`Safari/WebKit`) は CI ガード非対象 (§2.1 / §2.6 参照、`WebKit` を FORBIDDEN から除外)。Phase 3 では CI ガード ≠ 1:1 なので **本表を正として手動チェック** すること。
+**CI ガード検出範囲との関係**: `src/index.css:81` (`WKWebView compat`) は `wkwebview` keyword で CI 検出される。`src/lib/ime.ts:4` (`Safari/WebKit`) は CI ガード非対象 (§2.1 / §2.6 参照、`WebKit` を FORBIDDEN から除外)。CI ガード ≠ 1:1 のため本表を正として手動チェック**した**。加えて guard 非検出の `Rust` 名指しコメント（`useFileWatcher.ts` / `SettingsDialog.tsx` / `SetupWizardDialog.tsx` / 各 `*.test.ts` 等）も PR-3-4 で除去済み。
 
 ### 2.6 D: false positive (保持) — Phase 6 で部分検討
 
