@@ -289,7 +289,7 @@ if (app.isPackaged) {
 
 ### Phase 3 への引き継ぎ
 
-`electron/main/index.ts:30-36` のコメント (4 行) は Phase 3 でコメント削除対象になるが、削除と同時に **ADR-0001 「旧 Tauri 版 userData の互換維持と撤去タイミング」** を起こし、根拠を恒久記録する。本ドキュメントは dead artifact 化 (Phase 5 完了時) しても ADR は残る。
+`electron/main/index.ts:30-36` のコメントは Phase 3 で Tauri-free に書き換えられ（PR-3-4）、設計根拠は **ADR-0006「既存配布アプリの userData / settings.json 互換を当面維持する」**（PR-3-5）に恒久記録する。本ドキュメントは dead artifact 化 (Phase 5 完了時) しても ADR は残る。
 
 ---
 
