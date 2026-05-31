@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockRenderMermaid = vi.fn();
 vi.mock("../../lib/mermaid", () => ({
 	renderMermaid: (...args: unknown[]) => mockRenderMermaid(...args),
-	isTauriProtocol: false,
-	promoteMermaidStyles: vi.fn(),
 }));
 
 // Mock theme store

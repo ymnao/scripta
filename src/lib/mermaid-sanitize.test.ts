@@ -80,4 +80,19 @@ describe("sanitizeMermaidSvg", () => {
 		const result = sanitizeMermaidSvg(MERMAID_SVG);
 		expect(result).toContain("max-width");
 	});
+
+	it("text-anchor 属性とインラインスタイルを保持する", () => {
+		// promoteMermaidStyles 廃止後はサニタイズ出力がそのまま描画されるため、
+		// text-anchor（テキスト揃え）がサニタイズで失われないことを保証する。
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg" id="mermaid-0">
+<text text-anchor="middle" x="100" y="50">Hello</text>
+<text style="text-anchor: middle; font-size: 14px" x="300" y="50">Styled</text>
+</svg>`;
+		const result = sanitizeMermaidSvg(svg);
+		// 属性形式（1 つ目の <text>）— XMLSerializer の出力は安定
+		expect(result).toContain('text-anchor="middle"');
+		// インラインスタイル形式（2 つ目の <text>）— DOMPurify / シリアライザの
+		// 空白正規化（`text-anchor:middle` 等）で壊れないよう宣言の存在を regex で検証
+		expect(result).toMatch(/text-anchor\s*:\s*middle/);
+	});
 });

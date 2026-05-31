@@ -14,13 +14,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import {
-	clearMermaidCache,
-	getCacheEntry,
-	isTauriProtocol,
-	promoteMermaidStyles,
-	renderMermaid,
-} from "../../../lib/mermaid";
+import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
 import { useSettingsStore } from "../../../stores/settings";
 import { useThemeStore } from "../../../stores/theme";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
@@ -123,15 +117,8 @@ export class MermaidWidget extends WidgetType {
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
-				// bakeStyledSvg で焼き込み済みだが、WKWebView では innerHTML 再パース後に
-				// fill/stroke 等の CSS→属性変換が必要なため再適用する。
-				if (isTauriProtocol) {
-					promoteMermaidStyles(svgEl);
-				}
-
-				// max-width を SVG の style 属性から取得。
-				// WKWebView tauri:// は SVG の style 属性を CSSOM に反映しない
-				// 可能性があるため、属性文字列と viewBox もフォールバックとして使う。
+				// SVG の自然幅（max-width）を取得する。cssom から取れない場合に備え、
+				// style 属性文字列・viewBox の順でフォールバックする。
 				let mw: string | undefined;
 				const cssom = svgEl.style.maxWidth;
 				if (cssom) {
@@ -157,12 +144,9 @@ export class MermaidWidget extends WidgetType {
 					const natural = Number.parseFloat(mw);
 					if (!Number.isNaN(natural)) {
 						const scaledMaxWidth = `${natural * 1.35}px`;
-						// max-width を SVG ではなくコンテナ div に設定する。
-						// WKWebView tauri:// は SVG 要素の CSS max-width を処理しないが、
-						// HTML 要素の max-width は正常に機能する。
+						// コンテナ div と SVG 自身の双方に拡大後の max-width を設定し、
+						// 元の上限幅で頭打ちになるのを防ぐ。
 						inner.style.maxWidth = scaledMaxWidth;
-						// 通常ブラウザでは SVG 自身の max-width も有効なため、
-						// 同じ値に更新して元の上限幅で頭打ちになるのを防ぐ。
 						svgEl.style.maxWidth = scaledMaxWidth;
 					}
 				}
