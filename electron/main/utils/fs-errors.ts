@@ -1,4 +1,4 @@
-// 旧 Tauri 版と同じ message 形式を保ち、フロント側 errors.ts の正規表現
+// message は固定の英語文字列契約。フロント側 errors.ts の正規表現
 // (`/^Already exists:/` など) でマッチさせるための定数 + ファクトリ。
 // 生文字列を fs ハンドラに散らさず、タイポで翻訳が落ちる事故を防ぐ。
 export const FsError = {

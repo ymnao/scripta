@@ -226,7 +226,7 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 | `electron/main/ipc/workspace.ts` | 47 | 1 | newWindow 仕様参照 |
 | `electron/main/menu.test.ts` | 151 | 1 | 1:1 言及 |
 | `electron/main/menu.ts` | 4, 18, 39, 83 | 4 | setup_menu / focused / accelerator / View メニュー |
-| `electron/main/utils/fs-errors.ts` | 1 | 1 | **Phase 5 で本体ごと structured error 化、コメント削除と同時** |
+| `electron/main/utils/fs-errors.ts` | 1 | 1 | ✅ コメントは PR-3-4 で Tauri-free 化（message 文字列契約は保持）。structured error 化（本体コード）は Phase 5 |
 | `electron/main/utils/git-env.ts` | 4, 49 | 2 | git_command 集約 |
 | `electron/main/utils/git-validators.ts` | 3 | 1 | validator port |
 | `electron/main/utils/ogp-parser.ts` | 3 | 1 | parse port |
