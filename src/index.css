@@ -78,7 +78,7 @@
 }
 
 /* Editor font — applied via CSS custom property so that font-family
-   does not depend on style-mod's dynamic injection (WKWebView compat).
+   does not depend on style-mod's dynamic injection.
    Doubled class selector raises specificity above CodeMirror's base theme
    which injects font-family via adoptedStyleSheets (wins at equal specificity). */
 .cm-editor.cm-editor .cm-scroller {

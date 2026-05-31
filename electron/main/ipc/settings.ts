@@ -117,8 +117,7 @@ function persist(store: Store): void {
 }
 
 // 「未設定（own property なし）」と「null/undefined を set 済み」をどちらも
-// null として返す。旧 Tauri 版（Option<Value>）も None / Some(Null) を区別
-// しない仕様だったので合わせる。own property のみを参照することで
+// null として返す（未設定と明示的な null を区別しない仕様）。own property のみを参照することで
 // Object.prototype 由来 (toString 等) の誤マッチや IPC で関数を返してしまう
 // 事故を防ぐ。
 function getValue(store: Store, key: string): unknown {

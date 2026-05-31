@@ -3,13 +3,12 @@ import type { UpdateInfo } from "../../../src/types/update";
 import { httpFetch } from "../utils/http-fetch";
 import { compareSemver, parseSemver, stripVPrefix } from "../utils/semver-lite";
 
-// 旧 Tauri 版 src-tauri/src/commands/updater.rs `check_for_update_inner` を Node stdlib
-// に移植。GitHub Releases API から latest release を取得し、tag_name を `v` 前置きを
-// 除いた SemVer として現在バージョンと比較する。
+// `check_for_update_inner`。GitHub Releases API から latest release を取得し、
+// tag_name を `v` 前置きを除いた SemVer として現在バージョンと比較する。
 //
 // electron-updater は **Stage 6** (コードサイニング / 公証 / 配布) の作業に合流させる。
-// Stage 5 ではチェックのみ → ダイアログ → ブラウザで GitHub Releases に飛ばす UX で
-// 旧 Tauri 版の挙動を 1:1 で再現する（renderer 側 useUpdateCheck.ts は変更不要）。
+// Stage 5 ではチェックのみ → ダイアログ → ブラウザで GitHub Releases に飛ばす UX に
+// する（renderer 側 useUpdateCheck.ts は変更不要）。
 
 // 配布パイプライン (electron-builder.yml の publish / .github/workflows/release.yml の
 // gh release upload) は current repo を自動推定し ymnao/scripta-next の Release に成果物を
@@ -80,7 +79,7 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
 }
 
 export async function checkForUpdateInner(currentVersion: string): Promise<UpdateInfo> {
-	// network 前に currentVersion を validate する（旧 Rust と同方針：レイテンシのある
+	// network 前に currentVersion を validate する（レイテンシのある
 	// network 失敗より、まず手元の即時 fail を優先）。
 	try {
 		parseSemver(currentVersion);

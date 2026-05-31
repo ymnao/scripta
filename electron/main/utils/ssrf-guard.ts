@@ -2,9 +2,9 @@ import type { LookupAddress, LookupOptions } from "node:dns";
 import { promises as dnsPromises } from "node:dns";
 import { isIP, isIPv4, isIPv6 } from "node:net";
 
-// 旧 Tauri 版 src-tauri/src/commands/ogp.rs の `is_global_ip` / `SsrfSafeResolver` を
-// JS で 1:1 移植。グローバル到達可能 IP のみを許可する allowlist 方式で
-// プライベート / ループバック / リンクローカル / マルチキャスト 等を弾く。
+// `is_global_ip` / `SsrfSafeResolver`。グローバル到達可能 IP のみを許可する
+// allowlist 方式で、プライベート / ループバック / リンクローカル / マルチキャスト
+// 等を弾く。
 //
 // **DNS rebinding 防御 (pinSafeLookup)**:
 // 「事前に hostname を resolve → IP 検証 → 接続」を分離すると、validation 後に

@@ -1,7 +1,7 @@
 import { platform } from "node:os";
 import { type SimpleGit, simpleGit } from "simple-git";
 
-// 旧 Tauri 版 git_sync.rs の git_command(path, args) 相当を simple-git で集約。
+// simple-git ベースで git コマンド実行環境を集約。
 // 環境変数で対話入力経路を全 deny し、`LC_ALL=C` でエラー文を英語固定にする
 // （renderer 側 src/lib/errors.ts の正規表現は英語前提）。
 //
@@ -46,9 +46,9 @@ const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 //     - allowUnsafePager:     `GIT_PAGER="cat"` / `PAGER="cat"` で pager 抑止
 //
 // (B) 我々は明示制御せず、ユーザーの普段の git 環境（`.gitconfig` / 環境変数）を
-//     **意図的に尊重** するもの。旧 Tauri 版の `std::process::Command::new("git")` は
-//     何の制約もなく process.env を継承していたため、UX 上ユーザーが手元の git で
-//     できることは Electron 内でも同等にできるのが要件。攻撃者制御値の流入は
+//     **意図的に尊重** するもの。UX 上ユーザーが手元の git でできることは
+//     Electron 内でも同等にできるのが要件のため、process.env をそのまま継承する。
+//     攻撃者制御値の流入は
 //     IPC 認可（assertPathAllowed）で workspace 単位に閉じ込めて防ぐ。
 //     - allowUnsafeCredentialHelper: ユーザーの credential.helper（macOS keychain 等）
 //     - allowUnsafeConfigPaths:      ユーザーの GIT_CONFIG_* / XDG_CONFIG_HOME を継承
@@ -67,7 +67,7 @@ const UNSAFE_FLAGS = {
 };
 
 // 与えられた canonical な repo path を baseDir にした SimpleGit instance を返す。
-// `core.hooksPath=/dev/null` で hooks を無効化（旧 Rust と同じ）、
+// `core.hooksPath=/dev/null` で hooks を無効化、
 // `core.quotepath=false` で 非 ASCII path を 8 進エスケープしない。
 export function createGit(canonicalRepoPath: string): SimpleGit {
 	return simpleGit({

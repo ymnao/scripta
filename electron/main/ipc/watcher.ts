@@ -13,7 +13,7 @@ import {
 import { onFileTreeFilterChange } from "./settings";
 
 // session は webContents.id（windowId 相当）で索引する。各 window は同時に 1 つしか
-// watcher を持たない（旧 Tauri の WatcherState と同じ前提）。watcher:start で既存
+// watcher を持たない。watcher:start で既存
 // セッションがあれば必ず先に stop してから新設する。
 type Session = {
 	watcher: FSWatcher;
@@ -65,7 +65,7 @@ function flush(session: Session): void {
 function onFsEvent(session: Session, kind: FsKind, path: string): void {
 	if (session.stopped) return;
 	mergeEventKind(session.pending, path, kind);
-	// 「最初の event で deadline 設定、後続ではリセットしない」（旧 Rust 1:1）。
+	// 「最初の event で deadline 設定、後続ではリセットしない」。
 	// flushTimer === null は「pending が空 or 直前 flush 完了」を意味する。
 	if (session.pending.size > 0 && session.flushTimer === null) {
 		session.flushTimer = setTimeout(() => flush(session), BATCH_DEADLINE_MS);
@@ -102,9 +102,9 @@ function startSession(webContents: WebContents, canonicalRoot: string, inputRoot
 	return session;
 }
 
-// window close / watcher:stop 共通の停止処理。pending は **捨てる**（旧 Rust の
-// stale event 防止と同じ判断 — explicit stop で前 workspace の遅延通知が次の
-// workspace に漏れる事故を防ぐ）。
+// window close / watcher:stop 共通の停止処理。pending は **捨てる**（stale event
+// 防止 — explicit stop で前 workspace の遅延通知が次の workspace に漏れる事故を
+// 防ぐ）。
 //
 // chokidar.close() は非同期で、close() 完了前に listener closure 経由で onFsEvent が
 // 走り得る。stopped フラグを **synchronous に** 立てることで、close 完了を待たずとも

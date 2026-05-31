@@ -1,7 +1,7 @@
 import type { OgpData } from "../../../src/types/ogp";
 
-// 旧 Tauri 版 src-tauri/src/commands/ogp.rs の `parse_ogp` / `extract_og_meta` /
-// `extract_title_tag` / `decode_html_entities` を 1:1 で TS に移植したパーサ。
+// `parse_ogp` / `extract_og_meta` / `extract_title_tag` / `decode_html_entities`
+// から成る OGP パーサ。
 // 正規表現ではなく `<` 区切り → `meta` 接頭辞 → 属性抽出 という線形 scan で
 // HTML パースの fragility を回避する（全角 / 改行混入 / 属性順 不問）。
 //
@@ -9,13 +9,13 @@ import type { OgpData } from "../../../src/types/ogp";
 // - cheerio / parse5 等の DOM パーサは依存サイズが大きい
 // - Stage 5 の OGP 抽出は title / description / image / site_name の 4 タグに限定で、
 //   正規表現は属性順や改行で簡単に壊れる
-// - 旧 Rust の線形 scan が本番運用で実績があり、port のリスクが最小
+// - 線形 scan は実績があり、フォールトの少ない実装に保てる
 // - cheerio 等を導入する場合は `denyOnly` sandbox 制約でインストール時に
 //   `.idea` / `.gitmodules` などのテストフィクスチャ作成が阻まれる問題もあった
 
 export function decodeHtmlEntities(s: string): string {
 	// `&amp;` を最後にデコードする。先にやると `&amp;lt;` → `&lt;` → `<` のように
-	// 二重デコードが起こる。Rust 版と同じ順序。
+	// 二重デコードが起こる。
 	return s
 		.replaceAll("&lt;", "<")
 		.replaceAll("&gt;", ">")
@@ -138,8 +138,8 @@ function extractTitleTag(html: string): string | null {
 }
 
 // og:* property 名と OgpData のキーの対応。new property を増やすときはここに 1 行
-// 追加するだけ。重複 og:* タグが現れた場合は **最初の出現** を採用する（旧 Rust
-// `extract_og_meta` と同じ semantics）。
+// 追加するだけ。重複 og:* タグが現れた場合は **最初の出現** を採用する
+// （`extract_og_meta` の semantics）。
 const OG_PROPERTY_KEYS = {
 	"og:title": "title",
 	"og:description": "description",

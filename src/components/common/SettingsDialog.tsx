@@ -126,7 +126,7 @@ function WorkspaceSection({
 			if (creatingPaths.has(file.path)) return;
 			setCreatingPaths((prev) => new Set(prev).add(file.path));
 			try {
-				// writeNewFile は Rust 側で create_new(true) を使い、既存ファイルがあれば
+				// writeNewFile は main 側で排他的に新規作成し、既存ファイルがあれば
 				// 原子的に失敗する。TOCTOU レースなしで「上書きしない」を保証。
 				await writeNewFile(file.path, file.getContent());
 				setFiles((prev) => prev.map((f) => (f.path === file.path ? { ...f, exists: true } : f)));

@@ -9,8 +9,8 @@ const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navi
 
 const DRAG_THRESHOLD = 5;
 
-// Electron frameless window のドラッグ領域指定。Tauri の `data-tauri-drag-region` は
-// Electron では機能しないため、CSS `-webkit-app-region` で置き換える（型は src/types/css.d.ts）。
+// Electron frameless window のドラッグ領域指定。CSS `-webkit-app-region`
+// (WebkitAppRegion) でドラッグ可能領域を指定する（型は src/types/css.d.ts）。
 const DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "drag" };
 const NO_DRAG_REGION_STYLE: CSSProperties = { WebkitAppRegion: "no-drag" };
 

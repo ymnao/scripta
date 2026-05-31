@@ -100,7 +100,7 @@ vi.mock("../../hooks/useGitSync", () => ({
 
 // Capture the fs-change callback so tests can emit events.
 // preload 側で payload を剥がして配列を直接渡す実装になっているため、
-// 旧 Tauri の `{ payload }` 形式ではなく events 配列を直接渡す。
+// events 配列を直接渡す（`{ payload }` ラップはしない）。
 let fsChangeCallback: ((events: FsChangeEvent[]) => void) | null = null;
 
 function emitFsChange(events: FsChangeEvent[]) {

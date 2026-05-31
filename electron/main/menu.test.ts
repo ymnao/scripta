@@ -148,7 +148,7 @@ describe("buildMenuTemplate", () => {
 		const edit = tpl.find((t) => t.label === "Edit");
 		const items = (edit?.submenu as MenuItemConstructorOptions[] | undefined) ?? [];
 		const roles = new Set(items.map((i) => i.role));
-		// 旧 Tauri 1:1
+		// 標準の編集ロールが揃っていることを確認する
 		expect(roles.has("undo")).toBe(true);
 		expect(roles.has("redo")).toBe(true);
 		expect(roles.has("cut")).toBe(true);

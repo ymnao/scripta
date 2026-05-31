@@ -12,20 +12,18 @@ import {
 } from "../utils/git-validators";
 import { assertPathAllowed } from "../utils/path-guard";
 
-// 旧 Tauri 版 src-tauri/src/commands/git_sync.rs を simple-git ベースで 1:1 port。
+// git sync 操作を simple-git ベースで集約する IPC ハンドラ群。
 //
 // 設計の要点:
 // - すべての impl は冒頭で `assertPathAllowed(senderId, workspacePath)` を呼んで
 //   canonical を取得し、I/O はその canonical で実施する（fs.ts / search.ts と同方針）。
 // - simple-git の高水準 API（.commit / .pull / .push）は parsed result を返すが、
-//   旧 Rust は git の raw stdout を返していた。renderer 側 useGitSync.ts が
-//   stdout 文字列を parse する経路は無いが、エラーメッセージは旧版互換にしたい
-//   ため `git.raw([...])` を主軸に使う（特に `git show :2:path` には raw 必須）。
+//   git の raw stdout / stderr をそのまま renderer に流したいため `git.raw([...])`
+//   を主軸に使う（特に `git show :2:path` には raw 必須）。
 // - エラーメッセージは git stderr をそのまま renderer に流す（LC_ALL=C で英語固定 →
 //   src/lib/errors.ts の `/conflict/i` `/nothing to commit/i` 等のパターンが機能する）。
 
 // `git status --porcelain` の prefix で conflict（unmerged stage）を判定する。
-// 旧 Rust commands/git_sync.rs と同集合。
 const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD "]);
 
 async function checkAvailableImpl(): Promise<boolean> {
@@ -94,11 +92,10 @@ async function commitImpl(senderId: number, path: string, message: string): Prom
 	} catch (e) {
 		throw new Error(extractGitErrorMessage(e));
 	}
-	// 旧 Rust は非ゼロ exit を必ずエラー扱いだったが、simple-git は stderr が
-	// 空だと success 扱いする（git commit が "nothing to commit" を stdout に
-	// 出すケース）。renderer 側 useGitSync.ts は msg.includes("nothing to commit")
-	// でハンドリングしているので、明示的に throw して旧 Tauri の Err 経路を
-	// 再現する。
+	// simple-git は stderr が空だと success 扱いする（git commit が
+	// "nothing to commit" を stdout に出すケース）。renderer 側 useGitSync.ts は
+	// msg.includes("nothing to commit") でハンドリングしているので、明示的に
+	// throw してエラー経路に載せる。
 	if (/nothing (?:to commit|added to commit)/i.test(out)) {
 		throw new Error(out);
 	}
@@ -115,7 +112,7 @@ async function pullImpl(senderId: number, path: string, syncMethod: string): Pro
 		return (await createGit(canonical).raw(args)).trim();
 	} catch (e) {
 		const msg = extractGitErrorMessage(e);
-		// 初回 pull で upstream 未設定 → 旧 Rust と同じく成功扱い（空文字列を返す）。
+		// 初回 pull で upstream 未設定 → 成功扱い（空文字列を返す）。
 		if (msg.includes("no tracking information")) return "";
 		throw new Error(msg);
 	}
@@ -174,7 +171,7 @@ async function getConflictContentImpl(
 	const git = createGit(canonical);
 	const fetchStage = async (n: 2 | 3, label: "ours" | "theirs"): Promise<string> => {
 		try {
-			// 旧 Rust と同じく `--` を付けない（git show は stage ref を pathspec
+			// `--` を付けない（git show は stage ref を pathspec
 			// と誤解しないため）。simple-git の高水準 .show() は内部で `--` を付ける
 			// 可能性があるため raw を使う。
 			const c = await git.raw(["show", `:${n}:${filePath}`]);
@@ -219,9 +216,9 @@ async function resolveConflictImpl(
 		}
 		return;
 	}
-	// modify — 旧 Rust safe_write_in_repo を 1:1 で port。
+	// modify — repo 内への安全な書き込み。
 	const target = pathResolve(canonical, filePath);
-	// file_path 自身が symlink の場合は拒否（旧 Rust と同方針：別ファイルへの surprise write を防ぐ）。
+	// file_path 自身が symlink の場合は拒否（別ファイルへの surprise write を防ぐ）。
 	// lstat は symlink 自身を検査するため、canonical 化前の target に対して実行する必要がある。
 	try {
 		const st = await fsp.lstat(target);
@@ -257,7 +254,7 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 			() => false,
 		);
 	// 3 つの marker file の存在チェックは独立なので並列で。3 stat → 1 往復。
-	// 判定は rebase 系を merge より優先（旧 Rust と同じ）。
+	// 判定は rebase 系を merge より優先。
 	const [rebaseMerge, rebaseApply, mergeHead] = await Promise.all([
 		exists("rebase-merge"),
 		exists("rebase-apply"),
@@ -309,7 +306,7 @@ async function getLastCommitTimeImpl(senderId: number, path: string): Promise<st
 		const out = (await createGit(canonical).raw(["log", "-1", "--format=%ci"])).trim();
 		return out.length > 0 ? out : null;
 	} catch {
-		// 空 repo（HEAD が無い）等は null。旧 Rust と同方針。
+		// 空 repo（HEAD が無い）等は null。
 		return null;
 	}
 }

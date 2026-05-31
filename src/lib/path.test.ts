@@ -41,7 +41,7 @@ describe("dirname", () => {
 
 	it("uses first-found separator for mixed paths", () => {
 		// getSep picks '\' (first match), so lastIndexOf('\') stops at 'C:\'
-		// Mixed separators don't occur in practice (Tauri uses consistent separators)
+		// Mixed separators don't occur in practice (paths use consistent separators)
 		expect(dirname("C:\\Users/docs/file.md")).toBe("C:\\");
 	});
 });

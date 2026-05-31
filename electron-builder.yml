@@ -1,4 +1,4 @@
-# 旧 Tauri 版と bundle ID を揃える (com.scripta.app: macOS bundle ID / Windows
+# bundle ID (com.scripta.app: macOS bundle ID / Windows
 # レジストリ / Windows AUMID 用)。userData ディレクトリ名 (= app.getName) の
 # 継続は別途 electron/main/index.ts の app.setName("scripta") で行う。
 appId: com.scripta.app

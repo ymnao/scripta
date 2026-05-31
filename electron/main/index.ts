@@ -13,7 +13,7 @@ import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
-// 旧 Tauri 版の `asset://localhost/<path>` 相当を提供するローカル画像配信用スキーム。
+// ローカル画像配信用スキーム。
 // CSP `img-src` に許可するのは本スキームだけで、`file:` は許可しない。これによりファイル
 // アクセスは必ず `protocol.handle` のハンドラ → path-guard を経由する（任意 file 読み取り
 // 防止）。`registerSchemesAsPrivileged` は `app.ready` より前に呼ぶ必要がある（Electron）。
@@ -27,7 +27,7 @@ protocol.registerSchemesAsPrivileged([
 
 // Electron は app.getPath("userData") を app.getName() (= packaged package.json
 // の name / productName) ベースで解決する。本リポジトリの package.json:name は
-// "scripta-next" のままだが、旧 Tauri 版 (productName = "scripta") の userData
+// "scripta-next" のままだが、既存の配布済みアプリ (productName = "scripta") の userData
 // ディレクトリ (~/Library/Application Support/scripta 等) を継続利用するため、
 // app.whenReady() で userData が確定する前に明示上書きする。
 //
@@ -93,7 +93,7 @@ function isAllowedRendererUrl(url: string): boolean {
 interface CreateWindowOptions {
 	// メニューの "New Window" から呼ばれる場合は state 復元せずデフォルト bounds で開き、
 	// renderer 側 AppLayout に `?newWindow=true` を伝えて workspace 復元を抑止する。
-	// （旧 Tauri 版が同じ挙動。`AppLayout.tsx` の `isNewWindow` 分岐を参照）
+	// （`AppLayout.tsx` の `isNewWindow` 分岐を参照）
 	newWindow?: boolean;
 }
 

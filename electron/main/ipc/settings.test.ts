@@ -115,7 +115,7 @@ describe("getValue / setValue / deleteValue", () => {
 		expect("k" in load(store)).toBe(true);
 	});
 
-	it("getValue normalizes a stored undefined to null (旧 Tauri Option<Value> 互換)", () => {
+	it("getValue normalizes a stored undefined to null", () => {
 		const store = createStore(storePath);
 		setValue(store, "k", undefined);
 		// own property は存在するが、IPC で undefined を直接返さず null に寄せる
