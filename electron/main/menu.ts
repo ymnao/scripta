@@ -1,8 +1,8 @@
 import { is } from "@electron-toolkit/utils";
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 
-// 旧 Tauri 版 (`src-tauri/src/lib.rs::setup_menu`) と等価のメニュー項目を Electron で
-// 再構築する。renderer 側 AppLayout は既に preload 経由で
+// アプリケーションメニュー項目を Electron で
+// 構築する。renderer 側 AppLayout は既に preload 経由で
 // `onMenuEvent("open-settings" | "open-help" | "export")` を購読しているため、
 // menu の click ハンドラはフォーカス中の webContents へ `menu:<name>` を送るだけ。
 //
@@ -15,9 +15,9 @@ export interface MenuHandlers {
 	newWindow: () => void;
 }
 
-// 旧 Tauri は `is_focused()` の中から該当 window だけに emit していた。Electron の
+// menu click 時に発火元 window だけへ emit する。
 // `BrowserWindow.getFocusedWindow()` は menu click 時に発火元 window を返すため
-// 同じ意図を達成できる。focus 中の window が無い瞬間（未起動 / アクティベート前）は
+// これを利用する。focus 中の window が無い瞬間（未起動 / アクティベート前）は
 // 全 window のうち最初の生存 window にフォールバックする — broadcasting すると
 // conflict-resolver サブウィンドウが open-help などを誤って受け取ってしまう。
 function sendMenuEvent(name: MenuEventName): void {
@@ -36,7 +36,7 @@ export function buildMenuTemplate(handlers: MenuHandlers): MenuItemConstructorOp
 	const appSubmenu: MenuItemConstructorOptions[] = [
 		{ role: "about" },
 		{ type: "separator" },
-		// Settings... は accelerator Cmd+, を旧 Tauri から踏襲。renderer の Cmd+,
+		// Settings... は accelerator Cmd+, を割り当てる。renderer の Cmd+,
 		// ハンドラは存在しないため accelerator が menu 側だけで消費されても影響なし。
 		{
 			label: "Settings...",
@@ -80,7 +80,7 @@ export function buildMenuTemplate(handlers: MenuHandlers): MenuItemConstructorOp
 		{ role: "selectAll" },
 	];
 
-	// 旧 Tauri は View メニューを持たないが、Electron で View を完全に外すと
+	// View メニューを完全に外すと
 	// Cmd+Shift+I (DevTools) / F11 (fullscreen) などの組み込みショートカットが効かなくなる。
 	// dev では DevTools / reload を追加し、prod では zoom / fullscreen のみ提示する。
 	const viewBase: MenuItemConstructorOptions[] = [

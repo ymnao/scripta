@@ -10,7 +10,7 @@ import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
 // 2 つの基底パスを並走させる（fs.ts/listDirectoryImpl と同じ方針）。
 // `.` で始まるエントリ（ファイル / ディレクトリ）は早期に skip して、隠しディレクトリの
-// 中身を readdir しないようにする（旧 Rust collect_md_files の挙動 1:1）。
+// 中身を readdir しないようにする。
 type MdFiles = { io: string[]; input: string[] };
 
 async function walkMdFiles(ioDir: string, inputDir: string, out: MdFiles): Promise<void> {
@@ -41,7 +41,6 @@ async function collectMdFilesForWorkspace(
 }
 
 // 各 query char が target に **順序どおり** 含まれるかを判定する fuzzy match。
-// 旧 Rust fuzzy_match (search.rs L159-175) と 1:1 互換。
 export function fuzzyMatch(query: string, target: string): boolean {
 	const q = query.toLowerCase();
 	const t = target.toLowerCase();
@@ -101,8 +100,8 @@ export function cancelWikilinkScanForWindow(windowId: number): void {
 	bumpGeneration(wikilinkGeneration, windowId);
 }
 
-// 旧 Rust src-tauri/src/commands/search.rs の search_files を 1:1 ポート。
-// JS の String は UTF-16 code unit indexed なので、旧 Rust の「byte → UTF-16 変換段」
+// 全文検索の実装。
+// JS の String は UTF-16 code unit indexed なので、「byte → UTF-16 変換段」
 // は不要。case-insensitive 時のみ buildLowerToOrigUtf16Map で
 // `lineLower` 上の position を `line` 上の position に逆引きする。
 async function searchFilesImpl(
@@ -121,7 +120,7 @@ async function searchFilesImpl(
 
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];
-	// input-base で byte 比較 sort（旧 Rust md_files.sort() 互換）。io はインデックス連動。
+	// input-base で byte 比較 sort（lexicographic byte compare）。io はインデックス連動。
 	const order = io
 		.map((_, i) => i)
 		.sort((a, b) => (input[a] < input[b] ? -1 : input[a] > input[b] ? 1 : 0));
@@ -139,7 +138,7 @@ async function searchFilesImpl(
 		try {
 			content = await fsp.readFile(ioPath, "utf8");
 		} catch {
-			continue; // 旧 Rust: read_to_string Err → continue
+			continue; // 読み取り失敗ファイルは skip
 		}
 		// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 		const lines = content.split(/\r?\n/);
@@ -161,7 +160,7 @@ async function searchFilesImpl(
 					matchStart,
 					matchEnd,
 				});
-				pos = lowerEnd; // 旧 Rust: search_start = lower_byte_end と同等
+				pos = lowerEnd; // 次の検索開始位置を match 末尾へ進める
 			}
 		}
 	}
@@ -174,21 +173,21 @@ async function searchFilenamesImpl(
 	query: string,
 ): Promise<string[]> {
 	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath);
-	// byte 比較（旧 Rust の Vec<String>::sort = lexicographic byte compare 互換）。
+	// byte 比較（lexicographic byte compare）。
 	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
 	input.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 	if (query === "") return input;
 	return input.filter((p) => fuzzyMatch(query, basename(p)));
 }
 
-// path traversal 文字を含むページ名を弾く（旧 Rust is_path_traversal L222-227 互換）。
-// `..something` のような正当な名前も弾く点まで一致させる（旧 Rust の `contains("..")`）。
+// path traversal 文字を含むページ名を弾く。
+// `..something` のような正当な名前も弾く（`contains("..")` 相当）。
 export function isPathTraversal(name: string): boolean {
 	return name.includes("/") || name.includes("\\") || name === "." || name.includes("..");
 }
 
 // 1 行から `[[inner]]` を順次抽出する。empty inner（`[[]]`）はスキップ。
-// byteOffset は `[[` 開始位置の **1-based UTF-8 byte 位置**（旧 Rust 互換、unique key 用）。
+// byteOffset は `[[` 開始位置の **1-based UTF-8 byte 位置**（unique key 用）。
 export function* extractWikilinks(line: string): Generator<{ inner: string; byteOffset: number }> {
 	let i = 0;
 	while (true) {
@@ -270,7 +269,7 @@ async function scanUnresolvedWikilinksImpl(
 	for (const [pageName, references] of map) {
 		result.push({ pageName, references });
 	}
-	// pageName の byte 比較で昇順（旧 Rust String::cmp と整合）。
+	// pageName の byte 比較で昇順。
 	result.sort((a, b) => (a.pageName < b.pageName ? -1 : a.pageName > b.pageName ? 1 : 0));
 	return result;
 }

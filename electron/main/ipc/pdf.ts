@@ -7,9 +7,8 @@ import writeFileAtomic from "write-file-atomic";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
-// 旧 Tauri 版 src-tauri/src/commands/export.rs を Electron `webContents.printToPDF` に
-// 置き換える。Tauri 版は macOS / Windows それぞれ AppKit / WebView2 native API で
-// PDF を生成していたが、Electron は Chromium の printToPDF で OS 依存なし。
+// Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
+// native API は使わない。
 //
 // セキュリティ:
 // - outputPath は `assertWritePathAllowed(senderId, outputPath)` で検証する。
@@ -17,7 +16,7 @@ import { isGlobalIp } from "../utils/ssrf-guard";
 //   許可される（registerTransientWritePath / consumeTransientWritePath）。
 // - 隠し BrowserWindow は **専用 partition** で作る。main session には CSP ヘッダを
 //   inject する webRequest hook が登録されているため、PDF 用 HTML 内の
-//   `<script>` タグ（旧版の動的ページブレーク等）が strip されないようにする。
+//   `<script>` タグ（動的ページブレーク等）が strip されないようにする。
 // - 専用 partition の session には webRequest フィルタを 1 度だけ登録し、
 //   PDF レンダリング中の **subresource fetch を SSRF-safe に制限** する:
 //   - `http:` は完全遮断（スキーム allowlist で `https:` / `data:` / `file:` のみ）
@@ -38,7 +37,7 @@ import { isGlobalIp } from "../utils/ssrf-guard";
 const PDF_PARTITION = "scripta-pdf-export";
 // **export 全体** の上限。loadFile / fonts.ready / printToPDF を 1 つの予算で見て、
 // 「重いが正常な文書」を誤 timeout させず、「load 後にハング」を永遠に待たない。
-// 旧 Tauri 版 commands/export.rs と同じ 5 分（PDF_EXPORT_TIMEOUT_SECS=300）を採用。
+// export 全体に 5 分（300s）の予算を割り当てる。
 const PDF_EXPORT_TIMEOUT_MS = 300_000;
 const POST_LOAD_IDLE_MS = 100;
 
@@ -107,7 +106,7 @@ function installPdfWebRequestFilter(): void {
 	pdfWebRequestFilterInstalled = true;
 }
 
-// A4 サイズ + 20mm マージン（旧 Rust impl と同値）。Electron の printToPDF は
+// A4 サイズ + 20mm マージン。Electron の printToPDF は
 // margins を inches で要求するため mm から換算する（1 inch = 25.4 mm）。
 const PDF_MARGIN_MM = 20;
 const PDF_MARGIN_INCHES = PDF_MARGIN_MM / 25.4;
@@ -161,7 +160,7 @@ export async function exportPdfImpl(
 		// 「load → fonts.ready → idle → printToPDF」の各段に **個別の** タイムアウトを
 		// 持たせると、重いが正常な文書を early-timeout してしまう一方で「load 後に
 		// 固まる」ケースは無期限に待つという非対称な失敗モードになる。export 全体に
-		// 1 個の予算（PDF_EXPORT_TIMEOUT_MS = 300s、旧 Tauri 版と同じ）をかける。
+		// 1 個の予算（PDF_EXPORT_TIMEOUT_MS = 300s）をかける。
 		const exportWork = (async (): Promise<Buffer> => {
 			await w.loadFile(tmpHtmlPath);
 			// KaTeX 等のカスタムフォントが load 完了するのを待つ。document.fonts API が

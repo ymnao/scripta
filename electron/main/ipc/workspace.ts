@@ -44,7 +44,7 @@ export function isWorkspacePathApproved(rawPath: string): boolean {
 const windowWorkspaces = new Map<number, string>();
 
 // New Window (Cmd+Shift+N) で開かれた補助ウィンドウは「workspace を永続化しない」
-// 仕様（旧 Tauri / `AppLayout.tsx::isNewWindow` 参照）。renderer 側で startup の
+// 仕様（`AppLayout.tsx::isNewWindow` 参照）。renderer 側で startup の
 // 復元を抑止するだけでは、補助ウィンドウから picker で別フォルダを開いた瞬間に
 // `workspace:set` → `persistWorkspacePath` まで走り、メイン側 settings.json の
 // 既定 workspace を上書きしてしまう。

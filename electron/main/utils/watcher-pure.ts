@@ -19,7 +19,7 @@ export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolea
 	return false;
 }
 
-// 新しい event kind を pending Map にマージする。状態遷移ルール（旧 Rust 1:1）：
+// 新しい event kind を pending Map にマージする。状態遷移ルール：
 //   - create + modify → keep create（modification は creation の一部）
 //   - create + delete → エントリ削除（net no-op）
 //   - delete + create → modify（再作成）
@@ -39,12 +39,10 @@ export function mergeEventKind(pending: Map<string, FsKind>, path: string, kind:
 }
 
 // pending の "modify" を、対象パスが存在しなければ "delete" に昇格する。
-// macOS FSEvents は削除を modify として誤分類することがあるための救済（旧 Rust の
-// reclassify_deleted と同じ挙動）。
+// macOS FSEvents は削除を modify として誤分類することがあるための救済。
 //
 // TOCTOU について：exists() チェック後にファイルが再生成されると "delete" が誤って
 // 残るが、後続 batch の merge_event_kind で "delete + create → modify" に収束する。
-// 旧 Rust と同じ判断（コメント L148-152 参照）。
 export function reclassifyDeleted(
 	pending: Map<string, FsKind>,
 	exists: (p: string) => boolean = existsSync,

@@ -1,5 +1,4 @@
-// 旧 Tauri 版 src-tauri/src/commands/updater.rs が使う `semver` crate の最小サブセットを
-// stdlib のみで実装する。Stage 5 の用途は GitHub Releases の tag_name と
+// SemVer の最小サブセットを stdlib のみで実装する。Stage 5 の用途は GitHub Releases の tag_name と
 // アプリの currentVersion 比較のみで、SemVer 2.0.0 の以下を満たせば十分:
 // - "x.y.z" 必須
 // - 任意の "-pre.identifiers" prerelease
@@ -19,7 +18,7 @@ export function parseSemver(v: string): ParsedVersion {
 		throw new Error(`Invalid version '${v}'`);
 	}
 	// build metadata は比較に使わない（SemVer §10）が、文字種・空要素のバリデーションは
-	// 行う。`+???` のような不正値を有効として扱うと旧 Rust `semver` crate と挙動がズレる。
+	// 行う。`+???` のような不正値を有効として扱うと SemVer 仕様からズレる。
 	const buildIdx = v.indexOf("+");
 	const noBuild = buildIdx >= 0 ? v.slice(0, buildIdx) : v;
 	if (buildIdx >= 0) {
@@ -48,7 +47,7 @@ export function parseSemver(v: string): ParsedVersion {
 			throw new Error(`Invalid version '${v}'`);
 		}
 		// SemVer §2: numeric identifier (major / minor / patch) は leading zero 禁止。
-		// "0" はそのまま OK だが "01" "00" は invalid（旧 Rust `semver` crate と挙動を揃える）。
+		// "0" はそのまま OK だが "01" "00" は invalid（SemVer 仕様に従う）。
 		if (part.length > 1 && part.startsWith("0")) {
 			throw new Error(`Invalid version '${v}'`);
 		}

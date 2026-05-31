@@ -4,7 +4,7 @@ import { canonicalize, isPathAllowed } from "../utils/path-guard";
 import { attachWindowLifecycle } from "../utils/window-lifecycle";
 import { setActiveWorkspaceForWindow } from "./workspace";
 
-// 旧 Tauri 版 `WebviewWindow.getByLabel("conflict-resolver")` 互換の単一
+// conflict-resolver ウィンドウの単一
 // インスタンス管理。canonical な workspace path をキーにして同じ workspace の
 // 重複生成を防ぐ。複数 workspace を別 window で開く将来の経路にも自然対応。
 const conflictWindows = new Map<string, BrowserWindow>();
@@ -43,7 +43,7 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		// drag region / タブストリップを持たないため trafficLightPosition は設定せず
 		// macOS デフォルトに任せる（main window 用の調整値を流用しない）。
 		titleBarStyle: "hiddenInset",
-		// `parent` を指定すると親 close で子も追従して close（旧 Tauri と同じ挙動）。
+		// `parent` を指定すると親 close で子も追従して close。
 		parent,
 		modal: false,
 		webPreferences: {

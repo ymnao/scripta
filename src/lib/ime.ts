@@ -1,7 +1,7 @@
 /**
  * IME（入力メソッド）コンポジション中のキーイベントかどうかを判定する。
  *
- * Safari/WebKit では compositionend が keydown より先に発火するため
+ * compositionend が keydown より先に発火するブラウザでは
  * isComposing だけでは判定できない。keyCode 229（IME 処理済み）との
  * 二重チェックで全ブラウザに対応する。
  *

@@ -17,7 +17,7 @@ function applyTheme(theme: Theme) {
 		document.documentElement.classList.toggle("dark", theme === "dark");
 	}
 	// Mirror to localStorage for synchronous access in theme-init.js (FOUC prevention).
-	// The canonical store is tauri-plugin-store; localStorage is a sync cache only.
+	// The canonical store is the main-process settings store; localStorage is a sync cache only.
 	try {
 		localStorage.setItem("scripta-theme", theme);
 	} catch {

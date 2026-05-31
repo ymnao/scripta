@@ -1,12 +1,12 @@
 import { isAbsolute } from "node:path";
 
-// 旧 Tauri 版 src-tauri/src/commands/git_sync.rs の validator / 定数を 1:1 で port。
+// git 操作向けの validator / 定数を集約。
 // validateRelativePath / validateRefName は git の path / ref インジェクションを防ぎ、
 // isStageNotFound は modify/delete conflict で stage 2 or 3 が無いケースの fallback 判定。
 
 export const MAX_CONFLICT_CONTENT_SIZE = 10 * 1024 * 1024;
 
-// 相対パス文字列を検証する（旧 Rust validate_relative_path 互換）。
+// 相対パス文字列を検証する。
 // path traversal / NUL byte / 制御文字 / 絶対パスを拒否。
 export function validateRelativePath(filePath: string): void {
 	if (typeof filePath !== "string" || filePath.length === 0) {
@@ -30,8 +30,8 @@ export function validateRelativePath(filePath: string): void {
 	}
 }
 
-// git ref（branch / remote 名）を検証する（旧 Rust validate_ref_name 互換）。
-// 旧 Rust と git-check-ref-format の組み合わせに合わせて defensive に弾く。
+// git ref（branch / remote 名）を検証する。
+// git-check-ref-format に準じて defensive に弾く。
 export function validateRefName(name: string): void {
 	if (typeof name !== "string" || name.length === 0) {
 		throw new Error("Invalid ref name: empty");
@@ -57,7 +57,7 @@ export function validateRefName(name: string): void {
 }
 
 // `git show :2:path` / `:3:path` で stage が存在しない場合（modify/delete conflict）の
-// stderr パターン判定。旧 Rust is_stage_not_found 互換。
+// stderr パターン判定。
 // 該当パターンに当たれば呼び出し元は空文字列で fallback する。
 export function isStageNotFound(stderr: string): boolean {
 	return (

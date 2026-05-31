@@ -5,7 +5,7 @@ import { httpFetch } from "../utils/http-fetch";
 import { parseOgp } from "../utils/ogp-parser";
 import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
 
-// 旧 Tauri 版 src-tauri/src/commands/ogp.rs `fetch_ogp` を Node stdlib に移植。
+// OGP メタデータを取得する（`fetch_ogp`）。
 // SSRF 防御は redirect 1 hop ごとに `pinSafeLookup` で hostname を 1 度だけ解決し、
 // 解決済み IP を pin して http(s).request の `lookup` フックに渡す。これにより:
 //   - DNS 名: 1 回の dns.lookup → isGlobalIp 検証 → 以後の connect は pin された IP
