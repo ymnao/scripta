@@ -23,6 +23,7 @@
 	"include": [
 		"e2e",
 		"playwright.config.ts",
+		"playwright.electron.config.ts",
 		"vite.config.e2e.ts",
 		"src/types",
 		"electron/preload/api.ts"

@@ -88,6 +88,38 @@ jobs:
             test-results/
           retention-days: 7
 
+  # 実 Electron 起動 e2e (#33 / #82 C, Phase 1 PR-3)。renderer-only の `e2e` job とは
+  # 別 job に分離する (設計判断: 起動オーバーヘッドの隔離 + 失敗の切り分け容易化)。
+  # `test:e2e:electron` script が `electron-vite build` で `out/` 成果物を生成し、
+  # `_electron.launch` で実 main + preload + 実 IPC を起動する。Linux runner は GUI が
+  # 無いため xvfb-run でヘッドレス display を与える。Electron バイナリは setup-node-pnpm
+  # の postinstall で取得済み (script 頭の install.js は idempotent な再確認)。
+  electron-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      # Electron の共有ライブラリ依存 (libnss3 / libgbm 等) と xvfb を導入する。
+      # Playwright の install-deps は Chromium 系と同じ apt 依存を入れるため流用できる
+      # (Chromium ブラウザバイナリ自体は不要 — _electron はプロジェクトの electron を使う)。
+      - name: Install Electron system deps (xvfb 含む)
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Run electron e2e under xvfb
+        run: xvfb-run -a pnpm test:e2e:electron
+
+      - name: Upload electron Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-electron
+          path: |
+            playwright-report-electron/
+            test-results/
+          retention-days: 7
+
   build:
     runs-on: ubuntu-latest
     steps:

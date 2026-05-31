@@ -67,8 +67,11 @@ pnpm typecheck
 # ユニットテスト
 pnpm test
 
-# e2e テスト（Playwright）
+# e2e テスト（Playwright, renderer-only モード）
 pnpm test:e2e
+
+# e2e テスト（Playwright, 実 Electron 起動モード — build 成果物を _electron.launch）
+pnpm test:e2e:electron
 ```
 
 ### electron 42 への対応
@@ -117,7 +120,8 @@ scripta-next/
 │   └── types/                      # 型定義
 │
 ├── docs/                           # 仕様書・実装計画
-├── e2e/                            # Playwright e2e テスト（renderer-only モード）
+├── e2e/                            # Playwright e2e（renderer-only モード）
+│   └── electron/                   # 実 Electron 起動 e2e（_electron.launch, build 成果物）
 ├── electron-builder.yml            # 配布用ビルド設定
 ├── package.json
 ├── pnpm-workspace.yaml             # pnpm 11 設定（セキュリティ既定値 + overrides + patches）
@@ -200,8 +204,10 @@ scripta-next/
 
 - フロントエンドのユニットテストは Vitest を使用
 - main プロセスのロジックも Vitest でカバーする（IPC ハンドラはピュア関数として切り出してテストする）
-- e2e テストは Playwright を使用（**現状は renderer-only モード** — Vite dev server を起動し `e2e/helpers/electron-api-mock.ts` で `window.api` を注入する構成。実 Electron / 実 main プロセスは起動せず、実 IPC payload のシリアライズ / contextBridge / preload の実装ミスは検出しない。実 Electron 起動の `_electron` API ベース e2e は v1.0.0 昇格条件として将来追加予定、`docs/parity-checklist.md` § 13 項目 5 参照）
-- **コミット前に必ずユニットテストと e2e テストの両方を実行すること**
+- e2e テストは Playwright を使用。**2 モード並行運用**（#33 / #82 C, Phase 1 PR-3 で確立）:
+  - **renderer-only モード**（`e2e/*.spec.ts`, `playwright.config.ts`, `pnpm test:e2e`）— Vite dev server を起動し `e2e/helpers/electron-api-mock.ts` で `window.api` を注入。高速だが実 Electron / 実 main は起動せず、実 IPC payload のシリアライズ / contextBridge / preload の実装ミスは検出しない。UI ロジックの大半はこちらでカバー
+  - **実 Electron 起動モード**（`e2e/electron/*.electron.spec.ts`, `playwright.electron.config.ts`, `pnpm test:e2e:electron`）— `electron-vite build` の成果物 (`out/main/index.js`) を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。起動毎に temp userData を切り (`--user-data-dir`)、設定永続化 / Settings migration / asset protocol / マルチウィンドウ等、mock では踏めない main 境界を safety net 化する。Tauri purge (Phase 2-5) の前後で現挙動を固定する目的（ヘルパーは `e2e/electron/helpers/`、CI は `electron-e2e` job で xvfb-run 実行）
+- **コミット前に必ずユニットテストと e2e テストの両方を実行すること**（実 Electron モードは `pnpm test:e2e:electron` を別途実行）
 
 ```bash
 # コミット前の検証 (format / lint / typecheck / typecheck:e2e / unit / e2e / build)

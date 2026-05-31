@@ -34,6 +34,7 @@ test-files/
 # Playwright
 test-results/
 playwright-report/
+playwright-report-electron/
 playwright/.cache/
 
 # Logs

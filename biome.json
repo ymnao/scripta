@@ -44,7 +44,20 @@
 			"!**/release",
 			"!**/.claude",
 			"!**/test-results",
-			"!**/playwright-report"
+			"!**/playwright-report",
+			"!**/playwright-report-electron"
 		]
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["e2e/electron/helpers/launch.ts"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noEmptyPattern": "off"
+					}
+				}
+			}
+		}
+	]
 }

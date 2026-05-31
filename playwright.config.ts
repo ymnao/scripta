@@ -7,6 +7,10 @@ const PORT = 5174;
 
 export default defineConfig({
 	testDir: "./e2e",
+	// `e2e/electron/**` は実 Electron 起動モード（`playwright.electron.config.ts` が担当）。
+	// renderer-only の本 config が拾うと _electron fixture / webServer 前提が噛み合わず
+	// 失敗するため除外する。
+	testIgnore: "**/electron/**",
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
