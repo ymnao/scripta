@@ -89,7 +89,10 @@ describe("sanitizeMermaidSvg", () => {
 <text style="text-anchor: middle; font-size: 14px" x="300" y="50">Styled</text>
 </svg>`;
 		const result = sanitizeMermaidSvg(svg);
+		// 属性形式（1 つ目の <text>）— XMLSerializer の出力は安定
 		expect(result).toContain('text-anchor="middle"');
-		expect(result).toContain("text-anchor: middle");
+		// インラインスタイル形式（2 つ目の <text>）— DOMPurify / シリアライザの
+		// 空白正規化（`text-anchor:middle` 等）で壊れないよう宣言の存在を regex で検証
+		expect(result).toMatch(/text-anchor\s*:\s*middle/);
 	});
 });
