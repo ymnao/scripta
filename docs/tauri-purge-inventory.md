@@ -96,7 +96,7 @@
 | 旧 import | 旧用途 | 新 API | 備考 |
 |---|---|---|---|
 | `@tauri-apps/api/core::invoke` | Rust command 呼び出し | `window.api.<method>(…)` (`src/lib/commands.ts` ラッパー経由) | retry 層 (`withRetry`) は新版に引き継ぎ |
-| `@tauri-apps/api/core::convertFileSrc` | path → `tauri://localhost/<path>` URL 変換 | `window.api.convertFileSrc` → `buildScriptaAssetUrl()` (`scripta-asset://` scheme) | **Phase 3 で `buildAssetUrl` にリネーム** |
+| `@tauri-apps/api/core::convertFileSrc` | path → `tauri://localhost/<path>` URL 変換 | `window.api.buildAssetUrl` → `buildScriptaAssetUrl()` (`scripta-asset://` scheme) | **Phase 3 (PR-3-1) で `buildAssetUrl` にリネーム済み** |
 | `@tauri-apps/api/event::listen` | OS / Rust 発の event 受信 | `ipcRenderer.on(channel, …)` を preload で `subscribe<T>()` ラップ | `window.api.onFsChange` / `onWorkspaceReloadTree` / `onConflictResolved` / `onMenuEvent` / `onWindowCloseRequested` 経由 |
 | `@tauri-apps/api/event::emit` | window 間 event 送出 | `ipcRenderer.invoke("git:emit-conflict-resolved", …)` 経由で main が `webContents.send` で再配送 | `emitConflictResolved` ラッパー |
 | `@tauri-apps/api/window::getCurrentWindow` | 現在の window 取得 / close | `window.api.closeWindow()` | 単一 method 化で simpler |
@@ -185,7 +185,7 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 #### B-1. `convertFileSrc` API 名 (Tauri `@tauri-apps/api/core` 由来)
 
-新版でも同名関数として残存。`buildScriptaAssetUrl` を内部呼び出ししているだけなので、preload の API 名・ラッパー名を `buildAssetUrl` にリネームすれば波及は限定的。リネーム判断は Phase 3 で ADR 化 (ADR-0003 候補)。
+**✅ 完了 (Phase 3 PR-3-1)**。preload の API 名・renderer ラッパー名を `buildAssetUrl` にリネーム済み（内部 helper `buildScriptaAssetUrl` と命名を統一）。下表は rename **前** の残存箇所（baseline 記録）。プロトコル設計とリネームの根拠は scripta-asset protocol の ADR（Phase 3 PR-3-5 で起票）に記録。
 
 | ファイル | 行 | 内容 |
 |---|---|---|
@@ -199,7 +199,7 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 合計: **14 行 / 7 ファイル**
 
-**作業**: Phase 3 で `convertFileSrc` → `buildAssetUrl` 一括リネーム。`scripta-asset-url.ts:1` のコメントとテスト名 (`"converts Unix absolute path via convertFileSrc"` 等) も書き換え対象。
+**作業**: ✅ PR-3-1 で `convertFileSrc` → `buildAssetUrl` 一括リネーム完了。`scripta-asset-url.ts:1` のコメントとテスト名 (`"converts Unix absolute path via convertFileSrc"` 等) も書き換え済み。コード全体で `convertFileSrc` は 0 hit（CI ガード FORBIDDEN には再導入防止として残置）。
 
 ### 2.5 C: ドキュメンタリーコメント (完全削除) — Phase 3 担当
 

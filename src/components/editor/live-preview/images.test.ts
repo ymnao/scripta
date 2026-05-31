@@ -3,9 +3,9 @@ import { buildScriptaAssetUrl } from "../../../../electron/preload/scripta-asset
 import { parentDir, resolveImageSrc } from "./images";
 
 vi.mock("../../../lib/commands", () => ({
-	// production と同一ロジックでモックする。preload の `convertFileSrc` も同じ helper を
+	// production と同一ロジックでモックする。preload の `buildAssetUrl` も同じ helper を
 	// 呼んでおり、ここで挙動を分岐させる理由はない（mock がドリフトしてバグを隠す事故防止）。
-	convertFileSrc: (path: string) => buildScriptaAssetUrl(path),
+	buildAssetUrl: (path: string) => buildScriptaAssetUrl(path),
 }));
 
 vi.mock("../../../stores/workspace", () => ({
@@ -59,7 +59,7 @@ describe("resolveImageSrc", () => {
 		);
 	});
 
-	it("converts Unix absolute path via convertFileSrc", () => {
+	it("converts Unix absolute path via buildAssetUrl", () => {
 		const result = resolveImageSrc("/home/user/img.png", null);
 		expect(result).toBe("scripta-asset://localhost/home/user/img.png");
 		// 旧実装は host が `localhostC` のような壊れた URL を生成していたため、
@@ -67,14 +67,14 @@ describe("resolveImageSrc", () => {
 		expect(new URL(result).hostname).toBe("localhost");
 	});
 
-	it("converts Windows absolute path (backslash) via convertFileSrc", () => {
+	it("converts Windows absolute path (backslash) via buildAssetUrl", () => {
 		const result = resolveImageSrc("C:\\Users\\img.png", null);
 		// 旧実装 `scripta-asset://localhostC:\\Users\\img.png` は new URL で Invalid URL。
 		expect(new URL(result).hostname).toBe("localhost");
 		expect(result).toBe("scripta-asset://localhost/C%3A/Users/img.png");
 	});
 
-	it("converts Windows absolute path (forward slash) via convertFileSrc", () => {
+	it("converts Windows absolute path (forward slash) via buildAssetUrl", () => {
 		const result = resolveImageSrc("C:/Users/img.png", null);
 		expect(new URL(result).hostname).toBe("localhost");
 		expect(result).toBe("scripta-asset://localhost/C%3A/Users/img.png");

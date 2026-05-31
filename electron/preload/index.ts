@@ -37,7 +37,7 @@ const api: Api = Object.freeze({
 
 	openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
 	showInFolder: (path) => ipcRenderer.invoke("shell:show-in-folder", path),
-	convertFileSrc: (path) => buildScriptaAssetUrl(path),
+	buildAssetUrl: (path) => buildScriptaAssetUrl(path),
 
 	openDirectoryPicker: () => ipcRenderer.invoke("dialog:open-directory"),
 	showSaveDialog: (opts) => ipcRenderer.invoke("dialog:save", opts),

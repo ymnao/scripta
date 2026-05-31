@@ -1,4 +1,4 @@
-// preload の `convertFileSrc` と main の protocol handler、および各種テスト mock が
+// preload の `buildAssetUrl` と main の protocol handler、および各種テスト mock が
 // 同一ロジックで URL を組み立てる/分解するために、純粋関数として切り出している。
 // 本ファイルは electron / Node API いずれにも依存しないので preload / main / renderer
 // 側テストどこからでも import 可能。

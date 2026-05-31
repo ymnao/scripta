@@ -221,7 +221,7 @@
 
 | 旧 Tauri | 新 Electron |
 |---|---|
-| `convertFileSrc(path)` → `asset://localhost/<path>` | `convertFileSrc(path)` → `scripta-asset://localhost/<encoded path>`（per-segment `encodeURIComponent` + Windows `\` → `/` 正規化 + leading `/` 付与で `new URL()` パース可能を保証） |
+| `convertFileSrc(path)` → `asset://localhost/<path>` | `buildAssetUrl(path)` → `scripta-asset://localhost/<encoded path>`（per-segment `encodeURIComponent` + Windows `\` → `/` 正規化 + leading `/` 付与で `new URL()` パース可能を保証） |
 | CSP `img-src 'self' asset: https://asset.localhost https:` | CSP `img-src 'self' https: data: blob: scripta-asset:` |
 | Tauri が `asset:` プロトコルハンドラを内蔵 | `scripta-asset://` をカスタムプロトコルとして main 側で登録（`protocol.handle` + `net.fetch`） |
 
@@ -233,7 +233,7 @@
   - ハンドラは hostname=`localhost` を要求し、`urlPathnameToFsPath(url.pathname)` で OS path に戻してから（Windows 上のみ drive letter 形式の leading `/` を除去、POSIX では `/C:/...` も合法絶対パスとして保持）path-guard の process-wide チェック（`isPathWithinAnyAllowedRoot`）を通過した path のみ `net.fetch(pathToFileURL(path))` で配信
   - 失敗時はステータスのみ返し本文に path を含めない（情報漏洩防止）
 - `electron/preload/scripta-asset-url.ts`: `buildScriptaAssetUrl` / `urlPathnameToFsPath` を切り出し（preload・main・テスト mock すべての canonical な実装。drift 防止）
-- `electron/preload/index.ts`: `convertFileSrc: (path) => buildScriptaAssetUrl(path)`
+- `electron/preload/index.ts`: `buildAssetUrl: (path) => buildScriptaAssetUrl(path)`
 - `electron/main/utils/path-guard.ts`: `isPathWithinAnyAllowedRoot(p)` を追加（全 window の登録 root を union で見る。リクエスト元 webContents を特定できないプロトコルハンドラ専用）
 
 ### 信頼境界

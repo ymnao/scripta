@@ -328,7 +328,7 @@ function installApiMock(opts: {
 		},
 		// canonical: electron/preload/scripta-asset-url.ts の buildScriptaAssetUrl
 		// （addInitScript 制約で import 不可なのでロジックを 1:1 で複製）
-		convertFileSrc: (path: string): string => {
+		buildAssetUrl: (path: string): string => {
 			const normalized = path.replace(/\\/g, "/");
 			const withLeading = normalized.startsWith("/") ? normalized : `/${normalized}`;
 			const encoded = withLeading.split("/").map(encodeURIComponent).join("/");

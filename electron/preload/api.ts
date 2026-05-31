@@ -30,7 +30,7 @@ export type Api = Readonly<{
 
 	openExternal: (url: string) => Promise<void>;
 	showInFolder: (path: string) => Promise<void>;
-	convertFileSrc: (path: string) => string;
+	buildAssetUrl: (path: string) => string;
 
 	openDirectoryPicker: () => Promise<string | null>;
 	showSaveDialog: (opts: SaveDialogOptions) => Promise<string | null>;

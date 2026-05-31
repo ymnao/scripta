@@ -18,7 +18,7 @@ export function createApiMock(): Api {
 
 		openExternal: vi.fn(async () => {}),
 		showInFolder: vi.fn(async () => {}),
-		convertFileSrc: vi.fn((path: string) => buildScriptaAssetUrl(path)),
+		buildAssetUrl: vi.fn((path: string) => buildScriptaAssetUrl(path)),
 
 		openDirectoryPicker: vi.fn(async () => null),
 		showSaveDialog: vi.fn(async () => null),
