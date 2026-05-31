@@ -77,8 +77,10 @@ function collectRawCodeRanges(text: string): Array<[number, number]> {
 	// Merge fenced/indented/HTML ranges for binary search before scanning inline code.
 	const blockRanges = mergeRanges(ranges);
 
-	// Inline code spans: manually scan for backtick runs to avoid lookbehind
-	// which is unsupported in older WebKit engines used by some Tauri WebViews.
+	// Inline code spans: scan manually because a code span pairs an opening
+	// backtick run with a closing run of the *same length* (CommonMark), while
+	// skipping escaped backticks and runs inside the block ranges above. That
+	// run-length pairing can't be expressed as a single regex.
 	const textLen = text.length;
 	let i = 0;
 	while (i < textLen) {
