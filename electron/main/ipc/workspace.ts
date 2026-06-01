@@ -1,10 +1,10 @@
-import { ipcMain } from "electron";
 import {
 	canonicalize,
 	clearWorkspaceRootsForWindow,
 	registerWorkspaceRoot,
 	unregisterWorkspaceRoot,
 } from "../utils/path-guard";
+import { handle, StructuredError } from "../utils/structured-error";
 import { persistWorkspacePath } from "./settings";
 
 // renderer 経由で workspace:set を受け付ける際、main 側で「ユーザーが OS ネイティブ
@@ -84,13 +84,16 @@ export function unregisterWindow(webContentsId: number): void {
 }
 
 export function registerWorkspaceIpc(): void {
-	ipcMain.handle("workspace:set", async (event, path: string | null) => {
+	handle("workspace:set", async (event, path: string | null) => {
 		// renderer は任意 path を投げ得る。dialog 経由 / settings 経由で main が
 		// 承認した path 集合に無い場合は拒否し、信頼境界を main 側に閉じ込める。
 		// path === null（unregister）は常に許可。
 		if (path !== null && !isWorkspacePathApproved(path)) {
 			console.warn(`[workspace] rejected non-approved path: ${path}`);
-			throw new Error("Permission denied: workspace not approved");
+			throw new StructuredError(
+				"PATH_OUTSIDE_WORKSPACE",
+				"Permission denied: workspace not approved",
+			);
 		}
 		// 永続化を先に行うことで atomic 性を確保する。persistWorkspacePath が
 		// throw した場合、allowedRoots は更新されないため「workspace は登録済みだが

@@ -13,6 +13,7 @@ import {
 import { isNetworkError, translateError } from "../lib/errors";
 import { useGitSyncStore } from "../stores/git-sync";
 import { useToastStore } from "../stores/toast";
+import { getErrorKind } from "../types/errors";
 
 class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
@@ -136,7 +137,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 					store.setOfflineMode(true);
 					store.setErrorMessage(null);
 				} else {
-					store.setErrorMessage(String(e));
+					store.setErrorMessage(translateError(e));
 					// Refresh status so conflict detection works even after pull failure
 					await refreshStatus(path);
 				}
@@ -167,7 +168,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				store.setOfflineMode(true);
 				store.setErrorMessage(null);
 			} else {
-				store.setErrorMessage(String(e));
+				store.setErrorMessage(translateError(e));
 			}
 			throw e;
 		} finally {
@@ -198,8 +199,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				try {
 					await gitCommit(path, message);
 				} catch (e) {
-					const msg = String(e);
-					if (msg.includes("nothing to commit")) {
+					if (getErrorKind(e) === "GIT_NOTHING_TO_COMMIT") {
 						committed = false;
 					} else {
 						throw e;
@@ -234,7 +234,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				await refreshStatus(path);
 			} catch (e) {
 				if (workspacePathRef.current === path) {
-					store.setErrorMessage(String(e));
+					store.setErrorMessage(translateError(e));
 					await refreshStatus(path);
 				}
 			} finally {
@@ -411,9 +411,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 						if (result === "skipped") return;
 						const s = useGitSyncStore.getState();
 						if (s.errorMessage) {
-							useToastStore
-								.getState()
-								.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
+							useToastStore.getState().addToast("error", `同期に失敗しました: ${s.errorMessage}`);
 						} else if (s.offlineMode) {
 							useToastStore
 								.getState()
@@ -440,7 +438,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				if (result === "skipped") return;
 				const s = useGitSyncStore.getState();
 				if (s.errorMessage) {
-					toast.addToast("error", `同期に失敗しました: ${translateError(s.errorMessage)}`);
+					toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
 				} else if (s.offlineMode) {
 					toast.addToast(
 						"warning",

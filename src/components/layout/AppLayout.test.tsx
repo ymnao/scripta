@@ -399,7 +399,10 @@ describe("AppLayout", () => {
 
 	it('shows "保存失敗" on save error', async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
-		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
+		// non-transient（再試行せず即 error 表示）を kind で表現する
+		mockedWriteFile.mockRejectedValue(
+			Object.assign(new Error("Permission denied"), { kind: "EACCES" }),
+		);
 
 		await act(async () => {
 			render(<AppLayout />);

@@ -156,7 +156,11 @@ describe("useGitSync", () => {
 			conflictFiles: [],
 			hasRemote: true,
 		});
-		mockedGitCommit.mockRejectedValue(new Error("nothing to commit, working tree clean"));
+		mockedGitCommit.mockRejectedValue(
+			Object.assign(new Error("nothing to commit, working tree clean"), {
+				kind: "GIT_NOTHING_TO_COMMIT",
+			}),
+		);
 		mockedGitPull.mockResolvedValue("");
 		mockedGitPush.mockResolvedValue("");
 
@@ -182,7 +186,11 @@ describe("useGitSync", () => {
 			conflictFiles: [],
 			hasRemote: true,
 		});
-		mockedGitCommit.mockRejectedValue(new Error("nothing to commit, working tree clean"));
+		mockedGitCommit.mockRejectedValue(
+			Object.assign(new Error("nothing to commit, working tree clean"), {
+				kind: "GIT_NOTHING_TO_COMMIT",
+			}),
+		);
 		mockedGitPush.mockRejectedValue(new Error("remote: Permission denied"));
 
 		useGitSyncStore.setState({ gitSyncEnabled: true, pullBeforePush: false });

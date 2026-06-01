@@ -1,6 +1,6 @@
 import { promises as fsp } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ipcMain, shell } from "electron";
+import { shell } from "electron";
 import type { FileEntry } from "../../../src/types/workspace";
 import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
@@ -10,6 +10,7 @@ import {
 	consumeTransientWritePath,
 	findContainingWorkspaceRoot,
 } from "../utils/path-guard";
+import { handle } from "../utils/structured-error";
 import { getFileTreeFilterOptions } from "./settings";
 
 async function pathExistsAt(absolute: string): Promise<boolean> {
@@ -151,26 +152,26 @@ async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 }
 
 export function registerFsIpc(): void {
-	ipcMain.handle("fs:read", (event, path: string) => readFileImpl(event.sender.id, path));
-	ipcMain.handle("fs:write", (event, path: string, content: string) =>
+	handle("fs:read", (event, path: string) => readFileImpl(event.sender.id, path));
+	handle("fs:write", (event, path: string, content: string) =>
 		writeFileImpl(event.sender.id, path, content),
 	);
-	ipcMain.handle("fs:write-new", (event, path: string, content: string) =>
+	handle("fs:write-new", (event, path: string, content: string) =>
 		writeNewFileImpl(event.sender.id, path, content),
 	);
-	ipcMain.handle("fs:list", (event, path: string, opts?: unknown) =>
+	handle("fs:list", (event, path: string, opts?: unknown) =>
 		listDirectoryImpl(event.sender.id, path, opts),
 	);
-	ipcMain.handle("fs:create-file", (event, path: string) => createFileImpl(event.sender.id, path));
-	ipcMain.handle("fs:create-directory", (event, path: string) =>
+	handle("fs:create-file", (event, path: string) => createFileImpl(event.sender.id, path));
+	handle("fs:create-directory", (event, path: string) =>
 		createDirectoryImpl(event.sender.id, path),
 	);
-	ipcMain.handle("fs:path-exists", (event, path: string) => pathExistsImpl(event.sender.id, path));
-	ipcMain.handle("fs:file-exists", (event, path: string) => fileExistsImpl(event.sender.id, path));
-	ipcMain.handle("fs:rename", (event, oldPath: string, newPath: string) =>
+	handle("fs:path-exists", (event, path: string) => pathExistsImpl(event.sender.id, path));
+	handle("fs:file-exists", (event, path: string) => fileExistsImpl(event.sender.id, path));
+	handle("fs:rename", (event, oldPath: string, newPath: string) =>
 		renameEntryImpl(event.sender.id, oldPath, newPath),
 	);
-	ipcMain.handle("fs:delete", (event, path: string) => deleteEntryImpl(event.sender.id, path));
+	handle("fs:delete", (event, path: string) => deleteEntryImpl(event.sender.id, path));
 }
 
 export const __testing = {

@@ -2,10 +2,11 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, ipcMain, session } from "electron";
+import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
+import { handle } from "../utils/structured-error";
 
 // Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
 // native API は使わない。
@@ -202,7 +203,7 @@ export async function exportPdfImpl(
 }
 
 export function registerPdfIpc(): void {
-	ipcMain.handle(
+	handle(
 		"pdf:export",
 		(event, html: string, outputPath: string): Promise<void> =>
 			exportPdfImpl(event.sender.id, html, outputPath),

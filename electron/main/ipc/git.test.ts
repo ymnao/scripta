@@ -213,12 +213,15 @@ describe("addAllImpl / commitImpl", () => {
 		expect(log.split("\n").filter((l) => l.length > 0)).toHaveLength(1);
 	});
 
-	it("rejects nothing-to-commit (renderer マッチ用)", async () => {
+	it("rejects nothing-to-commit (kind=GIT_NOTHING_TO_COMMIT)", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "y.md", "y\n", "init");
 		// 何も変更せずに commit → git が "nothing to commit" を返す
 		await addAllImpl(TEST_WIN, dir);
 		await expect(commitImpl(TEST_WIN, dir, "noop")).rejects.toThrow(/nothing to commit/i);
+		await expect(commitImpl(TEST_WIN, dir, "noop")).rejects.toMatchObject({
+			kind: "GIT_NOTHING_TO_COMMIT",
+		});
 	});
 
 	it("rejects path outside workspace", async () => {

@@ -26,6 +26,13 @@ export interface ElectronApiMockOptions {
 	settings?: Record<string, unknown>;
 	/** `getAppVersion` が返すバージョン文字列（既定: "0.0.0-e2e"） */
 	appVersion?: string;
+	/**
+	 * workspace を初期化済み (`.scripta/initialized.json` が存在) として扱うか（既定: true）。
+	 * 既定で true にすることで、大半の spec が前提とする「既存 workspace」を再現し、
+	 * SetupWizard ダイアログが起動時に開いてクリックを遮るのを防ぐ。SetupWizard
+	 * 自体を検証する場合のみ false にする。
+	 */
+	workspaceInitialized?: boolean;
 }
 
 interface MockStore {
@@ -41,6 +48,7 @@ interface MockStore {
 	closeListeners: Array<() => void | Promise<void>>;
 	conflictListeners: Array<(workspacePath: string) => void>;
 	activeWorkspace: string | null;
+	workspaceInitialized: boolean;
 }
 
 declare global {
@@ -63,6 +71,7 @@ export class ElectronApiMock {
 			saveDialogResult: opts.saveDialogResult ?? null,
 			settings: opts.settings ?? {},
 			appVersion: opts.appVersion ?? "0.0.0-e2e",
+			workspaceInitialized: opts.workspaceInitialized ?? true,
 		};
 		await this.page.addInitScript(installApiMock, payload);
 	}
@@ -202,6 +211,7 @@ function installApiMock(opts: {
 	saveDialogResult: string | null;
 	settings: Record<string, unknown>;
 	appVersion: string;
+	workspaceInitialized: boolean;
 }): void {
 	const store: MockStore = {
 		files: { ...opts.fs.files },
@@ -216,6 +226,7 @@ function installApiMock(opts: {
 		closeListeners: [],
 		conflictListeners: [],
 		activeWorkspace: null,
+		workspaceInitialized: opts.workspaceInitialized,
 	};
 	window.__E2E_API_MOCK__ = store;
 
@@ -358,7 +369,7 @@ function installApiMock(opts: {
 		readFile: async (path: string): Promise<string> => {
 			track("readFile", [path]);
 			if (path in store.files) return store.files[path];
-			throw new Error(`File not found: ${path}`);
+			throw Object.assign(new Error(`File not found: ${path}`), { kind: "ENOENT" });
 		},
 		writeFile: async (path: string, content: string): Promise<void> => {
 			track("writeFile", [path, content]);
@@ -366,7 +377,8 @@ function installApiMock(opts: {
 		},
 		writeNewFile: async (path: string, content: string): Promise<void> => {
 			track("writeNewFile", [path, content]);
-			if (path in store.files) throw new Error(`Already exists: ${path}`);
+			if (path in store.files)
+				throw Object.assign(new Error(`Already exists: ${path}`), { kind: "EEXIST" });
 			store.files[path] = content;
 			const parent = parentDir(path);
 			if (parent in store.directories) {
@@ -379,11 +391,12 @@ function installApiMock(opts: {
 		): Promise<FileEntry[]> => {
 			track("listDirectory", [path, opts ?? null]);
 			if (path in store.directories) return store.directories[path];
-			throw new Error(`Directory not found: ${path}`);
+			throw Object.assign(new Error(`Directory not found: ${path}`), { kind: "ENOENT" });
 		},
 		createFile: async (path: string): Promise<void> => {
 			track("createFile", [path]);
-			if (path in store.files) throw new Error(`Already exists: ${path}`);
+			if (path in store.files)
+				throw Object.assign(new Error(`Already exists: ${path}`), { kind: "ALREADY_EXISTS" });
 			store.files[path] = "";
 			const parent = parentDir(path);
 			if (parent in store.directories) {
@@ -392,7 +405,8 @@ function installApiMock(opts: {
 		},
 		createDirectory: async (path: string): Promise<void> => {
 			track("createDirectory", [path]);
-			if (path in store.directories) throw new Error(`Already exists: ${path}`);
+			if (path in store.directories)
+				throw Object.assign(new Error(`Already exists: ${path}`), { kind: "ALREADY_EXISTS" });
 			store.directories[path] = [];
 			const parent = parentDir(path);
 			if (parent in store.directories) {
@@ -405,6 +419,11 @@ function installApiMock(opts: {
 		},
 		fileExists: async (path: string): Promise<boolean> => {
 			track("fileExists", [path]);
+			// `.scripta/initialized.json` は workspace 初期化マーカー。store に明示シードが
+			// 無くても workspaceInitialized フラグで存在を制御し、SetupWizard の誤表示を防ぐ。
+			if (path.endsWith("/.scripta/initialized.json")) {
+				return store.workspaceInitialized || path in store.files;
+			}
 			return path in store.files;
 		},
 		renameEntry: async (oldPath: string, newPath: string): Promise<void> => {

@@ -1,6 +1,6 @@
 # ADR-0003: IPC fs エラーを message 文字列契約として維持する
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR-0008](0008-structured-fs-error.md)
 - **Date**: 2026-05-31
 
 ## Context

@@ -218,13 +218,14 @@ scripta-next/
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**（実 Electron モードは `pnpm test:e2e:electron` を別途実行）
 
 ```bash
-# コミット前の検証 (format / lint / typecheck / typecheck:e2e / unit / e2e / build)
-# CI の必須 job (lint / typecheck / test / e2e / build) と parity。
+# コミット前の検証
+# (format / lint / typecheck / typecheck:e2e / unit / e2e / build / legacy-residue)
+# CI の必須 job (lint / typecheck / test / e2e / build / legacy-residue) と parity。
+# legacy keyword (旧バックエンド由来) 残骸検出は Phase 5 (Issue #85) 完了で
+# 残骸ゼロを達成したため verify chain と CI の blocking job に合流済み。
 pnpm verify
 
-# 補助: legacy keyword (旧 Tauri / WKWebView) 残骸検出 (Issue #82 / Phase 1 PR-2)
-# Phase 1 時点では既存残骸が大量にあるため意図的に fail する。Phase 2-5
-# 完了後に green 化し、verify chain へ合流させる予定 (現状は verify から除外)。
+# 個別実行する場合 (Issue #82 / Phase 1 PR-2 で導入、詳細は script ヘッダ参照)
 pnpm check:legacy-residue
 ```
 

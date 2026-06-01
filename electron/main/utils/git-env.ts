@@ -3,7 +3,7 @@ import { type SimpleGit, simpleGit } from "simple-git";
 
 // simple-git ベースで git コマンド実行環境を集約。
 // 環境変数で対話入力経路を全 deny し、`LC_ALL=C` でエラー文を英語固定にする
-// （renderer 側 src/lib/errors.ts の正規表現は英語前提）。
+// （git.ts の structured-error 分類 `classifyGitError` は英語 stderr 前提）。
 //
 // 重要: `.env({...process.env, ...})` で **既存 env を温存** すること。空の env を
 // 渡すと PATH / HOME が消えて git バイナリ自体が起動できなくなる / `.gitconfig`
@@ -88,7 +88,7 @@ export function createGitNoCwd(): SimpleGit {
 }
 
 // simple-git GitError は `message` に git の stderr を含む。
-// renderer 側 errors.ts の正規表現がマッチするよう、trim してそのまま流す。
+// classifyGitError が種別を判定できるよう、trim した生 stderr を返す。
 export function extractGitErrorMessage(e: unknown): string {
 	if (e instanceof Error) return e.message.trim();
 	return String(e);

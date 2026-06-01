@@ -1,6 +1,13 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { writeFile } from "../lib/commands";
+import type { ErrorKind } from "../types/errors";
+
+// non-transient 判定は preload で付与される `error.kind` ベースになったため、
+// 「再試行しない」検証には kind 付きエラーを reject させる（実際の IPC エラー形を模す）。
+function kindError(kind: ErrorKind, message: string): Error {
+	return Object.assign(new Error(message), { kind });
+}
 
 vi.mock("../lib/commands", () => ({
 	writeFile: vi.fn(),
@@ -141,7 +148,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("transitions to error on save failure", async () => {
-		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
+		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -159,7 +166,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("resets from error to unsaved on next edit", async () => {
-		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
+		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -388,7 +395,7 @@ describe("useAutoSave", () => {
 		const mockAddToast = (useToastStore as unknown as { __mockAddToast: Mock }).__mockAddToast;
 		mockAddToast.mockClear();
 
-		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
+		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -569,7 +576,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("does not retry on non-transient save error", async () => {
-		mockedWriteFile.mockRejectedValue("Not found: /test.md");
+		mockedWriteFile.mockRejectedValue(kindError("NOT_FOUND", "Not found: /test.md"));
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
@@ -602,7 +609,7 @@ describe("useAutoSave", () => {
 		// 2nd attempt: non-transient error → should show toast
 		mockedWriteFile
 			.mockRejectedValueOnce("Connection timed out")
-			.mockRejectedValueOnce("Permission denied (os error 13)");
+			.mockRejectedValueOnce(kindError("EACCES", "Permission denied"));
 
 		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
 			initialProps: { content: "initial" },
