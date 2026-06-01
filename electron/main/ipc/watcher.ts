@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { BrowserWindow, ipcMain, type WebContents } from "electron";
+import { BrowserWindow, type WebContents } from "electron";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { assertPathAllowed } from "../utils/path-guard";
+import { handle } from "../utils/structured-error";
 import {
 	type FsKind,
 	isWatcherIgnored,
@@ -136,7 +137,7 @@ function broadcastReloadTree(): void {
 }
 
 export function registerWatcherIpc(): void {
-	ipcMain.handle("watcher:start", async (event, rawPath: string) => {
+	handle("watcher:start", async (event, rawPath: string) => {
 		// 必ず path-guard を通す。未承認 path で chokidar を起動させないため。
 		// canonical を chokidar に渡すことで TOCTOU 抑止 + workspace.ts の表記と整合する。
 		const canonical = assertPathAllowed(event.sender.id, rawPath);
@@ -145,7 +146,7 @@ export function registerWatcherIpc(): void {
 		sessions.set(event.sender.id, startSession(event.sender, canonical, inputRoot));
 	});
 
-	ipcMain.handle("watcher:stop", async (event) => {
+	handle("watcher:stop", async (event) => {
 		stopWatcherForWindow(event.sender.id);
 	});
 

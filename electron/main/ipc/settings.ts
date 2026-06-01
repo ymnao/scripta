@@ -1,9 +1,10 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, ipcMain } from "electron";
+import { app } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, type EntryFilterOptions } from "../utils/entry-filter";
 import { isErrnoCode } from "../utils/fs-errors";
+import { handle } from "../utils/structured-error";
 import { normalizeWindowState, type WindowState } from "../utils/window-state";
 
 interface Store {
@@ -242,12 +243,12 @@ function readCurrentValue(store: Store, key: string): unknown {
 }
 
 export function registerSettingsIpc(): void {
-	ipcMain.handle("settings:get", async (_event, key: unknown): Promise<unknown> => {
+	handle("settings:get", async (_event, key: unknown): Promise<unknown> => {
 		// 不正キーは throw せず null。renderer は「未設定」として既定値にフォールバックする
 		if (!isSafeSettingsKey(key)) return null;
 		return getValue(getMainStore(), key);
 	});
-	ipcMain.handle("settings:set", async (_event, key: unknown, value: unknown) => {
+	handle("settings:set", async (_event, key: unknown, value: unknown) => {
 		if (!isSafeSettingsKey(key)) {
 			throw new Error(
 				`Invalid settings key: ${typeof key === "string" ? `"${key}"` : "(non-string)"}`,
@@ -267,7 +268,7 @@ export function registerSettingsIpc(): void {
 		setValue(store, key, value);
 		if (notifyFilter) emitFileTreeFilterChange();
 	});
-	ipcMain.handle("settings:delete", async (_event, key: unknown) => {
+	handle("settings:delete", async (_event, key: unknown) => {
 		if (!isSafeSettingsKey(key)) {
 			throw new Error(
 				`Invalid settings key: ${typeof key === "string" ? `"${key}"` : "(non-string)"}`,
@@ -281,7 +282,7 @@ export function registerSettingsIpc(): void {
 		deleteValue(store, key);
 		if (notifyFilter) emitFileTreeFilterChange();
 	});
-	ipcMain.handle("settings:save", async () => {
+	handle("settings:save", async () => {
 		persist(getMainStore());
 	});
 }

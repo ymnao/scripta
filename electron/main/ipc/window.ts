@@ -1,6 +1,7 @@
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, session } from "electron";
 import { canonicalize, isPathAllowed } from "../utils/path-guard";
+import { handle } from "../utils/structured-error";
 import { attachWindowLifecycle } from "../utils/window-lifecycle";
 import { setActiveWorkspaceForWindow } from "./workspace";
 
@@ -87,18 +88,18 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 }
 
 export function registerWindowIpc(): void {
-	ipcMain.handle("app:get-version", async () => app.getVersion());
+	handle("app:get-version", async () => app.getVersion());
 
-	ipcMain.handle("window:close", async (event) => {
+	handle("window:close", async (event) => {
 		const win = BrowserWindow.fromWebContents(event.sender);
 		win?.close();
 	});
 
-	ipcMain.handle("window:open-conflict", (event, workspacePath: string) =>
+	handle("window:open-conflict", (event, workspacePath: string) =>
 		createConflictWindow(event.sender.id, workspacePath),
 	);
 
-	ipcMain.handle("window:clear-webview-data", async () => {
+	handle("window:clear-webview-data", async () => {
 		await session.defaultSession.clearStorageData();
 	});
 }

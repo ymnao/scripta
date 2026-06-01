@@ -1,10 +1,10 @@
 import { promises as fsp } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { ipcMain } from "electron";
 import type { SearchResult } from "../../../src/types/search";
 import type { UnresolvedWikilink, WikilinkReference } from "../../../src/types/wikilink";
 import { assertPathAllowed } from "../utils/path-guard";
 import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
+import { handle } from "../utils/structured-error";
 
 // ワークスペース配下の `.md` ファイルを再帰的に収集する。
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
@@ -275,7 +275,7 @@ async function scanUnresolvedWikilinksImpl(
 }
 
 export function registerSearchIpc(): void {
-	ipcMain.handle(
+	handle(
 		"search:files",
 		(
 			event,
@@ -285,20 +285,20 @@ export function registerSearchIpc(): void {
 		): Promise<SearchResult[]> =>
 			searchFilesImpl(event.sender.id, workspacePath, query, caseSensitive ?? false),
 	);
-	ipcMain.handle("search:cancel", (event): void => {
+	handle("search:cancel", (event): void => {
 		cancelSearchForWindow(event.sender.id);
 	});
-	ipcMain.handle(
+	handle(
 		"search:filenames",
 		(event, workspacePath: string, query: string): Promise<string[]> =>
 			searchFilenamesImpl(event.sender.id, workspacePath, query),
 	);
-	ipcMain.handle(
+	handle(
 		"search:unresolved-wikilinks",
 		(event, workspacePath: string): Promise<UnresolvedWikilink[]> =>
 			scanUnresolvedWikilinksImpl(event.sender.id, workspacePath),
 	);
-	ipcMain.handle("wikilink:cancel", (event): void => {
+	handle("wikilink:cancel", (event): void => {
 		cancelWikilinkScanForWindow(event.sender.id);
 	});
 }
