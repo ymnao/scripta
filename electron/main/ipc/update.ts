@@ -1,7 +1,7 @@
 import type { UpdateInfo } from "../../../src/types/update";
 import { httpFetch } from "../utils/http-fetch";
+import { handle } from "../utils/ipc-handle";
 import { compareSemver, parseSemver, stripVPrefix } from "../utils/semver-lite";
-import { handle } from "../utils/structured-error";
 
 // `check_for_update_inner`。GitHub Releases API から latest release を取得し、
 // tag_name を `v` 前置きを除いた SemVer として現在バージョンと比較する。

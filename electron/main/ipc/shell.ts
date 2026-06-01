@@ -1,5 +1,5 @@
 import { shell } from "electron";
-import { handle } from "../utils/structured-error";
+import { handle } from "../utils/ipc-handle";
 import { isSafeExternalUrl } from "../utils/url";
 
 export function registerShellIpc(): void {

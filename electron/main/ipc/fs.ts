@@ -4,13 +4,13 @@ import { shell } from "electron";
 import type { FileEntry } from "../../../src/types/workspace";
 import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
+import { handle } from "../utils/ipc-handle";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
 	consumeTransientWritePath,
 	findContainingWorkspaceRoot,
 } from "../utils/path-guard";
-import { handle } from "../utils/structured-error";
 import { getFileTreeFilterOptions } from "./settings";
 
 async function pathExistsAt(absolute: string): Promise<boolean> {

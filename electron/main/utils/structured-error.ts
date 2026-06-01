@@ -1,18 +1,18 @@
-import { ipcMain } from "electron";
 import {
 	type ErrorKind,
 	encodeIpcError,
 	type StructuredErrorData,
 } from "../../../src/types/errors";
 
-// main 側の構造化エラー基盤。
+// main 側の構造化エラー基盤（electron 非依存の純粋ロジック。ipcMain ラッパー `handle()`
+// は electron 依存のため ./ipc-handle.ts に分離している）。
 //
 // - `StructuredError`: kind / code / path を保持する Error。ハンドラはこれを throw する。
 // - `classifyErrno` / `classifyGitError`: 生 errno / git stderr を ErrorKind へ分類する。
 //   旧 renderer 側 errors.ts の正規表現パースは、この main 側分類器へ移設された
 //   （= エラーを生成する側で 1 度だけ分類し、renderer は kind で分岐する）。
-// - `handle`: ipcMain.handle のラッパー。reject 時に任意のエラーを構造化し、
-//   `encodeIpcError` で sentinel + JSON を message に埋めて IPC を越えさせる。
+// - `serializeIpcError`: 任意のエラーを構造化し `encodeIpcError` で sentinel + JSON を
+//   message に埋めて IPC を越えさせる（`handle()` から使われる）。
 
 export class StructuredError extends Error {
 	readonly kind: ErrorKind;
@@ -104,20 +104,4 @@ export function toStructuredData(err: unknown): StructuredErrorData {
 // この Error の message が IPC を越えて renderer へ運ばれ、preload で decode される。
 export function serializeIpcError(err: unknown): Error {
 	return new Error(encodeIpcError(toStructuredData(err)));
-}
-
-// biome-ignore lint/suspicious/noExplicitAny: ipcMain.handle の listener シグネチャに合わせる
-type IpcListener = (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown;
-
-// ipcMain.handle のラッパー。listener が throw / reject した場合に
-// serializeIpcError で構造化し、renderer へ kind 付きで伝える。
-// 成功時はそのまま値を返す（fast path にラップのオーバーヘッドのみ）。
-export function handle(channel: string, listener: IpcListener): void {
-	ipcMain.handle(channel, async (event, ...args) => {
-		try {
-			return await listener(event, ...args);
-		} catch (err) {
-			throw serializeIpcError(err);
-		}
-	});
 }

@@ -3,8 +3,8 @@ import { join, relative, resolve } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { BrowserWindow, type WebContents } from "electron";
 import type { FsChangeEvent } from "../../../src/types/workspace";
+import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
-import { handle } from "../utils/structured-error";
 import {
 	type FsKind,
 	isWatcherIgnored,

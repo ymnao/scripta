@@ -427,8 +427,10 @@ function installApiMock(opts: {
 			track("fileExists", [path]);
 			// 初期化マーカー (`.scripta/initialized.json`)。store に明示シードが無くても
 			// workspaceInitialized フラグで存在を制御し、SetupWizard の誤表示を防ぐ。
-			// suffix は scripta-config から導出された値（drift 防止）。
-			if (path.endsWith(`/${opts.initializedMarkerSuffix}`)) {
+			// suffix は scripta-config から導出された値（drift 防止）。Windows 形式の
+			// `\` 区切りパスでも一致するよう、両者を `/` に正規化してから判定する。
+			const toPosix = (s: string): string => s.replace(/\\/g, "/");
+			if (toPosix(path).endsWith(`/${toPosix(opts.initializedMarkerSuffix)}`)) {
 				return store.workspaceInitialized || path in store.files;
 			}
 			return path in store.files;

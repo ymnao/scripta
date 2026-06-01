@@ -7,8 +7,8 @@ import {
 	type SaveDialogReturnValue,
 } from "electron";
 import type { SaveDialogOptions } from "../../preload/api";
+import { handle } from "../utils/ipc-handle";
 import { registerTransientWritePath } from "../utils/path-guard";
-import { handle } from "../utils/structured-error";
 import { approveWorkspacePath } from "./workspace";
 
 // ダイアログは「IPC を呼び出した window」の上に出すのが正解。focused/first で

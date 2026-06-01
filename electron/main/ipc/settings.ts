@@ -4,7 +4,7 @@ import { app } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, type EntryFilterOptions } from "../utils/entry-filter";
 import { isErrnoCode } from "../utils/fs-errors";
-import { handle } from "../utils/structured-error";
+import { handle } from "../utils/ipc-handle";
 import { normalizeWindowState, type WindowState } from "../utils/window-state";
 
 interface Store {

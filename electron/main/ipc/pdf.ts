@@ -4,9 +4,9 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
+import { handle } from "../utils/ipc-handle";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
-import { handle } from "../utils/structured-error";
 
 // Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
 // native API は使わない。

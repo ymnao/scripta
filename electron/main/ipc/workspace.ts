@@ -1,10 +1,11 @@
+import { handle } from "../utils/ipc-handle";
 import {
 	canonicalize,
 	clearWorkspaceRootsForWindow,
 	registerWorkspaceRoot,
 	unregisterWorkspaceRoot,
 } from "../utils/path-guard";
-import { handle, StructuredError } from "../utils/structured-error";
+import { StructuredError } from "../utils/structured-error";
 import { persistWorkspacePath } from "./settings";
 
 // renderer 経由で workspace:set を受け付ける際、main 側で「ユーザーが OS ネイティブ

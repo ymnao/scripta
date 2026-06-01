@@ -1,9 +1,9 @@
 import { URL } from "node:url";
 import type { OgpData } from "../../../src/types/ogp";
 import { httpFetch } from "../utils/http-fetch";
+import { handle } from "../utils/ipc-handle";
 import { parseOgp } from "../utils/ogp-parser";
 import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
-import { handle } from "../utils/structured-error";
 
 // OGP メタデータを取得する（`fetch_ogp`）。
 // SSRF 防御は redirect 1 hop ごとに `pinSafeLookup` で hostname を 1 度だけ解決し、

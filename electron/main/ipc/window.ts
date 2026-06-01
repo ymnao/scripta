@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { app, BrowserWindow, session } from "electron";
+import { handle } from "../utils/ipc-handle";
 import { canonicalize, isPathAllowed } from "../utils/path-guard";
-import { handle } from "../utils/structured-error";
 import { attachWindowLifecycle } from "../utils/window-lifecycle";
 import { setActiveWorkspaceForWindow } from "./workspace";
 

@@ -2,9 +2,9 @@ import { promises as fsp } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import type { SearchResult } from "../../../src/types/search";
 import type { UnresolvedWikilink, WikilinkReference } from "../../../src/types/wikilink";
+import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
 import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
-import { handle } from "../utils/structured-error";
 
 // ワークスペース配下の `.md` ファイルを再帰的に収集する。
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために

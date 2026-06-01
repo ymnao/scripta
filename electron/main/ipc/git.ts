@@ -10,8 +10,9 @@ import {
 	validateRefName,
 	validateRelativePath,
 } from "../utils/git-validators";
+import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
-import { gitError, handle } from "../utils/structured-error";
+import { gitError } from "../utils/structured-error";
 
 // git sync 操作を simple-git ベースで集約する IPC ハンドラ群。
 //
