@@ -24,6 +24,10 @@ function getDoc(view: EditorView): string {
 	return view.state.doc.toString();
 }
 
+function getCursor(view: EditorView): number {
+	return view.state.selection.main.head;
+}
+
 describe("toggleBold", () => {
 	it("wraps selection with **", () => {
 		const view = createView("hello world", 6, 11);
@@ -211,6 +215,62 @@ describe("toggleCheckState", () => {
 		const result = toggleCheckState(view);
 		expect(result).toBe(false);
 		expect(getDoc(view)).toBe("hello");
+	});
+});
+
+// #91: マーカー挿入後のカーソルはマーカーの右側に置く。
+// 本文中にカーソルがある場合はマーカー幅ぶん右にずれ、相対位置を維持する。
+describe("cursor position after marker insertion (#91)", () => {
+	it("toggleList: empty line places cursor after marker", () => {
+		const view = createView("", 0);
+		toggleList(view);
+		expect(getDoc(view)).toBe("- ");
+		expect(getCursor(view)).toBe(2);
+	});
+
+	it("toggleList: keeps cursor relative position in body text", () => {
+		// "hel|lo" → "- hel|lo"
+		const view = createView("hello", 3);
+		toggleList(view);
+		expect(getDoc(view)).toBe("- hello");
+		expect(getCursor(view)).toBe(5);
+	});
+
+	it("toggleList: removing marker keeps cursor in body", () => {
+		// "- |hello" → "|hello"
+		const view = createView("- hello", 2);
+		toggleList(view);
+		expect(getDoc(view)).toBe("hello");
+		expect(getCursor(view)).toBe(0);
+	});
+
+	it("toggleCheckbox: empty line places cursor after marker", () => {
+		const view = createView("", 0);
+		toggleCheckbox(view);
+		expect(getDoc(view)).toBe("- [ ] ");
+		expect(getCursor(view)).toBe(6);
+	});
+
+	it("toggleHeading: empty line places cursor after marker", () => {
+		const view = createView("", 0);
+		toggleHeading(1)(view);
+		expect(getDoc(view)).toBe("# ");
+		expect(getCursor(view)).toBe(2);
+	});
+
+	it("toggleHeading: level 3 on empty line places cursor after marker", () => {
+		const view = createView("", 0);
+		toggleHeading(3)(view);
+		expect(getDoc(view)).toBe("### ");
+		expect(getCursor(view)).toBe(4);
+	});
+
+	it("toggleHeading: keeps cursor relative position in body text", () => {
+		// "hel|lo" → "# hel|lo"
+		const view = createView("hello", 3);
+		toggleHeading(1)(view);
+		expect(getDoc(view)).toBe("# hello");
+		expect(getCursor(view)).toBe(5);
 	});
 });
 

@@ -1,6 +1,6 @@
 import "katex/dist/katex.min.css";
 import { redo, undo } from "@codemirror/commands";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { insertNewlineContinueMarkup, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
 	defaultHighlightStyle,
 	foldService,
@@ -264,6 +264,10 @@ export function MarkdownEditor({
 					{ key: "Mod-l", run: toggleList },
 					{ key: "Mod-Shift-l", run: toggleCheckbox },
 					{ key: "Mod-Enter", run: toggleCheckState },
+					// リスト/タスク/順序付きリスト/blockquote 上の Enter でマーカーを継続。
+					// 非 Markdown 文脈（コードブロック等）では false を返して既定の改行に委譲。
+					// Backspace 継続は listKeymap の独自ハンドラが担うため deleteMarkupBackward は導入しない。
+					{ key: "Enter", run: insertNewlineContinueMarkup },
 				]),
 			),
 			keymap.of([
