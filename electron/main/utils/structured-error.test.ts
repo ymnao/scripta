@@ -14,6 +14,8 @@ describe("classifyErrno", () => {
 		expect(classifyErrno("ENOENT")).toBe("ENOENT");
 		expect(classifyErrno("EPERM")).toBe("EACCES");
 		expect(classifyErrno("ENFILE")).toBe("EMFILE");
+		expect(classifyErrno("EISDIR")).toBe("EISDIR");
+		expect(classifyErrno("ENOTDIR")).toBe("ENOTDIR");
 	});
 
 	it("maps unknown / undefined codes to UNKNOWN", () => {

@@ -15,6 +15,8 @@ export type ErrorKind =
 	| "ENOENT"
 	| "EACCES"
 	| "EEXIST"
+	| "EISDIR"
+	| "ENOTDIR"
 	| "ENOSPC"
 	| "EROFS"
 	| "EAGAIN"
