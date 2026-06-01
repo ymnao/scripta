@@ -707,10 +707,16 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 		return;
 	}
 
-	// Mod+key はエディタのショートカット (Mod-s, Mod-b 等) に委譲する
-	// contentEditable のリッチテキストコマンド（太字・斜体等）を抑止しつつ、
-	// stopPropagation しないことで CM6 のキーマップに処理を委譲する
 	if (e.metaKey || e.ctrlKey) {
+		// クリップボード操作 (Cmd/Ctrl + V/C/X) は preventDefault すると native の
+		// paste/copy/cut イベントごと抑止され、セルの "paste" リスナが発火しなくなる
+		// （#89 の根本原因）。これらは native に通し、ペーストの sanitize は paste
+		// リスナ側で行う。
+		const key = e.key.toLowerCase();
+		if (key === "v" || key === "c" || key === "x") return;
+		// それ以外の Mod+key は contentEditable のリッチテキストコマンド（太字・斜体等）
+		// を抑止しつつ、stopPropagation しないことで CM6 のキーマップ (Mod-s, Mod-b 等)
+		// へ処理を委譲する
 		e.preventDefault();
 		return;
 	}

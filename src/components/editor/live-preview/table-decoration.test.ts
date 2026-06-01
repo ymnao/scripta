@@ -307,6 +307,46 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.doc.line(1).text).toBe("| AX | B |");
 	});
 
+	it("Cmd/Ctrl + V/C/X はセル内 keydown で preventDefault されない（native clipboard を通す, #89）", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+		cell.focus();
+
+		for (const key of ["v", "c", "x"]) {
+			const ev = new KeyboardEvent("keydown", {
+				key,
+				metaKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			cell.dispatchEvent(ev);
+			// native の paste/copy/cut イベントが発火するよう default を残す
+			expect(ev.defaultPrevented).toBe(false);
+		}
+	});
+
+	it("クリップボード以外の Mod+key（Cmd+B 等）はセル内 keydown で preventDefault される（装飾抑止, #89）", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+		cell.focus();
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "b",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+		// contentEditable の bold 化を抑止するため default を止める
+		expect(ev.defaultPrevented).toBe(true);
+	});
+
 	it("削除でテーブル末尾境界(EOF)に取り残されたら改行を補い退避する（tableBoundaryGuard）", async () => {
 		const view = mountEditor(`${simpleTable}\n`); // テーブル + 直下に 1 行
 		const endTo = view.state.doc.line(3).to; // テーブル最終行末尾
