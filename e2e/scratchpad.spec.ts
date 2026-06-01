@@ -79,6 +79,31 @@ test.describe("scratchpad", () => {
 		await expect(page.getByTestId("scratchpad-panel")).not.toBeVisible();
 	});
 
+	test("リスト項目末尾で Enter するとマーカーが継続する (#92 と挙動を揃える)", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({
+			fs: workspace,
+			dialogResult: "/workspace",
+			settings: { workspacePath: "/workspace" },
+		});
+
+		await page.goto("/");
+		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
+
+		await page.keyboard.press(`${modKey}+j`);
+		const panel = page.getByTestId("scratchpad-panel");
+		await expect(panel).toBeVisible();
+
+		const editor = panel.locator(".cm-content");
+		await editor.click();
+		await page.keyboard.type("1. foo");
+		await page.keyboard.press("Enter");
+		await page.keyboard.type("bar");
+
+		// Enter で次行が "2. " で継続する（MarkdownEditor と同じ挙動）
+		await expect(editor).toContainText("2. bar");
+	});
+
 	test("設定ダイアログにスクラッチパッドのトグルが表示される", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({

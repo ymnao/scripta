@@ -1,7 +1,7 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { insertNewlineContinueMarkup, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { GripHorizontal, X } from "lucide-react";
@@ -216,6 +216,9 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 			blockquoteDecoration,
 			horizontalRuleDecoration,
 			mathDecoration,
+			// リスト/タスク/順序付きリスト/blockquote 上の Enter でマーカーを継続。
+			// MarkdownEditor と挙動を揃える（非 Markdown 文脈では false を返し既定の改行へ委譲）。
+			Prec.high(keymap.of([{ key: "Enter", run: insertNewlineContinueMarkup }])),
 			keymap.of([
 				{
 					key: "Mod-s",
