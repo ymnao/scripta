@@ -14,7 +14,6 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api: Api = Object.freeze({
-	getVersion: () => process.versions.electron ?? "",
 	getAppVersion: () => ipcRenderer.invoke("app:get-version"),
 	closeWindow: () => ipcRenderer.invoke("window:close"),
 	openConflictWindow: (workspacePath) => ipcRenderer.invoke("window:open-conflict", workspacePath),

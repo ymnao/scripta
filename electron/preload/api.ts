@@ -21,7 +21,6 @@ export type Unsubscribe = () => void;
 export type MenuEventName = "open-settings" | "open-help" | "export";
 
 export type Api = Readonly<{
-	getVersion: () => string;
 	getAppVersion: () => Promise<string>;
 	closeWindow: () => Promise<void>;
 	openConflictWindow: (workspacePath: string) => Promise<void>;
