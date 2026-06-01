@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
-import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
+import { expect, type Page, test } from "@playwright/test";
+import { waitForSaved } from "./helpers/assertions";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 // #91（マーカー挿入後のカーソル位置）/ #92（Enter によるリスト継続）の
@@ -17,6 +17,19 @@ function makeWorkspace(content: string) {
 	};
 }
 
+// 指定内容の test.md を開き、エディタにフォーカスした状態を返す。
+async function openWithContent(page: Page, content: string): Promise<ElectronApiMock> {
+	const mock = new ElectronApiMock(page);
+	await mock.setup({ fs: makeWorkspace(content), dialogResult: "/workspace" });
+	await page.goto("/");
+	await page.getByLabel("Open folder").click();
+	await page.getByLabel("test.md file").click();
+	const editor = page.locator(".cm-content");
+	await expect(editor).toBeVisible();
+	await editor.click();
+	return mock;
+}
+
 async function lastWrite(mock: ElectronApiMock): Promise<string> {
 	const calls = await mock.getCalls("writeFile");
 	return calls[calls.length - 1][1] as string;
@@ -24,14 +37,7 @@ async function lastWrite(mock: ElectronApiMock): Promise<string> {
 
 test.describe("マーカー挿入後のカーソル位置 (#91)", () => {
 	test("空行で Cmd+L → 入力テキストがマーカーの右に入る", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace(""), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "");
 
 		await page.keyboard.press(`${modKey}+l`);
 		await page.keyboard.type("task");
@@ -42,14 +48,7 @@ test.describe("マーカー挿入後のカーソル位置 (#91)", () => {
 	});
 
 	test("空行で Cmd+1 → 入力テキストが見出しマーカーの右に入る", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace(""), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "");
 
 		await page.keyboard.press(`${modKey}+1`);
 		await page.keyboard.type("Title");
@@ -60,14 +59,7 @@ test.describe("マーカー挿入後のカーソル位置 (#91)", () => {
 	});
 
 	test("空行で Cmd+Shift+L → 入力テキストがタスクマーカーの右に入る", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace(""), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "");
 
 		await page.keyboard.press(`${modKey}+Shift+l`);
 		await page.keyboard.type("todo");
@@ -80,19 +72,11 @@ test.describe("マーカー挿入後のカーソル位置 (#91)", () => {
 
 test.describe("Enter によるリスト継続 (#92)", () => {
 	test("リスト項目末尾で Enter → 次行が - で継続", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace("- foo"), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "- foo");
 
 		await page.keyboard.press("End");
 		await page.keyboard.press("Enter");
 		await page.keyboard.type("bar");
-		await waitForUnsaved(page);
 		await page.keyboard.press(`${modKey}+s`);
 		await waitForSaved(page);
 
@@ -100,14 +84,7 @@ test.describe("Enter によるリスト継続 (#92)", () => {
 	});
 
 	test("タスクリスト末尾で Enter → 次行が - [ ] で継続", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace("- [ ] foo"), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "- [ ] foo");
 
 		await page.keyboard.press("End");
 		await page.keyboard.press("Enter");
@@ -119,14 +96,7 @@ test.describe("Enter によるリスト継続 (#92)", () => {
 	});
 
 	test("順序付きリスト末尾で Enter → 番号が自動インクリメント", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace("1. foo"), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "1. foo");
 
 		await page.keyboard.press("End");
 		await page.keyboard.press("Enter");
@@ -138,14 +108,7 @@ test.describe("Enter によるリスト継続 (#92)", () => {
 	});
 
 	test("blockquote 末尾で Enter → 次行が > で継続", async ({ page }) => {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({ fs: makeWorkspace("> foo"), dialogResult: "/workspace" });
-		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("test.md file").click();
-		const editor = page.locator(".cm-content");
-		await expect(editor).toBeVisible();
-		await editor.click();
+		const mock = await openWithContent(page, "> foo");
 
 		await page.keyboard.press("End");
 		await page.keyboard.press("Enter");
