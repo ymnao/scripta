@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { kindError } from "../__test-utils__/structured-error";
 import {
 	deleteEntry,
 	listDirectory,
@@ -12,6 +13,9 @@ import {
 
 // test-setup.ts の beforeEach が `window.api` を毎回新しい `createApiMock()` で置き換えるため、
 // 各テストでは `(window.api.<fn> as Mock).mockXxxValueOnce(...)` で個別の挙動を上書きする。
+//
+// non-transient 判定は preload で付与される `error.kind` ベースになったため、
+// 「再試行しない」検証には kindError() で kind 付きエラーを reject させる。
 
 describe("readFile with retry", () => {
 	beforeEach(() => {
@@ -44,9 +48,10 @@ describe("readFile with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedReadFile = window.api.readFile as Mock;
-		mockedReadFile.mockRejectedValue("Not found: /test.md");
+		const err = kindError("NOT_FOUND", "Not found: /test.md");
+		mockedReadFile.mockRejectedValue(err);
 
-		await expect(readFile("/test.md")).rejects.toBe("Not found: /test.md");
+		await expect(readFile("/test.md")).rejects.toBe(err);
 		expect(mockedReadFile).toHaveBeenCalledTimes(1);
 	});
 
@@ -95,9 +100,10 @@ describe("writeFile with retry", () => {
 
 	it("does not retry on permission error", async () => {
 		const mockedWriteFile = window.api.writeFile as Mock;
-		mockedWriteFile.mockRejectedValue("Permission denied (os error 13)");
+		const err = kindError("EACCES", "Permission denied");
+		mockedWriteFile.mockRejectedValue(err);
 
-		await expect(writeFile("/test.md", "content")).rejects.toBe("Permission denied (os error 13)");
+		await expect(writeFile("/test.md", "content")).rejects.toBe(err);
 		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
 	});
 });
@@ -127,9 +133,10 @@ describe("listDirectory with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedListDirectory = window.api.listDirectory as Mock;
-		mockedListDirectory.mockRejectedValue("Not found: /workspace");
+		const err = kindError("NOT_FOUND", "Not found: /workspace");
+		mockedListDirectory.mockRejectedValue(err);
 
-		await expect(listDirectory("/workspace")).rejects.toBe("Not found: /workspace");
+		await expect(listDirectory("/workspace")).rejects.toBe(err);
 		expect(mockedListDirectory).toHaveBeenCalledTimes(1);
 	});
 });
@@ -158,9 +165,10 @@ describe("renameEntry with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedRenameEntry = window.api.renameEntry as Mock;
-		mockedRenameEntry.mockRejectedValue("Target already exists: /new.md");
+		const err = kindError("TARGET_ALREADY_EXISTS", "Target already exists: /new.md");
+		mockedRenameEntry.mockRejectedValue(err);
 
-		await expect(renameEntry("/old.md", "/new.md")).rejects.toBe("Target already exists: /new.md");
+		await expect(renameEntry("/old.md", "/new.md")).rejects.toBe(err);
 		expect(mockedRenameEntry).toHaveBeenCalledTimes(1);
 	});
 });
@@ -189,9 +197,10 @@ describe("deleteEntry with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedDeleteEntry = window.api.deleteEntry as Mock;
-		mockedDeleteEntry.mockRejectedValue("Permission denied (os error 13)");
+		const err = kindError("EACCES", "Permission denied");
+		mockedDeleteEntry.mockRejectedValue(err);
 
-		await expect(deleteEntry("/test.md")).rejects.toBe("Permission denied (os error 13)");
+		await expect(deleteEntry("/test.md")).rejects.toBe(err);
 		expect(mockedDeleteEntry).toHaveBeenCalledTimes(1);
 	});
 });
@@ -221,9 +230,10 @@ describe("searchFiles with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedSearchFiles = window.api.searchFiles as Mock;
-		mockedSearchFiles.mockRejectedValue("Not found: /workspace");
+		const err = kindError("NOT_FOUND", "Not found: /workspace");
+		mockedSearchFiles.mockRejectedValue(err);
 
-		await expect(searchFiles("/workspace", "query")).rejects.toBe("Not found: /workspace");
+		await expect(searchFiles("/workspace", "query")).rejects.toBe(err);
 		expect(mockedSearchFiles).toHaveBeenCalledTimes(1);
 	});
 });
@@ -253,9 +263,10 @@ describe("searchFilenames with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedSearchFilenames = window.api.searchFilenames as Mock;
-		mockedSearchFilenames.mockRejectedValue("Not found: /workspace");
+		const err = kindError("NOT_FOUND", "Not found: /workspace");
+		mockedSearchFilenames.mockRejectedValue(err);
 
-		await expect(searchFilenames("/workspace", "query")).rejects.toBe("Not found: /workspace");
+		await expect(searchFilenames("/workspace", "query")).rejects.toBe(err);
 		expect(mockedSearchFilenames).toHaveBeenCalledTimes(1);
 	});
 });
@@ -285,9 +296,10 @@ describe("scanUnresolvedWikilinks with retry", () => {
 
 	it("does not retry on non-transient error", async () => {
 		const mockedScan = window.api.scanUnresolvedWikilinks as Mock;
-		mockedScan.mockRejectedValue("Not found: /workspace");
+		const err = kindError("NOT_FOUND", "Not found: /workspace");
+		mockedScan.mockRejectedValue(err);
 
-		await expect(scanUnresolvedWikilinks("/workspace")).rejects.toBe("Not found: /workspace");
+		await expect(scanUnresolvedWikilinks("/workspace")).rejects.toBe(err);
 		expect(mockedScan).toHaveBeenCalledTimes(1);
 	});
 });

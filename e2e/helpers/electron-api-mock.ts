@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
+import { getInitializedMarkerPath } from "../../src/lib/scripta-config";
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
 import type { OgpData } from "../../src/types/ogp";
 import type { SearchResult } from "../../src/types/search";
@@ -26,6 +27,13 @@ export interface ElectronApiMockOptions {
 	settings?: Record<string, unknown>;
 	/** `getAppVersion` が返すバージョン文字列（既定: "0.0.0-e2e"） */
 	appVersion?: string;
+	/**
+	 * workspace を初期化済み (`.scripta/initialized.json` が存在) として扱うか（既定: true）。
+	 * 既定で true にすることで、大半の spec が前提とする「既存 workspace」を再現し、
+	 * SetupWizard ダイアログが起動時に開いてクリックを遮るのを防ぐ。SetupWizard
+	 * 自体を検証する場合のみ false にする。
+	 */
+	workspaceInitialized?: boolean;
 }
 
 interface MockStore {
@@ -41,6 +49,7 @@ interface MockStore {
 	closeListeners: Array<() => void | Promise<void>>;
 	conflictListeners: Array<(workspacePath: string) => void>;
 	activeWorkspace: string | null;
+	workspaceInitialized: boolean;
 }
 
 declare global {
@@ -57,12 +66,17 @@ export class ElectronApiMock {
 	}
 
 	async setup(opts: ElectronApiMockOptions = {}): Promise<void> {
-		const payload: Required<ElectronApiMockOptions> = {
+		const payload: Required<ElectronApiMockOptions> & { initializedMarkerSuffix: string } = {
 			fs: opts.fs ?? { files: {}, directories: {} },
 			dialogResult: opts.dialogResult ?? null,
 			saveDialogResult: opts.saveDialogResult ?? null,
 			settings: opts.settings ?? {},
 			appVersion: opts.appVersion ?? "0.0.0-e2e",
+			workspaceInitialized: opts.workspaceInitialized ?? true,
+			// 初期化マーカーの相対 suffix（例: ".scripta/initialized.json"）を
+			// アプリ本体と同じ真実源 (scripta-config) から導出して drift を防ぐ。
+			// 派生値なので公開 option (ElectronApiMockOptions) には含めない。
+			initializedMarkerSuffix: getInitializedMarkerPath(""),
 		};
 		await this.page.addInitScript(installApiMock, payload);
 	}
@@ -202,6 +216,8 @@ function installApiMock(opts: {
 	saveDialogResult: string | null;
 	settings: Record<string, unknown>;
 	appVersion: string;
+	workspaceInitialized: boolean;
+	initializedMarkerSuffix: string;
 }): void {
 	const store: MockStore = {
 		files: { ...opts.fs.files },
@@ -216,6 +232,7 @@ function installApiMock(opts: {
 		closeListeners: [],
 		conflictListeners: [],
 		activeWorkspace: null,
+		workspaceInitialized: opts.workspaceInitialized,
 	};
 	window.__E2E_API_MOCK__ = store;
 
@@ -358,7 +375,7 @@ function installApiMock(opts: {
 		readFile: async (path: string): Promise<string> => {
 			track("readFile", [path]);
 			if (path in store.files) return store.files[path];
-			throw new Error(`File not found: ${path}`);
+			throw Object.assign(new Error(`File not found: ${path}`), { kind: "ENOENT" });
 		},
 		writeFile: async (path: string, content: string): Promise<void> => {
 			track("writeFile", [path, content]);
@@ -366,7 +383,8 @@ function installApiMock(opts: {
 		},
 		writeNewFile: async (path: string, content: string): Promise<void> => {
 			track("writeNewFile", [path, content]);
-			if (path in store.files) throw new Error(`Already exists: ${path}`);
+			if (path in store.files)
+				throw Object.assign(new Error(`Already exists: ${path}`), { kind: "EEXIST" });
 			store.files[path] = content;
 			const parent = parentDir(path);
 			if (parent in store.directories) {
@@ -379,11 +397,12 @@ function installApiMock(opts: {
 		): Promise<FileEntry[]> => {
 			track("listDirectory", [path, opts ?? null]);
 			if (path in store.directories) return store.directories[path];
-			throw new Error(`Directory not found: ${path}`);
+			throw Object.assign(new Error(`Directory not found: ${path}`), { kind: "ENOENT" });
 		},
 		createFile: async (path: string): Promise<void> => {
 			track("createFile", [path]);
-			if (path in store.files) throw new Error(`Already exists: ${path}`);
+			if (path in store.files)
+				throw Object.assign(new Error(`Already exists: ${path}`), { kind: "ALREADY_EXISTS" });
 			store.files[path] = "";
 			const parent = parentDir(path);
 			if (parent in store.directories) {
@@ -392,7 +411,8 @@ function installApiMock(opts: {
 		},
 		createDirectory: async (path: string): Promise<void> => {
 			track("createDirectory", [path]);
-			if (path in store.directories) throw new Error(`Already exists: ${path}`);
+			if (path in store.directories)
+				throw Object.assign(new Error(`Already exists: ${path}`), { kind: "ALREADY_EXISTS" });
 			store.directories[path] = [];
 			const parent = parentDir(path);
 			if (parent in store.directories) {
@@ -405,6 +425,14 @@ function installApiMock(opts: {
 		},
 		fileExists: async (path: string): Promise<boolean> => {
 			track("fileExists", [path]);
+			// 初期化マーカー (`.scripta/initialized.json`)。store に明示シードが無くても
+			// workspaceInitialized フラグで存在を制御し、SetupWizard の誤表示を防ぐ。
+			// suffix は scripta-config から導出された値（drift 防止）。Windows 形式の
+			// `\` 区切りパスでも一致するよう、両者を `/` に正規化してから判定する。
+			const toPosix = (s: string): string => s.replace(/\\/g, "/");
+			if (toPosix(path).endsWith(`/${toPosix(opts.initializedMarkerSuffix)}`)) {
+				return store.workspaceInitialized || path in store.files;
+			}
 			return path in store.files;
 		},
 		renameEntry: async (oldPath: string, newPath: string): Promise<void> => {

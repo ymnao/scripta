@@ -2,12 +2,12 @@ import {
 	BrowserWindow,
 	dialog,
 	type IpcMainInvokeEvent,
-	ipcMain,
 	type OpenDialogOptions,
 	type OpenDialogReturnValue,
 	type SaveDialogReturnValue,
 } from "electron";
 import type { SaveDialogOptions } from "../../preload/api";
+import { handle } from "../utils/ipc-handle";
 import { registerTransientWritePath } from "../utils/path-guard";
 import { approveWorkspacePath } from "./workspace";
 
@@ -40,7 +40,7 @@ function showSaveDialog(
 }
 
 export function registerDialogIpc(): void {
-	ipcMain.handle("dialog:open-directory", async (event): Promise<string | null> => {
+	handle("dialog:open-directory", async (event): Promise<string | null> => {
 		const result = await showOpenDialog(event, { properties: ["openDirectory"] });
 		if (result.canceled || result.filePaths.length === 0) return null;
 		// OS ネイティブな folder picker を通過した path のみを「ユーザー承認済み」として
@@ -49,7 +49,7 @@ export function registerDialogIpc(): void {
 		return result.filePaths[0];
 	});
 
-	ipcMain.handle("dialog:save", async (event, opts: SaveDialogOptions): Promise<string | null> => {
+	handle("dialog:save", async (event, opts: SaveDialogOptions): Promise<string | null> => {
 		const result = await showSaveDialog(event, opts);
 		if (result.canceled || !result.filePath) return null;
 		// ユーザーが明示的に選択した保存先は workspace 外でも書き込みを許可する。

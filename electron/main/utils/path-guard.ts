@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { StructuredError } from "./structured-error";
 
 // fs IPC のガードは window-scoped。allowedRoots は Map<windowId, Set<string>>
 // 構造を取り、ある window が `workspace:set` で申告して登録した root だけがその
@@ -30,13 +31,13 @@ const transientWritePaths = new Map<number, Set<string>>();
 
 export function validatePath(p: string): string {
 	if (typeof p !== "string" || p.length === 0) {
-		throw new Error("Invalid path: empty");
+		throw new StructuredError("INVALID_PATH", "Invalid path: empty");
 	}
 	if (p.includes("\0")) {
-		throw new Error("Invalid path: null byte");
+		throw new StructuredError("INVALID_PATH", "Invalid path: null byte");
 	}
 	if (!isAbsolute(p)) {
-		throw new Error("Invalid path: must be absolute");
+		throw new StructuredError("INVALID_PATH", "Invalid path: must be absolute");
 	}
 	return resolve(p);
 }
@@ -225,15 +226,15 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //   - assert 内で realpath を 1 回だけ計算し、その結果を返すことで重複正規化も
 //     避けられる（hot path の syscall 削減）
 //
-// validatePath が throw する場合（相対パス・null byte 等）は "Invalid path: ..." を
-// そのまま投げ、ガード違反は "Permission denied: outside workspace" を投げる。
-// 呼び出し側で 2 種類のエラーを区別できる。
+// validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
+// ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
+// 呼び出し側 / renderer は error.kind で 2 種類を区別できる。
 export function assertPathAllowed(windowId: number, p: string): string {
 	const target = realpathBestEffort(validatePath(p));
 	if (isWithinWindowAllowedRoot(windowId, target)) return target;
 	// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
 	console.warn(`[path-guard] denied outside workspace: ${p}`);
-	throw new Error("Permission denied: outside workspace");
+	throw new StructuredError("PATH_OUTSIDE_WORKSPACE", "Permission denied: outside workspace");
 }
 
 // write 系 IPC（fs:write / fs:write-new）専用ガード。
@@ -249,7 +250,7 @@ export function assertWritePathAllowed(windowId: number, p: string): string {
 	const set = transientWritePaths.get(windowId);
 	if (set?.has(target)) return target;
 	console.warn(`[path-guard] write denied outside workspace: ${p}`);
-	throw new Error("Permission denied: outside workspace");
+	throw new StructuredError("PATH_OUTSIDE_WORKSPACE", "Permission denied: outside workspace");
 }
 
 // 副作用なし boolean 判定。validatePath が throw する不正入力でも例外を飲んで

@@ -2,8 +2,9 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, ipcMain, session } from "electron";
+import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
+import { handle } from "../utils/ipc-handle";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
@@ -202,7 +203,7 @@ export async function exportPdfImpl(
 }
 
 export function registerPdfIpc(): void {
-	ipcMain.handle(
+	handle(
 		"pdf:export",
 		(event, html: string, outputPath: string): Promise<void> =>
 			exportPdfImpl(event.sender.id, html, outputPath),

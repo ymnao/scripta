@@ -125,7 +125,11 @@ beforeEach(() => {
 afterEach(async () => {
 	clearWorkspaceRoots();
 	for (const d of dirsToCleanup) {
-		await fsp.rm(d, { recursive: true, force: true });
+		// git のバックグラウンド書き込み（pack 生成等）と削除がレースすると
+		// `.git/objects/pack` で ENOTEMPTY が出る。fsp.rm は maxRetries 指定時に
+		// ENOTEMPTY / EBUSY 等を指数バックオフで自動リトライするため、CI の
+		// flaky cleanup を防ぐ。
+		await fsp.rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 	}
 });
 
@@ -213,12 +217,16 @@ describe("addAllImpl / commitImpl", () => {
 		expect(log.split("\n").filter((l) => l.length > 0)).toHaveLength(1);
 	});
 
-	it("rejects nothing-to-commit (renderer マッチ用)", async () => {
+	it("rejects nothing-to-commit (kind=GIT_NOTHING_TO_COMMIT)", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "y.md", "y\n", "init");
 		// 何も変更せずに commit → git が "nothing to commit" を返す
 		await addAllImpl(TEST_WIN, dir);
-		await expect(commitImpl(TEST_WIN, dir, "noop")).rejects.toThrow(/nothing to commit/i);
+		// 余計な git プロセスを増やさないよう、エラーを 1 回だけ捕捉して
+		// message（renderer 互換）と kind の両方を検証する。
+		const err = await commitImpl(TEST_WIN, dir, "noop").catch((e: unknown) => e);
+		expect((err as Error).message).toMatch(/nothing to commit/i);
+		expect(err).toMatchObject({ kind: "GIT_NOTHING_TO_COMMIT" });
 	});
 
 	it("rejects path outside workspace", async () => {

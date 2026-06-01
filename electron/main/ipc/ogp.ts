@@ -1,7 +1,7 @@
 import { URL } from "node:url";
-import { ipcMain } from "electron";
 import type { OgpData } from "../../../src/types/ogp";
 import { httpFetch } from "../utils/http-fetch";
+import { handle } from "../utils/ipc-handle";
 import { parseOgp } from "../utils/ogp-parser";
 import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
 
@@ -136,7 +136,7 @@ async function fetchOgpImpl(url: string): Promise<OgpData> {
 }
 
 export function registerOgpIpc(): void {
-	ipcMain.handle("ogp:fetch", (_event, url: string) => fetchOgpImpl(url));
+	handle("ogp:fetch", (_event, url: string) => fetchOgpImpl(url));
 }
 
 export const __testing = {

@@ -1,6 +1,6 @@
 import { promises as fsp } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve as pathResolve } from "node:path";
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow } from "electron";
 import type { ConflictContent, GitStatus } from "../../../src/types/git-sync";
 import { isErrnoCode } from "../utils/fs-errors";
 import { createGit, createGitNoCwd, extractGitErrorMessage } from "../utils/git-env";
@@ -10,7 +10,9 @@ import {
 	validateRefName,
 	validateRelativePath,
 } from "../utils/git-validators";
+import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
+import { gitError } from "../utils/structured-error";
 
 // git sync 操作を simple-git ベースで集約する IPC ハンドラ群。
 //
@@ -20,8 +22,9 @@ import { assertPathAllowed } from "../utils/path-guard";
 // - simple-git の高水準 API（.commit / .pull / .push）は parsed result を返すが、
 //   git の raw stdout / stderr をそのまま renderer に流したいため `git.raw([...])`
 //   を主軸に使う（特に `git show :2:path` には raw 必須）。
-// - エラーメッセージは git stderr をそのまま renderer に流す（LC_ALL=C で英語固定 →
-//   src/lib/errors.ts の `/conflict/i` `/nothing to commit/i` 等のパターンが機能する）。
+// - エラーは git stderr（LC_ALL=C で英語固定）を `gitError()` で ErrorKind に分類して
+//   throw する（GIT_CONFLICT / GIT_NOTHING_TO_COMMIT / NETWORK 等）。分類は main 側で
+//   1 度だけ行い、renderer は error.kind で分岐する（旧: renderer 側の正規表現パース）。
 
 // `git status --porcelain` の prefix で conflict（unmerged stage）を判定する。
 const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD "]);
@@ -80,7 +83,7 @@ async function addAllImpl(senderId: number, path: string): Promise<void> {
 	try {
 		await createGit(canonical).raw(["add", "-A"]);
 	} catch (e) {
-		throw new Error(extractGitErrorMessage(e));
+		throw gitError(extractGitErrorMessage(e));
 	}
 }
 
@@ -90,14 +93,14 @@ async function commitImpl(senderId: number, path: string, message: string): Prom
 	try {
 		out = (await createGit(canonical).raw(["commit", "-m", message])).trim();
 	} catch (e) {
-		throw new Error(extractGitErrorMessage(e));
+		throw gitError(extractGitErrorMessage(e));
 	}
 	// simple-git は stderr が空だと success 扱いする（git commit が
 	// "nothing to commit" を stdout に出すケース）。renderer 側 useGitSync.ts は
 	// msg.includes("nothing to commit") でハンドリングしているので、明示的に
 	// throw してエラー経路に載せる。
 	if (/nothing (?:to commit|added to commit)/i.test(out)) {
-		throw new Error(out);
+		throw gitError(out);
 	}
 	return out;
 }
@@ -114,7 +117,7 @@ async function pullImpl(senderId: number, path: string, syncMethod: string): Pro
 		const msg = extractGitErrorMessage(e);
 		// 初回 pull で upstream 未設定 → 成功扱い（空文字列を返す）。
 		if (msg.includes("no tracking information")) return "";
-		throw new Error(msg);
+		throw gitError(msg);
 	}
 }
 
@@ -130,7 +133,7 @@ async function pushImpl(senderId: number, path: string): Promise<string> {
 	const msg = extractGitErrorMessage(firstError);
 	// 初回 push で upstream 未設定 → 自動で `-u origin <branch>` を付けて再試行。
 	if (!(msg.includes("no upstream branch") || msg.includes("has no upstream"))) {
-		throw new Error(msg);
+		throw gitError(msg);
 	}
 	// branch / remote の取得は独立なので並列化（再試行経路の追加レイテンシを抑える）。
 	const [branch, remoteList] = await Promise.all([
@@ -140,14 +143,14 @@ async function pushImpl(senderId: number, path: string): Promise<string> {
 			.then((r) => r.trim())
 			.catch(() => ""),
 	]);
-	if (!branch) throw new Error(msg);
+	if (!branch) throw gitError(msg);
 	validateRefName(branch);
 	const remote = remoteList ? remoteList.split("\n")[0] : "origin";
 	validateRefName(remote);
 	try {
 		return (await git.raw(["push", "-u", remote, branch])).trim();
 	} catch (e) {
-		throw new Error(extractGitErrorMessage(e));
+		throw gitError(extractGitErrorMessage(e));
 	}
 }
 
@@ -157,7 +160,7 @@ async function getConflictedFilesImpl(senderId: number, path: string): Promise<s
 		const out = await createGit(canonical).raw(["diff", "--name-only", "--diff-filter=U"]);
 		return out.split("\n").filter((l) => l.length > 0);
 	} catch (e) {
-		throw new Error(extractGitErrorMessage(e));
+		throw gitError(extractGitErrorMessage(e));
 	}
 }
 
@@ -186,7 +189,7 @@ async function getConflictContentImpl(
 			const msg = extractGitErrorMessage(e);
 			// modify/delete conflict（DU/UD）で stage が無いケースは empty で fallback。
 			if (isStageNotFound(msg)) return "";
-			throw new Error(msg);
+			throw gitError(msg);
 		}
 	};
 	// stage 2 / 3 は独立 git show なので並列で取得。conflict resolver を開く
@@ -212,7 +215,7 @@ async function resolveConflictImpl(
 		try {
 			await git.raw(["rm", "-f", "--", filePath]);
 		} catch (e) {
-			throw new Error(extractGitErrorMessage(e));
+			throw gitError(extractGitErrorMessage(e));
 		}
 		return;
 	}
@@ -239,7 +242,7 @@ async function resolveConflictImpl(
 		// `git add` は repo-relative path を期待する（git が repo root から自動的に解釈）。
 		await git.raw(["add", "--", filePath]);
 	} catch (e) {
-		throw new Error(extractGitErrorMessage(e));
+		throw gitError(extractGitErrorMessage(e));
 	}
 }
 
@@ -264,14 +267,14 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 		try {
 			return (await git.raw(["rebase", "--continue"])).trim();
 		} catch (e) {
-			throw new Error(extractGitErrorMessage(e));
+			throw gitError(extractGitErrorMessage(e));
 		}
 	}
 	if (mergeHead) {
 		try {
 			return (await git.raw(["commit", "--no-edit"])).trim();
 		} catch (e) {
-			throw new Error(extractGitErrorMessage(e));
+			throw gitError(extractGitErrorMessage(e));
 		}
 	}
 	throw new Error("Not in a merge or rebase state");
@@ -312,35 +315,35 @@ async function getLastCommitTimeImpl(senderId: number, path: string): Promise<st
 }
 
 export function registerGitIpc(): void {
-	ipcMain.handle("git:check-available", () => checkAvailableImpl());
-	ipcMain.handle("git:check-repo", (event, path: string) => checkRepoImpl(event.sender.id, path));
-	ipcMain.handle("git:status", (event, path: string) => statusImpl(event.sender.id, path));
-	ipcMain.handle("git:add-all", (event, path: string) => addAllImpl(event.sender.id, path));
-	ipcMain.handle("git:commit", (event, path: string, message: string) =>
+	handle("git:check-available", () => checkAvailableImpl());
+	handle("git:check-repo", (event, path: string) => checkRepoImpl(event.sender.id, path));
+	handle("git:status", (event, path: string) => statusImpl(event.sender.id, path));
+	handle("git:add-all", (event, path: string) => addAllImpl(event.sender.id, path));
+	handle("git:commit", (event, path: string, message: string) =>
 		commitImpl(event.sender.id, path, message),
 	);
-	ipcMain.handle("git:pull", (event, path: string, syncMethod: string) =>
+	handle("git:pull", (event, path: string, syncMethod: string) =>
 		pullImpl(event.sender.id, path, syncMethod),
 	);
-	ipcMain.handle("git:push", (event, path: string) => pushImpl(event.sender.id, path));
-	ipcMain.handle("git:get-conflicted-files", (event, path: string) =>
+	handle("git:push", (event, path: string) => pushImpl(event.sender.id, path));
+	handle("git:get-conflicted-files", (event, path: string) =>
 		getConflictedFilesImpl(event.sender.id, path),
 	);
-	ipcMain.handle("git:get-conflict-content", (event, path: string, filePath: string) =>
+	handle("git:get-conflict-content", (event, path: string, filePath: string) =>
 		getConflictContentImpl(event.sender.id, path, filePath),
 	);
-	ipcMain.handle(
+	handle(
 		"git:resolve-conflict",
 		(event, path: string, filePath: string, content: string, resolution: "modify" | "delete") =>
 			resolveConflictImpl(event.sender.id, path, filePath, content, resolution),
 	);
-	ipcMain.handle("git:finish-conflict-resolution", (event, path: string) =>
+	handle("git:finish-conflict-resolution", (event, path: string) =>
 		finishConflictResolutionImpl(event.sender.id, path),
 	);
-	ipcMain.handle("git:get-last-commit-time", (event, path: string) =>
+	handle("git:get-last-commit-time", (event, path: string) =>
 		getLastCommitTimeImpl(event.sender.id, path),
 	);
-	ipcMain.handle("git:emit-conflict-resolved", (event, workspacePath: string) => {
+	handle("git:emit-conflict-resolved", (event, workspacePath: string) => {
 		emitConflictResolvedImpl(event.sender.id, workspacePath);
 	});
 }

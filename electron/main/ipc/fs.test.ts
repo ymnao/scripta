@@ -260,11 +260,15 @@ describe("createFileImpl", () => {
 		const path = join(workspaceDir, "exists.md");
 		await writeFile(path, "", "utf8");
 		await expect(createFileImpl(TEST_WIN, path)).rejects.toThrow(/^Already exists:/);
+		await expect(createFileImpl(TEST_WIN, path)).rejects.toMatchObject({ kind: "ALREADY_EXISTS" });
 	});
 
 	it("rejects creation outside the workspace", async () => {
 		const outside = join(tmpdir(), "scripta-outside-create.md");
 		await expect(createFileImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
+		await expect(createFileImpl(TEST_WIN, outside)).rejects.toMatchObject({
+			kind: "PATH_OUTSIDE_WORKSPACE",
+		});
 	});
 });
 
@@ -287,6 +291,9 @@ describe("createDirectoryImpl", () => {
 		const path = join(workspaceDir, "dir");
 		await createDirectoryImpl(TEST_WIN, path);
 		await expect(createDirectoryImpl(TEST_WIN, path)).rejects.toThrow(/^Already exists:/);
+		await expect(createDirectoryImpl(TEST_WIN, path)).rejects.toMatchObject({
+			kind: "ALREADY_EXISTS",
+		});
 	});
 });
 
@@ -346,6 +353,9 @@ describe("renameEntryImpl", () => {
 		const oldPath = join(workspaceDir, "missing.md");
 		const newPath = join(workspaceDir, "new.md");
 		await expect(renameEntryImpl(TEST_WIN, oldPath, newPath)).rejects.toThrow(/^Source not found:/);
+		await expect(renameEntryImpl(TEST_WIN, oldPath, newPath)).rejects.toMatchObject({
+			kind: "SOURCE_NOT_FOUND",
+		});
 	});
 
 	it("throws Target already exists when destination exists", async () => {
@@ -356,6 +366,9 @@ describe("renameEntryImpl", () => {
 		await expect(renameEntryImpl(TEST_WIN, oldPath, newPath)).rejects.toThrow(
 			/^Target already exists:/,
 		);
+		await expect(renameEntryImpl(TEST_WIN, oldPath, newPath)).rejects.toMatchObject({
+			kind: "TARGET_ALREADY_EXISTS",
+		});
 	});
 
 	it("rejects when either side is outside the workspace", async () => {
@@ -389,6 +402,7 @@ describe("deleteEntryImpl", () => {
 	it("throws Not found for missing entries", async () => {
 		const path = join(workspaceDir, "missing.md");
 		await expect(deleteEntryImpl(TEST_WIN, path)).rejects.toThrow(/^Not found:/);
+		await expect(deleteEntryImpl(TEST_WIN, path)).rejects.toMatchObject({ kind: "NOT_FOUND" });
 		expect(shell.trashItem).not.toHaveBeenCalled();
 	});
 

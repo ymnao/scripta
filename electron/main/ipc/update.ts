@@ -1,6 +1,6 @@
-import { ipcMain } from "electron";
 import type { UpdateInfo } from "../../../src/types/update";
 import { httpFetch } from "../utils/http-fetch";
+import { handle } from "../utils/ipc-handle";
 import { compareSemver, parseSemver, stripVPrefix } from "../utils/semver-lite";
 
 // `check_for_update_inner`。GitHub Releases API から latest release を取得し、
@@ -91,9 +91,7 @@ export async function checkForUpdateInner(currentVersion: string): Promise<Updat
 }
 
 export function registerUpdateIpc(): void {
-	ipcMain.handle("update:check", (_event, currentVersion: string) =>
-		checkForUpdateInner(currentVersion),
-	);
+	handle("update:check", (_event, currentVersion: string) => checkForUpdateInner(currentVersion));
 }
 
 export const __testing = { compareVersions, checkForUpdateInner };

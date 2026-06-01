@@ -1,11 +1,19 @@
-// message は固定の英語文字列契約。フロント側 errors.ts の正規表現
-// (`/^Already exists:/` など) でマッチさせるための定数 + ファクトリ。
-// 生文字列を fs ハンドラに散らさず、タイポで翻訳が落ちる事故を防ぐ。
+import { StructuredError } from "./structured-error";
+
+// fs ハンドラが文脈付きで投げる「意味的な」ファイル操作エラーのファクトリ。
+// 生 errno（EEXIST 等）だけでは区別できない「rename の source 不在」と
+// 「delete の対象不在」などを ErrorKind で区別し、renderer 側 errors.ts が
+// kind から日本語 UI メッセージを導出する。message は開発者向けの生文字列
+// （UNKNOWN 以外の kind では UI 表示に使われない）。
 export const FsError = {
-	alreadyExists: (p: string): Error => new Error(`Already exists: ${p}`),
-	sourceNotFound: (p: string): Error => new Error(`Source not found: ${p}`),
-	targetAlreadyExists: (p: string): Error => new Error(`Target already exists: ${p}`),
-	notFound: (p: string): Error => new Error(`Not found: ${p}`),
+	alreadyExists: (p: string): StructuredError =>
+		new StructuredError("ALREADY_EXISTS", `Already exists: ${p}`, { path: p }),
+	sourceNotFound: (p: string): StructuredError =>
+		new StructuredError("SOURCE_NOT_FOUND", `Source not found: ${p}`, { path: p }),
+	targetAlreadyExists: (p: string): StructuredError =>
+		new StructuredError("TARGET_ALREADY_EXISTS", `Target already exists: ${p}`, { path: p }),
+	notFound: (p: string): StructuredError =>
+		new StructuredError("NOT_FOUND", `Not found: ${p}`, { path: p }),
 };
 
 export function isErrnoCode(e: unknown, code: string): boolean {
