@@ -1,6 +1,26 @@
+import type { ChangeSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 type Command = (view: EditorView) => boolean;
+
+/**
+ * Dispatch a change while keeping each cursor to the RIGHT of inserted text
+ * at the insertion boundary.
+ *
+ * CodeMirror's default selection mapping uses `assoc: -1`, so a cursor sitting
+ * exactly at an insertion point stays on the LEFT of the inserted text
+ * (e.g. `|- ` after inserting `- `). Mapping with `assoc: 1` instead places the
+ * cursor on the right (`- |`). Cursors already inside body text are strictly
+ * after the insertion, so they shift by the inserted length and keep their
+ * relative position regardless of assoc.
+ */
+function dispatchKeepingCursorRight(view: EditorView, changes: ChangeSpec): void {
+	const changeSet = view.state.changes(changes);
+	view.dispatch({
+		changes: changeSet,
+		selection: view.state.selection.map(changeSet, 1),
+	});
+}
 
 function toggleWrap(view: EditorView, marker: string): boolean {
 	const { from, to } = view.state.selection.main;
@@ -41,14 +61,14 @@ export const toggleList: Command = (view) => {
 	if (listMatch) {
 		const wsLen = listMatch[1].length;
 		const markerEnd = line.from + listMatch[0].length;
-		view.dispatch({
-			changes: { from: line.from + wsLen, to: markerEnd, insert: "" },
-		});
+		dispatchKeepingCursorRight(view, { from: line.from + wsLen, to: markerEnd, insert: "" });
 	} else {
 		const wsMatch = text.match(/^(\s*)/);
 		const wsLen = wsMatch ? wsMatch[1].length : 0;
-		view.dispatch({
-			changes: { from: line.from + wsLen, to: line.from + wsLen, insert: "- " },
+		dispatchKeepingCursorRight(view, {
+			from: line.from + wsLen,
+			to: line.from + wsLen,
+			insert: "- ",
 		});
 	}
 	return true;
@@ -64,9 +84,7 @@ export const toggleCheckbox: Command = (view) => {
 	if (checkboxMatch) {
 		const wsLen = checkboxMatch[1].length;
 		const markerEnd = line.from + checkboxMatch[0].length;
-		view.dispatch({
-			changes: { from: line.from + wsLen, to: markerEnd, insert: "" },
-		});
+		dispatchKeepingCursorRight(view, { from: line.from + wsLen, to: markerEnd, insert: "" });
 		return true;
 	}
 
@@ -76,14 +94,14 @@ export const toggleCheckbox: Command = (view) => {
 	if (listMatch) {
 		const wsLen = listMatch[1].length;
 		const markerEnd = line.from + listMatch[0].length;
-		view.dispatch({
-			changes: { from: line.from + wsLen, to: markerEnd, insert: "- [ ] " },
-		});
+		dispatchKeepingCursorRight(view, { from: line.from + wsLen, to: markerEnd, insert: "- [ ] " });
 	} else {
 		const wsMatch = text.match(/^(\s*)/);
 		const wsLen = wsMatch ? wsMatch[1].length : 0;
-		view.dispatch({
-			changes: { from: line.from + wsLen, to: line.from + wsLen, insert: "- [ ] " },
+		dispatchKeepingCursorRight(view, {
+			from: line.from + wsLen,
+			to: line.from + wsLen,
+			insert: "- [ ] ",
 		});
 	}
 	return true;
@@ -150,20 +168,22 @@ export function toggleHeading(level: number): Command {
 			const existing = match[0];
 			if (existing === prefix) {
 				// Same level — remove heading
-				view.dispatch({
-					changes: { from: line.from, to: line.from + existing.length, insert: "" },
+				dispatchKeepingCursorRight(view, {
+					from: line.from,
+					to: line.from + existing.length,
+					insert: "",
 				});
 			} else {
 				// Different level — replace
-				view.dispatch({
-					changes: { from: line.from, to: line.from + existing.length, insert: prefix },
+				dispatchKeepingCursorRight(view, {
+					from: line.from,
+					to: line.from + existing.length,
+					insert: prefix,
 				});
 			}
 		} else {
 			// No heading — add
-			view.dispatch({
-				changes: { from: line.from, to: line.from, insert: prefix },
-			});
+			dispatchKeepingCursorRight(view, { from: line.from, to: line.from, insert: prefix });
 		}
 		return true;
 	};
