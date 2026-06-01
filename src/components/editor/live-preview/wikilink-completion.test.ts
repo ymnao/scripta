@@ -110,7 +110,7 @@ describe("wikilinkCompletion", () => {
 	});
 
 	it("returns null on searchFilenames failure", async () => {
-		mockSearchFilenames.mockRejectedValueOnce(new Error("invoke error"));
+		mockSearchFilenames.mockRejectedValueOnce(new Error("IPC error"));
 		const result = await wikilinkCompletionSource(createContext("[[", 2));
 		expect(result).toBeNull();
 	});
