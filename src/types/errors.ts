@@ -5,7 +5,8 @@
 // 越えると失われる。そこで構造化エラーを `message` 文字列に JSON エンコードして
 // 運び（main: encodeIpcError）、preload で decode してプロパティへ復元する
 // （preload: decodeIpcError）。renderer は復元後の `error.kind` で分岐するため、
-// メッセージ文字列の正規表現パース（旧 Tauri `Result<T, String>` 由来の設計）は不要になる。
+// メッセージ文字列の正規表現パースは不要になる
+// （旧バックエンド由来の設計と移行経緯は docs/adr/0008-structured-fs-error.md を参照）。
 
 // 構造化エラーの種別（discriminated union の discriminant）。
 // errno 系は Node の `NodeJS.ErrnoException.code` をそのまま種別に採用し、
