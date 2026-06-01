@@ -485,7 +485,7 @@ export function MarkdownEditor({
 			{
 				id: "insert-table",
 				label: "テーブルを挿入",
-				shortcut: isMac ? "⌃⇧T" : "Alt+Shift+T",
+				shortcut: isMac ? "⇧⌘T" : "Ctrl+Shift+T",
 				onClick: withFocus(insertTable),
 			},
 			{ id: "insert-hr", label: "水平線を挿入", onClick: withFocus(insertHorizontalRule) },

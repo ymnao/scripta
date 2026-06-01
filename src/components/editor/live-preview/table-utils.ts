@@ -1,6 +1,11 @@
 import { syntaxTree } from "@codemirror/language";
-import type { EditorState } from "@codemirror/state";
+import type { EditorState, Text } from "@codemirror/state";
 import { getStringWidth } from "../../../lib/east-asian-width";
+
+/** 指定行番号が存在し、かつ空行（trim 後に空文字）かを返す。 */
+export function isLineBlank(doc: Text, lineNum: number): boolean {
+	return lineNum >= 1 && lineNum <= doc.lines && doc.line(lineNum).text.trim().length === 0;
+}
 
 // ── Types ──────────────────────────────────────────────
 

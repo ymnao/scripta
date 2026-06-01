@@ -28,6 +28,7 @@ const groups: ShortcutGroup[] = [
 			{ keys: [[mod, "L"]], action: "リストの切り替え" },
 			{ keys: [[mod, shift, "L"]], action: "チェックボックスの切り替え" },
 			{ keys: [[mod, "\u21A9"]], action: "チェック / チェック解除" },
+			{ keys: [[mod, shift, "T"]], action: "テーブルを挿入" },
 		],
 	},
 	{

@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { buildTableDecorations } from "./table-decoration";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+	buildTableDecorations,
+	exitTableDown,
+	pasteIntoCell,
+	sanitizePasteText,
+	tableDecoration,
+} from "./table-decoration";
 import {
 	collectDecorations,
 	createTestState,
@@ -127,5 +137,191 @@ describe("buildTableDecorations", () => {
 		const w2 = widgetDecorations(collectDecorations(buildTableDecorations(state2)));
 
 		expect(w1[0].value.spec.widget.eq(w2[0].value.spec.widget)).toBe(true);
+	});
+});
+
+// ── sanitizePasteText（#89） ──
+
+describe("sanitizePasteText", () => {
+	it("`|` を除去する（テーブル構文を壊さない）", () => {
+		expect(sanitizePasteText("a|b|c")).toBe("abc");
+	});
+
+	it("改行をスペースに置換する", () => {
+		expect(sanitizePasteText("a\nb")).toBe("a b");
+		expect(sanitizePasteText("a\r\nb")).toBe("a b");
+		expect(sanitizePasteText("a\n\n\nb")).toBe("a b");
+	});
+
+	it("空文字列は空文字列を返す", () => {
+		expect(sanitizePasteText("")).toBe("");
+	});
+
+	it("通常テキストはそのまま返す", () => {
+		expect(sanitizePasteText("hello world")).toBe("hello world");
+	});
+});
+
+// ── selection clamp / exitTableDown / paste（#90 part2,3 / #89） ──
+//
+// dispatch・widget DOM を伴うため real EditorView を jsdom 上で起動して検証する。
+
+describe("table runtime (clamp / exitTableDown / paste)", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			mounted.pop()?.destroy();
+		}
+	});
+
+	function mountEditor(doc: string, cursorPos = 0): EditorView {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			selection: EditorSelection.cursor(cursorPos),
+			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		view.focus();
+		mounted.push(view);
+		return view;
+	}
+
+	it("selection head がテーブル末尾境界に来ると次行先頭へ退避する", () => {
+		const doc = `${simpleTable}\n\ntext`;
+		const view = mountEditor(doc);
+		const endTo = view.state.doc.line(3).to; // テーブル最終行の行末
+		view.dispatch({ selection: { anchor: endTo } });
+		// 巨大キャレットを避けて次行先頭へ
+		expect(view.state.selection.main.head).toBe(endTo + 1);
+	});
+
+	it("テーブル末尾境界以外の selection はそのまま", () => {
+		const doc = `${simpleTable}\n\ntext`;
+		const view = mountEditor(doc);
+		const textPos = doc.indexOf("text");
+		view.dispatch({ selection: { anchor: textPos } });
+		expect(view.state.selection.main.head).toBe(textPos);
+	});
+
+	it("末尾境界が EOF（直下に行が無い既存テーブル）なら改行を 1 つ補ってそこへ退避する", () => {
+		// 手入力・インポート済みファイルにありがちな「テーブルで終わる」ドキュメント
+		const view = mountEditor(simpleTable);
+		const endTo = view.state.doc.line(3).to;
+		expect(endTo).toBe(simpleTable.length); // テーブルが EOF
+
+		view.dispatch({ selection: { anchor: endTo } });
+
+		// 改行が 1 つだけ補われ（余分な空行を作らない）、巨大キャレット位置（endTo）に留まらない
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
+		expect(view.state.selection.main.head).toBe(endTo + 1);
+		// テーブル直下に編集可能な 1 行ができている
+		const { doc } = view.state;
+		expect(doc.line(doc.lines).text).toBe("");
+	});
+
+	it("EOF 退避で補った行へは再入（無限ループ）せず、改行を二重に補わない", () => {
+		const view = mountEditor(simpleTable);
+		const endTo = view.state.doc.line(3).to;
+		view.dispatch({ selection: { anchor: endTo } });
+		// 一度補ったら以降は直下に行が存在するので二重に改行を補わない
+		const afterFirst = view.state.doc.toString();
+		view.dispatch({ selection: { anchor: view.state.doc.line(3).to } });
+		expect(view.state.doc.toString()).toBe(afterFirst);
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
+	});
+
+	it("exitTableDown: 直下に行が無ければ改行を 1 つ補ってカーソルを置く", () => {
+		const view = mountEditor(simpleTable); // テーブルが EOF（直下に空行なし）
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		expect(wrapper).not.toBeNull();
+		if (!wrapper) return;
+
+		exitTableDown(view, wrapper);
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
+		// 補った空行の先頭にカーソル
+		expect(view.state.selection.main.head).toBe(simpleTable.length + 1);
+	});
+
+	it("exitTableDown: 直下に行があれば追加せずその行頭へ", () => {
+		const doc = `${simpleTable}\n\ntext`;
+		const view = mountEditor(doc);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		expect(wrapper).not.toBeNull();
+		if (!wrapper) return;
+
+		exitTableDown(view, wrapper);
+		// ドキュメントは変わらない（空行を二重に作らない）
+		expect(view.state.doc.toString()).toBe(doc);
+		// line4（空行）の行頭へ
+		expect(view.state.selection.main.head).toBe(view.state.doc.line(4).from);
+	});
+
+	it("pasteIntoCell: フォーカスセルにテキストを挿入しドキュメントへ反映する", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		expect(wrapper).not.toBeNull();
+		if (!wrapper) return;
+
+		const cell = wrapper.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+
+		pasteIntoCell(cell, "X", view, wrapper);
+		// セル DOM に挿入される
+		expect(cell.textContent).toContain("X");
+		// ドキュメント 1 行目（ヘッダ行）に反映される
+		expect(view.state.doc.line(1).text).toContain("X");
+	});
+
+	it("pasteIntoCell: セルをまたぐ選択時は対象セル末尾へ追記し他セルを壊さない", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		expect(wrapper).not.toBeNull();
+		if (!wrapper) return;
+
+		const cellA = wrapper.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		const cellB = wrapper.querySelector('[data-row="0"][data-col="1"]') as HTMLElement | null;
+		expect(cellA?.firstChild).toBeTruthy();
+		expect(cellB?.firstChild).toBeTruthy();
+		if (!cellA?.firstChild || !cellB?.firstChild) return;
+
+		// セル A → セル B にまたがる選択を作る
+		const range = document.createRange();
+		range.setStart(cellA.firstChild, 0);
+		range.setEnd(cellB.firstChild, 1);
+		const sel = window.getSelection();
+		sel?.removeAllRanges();
+		sel?.addRange(range);
+
+		pasteIntoCell(cellA, "X", view, wrapper);
+
+		// 対象セル A の末尾へ追記され、セル B は消えない（deleteContents で巻き込まない）
+		expect(cellA.textContent).toBe("AX");
+		expect(cellB.textContent).toBe("B");
+		// DOM と Markdown が一致（ヘッダ行 = | AX | B |）
+		expect(view.state.doc.line(1).text).toBe("| AX | B |");
+	});
+
+	it("削除でテーブル末尾境界(EOF)に取り残されたら改行を補い退避する（tableBoundaryGuard）", async () => {
+		const view = mountEditor(`${simpleTable}\n`); // テーブル + 直下に 1 行
+		const endTo = view.state.doc.line(3).to; // テーブル最終行末尾
+
+		// 直下の改行を削除し、カーソルを EOF 境界(endTo)へ（空行先頭からの Backspace 相当）
+		view.dispatch({ changes: { from: endTo, to: endTo + 1 }, selection: { anchor: endTo } });
+
+		// 削除直後はテーブル末尾境界（巨大キャレット位置）に取り残される
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(endTo);
+
+		// guard が次 tick で改行を補完し、テーブル直下の行へ退避する
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
+		expect(view.state.selection.main.head).toBe(endTo + 1);
 	});
 });

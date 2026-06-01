@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import {
-	type EditorState,
+	EditorSelection,
+	EditorState,
 	type Extension,
 	type Range,
 	StateEffect,
@@ -15,7 +16,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { getStringWidth } from "../../../lib/east-asian-width";
-import { findUnescapedPipe } from "./table-utils";
+import { findUnescapedPipe, isLineBlank } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -268,15 +269,25 @@ function getTableNodeFor(view: EditorView, wrapperEl: HTMLElement) {
 	return findTableNode(view.state, pos);
 }
 
-function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
+export function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
 	(document.activeElement as HTMLElement)?.blur();
 	const tableNode = getTableNodeFor(view, wrapperEl);
-	if (tableNode) {
-		const endLinePos = view.state.doc.line(tableNode.endLine).to;
-		const after = Math.min(endLinePos + 1, view.state.doc.length);
-		view.dispatch({ selection: { anchor: after } });
-		view.focus();
+	if (!tableNode) return;
+
+	const { doc } = view.state;
+	const endLine = doc.line(tableNode.endLine);
+
+	if (isLineBlank(doc, tableNode.endLine + 1)) {
+		// 既にテーブル直下に行がある: その行頭へ移動
+		view.dispatch({ selection: { anchor: doc.line(tableNode.endLine + 1).from } });
+	} else {
+		// 直下に行が無い（EOF / 直下が本文）: 改行を 1 つ補って行を作りその行頭へ
+		view.dispatch({
+			changes: { from: endLine.to, insert: "\n" },
+			selection: { anchor: endLine.to + 1 },
+		});
 	}
+	view.focus();
 }
 
 function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
@@ -465,19 +476,13 @@ class EditableTableWidget extends WidgetType {
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
 		wrapper.addEventListener("paste", (e) => {
 			e.preventDefault();
-			const text = e.clipboardData?.getData("text/plain") ?? "";
-			// `|` と改行を除去してプレーンテキストとして挿入
-			const sanitized = text.replace(/\|/g, "").replace(/\n/g, " ");
-			const sel = window.getSelection();
-			if (sel && sel.rangeCount > 0) {
-				const range = sel.getRangeAt(0);
-				range.deleteContents();
-				range.insertNode(document.createTextNode(sanitized));
-				range.collapse(false);
-				sel.removeAllRanges();
-				sel.addRange(range);
-			}
-			handleInput(e, view, wrapper);
+			const sanitized = sanitizePasteText(e.clipboardData?.getData("text/plain") ?? "");
+			if (!sanitized) return;
+			// フォーカスセルを正規化してから挿入する（e.target が text node /
+			// wrapper のケースで挿入先がずれて反映されないのを防ぐ）
+			const cell = getFocusedCell(wrapper);
+			if (!cell) return;
+			pasteIntoCell(cell, sanitized, view, wrapper);
 		});
 		wrapper.addEventListener("compositionstart", () => {
 			compositionState.set(wrapper, { active: true, composing: true });
@@ -499,9 +504,9 @@ class EditableTableWidget extends WidgetType {
 
 // ── Event handlers (module-level, read data from widgetDataMap) ──
 
-function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
-	const target = e.target as HTMLElement;
-	const rowIdx = Number(target.dataset.row);
+/** セルの属する行を DOM から読み取り、対応するドキュメント行へ反映する。 */
+function syncRowFromCell(cell: HTMLElement, view: EditorView, wrapperEl: HTMLElement): void {
+	const rowIdx = Number(cell.dataset.row);
 	if (Number.isNaN(rowIdx)) return;
 
 	const tableNode = getTableNodeFor(view, wrapperEl);
@@ -512,7 +517,7 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 	if (lineNum > view.state.doc.lines) return;
 
 	const docLine = view.state.doc.line(lineNum);
-	const tr = target.closest("tr");
+	const tr = cell.closest("tr");
 	if (!tr) return;
 
 	const cellContents: string[] = [];
@@ -526,6 +531,68 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 	view.dispatch({
 		changes: { from: docLine.from, to: docLine.to, insert: newLine },
 	});
+}
+
+function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
+	const target = e.target as HTMLElement;
+	// input target が text node / <br> の場合もあるためセルへ正規化する
+	const cell = target.closest?.("th, td") as HTMLElement | null;
+	if (!cell) return;
+	syncRowFromCell(cell, view, wrapperEl);
+}
+
+/** ペーストテキストを単一セル用に正規化する（`|` 除去 / 改行→スペース）。 */
+export function sanitizePasteText(raw: string): string {
+	return raw.replace(/\|/g, "").replace(/[\r\n]+/g, " ");
+}
+
+/** 現在フォーカス中のセルを解決する（activeElement → selection anchor の順）。 */
+function getFocusedCell(wrapperEl: HTMLElement): HTMLElement | null {
+	const active = document.activeElement;
+	if (active instanceof HTMLElement && wrapperEl.contains(active)) {
+		const cell = active.closest("th, td");
+		if (cell instanceof HTMLElement) return cell;
+	}
+	const anchor = window.getSelection()?.anchorNode;
+	const el = anchor instanceof Element ? anchor : (anchor?.parentElement ?? null);
+	const cell = el?.closest("th, td");
+	if (cell instanceof HTMLElement && wrapperEl.contains(cell)) return cell;
+	return null;
+}
+
+/** 正規化済みテキストをセルへ挿入し、ドキュメントへ反映する。 */
+export function pasteIntoCell(
+	cell: HTMLElement,
+	sanitized: string,
+	view: EditorView,
+	wrapperEl: HTMLElement,
+): void {
+	const sel = window.getSelection();
+	// 選択が対象セル内に完全に収まっている場合のみ caret 位置へ挿入する。
+	// anchor / focus どちらかがセル外（セルをまたぐ選択）だと deleteContents が
+	// 他セルの DOM まで巻き込み、syncRowFromCell が 1 行しか同期しないため
+	// DOM と Markdown が不整合になる。その場合は対象セル末尾への追記に倒す。
+	const withinCell =
+		sel !== null &&
+		sel.rangeCount > 0 &&
+		sel.anchorNode !== null &&
+		sel.focusNode !== null &&
+		cell.contains(sel.anchorNode) &&
+		cell.contains(sel.focusNode);
+	if (withinCell) {
+		const range = sel.getRangeAt(0);
+		range.deleteContents();
+		const node = document.createTextNode(sanitized);
+		range.insertNode(node);
+		range.setStartAfter(node);
+		range.collapse(true);
+		sel.removeAllRanges();
+		sel.addRange(range);
+	} else {
+		// セルをまたぐ選択 / セル外 / 選択なし → 対象セル末尾へ追記
+		cell.appendChild(document.createTextNode(sanitized));
+	}
+	syncRowFromCell(cell, view, wrapperEl);
 }
 
 function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElement): void {
@@ -873,6 +940,20 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 	type MenuItem = { label: string; action: () => void; disabled?: boolean } | null;
 	const items: MenuItem[] = [
 		{
+			label: "貼り付け",
+			action: () => {
+				if (!navigator.clipboard) return;
+				navigator.clipboard.readText().then(
+					(text) => {
+						const sanitized = sanitizePasteText(text);
+						if (sanitized) pasteIntoCell(target, sanitized, view, wrapperEl);
+					},
+					() => {},
+				);
+			},
+		},
+		null,
+		{
 			label: "上に行を追加",
 			action: () => insertRowBefore(view, wrapperEl, rowIdx, colIdx),
 			disabled: isHeader,
@@ -1083,6 +1164,102 @@ const treeChangeDetector = ViewPlugin.fromClass(
 	},
 );
 
+// ── Cursor clamp (avoid the full-height caret at the table's end) ──
+
+/**
+ * pos が block table の末尾境界（最終行の行末）かを判定する。該当すれば true。
+ * 安価な事前フィルタ（行末かつ `|` を含む行）を先に通し、syntaxTree を引く
+ * findTableNode はそこを通過した時だけ呼ぶ（カーソル移動ごとに走る hot path のため）。
+ */
+function isTableEndBoundary(state: EditorState, pos: number): boolean {
+	const line = state.doc.lineAt(pos);
+	if (pos !== line.to || !line.text.includes("|")) return false;
+	const tableNode = findTableNode(state, pos);
+	if (!tableNode) return false;
+	// 問題になるのはテーブル末尾境界のみ（上端境界はテーブル直前の正当な位置）
+	return pos === state.doc.line(tableNode.endLine).to;
+}
+
+/**
+ * テーブルは `Decoration.replace({ block: true })` で 1 つの block widget に
+ * なるため、selection head がテーブル末尾境界（最終行の行末）に来ると widget
+ * 高さ分の巨大キャレットが描画される。head がその位置に来たら次行先頭へ退避する。
+ *
+ * insertTable / exitTableDown はテーブル直下に行を確保するが、手入力・インポート
+ * 済みの既存ファイルではテーブルが EOF で終わる（直下に行が無い）こともある。その
+ * 場合は改行を 1 つだけ補って行を作り、そこへ退避する（テーブル直下に常に編集可能な
+ * 行を確保する不変条件。余分な空行は作らない / git 用の末尾改行は別概念で save 時の
+ * processContent が担う）。補った change により後続トランザクションは docChanged
+ * となり、本フィルタの先頭ガードで再入しない。
+ *
+ * 本フィルタは selection 変更のみのトランザクション（ナビゲーション）を扱う。
+ * transactionFilter は新 state の syntaxTree を参照できず、doc 変更後は位置も
+ * ずれるため、削除 / undo で境界に残るケースは tableBoundaryGuard が補正する。
+ */
+const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
+	if (!tr.selection || tr.docChanged) return tr;
+
+	const doc = tr.newDoc;
+	let modified = false;
+	let appendNewlineAt: number | null = null;
+	const ranges = tr.selection.ranges.map((range) => {
+		// docChanged でないので tr.startState の位置と head は一致する
+		if (!range.empty || !isTableEndBoundary(tr.startState, range.head)) return range;
+
+		modified = true;
+		// 直下に行が無い（テーブルが EOF）なら改行を 1 つ補う。退避先は補った行頭になる。
+		if (range.head === doc.length) appendNewlineAt = range.head;
+		return EditorSelection.cursor(range.head + 1);
+	});
+
+	if (!modified) return tr;
+	const selection = EditorSelection.create(ranges, tr.selection.mainIndex);
+	if (appendNewlineAt !== null) {
+		return [tr, { changes: { from: appendNewlineAt, insert: "\n" }, selection }];
+	}
+	return [tr, { selection }];
+});
+
+/**
+ * 削除 / undo など doc 変更後にカーソルがテーブル末尾境界へ取り残されるケースを補正する。
+ * transactionFilter（tableCursorFilter）は新 state の syntaxTree を参照できないため
+ * doc 変更トランザクションを扱えない。本 ViewPlugin は state 構築後の update() で
+ * syntaxTree(view.state) を使って判定し、必要なら次行先頭へ退避（EOF なら改行を補完）する。
+ *
+ * - エディタにフォーカスがある（= ユーザーがエディタ本体を操作中）ときのみ動作する。
+ *   セル編集中は contentEditable 側にフォーカスがあり view.hasFocus は false なので、
+ *   セル入力（syncRowFromCell の dispatch）には介入しない。
+ * - dispatch は update() 内で同期に呼べないため queueMicrotask で次 tick に回す
+ *   （描画前に走るので巨大キャレットは paint されない）。
+ */
+const tableBoundaryGuard = ViewPlugin.fromClass(
+	class {
+		update(update: ViewUpdate) {
+			if (!update.docChanged || !update.view.hasFocus) return;
+			const sel = update.state.selection.main;
+			if (!sel.empty || !isTableEndBoundary(update.state, sel.head)) return;
+
+			const { view } = update;
+			const head = sel.head;
+			queueMicrotask(() => {
+				const s = view.state.selection.main;
+				// 状況が変わっていない（まだ境界に居る）ことを確認してから補正
+				if (!s.empty || s.head !== head || !isTableEndBoundary(view.state, head)) return;
+				const atEof = head === view.state.doc.length;
+				view.dispatch({
+					changes: atEof ? { from: head, insert: "\n" } : undefined,
+					selection: { anchor: head + 1 },
+				});
+			});
+		}
+	},
+);
+
 // ── Extension ─────────────────────────────────────────
 
-export const tableDecoration: Extension = [tableDecorationField, treeChangeDetector];
+export const tableDecoration: Extension = [
+	tableDecorationField,
+	treeChangeDetector,
+	tableCursorFilter,
+	tableBoundaryGuard,
+];
