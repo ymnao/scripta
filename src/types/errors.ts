@@ -73,15 +73,15 @@ export function decodeIpcError(message: string): StructuredErrorData | null {
 	const json = message.slice(idx + IPC_ERROR_SENTINEL.length);
 	try {
 		const parsed: unknown = JSON.parse(json);
-		if (
-			typeof parsed === "object" &&
-			parsed !== null &&
-			typeof (parsed as { kind?: unknown }).kind === "string" &&
-			typeof (parsed as { message?: unknown }).message === "string"
-		) {
-			return parsed as StructuredErrorData;
-		}
-		return null;
+		if (typeof parsed !== "object" || parsed === null) return null;
+		const p = parsed as Record<string, unknown>;
+		if (typeof p.kind !== "string" || typeof p.message !== "string") return null;
+		// optional フィールド（code / path）も型検証してから復元する。
+		// 不正型（number 等）は drop し、kind / message は活かす。
+		const data: StructuredErrorData = { kind: p.kind as ErrorKind, message: p.message };
+		if (typeof p.code === "string") data.code = p.code;
+		if (typeof p.path === "string") data.path = p.path;
+		return data;
 	} catch {
 		return null;
 	}

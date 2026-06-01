@@ -40,6 +40,16 @@ describe("encodeIpcError / decodeIpcError", () => {
 	it("returns null when required fields are missing", () => {
 		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}{"message":"no kind"}`)).toBeNull();
 	});
+
+	it("drops optional fields (code / path) that are not strings", () => {
+		const wire = `${IPC_ERROR_SENTINEL}${JSON.stringify({
+			kind: "ENOENT",
+			message: "m",
+			code: 123,
+			path: ["not", "a", "string"],
+		})}`;
+		expect(decodeIpcError(wire)).toEqual({ kind: "ENOENT", message: "m" });
+	});
 });
 
 describe("getErrorKind", () => {

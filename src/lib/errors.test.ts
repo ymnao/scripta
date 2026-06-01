@@ -48,6 +48,12 @@ describe("translateError", () => {
 		);
 	});
 
+	it("falls back to default for an unexpected/forged kind not in the catalog", () => {
+		// getErrorKind は実行時に任意文字列を返し得る。未知 kind で undefined を返さないこと。
+		const forged = Object.assign(new Error("boom"), { kind: "TOTALLY_BOGUS_KIND" });
+		expect(translateError(forged)).toBe("予期しないエラーが発生しました。詳細: boom");
+	});
+
 	it("falls back with raw message for kind-less Error objects", () => {
 		expect(translateError(new Error("Something unexpected happened"))).toBe(
 			"予期しないエラーが発生しました。詳細: Something unexpected happened",
