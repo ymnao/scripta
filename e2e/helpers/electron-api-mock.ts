@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
+import { getInitializedMarkerPath } from "../../src/lib/scripta-config";
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
 import type { OgpData } from "../../src/types/ogp";
 import type { SearchResult } from "../../src/types/search";
@@ -65,13 +66,17 @@ export class ElectronApiMock {
 	}
 
 	async setup(opts: ElectronApiMockOptions = {}): Promise<void> {
-		const payload: Required<ElectronApiMockOptions> = {
+		const payload: Required<ElectronApiMockOptions> & { initializedMarkerSuffix: string } = {
 			fs: opts.fs ?? { files: {}, directories: {} },
 			dialogResult: opts.dialogResult ?? null,
 			saveDialogResult: opts.saveDialogResult ?? null,
 			settings: opts.settings ?? {},
 			appVersion: opts.appVersion ?? "0.0.0-e2e",
 			workspaceInitialized: opts.workspaceInitialized ?? true,
+			// 初期化マーカーの相対 suffix（例: ".scripta/initialized.json"）を
+			// アプリ本体と同じ真実源 (scripta-config) から導出して drift を防ぐ。
+			// 派生値なので公開 option (ElectronApiMockOptions) には含めない。
+			initializedMarkerSuffix: getInitializedMarkerPath(""),
 		};
 		await this.page.addInitScript(installApiMock, payload);
 	}
@@ -212,6 +217,7 @@ function installApiMock(opts: {
 	settings: Record<string, unknown>;
 	appVersion: string;
 	workspaceInitialized: boolean;
+	initializedMarkerSuffix: string;
 }): void {
 	const store: MockStore = {
 		files: { ...opts.fs.files },
@@ -419,9 +425,10 @@ function installApiMock(opts: {
 		},
 		fileExists: async (path: string): Promise<boolean> => {
 			track("fileExists", [path]);
-			// `.scripta/initialized.json` は workspace 初期化マーカー。store に明示シードが
-			// 無くても workspaceInitialized フラグで存在を制御し、SetupWizard の誤表示を防ぐ。
-			if (path.endsWith("/.scripta/initialized.json")) {
+			// 初期化マーカー (`.scripta/initialized.json`)。store に明示シードが無くても
+			// workspaceInitialized フラグで存在を制御し、SetupWizard の誤表示を防ぐ。
+			// suffix は scripta-config から導出された値（drift 防止）。
+			if (path.endsWith(`/${opts.initializedMarkerSuffix}`)) {
 				return store.workspaceInitialized || path in store.files;
 			}
 			return path in store.files;

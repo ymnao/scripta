@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { ErrorKind } from "../types/errors";
+import { kindError } from "../__test-utils__/structured-error";
 import {
 	deleteEntry,
 	listDirectory,
@@ -15,10 +15,7 @@ import {
 // 各テストでは `(window.api.<fn> as Mock).mockXxxValueOnce(...)` で個別の挙動を上書きする。
 //
 // non-transient 判定は preload で付与される `error.kind` ベースになったため、
-// 「再試行しない」検証には kind 付きエラーを reject させる（実際の IPC エラー形を模す）。
-function kindError(kind: ErrorKind, message: string): Error {
-	return Object.assign(new Error(message), { kind });
-}
+// 「再試行しない」検証には kindError() で kind 付きエラーを reject させる。
 
 describe("readFile with retry", () => {
 	beforeEach(() => {

@@ -87,8 +87,14 @@ export function fileExists(path: string): Promise<boolean> {
 	return fileExistsCmd(path);
 }
 
+// 初期化マーカー (`<ws>/.scripta/initialized.json`) の絶対パス。
+// アプリ本体と e2e mock が同じ真実源を参照できるよう関数化している。
+export function getInitializedMarkerPath(workspacePath: string): string {
+	return joinPath(getScriptaDir(workspacePath), INITIALIZED_FILE);
+}
+
 export async function isWorkspaceInitialized(workspacePath: string): Promise<boolean> {
-	return fileExists(joinPath(getScriptaDir(workspacePath), INITIALIZED_FILE));
+	return fileExists(getInitializedMarkerPath(workspacePath));
 }
 
 export async function markWorkspaceInitialized(workspacePath: string): Promise<void> {
