@@ -50,6 +50,12 @@ describe("encodeIpcError / decodeIpcError", () => {
 		})}`;
 		expect(decodeIpcError(wire)).toEqual({ kind: "ENOENT", message: "m" });
 	});
+
+	it("does not reconstruct from prototype-injected fields (__proto__ payload)", () => {
+		// own property としての kind/message を持たないため復元しない。
+		const wire = `${IPC_ERROR_SENTINEL}{"__proto__":{"kind":"ENOENT","message":"x"}}`;
+		expect(decodeIpcError(wire)).toBeNull();
+	});
 });
 
 describe("getErrorKind", () => {
@@ -66,5 +72,10 @@ describe("getErrorKind", () => {
 		expect(getErrorKind("string")).toBeUndefined();
 		expect(getErrorKind(null)).toBeUndefined();
 		expect(getErrorKind(42)).toBeUndefined();
+	});
+
+	it("ignores kind inherited from the prototype chain (own property only)", () => {
+		const inherited = Object.create({ kind: "ENOENT" });
+		expect(getErrorKind(inherited)).toBeUndefined();
 	});
 });

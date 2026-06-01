@@ -54,6 +54,12 @@ describe("translateError", () => {
 		expect(translateError(forged)).toBe("予期しないエラーが発生しました。詳細: boom");
 	});
 
+	it("falls back to default for Object.prototype keys as kind (no prototype pickup)", () => {
+		// "toString" 等は KIND_MESSAGES[kind] が関数を拾い得るため Object.hasOwn で防ぐ。
+		const forged = Object.assign(new Error("boom"), { kind: "toString" });
+		expect(translateError(forged)).toBe("予期しないエラーが発生しました。詳細: boom");
+	});
+
 	it("falls back with raw message for kind-less Error objects", () => {
 		expect(translateError(new Error("Something unexpected happened"))).toBe(
 			"予期しないエラーが発生しました。詳細: Something unexpected happened",

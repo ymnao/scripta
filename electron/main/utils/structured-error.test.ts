@@ -22,6 +22,11 @@ describe("classifyErrno", () => {
 		expect(classifyErrno("EWHATEVER")).toBe("UNKNOWN");
 		expect(classifyErrno(undefined)).toBe("UNKNOWN");
 	});
+
+	it("does not pick up Object.prototype keys via the `in` operator", () => {
+		expect(classifyErrno("toString")).toBe("UNKNOWN");
+		expect(classifyErrno("constructor")).toBe("UNKNOWN");
+	});
 });
 
 describe("classifyGitError", () => {

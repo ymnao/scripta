@@ -49,11 +49,10 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 export function translateError(error: unknown): string {
 	const kind = getErrorKind(error);
 	// getErrorKind は実行時には任意の文字列を返し得る（forge された / 未知の kind）。
-	// KIND_MESSAGES に実在するキーのみ翻訳し、それ以外は既定メッセージへフォールバック
-	// する（戻り値 undefined を防ぐ）。
-	if (kind !== undefined && kind !== "UNKNOWN") {
-		const message = KIND_MESSAGES[kind];
-		if (message !== undefined) return message;
+	// `KIND_MESSAGES[kind]` を直接引くと `"toString"` など Object.prototype 由来のキーで
+	// 関数を拾い得るため、Object.hasOwn で own key のみに限定する。該当しなければ既定へ。
+	if (kind !== undefined && kind !== "UNKNOWN" && Object.hasOwn(KIND_MESSAGES, kind)) {
+		return KIND_MESSAGES[kind];
 	}
 	return `予期しないエラーが発生しました。詳細: ${extractMessage(error)}`;
 }

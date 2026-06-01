@@ -75,12 +75,20 @@ export function decodeIpcError(message: string): StructuredErrorData | null {
 		const parsed: unknown = JSON.parse(json);
 		if (typeof parsed !== "object" || parsed === null) return null;
 		const p = parsed as Record<string, unknown>;
-		if (typeof p.kind !== "string" || typeof p.message !== "string") return null;
-		// optional フィールド（code / path）も型検証してから復元する。
-		// 不正型（number 等）は drop し、kind / message は活かす。
+		// IPC 境界の decoder なので own property のみを信頼する（`{"__proto__":{...}}`
+		// 等の prototype 経由の値で復元されないよう Object.hasOwn で限定）。
+		if (
+			!Object.hasOwn(p, "kind") ||
+			!Object.hasOwn(p, "message") ||
+			typeof p.kind !== "string" ||
+			typeof p.message !== "string"
+		) {
+			return null;
+		}
+		// optional フィールド（code / path）も own かつ string のときのみ復元する。
 		const data: StructuredErrorData = { kind: p.kind as ErrorKind, message: p.message };
-		if (typeof p.code === "string") data.code = p.code;
-		if (typeof p.path === "string") data.path = p.path;
+		if (Object.hasOwn(p, "code") && typeof p.code === "string") data.code = p.code;
+		if (Object.hasOwn(p, "path") && typeof p.path === "string") data.path = p.path;
 		return data;
 	} catch {
 		return null;
@@ -90,7 +98,8 @@ export function decodeIpcError(message: string): StructuredErrorData | null {
 // 任意の値から ErrorKind を取り出す（preload が復元時に付与した `kind` を読む）。
 // 構造化されていない値は undefined。
 export function getErrorKind(error: unknown): ErrorKind | undefined {
-	if (typeof error === "object" && error !== null) {
+	// preload が付与する own property `kind` のみを読む（prototype 汚染で誤判定しない）。
+	if (typeof error === "object" && error !== null && Object.hasOwn(error, "kind")) {
 		const kind = (error as { kind?: unknown }).kind;
 		if (typeof kind === "string") return kind as ErrorKind;
 	}

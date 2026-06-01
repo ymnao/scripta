@@ -47,7 +47,9 @@ const ERRNO_TO_KIND: Record<string, ErrorKind> = {
 };
 
 export function classifyErrno(code: string | undefined): ErrorKind {
-	if (code && code in ERRNO_TO_KIND) return ERRNO_TO_KIND[code];
+	// `code in ERRNO_TO_KIND` は prototype 上のキー（"toString" 等）でも真になり、
+	// 関数を ErrorKind として拾い得る。Object.hasOwn で own key のみに限定する。
+	if (code !== undefined && Object.hasOwn(ERRNO_TO_KIND, code)) return ERRNO_TO_KIND[code];
 	return "UNKNOWN";
 }
 
