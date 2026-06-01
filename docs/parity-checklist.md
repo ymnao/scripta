@@ -263,8 +263,15 @@
 
 ### 既知差分
 
-- ✅ **実 Electron 起動モード追加（Phase 1 PR-3, #33 / #82 C）**: `e2e/electron/*.electron.spec.ts`（`playwright.electron.config.ts`, `pnpm test:e2e:electron`）が `electron-vite build` 成果物を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。設定永続化 / Settings migration / asset protocol / 画像描画 / マルチウィンドウの 5 領域 + smoke を safety net 化（CI は `electron-e2e` job, xvfb-run）。
-- ⚠️ **renderer-only モードの守備範囲**: UI ロジックの大半は依然 renderer-only（`e2e/*.spec.ts`）で高速にカバー。並列性・速度・CI コストが利点だが、実 IPC payload のシリアライズ / contextBridge / preload の実装ミスは検出できない。これらは実 Electron 起動モードと Vitest unit test（`electron/main/ipc/*.test.ts` 群）が補完する。
+- ✅ **実 Electron 起動モード（Phase 1 PR-3, #33 / #82 C → Phase 4 #86 で拡充）**: `e2e/electron/*.electron.spec.ts`（`playwright.electron.config.ts`, `pnpm test:e2e:electron`）が `electron-vite build` 成果物を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。**smoke + 8 領域**を safety net 化: 設定永続化 / Settings migration / asset protocol / 画像描画 / マルチウィンドウ（Phase 1 PR-3）+ **ファイルライフサイクル（実 fs CRUD + 再起動永続化）/ Mermaid 描画 / PDF エクスポート（printToPDF）**（Phase 4）。CI は `electron-e2e` job（xvfb-run, full blocking）。1 spec = 1 領域の分類方針と CI ポリシーは [ADR-0009](adr/0009-renderer-only-e2e-strategy.md)。
+- ⚠️ **renderer-only モードが検出できない領域**（実 Electron 起動モードと Vitest unit test `electron/main/ipc/*.test.ts` 群が補完する）:
+  - IPC payload の serialization 不一致（contextBridge 越しの構造化クローン制約）
+  - contextBridge 経由の API 漏れ / 命名ズレ（`window.api.*` 表面）
+  - preload script の実 ready 状態（`contextIsolation` 越しの公開タイミング）
+  - protocol handler（`scripta-asset://`）の実 fetch と path-guard
+  - file watcher（`chokidar`）の実イベントフロー
+  - 実 OS のファイル操作（`fs:write` の path-guard 通過と実ディスク反映、`shell.trashItem` 等）
+  - production renderer での重量 widget 描画（mermaid SVG / PDF `printToPDF`）
 
 ### 検証項目
 

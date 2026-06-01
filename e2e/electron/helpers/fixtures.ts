@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // 実 main が読み書きする settings.json は `<userData>/settings.json` のフラットな
@@ -43,6 +43,24 @@ export function writeWorkspaceFiles(
 		const absPath = join(workspaceDir, relPath);
 		mkdirSync(dirname(absPath), { recursive: true });
 		writeFileSync(absPath, content);
+	}
+}
+
+// launch 後に workspace 内のテキストファイルを utf8 で読む。実 main が `fs:write`
+// 経由で書いた内容をディスクから検証するためのもの（autosave / 手動保存の実 IPC
+// 往復確認）。PDF 等のバイナリ検証には使わない（`%PDF` のように先頭が ASCII の
+// magic header だけ確認する用途なら utf8 read でも先頭は保持される）。
+export function readWorkspaceFile(workspaceDir: string, relPath: string): string {
+	return readFileSync(join(workspaceDir, relPath), "utf8");
+}
+
+// launch 後に workspace 内ファイルの存在とサイズを返す。PDF エクスポートのように
+// 「ファイルが生成されたか」「中身が空でないか」だけ確認したいケース用。
+export function workspaceFileSize(workspaceDir: string, relPath: string): number | null {
+	try {
+		return statSync(join(workspaceDir, relPath)).size;
+	} catch {
+		return null;
 	}
 }
 
