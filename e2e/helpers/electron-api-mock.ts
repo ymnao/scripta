@@ -296,10 +296,6 @@ function installApiMock(opts: {
 	// 緩い `unknown` / `string` のままだと preload 側のシグネチャが変わっても
 	// この helper は静かに古いまま放置されるため、foundation として固定する。
 	const api: Api = {
-		getVersion: (): string => {
-			track("getVersion", []);
-			return store.appVersion;
-		},
 		getAppVersion: async (): Promise<string> => {
 			track("getAppVersion", []);
 			return store.appVersion;

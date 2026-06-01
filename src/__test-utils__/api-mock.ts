@@ -9,7 +9,6 @@ import { buildScriptaAssetUrl } from "../../electron/preload/scripta-asset-url";
  */
 export function createApiMock(): Api {
 	return {
-		getVersion: vi.fn(() => ""),
 		getAppVersion: vi.fn(async () => "0.0.0"),
 		closeWindow: vi.fn(async () => {}),
 		openConflictWindow: vi.fn(async () => {}),

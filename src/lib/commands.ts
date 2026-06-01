@@ -1,3 +1,25 @@
+/**
+ * Renderer 側の IPC client 層。preload の contextBridge が公開する `window.api`
+ * （唯一の renderer↔main 境界）を呼ぶ薄いラッパーを 1 箇所に集約する。
+ *
+ * この層が存在する理由は 2 つ:
+ * 1. **transport との疎結合** — renderer の各モジュールが preload API（`window.api`）の
+ *    形状に直接依存しないようにし、IPC の呼び出し面を本ファイルに局所化する。
+ * 2. **IPC 横断の関心事の chokepoint** — 現状は transient error に対する retry
+ *    （`withRetry`）。将来 logging / error 変換等を足す場合もここが差し込み口になる。
+ *
+ * 関数の分類:
+ * - **retry あり**（`withRetry` でラップ）: timeout / 一時的ロック等の transient error
+ *   が起き得る fs / 全文検索系 — `readFile` / `writeFile` / `listDirectory` /
+ *   `renameEntry` / `deleteEntry` / `searchFiles` / `searchFilenames` /
+ *   `scanUnresolvedWikilinks`。
+ * - **retry なし**（`window.api.*` への 1:1 typed forward）: 上記以外。retry が
+ *   無益（冪等でない write / イベント購読）か、即時失敗で十分なもの。
+ *
+ * Electron では `window.api` 自体が typed な境界であるため、本層の存在価値は
+ * 上記 2 点（疎結合 + retry）にある。retry なし forward を呼び出し元へ inline
+ * せず本層に残す設計判断の経緯と根拠は ADR-0007 を参照。
+ */
 import type {
 	ListDirectoryOptions,
 	MenuEventName,
@@ -192,6 +214,22 @@ export function openConflictWindow(workspacePath: string): Promise<void> {
 
 export function buildAssetUrl(path: string): string {
 	return window.api.buildAssetUrl(path);
+}
+
+export function settingsGet(key: string): Promise<unknown> {
+	return window.api.settingsGet(key);
+}
+
+export function settingsSet(key: string, value: unknown): Promise<void> {
+	return window.api.settingsSet(key, value);
+}
+
+export function settingsDelete(key: string): Promise<void> {
+	return window.api.settingsDelete(key);
+}
+
+export function settingsSave(): Promise<void> {
+	return window.api.settingsSave();
 }
 
 export function openDirectoryPicker(): Promise<string | null> {
