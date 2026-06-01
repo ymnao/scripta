@@ -58,16 +58,14 @@ test.describe("マーカー挿入後のカーソル位置 (#91)", () => {
 		expect(await lastWrite(mock)).toContain("# Title");
 	});
 
-	test("空行で Cmd+Shift+L → 入力テキストがタスクマーカーの右に入る", async ({ page }) => {
-		const mock = await openWithContent(page, "");
-
-		await page.keyboard.press(`${modKey}+Shift+l`);
-		await page.keyboard.type("todo");
-		await page.keyboard.press(`${modKey}+s`);
-		await waitForSaved(page);
-
-		expect(await lastWrite(mock)).toContain("- [ ] todo");
-	});
+	// 注: Cmd+Shift+L（toggleCheckbox）の e2e は意図的に置かない。
+	// CM6 の keymap は Shift+文字キーを正しいバインディングに解決する際
+	// keyCode→基底キー名マップ（過去のキー入力から動的構築）に依存するため、
+	// ファイルを開いて即ショートカットを押す synthetic event 環境では解決が
+	// 不安定になる（CI Linux で Mod-l に誤フォールバックする）。
+	// toggleCheckbox のカーソル位置は formatting-commands.test.ts で決定的に
+	// 検証しており、dispatchKeepingCursorRight 機構は上記 Cmd+L / Cmd+1 が
+	// 同ヘルパー経由で end-to-end に担保している。
 });
 
 test.describe("Enter によるリスト継続 (#92)", () => {
