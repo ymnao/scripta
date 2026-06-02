@@ -15,6 +15,11 @@ describe("buildSectionBreakScript (#93)", () => {
 		expect(s).not.toMatch(/for \(var lvl = 1; lvl <= 6/);
 	});
 
+	it("smart-level meta が無ければ即 return (smart=false / level=none で確実に no-op)", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toMatch(/if \(!levelMeta\) return JSON\.stringify\(result\)/);
+	});
+
 	it("smart-level は meta tag を優先、無ければ heading 分布で auto-detect", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("'meta[name=\"scripta-pdf-smart-level\"]'");
@@ -23,6 +28,13 @@ describe("buildSectionBreakScript (#93)", () => {
 		expect(s).toMatch(/hc\.h3 >= 2/);
 		expect(s).toMatch(/hc\.h1 >= 2/);
 		expect(s).toMatch(/hc\.h4 >= 2/);
+	});
+
+	it("force-level meta を読み、該当見出しで virtualY を次ページ頭へジャンプする", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("'meta[name=\"scripta-pdf-force-level\"]'");
+		expect(s).toMatch(/fhLvl <= forceLevel/);
+		expect(s).toMatch(/pageHeight - inPageF/);
 	});
 
 	it("criterion を meta tag (scripta-pdf-criterion) から読む", () => {

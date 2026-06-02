@@ -471,7 +471,7 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(html).not.toContain('<table class="pdf-section-keep">');
 	});
 
-	it("smart + level + criterion を meta tag 経由で main 側 script へ伝える", async () => {
+	it("smart + level + criterion + force-level を meta tag 経由で main 側 script へ伝える", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# T\n\n## A\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "h2",
@@ -481,9 +481,21 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain('<meta name="scripta-pdf-smart-level" content="2">');
 		expect(html).toContain('<meta name="scripta-pdf-criterion" content="compact">');
+		// level=h2 (smart=true) なら forceLevel = 1 (h1 で CSS force-break)
+		expect(html).toContain('<meta name="scripta-pdf-force-level" content="1">');
 	});
 
-	it("smart=false のときは meta tag を埋め込まない", async () => {
+	it("level=h3 では force-level=2 (h1, h2 が CSS force-break)", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# T", "/workspace/test.md", {
+			pageBreakLevel: "h3",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('<meta name="scripta-pdf-force-level" content="2">');
+	});
+
+	it("smart=false のときは meta tag を埋め込まない (script の no-op signal)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "h2",
@@ -492,6 +504,17 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).not.toContain("scripta-pdf-smart-level");
 		expect(html).not.toContain("scripta-pdf-criterion");
+		expect(html).not.toContain("scripta-pdf-force-level");
+	});
+
+	it("level=none のときは meta tag を埋め込まない (script の no-op signal)", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
+			pageBreakLevel: "none",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("scripta-pdf-smart-level");
 	});
 
 	it("does NOT inject inline <script> into HTML (JS DOM 測定は完全廃止)", async () => {

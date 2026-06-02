@@ -32,13 +32,24 @@ export function buildSectionBreakScript(): string {
   };
 
   try {
-    // meta から smart-level と criterion を読む
+    // smart-level meta が無ければ script は何もしない (smart=false / level=none では
+    // renderer が meta を emit しない設計なので、これが「smart 改ページ OFF」の signal)。
     var levelMeta = document.querySelector('meta[name="scripta-pdf-smart-level"]');
-    var requestedLevel = levelMeta ? parseInt(levelMeta.getAttribute('content') || '', 10) : NaN;
+    if (!levelMeta) return JSON.stringify(result);
+    var requestedLevel = parseInt(levelMeta.getAttribute('content') || '', 10);
+
     var criterionMeta = document.querySelector('meta[name="scripta-pdf-criterion"]');
     var criterion = (criterionMeta && criterionMeta.getAttribute('content')) || 'section';
     if (criterion !== 'compact' && criterion !== 'section') criterion = 'section';
     result.criterion = criterion;
+
+    // force-level meta: CSS で break-before:page が当たる上位見出しの最大レベル。
+    // この値以下のレベルの見出しに遭遇したら virtualY を次ページ頭へジャンプさせて、
+    // CSS forced break を simulation に反映する (renderer の buildForceBreakSelectors と
+    // 同じ集合を表す)。
+    var forceMeta = document.querySelector('meta[name="scripta-pdf-force-level"]');
+    var forceLevel = forceMeta ? parseInt(forceMeta.getAttribute('content') || '0', 10) : 0;
+    if (!(forceLevel >= 0 && forceLevel <= 6)) forceLevel = 0;
 
     // body 直下の見出し分布を 1-pass で測定
     var bodyChildren = document.body.children;
@@ -50,10 +61,10 @@ export function buildSectionBreakScript(): string {
       }
     }
 
-    // smart-level の解決: meta で指定 & その level が body に複数あればそれを採用、
-    // そうでなければ「複数回現れる最も浅いレベル (h2 > h3 > h1 > h4)」で auto-detect。
-    // 大半のケースは meta 値がそのまま採用される。ユーザが選んだ level がドキュメント
-    // 構造と合わないとき (例: level=h2 だが doc 内に h2 が無く h3 だけ) は fallback する。
+    // smart-level の解決: meta 指定 & その level が body に複数あればそれを採用、
+    // 無ければ「複数回現れる最も浅いレベル (h2 > h3 > h1 > h4)」で auto-detect。
+    // ユーザが選んだ level がドキュメント構造と合わないとき (例: level=h2 だが doc に
+    // h2 が無く h3 だけ) は fallback する。
     var smartLevel = null;
     if (requestedLevel >= 1 && requestedLevel <= 6 && result.headingCounts['h' + requestedLevel] >= 2) {
       smartLevel = requestedLevel;
@@ -124,6 +135,24 @@ export function buildSectionBreakScript(): string {
           if (inPageMarker > 0) virtualY += pageHeight - inPageMarker;
           virtualY += h;
           continue;
+        }
+
+        // CSS で break-before: page が当たる上位見出し (h1..h{forceLevel}) → virtualY を
+        // 次ページ頭にジャンプ。これを入れないと「自然レイアウトの高さ累積」と「実 print
+        // の paginated layout」がずれて、後続の smart-level 判定がページ境界を誤認する。
+        if (forceLevel > 0) {
+          var ft = item.tagName;
+          if (ft.length === 2 && ft.charAt(0) === 'H') {
+            var fhLvl = parseInt(ft.charAt(1), 10);
+            if (fhLvl >= 1 && fhLvl <= forceLevel) {
+              if (virtualY > 0) {
+                var inPageF = virtualY % pageHeight;
+                if (inPageF > 0) virtualY += pageHeight - inPageF;
+              }
+              virtualY += h;
+              continue;
+            }
+          }
         }
 
         // smart-level 見出し → criterion に応じて needed height を算出

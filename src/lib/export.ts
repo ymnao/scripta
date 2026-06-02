@@ -248,13 +248,18 @@ export function buildHtmlDocument(
 		? `${forceSelectors} { break-before: page; page-break-before: always; }`
 		: "";
 
-	// smart 改ページの設定を meta tag 経由で main 側 script に伝える (#93)。
-	// - smart-level: ユーザ選択の見出しレベル (1/2/3)。script はこのレベルでセクションを区切る。
+	// smart 改ページ設定を meta tag 経由で main 側 script に伝える (#93)。
+	// - smart-level: ユーザ選択の見出しレベル (1/2/3)。script はこのレベルで section を区切る。
 	// - criterion: section (default, 全体 keep) / compact (heading + 直後ブロックのみ keep)。
+	// - force-level: CSS で `break-before: page` が当たる上位見出しの最大レベル (smart-1)。
+	//   script はこのレベル以下の見出しに遭遇したら virtualY を次ページ頭へジャンプさせて、
+	//   実 print の paginated layout と一致させる。
+	// **meta tag が無い場合は script は即 return** (smart=false / level=none で確実に no-op)。
 	const scriptMeta =
 		pageBreak?.smart && pageBreak.level !== "none"
 			? `<meta name="scripta-pdf-smart-level" content="${LEVEL_NUM[pageBreak.level]}">
 <meta name="scripta-pdf-criterion" content="${pageBreak.criterion ?? "section"}">
+<meta name="scripta-pdf-force-level" content="${LEVEL_NUM[pageBreak.level] - 1}">
 `
 			: "";
 
