@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildSectionBreakScript } from "./page-break-script";
 
+// behavior-contract のみ assert する (実装詳細の文字列マッチに依存しない最小セット)。
+// e2e が実 Electron で script の戻り値を直接 assert するのでそちらが本筋の safety net。
 describe("buildSectionBreakScript (#93)", () => {
 	it("IIFE 形式で返す", () => {
 		const s = buildSectionBreakScript();
@@ -8,107 +10,33 @@ describe("buildSectionBreakScript (#93)", () => {
 		expect(s.trimEnd().endsWith("})();")).toBe(true);
 	});
 
-	it("body 直下 h1〜h6 を 1-pass で集計する", () => {
+	it("smart-level / criterion の meta tag 名を読む (renderer との契約)", () => {
 		const s = buildSectionBreakScript();
-		// 6 連続の querySelectorAll ではなく、children を 1 度走査する形であること
-		expect(s).toContain("var bodyChildren = document.body.children;");
-		expect(s).not.toMatch(/for \(var lvl = 1; lvl <= 6/);
+		expect(s).toContain('meta[name="scripta-pdf-smart-level"]');
+		expect(s).toContain('meta[name="scripta-pdf-criterion"]');
 	});
 
-	it("smart-level meta が無ければ即 return (smart=false / level=none で確実に no-op)", () => {
+	it("smart-level meta が無ければ即 return (smart=false / 対象見出し不足で no-op)", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toMatch(/if \(!levelMeta\) return JSON\.stringify\(result\)/);
 	});
 
-	it("smart-level 解決: meta 優先、不在時は heading 分布 (h2 > h3 > h1 > h4) で auto-detect", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("'meta[name=\"scripta-pdf-smart-level\"]'");
-		// 「複数回現れる最も浅いレベル」で fallback。h1=タイトル 1 + h3=多数 のような
-		// 構造で smartLevel=null にならないよう shallow / deeper 両方向に補正する。
-		expect(s).toMatch(/hc\.h2 >= 2/);
-		expect(s).toMatch(/hc\.h3 >= 2/);
-		expect(s).toMatch(/hc\.h1 >= 2/);
-		expect(s).toMatch(/hc\.h4 >= 2/);
-	});
-
-	it("break-inside: avoid 要素 (LI 含む) が現ページに収まらないなら virtualY を次ページにジャンプ", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("isAvoidBreakInside");
-		expect(s).toMatch(/'P' \|\| t === 'PRE'/);
-		expect(s).toContain("'LI'");
-		expect(s).toContain("mermaid-diagram");
-		expect(s).toMatch(/h > remainingA/);
-	});
-
-	it("body 直下の UL/OL を展開して LI を children に並べる (LI 単位の break-inside avoid 反映のため)", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toMatch(/c\.tagName === 'UL' \|\| c\.tagName === 'OL'/);
-		expect(s).toMatch(/lis\[li\]\.tagName === 'LI'/);
-	});
-
-	it("fallback で smart level が下がった場合、forceLevel を smartLevel-1 にクランプ", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toMatch(/if \(forceLevel >= smartLevel\) forceLevel = smartLevel - 1/);
-	});
-
-	it("force-level meta を読み、該当見出しで virtualY を次ページ頭へジャンプする", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("'meta[name=\"scripta-pdf-force-level\"]'");
-		expect(s).toMatch(/fhLvl <= forceLevel/);
-		expect(s).toMatch(/pageHeight - inPageF/);
-	});
-
-	it("criterion を meta tag (scripta-pdf-criterion) から読む", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("'meta[name=\"scripta-pdf-criterion\"]'");
-		expect(s).toContain("'section'");
-		expect(s).toContain("'compact'");
-	});
-
-	it("ページ高さルーラーは (257 / zoom) mm で zoom 補正を入れる", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("(257 / zoom)");
-	});
-
-	it("印刷幅 170mm へ body を一時揃える", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("(170 / zoom) + 'mm'");
-	});
-
-	it("safety buffer 5% で screen ⇔ print の layout drift を吸収する", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("pageHeight * 0.05");
-	});
-
-	it("compact criterion は heading + 直後ブロックのみで needed height を計算", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("criterion === 'compact'");
-		expect(s).toMatch(/criterion === 'compact'[\s\S]{0,400}heights\[i \+ 1\]/);
-	});
-
-	it("section criterion は次の同位以下見出し or HR pagebreak まで集計", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("nxLvl <= smartLevel");
-		expect(s).toContain("'pdf-pagebreak'");
-	});
-
-	it("section が現ページに収まらない時、見出し自身に inline break-before を注入", () => {
+	it("見出しに inline `style.breakBefore = 'page'` を注入する経路を持つ", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("item.style.breakBefore = 'page'");
 		expect(s).toContain("item.style.pageBreakBefore = 'always'");
-		expect(s).toMatch(/neededH \+ safetyBuffer/);
 	});
 
-	it("診断 JSON: headingCounts / smartLevelUsed / criterion / sectionsTotal / sectionsBroken / errors", () => {
+	it("診断 JSON: smartLevelUsed / criterion / sectionsTotal / sectionsBroken / errors を返す", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toMatch(/headingCounts:/);
 		expect(s).toMatch(/smartLevelUsed: null/);
 		expect(s).toMatch(/sectionsTotal: 0/);
 		expect(s).toMatch(/sectionsBroken: 0/);
+		expect(s).toMatch(/errors: \[\]/);
 		expect(s).toContain("return JSON.stringify(result)");
 	});
 
-	it("body style を try/finally で restore する", () => {
+	it("body style を try/finally で restore する (例外でも壊れない)", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("} finally {");
 		expect(s).toContain("document.body.style.padding = origPadding");

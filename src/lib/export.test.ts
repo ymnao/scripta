@@ -27,6 +27,7 @@ const {
 	getDefaultPromptTemplate,
 	preprocessMermaidBlocks,
 	preprocessPageBreakMarkers,
+	resolveSmartLevel,
 } = await import("./export");
 
 const mockedSave = showSaveDialog as Mock;
@@ -384,20 +385,6 @@ describe("buildHtmlDocument page break CSS (#93)", () => {
 		expect(html).toMatch(/page-break-after: avoid/);
 	});
 
-	it(".pdf-section-keep CSS は出力しない (#93 v5 で wrapper 撤廃)", () => {
-		const html = buildHtmlDocument("<p>test</p>", "test", "light");
-		expect(html).not.toContain(".pdf-section-keep");
-	});
-
-	it("[data-no-break] CSS は出力しない (script の inline break-before 注入に移行済み)", () => {
-		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
-			level: "h2",
-			smart: true,
-		});
-		expect(html).not.toContain("[data-no-break]");
-		expect(html).not.toContain("data-no-break>");
-	});
-
 	it("adds task-list-item class to li elements with checkboxes", () => {
 		const body = '<ul><li><input disabled="" type="checkbox"> task</li></ul>';
 		const html = buildHtmlDocument(body, "test", "light");
@@ -471,9 +458,10 @@ describe("exportAsPdf — meta tag + page break CSS (#93)", () => {
 		expect(html).not.toContain('<table class="pdf-section-keep">');
 	});
 
-	it("smart + level + criterion + force-level を meta tag 経由で main 側 script へ伝える", async () => {
+	it("smart + level + criterion を meta tag 経由で main 側 script へ伝える", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# T\n\n## A\n\nbody", "/workspace/test.md", {
+		// h2 が複数あるドキュメントで requested=h2 がそのまま採用される
+		await exportAsPdf("# T\n\n## A\n\nbody\n\n## B\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
 			pageBreakCriterion: "compact",
@@ -481,18 +469,20 @@ describe("exportAsPdf — meta tag + page break CSS (#93)", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain('<meta name="scripta-pdf-smart-level" content="2">');
 		expect(html).toContain('<meta name="scripta-pdf-criterion" content="compact">');
-		// level=h2 (smart=true) なら forceLevel = 1 (h1 で CSS force-break)
-		expect(html).toContain('<meta name="scripta-pdf-force-level" content="1">');
+		// force-level は script 側で smart-level - 1 として導出するので meta tag は emit しない
+		expect(html).not.toContain("scripta-pdf-force-level");
 	});
 
-	it("level=h3 では force-level=2 (h1, h2 が CSS force-break)", async () => {
+	it("requested level に該当見出しが足りない場合は近いレベルへ自動補正 (h3 fallback)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# T", "/workspace/test.md", {
-			pageBreakLevel: "h3",
-			smartPageBreak: true,
-		});
+		// h1 1 個 + h3 3 個。requested=h2 だが doc に h2 が無いので h3 に補正される
+		await exportAsPdf(
+			"# T\n\n### A\n\nbody\n\n### B\n\nbody\n\n### C\n\nbody",
+			"/workspace/test.md",
+			{ pageBreakLevel: "h2", smartPageBreak: true },
+		);
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).toContain('<meta name="scripta-pdf-force-level" content="2">');
+		expect(html).toContain('<meta name="scripta-pdf-smart-level" content="3">');
 	});
 
 	it("smart=false のときは meta tag を埋め込まない (script の no-op signal)", async () => {
@@ -504,13 +494,23 @@ describe("exportAsPdf — meta tag + page break CSS (#93)", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).not.toContain("scripta-pdf-smart-level");
 		expect(html).not.toContain("scripta-pdf-criterion");
-		expect(html).not.toContain("scripta-pdf-force-level");
 	});
 
 	it("level=none のときは meta tag を埋め込まない (script の no-op signal)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "none",
+			smartPageBreak: true,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("scripta-pdf-smart-level");
+	});
+
+	it("requested level の対象見出しが不足し fallback 候補も無ければ meta を出さない", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		// h2 / h3 が無く、見出しも H1 1 個のみ (= 2 件未満) で auto-detect も failure
+		await exportAsPdf("# Single\n\nbody", "/workspace/test.md", {
+			pageBreakLevel: "h2",
 			smartPageBreak: true,
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
@@ -536,6 +536,37 @@ describe("exportAsPdf — meta tag + page break CSS (#93)", () => {
 		expect(html).toMatch(/<body style="zoom: 0\.8; max-width: 1000px">/);
 		const bodyOpenCount = html.split("<body").length - 1;
 		expect(bodyOpenCount).toBe(1);
+	});
+});
+
+describe("resolveSmartLevel (#93)", () => {
+	const make = (...tags: string[]) => tags.join("\n");
+
+	it("requested level に複数見出しがあればそのまま採用", () => {
+		const body = make("<h1>T</h1>", "<h2>A</h2>", "<h2>B</h2>");
+		expect(resolveSmartLevel(body, 2)).toBe(2);
+	});
+
+	it("requested level に該当が無ければ最も浅いレベル (h2 > h3 > h1 > h4) で auto-detect", () => {
+		// h2=0, h3=3 → h3 fallback (deeper 方向)
+		const body = make("<h1>T</h1>", "<h3>a</h3>", "<h3>b</h3>", "<h3>c</h3>");
+		expect(resolveSmartLevel(body, 2)).toBe(3);
+	});
+
+	it("h2 と h3 の両方があれば h2 優先", () => {
+		const body = make("<h2>A</h2>", "<h2>B</h2>", "<h3>x</h3>", "<h3>y</h3>");
+		expect(resolveSmartLevel(body, 3)).toBe(3); // requested 優先
+		expect(resolveSmartLevel(body, 1)).toBe(2); // requested の対象無し → h2 fallback
+	});
+
+	it("対象見出しが 2 件未満なら null", () => {
+		const body = make("<h1>Only</h1>", "<p>p</p>");
+		expect(resolveSmartLevel(body, 2)).toBeNull();
+	});
+
+	it("h1 が複数あれば fallback で採用 (h2/h3 が無い場合)", () => {
+		const body = make("<h1>A</h1>", "<h1>B</h1>");
+		expect(resolveSmartLevel(body, 2)).toBe(1);
 	});
 });
 

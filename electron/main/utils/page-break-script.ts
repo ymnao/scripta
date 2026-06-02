@@ -2,8 +2,8 @@
  * PDF 改ページ補正スクリプト (#93)。
  *
  * 印刷直前 (fonts.ready + idle 後) に main の `executeJavaScript` 経由で
- * webContents 内で実行される。ユーザ選択の smart-level / criterion を meta tag
- * 経由で受け取り、各セクションの実 layout 高さを測定して「現ページ残量に
+ * webContents 内で実行される。renderer が解決済み smart-level / criterion を meta tag
+ * 経由で渡し、本 script は各セクションの実 layout 高さを測定して「現ページ残量に
  * 収まらない section」に inline `style.breakBefore = 'page'` を強制注入する。
  *
  * Chromium の `break-inside: avoid` は wrapper 要素に対して unreliable (子要素間で
@@ -12,18 +12,21 @@
  *
  * # meta tag contract (renderer が emit)
  *
- * - `<meta name="scripta-pdf-smart-level" content="1|2|3">`: 区切り対象見出しレベル。
- *   省略時はスクリプトが body 直下の見出し分布から auto-detect する。
+ * - `<meta name="scripta-pdf-smart-level" content="1〜4">`: 区切り対象見出しレベル。
+ *   renderer 側 `resolveSmartLevel` がユーザ選択値と body 見出し分布から resolve 済み。
+ *   meta 不在なら script は即 return (smart=false / level=none / 対象見出し不足)。
  * - `<meta name="scripta-pdf-criterion" content="section|compact">`: keep 基準。
  *   - section: 見出し + 次の同位以下見出しまでを 1 単位として keep-together
  *   - compact: 見出し + 直後ブロックのみ keep (中割れ許容、詰めた配置)
+ *
+ * force-level (CSS で `break-before: page` が当たる上位見出しの最大レベル) は
+ * `smart-level - 1` として本 script 内で導出する (renderer の CSS と同じ式)。
  */
 
 /** `executeJavaScript` で実行する文字列を返す。pure function (テスト容易性のため)。 */
 export function buildSectionBreakScript(): string {
 	return `(function() {
   var result = {
-    headingCounts: { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 },
     smartLevelUsed: null,
     criterion: 'section',
     sectionsTotal: 0,
@@ -32,67 +35,24 @@ export function buildSectionBreakScript(): string {
   };
 
   try {
-    // smart-level meta が無ければ script は何もしない (smart=false / level=none では
-    // renderer が meta を emit しない設計なので、これが「smart 改ページ OFF」の signal)。
+    // smart-level meta が無ければ script は何もしない。
     var levelMeta = document.querySelector('meta[name="scripta-pdf-smart-level"]');
     if (!levelMeta) return JSON.stringify(result);
-    var requestedLevel = parseInt(levelMeta.getAttribute('content') || '', 10);
+    var smartLevel = parseInt(levelMeta.getAttribute('content') || '', 10);
+    if (!(smartLevel >= 1 && smartLevel <= 6)) return JSON.stringify(result);
+    result.smartLevelUsed = smartLevel;
+    // force-level は smart-level - 1 (renderer の buildForceBreakSelectors と同じ式)
+    var forceLevel = smartLevel - 1;
 
     var criterionMeta = document.querySelector('meta[name="scripta-pdf-criterion"]');
     var criterion = (criterionMeta && criterionMeta.getAttribute('content')) || 'section';
     if (criterion !== 'compact' && criterion !== 'section') criterion = 'section';
     result.criterion = criterion;
 
-    // force-level meta: CSS で break-before:page が当たる上位見出しの最大レベル。
-    // この値以下のレベルの見出しに遭遇したら virtualY を次ページ頭へジャンプさせて、
-    // CSS forced break を simulation に反映する (renderer の buildForceBreakSelectors と
-    // 同じ集合を表す)。
-    var forceMeta = document.querySelector('meta[name="scripta-pdf-force-level"]');
-    var forceLevel = forceMeta ? parseInt(forceMeta.getAttribute('content') || '0', 10) : 0;
-    if (!(forceLevel >= 0 && forceLevel <= 6)) forceLevel = 0;
-
-    // body 直下の見出し分布を 1-pass で測定
-    var bodyChildren = document.body.children;
-    for (var bi = 0; bi < bodyChildren.length; bi++) {
-      var tag = bodyChildren[bi].tagName;
-      if (tag.length === 2 && tag.charAt(0) === 'H') {
-        var d = parseInt(tag.charAt(1), 10);
-        if (d >= 1 && d <= 6) result.headingCounts['h' + d]++;
-      }
-    }
-
-    // smart-level の解決:
-    //   1. meta 指定の level に複数見出しがあればそれを採用
-    //   2. 不在ならば「複数回現れる最も浅いレベル」で auto-detect (h2 > h3 > h1 > h4)
-    //
-    // 一度「ユーザ契約優先」で shallow-only fallback にしたが (レビュー指摘)、
-    // それだと「h1=タイトル 1 個 + h3=section 多数」(typical markdown スタイル) で
-    // smartLevel=null になって中割れ放置という別の UX 違反が出たため、shallow / deeper
-    // 両方向 fallback に戻した。ユーザの「h2 まで」選択は「該当見出しがあれば」honor
-    // するが、ドキュメント構造が合わなければ近いレベルへ自動補正する。dialog 側で
-    // この挙動を label に明記する手もあるが、現状は実用優先で auto-detect 任せ。
-    var smartLevel = null;
-    if (requestedLevel >= 1 && requestedLevel <= 6 && result.headingCounts['h' + requestedLevel] >= 2) {
-      smartLevel = requestedLevel;
-    } else {
-      var hc = result.headingCounts;
-      if (hc.h2 >= 2) smartLevel = 2;
-      else if (hc.h3 >= 2) smartLevel = 3;
-      else if (hc.h1 >= 2) smartLevel = 1;
-      else if (hc.h4 >= 2) smartLevel = 4;
-    }
-    result.smartLevelUsed = smartLevel;
-    if (smartLevel === null) return JSON.stringify(result);
-
-    // fallback で smart level が下がった場合 (例: requested=3 → smartLevel=2)、
-    // renderer 由来の forceLevel (=2) のままだと loop が h2 を「上位 force-break」として
-    // 処理して continue し、smart-suppression に入らず fallback の意味が消える。
-    // forceLevel は常に smartLevel より浅い側 (= smartLevel - 1 以下) に clamp する。
-    if (forceLevel >= smartLevel) forceLevel = smartLevel - 1;
-
     // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測。
-    // ruler は body 内に置くと body.style.zoom が適用されるため、ruler 高さを
-    // (257 / zoom) mm に補正して rendered 値が常に物理 257mm 相当の viewport px になるようにする。
+    // ruler は body 内に置くので body.style.zoom が適用される。zoom != 1 で ruler 高さが
+    // そのままだと「物理ページの半分 (zoom=0.5)」等を返してしまうため、ruler 高さを
+    // (257 / zoom) mm に補正して、rendered 値が常に物理 257mm 相当の viewport px になるようにする。
     var zoom = parseFloat(document.body.style.zoom) || 1;
     var ruler = document.createElement('div');
     ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:' + (257 / zoom) + 'mm;';
@@ -123,8 +83,7 @@ export function buildSectionBreakScript(): string {
     try {
       // body 直下を走査しつつ、UL/OL は LI に展開する。CSS で li に break-inside: avoid
       // が当たっているため、UL 全体を 1 つの自然高さで足すと最終 LI が実 print で次ページ
-      // に押し出される挙動を見逃す。LI 単位の高さで累積すれば LI 押し出しを正しく simulate
-      // できる。
+      // に押し出される挙動を見逃す。LI 単位の高さで累積すれば LI 押し出しを正しく simulate できる。
       var children = [];
       var bodyDirectChildren = document.body.children;
       for (var ci = 0; ci < bodyDirectChildren.length; ci++) {
@@ -151,8 +110,7 @@ export function buildSectionBreakScript(): string {
 
       // CSS で break-inside: avoid を当てている要素集合 (export.ts の @media print と同期)。
       // 現ページに収まらない場合 Chromium は次ページに送るので、virtualY 累積でも同じ
-      // 挙動をシミュレートして実 print の paginated layout と一致させる。LI も含める
-      // (UL/OL を expand したため、各 LI が直接 children に並ぶ)。
+      // 挙動をシミュレートして実 print の paginated layout と一致させる。
       function isAvoidBreakInside(el) {
         var t = el.tagName;
         if (
@@ -231,7 +189,6 @@ export function buildSectionBreakScript(): string {
 
           var inPage = virtualY % pageHeight;
           var remaining = pageHeight - inPage;
-          // 現ページに収まらない && 1 ページに収まる && 既にページ途中
           if (
             inPage > 0 &&
             (neededH + safetyBuffer) > remaining &&
@@ -244,15 +201,13 @@ export function buildSectionBreakScript(): string {
           }
         }
 
-        // break-inside: avoid の要素は現ページに収まらない場合、Chromium が次ページに
-        // 送るのでそれを virtualY にも反映させる。これを入れないと後続の smart-level
-        // 判定が「実 print より早い段階」で remaining を見積もり、必要な force-break を
-        // 見逃す。
+        // break-inside: avoid の要素が現ページからはみ出す場合、Chromium は次ページへ
+        // 送るので virtualY も同じく次ページ頭へジャンプさせて simulation を実 print と合わせる。
         if (isAvoidBreakInside(item)) {
           var inPageA = virtualY % pageHeight;
           var remainingA = pageHeight - inPageA;
           if (inPageA > 0 && h > remainingA && h <= pageHeight) {
-            virtualY += remainingA; // 次ページ頭へジャンプしてからこの要素を配置
+            virtualY += remainingA;
           }
         }
         virtualY += h;

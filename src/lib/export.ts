@@ -1,5 +1,4 @@
 import { version as katexVersion } from "katex/package.json";
-import type { PdfPageBreakCriterion } from "../types/pdf";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
@@ -9,9 +8,39 @@ import { svgToPng } from "./svg-rasterize";
 
 export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
-export type PageBreakCriterion = PdfPageBreakCriterion;
+/** smart 改ページの keep 基準 (#93)。 */
+export type PageBreakCriterion = "compact" | "section";
 
 const LEVEL_NUM: Record<Exclude<PageBreakLevel, "none">, 1 | 2 | 3> = { h1: 1, h2: 2, h3: 3 };
+
+/**
+ * 改ページ判定の smart-level を解決する (#93)。
+ *
+ * ユーザ選択 `requested` を尊重するが、bodyHtml に該当 level の見出しが 2 件未満なら
+ * 「複数回現れる最も浅いレベル (h2 > h3 > h1 > h4)」に自動補正する。これは
+ * 「h1=タイトル 1 個 + h3=section 多数」のような典型 markdown 構造で「h2 まで」を
+ * 選んでも適切に動作させるための妥協。
+ *
+ * 旧版は main 側 script の中 (executeJavaScript) で auto-detect していたが、policy を
+ * renderer に集約することで (a) pure TS で unit test できる、(b) renderer が
+ * `smart-level` と `force-level` を **一貫導出** できて clamp 不要、(c) script は
+ * meta を読むだけで簡潔、というメリットを得る。
+ *
+ * 戻り値 `null` は「smart 改ページの対象見出しが見つからない」を意味し、script は
+ * meta 不在 = no-op に degrade する。
+ */
+export function resolveSmartLevel(bodyHtml: string, requested: 1 | 2 | 3): 1 | 2 | 3 | 4 | null {
+	const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+	for (const m of bodyHtml.matchAll(/<h([1-6])\b/g)) {
+		counts[Number.parseInt(m[1], 10)]++;
+	}
+	if (counts[requested] >= 2) return requested;
+	if (counts[2] >= 2) return 2;
+	if (counts[3] >= 2) return 3;
+	if (counts[1] >= 2) return 1;
+	if (counts[4] >= 2) return 4;
+	return null;
+}
 
 /**
  * `<!-- pagebreak -->` を `<hr class="pdf-pagebreak"/>` に変換する (#93)。
@@ -257,19 +286,21 @@ export function buildHtmlDocument(
 		: "";
 
 	// smart 改ページ設定を meta tag 経由で main 側 script に伝える (#93)。
-	// - smart-level: ユーザ選択の見出しレベル (1/2/3)。script はこのレベルで section を区切る。
+	// - smart-level: bodyHtml の見出し分布も考慮した resolved レベル (1〜4)。script は
+	//   これを smart-suppression 対象として break-before を inline 注入する。
 	// - criterion: section (default, 全体 keep) / compact (heading + 直後ブロックのみ keep)。
-	// - force-level: CSS で `break-before: page` が当たる上位見出しの最大レベル (smart-1)。
-	//   script はこのレベル以下の見出しに遭遇したら virtualY を次ページ頭へジャンプさせて、
-	//   実 print の paginated layout と一致させる。
-	// **meta tag が無い場合は script は即 return** (smart=false / level=none で確実に no-op)。
-	const scriptMeta =
-		pageBreak?.smart && pageBreak.level !== "none"
-			? `<meta name="scripta-pdf-smart-level" content="${LEVEL_NUM[pageBreak.level]}">
-<meta name="scripta-pdf-criterion" content="${pageBreak.criterion ?? "section"}">
-<meta name="scripta-pdf-force-level" content="${LEVEL_NUM[pageBreak.level] - 1}">
-`
-			: "";
+	// **meta tag が無い場合は script は即 return** (smart=false / level=none / 文書に
+	// 対象見出し不足 で確実に no-op)。
+	// force-level は smart-level - 1 として script 側で導出するので transport 不要。
+	let scriptMeta = "";
+	if (pageBreak?.smart && pageBreak.level !== "none") {
+		const smartLevel = resolveSmartLevel(bodyHtml, LEVEL_NUM[pageBreak.level]);
+		if (smartLevel !== null) {
+			scriptMeta =
+				`<meta name="scripta-pdf-smart-level" content="${smartLevel}">\n` +
+				`<meta name="scripta-pdf-criterion" content="${pageBreak.criterion ?? "section"}">\n`;
+		}
+	}
 
 	return `<!DOCTYPE html>
 <html lang="ja">
