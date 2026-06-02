@@ -131,33 +131,51 @@ export function buildPageBreakScript(config: PageBreakConfig): string {
         // 上位見出し: smart 抑制対象外 → 常に改ページ
         pageUsed = 0;
       } else {
-        // smart 抑制判定
-        var need;
+        // smart 抑制判定（criterion ごとに収まり方を判定）
+        var suppress;
         if (criterion === 'compact') {
-          // 見出し + 直後の最初の非見出しブロック
+          // compact: 見出し + 直後の最初の非見出しブロックが現ページ残量に収まる。
+          // セクション残りは自然オーバーフローを許容。
           var firstBlockH = 0;
           if (i + 1 < items.length) {
             var nextTag = items[i + 1].tagName;
             if (!/^H[1-6]$/.test(nextTag)) firstBlockH = heights[i + 1];
           }
-          need = h + firstBlockH;
+          suppress = (pageUsed + h + firstBlockH) <= safePageHeight;
         } else {
-          // section: 次の同位以上の見出しまで
-          need = h;
-          for (var k = i + 1; k < items.length; k++) {
+          // section: 次の同位以上の見出しまでをシミュレーション走査し、
+          // 「セクション内の break-inside: avoid ブロックがページ送りされる」ケースは
+          // セクション overflow と判定して force-break する（widow / 中途半端な分割を防ぐ）。
+          // 旧実装は「総 need <= ページ残量」だけで判定していたため、後段の avoid-break
+          // 押し出しが起きても抑制が撤回されず、H2 だけ残って LI が次ページに送られる
+          // 中割れが発生していた (#93 follow-up)。
+          var simUsed = pageUsed + h;
+          var fits = simUsed <= pageHeight;
+          for (var k = i + 1; fits && k < items.length; k++) {
             var kTag = items[k].tagName;
             var kMatch = kTag.match(/^H([1-6])$/);
             if (kMatch) {
               var kLevel = parseInt(kMatch[1], 10);
               if (kLevel <= maxLevel) break;
             }
-            // 著者マーカーが途中にあれば section はそこで打ち切り
             if (kTag === 'HR' && items[k].classList && items[k].classList.contains('pdf-pagebreak')) break;
-            need += heights[k];
+
+            var kAvoidBreak = (kTag in avoidBreakTags);
+            if (kAvoidBreak && simUsed > 0 && simUsed + heights[k] > pageHeight) {
+              // avoid-break ブロックが現ページからはみ出す → セクション中割れ
+              fits = false;
+              break;
+            }
+            simUsed += heights[k];
+            if (simUsed > pageHeight) {
+              fits = false;
+              break;
+            }
           }
+          suppress = fits && simUsed <= safePageHeight;
         }
 
-        if (pageUsed + need <= safePageHeight) {
+        if (suppress) {
           el.setAttribute('data-no-break', '');
         } else {
           pageUsed = 0;

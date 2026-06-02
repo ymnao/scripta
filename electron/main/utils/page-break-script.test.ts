@@ -68,4 +68,19 @@ describe("buildPageBreakScript", () => {
 		// section 用ループの早期 break 条件
 		expect(script).toContain("kLevel <= maxLevel");
 	});
+
+	it("section criterion: 旧『総 need <= ページ残量』だけの判定でなく avoid-break overflow も検出する (#93 follow-up)", () => {
+		const script = buildPageBreakScript({ level: 2, criterion: "section" });
+		// 走査内で avoid-break ブロックの push-overflow を判定するロジックの痕跡
+		expect(script).toContain("kAvoidBreak");
+		expect(script).toContain("simUsed + heights[k] > pageHeight");
+		// 旧ロジック (need 単純集計のみ) を残していないこと
+		expect(script).not.toMatch(/var need\s*=\s*h;\s*\n\s*for/);
+	});
+
+	it("compact criterion: シンプルな heading + first block 判定を維持", () => {
+		const script = buildPageBreakScript({ level: 2, criterion: "compact" });
+		expect(script).toContain("firstBlockH");
+		expect(script).toContain("(pageUsed + h + firstBlockH) <= safePageHeight");
+	});
 });
