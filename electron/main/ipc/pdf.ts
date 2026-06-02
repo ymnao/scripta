@@ -142,6 +142,17 @@ export async function exportPdfImpl(
 	const tmpHtmlPath = join(tmpDirPath, "export.html");
 	await fsp.writeFile(tmpHtmlPath, html, "utf8");
 
+	// 診断用: 環境変数 `SCRIPTA_PDF_DEBUG_HTML_PATH` がセットされていれば、
+	// printToPDF に渡される最終 HTML を指定 path にコピーする。#106 のような
+	// PDF 内描画問題で「実際に何が WebView に届いているか」を取り出すための
+	// debug hook。本番では env を設定しないので no-op。
+	const debugHtmlPath = process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
+	if (debugHtmlPath) {
+		await fsp.writeFile(debugHtmlPath, html, "utf8").catch((err) => {
+			console.error("[scripta:pdf-debug] HTML write failed:", err);
+		});
+	}
+
 	let win: BrowserWindow | null = null;
 	let timeoutId: NodeJS.Timeout | undefined;
 	try {

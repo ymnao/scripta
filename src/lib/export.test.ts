@@ -11,6 +11,10 @@ vi.mock("./mermaid", () => ({
 	renderMermaid: vi.fn(async (source: string) => `<svg>${source}</svg>`),
 }));
 
+vi.mock("./svg-rasterize", () => ({
+	svgToPng: vi.fn(async () => "data:image/png;base64,MOCK"),
+}));
+
 const { writeFile, exportPdf, showSaveDialog } = await import("./commands");
 const {
 	buildDynamicPageBreakScript,
@@ -19,6 +23,7 @@ const {
 	exportAsHtml,
 	exportAsPdf,
 	exportAsPrompt,
+	extractSvgNaturalSizeAttrs,
 	findMermaidCodeBlocks,
 	getDefaultPromptTemplate,
 	preprocessMermaidBlocks,
@@ -236,14 +241,79 @@ describe("exportAsPdf", () => {
 		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
 	});
 
-	it("includes Mermaid SVG in final PDF HTML output", async () => {
+	it("PDF 出力では Mermaid を PNG ラスタライズして <img> として埋め込む (#106)", async () => {
+		const { svgToPng } = await import("./svg-rasterize");
+		const { renderMermaid } = await import("./mermaid");
+		(svgToPng as Mock).mockClear();
+		// SVG に明示的な width/height を入れて intrinsic 寸法を返させる
+		(renderMermaid as Mock).mockImplementationOnce(
+			async () => '<svg width="320" height="240" viewBox="0 0 320 240"><g/></svg>',
+		);
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
 		await exportAsPdf(md, "/workspace/test.md");
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).toContain("<svg>");
+		// SVG 経路ではなく <img src="data:image/png;..."> 経路で埋め込む
+		expect(html).toContain('<img src="data:image/png;base64,MOCK"');
+		// retina 用の 2x PNG だが、<img> の表示サイズは SVG 自然寸法（1x）にする
+		expect(html).toContain('width="320"');
+		expect(html).toContain('height="240"');
 		expect(html).toContain("mermaid-diagram");
 		expect(html).not.toContain("```mermaid");
+		expect(svgToPng).toHaveBeenCalled();
+	});
+
+	it("PDF HTML には `.mermaid-diagram img` 用の max-width:100% CSS が含まれる", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("# x", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// PNG の <img> が container 幅を超えないように max-width: 100% を CSS で指定
+		expect(html).toContain(".mermaid-diagram img { max-width: 100%; height: auto; }");
+	});
+
+	it("PDF 出力では Mermaid を htmlLabels=false / useMaxWidth=false で描画する (#106)", async () => {
+		const { renderMermaid } = await import("./mermaid");
+		(renderMermaid as Mock).mockClear();
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("```mermaid\ngraph TD\n  A-->B\n```", "/workspace/test.md");
+
+		// 印刷経路の foreignObject 不可視 / SVG 高さ 0 を回避するため、
+		// renderMermaid の 3 番目の引数で export モード指定を渡す。
+		expect(renderMermaid).toHaveBeenCalledWith(expect.any(String), "light", {
+			htmlLabels: false,
+			useMaxWidth: false,
+		});
+	});
+
+	it("ラスタライズ失敗時は inline SVG にフォールバックする (#106)", async () => {
+		const { svgToPng } = await import("./svg-rasterize");
+		(svgToPng as Mock).mockImplementationOnce(() => Promise.reject(new Error("canvas tainted")));
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("```mermaid\ngraph TD\n  A-->B\n```", "/workspace/test.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// PNG 経路に失敗したら inline SVG にフォールバック
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		expect(html).not.toContain("data:image/png;base64,MOCK");
+	});
+
+	it("HTML 出力では Mermaid を inline SVG で埋め込む（PNG ラスタライズしない）", async () => {
+		const { renderMermaid } = await import("./mermaid");
+		const { svgToPng } = await import("./svg-rasterize");
+		(renderMermaid as Mock).mockClear();
+		(svgToPng as Mock).mockClear();
+		mockedSave.mockResolvedValue("/output/test.html");
+		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
+		await exportAsHtml(md, "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+
+		// HTML 出力はブラウザで開かれる前提で SVG を inline で保持
+		expect(html).toContain("<svg>");
+		expect(html).toContain("mermaid-diagram");
+		// PNG ラスタライズは呼ばれない（PDF 専用）
+		expect(svgToPng).not.toHaveBeenCalled();
+		// HTML 出力はリッチな foreignObject ラベル維持（既定: htmlLabels=true）
+		expect(renderMermaid).toHaveBeenCalledWith(expect.any(String), expect.any(String), {});
 	});
 
 	it("includes page break CSS when pageBreakLevel is set", async () => {
@@ -607,6 +677,32 @@ describe("exportAsPrompt with custom template", () => {
 		await exportAsPrompt("# Hello", "/workspace/test.md");
 		const output = mockedWriteFile.mock.calls[0][1] as string;
 		expect(output).toContain("# HTML変換プロンプト");
+	});
+});
+
+describe("extractSvgNaturalSizeAttrs (#106 PDF img sizing)", () => {
+	it("SVG ルートの width / height 属性を抽出する", () => {
+		const svg = '<svg width="320" height="240" viewBox="0 0 320 240"><rect/></svg>';
+		expect(extractSvgNaturalSizeAttrs(svg)).toBe(' width="320" height="240"');
+	});
+
+	it("小数点付きの寸法も対応", () => {
+		const svg = '<svg width="200.5" height="100.75" viewBox="0 0 200 100"></svg>';
+		expect(extractSvgNaturalSizeAttrs(svg)).toBe(' width="200.5" height="100.75"');
+	});
+
+	it("width / height が無い SVG は空文字を返す", () => {
+		const svg = '<svg viewBox="0 0 100 50"></svg>';
+		expect(extractSvgNaturalSizeAttrs(svg)).toBe("");
+	});
+
+	it("width が `100%` 等の非数値の場合は空文字を返す（intrinsic でないため img 用には使えない）", () => {
+		const svg = '<svg width="100%" height="100%" viewBox="0 0 100 50"></svg>';
+		expect(extractSvgNaturalSizeAttrs(svg)).toBe("");
+	});
+
+	it("SVG タグが無い文字列は空文字を返す", () => {
+		expect(extractSvgNaturalSizeAttrs("<div>not svg</div>")).toBe("");
 	});
 });
 
