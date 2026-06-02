@@ -74,7 +74,12 @@ export function ExportDialog({
 	const [activeSection, setActiveSection] = useState<Section>("html");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
 	const [pageBreakEnabled, setPageBreakEnabled] = useState(true);
-	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h3");
+	// default は h2: forceUpperBreak が内部 ON のため、smart 抑制が効くのは「level
+	// 値そのもの」の見出しのみ（level より浅い見出しは常に改ページ）。多くの
+	// markdown 文書では H2 が章/節レベルで使われるため、h2 default にすると h2 が
+	// 自然に smart 抑制対象になる（#93 で fix の default が改善しない 41 ページ PDF
+	// の典型ケースをカバー）。
+	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
 	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("compact");
 	const [pdfZoom, setPdfZoom] = useState(100);

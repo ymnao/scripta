@@ -153,6 +153,22 @@ describe("ExportDialog", () => {
 			expect(exportAsPdf).toHaveBeenCalled();
 		});
 
+		it("default で pageBreakLevel=h2 / smart=true / criterion=compact が渡される (#93)", async () => {
+			vi.mocked(exportAsPdf).mockResolvedValue(true);
+			renderDialog();
+			await switchToPdf();
+			await userEvent.click(screen.getByText("PDFとしてエクスポート"));
+			expect(exportAsPdf).toHaveBeenCalledWith(
+				"# Hello",
+				"/path/to/file.md",
+				expect.objectContaining({
+					pageBreakLevel: "h2",
+					smartPageBreak: true,
+					pageBreakCriterion: "compact",
+				}),
+			);
+		});
+
 		it("成功で onClose が呼ばれる", async () => {
 			vi.mocked(exportAsPdf).mockResolvedValue(true);
 			const onClose = vi.fn();
