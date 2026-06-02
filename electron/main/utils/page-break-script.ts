@@ -61,25 +61,20 @@ export function buildSectionBreakScript(): string {
       }
     }
 
-    // smart-level の解決: meta 指定の level に複数見出しがあればそれを採用。
-    // 不在ならば **requested より浅い** level にのみ fallback (ユーザ契約: 「h2 まで」を
-    // 選んだのに勝手に h3 を改ページ対象にするのは UI 表示と乖離するため deeper には
-    // fallback しない)。requested が指定されていない場合のみ全レベル auto-detect。
+    // smart-level の解決:
+    //   1. meta 指定の level に複数見出しがあればそれを採用
+    //   2. 不在ならば「複数回現れる最も浅いレベル」で auto-detect (h2 > h3 > h1 > h4)
+    //
+    // 一度「ユーザ契約優先」で shallow-only fallback にしたが (レビュー指摘)、
+    // それだと「h1=タイトル 1 個 + h3=section 多数」(typical markdown スタイル) で
+    // smartLevel=null になって中割れ放置という別の UX 違反が出たため、shallow / deeper
+    // 両方向 fallback に戻した。ユーザの「h2 まで」選択は「該当見出しがあれば」honor
+    // するが、ドキュメント構造が合わなければ近いレベルへ自動補正する。dialog 側で
+    // この挙動を label に明記する手もあるが、現状は実用優先で auto-detect 任せ。
     var smartLevel = null;
-    if (requestedLevel >= 1 && requestedLevel <= 6) {
-      if (result.headingCounts['h' + requestedLevel] >= 2) {
-        smartLevel = requestedLevel;
-      } else {
-        // requested より浅い (level が小さい) 方向だけ fallback を許す
-        for (var fb = requestedLevel - 1; fb >= 1; fb--) {
-          if (result.headingCounts['h' + fb] >= 2) {
-            smartLevel = fb;
-            break;
-          }
-        }
-      }
+    if (requestedLevel >= 1 && requestedLevel <= 6 && result.headingCounts['h' + requestedLevel] >= 2) {
+      smartLevel = requestedLevel;
     } else {
-      // meta 値が無効値の場合のみ無制限 auto-detect (現実的にはほぼ起きない fallback path)
       var hc = result.headingCounts;
       if (hc.h2 >= 2) smartLevel = 2;
       else if (hc.h3 >= 2) smartLevel = 3;

@@ -20,13 +20,15 @@ describe("buildSectionBreakScript (#93)", () => {
 		expect(s).toMatch(/if \(!levelMeta\) return JSON\.stringify\(result\)/);
 	});
 
-	it("smart-level 解決: meta 優先、不在時は requested より浅いレベルにのみ fallback", () => {
+	it("smart-level 解決: meta 優先、不在時は heading 分布 (h2 > h3 > h1 > h4) で auto-detect", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("'meta[name=\"scripta-pdf-smart-level\"]'");
-		// requested-1 から 1 まで降順で fallback ループ
-		expect(s).toMatch(/for \(var fb = requestedLevel - 1; fb >= 1; fb--\)/);
-		// 旧コード ("deeper fallback") の優先順表 (h2 > h3 > h1 > h4) は無効値時のみ
+		// 「複数回現れる最も浅いレベル」で fallback。h1=タイトル 1 + h3=多数 のような
+		// 構造で smartLevel=null にならないよう shallow / deeper 両方向に補正する。
 		expect(s).toMatch(/hc\.h2 >= 2/);
+		expect(s).toMatch(/hc\.h3 >= 2/);
+		expect(s).toMatch(/hc\.h1 >= 2/);
+		expect(s).toMatch(/hc\.h4 >= 2/);
 	});
 
 	it("break-inside: avoid 要素 (LI 含む) が現ページに収まらないなら virtualY を次ページにジャンプ", () => {
