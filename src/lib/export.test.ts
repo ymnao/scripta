@@ -613,6 +613,18 @@ describe("preprocessPageBreakMarkers (#93)", () => {
 		expect(out).toContain("~~~\n<!-- pagebreak -->");
 		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
 	});
+
+	it("CRLF 行末でも fenced code block 内の marker を skip する", () => {
+		// CRLF (\r\n) で記述された markdown。`text.split('\n')` だと各行末に \r が残る
+		// ので、close fence regex が \r を許容しないと「未閉じ fenced」と誤判定する。
+		const md =
+			"before\r\n\r\n```\r\n<!-- pagebreak -->\r\n```\r\n\r\nafter\r\n\r\n<!-- pagebreak -->\r\n\r\nend";
+		const out = preprocessPageBreakMarkers(md);
+		// code block 内のものは温存
+		expect(out).toContain("```\r\n<!-- pagebreak -->\r\n```");
+		// 外側の 1 件だけ変換
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
 });
 
 describe("PDF 出力で pagebreak marker が HTML に伝わる (#93)", () => {

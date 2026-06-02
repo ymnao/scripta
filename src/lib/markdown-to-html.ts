@@ -58,6 +58,9 @@ export function collectRawCodeRanges(text: string): Array<[number, number]> {
 	// Fenced code blocks (``` or ~~~). CommonMark spec: closing fence must use the
 	// **same character** and be **at least as long** as the opening fence. Regex can't
 	// express "back-reference with length ≥ captured" so scan line-by-line.
+	// `\r?` を行末で許容して CRLF 入力でも閉じフェンスを正しく検出 (split('\n') で
+	// 各行末に \r が残るため、明示的に許容しないと CRLF の正当な fenced code が
+	// 「未閉じ」と誤判定され doc 末尾まで code 扱いになる)。
 	const lines = text.split("\n");
 	const lineOffsets: number[] = [0];
 	for (let li = 0; li < lines.length; li++) {
@@ -75,7 +78,7 @@ export function collectRawCodeRanges(text: string): Array<[number, number]> {
 		const fenceLen = open[1].length;
 		const start = lineOffsets[li];
 		const closeRe = new RegExp(
-			`^${containerPrefix.source}[ \\t]{0,3}\\${fenceChar}{${fenceLen},}[ \\t]*$`,
+			`^${containerPrefix.source}[ \\t]{0,3}\\${fenceChar}{${fenceLen},}[ \\t]*\\r?$`,
 		);
 		let closed = false;
 		for (let lj = li + 1; lj < lines.length; lj++) {
@@ -218,17 +221,11 @@ function preprocessDisplayMath(
 ): string {
 	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
 
-	// Build ranges covered by fenced code blocks to skip them.
-	// CommonMark allows 0-3 spaces indent and both ``` and ~~~ fences.
-	// Also handles fences nested inside blockquotes / lists.
-	const codeRanges: Array<[number, number]> = [];
-	const fenceRe = new RegExp(
-		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
-		"gm",
-	);
-	for (const m of markdown.matchAll(fenceRe)) {
-		codeRanges.push([m.index, m.index + m[0].length]);
-	}
+	// Code 範囲を skip するため共通 helper を使う。`collectRawCodeRanges` は CommonMark
+	// 準拠で fenced (閉じ長 >= 開き長)・indented・raw `<pre>`/`<code>`・inline すべてを
+	// 扱う。以前は local の `\1` 正規表現で同長閉じのみ拾っており、`<pre>` や indented
+	// code 内の display math まで KaTeX 化してしまう不整合があった。
+	const codeRanges = collectRawCodeRanges(markdown);
 
 	// Match display math $$...$$ that spans at least one newline.
 	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
@@ -241,7 +238,7 @@ function preprocessDisplayMath(
 			"gm",
 		),
 		(match, prefix: string, rawTex: string, offset: number) => {
-			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
+			if (isInsideRanges(offset, codeRanges)) {
 				return match;
 			}
 			// Determine the actual position of the opening $$ within the match
