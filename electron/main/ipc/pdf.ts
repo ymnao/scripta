@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { handle } from "../utils/ipc-handle";
+import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
@@ -186,11 +187,22 @@ export async function exportPdfImpl(
 				// ignore
 			}
 			await delay(POST_LOAD_IDLE_MS);
-			// 改ページ判定は CSS Paged Media（break-before / break-after / break-inside、
-			// widows / orphans）に任せる方針 (#93)。renderer 側で HTML を生成する時点で
-			// CSS と必要なら `<section class="pdf-section-keep">` ラッパを埋め込み済み。
-			// 旧 dynamic measurement script は JS と Chromium 実 layout の差分で
-			// 中割れを引き起こしたため廃止した（research-derived CSS-only ベストプラクティス）。
+
+			// `<section class="pdf-section-keep">` を含む場合、CSS `break-inside: avoid` だけでは
+			// Chromium が wrapper の中割れを許容してしまう (chromium #601033 / puppeteer #6366
+			// 等の known issue)。実 layout を測定し、ページ境界をまたぐ section に inline で
+			// `break-before: page` を強制注入する hybrid アプローチ (#93)。
+			//
+			// このタイミング (fonts.ready + idle 後 / printToPDF 直前) で実行することで、
+			// 全フォント・画像・Mermaid raster がレイアウト確定済みの状態で測定でき、
+			// 測定結果が printToPDF の実 layout と最も近い状態になる。
+			try {
+				await w.webContents.executeJavaScript(buildSectionBreakScript(), true);
+			} catch (err) {
+				// 補正失敗は warning 扱い: CSS `break-inside: avoid` だけで動作するため、
+				// 中割れリスクは残るが PDF 出力自体は続行する（PDF 欠落は発生しない）。
+				console.warn("[scripta:#93] section break correction failed:", err);
+			}
 			return await w.webContents.printToPDF(PDF_OPTIONS);
 		})();
 		// timeout が race に勝った後 exportWork が遅れて reject すると unhandled
