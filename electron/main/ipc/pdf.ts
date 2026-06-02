@@ -214,6 +214,10 @@ export async function exportPdfImpl(
 					h6: (html.match(/<h6\b/g) ?? []).length,
 				},
 			};
+			// section を `<table class="pdf-section-keep"><tbody><tr><td>...</td></tr></tbody></table>`
+			// に変換する table-row hack (#93 v4)。Chromium の table-row は atomic break unit として
+			// 信頼でき、「行が現ページに入るなら入れる、入らないなら次ページに送る」を確実に実装する。
+			// wrapper の break-inside hint よりはるかに安定。
 			try {
 				const diag = (await w.webContents.executeJavaScript(
 					buildSectionBreakScript(),
@@ -221,12 +225,11 @@ export async function exportPdfImpl(
 				)) as string;
 				process.stderr.write(`\n========== [scripta #93 PDF export diagnostics] ==========\n`);
 				process.stderr.write(`  received HTML: ${JSON.stringify(htmlInfo)}\n`);
-				process.stderr.write(`  section-break script: ${diag}\n`);
+				process.stderr.write(`  table-wrap script: ${diag}\n`);
 				process.stderr.write(`==========================================================\n\n`);
 			} catch (err) {
-				// 補正失敗は warning 扱い: CSS `break-inside: avoid` だけで動作するため、
-				// 中割れリスクは残るが PDF 出力自体は続行する（PDF 欠落は発生しない）。
-				process.stderr.write(`[scripta #93] section break correction failed: ${err}\n`);
+				// 補正失敗は warning 扱い: PDF 出力自体は続行する。
+				process.stderr.write(`[scripta #93] table-wrap correction failed: ${err}\n`);
 			}
 			return await w.webContents.printToPDF(PDF_OPTIONS);
 		})();
