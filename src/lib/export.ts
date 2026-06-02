@@ -1,3 +1,4 @@
+import katexPkg from "katex/package.json";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { markdownToHtml } from "./markdown-to-html";
@@ -6,6 +7,12 @@ import { basename } from "./path";
 
 export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
+
+// `katex/package.json` の version を bundle 側 katex 本体と同期する。
+// CSS の class 名・markup 構造は katex 本体の version と一致させる必要がある
+// （CDN URL を文字列リテラルで固定すると bump 時に乖離する。issue #79）。
+export const KATEX_VERSION: string = katexPkg.version;
+const KATEX_CSS_URL = `https://cdn.jsdelivr.net/npm/katex@${KATEX_VERSION}/dist/katex.min.css`;
 
 /** ExportTheme を Mermaid 用の "light" | "dark" に解決する。system の場合は OS 設定を参照。 */
 function resolveMermaidTheme(theme?: ExportTheme): "light" | "dark" {
@@ -409,7 +416,7 @@ export function buildHtmlDocument(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.33/dist/katex.min.css">
+<link rel="stylesheet" href="${KATEX_CSS_URL}">
 <style>
 :root {
   color-scheme: ${theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark"};
