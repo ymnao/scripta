@@ -84,8 +84,10 @@ export function buildSectionBreakScript(): string {
       result.errors.push('pageHeight <= 0');
       return JSON.stringify(result);
     }
-    // 15% safety buffer は経験則上のスイートスポット
-    var safetyBuffer = pageHeight * 0.15;
+    // 10% safety buffer。v5.1 で margin drift を解消したことで script の
+    // measurement 精度が向上したため、buffer を 15% → 10% に詰めても中割れリスクは低い。
+    // 不要な force-break で空白を増やすデメリットの方が大きいので攻めの設定 (#93 v5.2)。
+    var safetyBuffer = pageHeight * 0.1;
 
     // 4. body を印刷幅 (170mm) に揃えてから measure
     var origPadding = document.body.style.padding;
