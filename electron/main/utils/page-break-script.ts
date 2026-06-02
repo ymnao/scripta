@@ -102,10 +102,17 @@ export function buildSectionBreakScript(): string {
 
     try {
       var children = Array.prototype.slice.call(document.body.children);
+      // heights は「element box の高さ」ではなく「次要素 top までの距離」を使う。
+      // この方法で **ブロック間の上下マージン** が暗黙的に含まれ、virtualY の累積が
+      // 実 print layout と一致する。margin collapse が起きていても次要素の top を基準
+      // にすれば自動で正しい (旧 v2 で確立した方式、v5 で見落としていた #93 v5.1)。
       var heights = [];
+      var bodyBottom = document.body.getBoundingClientRect().bottom;
       for (var i = 0; i < children.length; i++) {
-        var r = children[i].getBoundingClientRect();
-        heights.push(Math.max(0, r.bottom - r.top));
+        var top = children[i].getBoundingClientRect().top;
+        var nextTop =
+          i + 1 < children.length ? children[i + 1].getBoundingClientRect().top : bodyBottom;
+        heights.push(Math.max(0, nextTop - top));
       }
 
       var virtualY = 0;
