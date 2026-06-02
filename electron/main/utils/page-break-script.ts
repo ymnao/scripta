@@ -1,54 +1,109 @@
 /**
- * PDF 改ページ補正スクリプト (#93) — hybrid CSS + JS アプローチ。
+ * PDF 改ページ補正スクリプト (#93) — main 内で完結する hybrid アプローチ。
  *
  * # 背景
  *
- * Chromium の `break-inside: avoid` を wrapper 要素（`<section>` / `<div>` 等）に
- * 当てても、wrapper 全体を次ページへ送る挙動には **ならない**。子要素（LI 等）
- * それぞれが `break-inside: avoid` を持っている場合、Chromium は「子要素間の
- * 境界で break」を選択し、wrapper の avoid 要件は『子レベルで尊重した』と
- * みなして wrapper の中割れを許容してしまう（known issue: chromium #601033,
- * puppeteer #6366, 多数の bug report）。
+ * Chromium の `break-inside: avoid` を wrapper 要素 (`<section>` / `<div>`) に当てても
+ * wrapper 全体を次ページへ送る挙動には **ならない**。子要素 (LI 等) が break-inside:
+ * avoid を持つと Chromium は子要素間で break する経路を選び、wrapper の avoid 要件は
+ * 「子レベルで尊重」とみなして wrapper 中割れを許容してしまう (chromium #601033 /
+ * puppeteer #6366 等の known issue)。
  *
  * # 解決策
  *
- * このスクリプトが「実 layout で wrapper がページ境界をまたぐかどうか」を
- * 測定し、またぐものに `style.breakBefore = 'page'` を **明示的に inline style で
- * 注入** することで、Chromium に「この section の前で必ず改ページ」を強制する。
- * 明示的な `break-before` は Chromium が確実に尊重する。
+ * 1. 印刷直前（fonts.ready + idle 後 / printToPDF 直前）に main から executeJavaScript
+ *    でこのスクリプトを実行する。
+ * 2. 必要なら `<section class="pdf-section-keep">` を DOM 操作で自前 wrap する
+ *    （renderer 側で wrap 済みなら skip）。renderer のコード反映状態に左右されない。
+ * 3. 自前で必要な CSS (`break-inside: avoid-page`) も style 要素経由で注入。
+ * 4. 各 section の実 layout 位置を測定し、ページ境界をまたぐものに inline
+ *    `style.breakBefore = 'page'` を強制注入。
  *
- * # 測定精度の確保と drift 対策
+ * # 測定精度の確保
  *
- * screen layout と print layout は CSS が同じでも完全一致しない（margin collapse、
- * font metrics、KaTeX/Mermaid のサブピクセル丸めなど）。section 高さで drift が
- * 数 mm〜数十 mm の誤差を持つ場合があり、「screen で測ると収まるが print では
- * 収まらない」境界ケースが発生し得る。
- *
- * 対策: `SAFETY_BUFFER_RATIO`（ページ高さの 10%、A4 で約 25mm）を section の必要
- * 高さに加算して判定。drift を吸収しつつ、過度な force-break で空白を増やしすぎない
- * バランス点。
+ * - body width を印刷幅 (170mm) に揃え、`pre` を pre-wrap にして印刷折り返しを再現
+ * - safety buffer 20% を section 高さに加算して screen ⇔ print の layout drift を吸収
  *
  * # 診断
  *
- * 走査結果を JSON で return し、呼び出し側 (pdf.ts) が `console.log` で
- * メインプロセス stderr へ書き出す。「script が走ったか / 何セクション検出されたか /
- * 何セクション force-break したか」をユーザが pnpm dev のターミナルで確認できる。
+ * 走査結果を JSON で return:
+ *   - rendererWrapped: 既存の wrap が存在したか
+ *   - h2Count: body 直下の h2 数（自前 wrap 判断用）
+ *   - count: 最終的に検出した .pdf-section-keep 数
+ *   - broken: break-before を注入した section 数
+ *   - errors: 例外メッセージ
+ *
+ * 呼び出し側 (pdf.ts) が console.log でメインプロセス stderr へ書き出し、ユーザが
+ * pnpm dev のターミナルで動作確認できる。
  */
 
 /**
  * `executeJavaScript` で実行する文字列を返す。pure function (テスト容易性のため)。
- * 戻り値は `{ count, broken, errors }` を含む JSON 文字列。
+ * smartLevel: wrap 対象見出しレベル (default 2 = h2)。
  */
-export function buildSectionBreakScript(): string {
+export function buildSectionBreakScript(smartLevel: 1 | 2 | 3 = 2): string {
 	return `(function() {
-  var result = { count: 0, broken: 0, errors: [] };
+  var result = {
+    rendererWrapped: false,
+    h2Count: 0,
+    count: 0,
+    broken: 0,
+    errors: []
+  };
+
   try {
+    var SMART_LEVEL = ${smartLevel};
+
+    // 既存 wrap (renderer 側で wrapSectionsInHtml が走っていれば存在)
+    var existing = document.querySelectorAll('.pdf-section-keep');
+    result.rendererWrapped = existing.length > 0;
+    result.h2Count = document.querySelectorAll('body > h' + SMART_LEVEL).length;
+
+    // 自前 wrap (renderer が古い / smart=false で wrap が走っていない場合の保険)
+    if (!result.rendererWrapped && result.h2Count > 0) {
+      // body 直下の対象見出しを集める
+      var headings = Array.prototype.slice.call(
+        document.querySelectorAll('body > h' + SMART_LEVEL)
+      );
+      // 末尾から処理（DOM 操作中の collection 不整合を避ける）
+      for (var hi = headings.length - 1; hi >= 0; hi--) {
+        var startEl = headings[hi];
+        // 終端: 次の同位以上の見出し or null
+        var endEl = startEl.nextSibling;
+        while (endEl) {
+          if (endEl.nodeType === 1 && /^H[1-6]$/.test(endEl.tagName)) {
+            var lvl = parseInt(endEl.tagName.charAt(1), 10);
+            if (lvl <= SMART_LEVEL) break;
+          }
+          endEl = endEl.nextSibling;
+        }
+        // startEl から endEl の手前までを section に移動
+        var section = document.createElement('section');
+        section.className = 'pdf-section-keep';
+        startEl.parentNode.insertBefore(section, startEl);
+        var cur = startEl;
+        while (cur && cur !== endEl) {
+          var next = cur.nextSibling;
+          section.appendChild(cur);
+          cur = next;
+        }
+      }
+    }
+
+    // 必要な CSS を inject (renderer が古いと .pdf-section-keep 用の break-inside CSS が無いため)
+    var styleEl = document.createElement('style');
+    styleEl.textContent = '@media print { .pdf-section-keep { break-inside: avoid-page; page-break-inside: avoid; } } pre.pdf-section-measure { white-space: pre-wrap !important; word-wrap: break-word !important; }';
+    document.head.appendChild(styleEl);
+
+    // section 検出
     var sections = document.querySelectorAll('.pdf-section-keep');
     result.count = sections.length;
-    if (sections.length === 0) return JSON.stringify(result);
+    if (sections.length === 0) {
+      document.head.removeChild(styleEl);
+      return JSON.stringify(result);
+    }
 
-    // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測。
-    // CSS zoom 適用時、getBoundingClientRect() は zoom 後の値を返す。
+    // ページ高さ (A4 - 上下 20mm margin = 257mm)
     var zoom = parseFloat(document.body.style.zoom) || 1;
     var ruler = document.createElement('div');
     ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
@@ -57,16 +112,14 @@ export function buildSectionBreakScript(): string {
     document.body.removeChild(ruler);
     if (pageHeight <= 0) {
       result.errors.push('pageHeight measurement <= 0');
+      document.head.removeChild(styleEl);
       return JSON.stringify(result);
     }
 
-    // 20% safety buffer (≈51mm @ A4)。screen と print の layout drift（KaTeX 行送り
-     // 差、margin collapse、リスト padding 差等で section 高さが数mm〜数十mm 食い違う）
-     // を吸収する。10% で不足ケースが報告されたため拡大 (#93)。
+    // 20% safety buffer (≈51mm @ A4) で screen ⇔ print の layout drift を吸収
     var safetyBuffer = pageHeight * 0.20;
 
-    // body を印刷幅 (170mm) に揃えてから measure。screen 幅と print 幅で
-    // テキスト折り返しが変わると section 高さが drift するため。
+    // body を印刷幅 (170mm) に揃えてから measure
     var origPadding = document.body.style.padding;
     var origWidth = document.body.style.width;
     var origMaxWidth = document.body.style.maxWidth;
@@ -74,9 +127,9 @@ export function buildSectionBreakScript(): string {
     var pw = (170 / zoom) + 'mm';
     document.body.style.width = pw;
     document.body.style.maxWidth = pw;
-    var styleEl = document.createElement('style');
-    styleEl.textContent = 'pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
-    document.head.appendChild(styleEl);
+    var measureStyle = document.createElement('style');
+    measureStyle.textContent = 'pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
+    document.head.appendChild(measureStyle);
     document.body.offsetHeight; // 強制 reflow
 
     try {
@@ -89,7 +142,7 @@ export function buildSectionBreakScript(): string {
         var height = rect.bottom - rect.top;
         if (height < 0) height = 0;
 
-        // 著者マーカー (hr.pdf-pagebreak): virtualY を次ページ頭へジャンプ
+        // pagebreak 著者マーカー
         var isMarker =
           item.tagName === 'HR' &&
           item.classList &&
@@ -101,13 +154,10 @@ export function buildSectionBreakScript(): string {
           continue;
         }
 
-        // .pdf-section-keep がページ境界をまたぐ場合の処理
+        // .pdf-section-keep のページ境界またぎ判定
         if (item.classList && item.classList.contains('pdf-section-keep') && height > 0) {
           var inPage = virtualY % pageHeight;
           var remaining = pageHeight - inPage;
-          // 判定: section が現ページ残量に収まらない (drift buffer 加算)
-          //      && section 全体が 1 ページに収まる (収まらないなら force しても無意味)
-          //      && 既にページ途中 (page 頭での force は no-op)
           if (
             (height + safetyBuffer) > remaining &&
             height <= pageHeight &&
@@ -115,7 +165,7 @@ export function buildSectionBreakScript(): string {
           ) {
             item.style.breakBefore = 'page';
             item.style.pageBreakBefore = 'always';
-            virtualY += remaining; // 次ページ頭まで進める
+            virtualY += remaining;
             result.broken++;
           }
         }
@@ -123,7 +173,7 @@ export function buildSectionBreakScript(): string {
         virtualY += height;
       }
     } finally {
-      document.head.removeChild(styleEl);
+      document.head.removeChild(measureStyle);
       document.body.style.padding = origPadding;
       document.body.style.width = origWidth;
       document.body.style.maxWidth = origMaxWidth;

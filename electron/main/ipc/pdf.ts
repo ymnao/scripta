@@ -193,26 +193,27 @@ export async function exportPdfImpl(
 			// 等の known issue)。実 layout を測定し、ページ境界をまたぐ section に inline で
 			// `break-before: page` を強制注入する hybrid アプローチ (#93)。
 			//
+			// script は renderer 側で wrap 済みでも未 wrap でも動くよう、自前で DOM 操作で
+			// h2 セクションを wrap するロジックも含む。renderer の HMR 反映状態に依存しない。
+			//
 			// このタイミング (fonts.ready + idle 後 / printToPDF 直前) で実行することで、
 			// 全フォント・画像・Mermaid raster がレイアウト確定済みの状態で測定でき、
 			// 測定結果が printToPDF の実 layout と最も近い状態になる。
 			//
-			// script は `{ count, broken, errors }` JSON を return する。ユーザが
-			// 「script が走ったか / 何セクション検出されたか / 何セクション force-break したか」
-			// を pnpm dev のターミナルで確認できる診断ログ (#93 debug)。
-			// 目立つ形でログ出力する（重要なので process.stderr.write で直接出力）。
+			// 受信 HTML の sanity check と script result を ターミナルに出力する。
+			const htmlInfo = {
+				size: html.length,
+				hasSectionKeep: html.includes('class="pdf-section-keep"'),
+				h2Count: (html.match(/<h2\b/g) ?? []).length,
+			};
 			try {
 				const diag = (await w.webContents.executeJavaScript(
 					buildSectionBreakScript(),
 					true,
 				)) as string;
 				process.stderr.write(`\n========== [scripta #93 PDF export diagnostics] ==========\n`);
-				process.stderr.write(`  section-break script result: ${diag}\n`);
-				process.stderr.write(
-					`  → count=0 なら ExportDialog の改ページ判定が「節単位」になっていない\n`,
-				);
-				process.stderr.write(`  → broken=0 なら drift で全 section が「収まる」判定\n`);
-				process.stderr.write(`  → broken>0 なら本来 break-before が注入された\n`);
+				process.stderr.write(`  received HTML: ${JSON.stringify(htmlInfo)}\n`);
+				process.stderr.write(`  section-break script: ${diag}\n`);
 				process.stderr.write(`==========================================================\n\n`);
 			} catch (err) {
 				// 補正失敗は warning 扱い: CSS `break-inside: avoid` だけで動作するため、
