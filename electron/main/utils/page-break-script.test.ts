@@ -8,9 +8,10 @@ describe("buildSectionBreakScript (#93 hybrid)", () => {
 		expect(s.trimEnd().endsWith("})();")).toBe(true);
 	});
 
-	it("セクション 0 件は早期 return（無駄な計測しない）", () => {
+	it("セクション 0 件でも診断 JSON を return する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toMatch(/sections\.length === 0[^;]*return/);
+		expect(s).toMatch(/result\.count = sections\.length/);
+		expect(s).toMatch(/if \(sections\.length === 0\) return JSON\.stringify\(result\)/);
 	});
 
 	it("印刷幅 170mm へ body を一時揃える", () => {
@@ -23,10 +24,17 @@ describe("buildSectionBreakScript (#93 hybrid)", () => {
 		expect(s).toContain("height:257mm");
 	});
 
+	it("safety buffer (10%) で screen ⇔ print の layout drift を吸収する", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("pageHeight * 0.10");
+		expect(s).toContain("(height + safetyBuffer) > remaining");
+	});
+
 	it("section がページ境界をまたぐ条件で breakBefore = 'page' を inline 注入する", () => {
 		const s = buildSectionBreakScript();
-		// 残量に収まらず、1 ページに収まる、かつ既にページ途中
-		expect(s).toMatch(/height > remaining[\s\S]*?height <= pageHeight[\s\S]*?inPage > 0/);
+		expect(s).toMatch(
+			/\(height \+ safetyBuffer\) > remaining[\s\S]*?height <= pageHeight[\s\S]*?inPage > 0/,
+		);
 		expect(s).toContain("item.style.breakBefore = 'page'");
 		expect(s).toContain("item.style.pageBreakBefore = 'always'");
 	});
@@ -37,9 +45,15 @@ describe("buildSectionBreakScript (#93 hybrid)", () => {
 		expect(s).toContain("pageHeight - inPageMarker");
 	});
 
+	it("診断用 JSON ({ count, broken, errors }) を返す", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toMatch(/var result = \{ count: 0, broken: 0, errors: \[\] \}/);
+		expect(s).toContain("result.broken++");
+		expect(s).toContain("return JSON.stringify(result)");
+	});
+
 	it("body style を try/finally で restore する (例外でも壊れない)", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("try {");
 		expect(s).toContain("} finally {");
 		expect(s).toContain("document.body.style.padding = origPadding");
 		expect(s).toContain("document.body.style.width = origWidth");

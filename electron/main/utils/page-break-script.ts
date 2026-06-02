@@ -10,107 +10,125 @@
  * みなして wrapper の中割れを許容してしまう（known issue: chromium #601033,
  * puppeteer #6366, 多数の bug report）。
  *
- * 例えば「H2 + LI + LI + LI」というセクションで、LI3 のサイズだけページ末尾を
- * 超える場合、Chromium は LI2 と LI3 の間で break して LI3 を次ページに送る。
- * wrapper の break-inside: avoid は「LI 自身は分割しない」点では尊重されるが、
- * **セクション全体を次ページに送るには至らない**。
- *
  * # 解決策
  *
  * このスクリプトが「実 layout で wrapper がページ境界をまたぐかどうか」を
- * 測定し、またぐものに `style.breakBefore = 'page'` / `pageBreakBefore = 'always'`
- * を **明示的に inline style で注入** することで、Chromium に「この section の
- * 前で必ず改ページ」を強制する。明示的な `break-before` は Chromium が確実に
- * 尊重する。
+ * 測定し、またぐものに `style.breakBefore = 'page'` を **明示的に inline style で
+ * 注入** することで、Chromium に「この section の前で必ず改ページ」を強制する。
+ * 明示的な `break-before` は Chromium が確実に尊重する。
  *
- * # 測定精度の確保
+ * # 測定精度の確保と drift 対策
  *
- * - script 内で body.width を印刷幅 (170mm) に揃え、`pre` を pre-wrap にして
- *   印刷時のテキスト折り返しを再現してから測定。screen 幅 (800px) のままだと
- *   テキスト wrap が違って section 高さが drift するため。
- * - body 直下の children を順に走査し、virtualY を累積。`.pdf-section-keep`
- *   要素が現ページ残量に収まらず、かつ 1 ページに収まるなら break-before 注入。
- * - body 直下の HR (`<hr class="pdf-pagebreak">`) は明示的に検出して virtualY を
- *   次ページ頭にジャンプ（@media print の force-break を screen 測定で再現するため）。
+ * screen layout と print layout は CSS が同じでも完全一致しない（margin collapse、
+ * font metrics、KaTeX/Mermaid のサブピクセル丸めなど）。section 高さで drift が
+ * 数 mm〜数十 mm の誤差を持つ場合があり、「screen で測ると収まるが print では
+ * 収まらない」境界ケースが発生し得る。
+ *
+ * 対策: `SAFETY_BUFFER_RATIO`（ページ高さの 10%、A4 で約 25mm）を section の必要
+ * 高さに加算して判定。drift を吸収しつつ、過度な force-break で空白を増やしすぎない
+ * バランス点。
+ *
+ * # 診断
+ *
+ * 走査結果を JSON で return し、呼び出し側 (pdf.ts) が `console.log` で
+ * メインプロセス stderr へ書き出す。「script が走ったか / 何セクション検出されたか /
+ * 何セクション force-break したか」をユーザが pnpm dev のターミナルで確認できる。
  */
 
 /**
  * `executeJavaScript` で実行する文字列を返す。pure function (テスト容易性のため)。
+ * 戻り値は `{ count, broken, errors }` を含む JSON 文字列。
  */
 export function buildSectionBreakScript(): string {
 	return `(function() {
-  var sections = document.querySelectorAll('.pdf-section-keep');
-  if (sections.length === 0) return;
-
-  // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測。
-  // CSS zoom 適用時、getBoundingClientRect() は zoom 後の値を返す。
-  var zoom = parseFloat(document.body.style.zoom) || 1;
-  var ruler = document.createElement('div');
-  ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
-  document.body.appendChild(ruler);
-  var pageHeight = ruler.getBoundingClientRect().height;
-  document.body.removeChild(ruler);
-  if (pageHeight <= 0) return;
-
-  // body を印刷幅 (170mm) に揃えてから measure。screen 幅と print 幅で
-  // テキスト折り返しが変わると section 高さが drift するため。
-  var origPadding = document.body.style.padding;
-  var origWidth = document.body.style.width;
-  var origMaxWidth = document.body.style.maxWidth;
-  document.body.style.padding = '0';
-  var pw = (170 / zoom) + 'mm';
-  document.body.style.width = pw;
-  document.body.style.maxWidth = pw;
-  // pre も印刷時の wrap モードに合わせる
-  var styleEl = document.createElement('style');
-  styleEl.textContent = 'pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
-  document.head.appendChild(styleEl);
-  document.body.offsetHeight; // 強制 reflow
-
+  var result = { count: 0, broken: 0, errors: [] };
   try {
-    var children = Array.prototype.slice.call(document.body.children);
-    var virtualY = 0;
+    var sections = document.querySelectorAll('.pdf-section-keep');
+    result.count = sections.length;
+    if (sections.length === 0) return JSON.stringify(result);
 
-    for (var i = 0; i < children.length; i++) {
-      var item = children[i];
-      var rect = item.getBoundingClientRect();
-      var height = rect.bottom - rect.top;
-      if (height < 0) height = 0;
-
-      // pagebreak 著者マーカー (hr.pdf-pagebreak) は次ページ頭へジャンプ
-      // CSS @media print の break-before:page を screen 測定で再現する
-      var isMarker =
-        item.tagName === 'HR' &&
-        item.classList &&
-        item.classList.contains('pdf-pagebreak');
-      if (isMarker && virtualY > 0) {
-        var inPageMarker = virtualY % pageHeight;
-        if (inPageMarker > 0) virtualY += pageHeight - inPageMarker;
-        virtualY += height;
-        continue;
-      }
-
-      // .pdf-section-keep がページ境界をまたぐ場合の処理
-      if (item.classList && item.classList.contains('pdf-section-keep') && height > 0) {
-        var inPage = virtualY % pageHeight;
-        var remaining = pageHeight - inPage;
-        // section がページ残量に収まらない && 1 ページ全体には収まる && 既にページ途中
-        // → break-before:page を強制注入して次ページ先頭から開始させる
-        // 1 ページに収まらない (=巨大 section) 時は強制しても無意味なので skip
-        if (height > remaining && height <= pageHeight && inPage > 0) {
-          item.style.breakBefore = 'page';
-          item.style.pageBreakBefore = 'always';
-          virtualY += remaining; // 次ページ頭まで進める
-        }
-      }
-
-      virtualY += height;
+    // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測。
+    // CSS zoom 適用時、getBoundingClientRect() は zoom 後の値を返す。
+    var zoom = parseFloat(document.body.style.zoom) || 1;
+    var ruler = document.createElement('div');
+    ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
+    document.body.appendChild(ruler);
+    var pageHeight = ruler.getBoundingClientRect().height;
+    document.body.removeChild(ruler);
+    if (pageHeight <= 0) {
+      result.errors.push('pageHeight measurement <= 0');
+      return JSON.stringify(result);
     }
-  } finally {
-    document.head.removeChild(styleEl);
-    document.body.style.padding = origPadding;
-    document.body.style.width = origWidth;
-    document.body.style.maxWidth = origMaxWidth;
+
+    // 10% safety buffer (≈25mm @ A4)。screen と print の layout drift を吸収する。
+    var safetyBuffer = pageHeight * 0.10;
+
+    // body を印刷幅 (170mm) に揃えてから measure。screen 幅と print 幅で
+    // テキスト折り返しが変わると section 高さが drift するため。
+    var origPadding = document.body.style.padding;
+    var origWidth = document.body.style.width;
+    var origMaxWidth = document.body.style.maxWidth;
+    document.body.style.padding = '0';
+    var pw = (170 / zoom) + 'mm';
+    document.body.style.width = pw;
+    document.body.style.maxWidth = pw;
+    var styleEl = document.createElement('style');
+    styleEl.textContent = 'pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
+    document.head.appendChild(styleEl);
+    document.body.offsetHeight; // 強制 reflow
+
+    try {
+      var children = Array.prototype.slice.call(document.body.children);
+      var virtualY = 0;
+
+      for (var i = 0; i < children.length; i++) {
+        var item = children[i];
+        var rect = item.getBoundingClientRect();
+        var height = rect.bottom - rect.top;
+        if (height < 0) height = 0;
+
+        // 著者マーカー (hr.pdf-pagebreak): virtualY を次ページ頭へジャンプ
+        var isMarker =
+          item.tagName === 'HR' &&
+          item.classList &&
+          item.classList.contains('pdf-pagebreak');
+        if (isMarker && virtualY > 0) {
+          var inPageMarker = virtualY % pageHeight;
+          if (inPageMarker > 0) virtualY += pageHeight - inPageMarker;
+          virtualY += height;
+          continue;
+        }
+
+        // .pdf-section-keep がページ境界をまたぐ場合の処理
+        if (item.classList && item.classList.contains('pdf-section-keep') && height > 0) {
+          var inPage = virtualY % pageHeight;
+          var remaining = pageHeight - inPage;
+          // 判定: section が現ページ残量に収まらない (drift buffer 加算)
+          //      && section 全体が 1 ページに収まる (収まらないなら force しても無意味)
+          //      && 既にページ途中 (page 頭での force は no-op)
+          if (
+            (height + safetyBuffer) > remaining &&
+            height <= pageHeight &&
+            inPage > 0
+          ) {
+            item.style.breakBefore = 'page';
+            item.style.pageBreakBefore = 'always';
+            virtualY += remaining; // 次ページ頭まで進める
+            result.broken++;
+          }
+        }
+
+        virtualY += height;
+      }
+    } finally {
+      document.head.removeChild(styleEl);
+      document.body.style.padding = origPadding;
+      document.body.style.width = origWidth;
+      document.body.style.maxWidth = origMaxWidth;
+    }
+  } catch (e) {
+    result.errors.push(String(e && e.message ? e.message : e));
   }
+  return JSON.stringify(result);
 })();`;
 }

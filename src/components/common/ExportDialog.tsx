@@ -81,7 +81,11 @@ export function ExportDialog({
 	// の典型ケースをカバー）。
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
-	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("compact");
+	// default = section: Chromium の break-inside: avoid が wrapper では unreliable な
+	// ため、明示的に `<section class="pdf-section-keep">` で wrap + JS break-before 強制
+	// 注入の経路 (#93) を default で有効化する。compact は「重なってもよい」UX で、
+	// section の方が大半の用途で期待通りに動くので default。
+	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("section");
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);

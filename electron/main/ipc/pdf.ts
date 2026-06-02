@@ -196,8 +196,16 @@ export async function exportPdfImpl(
 			// このタイミング (fonts.ready + idle 後 / printToPDF 直前) で実行することで、
 			// 全フォント・画像・Mermaid raster がレイアウト確定済みの状態で測定でき、
 			// 測定結果が printToPDF の実 layout と最も近い状態になる。
+			//
+			// script は `{ count, broken, errors }` JSON を return する。ユーザが
+			// 「script が走ったか / 何セクション検出されたか / 何セクション force-break したか」
+			// を pnpm dev のターミナルで確認できる診断ログ (#93 debug)。
 			try {
-				await w.webContents.executeJavaScript(buildSectionBreakScript(), true);
+				const diag = (await w.webContents.executeJavaScript(
+					buildSectionBreakScript(),
+					true,
+				)) as string;
+				console.log(`[scripta:#93] section-break: ${diag}`);
 			} catch (err) {
 				// 補正失敗は warning 扱い: CSS `break-inside: avoid` だけで動作するため、
 				// 中割れリスクは残るが PDF 出力自体は続行する（PDF 欠落は発生しない）。
