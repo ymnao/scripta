@@ -596,6 +596,23 @@ describe("preprocessPageBreakMarkers (#93)", () => {
 		expect(out).toContain("<pre><!-- pagebreak --></pre>");
 		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
 	});
+
+	it("CommonMark: 閉じフェンスが開きより長い fenced code 内も skip する", () => {
+		// 開き 4 backticks, 閉じ 5 backticks (CommonMark spec で valid)
+		const md = "````\n<!-- pagebreak -->\n`````\n\nafter\n\n<!-- pagebreak -->\n\nend";
+		const out = preprocessPageBreakMarkers(md);
+		// code block 内のものは温存
+		expect(out).toContain("````\n<!-- pagebreak -->");
+		// outside の 1 件だけ変換
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
+
+	it("CommonMark: ~~~ fence でも閉じが長い場合に skip する", () => {
+		const md = "~~~\n<!-- pagebreak -->\n~~~~~\n\nafter\n\n<!-- pagebreak -->\n\nend";
+		const out = preprocessPageBreakMarkers(md);
+		expect(out).toContain("~~~\n<!-- pagebreak -->");
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
 });
 
 describe("PDF 出力で pagebreak marker が HTML に伝わる (#93)", () => {

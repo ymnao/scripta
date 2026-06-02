@@ -125,10 +125,13 @@ hr.pdf-pagebreak { border: 0; margin: 0; height: 0; visibility: hidden; }
 
 			await pwExpect.poll(() => workspaceFileSize(workspaceDir, "no-meta.pdf")).toBeGreaterThan(0);
 
-			// stderr に script の result JSON が出ているはず
+			// stderr に script の result JSON が出ているはず。
 			// 形式: `[scripta:#93] break-before script: { ... } (html N bytes)`
+			// JSON は `{"headingCounts":{"h1":0,...},...}` の様にネストするので、
+			// 単純な `{[^}]+}` regex では最初の内側 `}` で切れて不完全な JSON になる。
+			// 末尾の ` (html N bytes)` を anchor に使って **greedy** に最後の `}` まで拾う。
 			const joined = stderrLines.join("");
-			const m = joined.match(/\[scripta:#93\][^{]*({[^}]+})/);
+			const m = joined.match(/\[scripta:#93\] break-before script: (\{.*\}) \(html \d+ bytes\)/);
 			expect(m, "diagnostic line should appear in stderr").not.toBeNull();
 			const diag = JSON.parse(m?.[1] ?? "{}") as {
 				sectionsTotal: number;

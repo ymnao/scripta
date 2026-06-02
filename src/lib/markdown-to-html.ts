@@ -52,15 +52,47 @@ export function isInsideRanges(pos: number, ranges: Array<[number, number]>): bo
 export function collectRawCodeRanges(text: string): Array<[number, number]> {
 	const ranges: Array<[number, number]> = [];
 
-	// Fenced code blocks (``` or ~~~), including those nested inside
-	// blockquotes / lists via the container prefix pattern.
+	// Container prefix for fenced / indented inside blockquotes / lists.
 	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
-	const fenceRe = new RegExp(
-		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
-		"gm",
-	);
-	for (const m of text.matchAll(fenceRe)) {
-		ranges.push([m.index, m.index + m[0].length]);
+
+	// Fenced code blocks (``` or ~~~). CommonMark spec: closing fence must use the
+	// **same character** and be **at least as long** as the opening fence. Regex can't
+	// express "back-reference with length ≥ captured" so scan line-by-line.
+	const lines = text.split("\n");
+	const lineOffsets: number[] = [0];
+	for (let li = 0; li < lines.length; li++) {
+		lineOffsets.push(lineOffsets[li] + lines[li].length + 1);
+	}
+	const openRe = new RegExp(`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*$`);
+	let li = 0;
+	while (li < lines.length) {
+		const open = lines[li].match(openRe);
+		if (!open) {
+			li++;
+			continue;
+		}
+		const fenceChar = open[1][0]; // ` or ~
+		const fenceLen = open[1].length;
+		const start = lineOffsets[li];
+		const closeRe = new RegExp(
+			`^${containerPrefix.source}[ \\t]{0,3}\\${fenceChar}{${fenceLen},}[ \\t]*$`,
+		);
+		let closed = false;
+		for (let lj = li + 1; lj < lines.length; lj++) {
+			if (closeRe.test(lines[lj])) {
+				const end = lineOffsets[lj] + lines[lj].length;
+				ranges.push([start, end]);
+				li = lj + 1;
+				closed = true;
+				break;
+			}
+		}
+		if (!closed) {
+			// Unclosed fence: treat the rest of the document as code (matches CommonMark
+			// "to the end of the containing block / document" behaviour).
+			ranges.push([start, text.length]);
+			break;
+		}
 	}
 
 	// Indented code blocks: runs of lines indented by 4+ spaces or a tab,
