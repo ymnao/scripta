@@ -1,3 +1,4 @@
+import { history, redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
@@ -200,6 +201,82 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.selection.main.head).toBe(endTo + 1);
 	});
 
+	it("先頭テーブルの左上セルで ArrowUp は何もしない（ドキュメントを改変しない, #90）", () => {
+		const view = mountEditor(simpleTable); // テーブルが doc 先頭
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+		cell.focus();
+		cell.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
+		);
+		// ドキュメント・カーソルとも変化しない
+		expect(view.state.doc.toString()).toBe(simpleTable);
+	});
+
+	it("先頭テーブルの左上セルでセル先頭 ArrowLeft は preventDefault され抑止される（巨大キャレット防止, #90）", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+		cell.focus();
+		// セル先頭にキャレットを置く
+		const range = document.createRange();
+		range.selectNodeContents(cell);
+		range.collapse(true);
+		const sel = window.getSelection();
+		sel?.removeAllRanges();
+		sel?.addRange(range);
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "ArrowLeft",
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+		// セル外へ抜けない（native の caret 移動も止める）
+		expect(ev.defaultPrevented).toBe(true);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+	});
+
+	it("唯一のテーブルを削除する transaction で stale な末尾境界に退避しない（#90）", () => {
+		// tr.startState の decoration の末尾を newDoc にマップするだけだと、削除した
+		// テーブルの「古い末尾 → 削除後 0」が trailing と誤認され空 doc に \n が補われる。
+		// tr.state（適用後 state）の decoration を読むことで、消えたテーブルは初めから
+		// 末尾候補に含まれない。
+		const view = mountEditor(simpleTable);
+		view.dispatch({ changes: { from: 0, to: simpleTable.length }, selection: { anchor: 0 } });
+		expect(view.state.doc.toString()).toBe("");
+		expect(view.state.selection.main.head).toBe(0);
+	});
+
+	it("空 doc にテーブルを insert して selection がその末尾に来るなら退避が走る（新規テーブル境界, #90）", () => {
+		// この transaction で初めて生まれるテーブルは tr.startState の decoration には
+		// 含まれないため、startState ベースだと dodge も EOF 改行補完も走らず巨大キャレット
+		// が出てしまう。tr.state を見れば新規テーブル境界もきちんと拾える。
+		const view = mountEditor("");
+		view.dispatch({
+			changes: { from: 0, insert: simpleTable },
+			selection: { anchor: simpleTable.length },
+		});
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
+		expect(view.state.selection.main.head).toBe(simpleTable.length + 1);
+	});
+
+	it("fenced code block 内のパイプ行は退避対象にしない（widget でない場所での誤発火防止, #90）", () => {
+		// code fence 内に表っぽい行が並んでいても widget 化されないので末尾境界 dodge は
+		// 走らない。以前は doc テキストベースで判定していたため誤発火していた。
+		const doc = "```\n| 1 | 2 |\n| --- | --- |\n| 3 | 4 |\n```";
+		const view = mountEditor(doc);
+		// fence 内最終行の行末（= "| 3 | 4 |" の末尾）にカーソルを置いても dodge しない
+		const lastFenceContentLine = view.state.doc.line(4);
+		view.dispatch({ selection: { anchor: lastFenceContentLine.to } });
+		expect(view.state.doc.toString()).toBe(doc);
+		expect(view.state.selection.main.head).toBe(lastFenceContentLine.to);
+	});
+
 	it("テーブル末尾境界以外の selection はそのまま", () => {
 		const doc = `${simpleTable}\n\ntext`;
 		const view = mountEditor(doc);
@@ -259,6 +336,22 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.doc.toString()).toBe(doc);
 		// line4（空行）の行頭へ
 		expect(view.state.selection.main.head).toBe(view.state.doc.line(4).from);
+	});
+
+	it("exitTableDown: 本文が密着していても巻き込まず本文行頭へ抜ける（飲み込み防止, #90）", () => {
+		// テーブル直下に本文が密着（lezer の Table ノードが本文行を含むケース）。
+		// trim した最終行で判定するので、本文を表へ巻き込まず行頭へ抜ける。
+		const doc = `${simpleTable}\ntext`;
+		const view = mountEditor(doc);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		expect(wrapper).not.toBeNull();
+		if (!wrapper) return;
+
+		exitTableDown(view, wrapper);
+		// 改行を挿入せず（飲み込まず）、本文行頭へ
+		expect(view.state.doc.toString()).toBe(doc);
+		expect(view.state.selection.main.head).toBe(view.state.doc.line(4).from);
+		expect(view.state.doc.lineAt(view.state.selection.main.head).text).toBe("text");
 	});
 
 	it("pasteIntoCell: フォーカスセルにテキストを挿入しドキュメントへ反映する", () => {
@@ -347,21 +440,262 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(ev.defaultPrevented).toBe(true);
 	});
 
-	it("削除でテーブル末尾境界(EOF)に取り残されたら改行を補い退避する（tableBoundaryGuard）", async () => {
+	it("Cmd/Ctrl+A はセル内容だけを選択し、CM の doc 全選択へ伝播しない", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+		cell.focus();
+
+		// wrapper の上位（contentDOM）に届けば CM の Mod-a (doc 全選択) が走ってしまう
+		let reachedEditor = false;
+		const onKey = () => {
+			reachedEditor = true;
+		};
+		view.contentDOM.addEventListener("keydown", onKey);
+		const ev = new KeyboardEvent("keydown", {
+			key: "a",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+		view.contentDOM.removeEventListener("keydown", onKey);
+
+		// native / CM 双方の全選択を止める（preventDefault + stopPropagation）
+		expect(ev.defaultPrevented).toBe(true);
+		expect(reachedEditor).toBe(false);
+		// セルの内容だけが選択される（doc 全体ではない）
+		const sel = window.getSelection();
+		expect(sel?.toString()).toBe("A");
+	});
+
+	it("セル入力（input イベント）→ Cmd/Ctrl+Z で「いま打っていたセル」が確実に戻る（#90）", () => {
+		// 表外で 1 編集 → セル内タイプ相当の入力 → Cmd+Z でセル編集だけを戻し、
+		// もう 1 回 Cmd+Z で表外編集を戻す（history のグループ化が崩れないことの担保）。
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		const initial = `hello\n\n${simpleTable}`;
+		let state = EditorState.create({
+			doc: initial,
+			selection: EditorSelection.cursor(0),
+			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+
+		// 表外編集（hello → hello!）
+		view.dispatch({ changes: { from: 5, insert: "!" } });
+		const afterOuter = view.state.doc.toString();
+
+		// セル内タイプ（input イベント経由）— データ行(row 1)・col 0 を "1" → "1X" に
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement;
+		const cell = wrapper.querySelector('[data-row="1"][data-col="0"]') as HTMLElement;
+		cell.textContent = "1X";
+		cell.dispatchEvent(new Event("input", { bubbles: true }));
+		const afterCell = view.state.doc.toString();
+		expect(afterCell).toContain("| 1X | 2 |");
+
+		// Cmd+Z 1 回 → セル編集だけ戻る（表外編集は残る）
+		undo(view);
+		expect(view.state.doc.toString()).toBe(afterOuter);
+
+		// Cmd+Z もう 1 回 → 表外編集も戻る
+		undo(view);
+		expect(view.state.doc.toString()).toBe(initial);
+	});
+
+	it("セル内 beforeinput(historyUndo) で CM の undo が走り native の per-cell undo を抑止する（#90）", () => {
+		// contentEditable 内では Cmd+Z やメニュー Undo が beforeinput(historyUndo) に集約される。
+		// keydown だけだと取りこぼす経路（Electron menu role 経由 等）があるため、beforeinput
+		// で確実に CM history へ橋渡しする。
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc: simpleTable,
+			selection: EditorSelection.cursor(0),
+			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+
+		// 履歴に積む 1 編集
+		view.dispatch({ changes: { from: simpleTable.length, insert: "\nX" } });
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\nX`);
+
+		// セル内で beforeinput(historyUndo) を発火させる
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+		const ev = new InputEvent("beforeinput", {
+			inputType: "historyUndo",
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+
+		// preventDefault で native の per-cell undo を抑止しつつ CM の undo を実行
+		expect(ev.defaultPrevented).toBe(true);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+	});
+
+	it("undo が走ったら、フォーカス中でもセル DOM がドキュメントの内容に追従する（#90 表内 Cmd+Z 真因）", () => {
+		// 旧 updateDOM は「フォーカス中のセルは更新スキップ」という最適化があり、
+		// セル内 Cmd+Z で state.doc が戻っても DOM が古い内容のまま残り、見た目上
+		// 「Cmd+Z が効かない」状態になっていた。差分があれば必ず DOM を追従させる。
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc: simpleTable,
+			selection: EditorSelection.cursor(0),
+			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+
+		// セル (1, 0) にフォーカスを置き、typing 経路を再現する
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement;
+		const cell = wrapper.querySelector('[data-row="1"][data-col="0"]') as HTMLElement;
+		cell.focus();
+		cell.textContent = "1X";
+		cell.dispatchEvent(new Event("input", { bubbles: true }));
+		expect(view.state.doc.toString()).toContain("| 1X | 2 |");
+
+		// undo を発火（フォーカスはセルに残ったまま）
+		undo(view);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+
+		// セル DOM も追従して "1" に戻っている（フォーカス中でも更新される）
+		const cellAfter = (view.dom.querySelector(".cm-table-widget") as HTMLElement).querySelector(
+			'[data-row="1"][data-col="0"]',
+		) as HTMLElement;
+		expect(cellAfter.textContent).toBe("1");
+	});
+
+	it("ignoreEvent は historyUndo / historyRedo InputEvent を CM に通す（CM の history が処理できるように, #90）", () => {
+		// CM6 の history() 拡張は beforeinput(inputType=historyUndo/Redo) をハンドラとして
+		// 登録する。widget が ignoreEvent=true を返すと eventBelongsToEditor が false に
+		// なり CM のハンドラチェーンが走らなくなって native の per-cell undo に
+		// フォールバックしてしまうので、これらの InputEvent は ignoreEvent=false で通す。
+		const state = createTestState(simpleTable);
+		const widget = widgetDecorations(collectDecorations(buildTableDecorations(state)))[0].value.spec
+			.widget;
+		const evUndo = new InputEvent("beforeinput", {
+			inputType: "historyUndo",
+			bubbles: true,
+			cancelable: true,
+		});
+		const evRedo = new InputEvent("beforeinput", {
+			inputType: "historyRedo",
+			bubbles: true,
+			cancelable: true,
+		});
+		const evType = new InputEvent("beforeinput", {
+			inputType: "insertText",
+			bubbles: true,
+			cancelable: true,
+		});
+		expect(widget.ignoreEvent(evUndo)).toBe(false);
+		expect(widget.ignoreEvent(evRedo)).toBe(false);
+		// 通常の入力は引き続き ignore（自前の input ハンドラで処理する）
+		expect(widget.ignoreEvent(evType)).toBe(true);
+	});
+
+	it("undo / redo はテーブル末尾退避フィルタを通らず履歴上の状態を忠実に復元する（#90）", () => {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc: `${simpleTable}\ntext`,
+			selection: EditorSelection.cursor(0),
+			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+
+		// "text" 行末 → Backspace 相当でテーブル末尾境界を作る操作。filter は dodge する。
+		const tableEnd = view.state.doc.line(3).to;
+		view.dispatch({ changes: { from: tableEnd, to: tableEnd + "\ntext".length } });
+		expect(view.state.doc.toString()).toBe(simpleTable);
+
+		// undo: 履歴の状態（"text" 行が復活）を忠実に復元し、dodge による余計な改行や
+		// カーソル移動を起こさない
+		undo(view);
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\ntext`);
+
+		// redo: 元の状態へ戻す（こちらも dodge しない）
+		redo(view);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+	});
+
+	it("削除でテーブル末尾境界(EOF)に取り残されたら同期で改行を補い退避する", () => {
 		const view = mountEditor(`${simpleTable}\n`); // テーブル + 直下に 1 行
 		const endTo = view.state.doc.line(3).to; // テーブル最終行末尾
 
 		// 直下の改行を削除し、カーソルを EOF 境界(endTo)へ（空行先頭からの Backspace 相当）
 		view.dispatch({ changes: { from: endTo, to: endTo + 1 }, selection: { anchor: endTo } });
 
-		// 削除直後はテーブル末尾境界（巨大キャレット位置）に取り残される
-		expect(view.state.doc.toString()).toBe(simpleTable);
-		expect(view.state.selection.main.head).toBe(endTo);
-
-		// guard が次 tick で改行を補完し、テーブル直下の行へ退避する
-		await new Promise<void>((resolve) => queueMicrotask(resolve));
-
+		// docChanged トランザクションでも filter が同期で改行を補完し、直下行へ退避する
+		// （queueMicrotask 待ちは不要）
 		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
 		expect(view.state.selection.main.head).toBe(endTo + 1);
+	});
+
+	it("テーブル直下の空行を削除して本文を密着させると、カーソルは本文行頭へ退避する（#90）", () => {
+		// ユーザー報告シナリオ: テーブル + 空行 + 本文。空行を消して本文をテーブル直下へ。
+		const doc = `${simpleTable}\n\ntext`;
+		const view = mountEditor(doc);
+		const endTo = view.state.doc.line(3).to; // テーブル最終行末尾
+
+		// 空行(line4)を削除して本文をテーブル直下へ（境界に取り残されるはずの操作）
+		view.dispatch({ changes: { from: endTo, to: endTo + 1 }, selection: { anchor: endTo } });
+
+		// 直下に本文行があるので改行は補わず、カーソルだけ本文行頭(endTo+1)へ退避
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\ntext`);
+		expect(view.state.selection.main.head).toBe(endTo + 1);
+		expect(view.state.doc.lineAt(view.state.selection.main.head).text).toBe("text");
+	});
+
+	it("退避が削除をまたぐ docChanged でも undo / redo が正しく機能する（#90）", () => {
+		const doc = `${simpleTable}\n\ntext`;
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			selection: EditorSelection.cursor(0),
+			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+
+		const endTo = view.state.doc.line(3).to;
+		view.dispatch({ changes: { from: endTo, to: endTo + 1 }, selection: { anchor: endTo } });
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\ntext`);
+
+		// 退避を含む再構築トランザクションも history に積まれ、undo で元に戻る
+		undo(view);
+		expect(view.state.doc.toString()).toBe(doc);
+		redo(view);
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\ntext`);
+	});
+
+	it("テーブルでないパイプ行の行末では退避しない（誤検知防止, #90）", () => {
+		// header + delimiter が揃わない単独パイプ行は widget 化されないので退避もしない
+		const view = mountEditor("| not a table\nmore");
+		const line1End = view.state.doc.line(1).to;
+		view.dispatch({ selection: { anchor: line1End } });
+		expect(view.state.selection.main.head).toBe(line1End);
+		expect(view.state.doc.toString()).toBe("| not a table\nmore");
 	});
 });

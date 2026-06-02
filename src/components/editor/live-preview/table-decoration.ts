@@ -6,6 +6,9 @@ import {
 	type Range,
 	StateEffect,
 	StateField,
+	type Text,
+	Transaction,
+	type TransactionSpec,
 } from "@codemirror/state";
 import {
 	Decoration,
@@ -15,8 +18,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { getStringWidth } from "../../../lib/east-asian-width";
-import { findUnescapedPipe, isLineBlank } from "./table-utils";
+import { findUnescapedPipe } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -96,6 +98,17 @@ function parseTableFromLines(lines: string[]): TableData | null {
 
 // ── Helpers ───────────────────────────────────────────
 
+/**
+ * lezer の Table ノードは直後の本文行を含むことがある。パイプを含む最後の行まで詰めて
+ * 実際のテーブル最終行を返す（findTableNode と buildTableDecorations で共有）。
+ */
+function trimToLastTableLine(doc: Text, startLine: number, endLine: number): number {
+	while (endLine > startLine && !doc.line(endLine).text.includes("|")) {
+		endLine--;
+	}
+	return endLine;
+}
+
 function findTableNode(
 	state: EditorState,
 	pos: number,
@@ -107,11 +120,13 @@ function findTableNode(
 		let node = tree.resolve(p, 1);
 		while (node) {
 			if (node.name === "Table") {
+				const startLine = state.doc.lineAt(node.from).number;
+				const endLine = trimToLastTableLine(state.doc, startLine, state.doc.lineAt(node.to).number);
 				return {
 					from: node.from,
-					to: node.to,
-					startLine: state.doc.lineAt(node.from).number,
-					endLine: state.doc.lineAt(node.to).number,
+					to: state.doc.line(endLine).to,
+					startLine,
+					endLine,
 				};
 			}
 			if (!node.parent) break;
@@ -121,19 +136,22 @@ function findTableNode(
 	return null;
 }
 
+/** セルにフォーカスを移し、キャレットを内容末尾に置く。 */
+export function placeCaretAtEnd(cell: HTMLElement): void {
+	cell.focus();
+	const range = document.createRange();
+	range.selectNodeContents(cell);
+	range.collapse(false);
+	const sel = window.getSelection();
+	sel?.removeAllRanges();
+	sel?.addRange(range);
+}
+
 export function focusCell(container: HTMLElement, row: number, col: number): void {
 	const cell = container.querySelector(
 		`[data-row="${row}"][data-col="${col}"]`,
 	) as HTMLElement | null;
-	if (cell) {
-		cell.focus();
-		const range = document.createRange();
-		range.selectNodeContents(cell);
-		range.collapse(false);
-		const sel = window.getSelection();
-		sel?.removeAllRanges();
-		sel?.addRange(range);
-	}
+	if (cell) placeCaretAtEnd(cell);
 }
 
 /** セル内容を正規化する。`|` をエスケープし改行を除去する。 */
@@ -168,68 +186,9 @@ function setCellContent(el: HTMLElement, content: string): void {
 	}
 }
 
-/** セル表示幅を計算する。`<br>` は改行なので各セグメントの最大幅を返す。 */
-function cellDisplayWidth(content: string): number {
-	if (!content.includes("<br>")) return getStringWidth(content);
-	return Math.max(...content.split("<br>").map(getStringWidth));
-}
-
 /** Map widget row index → doc line offset (skip delimiter at doc index 1). */
 function widgetRowToLineOffset(widgetRow: number): number {
 	return widgetRow >= 1 ? widgetRow + 1 : widgetRow;
-}
-
-function formatTableLines(container: HTMLElement, data: TableData): string[] {
-	const { rows, alignments } = data;
-	const colCount = Math.max(...rows.map((r) => r.cells.length), alignments.length);
-
-	const domRows: string[][] = [];
-	for (let r = 0; r < rows.length; r++) {
-		const cells: string[] = [];
-		for (let c = 0; c < colCount; c++) {
-			const cell = container.querySelector(
-				`[data-row="${r}"][data-col="${c}"]`,
-			) as HTMLElement | null;
-			cells.push(cell ? getCellTextContent(cell) : "");
-		}
-		domRows.push(cells);
-	}
-
-	const colWidths: number[] = new Array(colCount).fill(3);
-	for (const cellRow of domRows) {
-		for (let c = 0; c < cellRow.length; c++) {
-			colWidths[c] = Math.max(colWidths[c], cellDisplayWidth(cellRow[c]));
-		}
-	}
-
-	const lines: string[] = [];
-	let domRowIdx = 0;
-	for (let i = 0; i <= rows.length; i++) {
-		if (i === 1) {
-			const parts: string[] = [];
-			for (let c = 0; c < colCount; c++) {
-				const w = colWidths[c];
-				const align = c < alignments.length ? alignments[c] : "left";
-				if (align === "center") parts.push(`:${"-".repeat(w - 2)}:`);
-				else if (align === "right") parts.push(`${"-".repeat(w - 1)}:`);
-				else parts.push("-".repeat(w));
-			}
-			lines.push(`| ${parts.join(" | ")} |`);
-		}
-		if (i >= rows.length) break;
-		const parts: string[] = [];
-		for (let c = 0; c < colCount; c++) {
-			const content =
-				domRowIdx < domRows.length && c < domRows[domRowIdx].length ? domRows[domRowIdx][c] : "";
-			const displayWidth = cellDisplayWidth(content);
-			const padding = colWidths[c] - displayWidth;
-			parts.push(content + " ".repeat(Math.max(0, padding)));
-		}
-		lines.push(`| ${parts.join(" | ")} |`);
-		domRowIdx++;
-	}
-
-	return lines;
 }
 
 // ── Widget ────────────────────────────────────────────
@@ -275,16 +234,18 @@ export function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
 	if (!tableNode) return;
 
 	const { doc } = view.state;
-	const endLine = doc.line(tableNode.endLine);
+	const belowLineNum = tableNode.endLine + 1;
 
-	if (isLineBlank(doc, tableNode.endLine + 1)) {
-		// 既にテーブル直下に行がある: その行頭へ移動
-		view.dispatch({ selection: { anchor: doc.line(tableNode.endLine + 1).from } });
+	if (belowLineNum <= doc.lines) {
+		// テーブル直下に行（空行 / 本文）がある: その行頭へ移動する（挿入しない）。
+		// 本文が密着していても巻き込まず、本文行頭へ抜ける。
+		view.dispatch({ selection: { anchor: doc.line(belowLineNum).from } });
 	} else {
-		// 直下に行が無い（EOF / 直下が本文）: 改行を 1 つ補って行を作りその行頭へ
+		// EOF（直下に行が無い）: 改行を 1 つ補って行を作りその行頭へ
+		const endTo = doc.line(tableNode.endLine).to;
 		view.dispatch({
-			changes: { from: endLine.to, insert: "\n" },
-			selection: { anchor: endLine.to + 1 },
+			changes: { from: endTo, insert: "\n" },
+			selection: { anchor: endTo + 1 },
 		});
 	}
 	view.focus();
@@ -350,12 +311,6 @@ class EditableTableWidget extends WidgetType {
 		const tableEl = dom.querySelector("table");
 		if (!tableEl) return false;
 
-		const structuralChange = pendingFocus !== null && pendingFocus.tableFrom === this.tableFrom;
-
-		const focused = dom.querySelector(":focus") as HTMLElement | null;
-		const focusedRow = focused?.dataset.row;
-		const focusedCol = focused?.dataset.col;
-
 		const { rows, alignments } = this.data;
 		const colCount = Math.max(...rows.map((r) => r.cells.length), alignments.length);
 		const existingTrs = Array.from(tableEl.querySelectorAll(":scope > tr"));
@@ -406,11 +361,16 @@ class EditableTableWidget extends WidgetType {
 				cell.dataset.col = String(c);
 				const align = c < alignments.length ? alignments[c] : "left";
 				if (cell.style.textAlign !== align) cell.style.textAlign = align;
-				if (!structuralChange && focusedRow === String(r) && focusedCol === String(c)) continue;
 				const content = c < row.cells.length ? row.cells[c].content : "";
-				if (getCellTextContent(cell) !== content) {
-					setCellContent(cell, content);
-				}
+				if (getCellTextContent(cell) === content) continue;
+				// 「フォーカス中のセルは更新スキップ」という旧来の最適化は undo / redo で
+				// セル DOM が古い内容のまま残り「Cmd+Z が効かない」ように見える深刻なバグの
+				// 元になっていた。typing 経路では DOM と data が一致するのでこの分岐に
+				// 入らない（idempotent）。差分があるときは必ず更新し、フォーカス中なら
+				// 新内容の末尾にキャレットを置き直す。
+				const wasFocused = document.activeElement === cell;
+				setCellContent(cell, content);
+				if (wasFocused) placeCaretAtEnd(cell);
 			}
 		}
 
@@ -425,6 +385,16 @@ class EditableTableWidget extends WidgetType {
 
 	ignoreEvent(e: Event): boolean {
 		if (e instanceof KeyboardEvent && (e.metaKey || e.ctrlKey)) {
+			return false;
+		}
+		// undo / redo の InputEvent（Cmd+Z や Edit メニュー Undo 等が contentEditable で
+		// 変換されて発火するもの）は CM6 の history() 拡張が beforeinput ハンドラとして
+		// 自前で処理する。ignoreEvent=true で返すと eventBelongsToEditor が false になり
+		// CM 側のハンドラが走らなくなって native の per-cell undo にフォールバックしてしまう。
+		if (
+			e instanceof InputEvent &&
+			(e.inputType === "historyUndo" || e.inputType === "historyRedo")
+		) {
 			return false;
 		}
 		// セル外（padding 帯）のクリックはエディタに委譲し、カーソル配置を可能にする
@@ -472,7 +442,10 @@ class EditableTableWidget extends WidgetType {
 
 		wrapper.addEventListener("input", (e) => handleInput(e, view, wrapper));
 		wrapper.addEventListener("keydown", (e) => handleKeydown(e, view, wrapper));
-		wrapper.addEventListener("focusout", (e) => handleFocusOut(e as FocusEvent, view, wrapper));
+		// 注: undo / redo は CM6 の history() に任せる（ignoreEvent で historyUndo /
+		// historyRedo の InputEvent を CM へ通すように設定済み）。ここで beforeinput を
+		// 横取りすると CM の経路と重複し、history の整合性を壊しうる。
+		wrapper.addEventListener("focusout", () => handleFocusOut(wrapper));
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
 		wrapper.addEventListener("paste", (e) => {
 			e.preventDefault();
@@ -504,8 +477,19 @@ class EditableTableWidget extends WidgetType {
 
 // ── Event handlers (module-level, read data from widgetDataMap) ──
 
-/** セルの属する行を DOM から読み取り、対応するドキュメント行へ反映する。 */
-function syncRowFromCell(cell: HTMLElement, view: EditorView, wrapperEl: HTMLElement): void {
+/**
+ * セルの属する行を DOM から読み取り、対応するドキュメント行へ反映する。
+ *
+ * @param fromTyping ユーザーの直接入力起点なら true。"input.type" 注釈を付けて CM の
+ *   history を通常タイピングと同様に扱わせ（連続入力を 1 group にまとめる）、dispatch 後
+ *   に再構築されるセル DOM へキャレットをセル末尾で再フォーカスする。paste 等は false。
+ */
+function syncRowFromCell(
+	cell: HTMLElement,
+	view: EditorView,
+	wrapperEl: HTMLElement,
+	fromTyping = false,
+): void {
 	const rowIdx = Number(cell.dataset.row);
 	if (Number.isNaN(rowIdx)) return;
 
@@ -530,7 +514,18 @@ function syncRowFromCell(cell: HTMLElement, view: EditorView, wrapperEl: HTMLEle
 
 	view.dispatch({
 		changes: { from: docLine.from, to: docLine.to, insert: newLine },
+		// 連続入力を 1 つの undo グループにまとめる（注釈が無いと history のグループ化が
+		// 表外の編集と混じって崩れ、最後の入力が history に積まれず "前の修正" が undo
+		// される現象が起きる）。
+		...(fromTyping ? { annotations: Transaction.userEvent.of("input.type") } : {}),
 	});
+
+	if (!fromTyping) return;
+
+	// dispatch でウィジェット DOM が再構築されるとセルの DOM フォーカスが失われ、次の
+	// キーストロークが行方不明になる。連続入力を継続できるよう、同座標のセルへ
+	// フォーカスを戻し、キャレットをセル末尾に置く（入力直後の自然な位置）。
+	focusCell(wrapperEl, rowIdx, Number(cell.dataset.col));
 }
 
 function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
@@ -538,7 +533,7 @@ function handleInput(e: Event, view: EditorView, wrapperEl: HTMLElement): void {
 	// input target が text node / <br> の場合もあるためセルへ正規化する
 	const cell = target.closest?.("th, td") as HTMLElement | null;
 	if (!cell) return;
-	syncRowFromCell(cell, view, wrapperEl);
+	syncRowFromCell(cell, view, wrapperEl, /* fromTyping= */ true);
 }
 
 /** ペーストテキストを単一セル用に正規化する（`|` 除去 / 改行→スペース）。 */
@@ -599,6 +594,38 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	// IME コンポジション中はすべてのキー処理をスキップする
 	const imeState = getCompositionState(wrapperEl);
 	if (e.isComposing || imeState.composing) return;
+
+	// Mod 修飾キーは row/col ガードよりも先に処理する。Chromium は contenteditable 内
+	// の keydown.target を子ノード（テキストノード等）にすることがあり、td に向けた
+	// dataset.row チェックを掻い潜って素通りし、native の contentEditable undo（cell
+	// だけが変わり markdown と desync する）等が走ってしまうのを防ぐ。
+	if (e.metaKey || e.ctrlKey) {
+		const key = e.key.toLowerCase();
+		// クリップボード操作 (V/C/X) は native の paste/copy/cut を効かせるため何もしない。
+		if (key === "v" || key === "c" || key === "x") return;
+		// undo / redo (Z / Shift+Z): CM の history（keymap + beforeinput）に委譲する。
+		// stopPropagation せず・preventDefault せず通す。CM の Mod-z バインディングが
+		// 走り、preventDefault されるので native の per-cell undo はその過程で抑止される。
+		if (key === "z") return;
+		// 全選択 (A): セル内容のみを選択する（doc 全選択を抑止）。
+		if (key === "a") {
+			e.preventDefault();
+			e.stopPropagation();
+			const cell = (e.target as HTMLElement | null)?.closest?.("th, td") as HTMLElement | null;
+			if (cell) {
+				const range = document.createRange();
+				range.selectNodeContents(cell);
+				const sel = window.getSelection();
+				sel?.removeAllRanges();
+				sel?.addRange(range);
+			}
+			return;
+		}
+		// それ以外の Mod+key は contentEditable のリッチテキストコマンド（太字等）を抑止
+		// しつつ、stopPropagation せず CM6 のキーマップ (Mod-s, Mod-b 等) へ委譲する。
+		e.preventDefault();
+		return;
+	}
 
 	const target = e.target as HTMLElement;
 	if (!target.dataset.row || !target.dataset.col) return;
@@ -690,10 +717,33 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 		e.stopPropagation();
 		if (rowIdx - 1 >= 0) {
 			focusCell(wrapperEl, rowIdx - 1, colIdx);
-		} else {
-			exitTableUp(view, wrapperEl);
+			return;
 		}
+		// ドキュメント先頭のテーブルなら、抜ける先が無いのでセル内に留める。
+		// （以前は上に空行を補っていたが、意図しないドキュメント改変になるため取りやめ）
+		const tableNode = getTableNodeFor(view, wrapperEl);
+		if (tableNode && tableNode.startLine === 1) return;
+		exitTableUp(view, wrapperEl);
 		return;
+	}
+
+	if (e.key === "ArrowLeft") {
+		// セル内の通常の左移動はネイティブの contentEditable に任せる。
+		// 抜ける先（先頭テーブルの左上セルでカーソルがセル先頭）の場合のみ抑止する。
+		if (rowIdx === 0 && colIdx === 0) {
+			const sel = window.getSelection();
+			// 空セル: anchor === td それ自体。非空セル: anchor === td.firstChild（先頭テキストノード）。
+			const atCellStart =
+				sel?.anchorOffset === 0 &&
+				(sel.anchorNode === target || sel.anchorNode === target.firstChild);
+			const tableNode = getTableNodeFor(view, wrapperEl);
+			if (atCellStart && tableNode && tableNode.startLine === 1) {
+				e.preventDefault();
+				e.stopPropagation();
+				return;
+			}
+		}
+		// それ以外はネイティブに委ねる（stopPropagation せず関数末尾の処理へ）
 	}
 
 	if (e.key === "Escape") {
@@ -707,48 +757,16 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 		return;
 	}
 
-	if (e.metaKey || e.ctrlKey) {
-		// クリップボード操作 (Cmd/Ctrl + V/C/X) は preventDefault すると native の
-		// paste/copy/cut イベントごと抑止され、セルの "paste" リスナが発火しなくなる
-		// （#89 の根本原因）。これらは native に通し、ペーストの sanitize は paste
-		// リスナ側で行う。
-		const key = e.key.toLowerCase();
-		if (key === "v" || key === "c" || key === "x") return;
-		// それ以外の Mod+key は contentEditable のリッチテキストコマンド（太字・斜体等）
-		// を抑止しつつ、stopPropagation しないことで CM6 のキーマップ (Mod-s, Mod-b 等)
-		// へ処理を委譲する
-		e.preventDefault();
-		return;
-	}
-
 	e.stopPropagation();
 }
 
-function handleFocusOut(e: FocusEvent, view: EditorView, wrapperEl: HTMLElement): void {
-	const related = e.relatedTarget as HTMLElement | null;
-	if (related && wrapperEl.contains(related)) return;
-
-	// フォーカスがテーブル外に移動したら IME フラグをリセット
+function handleFocusOut(wrapperEl: HTMLElement): void {
+	// フォーカスがテーブル外に移動したら IME フラグをリセット。
+	// 以前はここで formatTableLines による列幅揃えを dispatch していたが、
+	// 「セル編集 → 保存 → 表外へフォーカス移動」だけで保存済みのドキュメントを
+	// 再 dispatch して dirty に戻す副作用があり、ユーザーが「編集していないのに
+	// 編集扱い」になる現象を引き起こしていた。focusout では何もしない。
 	compositionState.delete(wrapperEl);
-
-	const tableNode = getTableNodeFor(view, wrapperEl);
-	if (!tableNode) return;
-
-	const lines: string[] = [];
-	for (let l = tableNode.startLine; l <= tableNode.endLine; l++) {
-		lines.push(view.state.doc.line(l).text);
-	}
-	const currentData = parseTableFromLines(lines);
-	if (!currentData) return;
-
-	const formatted = formatTableLines(wrapperEl, currentData);
-	if (formatted.join("\n") === lines.join("\n")) return;
-
-	const from = view.state.doc.line(tableNode.startLine).from;
-	const to = view.state.doc.line(tableNode.endLine).to;
-	view.dispatch({
-		changes: { from, to, insert: formatted.join("\n") },
-	});
 }
 
 // ── Row operations ───────────────────────────────────
@@ -1093,14 +1111,7 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 			if (node.name !== "Table") return;
 
 			const startLine = state.doc.lineAt(node.from).number;
-			let endLine = state.doc.lineAt(node.to).number;
-
-			// Trim trailing non-table lines (parser may include adjacent text)
-			while (endLine > startLine) {
-				const text = state.doc.line(endLine).text.trim();
-				if (text.includes("|")) break;
-				endLine--;
-			}
+			const endLine = trimToLastTableLine(state.doc, startLine, state.doc.lineAt(node.to).number);
 
 			const lines: string[] = [];
 			for (let l = startLine; l <= endLine; l++) {
@@ -1170,47 +1181,65 @@ const treeChangeDetector = ViewPlugin.fromClass(
 	},
 );
 
-// ── Cursor clamp (avoid the full-height caret at the table's end) ──
+// ── Atomic table ranges + trailing-boundary cursor dodge ──
+//
+// テーブルは `Decoration.replace({ block: true })` で 1 つの block widget になる。
+// selection がこの置換範囲に絡むと CM が widget 高さ分の巨大キャレットを描画し、特に
+// テーブル末尾境界（最終行の行末）で顕著になる。これを 2 段で防ぐ:
+//
+// 1. atomicRanges — テーブルの置換範囲を 1 単位として宣言し、カーソル移動・クリックが
+//    範囲内部へ潜り込まないようにする（blockquote / heading と同じ方式）。
+// 2. tableCursorFilter — それでも末尾境界（block widget の直後）にカーソルが来ると
+//    巨大キャレットが残るため、その位置なら次行先頭へ退避する。境界判定は
+//    tableDecorationField（実際に widget 化されているテーブルだけを含む）から行うので、
+//    code fence 等に紛れたパイプ行で誤発火しない。docChanged ではデコレーションの末尾を
+//    tr.changes で newDoc 座標へマップしてから比較する。
+
+const tableAtomicRanges = EditorView.atomicRanges.of(
+	(view) => view.state.field(tableDecorationField, false) ?? Decoration.none,
+);
 
 /**
- * pos が block table の末尾境界（最終行の行末）かを判定する。該当すれば true。
- * 安価な事前フィルタ（行末かつ `|` を含む行）を先に通し、syntaxTree を引く
- * findTableNode はそこを通過した時だけ呼ぶ（カーソル移動ごとに走る hot path のため）。
+ * 「実際に widget 化されているテーブル」の末尾境界（newDoc 座標）の集合を返す。
+ * tr.state は tr 適用後の state を遅延計算し、その過程で tableDecorationField の update も
+ * 走るので、newDoc の現実の decoration が得られる。これにより
+ *  - この transaction で削除されたテーブルの古い末尾が拾われ続けない（stale 退避防止）
+ *  - この transaction で新規に作られたテーブルの末尾も拾える（新規テーブル境界の取りこぼし防止）
  */
-function isTableEndBoundary(state: EditorState, pos: number): boolean {
-	const line = state.doc.lineAt(pos);
-	if (pos !== line.to || !line.text.includes("|")) return false;
-	const tableNode = findTableNode(state, pos);
-	if (!tableNode) return false;
-	// 問題になるのはテーブル末尾境界のみ（上端境界はテーブル直前の正当な位置）
-	return pos === state.doc.line(tableNode.endLine).to;
+function trailingEndsOfTables(tr: Transaction): Set<number> {
+	const decos = tr.state.field(tableDecorationField, false);
+	const ends = new Set<number>();
+	if (!decos) return ends;
+	const iter = decos.iter();
+	while (iter.value) {
+		ends.add(iter.to);
+		iter.next();
+	}
+	return ends;
 }
 
 /**
- * テーブルは `Decoration.replace({ block: true })` で 1 つの block widget に
- * なるため、selection head がテーブル末尾境界（最終行の行末）に来ると widget
- * 高さ分の巨大キャレットが描画される。head がその位置に来たら次行先頭へ退避する。
- *
- * insertTable / exitTableDown はテーブル直下に行を確保するが、手入力・インポート
- * 済みの既存ファイルではテーブルが EOF で終わる（直下に行が無い）こともある。その
- * 場合は改行を 1 つだけ補って行を作り、そこへ退避する（テーブル直下に常に編集可能な
- * 行を確保する不変条件。余分な空行は作らない / git 用の末尾改行は別概念で save 時の
- * processContent が担う）。補った change により後続トランザクションは docChanged
- * となり、本フィルタの先頭ガードで再入しない。
- *
- * 本フィルタは selection 変更のみのトランザクション（ナビゲーション）を扱う。
- * transactionFilter は新 state の syntaxTree を参照できず、doc 変更後は位置も
- * ずれるため、削除 / undo で境界に残るケースは tableBoundaryGuard が補正する。
+ * テーブル末尾境界に来たカーソルを次行先頭へ退避し、巨大キャレットを防ぐ。テーブルが
+ * EOF で終わる（直下に行が無い）場合は改行を 1 つだけ補ってそこへ退避する（テーブル
+ * 直下に常に編集可能な行を確保する不変条件。余分な空行は作らない / git 用の末尾改行は
+ * 別概念で save 時の processContent が担う）。
  */
 const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
-	if (!tr.selection || tr.docChanged) return tr;
+	if (!tr.selection) return tr;
+	// undo / redo は履歴上の状態を忠実に復元するためのトランザクションなので、ここで
+	// カーソルを別位置に動かしたり改行を補ったりしない（さもないと undo 順序が
+	// 直感と合わなくなる）。
+	const ev = tr.annotation(Transaction.userEvent);
+	if (ev === "undo" || ev === "redo") return tr;
+
+	const trailingEnds = trailingEndsOfTables(tr);
+	if (trailingEnds.size === 0) return tr;
 
 	const doc = tr.newDoc;
-	let modified = false;
 	let appendNewlineAt: number | null = null;
+	let modified = false;
 	const ranges = tr.selection.ranges.map((range) => {
-		// docChanged でないので tr.startState の位置と head は一致する
-		if (!range.empty || !isTableEndBoundary(tr.startState, range.head)) return range;
+		if (!range.empty || !trailingEnds.has(range.head)) return range;
 
 		modified = true;
 		// 直下に行が無い（テーブルが EOF）なら改行を 1 つ補う。退避先は補った行頭になる。
@@ -1220,52 +1249,22 @@ const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 
 	if (!modified) return tr;
 	const selection = EditorSelection.create(ranges, tr.selection.mainIndex);
+
+	// 追加 spec の selection は `sequential: true` で post-merged-changes 座標として扱う。
+	// これで docChanged（削除をまたぐ前方退避）でも changes でマップされない。EOF の場合は
+	// 直下に改行も 1 つ補う。
+	const extra: TransactionSpec = { selection, sequential: true };
 	if (appendNewlineAt !== null) {
-		return [tr, { changes: { from: appendNewlineAt, insert: "\n" }, selection }];
+		extra.changes = { from: appendNewlineAt, insert: "\n" };
 	}
-	return [tr, { selection }];
+	return [tr, extra];
 });
-
-/**
- * 削除 / undo など doc 変更後にカーソルがテーブル末尾境界へ取り残されるケースを補正する。
- * transactionFilter（tableCursorFilter）は新 state の syntaxTree を参照できないため
- * doc 変更トランザクションを扱えない。本 ViewPlugin は state 構築後の update() で
- * syntaxTree(view.state) を使って判定し、必要なら次行先頭へ退避（EOF なら改行を補完）する。
- *
- * - エディタにフォーカスがある（= ユーザーがエディタ本体を操作中）ときのみ動作する。
- *   セル編集中は contentEditable 側にフォーカスがあり view.hasFocus は false なので、
- *   セル入力（syncRowFromCell の dispatch）には介入しない。
- * - dispatch は update() 内で同期に呼べないため queueMicrotask で次 tick に回す
- *   （描画前に走るので巨大キャレットは paint されない）。
- */
-const tableBoundaryGuard = ViewPlugin.fromClass(
-	class {
-		update(update: ViewUpdate) {
-			if (!update.docChanged || !update.view.hasFocus) return;
-			const sel = update.state.selection.main;
-			if (!sel.empty || !isTableEndBoundary(update.state, sel.head)) return;
-
-			const { view } = update;
-			const head = sel.head;
-			queueMicrotask(() => {
-				const s = view.state.selection.main;
-				// 状況が変わっていない（まだ境界に居る）ことを確認してから補正
-				if (!s.empty || s.head !== head || !isTableEndBoundary(view.state, head)) return;
-				const atEof = head === view.state.doc.length;
-				view.dispatch({
-					changes: atEof ? { from: head, insert: "\n" } : undefined,
-					selection: { anchor: head + 1 },
-				});
-			});
-		}
-	},
-);
 
 // ── Extension ─────────────────────────────────────────
 
 export const tableDecoration: Extension = [
 	tableDecorationField,
 	treeChangeDetector,
+	tableAtomicRanges,
 	tableCursorFilter,
-	tableBoundaryGuard,
 ];

@@ -3,9 +3,12 @@ import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildTableDecorations, tableDecoration } from "./table-decoration";
 import { createEmptyTable } from "./table-utils";
 import { insertTable, tableKeymap } from "./tables";
-import { createTestState } from "./test-helper";
+import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
+
+const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
 
 describe("tableKeymap", () => {
 	it("Extension として定義されている", () => {
@@ -60,21 +63,47 @@ describe("insertTable (runtime)", () => {
 		expect(lastLineIsBlank(view)).toBe(true);
 	});
 
-	it("本文行の直後に挿入され、テーブル直下に行ができる", () => {
+	it("本文行の直後に挿入され、本文と空行で区切られテーブル直下に行ができる", () => {
 		const view = mountEditor("hello", 5);
 		insertTable(view);
 		const text = view.state.doc.toString();
-		expect(text).toBe(`hello\n${createEmptyTable(3, 2)}\n`);
+		// 本文（hello）とテーブルの間に空行を入れる（密着すると lezer がテーブルを
+		// 認識せずプレーンテキスト化するため）
+		expect(text).toBe(`hello\n\n${createEmptyTable(3, 2)}\n`);
 		expect(lastLineIsBlank(view)).toBe(true);
 	});
 
-	it("既に直下に行がある場合は改行を二重に追加しない（idempotent）", () => {
-		// "hello\n\n" の空行（line2）にカーソル
+	it("テーブル直下の本文の下に挿入しても両テーブルが描画される（プレーンテキスト化しない, #90）", () => {
+		const tA = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+		const doc0 = `${tA}\ntext`; // テーブル + 密着本文
+		const view = mountEditor(doc0, doc0.length); // カーソルは本文行末
+		insertTable(view);
+
+		const doc = view.state.doc.toString();
+		// 本文とテーブル B の間に空行が入る
+		expect(doc).toBe(`${tA}\ntext\n\n${createEmptyTable(3, 2)}\n`);
+
+		// 結果ドキュメントで両テーブルが widget として認識される（密着なら 0 になる）
+		const fresh = EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] });
+		ensureSyntaxTree(fresh, doc.length, Number.POSITIVE_INFINITY);
+		const widgets = replaceDecorations(collectDecorations(buildTableDecorations(fresh))).length;
+		expect(widgets).toBe(2);
+	});
+
+	it("本文行の直下の空行で挿入してもテーブル上に空行を確保する（プレーンテキスト化防止, #90）", () => {
+		// "hello\n\n" の空行（line2）にカーソル。直上の本文行とテーブルの間には
+		// 空行が必要（密着すると lezer がテーブルを認識しない）。
 		const view = mountEditor("hello\n\n", 6);
 		insertTable(view);
 		const text = view.state.doc.toString();
-		// テーブル直下の行は 1 つだけ（\n\n にならない）
-		expect(text).toBe(`hello\n${createEmptyTable(3, 2)}\n`);
+		expect(text).toBe(`hello\n\n${createEmptyTable(3, 2)}\n`);
+	});
+
+	it("先頭または直上が空行なら追加の \\n は補わない（idempotent）", () => {
+		// "\n" の line2（空行）にカーソル。直上(line1)も空行なので prefix なし。
+		const view = mountEditor("\n", 1);
+		insertTable(view);
+		expect(view.state.doc.toString()).toBe(`\n${createEmptyTable(3, 2)}\n`);
 	});
 
 	it("Mod-Shift-T でテーブルが挿入される", () => {
@@ -90,6 +119,100 @@ describe("insertTable (runtime)", () => {
 		const handled = runScopeHandlers(view, event, "editor");
 		expect(handled).toBe(true);
 		expect(view.state.doc.toString().startsWith("| ")).toBe(true);
+	});
+});
+
+// ── Backspace at the line directly below a table（#90 追補） ──
+//
+// widget DOM を参照するため tableDecoration も載せて real EditorView を起動する。
+
+describe("backspaceIntoTableFromBelow (runtime)", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			mounted.pop()?.destroy();
+		}
+	});
+
+	function mountEditor(doc: string, cursorPos: number): EditorView {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			selection: EditorSelection.cursor(cursorPos),
+			extensions: [markdown({ base: markdownLanguage }), tableDecoration, tableKeymap],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		view.focus();
+		mounted.push(view);
+		return view;
+	}
+
+	function pressBackspace(view: EditorView): boolean {
+		return runScopeHandlers(view, new KeyboardEvent("keydown", { key: "Backspace" }), "editor");
+	}
+
+	it("テーブル直下の非空行頭で Backspace するとマージせず最終セルへ入る", () => {
+		const view = mountEditor(`${simpleTable}\ntext`, 0);
+		const textLineFrom = view.state.doc.line(4).from;
+		view.dispatch({ selection: { anchor: textLineFrom } });
+
+		const handled = pressBackspace(view);
+
+		// 消費され（handled）、かつドキュメントは変化しない（テーブル行へマージしない）。
+		// focusCell の DOM フォーカスは jsdom では確実に観測できないため、handled=true
+		// （= widget を見つけ focusCell まで到達）+ doc 不変で「マージ抑止」を担保する。
+		expect(handled).toBe(true);
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\ntext`);
+	});
+
+	it("テーブル直下の空行頭の Backspace は既定に委譲する（handler は消費しない）", () => {
+		const view = mountEditor(`${simpleTable}\n`, 0);
+		const blankLineFrom = view.state.doc.line(4).from;
+		view.dispatch({ selection: { anchor: blankLineFrom } });
+
+		// 空行は通常の削除（テーブル直下の空行を詰める挙動）に任せるので消費しない
+		expect(pressBackspace(view)).toBe(false);
+	});
+
+	it("テーブルが直上に無ければ Backspace を消費しない", () => {
+		const view = mountEditor("hello\nworld", 0);
+		view.dispatch({ selection: { anchor: view.state.doc.line(2).from } });
+		expect(pressBackspace(view)).toBe(false);
+	});
+
+	it("表の直前行の末尾で ArrowRight を押すと表 (0,0) セルへ入る（左端巨大キャレット防止, #90）", () => {
+		const doc = `text\n${simpleTable}`;
+		const view = mountEditor(doc, 0);
+		const line1End = view.state.doc.line(1).to;
+		view.dispatch({ selection: { anchor: line1End } });
+
+		const handled = runScopeHandlers(
+			view,
+			new KeyboardEvent("keydown", { key: "ArrowRight" }),
+			"editor",
+		);
+		expect(handled).toBe(true);
+		// ドキュメントは変化しない（カーソル移動のみ）
+		expect(view.state.doc.toString()).toBe(doc);
+	});
+
+	it("表の直後行の先頭で ArrowLeft を押すと表の右下セルへ入る（#90）", () => {
+		const doc = `${simpleTable}\ntext`;
+		const view = mountEditor(doc, 0);
+		const textLineFrom = view.state.doc.line(4).from;
+		view.dispatch({ selection: { anchor: textLineFrom } });
+
+		const handled = runScopeHandlers(
+			view,
+			new KeyboardEvent("keydown", { key: "ArrowLeft" }),
+			"editor",
+		);
+		expect(handled).toBe(true);
+		expect(view.state.doc.toString()).toBe(doc);
 	});
 });
 

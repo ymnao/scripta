@@ -71,6 +71,14 @@ export function buildMenuTemplate(handlers: MenuHandlers): MenuItemConstructorOp
 	];
 
 	const editSubmenu: MenuItemConstructorOptions[] = [
+		// undo / redo は OS 標準 role に任せる。`undo:` セレクタ → 現在フォーカス中の
+		// 編集対象（contentEditable / textarea / input）へ送られるので、
+		//   - 表外 editor（cm-content）: beforeinput(historyUndo) → CM history が処理
+		//   - 表セル（contentEditable widget）: 同上。EditableTableWidget.ignoreEvent が
+		//     historyUndo/Redo InputEvent を CM に通すので CM の history が走る
+		//   - Settings / Search / Command Palette / Mermaid textarea などの input: native undo
+		// が同時に成立する。Cmd+Z をグローバル accelerator や IPC で固定経路にすると
+		// editor 以外の入力欄で native undo が壊れるのでそれは選ばない。
 		{ role: "undo" },
 		{ role: "redo" },
 		{ type: "separator" },
