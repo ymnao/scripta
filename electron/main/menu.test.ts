@@ -143,11 +143,17 @@ describe("buildMenuTemplate", () => {
 		expect(roles).toContain("toggleDevTools");
 	});
 
-	it("Edit menu uses standard roles only (no custom accelerators that conflict with renderer)", () => {
+	it("Edit menu は標準 role のみ（accelerator は OS にまかせ、focus に応じた native 経路へ通す）", () => {
+		// Undo / Redo を custom click + accelerator で固定経路にすると、Settings /
+		// Search / Command Palette / Mermaid textarea などフォーカス先の input で
+		// native undo が壊れる。標準 role に任せれば `undo:` セレクタが現在の
+		// 編集対象（contentEditable / textarea）へ送られ、editor 内では beforeinput
+		// historyUndo → CM history（表セルも EditableTableWidget.ignoreEvent を経て
+		// 同経路に流れる）が、それ以外の input では native undo が走る。
 		const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 		const edit = tpl.find((t) => t.label === "Edit");
 		const items = (edit?.submenu as MenuItemConstructorOptions[] | undefined) ?? [];
-		const roles = new Set(items.map((i) => i.role));
+		const roles = new Set(items.map((i) => i.role).filter(Boolean));
 		// 標準の編集ロールが揃っていることを確認する
 		expect(roles.has("undo")).toBe(true);
 		expect(roles.has("redo")).toBe(true);
@@ -155,6 +161,17 @@ describe("buildMenuTemplate", () => {
 		expect(roles.has("copy")).toBe(true);
 		expect(roles.has("paste")).toBe(true);
 		expect(roles.has("selectAll")).toBe(true);
+
+		// Undo / Redo は accelerator や registerAccelerator: false 等の上書きを持たない
+		// （= OS 標準の挙動に完全に委ねる）。
+		const undoItem = items.find((i) => i.role === "undo");
+		const redoItem = items.find((i) => i.role === "redo");
+		expect(undoItem?.accelerator).toBeUndefined();
+		expect(redoItem?.accelerator).toBeUndefined();
+		expect(undoItem?.registerAccelerator).toBeUndefined();
+		expect(redoItem?.registerAccelerator).toBeUndefined();
+		expect(undoItem?.click).toBeUndefined();
+		expect(redoItem?.click).toBeUndefined();
 	});
 });
 
