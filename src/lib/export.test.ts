@@ -27,6 +27,7 @@ const {
 	getDefaultPromptTemplate,
 	preprocessMermaidBlocks,
 	preprocessPageBreakMarkers,
+	wrapSectionsInHtml,
 } = await import("./export");
 
 const mockedSave = showSaveDialog as Mock;
@@ -196,7 +197,6 @@ describe("exportAsPdf", () => {
 		expect(mockedExportPdf).toHaveBeenCalledWith(
 			expect.stringContaining("<!DOCTYPE html>"),
 			"/output/test.pdf",
-			undefined,
 		);
 	});
 
@@ -317,73 +317,87 @@ describe("exportAsPdf", () => {
 		expect(renderMermaid).toHaveBeenCalledWith(expect.any(String), expect.any(String), {});
 	});
 
-	it("includes page break CSS when pageBreakLevel is set", async () => {
+	it("smart=false の force-break CSS が出力される（modern + legacy alias）", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Hello", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: false,
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).toContain("h1, h2 { break-before: page; }");
+		// smart=false: level (h2) と上位 (h1) を force-break
+		expect(html).toMatch(/h1, h2 \{[^}]*break-before: page;[^}]*page-break-before: always;/);
 	});
 });
 
-describe("buildHtmlDocument page break", () => {
-	it("includes h1 break-before when level is h1", () => {
+describe("buildHtmlDocument page break (CSS-only, #93)", () => {
+	it("smart=true + level=h1: force-break セレクタは無し（forceLevel=0）", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
 			level: "h1",
-			smart: false,
+			smart: true,
 		});
-		expect(html).toContain("h1 { break-before: page; }");
+		expect(html).not.toMatch(/h[1-6][^{]*\{\s*break-before:\s*page/);
 	});
 
-	it("includes h1 and h2 break-before when level is h2", () => {
+	it("smart=true + level=h2: forceLevel=1 で h1 のみ force-break", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
 			level: "h2",
-			smart: false,
+			smart: true,
 		});
-		expect(html).toContain("h1, h2 { break-before: page; }");
+		expect(html).toMatch(/h1 \{[^}]*break-before: page;[^}]*page-break-before: always;/);
+		expect(html).not.toMatch(/h1, h2 \{[^}]*break-before: page/);
 	});
 
-	it("includes h1, h2 and h3 break-before when level is h3", () => {
+	it("smart=true + level=h3: forceLevel=2 で h1, h2 force-break", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
+			level: "h3",
+			smart: true,
+		});
+		expect(html).toMatch(/h1, h2 \{[^}]*break-before: page;/);
+		expect(html).not.toMatch(/h1, h2, h3 \{[^}]*break-before: page/);
+	});
+
+	it("smart=false: level 自身を含めて force-break (旧 aggressive 動作)", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
 			level: "h3",
 			smart: false,
 		});
-		expect(html).toContain("h1, h2, h3 { break-before: page; }");
+		expect(html).toMatch(/h1, h2, h3 \{[^}]*break-before: page;/);
 	});
 
-	it("smart=true は [data-no-break] CSS を出力する（属性付与は executeJavaScript 側、#93）", () => {
-		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
-			level: "h2",
-			smart: true,
-		});
-		expect(html).toContain("[data-no-break] { break-before: auto !important; }");
-		// 静的な属性付与は廃止された（#93 で executeJavaScript 経由の動的注入に統合）
-		expect(html).not.toContain("data-no-break>");
-	});
-
-	it("smart=false は [data-no-break] CSS を出力しない", () => {
-		const html = buildHtmlDocument("<h2>A</h2><p>text</p>", "test", "light", {
-			level: "h2",
-			smart: false,
-		});
-		expect(html).not.toContain("[data-no-break]");
-	});
-
-	it("does not include heading break-before when level is none", () => {
-		// pagebreak marker 用の hr.pdf-pagebreak は常時出力されるため、
-		// ここでは「見出し系の break-before」が無いことを確認する。
+	it("level=none: 見出し系の force-break は無し", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
 			level: "none",
 			smart: true,
 		});
-		expect(html).not.toMatch(/h[1-6][^{]*{\s*break-before:\s*page/);
+		expect(html).not.toMatch(/h[1-6][^{]*\{\s*break-before:\s*page/);
 	});
 
-	it("does not include heading break-before when pageBreak is undefined", () => {
+	it("pageBreak undefined: 見出し系の force-break は無し", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light");
-		expect(html).not.toMatch(/h[1-6][^{]*{\s*break-before:\s*page/);
+		expect(html).not.toMatch(/h[1-6][^{]*\{\s*break-before:\s*page/);
+	});
+
+	it("常に widows / orphans / break-after avoid CSS を出力する (CSS Paged Media best practice)", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light");
+		expect(html).toMatch(/widows:\s*3/);
+		expect(html).toMatch(/orphans:\s*3/);
+		expect(html).toMatch(/h1, h2, h3, h4, h5, h6 \{[\s\S]*?break-after: avoid/);
+		expect(html).toMatch(/page-break-after: avoid/);
+	});
+
+	it("常に .pdf-section-keep の break-inside: avoid-page を出力する", () => {
+		const html = buildHtmlDocument("<p>test</p>", "test", "light");
+		expect(html).toMatch(/\.pdf-section-keep \{[\s\S]*?break-inside: avoid-page/);
+		expect(html).toMatch(/\.pdf-section-keep \{[\s\S]*?page-break-inside: avoid/);
+	});
+
+	it("もはや [data-no-break] CSS は出力しない（CSS-only への移行で廃止）", () => {
+		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
+			level: "h2",
+			smart: true,
+		});
+		expect(html).not.toContain("[data-no-break]");
+		expect(html).not.toContain("data-no-break>");
 	});
 
 	it("adds task-list-item class to li elements with checkboxes", () => {
@@ -429,70 +443,69 @@ describe("exportAsPdf zoom", () => {
 	});
 });
 
-describe("exportAsPdf — pageBreak IPC contract (#93)", () => {
+describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
 
-	it("passes pageBreak option to exportPdf when smart は ON で level !== none", async () => {
+	it("exportPdf は (html, savePath) の 2 引数で呼ばれる（IPC pageBreak param は廃止）", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
 		});
-		const arg = mockedExportPdf.mock.calls[0][2];
-		expect(arg).toEqual({ level: 2, criterion: "compact" });
+		expect(mockedExportPdf).toHaveBeenCalledTimes(1);
+		const call = mockedExportPdf.mock.calls[0];
+		expect(call.length).toBe(2);
+		expect(call[1]).toBe("/output/test.pdf");
 	});
 
-	it("omits pageBreak option (= undefined) when smart は OFF", async () => {
+	it("smart=true + criterion=section: smart-level セクションを <section class=pdf-section-keep> で wrap する", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# Hello", "/workspace/test.md", {
+		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
 			pageBreakLevel: "h2",
-			smartPageBreak: false,
-		});
-		expect(mockedExportPdf.mock.calls[0][2]).toBeUndefined();
-	});
-
-	it("omits pageBreak option when level === none", async () => {
-		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# Hello", "/workspace/test.md", {
-			pageBreakLevel: "none",
-			smartPageBreak: true,
-		});
-		expect(mockedExportPdf.mock.calls[0][2]).toBeUndefined();
-	});
-
-	it("omits pageBreak option when no options are provided", async () => {
-		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# Hello", "/workspace/test.md");
-		expect(mockedExportPdf.mock.calls[0][2]).toBeUndefined();
-	});
-
-	it("passes criterion=section when指定", async () => {
-		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# Hello", "/workspace/test.md", {
-			pageBreakLevel: "h3",
 			smartPageBreak: true,
 			pageBreakCriterion: "section",
 		});
-		expect(mockedExportPdf.mock.calls[0][2]).toEqual({ level: 3, criterion: "section" });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// 2 つの h2 セクションそれぞれが wrap されている
+		expect(html.match(/<section class="pdf-section-keep">/g)?.length).toBe(2);
 	});
 
-	it("maps level h1/h2/h3 → 1/2/3", async () => {
+	it("smart=true + criterion=compact: wrap は行わない", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# x", "/workspace/test.md", {
-			pageBreakLevel: "h1",
+		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
+			pageBreakLevel: "h2",
 			smartPageBreak: true,
+			pageBreakCriterion: "compact",
 		});
-		expect(mockedExportPdf.mock.calls[0][2]).toEqual({ level: 1, criterion: "compact" });
-		await exportAsPdf("# x", "/workspace/test.md", {
-			pageBreakLevel: "h3",
-			smartPageBreak: true,
-		});
-		expect(mockedExportPdf.mock.calls[1][2]).toEqual({ level: 3, criterion: "compact" });
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain('<section class="pdf-section-keep">');
 	});
 
-	it("does NOT inject inline <script> into HTML (動的判定は main 側で executeJavaScript 注入)", async () => {
+	it("smart=false: section wrap は行わない（criterion 無視）", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+			pageBreakCriterion: "section",
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain('<section class="pdf-section-keep">');
+	});
+
+	it("level=none: section wrap は行わない", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
+			pageBreakLevel: "none",
+			smartPageBreak: true,
+			pageBreakCriterion: "section",
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain('<section class="pdf-section-keep">');
+	});
+
+	it("does NOT inject inline <script> into HTML (JS DOM 測定は完全廃止)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
 			pageBreakLevel: "h2",
@@ -511,6 +524,49 @@ describe("exportAsPdf — pageBreak IPC contract (#93)", () => {
 		expect(html).toMatch(/<body style="zoom: 0\.8; max-width: 1000px">/);
 		const bodyOpenCount = html.split("<body").length - 1;
 		expect(bodyOpenCount).toBe(1);
+	});
+});
+
+describe("wrapSectionsInHtml (#93)", () => {
+	it("smartLevel=2 で h2 ごとのセクションを wrap する", () => {
+		const body = "<h1>T</h1><p>meta</p><h2>A</h2><p>a</p><h2>B</h2><p>b</p>";
+		const out = wrapSectionsInHtml(body, 2);
+		expect(out).toBe(
+			'<h1>T</h1><p>meta</p><section class="pdf-section-keep"><h2>A</h2><p>a</p></section><section class="pdf-section-keep"><h2>B</h2><p>b</p></section>',
+		);
+	});
+
+	it("smartLevel=2 でセクション内の h3 はセクション終端にならない", () => {
+		const body = "<h2>A</h2><h3>sub</h3><p>x</p><h2>B</h2>";
+		const out = wrapSectionsInHtml(body, 2);
+		expect(out).toBe(
+			'<section class="pdf-section-keep"><h2>A</h2><h3>sub</h3><p>x</p></section><section class="pdf-section-keep"><h2>B</h2></section>',
+		);
+	});
+
+	it("smartLevel=3 で h3 のセクションを wrap、h2 はセクション終端", () => {
+		const body = "<h2>X</h2><h3>a</h3><p>1</p><h3>b</h3><p>2</p><h2>Y</h2>";
+		const out = wrapSectionsInHtml(body, 3);
+		expect(out).toContain('<section class="pdf-section-keep"><h3>a</h3><p>1</p></section>');
+		expect(out).toContain('<section class="pdf-section-keep"><h3>b</h3><p>2</p></section>');
+		// h2 自身は wrap されない
+		expect(out).toMatch(/<h2>X<\/h2>/);
+	});
+
+	it("対象見出しが無い場合は body をそのまま返す", () => {
+		const body = "<h1>T</h1><p>meta only</p>";
+		const out = wrapSectionsInHtml(body, 2);
+		expect(out).toBe(body);
+	});
+
+	it("空文字を渡しても crash しない", () => {
+		expect(wrapSectionsInHtml("", 2)).toBe("");
+	});
+
+	it("属性付き見出しタグ（<h2 id=...>）にも対応", () => {
+		const body = '<h2 id="sec">A</h2><p>a</p>';
+		const out = wrapSectionsInHtml(body, 2);
+		expect(out).toBe('<section class="pdf-section-keep"><h2 id="sec">A</h2><p>a</p></section>');
 	});
 });
 

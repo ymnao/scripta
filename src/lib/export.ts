@@ -1,5 +1,5 @@
 import { version as katexVersion } from "katex/package.json";
-import type { PdfPageBreakCriterion, PdfPageBreakLevel } from "../types/pdf";
+import type { PdfPageBreakCriterion } from "../types/pdf";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { markdownToHtml } from "./markdown-to-html";
@@ -11,11 +11,55 @@ export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
 export type PageBreakCriterion = PdfPageBreakCriterion;
 
-const PAGE_BREAK_LEVEL_MAP: Record<Exclude<PageBreakLevel, "none">, PdfPageBreakLevel> = {
-	h1: 1,
-	h2: 2,
-	h3: 3,
-};
+const LEVEL_NUM: Record<Exclude<PageBreakLevel, "none">, 1 | 2 | 3> = { h1: 1, h2: 2, h3: 3 };
+
+/**
+ * smart 抑制対象の見出しレベル直下のセクションを `<section class="pdf-section-keep">`
+ * で wrap する (#93)。CSS Paged Media の `break-inside: avoid-page` を Chromium に
+ * 任せれば、現ページ残量に section 全体が収まる時は同ページに保持し、収まらない時は
+ * section の先頭で force-break される。
+ *
+ * セクションの終端は「次の同位以上の見出し」または body 末尾。HTML パースは
+ * 重い依存を避けるため string-based（heading は markdown-to-html が出力する
+ * `<h{n}>` 正規パターンに限定）。
+ */
+export function wrapSectionsInHtml(bodyHtml: string, smartLevel: 1 | 2 | 3): string {
+	type Heading = { level: number; start: number };
+	const headings: Heading[] = [];
+	for (const m of bodyHtml.matchAll(/<h([1-6])\b[^>]*>/gi)) {
+		headings.push({ level: Number.parseInt(m[1], 10), start: m.index ?? 0 });
+	}
+	if (headings.length === 0) return bodyHtml;
+
+	type Section = { start: number; end: number };
+	const sections: Section[] = [];
+	for (let i = 0; i < headings.length; i++) {
+		if (headings[i].level !== smartLevel) continue;
+		let end = bodyHtml.length;
+		for (let j = i + 1; j < headings.length; j++) {
+			// 同位以上の見出しで section 終端
+			if (headings[j].level <= smartLevel) {
+				end = headings[j].start;
+				break;
+			}
+		}
+		sections.push({ start: headings[i].start, end });
+	}
+	if (sections.length === 0) return bodyHtml;
+
+	// 末尾から wrap（offset 保持）
+	let result = bodyHtml;
+	for (let i = sections.length - 1; i >= 0; i--) {
+		const s = sections[i];
+		// trim 末尾の空白で `<section>...</section>` 後の余分な空行を避ける
+		const inner = result.slice(s.start, s.end).replace(/\s+$/, "");
+		result =
+			result.slice(0, s.start) +
+			`<section class="pdf-section-keep">${inner}</section>` +
+			result.slice(s.end);
+	}
+	return result;
+}
 
 /**
  * `<!-- pagebreak -->` を `<hr class="pdf-pagebreak"/>` に変換する (#93)。
@@ -202,20 +246,24 @@ export async function preprocessMermaidBlocks(
 	return result;
 }
 
-function buildPageBreakCss(level: PageBreakLevel, smart: boolean): string {
+/**
+ * 強制改ページ対象の CSS セレクタを構築する (#93 CSS-only redesign)。
+ *
+ * - smart=true: smart 抑制対象（= level そのもの）より「上位」レベルのみ force-break。
+ *   smart level 自体は break-after: avoid + (section criterion なら) section wrap で
+ *   Chromium に判定を任せる。
+ * - smart=false: level 自身と上位すべて force-break（旧 aggressive 動作）。
+ */
+function buildForceBreakSelectors(level: PageBreakLevel, smart: boolean): string {
 	if (level === "none") return "";
-
-	const selectors: string[] = ["h1"];
-	if (level === "h2" || level === "h3") selectors.push("h2");
-	if (level === "h3") selectors.push("h3");
-
-	let css = `${selectors.join(", ")} { break-before: page; }`;
-
-	if (smart) {
-		css += "\n[data-no-break] { break-before: auto !important; }";
-	}
-
-	return css;
+	const num = LEVEL_NUM[level];
+	// smart=true → force level = num - 1（h1 設定時は 0 で force-break なし）
+	// smart=false → force level = num（level 自身を含めて全部 force-break）
+	const maxForce = smart ? num - 1 : num;
+	if (maxForce <= 0) return "";
+	const sels: string[] = [];
+	for (let i = 1; i <= maxForce; i++) sels.push(`h${i}`);
+	return sels.join(", ");
 }
 
 function buildThemeCss(theme: ExportTheme): string {
@@ -238,6 +286,16 @@ export function buildHtmlDocument(
 	theme: ExportTheme = "system",
 	pageBreak?: { level: PageBreakLevel; smart: boolean },
 ): string {
+	const forceSelectors = pageBreak
+		? buildForceBreakSelectors(pageBreak.level, pageBreak.smart)
+		: "";
+	// modern + legacy `page-break-*` を両方出すのは古い Chromium / WebKit 互換のため
+	// （pdf4.dev best practice ガイド準拠）。modern (`break-*`) は今後の標準、legacy は
+	// 古いレンダラやライブラリへの保険。
+	const forceBreakRule = forceSelectors
+		? `${forceSelectors} { break-before: page; page-break-before: always; }`
+		: "";
+
 	return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -308,6 +366,7 @@ ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
 .task-list-item { list-style: none; }
 input[type="checkbox"] { margin-right: 0.5em; }
+.pdf-section-keep { display: block; }
 ${buildThemeCss(theme)}
 
 @page {
@@ -317,10 +376,36 @@ ${buildThemeCss(theme)}
 @media print {
   body { padding: 0; }
   pre { white-space: pre-wrap; word-wrap: break-word; }
-  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
-  p, li, pre, blockquote, table, img { break-inside: avoid; }
-  hr.pdf-pagebreak { break-before: page; }
-${pageBreak ? `  ${buildPageBreakCss(pageBreak.level, pageBreak.smart).split("\n").join("\n  ")}` : ""}
+
+  /* widow / orphan typographic guard (pdf4.dev: 3 is the recommended print value). */
+  p, li, blockquote { widows: 3; orphans: 3; }
+
+  /* 見出しは直後コンテンツと一緒に置く (heading widow 回避)。modern + legacy alias。 */
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* 各ブロック単位は途中分割しない。 */
+  p, li, pre, blockquote, table, img, .mermaid-diagram {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* criterion=section: smart-level セクション全体を keep-together。Chromium は
+     現ページ残量に収まらなければ section 先頭で自動 force-break する。 */
+  .pdf-section-keep {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* 著者マーカー: \`<!-- pagebreak -->\` 由来。 */
+  hr.pdf-pagebreak {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  ${forceBreakRule}
 }
 </style>
 </head>
@@ -415,7 +500,14 @@ export async function exportAsPdf(
 		{ htmlLabels: false, useMaxWidth: false },
 		{ rasterize: true },
 	);
-	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
+	let bodyHtml = markdownToHtml(preprocessed, { breaks: true });
+
+	// criterion=section: smart-level の各セクションを `<section class="pdf-section-keep">`
+	// で wrap して Chromium 側で keep-together させる (#93 CSS-only)。
+	if (pageBreak?.smart && criterion === "section") {
+		bodyHtml = wrapSectionsInHtml(bodyHtml, LEVEL_NUM[pageBreak.level]);
+	}
+
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
 	if (scaleFactor !== 1) {
@@ -428,13 +520,10 @@ export async function exportAsPdf(
 		}
 	}
 
-	// 動的改ページ判定は main 側で executeJavaScript 経由で注入する (#93)。
-	// inline `<script>` 注入は font / image レイアウト確定前に走って測定が
-	// 狂いやすかったため廃止。pageBreak option を IPC で main に渡す。
-	const pageBreakOption = pageBreak?.smart
-		? { level: PAGE_BREAK_LEVEL_MAP[pageBreak.level], criterion }
-		: undefined;
-	await exportPdf(html, savePath, pageBreakOption);
+	// 改ページ判定は CSS Paged Media（break-before/after/inside + widows/orphans + section
+	// wrapper）に完全委譲する設計に移行 (#93)。動的 JS 測定は Chromium の実 layout との
+	// 差分で中割れを引き起こすため廃止した。
+	await exportPdf(html, savePath);
 	return true;
 }
 

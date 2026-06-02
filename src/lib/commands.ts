@@ -27,7 +27,6 @@ import type {
 } from "../../electron/preload/api";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
-import type { PdfPageBreakOptions } from "../types/pdf";
 import type { SearchResult } from "../types/search";
 import type { UpdateInfo } from "../types/update";
 import type { UnresolvedWikilink } from "../types/wikilink";
@@ -132,12 +131,8 @@ export function fetchOgp(url: string): Promise<OgpData> {
 	return window.api.fetchOgp(url);
 }
 
-export function exportPdf(
-	html: string,
-	outputPath: string,
-	pageBreak?: PdfPageBreakOptions,
-): Promise<void> {
-	return window.api.exportPdf(html, outputPath, pageBreak);
+export function exportPdf(html: string, outputPath: string): Promise<void> {
+	return window.api.exportPdf(html, outputPath);
 }
 
 export function openExternal(url: string): Promise<void> {

@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { handle } from "../utils/ipc-handle";
-import { buildPageBreakScript, type PageBreakConfig } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
@@ -132,7 +131,6 @@ export async function exportPdfImpl(
 	senderId: number,
 	html: string,
 	outputPath: string,
-	pageBreak?: PageBreakConfig,
 ): Promise<void> {
 	const canonical = assertWritePathAllowed(senderId, outputPath);
 
@@ -188,18 +186,11 @@ export async function exportPdfImpl(
 				// ignore
 			}
 			await delay(POST_LOAD_IDLE_MS);
-			// 改ページ判定スクリプトは fonts.ready + idle 後に injection する (#93)。
-			// inline `<script>` 注入は font / image レイアウト確定前に走って測定が
-			// 狂いやすかったので、main 側から executeJavaScript で必ず post-idle に流す。
-			if (pageBreak) {
-				try {
-					await w.webContents.executeJavaScript(buildPageBreakScript(pageBreak), true);
-				} catch (err) {
-					// 判定失敗は warning 扱い: CSS 静的 break-before だけは効くので
-					// PDF 出力自体は続行する（widow が増えるが文書欠落はしない）。
-					console.warn("[scripta:#93] dynamic page-break script failed:", err);
-				}
-			}
+			// 改ページ判定は CSS Paged Media（break-before / break-after / break-inside、
+			// widows / orphans）に任せる方針 (#93)。renderer 側で HTML を生成する時点で
+			// CSS と必要なら `<section class="pdf-section-keep">` ラッパを埋め込み済み。
+			// 旧 dynamic measurement script は JS と Chromium 実 layout の差分で
+			// 中割れを引き起こしたため廃止した（research-derived CSS-only ベストプラクティス）。
 			return await w.webContents.printToPDF(PDF_OPTIONS);
 		})();
 		// timeout が race に勝った後 exportWork が遅れて reject すると unhandled
@@ -227,21 +218,11 @@ export async function exportPdfImpl(
 	}
 }
 
-function isValidPageBreakConfig(value: unknown): value is PageBreakConfig {
-	if (!value || typeof value !== "object") return false;
-	const v = value as Record<string, unknown>;
-	if (v.level !== 1 && v.level !== 2 && v.level !== 3) return false;
-	if (v.criterion !== "compact" && v.criterion !== "section") return false;
-	return true;
-}
-
 export function registerPdfIpc(): void {
 	handle(
 		"pdf:export",
-		(event, html: string, outputPath: string, pageBreak?: unknown): Promise<void> => {
-			const cfg = isValidPageBreakConfig(pageBreak) ? pageBreak : undefined;
-			return exportPdfImpl(event.sender.id, html, outputPath, cfg);
-		},
+		(event, html: string, outputPath: string): Promise<void> =>
+			exportPdfImpl(event.sender.id, html, outputPath),
 	);
 }
 
