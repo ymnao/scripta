@@ -8,6 +8,7 @@ import {
 	exportAsPdf,
 	exportAsPrompt,
 	getDefaultPromptTemplate,
+	type PageBreakCriterion,
 	type PageBreakLevel,
 } from "../../lib/export";
 import {
@@ -36,9 +37,10 @@ interface ExportDialogProps {
 
 type Section = "html" | "pdf" | "prompt";
 
+// PDF を先頭に置く (ユーザ要望、利用頻度順)
 const sections: { key: Section; label: string }[] = [
-	{ key: "html", label: "HTML" },
 	{ key: "pdf", label: "PDF" },
+	{ key: "html", label: "HTML" },
 	{ key: "prompt", label: "プロンプト" },
 ];
 
@@ -54,6 +56,13 @@ const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: st
 	{ value: "h3", label: "h3まで" },
 ];
 
+// 改ページ判定: section (default) はセクション全体を keep-together、
+// compact は heading + 直後ブロックのみ keep-together で中割れ許容 (#93 v5.4)。
+const pageBreakCriterionOptions: { value: PageBreakCriterion; label: string }[] = [
+	{ value: "section", label: "節単位（中割れ防止）" },
+	{ value: "compact", label: "コンパクト（中割れ許容）" },
+];
+
 export function ExportDialog({
 	open,
 	onClose,
@@ -65,7 +74,8 @@ export function ExportDialog({
 	onScriptaDirConfirm,
 }: ExportDialogProps) {
 	const titleId = useId();
-	const [activeSection, setActiveSection] = useState<Section>("html");
+	// PDF を default active に (ユーザ要望、利用頻度順)
+	const [activeSection, setActiveSection] = useState<Section>("pdf");
 	const [htmlTheme, setHtmlTheme] = useState<ExportTheme>("system");
 	const [pageBreakEnabled, setPageBreakEnabled] = useState(true);
 	// default は h2: forceUpperBreak が内部 ON のため、smart 抑制が効くのは「level
@@ -75,6 +85,8 @@ export function ExportDialog({
 	// の典型ケースをカバー）。
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
+	// default は section: セクション全体を keep-together し中割れを防ぐ (#93 v5.4)
+	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("section");
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);
@@ -103,6 +115,7 @@ export function ExportDialog({
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
+				pageBreakCriterion,
 				zoom: pdfZoom,
 			});
 			if (result) onClose();
@@ -230,6 +243,15 @@ export function ExportDialog({
 									onChange={setSmartPageBreak}
 									size="sm"
 								/>
+								{smartPageBreak && (
+									<SelectInput
+										id="export-pdf-page-break-criterion"
+										label="改ページ判定"
+										value={pageBreakCriterion}
+										options={pageBreakCriterionOptions}
+										onChange={setPageBreakCriterion}
+									/>
+								)}
 							</>
 						)}
 						<RangeInput

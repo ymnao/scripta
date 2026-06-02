@@ -41,12 +41,21 @@ export function buildSectionBreakScript(): string {
     unwrapped: 0,
     headingCounts: { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 },
     smartLevelUsed: null,
+    criterion: 'section',
     sectionsTotal: 0,
     sectionsBroken: 0,
     errors: []
   };
 
   try {
+    // 0. criterion を meta タグから読む。renderer が
+    //    <meta name="scripta-pdf-criterion" content="section|compact"> を埋め込んでいる。
+    //    無ければ default = "section" (whole section keep-together)。
+    var criterionMeta = document.querySelector('meta[name="scripta-pdf-criterion"]');
+    var criterion = (criterionMeta && criterionMeta.getAttribute('content')) || 'section';
+    if (criterion !== 'compact' && criterion !== 'section') criterion = 'section';
+    result.criterion = criterion;
+
     // 1. 既存の .pdf-section-keep wrapper を unwrap (子要素を親に flatten)
     // renderer 側で wrap された場合の overcaution 源を削除する。
     var wrappers = document.querySelectorAll('.pdf-section-keep');
@@ -74,9 +83,13 @@ export function buildSectionBreakScript(): string {
     if (smartLevel === null) return JSON.stringify(result);
 
     // 3. ページ高さ (A4 - 上下 20mm margin = 257mm) を実測
+    // ruler は body 内に置くので body.style.zoom が適用される。zoom != 1 で
+    // ruler height がそのままだと「物理ページの半分 (zoom=0.5)」等を返してしまうため、
+    // ruler 高さを (257 / zoom) mm に補正して、rendered 値が常に物理 257mm 相当の
+    // viewport px になるようにする (#93 v5.4 zoom fix)。
     var zoom = parseFloat(document.body.style.zoom) || 1;
     var ruler = document.createElement('div');
-    ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
+    ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:' + (257 / zoom) + 'mm;';
     document.body.appendChild(ruler);
     var pageHeight = ruler.getBoundingClientRect().height;
     document.body.removeChild(ruler);
@@ -135,39 +148,50 @@ export function buildSectionBreakScript(): string {
           continue;
         }
 
-        // smart-level 見出し → section 範囲を計算して break-before 判定
+        // smart-level 見出し → criterion に応じて needed height を算出して break-before 判定
         if (item.tagName === 'H' + smartLevel) {
           result.sectionsTotal++;
 
-          // section 範囲: この見出しから「次の同位以下見出し or HR pagebreak」まで
-          var sectionH = h;
-          for (var j = i + 1; j < children.length; j++) {
-            var nx = children[j];
-            // 次の見出しが同位以下なら section 終端
-            if (/^H[1-6]$/.test(nx.tagName)) {
-              var nxLvl = parseInt(nx.tagName.charAt(1), 10);
-              if (nxLvl <= smartLevel) break;
+          var neededH;
+          if (criterion === 'compact') {
+            // compact: 見出し + 直後の最初の本文ブロック (heading widow 防止のみ)
+            // 残りのコンテンツは現ページに溢れて自然分割を許容する詰めた挙動。
+            neededH = h;
+            if (i + 1 < children.length) {
+              var first = children[i + 1];
+              if (!/^H[1-6]$/.test(first.tagName)) {
+                neededH += heights[i + 1];
+              }
             }
-            // pagebreak marker も終端
-            if (
-              nx.tagName === 'HR' &&
-              nx.classList &&
-              nx.classList.contains('pdf-pagebreak')
-            ) break;
-            sectionH += heights[j];
+          } else {
+            // section (default): 見出し + 次の同位以下見出しまでの全コンテンツ
+            // 中割れを避けてセクション全体を次ページに送る strict 挙動。
+            neededH = h;
+            for (var j = i + 1; j < children.length; j++) {
+              var nx = children[j];
+              if (/^H[1-6]$/.test(nx.tagName)) {
+                var nxLvl = parseInt(nx.tagName.charAt(1), 10);
+                if (nxLvl <= smartLevel) break;
+              }
+              if (
+                nx.tagName === 'HR' &&
+                nx.classList &&
+                nx.classList.contains('pdf-pagebreak')
+              ) break;
+              neededH += heights[j];
+            }
           }
 
           var inPage = virtualY % pageHeight;
           var remaining = pageHeight - inPage;
-          // section が現ページに収まらない && 1 ページに収まる && 既にページ途中
           if (
             inPage > 0 &&
-            (sectionH + safetyBuffer) > remaining &&
-            sectionH <= pageHeight
+            (neededH + safetyBuffer) > remaining &&
+            neededH <= pageHeight
           ) {
             item.style.breakBefore = 'page';
             item.style.pageBreakBefore = 'always';
-            virtualY += remaining; // 次ページ頭にジャンプ
+            virtualY += remaining;
             result.sectionsBroken++;
           }
         }

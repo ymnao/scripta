@@ -284,7 +284,7 @@ export function buildHtmlDocument(
 	bodyHtml: string,
 	title: string,
 	theme: ExportTheme = "system",
-	pageBreak?: { level: PageBreakLevel; smart: boolean },
+	pageBreak?: { level: PageBreakLevel; smart: boolean; criterion?: PageBreakCriterion },
 ): string {
 	const forceSelectors = pageBreak
 		? buildForceBreakSelectors(pageBreak.level, pageBreak.smart)
@@ -296,12 +296,19 @@ export function buildHtmlDocument(
 		? `${forceSelectors} { break-before: page; page-break-before: always; }`
 		: "";
 
+	// criterion を meta tag 経由で main 側 script に伝える (#93 v5.4)。
+	// script は <meta name="scripta-pdf-criterion"> を読んで section / compact を分岐する。
+	const criterionMeta =
+		pageBreak?.smart && pageBreak?.criterion
+			? `<meta name="scripta-pdf-criterion" content="${pageBreak.criterion}">\n`
+			: "";
+
 	return `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(title)}</title>
+${criterionMeta}<title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="${KATEX_CSS_URL}">
 <style>
 :root {
@@ -460,8 +467,9 @@ export async function exportAsPdf(
 		pageBreakLevel?: PageBreakLevel;
 		smartPageBreak?: boolean;
 		/**
-		 * @deprecated #93 redesign 後、criterion は廃止。smart=true + level !== "none" なら
-		 * 常に section wrap が走る。引数として渡されても無視される（後方互換のため保持）。
+		 * #93 v5.4 で復活。`section` (default) はセクション全体を keep-together、
+		 * `compact` は heading + 直後ブロックのみ keep-together で中割れ許容。
+		 * smart=false の時は無視される。
 		 */
 		pageBreakCriterion?: PageBreakCriterion;
 		zoom?: number;
@@ -480,10 +488,11 @@ export async function exportAsPdf(
 	const zoom = options?.zoom ?? 100;
 	const scaleFactor = zoom / 100;
 	const smart = options?.smartPageBreak ?? true;
+	const criterion: PageBreakCriterion = options?.pageBreakCriterion ?? "section";
 
 	const pageBreak =
 		options?.pageBreakLevel && options.pageBreakLevel !== "none"
-			? { level: options.pageBreakLevel, smart }
+			? { level: options.pageBreakLevel, smart, criterion }
 			: undefined;
 
 	// PDF 経路は SVG → PNG にラスタライズして印刷の SVG quirk を bypass (#106)。

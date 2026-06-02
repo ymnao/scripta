@@ -33,9 +33,23 @@ describe("buildSectionBreakScript (#93 v5 inline break-before)", () => {
 		expect(s).toContain("(170 / zoom) + 'mm'");
 	});
 
-	it("ページ高さは 257mm ルーラーで実測する (A4 - 上下 20mm margin)", () => {
+	it("ページ高さルーラーは (257 / zoom) mm で zoom 補正を入れる (#93 v5.4)", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("height:257mm");
+		expect(s).toContain("(257 / zoom)");
+	});
+
+	it("criterion を meta tag (scripta-pdf-criterion) から読む", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("'meta[name=\"scripta-pdf-criterion\"]'");
+		expect(s).toContain("'section'");
+		expect(s).toContain("'compact'");
+	});
+
+	it("compact criterion は heading + 直後ブロックのみで needed height を計算", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("criterion === 'compact'");
+		// compact 分岐に直後ブロックの参照がある
+		expect(s).toMatch(/criterion === 'compact'[\s\S]{0,400}heights\[i \+ 1\]/);
 	});
 
 	it("safety buffer (5%) で screen ⇔ print の layout drift を吸収する", () => {
@@ -47,10 +61,10 @@ describe("buildSectionBreakScript (#93 v5 inline break-before)", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("item.style.breakBefore = 'page'");
 		expect(s).toContain("item.style.pageBreakBefore = 'always'");
-		expect(s).toMatch(/sectionH \+ safetyBuffer/);
+		expect(s).toMatch(/neededH \+ safetyBuffer/);
 	});
 
-	it("section 範囲は次の同位以下見出し or HR pagebreak まで", () => {
+	it("section criterion は次の同位以下見出し or HR pagebreak まで集計する", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("nxLvl <= smartLevel");
 		expect(s).toContain("'pdf-pagebreak'");
