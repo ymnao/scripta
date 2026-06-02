@@ -74,20 +74,27 @@ describe("renderMermaid", () => {
 			useMaxWidth: false,
 		});
 
-		// 直近の initialize 呼び出しで主要な diagram type に false が伝播
+		// 直近の initialize 呼び出しで mermaid v11 の **正規 key** に false が伝播
 		expect(initSpy).toHaveBeenCalled();
 		// biome-ignore lint/suspicious/noExplicitAny: test internal config shape
 		const config = initSpy.mock.calls.at(-1)?.[0] as any;
-		// mermaid v11: top-level htmlLabels が new、flowchart.htmlLabels は deprecated
-		// 互換性のため両方セット
+		// top-level htmlLabels（v11 正規）
 		expect(config.htmlLabels).toBe(false);
-		expect(config.flowchart.htmlLabels).toBe(false);
+		// 主要 diagram type の useMaxWidth 波及（authoritative key 名で assert）
 		expect(config.flowchart.useMaxWidth).toBe(false);
 		expect(config.sequence.useMaxWidth).toBe(false);
-		expect(config.classDiagram.htmlLabels).toBe(false);
-		expect(config.classDiagram.useMaxWidth).toBe(false);
-		expect(config.stateDiagram.htmlLabels).toBe(false);
+		expect(config.class.useMaxWidth).toBe(false);
+		expect(config.state.useMaxWidth).toBe(false);
 		expect(config.gantt.useMaxWidth).toBe(false);
+		expect(config.er.useMaxWidth).toBe(false);
+		// class は htmlLabels も持つ（ClassDiagramConfig インタフェース）
+		expect(config.class.htmlLabels).toBe(false);
+		// regression guard: 旧 commit の wrong key（classDiagram / stateDiagram）が
+		// 復活していないことを確認。これらは mermaid v11 の MermaidConfig には存在せず、
+		// 設定しても silent に無視されて useMaxWidth: false が効かないという #106 の
+		// High 優先度バグの原因だった。
+		expect(config.classDiagram).toBeUndefined();
+		expect(config.stateDiagram).toBeUndefined();
 	});
 
 	it("options 既定時は htmlLabels / useMaxWidth が true（画面プレビュー向け）", async () => {
@@ -98,9 +105,14 @@ describe("renderMermaid", () => {
 
 		await renderMermaid("graph TD\n  P-->Q", "light");
 
-		const config = initSpy.mock.calls.at(-1)?.[0] as Record<string, Record<string, unknown>>;
-		expect(config.flowchart.htmlLabels).toBe(true);
+		// biome-ignore lint/suspicious/noExplicitAny: test internal config shape
+		const config = initSpy.mock.calls.at(-1)?.[0] as any;
+		// htmlLabels は v11 推奨の top-level だけで指定（mermaid 既定 true 相当）
+		expect(config.htmlLabels).toBe(true);
 		expect(config.flowchart.useMaxWidth).toBe(true);
+		// 一部 type の useMaxWidth が true で波及していることを確認
+		expect(config.class.useMaxWidth).toBe(true);
+		expect(config.state.useMaxWidth).toBe(true);
 	});
 
 	it("htmlLabels=false 時は themeVariables / themeCSS でラベル fill を強制する (#106, mermaid#885)", async () => {

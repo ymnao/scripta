@@ -102,6 +102,25 @@ describe("svgToPng (#106)", () => {
 		const svg = '<svg viewBox="0 0 200 100" width="200" height="100"></svg>';
 		await expect(svgToPng(svg)).rejects.toThrow("Tainted canvas");
 	});
+
+	it("foreignObject が残った SVG をラスタライズすると console.warn でラベル消失を通知する", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const svg =
+			'<svg viewBox="0 0 200 100" width="200" height="100"><foreignObject><div>label</div></foreignObject></svg>';
+		await svgToPng(svg);
+		expect(warnSpy).toHaveBeenCalled();
+		expect(warnSpy.mock.calls[0][0]).toContain("foreignObject");
+		expect(warnSpy.mock.calls[0][0]).toContain("htmlLabels");
+		warnSpy.mockRestore();
+	});
+
+	it("foreignObject が無い SVG では console.warn を発しない", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const svg = '<svg viewBox="0 0 200 100" width="200" height="100"><text>OK</text></svg>';
+		await svgToPng(svg);
+		expect(warnSpy).not.toHaveBeenCalled();
+		warnSpy.mockRestore();
+	});
 });
 
 describe("stripForeignObjects (#106 canvas taint 防止)", () => {

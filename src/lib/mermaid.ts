@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import type { MermaidConfig } from "mermaid";
 import { FONT_FAMILY_MAP } from "../components/editor/editor-theme";
 import { useSettingsStore } from "../stores/settings";
 
@@ -194,29 +195,34 @@ function applyOptionFlags(options: MermaidRenderOptions): {
 	};
 }
 
-function buildConfig(theme: "light" | "dark", font: FontSnapshot, options: MermaidRenderOptions) {
+function buildConfig(
+	theme: "light" | "dark",
+	font: FontSnapshot,
+	options: MermaidRenderOptions,
+): MermaidConfig {
 	const { htmlLabels, useMaxWidth } = applyOptionFlags(options);
 	// htmlLabels: false の SVG <text> 不可視対策の theme variable 上書き（mermaid#885）
 	const labelOverrides =
 		options.htmlLabels === false ? getInvisibleLabelOverrides(theme) : undefined;
+	// useMaxWidth: false を全 diagram type に波及。authoritative な型は MermaidConfig
+	// から取得（mermaid v11 config schema）。間違った key（`classDiagram` 等）は
+	// TypeScript の excess property check で compile error になる guard 付き。
 	return {
 		startOnLoad: false,
-		securityLevel: "strict" as const,
+		securityLevel: "strict",
 		theme: getMermaidTheme(theme),
 		themeVariables: labelOverrides?.themeVariables,
 		themeCSS: getThemeCss(theme, options),
 		fontFamily: font.fontFamily,
 		fontSize: font.fontSize,
-		// mermaid v11: top-level は新、flowchart.* は deprecated。両方セットで
-		// `config.htmlLabels ?? config.flowchart?.htmlLabels ?? true` の解決を
-		// 確実に false にし、deprecation warning も消す。
+		// mermaid v11: top-level htmlLabels が新仕様（推奨）、flowchart.htmlLabels は
+		// deprecated。top-level が precedence。
 		htmlLabels,
 		flowchart: {
 			nodeSpacing: 40,
 			rankSpacing: 40,
 			padding: 15,
 			diagramPadding: 8,
-			htmlLabels,
 			useMaxWidth,
 		},
 		sequence: {
@@ -228,18 +234,32 @@ function buildConfig(theme: "light" | "dark", font: FontSnapshot, options: Merma
 			messageMargin: 28,
 			useMaxWidth,
 		},
-		// 主要な diagram type に htmlLabels / useMaxWidth を波及（未列挙 type は
-		// mermaid 既定のまま。利用頻度の低い type は様子見で十分、#106 範囲）。
-		classDiagram: { htmlLabels, useMaxWidth },
-		stateDiagram: { htmlLabels, useMaxWidth },
+		// BaseDiagramConfig extends な全 type に useMaxWidth を波及（mermaid v11
+		// schema 全網羅）。class は htmlLabels も持つので両方セット。
+		class: { htmlLabels, useMaxWidth },
+		state: { useMaxWidth },
+		er: { useMaxWidth },
+		pie: { useMaxWidth },
 		gantt: { useMaxWidth },
 		journey: { useMaxWidth },
-		pie: { useMaxWidth },
-		er: { useMaxWidth },
-		c4: { useMaxWidth },
-		gitGraph: { useMaxWidth },
-		mindmap: { useMaxWidth },
+		timeline: { useMaxWidth },
+		quadrantChart: { useMaxWidth },
+		xyChart: { useMaxWidth },
 		requirement: { useMaxWidth },
+		architecture: { useMaxWidth },
+		mindmap: { useMaxWidth },
+		ishikawa: { useMaxWidth },
+		kanban: { useMaxWidth },
+		gitGraph: { useMaxWidth },
+		c4: { useMaxWidth },
+		sankey: { useMaxWidth },
+		packet: { useMaxWidth },
+		block: { useMaxWidth },
+		eventmodeling: { useMaxWidth },
+		treeView: { useMaxWidth },
+		radar: { useMaxWidth },
+		venn: { useMaxWidth },
+		"wardley-beta": { useMaxWidth },
 	};
 }
 

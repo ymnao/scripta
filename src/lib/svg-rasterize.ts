@@ -21,7 +21,17 @@ export async function svgToPng(
 ): Promise<string> {
 	const scale = options.scale ?? 2;
 	// canvas tainted を避けるため foreignObject を除去（htmlLabels: false 指定でも
-	// 残ることがある）。
+	// 残ることがある）。**foreignObject にラベル等を出している diagram type を未対応**
+	// で、ここで silently 削除すると「ラベル抜けの PNG が成功扱いで通る」事故になる。
+	// 残っていたら必ず console.warn で surface（呼出側で htmlLabels: false が効いて
+	// いるかを再確認する trigger になる）。
+	if (/<foreignObject\b/i.test(svg)) {
+		console.warn(
+			"[svg-rasterize] SVG に <foreignObject> が残っていたので canvas taint 回避のため strip しました。" +
+				" HTML foreignObject 内のラベルは PNG から消えます。" +
+				" 該当 diagram type に対し `htmlLabels: false` 等で SVG <text> ラベル出力を選択してください。",
+		);
+	}
 	const cleanedSvg = stripForeignObjects(svg);
 	// font 読み込みが完了するまで待ってからラスタライズ（custom font の text 形状が
 	// 安定するまで canvas に描画してしまうと、編集中のフォントに見える PNG が
