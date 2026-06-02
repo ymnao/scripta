@@ -633,8 +633,8 @@ function installApiMock(opts: {
 			track("fetchOgp", [url]);
 			return { title: null, description: null, image: null, siteName: null, url };
 		},
-		exportPdf: async (html: string, outputPath: string): Promise<void> => {
-			track("exportPdf", [html, outputPath]);
+		exportPdf: async (html: string, outputPath: string, pageBreak?: unknown): Promise<void> => {
+			track("exportPdf", [html, outputPath, pageBreak]);
 		},
 		checkForUpdate: async (currentVersion: string): Promise<UpdateInfo> => {
 			track("checkForUpdate", [currentVersion]);

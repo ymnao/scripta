@@ -76,7 +76,8 @@ const api: Api = Object.freeze({
 	cancelWikilinkScan: () => invoke(ipcRenderer.invoke("wikilink:cancel")),
 
 	fetchOgp: (url) => invoke(ipcRenderer.invoke("ogp:fetch", url)),
-	exportPdf: (html, outputPath) => invoke(ipcRenderer.invoke("pdf:export", html, outputPath)),
+	exportPdf: (html, outputPath, pageBreak) =>
+		invoke(ipcRenderer.invoke("pdf:export", html, outputPath, pageBreak)),
 	checkForUpdate: (currentVersion) => invoke(ipcRenderer.invoke("update:check", currentVersion)),
 
 	gitCheckAvailable: () => invoke(ipcRenderer.invoke("git:check-available")),

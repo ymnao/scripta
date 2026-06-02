@@ -8,6 +8,7 @@ import {
 	exportAsPdf,
 	exportAsPrompt,
 	getDefaultPromptTemplate,
+	type PageBreakCriterion,
 	type PageBreakLevel,
 } from "../../lib/export";
 import {
@@ -54,6 +55,11 @@ const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: st
 	{ value: "h3", label: "h3まで" },
 ];
 
+const pageBreakCriterionOptions: { value: PageBreakCriterion; label: string }[] = [
+	{ value: "compact", label: "コンパクト（見出し + 直後ブロック）" },
+	{ value: "section", label: "節単位（次の同位見出しまで）" },
+];
+
 export function ExportDialog({
 	open,
 	onClose,
@@ -70,7 +76,7 @@ export function ExportDialog({
 	const [pageBreakEnabled, setPageBreakEnabled] = useState(true);
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h3");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
-	const [forceUpperBreak, setForceUpperBreak] = useState(true);
+	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("compact");
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);
@@ -99,7 +105,7 @@ export function ExportDialog({
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
-				forceUpperBreak,
+				pageBreakCriterion,
 				zoom: pdfZoom,
 			});
 			if (result) onClose();
@@ -227,13 +233,13 @@ export function ExportDialog({
 									onChange={setSmartPageBreak}
 									size="sm"
 								/>
-								{smartPageBreak && pageBreakLevel !== "h1" && (
-									<Toggle
-										id="export-pdf-force-upper-break"
-										label="上位見出しは常に改ページ"
-										checked={forceUpperBreak}
-										onChange={setForceUpperBreak}
-										size="sm"
+								{smartPageBreak && (
+									<SelectInput
+										id="export-pdf-page-break-criterion"
+										label="改ページ判定"
+										value={pageBreakCriterion}
+										options={pageBreakCriterionOptions}
+										onChange={setPageBreakCriterion}
 									/>
 								)}
 							</>
