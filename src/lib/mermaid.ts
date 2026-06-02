@@ -38,22 +38,21 @@ text.messageText, text.noteText, text.labelText, text.loopText {
 }
 `;
 
+/** htmlLabels:false 時に SVG <text> へ強制する fill 色（mermaid#885 対策、Layer 3+4 で共有）。 */
+const LABEL_FILL_LIGHT = "#1a1a1a";
+const LABEL_FILL_DARK = "#d4d4d4";
+
 /**
- * `htmlLabels: false` で flowchart / classDiagram / stateDiagram のラベルが
- * SVG `<text>` で描画されるが、mermaid v11 で `options.nodeTextColor || options.textColor`
- * テーマ変数 fallback chain が undefined / 同色値に解決され、印刷経路で **ラベル全消失**
- * する既知挙動がある（mermaid-js/mermaid#885）。
- *
- * - `themeVariables`: mermaid の getStyles テンプレートに渡る生の値を上書き
- *   → `${options.nodeTextColor}` 補間が確実な dark color になる
- * - `themeCSS`: 上記の theme variable 解決が壊れた場合の belt-and-suspenders。
- *   `.label text` / `.nodeLabel` 等の selector で fill を強制
+ * htmlLabels:false 時に mermaid v11 で SVG `<text>` が theme variable fallback の
+ * undefined / 同色値解決で透明化する既知挙動（mermaid#885）への対処を返す。
+ * themeVariables で getStyles テンプレ補間を確実な dark color にし、themeCSS で
+ * fill selector も強制（getStyles 出力が壊れた場合の belt-and-suspenders）。
  */
 function getInvisibleLabelOverrides(theme: "light" | "dark"): {
 	themeVariables: { textColor: string; nodeTextColor: string; titleColor: string };
 	css: string;
 } {
-	const textColor = theme === "dark" ? "#d4d4d4" : "#1a1a1a";
+	const textColor = theme === "dark" ? LABEL_FILL_DARK : LABEL_FILL_LIGHT;
 	return {
 		themeVariables: {
 			textColor,
@@ -208,10 +207,9 @@ function buildConfig(theme: "light" | "dark", font: FontSnapshot, options: Merma
 		themeCSS: getThemeCss(theme, options),
 		fontFamily: font.fontFamily,
 		fontSize: font.fontSize,
-		// mermaid v11 で `flowchart.htmlLabels` は DEPRECATED → 新しいのはトップレベル
-		// `htmlLabels`。`getEffectiveHtmlLabels` の解決は
-		// `config.htmlLabels ?? config.flowchart?.htmlLabels ?? true` なので、
-		// 両方明示すれば deprecation 警告も消えるし、両方経路で確実に false が伝わる。
+		// mermaid v11: top-level は新、flowchart.* は deprecated。両方セットで
+		// `config.htmlLabels ?? config.flowchart?.htmlLabels ?? true` の解決を
+		// 確実に false にし、deprecation warning も消す。
 		htmlLabels,
 		flowchart: {
 			nodeSpacing: 40,
@@ -230,9 +228,8 @@ function buildConfig(theme: "light" | "dark", font: FontSnapshot, options: Merma
 			messageMargin: 28,
 			useMaxWidth,
 		},
-		// 主要な diagram タイプにも useMaxWidth / htmlLabels を波及。
-		// 未列挙の type は mermaid 既定（useMaxWidth: true）になり PDF で width=100% が
-		// 残る可能性があるが、利用頻度の低い type は様子見で十分（#106 範囲）。
+		// 主要な diagram type に htmlLabels / useMaxWidth を波及（未列挙 type は
+		// mermaid 既定のまま。利用頻度の低い type は様子見で十分、#106 範囲）。
 		classDiagram: { htmlLabels, useMaxWidth },
 		stateDiagram: { htmlLabels, useMaxWidth },
 		gantt: { useMaxWidth },
@@ -280,18 +277,13 @@ function cacheKey(
 }
 
 /**
- * SVG 内の全ての `<text>` / `<tspan>` 要素に明示的な `fill` 属性を直接注入する。
- * mermaid#885 の text 不可視問題に対する **最終防衛線**:
- * - themeVariables override が mermaid 内部で打ち消されるケース
- * - themeCSS が mermaid 生成 CSS より前に出力されて specificity / source order で負けるケース
- * - selector がカバーしていない diagram type（例: sequence の `.actor-text`）
- * これら全てを無視して、`<text>` 要素レベルで `fill` を強制する。
- *
- * 既存の `fill` 属性 / `style="fill:..."` インラインスタイルは除去してから注入する
- * （重複・矛盾回避）。`<tspan>` も対象（mermaid のラベル改行で使われる）。
+ * 全ての `<text>` / `<tspan>` に `fill` 属性を直接注入する mermaid#885 対策の最終
+ * 防衛線（themeVariables / themeCSS / selector 漏れを bypass）。既存 fill 属性と
+ * inline style fill は除去してから注入。canvas ラスタライズ前にも有効（透明 text は
+ * 透明 PNG に焼かれるため）。
  */
 export function forceVisibleTextInSvg(svg: string, theme: "light" | "dark"): string {
-	const fillColor = theme === "dark" ? "#d4d4d4" : "#1a1a1a";
+	const fillColor = theme === "dark" ? LABEL_FILL_DARK : LABEL_FILL_LIGHT;
 	return svg.replace(/<(text|tspan)\b([^>]*?)>/g, (_full, tag: string, rawAttrs: string) => {
 		// 既存 fill 属性を除去
 		let attrs = rawAttrs.replace(/\s+fill\s*=\s*"[^"]*"/g, "");

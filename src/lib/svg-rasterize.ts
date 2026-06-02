@@ -1,33 +1,20 @@
 /**
- * SVG 文字列を PNG data URL にラスタライズする。
- *
- * PDF export 経路で Mermaid SVG の `<text>` が描画されない問題（#106）に対する
- * 根本対処。`webContents.printToPDF` の印刷コンテキストでは SVG inline text の
- * レンダリングが font 解決 / CSS 評価順序 / themeVariables fallback 等の複数
- * レイヤーで不安定だが、PNG は単なる bitmap なので印刷経路で確実に描画される。
- *
- * 制約:
- * - SVG が `<foreignObject>` を含むと canvas tainted エラーになる
- *   → 呼び出し側で `htmlLabels: false` を指定して foreignObject を回避すること
- * - SVG に intrinsic width / height 属性が必要
- *   → 呼び出し側で `useMaxWidth: false` を指定して intrinsic 寸法を出させること
- * - Image element の load + canvas drawImage はレンダラ process でしか動かない
- *   （main process には DOM がない）
- *
- * 失敗時は呼び出し側で inline SVG fallback を選ぶ想定。
- */
-/**
- * SVG 内の `<foreignObject>` をすべて strip する。
- * canvas を `<img>` 経由で SVG 描画する際、SVG 内に foreignObject が含まれると
- * canvas が tainted 化し `toDataURL` が SecurityError で reject される。
- * 上流（mermaid 設定）で `htmlLabels: false` を指定済みでも、theme / title / 特殊
- * shape 等の path で予期せず foreignObject が emit されることがあるので、
- * rasterize 直前に safety net として除去する。
+ * SVG 内の `<foreignObject>` を全部 strip する。
+ * foreignObject を含む SVG を `<img>` 経由 canvas にロードすると canvas tainted
+ * → `toDataURL` が SecurityError。上流で `htmlLabels: false` 指定済みでも theme /
+ * title / 特殊 shape で残ることがあるので、rasterize 直前 safety net として除去。
  */
 export function stripForeignObjects(svg: string): string {
 	return svg.replace(/<foreignObject\b[\s\S]*?<\/foreignObject>/gi, "");
 }
 
+/**
+ * SVG 文字列を PNG data URL にラスタライズする（#106 の Mermaid label 消失への
+ * 根本対処）。`webContents.printToPDF` の印刷コンテキストでは SVG inline text の
+ * 描画が複数レイヤーで不安定だが、PNG は bitmap なので確実に描画される。
+ * 制約: foreignObject 非含 / intrinsic width/height 必須 / renderer process 限定。
+ * 失敗時は呼出側で inline SVG fallback を選ぶ想定。
+ */
 export async function svgToPng(
 	svg: string,
 	options: { scale?: number; backgroundColor?: string } = {},
