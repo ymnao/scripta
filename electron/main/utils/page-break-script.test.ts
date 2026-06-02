@@ -1,26 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { buildSectionBreakScript } from "./page-break-script";
 
-describe("buildSectionBreakScript (#93 hybrid + main-side wrap)", () => {
+describe("buildSectionBreakScript (#93 adaptive)", () => {
 	it("IIFE 形式で返す", () => {
 		const s = buildSectionBreakScript();
 		expect(s.startsWith("(function() {")).toBe(true);
 		expect(s.trimEnd().endsWith("})();")).toBe(true);
 	});
 
-	it("default smartLevel=2 が埋め込まれる", () => {
+	it("body 直下 h1〜h6 の出現数を測定する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("var SMART_LEVEL = 2;");
+		expect(s).toContain("document.querySelectorAll('body > h' + lvl)");
+		expect(s).toContain("headingCounts");
 	});
 
-	it("smartLevel を引数で変更できる", () => {
-		const s3 = buildSectionBreakScript(3);
-		expect(s3).toContain("var SMART_LEVEL = 3;");
+	it("smartLevel 自動検出: h2 を最優先（複数回現れる最も浅いレベル）", () => {
+		const s = buildSectionBreakScript();
+		// h2 → h3 → h1 → h4 の優先順
+		expect(s).toMatch(/hc\.h2 >= 2/);
+		expect(s).toMatch(/hc\.h3 >= 2/);
+		expect(s).toMatch(/hc\.h1 >= 2/);
+		expect(s).toMatch(/hc\.h4 >= 2/);
+	});
+
+	it("smartLevel=null の時は wrap も skip し JSON return", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("smartLevel !== null");
+		expect(s).toContain("smartLevelUsed");
 	});
 
 	it("renderer 未 wrap でも自前で section を wrap する経路がある", () => {
 		const s = buildSectionBreakScript();
-		// 自前 wrap の判定: rendererWrapped が false かつ h2 がある時
 		expect(s).toContain("rendererWrapped");
 		expect(s).toContain("section.className = 'pdf-section-keep'");
 		expect(s).toContain("section.appendChild(cur)");
@@ -59,17 +69,12 @@ describe("buildSectionBreakScript (#93 hybrid + main-side wrap)", () => {
 		expect(s).toContain("pageHeight - inPageMarker");
 	});
 
-	it("診断 JSON ({ rendererWrapped, h2Count, count, broken, errors }) を返す", () => {
+	it("診断 JSON ({ rendererWrapped, headingCounts, smartLevelUsed, count, broken, errors })", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toMatch(/rendererWrapped: false/);
-		expect(s).toMatch(/h2Count: 0/);
+		expect(s).toMatch(/headingCounts:/);
+		expect(s).toMatch(/smartLevelUsed: null/);
 		expect(s).toContain("result.broken++");
 		expect(s).toContain("return JSON.stringify(result)");
-	});
-
-	it("body style を try/finally で restore する", () => {
-		const s = buildSectionBreakScript();
-		expect(s).toContain("} finally {");
-		expect(s).toContain("document.body.style.padding = origPadding");
 	});
 });

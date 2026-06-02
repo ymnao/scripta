@@ -201,10 +201,18 @@ export async function exportPdfImpl(
 			// 測定結果が printToPDF の実 layout と最も近い状態になる。
 			//
 			// 受信 HTML の sanity check と script result を ターミナルに出力する。
+			// すべての heading レベル数も表示して markdown 構造の把握を可能にする (#93)。
 			const htmlInfo = {
 				size: html.length,
 				hasSectionKeep: html.includes('class="pdf-section-keep"'),
-				h2Count: (html.match(/<h2\b/g) ?? []).length,
+				headings: {
+					h1: (html.match(/<h1\b/g) ?? []).length,
+					h2: (html.match(/<h2\b/g) ?? []).length,
+					h3: (html.match(/<h3\b/g) ?? []).length,
+					h4: (html.match(/<h4\b/g) ?? []).length,
+					h5: (html.match(/<h5\b/g) ?? []).length,
+					h6: (html.match(/<h6\b/g) ?? []).length,
+				},
 			};
 			try {
 				const diag = (await w.webContents.executeJavaScript(

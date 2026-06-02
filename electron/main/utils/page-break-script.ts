@@ -4,20 +4,21 @@
  * # 背景
  *
  * Chromium の `break-inside: avoid` を wrapper 要素 (`<section>` / `<div>`) に当てても
- * wrapper 全体を次ページへ送る挙動には **ならない**。子要素 (LI 等) が break-inside:
- * avoid を持つと Chromium は子要素間で break する経路を選び、wrapper の avoid 要件は
- * 「子レベルで尊重」とみなして wrapper 中割れを許容してしまう (chromium #601033 /
- * puppeteer #6366 等の known issue)。
+ * wrapper 全体を次ページへ送る挙動には **ならない**（chromium #601033 等）。子要素
+ * (LI 等) が break-inside: avoid を持つと Chromium は子要素間で break する経路を
+ * 選び、wrapper の avoid 要件は「子レベルで尊重」とみなして wrapper 中割れを許容してしまう。
  *
  * # 解決策
  *
- * 1. 印刷直前（fonts.ready + idle 後 / printToPDF 直前）に main から executeJavaScript
- *    でこのスクリプトを実行する。
- * 2. 必要なら `<section class="pdf-section-keep">` を DOM 操作で自前 wrap する
- *    （renderer 側で wrap 済みなら skip）。renderer のコード反映状態に左右されない。
- * 3. 自前で必要な CSS (`break-inside: avoid-page`) も style 要素経由で注入。
- * 4. 各 section の実 layout 位置を測定し、ページ境界をまたぐものに inline
- *    `style.breakBefore = 'page'` を強制注入。
+ * 1. 印刷直前に main から executeJavaScript でこのスクリプトを実行
+ * 2. **document の heading 構造を自動検出**: body 直下に h1〜h6 が何個ずつあるか
+ *    調べ、「複数回現れる最も浅いレベル（h2 を優先、無ければ h3、h1...）」を smart
+ *    level として採用。markdown の構造 (`# title / ## section` でも `# title / # section`
+ *    でも) に適応する
+ * 3. smart level の見出しを `<section class="pdf-section-keep">` で DOM 操作 wrap
+ * 4. `.pdf-section-keep { break-inside: avoid-page }` の CSS を script から inject
+ * 5. 各 section の実 layout 位置を測定し、ページ境界をまたぐものに inline
+ *    `style.breakBefore = 'page'` を強制注入
  *
  * # 測定精度の確保
  *
@@ -28,42 +29,52 @@
  *
  * 走査結果を JSON で return:
  *   - rendererWrapped: 既存の wrap が存在したか
- *   - h2Count: body 直下の h2 数（自前 wrap 判断用）
+ *   - headingCounts: body 直下の h1〜h6 出現数 (markdown 構造把握用)
+ *   - smartLevelUsed: 自動検出で採用した smart level（null = wrap 対象なし）
  *   - count: 最終的に検出した .pdf-section-keep 数
  *   - broken: break-before を注入した section 数
  *   - errors: 例外メッセージ
- *
- * 呼び出し側 (pdf.ts) が console.log でメインプロセス stderr へ書き出し、ユーザが
- * pnpm dev のターミナルで動作確認できる。
  */
 
 /**
  * `executeJavaScript` で実行する文字列を返す。pure function (テスト容易性のため)。
- * smartLevel: wrap 対象見出しレベル (default 2 = h2)。
  */
-export function buildSectionBreakScript(smartLevel: 1 | 2 | 3 = 2): string {
+export function buildSectionBreakScript(): string {
 	return `(function() {
   var result = {
     rendererWrapped: false,
-    h2Count: 0,
+    headingCounts: { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 },
+    smartLevelUsed: null,
     count: 0,
     broken: 0,
     errors: []
   };
 
   try {
-    var SMART_LEVEL = ${smartLevel};
-
     // 既存 wrap (renderer 側で wrapSectionsInHtml が走っていれば存在)
     var existing = document.querySelectorAll('.pdf-section-keep');
     result.rendererWrapped = existing.length > 0;
-    result.h2Count = document.querySelectorAll('body > h' + SMART_LEVEL).length;
 
-    // 自前 wrap (renderer が古い / smart=false で wrap が走っていない場合の保険)
-    if (!result.rendererWrapped && result.h2Count > 0) {
-      // body 直下の対象見出しを集める
+    // body 直下の見出し分布を測定
+    for (var lvl = 1; lvl <= 6; lvl++) {
+      result.headingCounts['h' + lvl] =
+        document.querySelectorAll('body > h' + lvl).length;
+    }
+
+    // smart level 自動検出: 複数回現れる最も浅いレベル (h2 を優先)
+    // 「セクション境界」として自然なレベルを採用する
+    var smartLevel = null;
+    var hc = result.headingCounts;
+    if (hc.h2 >= 2) smartLevel = 2;
+    else if (hc.h3 >= 2) smartLevel = 3;
+    else if (hc.h1 >= 2) smartLevel = 1;
+    else if (hc.h4 >= 2) smartLevel = 4;
+    result.smartLevelUsed = smartLevel;
+
+    // 自前 wrap (renderer 側が未 wrap で、対象 heading が複数ある時)
+    if (!result.rendererWrapped && smartLevel !== null) {
       var headings = Array.prototype.slice.call(
-        document.querySelectorAll('body > h' + SMART_LEVEL)
+        document.querySelectorAll('body > h' + smartLevel)
       );
       // 末尾から処理（DOM 操作中の collection 不整合を避ける）
       for (var hi = headings.length - 1; hi >= 0; hi--) {
@@ -72,12 +83,11 @@ export function buildSectionBreakScript(smartLevel: 1 | 2 | 3 = 2): string {
         var endEl = startEl.nextSibling;
         while (endEl) {
           if (endEl.nodeType === 1 && /^H[1-6]$/.test(endEl.tagName)) {
-            var lvl = parseInt(endEl.tagName.charAt(1), 10);
-            if (lvl <= SMART_LEVEL) break;
+            var lvl2 = parseInt(endEl.tagName.charAt(1), 10);
+            if (lvl2 <= smartLevel) break;
           }
           endEl = endEl.nextSibling;
         }
-        // startEl から endEl の手前までを section に移動
         var section = document.createElement('section');
         section.className = 'pdf-section-keep';
         startEl.parentNode.insertBefore(section, startEl);
@@ -90,12 +100,11 @@ export function buildSectionBreakScript(smartLevel: 1 | 2 | 3 = 2): string {
       }
     }
 
-    // 必要な CSS を inject (renderer が古いと .pdf-section-keep 用の break-inside CSS が無いため)
+    // 必要な CSS を inject (renderer が古い / wrap 経路ごとに必要)
     var styleEl = document.createElement('style');
-    styleEl.textContent = '@media print { .pdf-section-keep { break-inside: avoid-page; page-break-inside: avoid; } } pre.pdf-section-measure { white-space: pre-wrap !important; word-wrap: break-word !important; }';
+    styleEl.textContent = '@media print { .pdf-section-keep { break-inside: avoid-page; page-break-inside: avoid; } }';
     document.head.appendChild(styleEl);
 
-    // section 検出
     var sections = document.querySelectorAll('.pdf-section-keep');
     result.count = sections.length;
     if (sections.length === 0) {
@@ -103,7 +112,7 @@ export function buildSectionBreakScript(smartLevel: 1 | 2 | 3 = 2): string {
       return JSON.stringify(result);
     }
 
-    // ページ高さ (A4 - 上下 20mm margin = 257mm)
+    // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測
     var zoom = parseFloat(document.body.style.zoom) || 1;
     var ruler = document.createElement('div');
     ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
