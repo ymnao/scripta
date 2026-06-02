@@ -1,3 +1,4 @@
+import { version as katexVersion } from "katex/package.json";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("./commands", () => ({
@@ -12,7 +13,6 @@ vi.mock("./mermaid", () => ({
 
 const { writeFile, exportPdf, showSaveDialog } = await import("./commands");
 const {
-	KATEX_VERSION,
 	buildDynamicPageBreakScript,
 	buildHtmlDocument,
 	buildPromptFromTemplate,
@@ -64,14 +64,11 @@ describe("exportAsHtml", () => {
 		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
 	});
 
-	it("syncs KaTeX CSS CDN version with installed katex package (issue #79)", async () => {
+	it("syncs KaTeX CSS CDN version with installed katex package (#79)", async () => {
 		mockedSave.mockResolvedValue("/output/test.html");
 		await exportAsHtml("$x^2$", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
-		// CDN URL のバージョン部分が katex/package.json の version と一致すること。
-		// ハードコード時代（"katex@0.16.33" 固定）の retrogression を防ぐ。
-		expect(html).toContain(`katex@${KATEX_VERSION}/dist/katex.min.css`);
-		expect(KATEX_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+		expect(html).toContain(`katex@${katexVersion}/dist/katex.min.css`);
 	});
 
 	it("converts markdown content to HTML", async () => {
