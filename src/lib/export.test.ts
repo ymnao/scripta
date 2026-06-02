@@ -328,7 +328,7 @@ describe("exportAsPdf", () => {
 	});
 });
 
-describe("buildHtmlDocument page break (CSS-only, #93)", () => {
+describe("buildHtmlDocument page break CSS (#93)", () => {
 	it("smart=true + level=h1: force-break セレクタは無し（forceLevel=0）", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light", {
 			level: "h1",
@@ -389,7 +389,7 @@ describe("buildHtmlDocument page break (CSS-only, #93)", () => {
 		expect(html).not.toContain(".pdf-section-keep");
 	});
 
-	it("もはや [data-no-break] CSS は出力しない（CSS-only への移行で廃止）", () => {
+	it("[data-no-break] CSS は出力しない (script の inline break-before 注入に移行済み)", () => {
 		const html = buildHtmlDocument("<h2>A</h2><p>text</p><h2>B</h2>", "test", "light", {
 			level: "h2",
 			smart: true,
@@ -441,7 +441,7 @@ describe("exportAsPdf zoom", () => {
 	});
 });
 
-describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
+describe("exportAsPdf — meta tag + page break CSS (#93)", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -517,7 +517,7 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(html).not.toContain("scripta-pdf-smart-level");
 	});
 
-	it("does NOT inject inline <script> into HTML (JS DOM 測定は完全廃止)", async () => {
+	it("renderer は HTML に inline <script> を埋め込まない (DOM 測定は main 側 executeJavaScript)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Hello\n## World", "/workspace/test.md", {
 			pageBreakLevel: "h2",

@@ -207,11 +207,11 @@ export async function preprocessMermaidBlocks(
 }
 
 /**
- * 強制改ページ対象の CSS セレクタを構築する (#93 CSS-only redesign)。
+ * 強制改ページ対象の CSS セレクタを構築する (#93)。
  *
- * - smart=true: smart 抑制対象（= level そのもの）より「上位」レベルのみ force-break。
- *   smart level 自体は break-after: avoid + (section criterion なら) section wrap で
- *   Chromium に判定を任せる。
+ * - smart=true: smart 抑制対象 (= level そのもの) より「上位」レベルのみ force-break。
+ *   smart level 自体は break-after: avoid CSS + main 側 script の inline break-before
+ *   注入で扱う。
  * - smart=false: level 自身と上位すべて force-break（旧 aggressive 動作）。
  */
 function buildForceBreakSelectors(level: PageBreakLevel, smart: boolean): string {
@@ -489,9 +489,10 @@ export async function exportAsPdf(
 		}
 	}
 
-	// 改ページ判定は CSS Paged Media（break-before/after/inside + widows/orphans + section
-	// wrapper）に完全委譲する設計に移行 (#93)。動的 JS 測定は Chromium の実 layout との
-	// 差分で中割れを引き起こすため廃止した。
+	// 改ページ判定は renderer 側で生成した HTML の meta tag (scripta-pdf-smart-level /
+	// criterion / force-level) を main 側 page-break-script が読み取り、見出しに inline
+	// `break-before: page` を実 layout 基準で注入する hybrid 設計 (#93)。renderer は
+	// 上位レベルの force-break CSS と meta tag emit までを担当する。
 	await exportPdf(html, savePath);
 	return true;
 }
