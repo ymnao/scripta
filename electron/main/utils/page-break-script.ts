@@ -1,37 +1,35 @@
 /**
- * PDF 改ページ補正スクリプト (#93) — table-row hack (v4)。
+ * PDF 改ページ補正スクリプト (#93) — minimal inline break-before injection (v5)。
  *
- * # 設計の経緯
+ * # 経緯
  *
- * v1: CSS `break-inside: avoid` を `<section>` wrapper に → 中割れ (Chromium が子要素間で break)
- * v2: CSS `break-inside: avoid-page` を `<section>` に動的 inject → 各 section が独立 page に
- *     overcaution （無駄空白だらけ、user 報告で「逆にとんでもないこと」）
+ * v1〜v4 はすべて wrapper（`<section>` / `<table>`）に CSS hint を当てる方式だったが、
+ * Chromium はどの wrapper 形式でも `break-inside` を「各 wrapper を独立した新ページに送る」
+ * と過剰解釈する quirk があり、無駄空白だらけの結果になっていた。
  *
- * **v4 (current)**: **Table-row hack**。Chromium は `<table><tr>` を atomic break unit として
- *   扱い、「行が現ページに入るなら入れる、入らないなら次ページに送る」を確実に実装する。
- *   wrapper の break-inside hint よりはるかに信頼できる手法（CSS Paged Media の community で
- *   bootstrap や paged.js も推奨）。
+ * # 設計 (v5: wrapper を完全に捨てる)
  *
- * # 設計
+ * - **wrapper を使わない**。renderer 側で wrap されていれば DOM 操作で unwrap する。
+ * - smart-level の見出し（h2 / h3 等）を自動検出し、各見出しを起点とする「section」の
+ *   レンダリング高さを実測。
+ * - 「現ページ残量に section が収まらない」ものに **inline `break-before: page` を
+ *   見出し自身に直接注入**。Chromium は inline forced break を確実に尊重する。
  *
- * 1. document の見出し分布を自動検出
- * 2. 既存の `.pdf-section-keep` (section wrap、renderer 側で作成されたもの) を
- *    `<table class="pdf-section-keep"><tbody><tr><td>...</td></tr></tbody></table>` に変換
- * 3. 既存がなければ smart level の見出しを上記 table 構造で直接 wrap
- * 4. table 装飾 CSS を inject (見た目を block と同じにする: width 100%, border 0, padding 0)
- * 5. 既存の `.pdf-section-keep { break-inside: ... }` rule を `auto !important` で override
- *    (renderer の stale CSS が残っている場合の保険)
+ * # buffer
  *
- * # 設計の利点
- *
- * - table row の atomic 性は Chromium で **長年安定**。break-inside hint と違って quirk 無し
- * - measurement drift の影響を受けない (Chromium が実 layout で決定)
- * - 中割れも overcaution も起きない
+ * 15% safety buffer (≈38mm @ A4)。drift があっても sec4 のような小 section が
+ * 現ページに収まる誤判定を防げる。逆に大きすぎると section 3 のような中サイズの
+ * section まで force-break してしまうので、15% が経験則上のスイートスポット。
  *
  * # 診断
  *
- * 走査結果を JSON で return: rendererWrapped / headingCounts / smartLevelUsed /
- * count / converted (table 化した数) / errors。
+ * 走査結果を JSON で return:
+ *   - unwrapped: 削除した `.pdf-section-keep` wrapper 数
+ *   - headingCounts: body 直下の h1〜h6 出現数
+ *   - smartLevelUsed: 採用した smart level
+ *   - sectionsTotal: 検出した section 数
+ *   - sectionsBroken: break-before 注入した section 数
+ *   - errors: 例外メッセージ
  */
 
 /**
@@ -40,138 +38,138 @@
 export function buildSectionBreakScript(): string {
 	return `(function() {
   var result = {
-    rendererWrapped: false,
+    unwrapped: 0,
     headingCounts: { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 },
     smartLevelUsed: null,
-    count: 0,
-    converted: 0,
+    sectionsTotal: 0,
+    sectionsBroken: 0,
     errors: []
   };
 
   try {
-    // 既存の wrap (renderer 側 wrapSectionsInHtml が走っていれば存在)
-    var existing = document.querySelectorAll('.pdf-section-keep');
-    result.rendererWrapped = existing.length > 0;
+    // 1. 既存の .pdf-section-keep wrapper を unwrap (子要素を親に flatten)
+    // renderer 側で wrap された場合の overcaution 源を削除する。
+    var wrappers = document.querySelectorAll('.pdf-section-keep');
+    result.unwrapped = wrappers.length;
+    for (var wi = 0; wi < wrappers.length; wi++) {
+      var w = wrappers[wi];
+      var p = w.parentNode;
+      if (!p) continue;
+      while (w.firstChild) p.insertBefore(w.firstChild, w);
+      p.removeChild(w);
+    }
 
+    // 2. body 直下の見出し分布を測定
     for (var lvl = 1; lvl <= 6; lvl++) {
       result.headingCounts['h' + lvl] =
         document.querySelectorAll('body > h' + lvl).length;
     }
-
-    // smart level 自動検出
-    var smartLevel = null;
     var hc = result.headingCounts;
+    var smartLevel = null;
     if (hc.h2 >= 2) smartLevel = 2;
     else if (hc.h3 >= 2) smartLevel = 3;
     else if (hc.h1 >= 2) smartLevel = 1;
     else if (hc.h4 >= 2) smartLevel = 4;
     result.smartLevelUsed = smartLevel;
+    if (smartLevel === null) return JSON.stringify(result);
 
-    // table 装飾 CSS と、既存 break-inside rule の override を inject。
-    // !important で renderer 側 stale CSS の .pdf-section-keep break-inside:avoid-page を
-    // 無効化する（overcaution の元）。
+    // 3. ページ高さ (A4 - 上下 20mm margin = 257mm) を実測
+    var zoom = parseFloat(document.body.style.zoom) || 1;
+    var ruler = document.createElement('div');
+    ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
+    document.body.appendChild(ruler);
+    var pageHeight = ruler.getBoundingClientRect().height;
+    document.body.removeChild(ruler);
+    if (pageHeight <= 0) {
+      result.errors.push('pageHeight <= 0');
+      return JSON.stringify(result);
+    }
+    // 15% safety buffer は経験則上のスイートスポット
+    var safetyBuffer = pageHeight * 0.15;
+
+    // 4. body を印刷幅 (170mm) に揃えてから measure
+    var origPadding = document.body.style.padding;
+    var origWidth = document.body.style.width;
+    var origMaxWidth = document.body.style.maxWidth;
+    document.body.style.padding = '0';
+    var pw = (170 / zoom) + 'mm';
+    document.body.style.width = pw;
+    document.body.style.maxWidth = pw;
     var styleEl = document.createElement('style');
-    styleEl.textContent = [
-      '.pdf-section-keep {',
-      '  break-inside: auto !important;',
-      '  page-break-inside: auto !important;',
-      '}',
-      'table.pdf-section-keep {',
-      '  width: 100%;',
-      '  border-collapse: collapse;',
-      '  margin: 0;',
-      '  border: 0;',
-      '}',
-      'table.pdf-section-keep > tbody > tr > td {',
-      '  padding: 0;',
-      '  border: 0;',
-      '  vertical-align: top;',
-      '}',
-      // table row は atomic break unit (Chromium の table layout の自然な挙動)
-      // ここで明示的に書く必要は無いが、保険として
-      'table.pdf-section-keep > tbody > tr {',
-      '  break-inside: avoid;',
-      '  page-break-inside: avoid;',
-      '}'
-    ].join('\\n');
+    styleEl.textContent = 'pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
     document.head.appendChild(styleEl);
+    document.body.offsetHeight; // 強制 reflow
 
-    function wrapAsTable(elements) {
-      // 与えられた element 群を <table.pdf-section-keep><tbody><tr><td>...</td></tr></tbody></table>
-      // に移動する。最初の element の位置に挿入。
-      if (elements.length === 0) return null;
-      var first = elements[0];
-      var table = document.createElement('table');
-      table.className = 'pdf-section-keep';
-      var tbody = document.createElement('tbody');
-      var tr = document.createElement('tr');
-      var td = document.createElement('td');
-      table.appendChild(tbody);
-      tbody.appendChild(tr);
-      tr.appendChild(td);
-      first.parentNode.insertBefore(table, first);
-      for (var k = 0; k < elements.length; k++) {
-        td.appendChild(elements[k]);
+    try {
+      var children = Array.prototype.slice.call(document.body.children);
+      var heights = [];
+      for (var i = 0; i < children.length; i++) {
+        var r = children[i].getBoundingClientRect();
+        heights.push(Math.max(0, r.bottom - r.top));
       }
-      return table;
-    }
 
-    // 既存 section wrap を table に置換
-    if (result.rendererWrapped) {
-      var existingArr = Array.prototype.slice.call(existing);
-      for (var ei = 0; ei < existingArr.length; ei++) {
-        var sec = existingArr[ei];
-        if (sec.tagName === 'TABLE') continue; // already table
-        // section の子要素全部を取り出して table 化
-        var inner = [];
-        var c = sec.firstChild;
-        while (c) {
-          var nx = c.nextSibling;
-          if (c.nodeType === 1) inner.push(c);
-          c = nx;
+      var virtualY = 0;
+      for (var i = 0; i < children.length; i++) {
+        var item = children[i];
+        var h = heights[i];
+
+        // pagebreak 著者マーカー (hr.pdf-pagebreak)
+        var isMarker =
+          item.tagName === 'HR' &&
+          item.classList &&
+          item.classList.contains('pdf-pagebreak');
+        if (isMarker && virtualY > 0) {
+          var inPageMarker = virtualY % pageHeight;
+          if (inPageMarker > 0) virtualY += pageHeight - inPageMarker;
+          virtualY += h;
+          continue;
         }
-        if (inner.length === 0) continue;
-        // section の位置に table を挿入してから section を削除
-        var table = document.createElement('table');
-        table.className = 'pdf-section-keep';
-        var tbody = document.createElement('tbody');
-        var tr = document.createElement('tr');
-        var td = document.createElement('td');
-        table.appendChild(tbody);
-        tbody.appendChild(tr);
-        tr.appendChild(td);
-        sec.parentNode.insertBefore(table, sec);
-        for (var ii = 0; ii < inner.length; ii++) td.appendChild(inner[ii]);
-        sec.parentNode.removeChild(sec);
-        result.converted++;
-      }
-    } else if (smartLevel !== null) {
-      // body 直下に対象 heading が複数 → table で wrap
-      var headings = Array.prototype.slice.call(
-        document.querySelectorAll('body > h' + smartLevel)
-      );
-      // 末尾から処理 (DOM 操作中の collection 不整合回避)
-      for (var hi = headings.length - 1; hi >= 0; hi--) {
-        var startEl = headings[hi];
-        // 終端: 次の同位以上見出し or null
-        var endEl = startEl.nextSibling;
-        var inner = [startEl];
-        var cur = startEl.nextSibling;
-        while (cur) {
-          if (cur.nodeType === 1 && /^H[1-6]$/.test(cur.tagName)) {
-            var lvl2 = parseInt(cur.tagName.charAt(1), 10);
-            if (lvl2 <= smartLevel) break;
+
+        // smart-level 見出し → section 範囲を計算して break-before 判定
+        if (item.tagName === 'H' + smartLevel) {
+          result.sectionsTotal++;
+
+          // section 範囲: この見出しから「次の同位以下見出し or HR pagebreak」まで
+          var sectionH = h;
+          for (var j = i + 1; j < children.length; j++) {
+            var nx = children[j];
+            // 次の見出しが同位以下なら section 終端
+            if (/^H[1-6]$/.test(nx.tagName)) {
+              var nxLvl = parseInt(nx.tagName.charAt(1), 10);
+              if (nxLvl <= smartLevel) break;
+            }
+            // pagebreak marker も終端
+            if (
+              nx.tagName === 'HR' &&
+              nx.classList &&
+              nx.classList.contains('pdf-pagebreak')
+            ) break;
+            sectionH += heights[j];
           }
-          if (cur.nodeType === 1) inner.push(cur);
-          cur = cur.nextSibling;
-        }
-        wrapAsTable(inner);
-        result.converted++;
-      }
-    }
 
-    var finalCount = document.querySelectorAll('table.pdf-section-keep').length;
-    result.count = finalCount;
+          var inPage = virtualY % pageHeight;
+          var remaining = pageHeight - inPage;
+          // section が現ページに収まらない && 1 ページに収まる && 既にページ途中
+          if (
+            inPage > 0 &&
+            (sectionH + safetyBuffer) > remaining &&
+            sectionH <= pageHeight
+          ) {
+            item.style.breakBefore = 'page';
+            item.style.pageBreakBefore = 'always';
+            virtualY += remaining; // 次ページ頭にジャンプ
+            result.sectionsBroken++;
+          }
+        }
+
+        virtualY += h;
+      }
+    } finally {
+      document.head.removeChild(styleEl);
+      document.body.style.padding = origPadding;
+      document.body.style.width = origWidth;
+      document.body.style.maxWidth = origMaxWidth;
+    }
   } catch (e) {
     result.errors.push(String(e && e.message ? e.message : e));
   }

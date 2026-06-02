@@ -1,17 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { buildSectionBreakScript } from "./page-break-script";
 
-describe("buildSectionBreakScript (#93 v4 table-row hack)", () => {
+describe("buildSectionBreakScript (#93 v5 inline break-before)", () => {
 	it("IIFE 形式で返す", () => {
 		const s = buildSectionBreakScript();
 		expect(s.startsWith("(function() {")).toBe(true);
 		expect(s.trimEnd().endsWith("})();")).toBe(true);
 	});
 
+	it("`.pdf-section-keep` wrapper を unwrap する (overcaution 源の排除)", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("document.querySelectorAll('.pdf-section-keep')");
+		expect(s).toContain("p.insertBefore(w.firstChild, w)");
+		expect(s).toContain("p.removeChild(w)");
+	});
+
 	it("body 直下 h1〜h6 の出現数を測定する", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("document.querySelectorAll('body > h' + lvl)");
-		expect(s).toContain("headingCounts");
 	});
 
 	it("smartLevel 自動検出: h2 > h3 > h1 > h4 の優先順", () => {
@@ -22,50 +28,52 @@ describe("buildSectionBreakScript (#93 v4 table-row hack)", () => {
 		expect(s).toMatch(/hc\.h4 >= 2/);
 	});
 
-	it("既存 .pdf-section-keep の break-inside を auto !important で override する", () => {
+	it("印刷幅 170mm へ body を一時揃える", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("break-inside: auto !important");
-		expect(s).toContain("page-break-inside: auto !important");
+		expect(s).toContain("(170 / zoom) + 'mm'");
 	});
 
-	it("table 装飾 CSS を inject する (width 100%, border-collapse, padding 0)", () => {
+	it("ページ高さは 257mm ルーラーで実測する (A4 - 上下 20mm margin)", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("width: 100%");
-		expect(s).toContain("border-collapse: collapse");
-		expect(s).toContain("padding: 0");
+		expect(s).toContain("height:257mm");
 	});
 
-	it("table > tbody > tr に break-inside: avoid を当てて atomic 化", () => {
+	it("safety buffer (15%) で screen ⇔ print の layout drift を吸収する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toMatch(/table\.pdf-section-keep > tbody > tr.*?break-inside: avoid/s);
-		expect(s).toMatch(/page-break-inside: avoid/);
+		expect(s).toContain("pageHeight * 0.15");
 	});
 
-	it("既存 <section> wrap を <table> 構造に変換する", () => {
+	it("section が現ページに収まらない時、見出し自身に inline break-before を注入する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("sec.tagName === 'TABLE'");
-		expect(s).toContain("table.className = 'pdf-section-keep'");
-		expect(s).toContain("document.createElement('tbody')");
-		expect(s).toContain("document.createElement('tr')");
-		expect(s).toContain("document.createElement('td')");
+		expect(s).toContain("item.style.breakBefore = 'page'");
+		expect(s).toContain("item.style.pageBreakBefore = 'always'");
+		expect(s).toMatch(/sectionH \+ safetyBuffer/);
 	});
 
-	it("renderer 未 wrap でも smartLevel の heading を table 化する経路がある", () => {
+	it("section 範囲は次の同位以下見出し or HR pagebreak まで", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("wrapAsTable");
+		expect(s).toContain("nxLvl <= smartLevel");
+		expect(s).toContain("'pdf-pagebreak'");
 	});
 
-	it("診断 JSON: rendererWrapped / headingCounts / smartLevelUsed / count / converted / errors", () => {
+	it("hr.pdf-pagebreak 著者マーカーで virtualY を次ページ頭へジャンプする", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toMatch(/rendererWrapped: false/);
+		expect(s).toContain("pageHeight - inPageMarker");
+	});
+
+	it("診断 JSON: unwrapped / headingCounts / smartLevelUsed / sectionsTotal / sectionsBroken / errors", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toMatch(/unwrapped: 0/);
 		expect(s).toMatch(/headingCounts:/);
 		expect(s).toMatch(/smartLevelUsed: null/);
-		expect(s).toMatch(/converted: 0/);
+		expect(s).toMatch(/sectionsTotal: 0/);
+		expect(s).toMatch(/sectionsBroken: 0/);
 		expect(s).toContain("return JSON.stringify(result)");
 	});
 
-	it("table.pdf-section-keep が DOM に存在するか最後に count する", () => {
+	it("body style を try/finally で restore する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("document.querySelectorAll('table.pdf-section-keep').length");
+		expect(s).toContain("} finally {");
+		expect(s).toContain("document.body.style.padding = origPadding");
 	});
 });

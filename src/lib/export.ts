@@ -366,7 +366,6 @@ ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
 .task-list-item { list-style: none; }
 input[type="checkbox"] { margin-right: 0.5em; }
-.pdf-section-keep { display: block; }
 ${buildThemeCss(theme)}
 
 @page {
@@ -389,13 +388,6 @@ ${buildThemeCss(theme)}
   /* 各ブロック単位は途中分割しない。 */
   p, li, pre, blockquote, table, img, .mermaid-diagram {
     break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  /* criterion=section: smart-level セクション全体を keep-together。Chromium は
-     現ページ残量に収まらなければ section 先頭で自動 force-break する。 */
-  .pdf-section-keep {
-    break-inside: avoid-page;
     page-break-inside: avoid;
   }
 
@@ -503,27 +495,11 @@ export async function exportAsPdf(
 		{ htmlLabels: false, useMaxWidth: false },
 		{ rasterize: true },
 	);
-	let bodyHtml = markdownToHtml(preprocessed, { breaks: true });
+	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
 
-	// smart 改ページ時は常に smart-level のセクションを `<section class="pdf-section-keep">`
-	// で wrap (#93)。main 側の executeJavaScript hybrid 補正が「ページ境界をまたぐ section」
-	// を検出して break-before を inline 注入する。
-	// 旧 criterion option (compact / section) は撤廃: criterion=compact だと wrap が走らず
-	// hybrid 補正が機能せず中割れが残るため、選択肢を残すこと自体が UX バグだった。
-	let sectionsWrapped = 0;
-	if (pageBreak?.smart) {
-		const before = bodyHtml;
-		bodyHtml = wrapSectionsInHtml(bodyHtml, LEVEL_NUM[pageBreak.level]);
-		sectionsWrapped = (bodyHtml.match(/<section class="pdf-section-keep">/g) ?? []).length;
-		if (sectionsWrapped === 0 && before !== bodyHtml) {
-			// wrap してるはずなのに 0 件は起きないはず（保険）
-			console.warn("[scripta:#93] wrapSectionsInHtml ran but produced 0 sections");
-		}
-	}
-	console.log(
-		`[scripta:#93] exportAsPdf: level=${pageBreak?.level ?? "none"} smart=${pageBreak?.smart ?? false} wrappedSections=${sectionsWrapped}`,
-	);
-
+	// section の改ページ判定は main 側 (pdf.ts) で executeJavaScript により行う (#93 v5)。
+	// renderer 側で wrap せず、main の script が heading 自身に inline break-before を
+	// 注入することで wrapper ベースの quirk (overcaution) を完全に回避する。
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
 	if (scaleFactor !== 1) {

@@ -385,10 +385,9 @@ describe("buildHtmlDocument page break (CSS-only, #93)", () => {
 		expect(html).toMatch(/page-break-after: avoid/);
 	});
 
-	it("常に .pdf-section-keep の break-inside: avoid-page を出力する", () => {
+	it(".pdf-section-keep CSS は出力しない (#93 v5 で wrapper 撤廃)", () => {
 		const html = buildHtmlDocument("<p>test</p>", "test", "light");
-		expect(html).toMatch(/\.pdf-section-keep \{[\s\S]*?break-inside: avoid-page/);
-		expect(html).toMatch(/\.pdf-section-keep \{[\s\S]*?page-break-inside: avoid/);
+		expect(html).not.toContain(".pdf-section-keep");
 	});
 
 	it("もはや [data-no-break] CSS は出力しない（CSS-only への移行で廃止）", () => {
@@ -460,47 +459,29 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(call[1]).toBe("/output/test.pdf");
 	});
 
-	it("smart=true + level=h2: smart-level セクションを <section class=pdf-section-keep> で常に wrap する", async () => {
+	it("renderer は section wrap しない (#93 v5: main 側 script が break-before 注入)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		// 2 つの h2 セクションそれぞれが wrap されている
-		expect(html.match(/<section class="pdf-section-keep">/g)?.length).toBe(2);
+		// wrapper を一切作らない（wrapper の break-inside hint が Chromium で overcaution を
+		// 起こす quirk を避けるため、見出し element に直接 inline break-before を注入する方式）
+		expect(html).not.toContain('<section class="pdf-section-keep">');
+		expect(html).not.toContain('<table class="pdf-section-keep">');
 	});
 
 	it("criterion option を渡しても無視される (deprecated, #93 redesign)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
-		// 旧 criterion=compact を渡しても section wrap は走る
 		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
 			pageBreakCriterion: "compact",
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html.match(/<section class="pdf-section-keep">/g)?.length).toBe(2);
-	});
-
-	it("smart=false: section wrap は行わない", async () => {
-		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
-			pageBreakLevel: "h2",
-			smartPageBreak: false,
-		});
-		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).not.toContain('<section class="pdf-section-keep">');
-	});
-
-	it("level=none: section wrap は行わない", async () => {
-		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
-			pageBreakLevel: "none",
-			smartPageBreak: true,
-		});
-		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).not.toContain('<section class="pdf-section-keep">');
+		// 引数は無視され renderer は何も wrap しない
+		expect(html).not.toContain("pdf-section-keep");
 	});
 
 	it("does NOT inject inline <script> into HTML (JS DOM 測定は完全廃止)", async () => {
