@@ -1,3 +1,4 @@
+import { version as katexVersion } from "katex/package.json";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("./commands", () => ({
@@ -61,6 +62,13 @@ describe("exportAsHtml", () => {
 		await exportAsHtml("$x^2$", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
 		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+	});
+
+	it("syncs KaTeX CSS CDN version with installed katex package (#79)", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("$x^2$", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain(`katex@${katexVersion}/dist/katex.min.css`);
 	});
 
 	it("converts markdown content to HTML", async () => {
