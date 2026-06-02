@@ -20,14 +20,21 @@ describe("buildSectionBreakScript (#93)", () => {
 		expect(s).toMatch(/if \(!levelMeta\) return JSON\.stringify\(result\)/);
 	});
 
-	it("smart-level は meta tag を優先、無ければ heading 分布で auto-detect", () => {
+	it("smart-level 解決: meta 優先、不在時は requested より浅いレベルにのみ fallback", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("'meta[name=\"scripta-pdf-smart-level\"]'");
-		// fallback の優先順 (h2 > h3 > h1 > h4)
+		// requested-1 から 1 まで降順で fallback ループ
+		expect(s).toMatch(/for \(var fb = requestedLevel - 1; fb >= 1; fb--\)/);
+		// 旧コード ("deeper fallback") の優先順表 (h2 > h3 > h1 > h4) は無効値時のみ
 		expect(s).toMatch(/hc\.h2 >= 2/);
-		expect(s).toMatch(/hc\.h3 >= 2/);
-		expect(s).toMatch(/hc\.h1 >= 2/);
-		expect(s).toMatch(/hc\.h4 >= 2/);
+	});
+
+	it("break-inside: avoid 要素が現ページに収まらないなら virtualY を次ページにジャンプ", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toContain("isAvoidBreakInside");
+		expect(s).toMatch(/'P' \|\| t === 'PRE'/);
+		expect(s).toContain("mermaid-diagram");
+		expect(s).toMatch(/h > remainingA/);
 	});
 
 	it("force-level meta を読み、該当見出しで virtualY を次ページ頭へジャンプする", () => {

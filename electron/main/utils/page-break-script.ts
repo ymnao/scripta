@@ -61,14 +61,25 @@ export function buildSectionBreakScript(): string {
       }
     }
 
-    // smart-level の解決: meta 指定 & その level が body に複数あればそれを採用、
-    // 無ければ「複数回現れる最も浅いレベル (h2 > h3 > h1 > h4)」で auto-detect。
-    // ユーザが選んだ level がドキュメント構造と合わないとき (例: level=h2 だが doc に
-    // h2 が無く h3 だけ) は fallback する。
+    // smart-level の解決: meta 指定の level に複数見出しがあればそれを採用。
+    // 不在ならば **requested より浅い** level にのみ fallback (ユーザ契約: 「h2 まで」を
+    // 選んだのに勝手に h3 を改ページ対象にするのは UI 表示と乖離するため deeper には
+    // fallback しない)。requested が指定されていない場合のみ全レベル auto-detect。
     var smartLevel = null;
-    if (requestedLevel >= 1 && requestedLevel <= 6 && result.headingCounts['h' + requestedLevel] >= 2) {
-      smartLevel = requestedLevel;
+    if (requestedLevel >= 1 && requestedLevel <= 6) {
+      if (result.headingCounts['h' + requestedLevel] >= 2) {
+        smartLevel = requestedLevel;
+      } else {
+        // requested より浅い (level が小さい) 方向だけ fallback を許す
+        for (var fb = requestedLevel - 1; fb >= 1; fb--) {
+          if (result.headingCounts['h' + fb] >= 2) {
+            smartLevel = fb;
+            break;
+          }
+        }
+      }
     } else {
+      // meta 値が無効値の場合のみ無制限 auto-detect (現実的にはほぼ起きない fallback path)
       var hc = result.headingCounts;
       if (hc.h2 >= 2) smartLevel = 2;
       else if (hc.h3 >= 2) smartLevel = 3;
@@ -118,6 +129,15 @@ export function buildSectionBreakScript(): string {
         var top = children[i].getBoundingClientRect().top;
         var nextTop = i + 1 < children.length ? children[i + 1].getBoundingClientRect().top : bodyBottom;
         heights.push(Math.max(0, nextTop - top));
+      }
+
+      // CSS で break-inside: avoid を当てている要素集合 (export.ts の @media print と同期)。
+      // これらの要素が現ページに収まらない場合、Chromium は次ページに送るので、virtualY
+      // の累積でも同じ挙動をシミュレートして実 print の paginated layout と一致させる。
+      function isAvoidBreakInside(el) {
+        var t = el.tagName;
+        if (t === 'P' || t === 'PRE' || t === 'BLOCKQUOTE' || t === 'TABLE' || t === 'IMG') return true;
+        return !!(el.classList && el.classList.contains('mermaid-diagram'));
       }
 
       var virtualY = 0;
@@ -202,6 +222,17 @@ export function buildSectionBreakScript(): string {
           }
         }
 
+        // break-inside: avoid の要素は現ページに収まらない場合、Chromium が次ページに
+        // 送るのでそれを virtualY にも反映させる。これを入れないと後続の smart-level
+        // 判定が「実 print より早い段階」で remaining を見積もり、必要な force-break を
+        // 見逃す。
+        if (isAvoidBreakInside(item)) {
+          var inPageA = virtualY % pageHeight;
+          var remainingA = pageHeight - inPageA;
+          if (inPageA > 0 && h > remainingA && h <= pageHeight) {
+            virtualY += remainingA; // 次ページ頭へジャンプしてからこの要素を配置
+          }
+        }
         virtualY += h;
       }
     } finally {

@@ -565,6 +565,21 @@ describe("preprocessPageBreakMarkers (#93)", () => {
 		const md = "# Title\n\ntext";
 		expect(preprocessPageBreakMarkers(md)).toBe(md);
 	});
+
+	it("fenced code block 内のリテラル <!-- pagebreak --> は変換しない", () => {
+		const md = "text\n\n```html\n<!-- pagebreak -->\n```\n\nafter\n\n<!-- pagebreak -->\n\nend";
+		const out = preprocessPageBreakMarkers(md);
+		// code block 内のものはそのまま、外側のものだけ hr に
+		expect(out).toContain("```html\n<!-- pagebreak -->\n```");
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
+
+	it("inline code 内のリテラル <!-- pagebreak --> も変換しない", () => {
+		const md = "text `<!-- pagebreak -->` more\n\n<!-- pagebreak -->\n\nend";
+		const out = preprocessPageBreakMarkers(md);
+		expect(out).toContain("`<!-- pagebreak -->`");
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
 });
 
 describe("PDF 出力で pagebreak marker が HTML に伝わる (#93)", () => {
