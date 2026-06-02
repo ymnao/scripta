@@ -117,40 +117,11 @@ export class MermaidWidget extends WidgetType {
 			inner.innerHTML = this.svg;
 			const svgEl = inner.querySelector("svg");
 			if (svgEl) {
-				// SVG の自然幅（max-width）を取得する。cssom から取れない場合に備え、
-				// style 属性文字列・viewBox の順でフォールバックする。
-				let mw: string | undefined;
-				const cssom = svgEl.style.maxWidth;
-				if (cssom) {
-					mw = cssom;
-				} else {
-					const styleAttr = svgEl.getAttribute("style") ?? "";
-					const match = styleAttr.match(/max-width:\s*([\d.]+)px/);
-					if (match) {
-						mw = `${match[1]}px`;
-					}
-				}
-				if (!mw) {
-					const vb = svgEl.getAttribute("viewBox");
-					if (vb) {
-						const parts = vb.split(/\s+/);
-						if (parts.length === 4) {
-							mw = `${parts[2]}px`;
-						}
-					}
-				}
-
-				if (mw) {
-					const natural = Number.parseFloat(mw);
-					if (!Number.isNaN(natural)) {
-						const scaledMaxWidth = `${natural * 1.35}px`;
-						// コンテナ div と SVG 自身の双方に拡大後の max-width を設定し、
-						// 元の上限幅で頭打ちになるのを防ぐ。
-						inner.style.maxWidth = scaledMaxWidth;
-						svgEl.style.maxWidth = scaledMaxWidth;
-					}
-				}
-				// SVG は viewBox でアスペクト比を保持しコンテナ幅に合わせる
+				// Mermaid v11 が emit する自然サイズ（width="100%" + style="max-width: Xpx"）を
+				// そのまま尊重する。以前は max-width を 1.35x に上書きして人工的に拡大して
+				// いたが、mermaid v11 の自然サイズと組み合わさり「でかすぎる」UX になって
+				// いたため撤去した（ベストプラクティス: artificial scale up しない）。
+				// SVG は viewBox + width="100%" でアスペクト比を保持しコンテナ幅に合わせる。
 				svgEl.setAttribute("width", "100%");
 				svgEl.removeAttribute("height");
 			}

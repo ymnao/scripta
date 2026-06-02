@@ -2,8 +2,9 @@ import { version as katexVersion } from "katex/package.json";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { markdownToHtml } from "./markdown-to-html";
-import { renderMermaid } from "./mermaid";
+import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { basename } from "./path";
+import { svgToPng } from "./svg-rasterize";
 
 export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
@@ -114,12 +115,39 @@ export function findMermaidCodeBlocks(markdown: string): MermaidMatch[] {
 }
 
 /**
+ * SVG ルート要素の自然寸法（`useMaxWidth: false` で emit される width="W" height="H"）を
+ * 抽出して `<img width="W" height="H">` 用の属性文字列を返す。
+ * - PNG は 2x scale で焼いているが `<img>` の表示は 1x（SVG 自然寸法）にしたい
+ *   ── retina sharpness は PNG の解像度で吸収、layout は 1x ── という standard pattern。
+ * - 自然寸法が取れない場合（旧経路 / 異常 SVG）は空文字を返してフォールバック。
+ */
+export function extractSvgNaturalSizeAttrs(svg: string): string {
+	const openMatch = svg.match(/<svg\b([^>]*)>/);
+	if (!openMatch) return "";
+	const attrs = openMatch[1];
+	const wMatch = attrs.match(/\bwidth\s*=\s*"(\d+(?:\.\d+)?)"/);
+	const hMatch = attrs.match(/\bheight\s*=\s*"(\d+(?:\.\d+)?)"/);
+	if (!wMatch || !hMatch) return "";
+	return ` width="${wMatch[1]}" height="${hMatch[1]}"`;
+}
+
+/**
  * Mermaid コードブロックを SVG に変換する。
  * エラー時は元のコードブロックをそのまま残す。
+ * `mermaidOptions` で描画モードを切り替え（既定: 画面プレビュー向け）。
+ * PDF export は `{ htmlLabels: false, useMaxWidth: false }` で呼び、印刷経路の
+ * foreignObject 不可視と SVG 高さ 0 問題を回避する（#106）。
+ *
+ * `embedOptions.rasterize: true` を指定すると SVG を PNG 化してから `<img>` で
+ * 埋め込む。PDF export は印刷経路の SVG text レンダリング不安定（font / CSS /
+ * themeVariables 由来の複数要因）を bypass するためこのモードを使う。
+ * ラスタライズ失敗時は inline SVG にフォールバック。
  */
 export async function preprocessMermaidBlocks(
 	markdown: string,
 	theme: "light" | "dark" = "light",
+	mermaidOptions: MermaidRenderOptions = {},
+	embedOptions: { rasterize?: boolean } = {},
 ): Promise<string> {
 	const matches = findMermaidCodeBlocks(markdown);
 	if (matches.length === 0) return markdown;
@@ -129,8 +157,30 @@ export async function preprocessMermaidBlocks(
 	for (let i = matches.length - 1; i >= 0; i--) {
 		const match = matches[i];
 		try {
-			const svg = await renderMermaid(match.source, theme);
-			const raw = `<div class="mermaid-diagram">${svg}</div>`;
+			const svg = await renderMermaid(match.source, theme, mermaidOptions);
+			let raw: string;
+			if (embedOptions.rasterize) {
+				try {
+					const png = await svgToPng(svg, { scale: 2 });
+					// retina 描画のため PNG は 2x で焼くが、`<img>` の表示サイズは
+					// SVG 自然寸法（1x）にする。CSS `.mermaid-diagram img { max-width: 100% }`
+					// と組み合わせて、印刷ページ幅より小さい時は natural、ページ幅を
+					// 超える時はページ幅に縮む挙動。
+					const sizeAttrs = extractSvgNaturalSizeAttrs(svg);
+					raw = `<div class="mermaid-diagram"><img src="${png}"${sizeAttrs} alt="Mermaid diagram"/></div>`;
+				} catch (err) {
+					// ラスタライズ失敗時は inline SVG にフォールバック（描画は印刷経路の
+					// SVG text 不安定リスクが残るが、何も出ないよりはマシ）。
+					// 失敗理由は DevTools コンソールに必ず出す（#106 診断用に silent 化禁止）。
+					console.error(
+						"[scripta:#106] Mermaid PNG ラスタライズ失敗 → inline SVG フォールバック:",
+						err,
+					);
+					raw = `<div class="mermaid-diagram">${svg}</div>`;
+				}
+			} else {
+				raw = `<div class="mermaid-diagram">${svg}</div>`;
+			}
 			// 元のフェンスのインデントを保持する（リスト・引用内の構造維持）
 			const replacement = match.indent
 				? raw
@@ -470,6 +520,7 @@ th { font-weight: 600; }
 img { max-width: 100%; height: auto; }
 .mermaid-diagram { text-align: center; margin: 1em 0; }
 .mermaid-diagram svg { max-width: 100%; height: auto; }
+.mermaid-diagram img { max-width: 100%; height: auto; }
 hr { border: none; border-top: 1px solid; margin: 1em 0; }
 ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
@@ -569,7 +620,19 @@ export async function exportAsPdf(
 			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
 			: undefined;
 
-	const preprocessed = await preprocessMermaidBlocks(markdown, "light");
+	// PDF 印刷経路では Mermaid を SVG <text> + intrinsic 寸法で出力させた上で、
+	// scripta renderer 側で PNG にラスタライズしてから埋め込む（#106）。
+	// - htmlLabels: false → foreignObject を避ける（canvas tainted 回避にも必須）。
+	// - useMaxWidth: false → SVG に intrinsic width / height を出させる（Image の
+	//   naturalWidth / naturalHeight に必要）。
+	// - rasterize: true → 印刷経路の SVG text レンダリング不安定（font / CSS /
+	//   themeVariables 由来）を完全に bypass。PDF 内は静的 PNG だけ描画する。
+	const preprocessed = await preprocessMermaidBlocks(
+		markdown,
+		"light",
+		{ htmlLabels: false, useMaxWidth: false },
+		{ rasterize: true },
+	);
 	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
