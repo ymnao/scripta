@@ -60,8 +60,10 @@ export function buildSectionBreakScript(): string {
       return JSON.stringify(result);
     }
 
-    // 10% safety buffer (≈25mm @ A4)。screen と print の layout drift を吸収する。
-    var safetyBuffer = pageHeight * 0.10;
+    // 20% safety buffer (≈51mm @ A4)。screen と print の layout drift（KaTeX 行送り
+     // 差、margin collapse、リスト padding 差等で section 高さが数mm〜数十mm 食い違う）
+     // を吸収する。10% で不足ケースが報告されたため拡大 (#93)。
+    var safetyBuffer = pageHeight * 0.20;
 
     // body を印刷幅 (170mm) に揃えてから measure。screen 幅と print 幅で
     // テキスト折り返しが変わると section 高さが drift するため。

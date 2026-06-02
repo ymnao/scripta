@@ -24,9 +24,9 @@ describe("buildSectionBreakScript (#93 hybrid)", () => {
 		expect(s).toContain("height:257mm");
 	});
 
-	it("safety buffer (10%) で screen ⇔ print の layout drift を吸収する", () => {
+	it("safety buffer (20%) で screen ⇔ print の layout drift を吸収する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("pageHeight * 0.10");
+		expect(s).toContain("pageHeight * 0.20");
 		expect(s).toContain("(height + safetyBuffer) > remaining");
 	});
 

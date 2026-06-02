@@ -200,16 +200,24 @@ export async function exportPdfImpl(
 			// script は `{ count, broken, errors }` JSON を return する。ユーザが
 			// 「script が走ったか / 何セクション検出されたか / 何セクション force-break したか」
 			// を pnpm dev のターミナルで確認できる診断ログ (#93 debug)。
+			// 目立つ形でログ出力する（重要なので process.stderr.write で直接出力）。
 			try {
 				const diag = (await w.webContents.executeJavaScript(
 					buildSectionBreakScript(),
 					true,
 				)) as string;
-				console.log(`[scripta:#93] section-break: ${diag}`);
+				process.stderr.write(`\n========== [scripta #93 PDF export diagnostics] ==========\n`);
+				process.stderr.write(`  section-break script result: ${diag}\n`);
+				process.stderr.write(
+					`  → count=0 なら ExportDialog の改ページ判定が「節単位」になっていない\n`,
+				);
+				process.stderr.write(`  → broken=0 なら drift で全 section が「収まる」判定\n`);
+				process.stderr.write(`  → broken>0 なら本来 break-before が注入された\n`);
+				process.stderr.write(`==========================================================\n\n`);
 			} catch (err) {
 				// 補正失敗は warning 扱い: CSS `break-inside: avoid` だけで動作するため、
 				// 中割れリスクは残るが PDF 出力自体は続行する（PDF 欠落は発生しない）。
-				console.warn("[scripta:#93] section break correction failed:", err);
+				process.stderr.write(`[scripta #93] section break correction failed: ${err}\n`);
 			}
 			return await w.webContents.printToPDF(PDF_OPTIONS);
 		})();
