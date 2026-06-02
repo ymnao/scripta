@@ -68,7 +68,7 @@ describe("ExportDialog", () => {
 			expect(screen.queryByText("エクスポート")).not.toBeInTheDocument();
 		});
 
-		it("初期状態で PDF セクションが表示される (ユーザ要望で順序変更 #93 v5.4)", () => {
+		it("初期状態で PDF セクションが表示される", () => {
 			renderDialog();
 			expect(screen.getByText("PDFとしてエクスポート")).toBeInTheDocument();
 		});
@@ -161,7 +161,7 @@ describe("ExportDialog", () => {
 			expect(exportAsPdf).toHaveBeenCalled();
 		});
 
-		it("default で pageBreakLevel=h2 / smart=true / criterion=section が渡される (#93 v5.4)", async () => {
+		it("default で pageBreakLevel=h2 / smart=true / criterion=section が渡される (#93)", async () => {
 			vi.mocked(exportAsPdf).mockResolvedValue(true);
 			renderDialog();
 			await switchToPdf();

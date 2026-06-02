@@ -14,54 +14,6 @@ export type PageBreakCriterion = PdfPageBreakCriterion;
 const LEVEL_NUM: Record<Exclude<PageBreakLevel, "none">, 1 | 2 | 3> = { h1: 1, h2: 2, h3: 3 };
 
 /**
- * smart 抑制対象の見出しレベル直下のセクションを `<section class="pdf-section-keep">`
- * で wrap する (#93)。CSS Paged Media の `break-inside: avoid-page` を Chromium に
- * 任せれば、現ページ残量に section 全体が収まる時は同ページに保持し、収まらない時は
- * section の先頭で force-break される。
- *
- * セクションの終端は「次の同位以上の見出し」または body 末尾。HTML パースは
- * 重い依存を避けるため string-based（heading は markdown-to-html が出力する
- * `<h{n}>` 正規パターンに限定）。
- */
-export function wrapSectionsInHtml(bodyHtml: string, smartLevel: 1 | 2 | 3): string {
-	type Heading = { level: number; start: number };
-	const headings: Heading[] = [];
-	for (const m of bodyHtml.matchAll(/<h([1-6])\b[^>]*>/gi)) {
-		headings.push({ level: Number.parseInt(m[1], 10), start: m.index ?? 0 });
-	}
-	if (headings.length === 0) return bodyHtml;
-
-	type Section = { start: number; end: number };
-	const sections: Section[] = [];
-	for (let i = 0; i < headings.length; i++) {
-		if (headings[i].level !== smartLevel) continue;
-		let end = bodyHtml.length;
-		for (let j = i + 1; j < headings.length; j++) {
-			// 同位以上の見出しで section 終端
-			if (headings[j].level <= smartLevel) {
-				end = headings[j].start;
-				break;
-			}
-		}
-		sections.push({ start: headings[i].start, end });
-	}
-	if (sections.length === 0) return bodyHtml;
-
-	// 末尾から wrap（offset 保持）
-	let result = bodyHtml;
-	for (let i = sections.length - 1; i >= 0; i--) {
-		const s = sections[i];
-		// trim 末尾の空白で `<section>...</section>` 後の余分な空行を避ける
-		const inner = result.slice(s.start, s.end).replace(/\s+$/, "");
-		result =
-			result.slice(0, s.start) +
-			`<section class="pdf-section-keep">${inner}</section>` +
-			result.slice(s.end);
-	}
-	return result;
-}
-
-/**
  * `<!-- pagebreak -->` を `<hr class="pdf-pagebreak"/>` に変換する (#93)。
  * markdown を渡す段階で適用し、HTML / PDF どちらの経路でも著者マーカーを有効化する。
  * CSS で visibility:hidden + @media print の break-before:page を当てるため、画面上は
@@ -296,11 +248,14 @@ export function buildHtmlDocument(
 		? `${forceSelectors} { break-before: page; page-break-before: always; }`
 		: "";
 
-	// criterion を meta tag 経由で main 側 script に伝える (#93 v5.4)。
-	// script は <meta name="scripta-pdf-criterion"> を読んで section / compact を分岐する。
-	const criterionMeta =
-		pageBreak?.smart && pageBreak?.criterion
-			? `<meta name="scripta-pdf-criterion" content="${pageBreak.criterion}">\n`
+	// smart 改ページの設定を meta tag 経由で main 側 script に伝える (#93)。
+	// - smart-level: ユーザ選択の見出しレベル (1/2/3)。script はこのレベルでセクションを区切る。
+	// - criterion: section (default, 全体 keep) / compact (heading + 直後ブロックのみ keep)。
+	const scriptMeta =
+		pageBreak?.smart && pageBreak.level !== "none"
+			? `<meta name="scripta-pdf-smart-level" content="${LEVEL_NUM[pageBreak.level]}">
+<meta name="scripta-pdf-criterion" content="${pageBreak.criterion ?? "section"}">
+`
 			: "";
 
 	return `<!DOCTYPE html>
@@ -308,7 +263,7 @@ export function buildHtmlDocument(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-${criterionMeta}<title>${escapeHtml(title)}</title>
+${scriptMeta}<title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="${KATEX_CSS_URL}">
 <style>
 :root {

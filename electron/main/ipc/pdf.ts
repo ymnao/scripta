@@ -188,48 +188,22 @@ export async function exportPdfImpl(
 			}
 			await delay(POST_LOAD_IDLE_MS);
 
-			// `<section class="pdf-section-keep">` を含む場合、CSS `break-inside: avoid` だけでは
-			// Chromium が wrapper の中割れを許容してしまう (chromium #601033 / puppeteer #6366
-			// 等の known issue)。実 layout を測定し、ページ境界をまたぐ section に inline で
-			// `break-before: page` を強制注入する hybrid アプローチ (#93)。
-			//
-			// script は renderer 側で wrap 済みでも未 wrap でも動くよう、自前で DOM 操作で
-			// h2 セクションを wrap するロジックも含む。renderer の HMR 反映状態に依存しない。
-			//
-			// このタイミング (fonts.ready + idle 後 / printToPDF 直前) で実行することで、
-			// 全フォント・画像・Mermaid raster がレイアウト確定済みの状態で測定でき、
-			// 測定結果が printToPDF の実 layout と最も近い状態になる。
-			//
-			// 受信 HTML の sanity check と script result を ターミナルに出力する。
-			// すべての heading レベル数も表示して markdown 構造の把握を可能にする (#93)。
-			const htmlInfo = {
-				size: html.length,
-				hasSectionKeep: html.includes('class="pdf-section-keep"'),
-				headings: {
-					h1: (html.match(/<h1\b/g) ?? []).length,
-					h2: (html.match(/<h2\b/g) ?? []).length,
-					h3: (html.match(/<h3\b/g) ?? []).length,
-					h4: (html.match(/<h4\b/g) ?? []).length,
-					h5: (html.match(/<h5\b/g) ?? []).length,
-					h6: (html.match(/<h6\b/g) ?? []).length,
-				},
-			};
-			// section の改ページ判定は **wrapper を使わず**、見出し element に直接 inline
-			// `break-before: page` を注入する方式 (#93 v5)。wrapper 経由の break-inside hint は
-			// どの形式 (section / table) でも Chromium が overcaution する quirk があるため、
-			// 確実に動作する inline forced break で精密に制御する。
+			// Section の改ページ判定: 見出しに直接 inline `break-before: page` を注入する
+			// 方式 (#93)。wrapper への `break-inside: avoid` は Chromium で overcaution
+			// を起こす quirk (#601033) があり、inline forced break の方が確実。
+			// 診断ログは `SCRIPTA_PDF_DEBUG` 環境変数を立てた時だけ出力する。
 			try {
 				const diag = (await w.webContents.executeJavaScript(
 					buildSectionBreakScript(),
 					true,
 				)) as string;
-				process.stderr.write(`\n========== [scripta #93 PDF export diagnostics] ==========\n`);
-				process.stderr.write(`  received HTML: ${JSON.stringify(htmlInfo)}\n`);
-				process.stderr.write(`  break-before script: ${diag}\n`);
-				process.stderr.write(`==========================================================\n\n`);
+				if (process.env.SCRIPTA_PDF_DEBUG) {
+					process.stderr.write(
+						`[scripta:#93] break-before script: ${diag} (html ${html.length} bytes)\n`,
+					);
+				}
 			} catch (err) {
-				// 補正失敗は warning 扱い: PDF 出力自体は続行する。
-				process.stderr.write(`[scripta #93] break-before correction failed: ${err}\n`);
+				console.warn("[scripta:#93] break-before correction failed:", err);
 			}
 			return await w.webContents.printToPDF(PDF_OPTIONS);
 		})();

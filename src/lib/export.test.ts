@@ -27,7 +27,6 @@ const {
 	getDefaultPromptTemplate,
 	preprocessMermaidBlocks,
 	preprocessPageBreakMarkers,
-	wrapSectionsInHtml,
 } = await import("./export");
 
 const mockedSave = showSaveDialog as Mock;
@@ -459,7 +458,7 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(call[1]).toBe("/output/test.pdf");
 	});
 
-	it("renderer は section wrap しない (#93 v5: main 側 script が break-before 注入)", async () => {
+	it("renderer は section wrap しない (#93: main 側 script が break-before 注入)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
 			pageBreakLevel: "h2",
@@ -472,16 +471,27 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(html).not.toContain('<table class="pdf-section-keep">');
 	});
 
-	it("criterion option を渡しても無視される (deprecated, #93 redesign)", async () => {
+	it("smart + level + criterion を meta tag 経由で main 側 script へ伝える", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
-		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
+		await exportAsPdf("# T\n\n## A\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
 			pageBreakCriterion: "compact",
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		// 引数は無視され renderer は何も wrap しない
-		expect(html).not.toContain("pdf-section-keep");
+		expect(html).toContain('<meta name="scripta-pdf-smart-level" content="2">');
+		expect(html).toContain('<meta name="scripta-pdf-criterion" content="compact">');
+	});
+
+	it("smart=false のときは meta tag を埋め込まない", async () => {
+		mockedSave.mockResolvedValue("/output/test.pdf");
+		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
+			pageBreakLevel: "h2",
+			smartPageBreak: false,
+		});
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).not.toContain("scripta-pdf-smart-level");
+		expect(html).not.toContain("scripta-pdf-criterion");
 	});
 
 	it("does NOT inject inline <script> into HTML (JS DOM 測定は完全廃止)", async () => {
@@ -503,49 +513,6 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(html).toMatch(/<body style="zoom: 0\.8; max-width: 1000px">/);
 		const bodyOpenCount = html.split("<body").length - 1;
 		expect(bodyOpenCount).toBe(1);
-	});
-});
-
-describe("wrapSectionsInHtml (#93)", () => {
-	it("smartLevel=2 で h2 ごとのセクションを wrap する", () => {
-		const body = "<h1>T</h1><p>meta</p><h2>A</h2><p>a</p><h2>B</h2><p>b</p>";
-		const out = wrapSectionsInHtml(body, 2);
-		expect(out).toBe(
-			'<h1>T</h1><p>meta</p><section class="pdf-section-keep"><h2>A</h2><p>a</p></section><section class="pdf-section-keep"><h2>B</h2><p>b</p></section>',
-		);
-	});
-
-	it("smartLevel=2 でセクション内の h3 はセクション終端にならない", () => {
-		const body = "<h2>A</h2><h3>sub</h3><p>x</p><h2>B</h2>";
-		const out = wrapSectionsInHtml(body, 2);
-		expect(out).toBe(
-			'<section class="pdf-section-keep"><h2>A</h2><h3>sub</h3><p>x</p></section><section class="pdf-section-keep"><h2>B</h2></section>',
-		);
-	});
-
-	it("smartLevel=3 で h3 のセクションを wrap、h2 はセクション終端", () => {
-		const body = "<h2>X</h2><h3>a</h3><p>1</p><h3>b</h3><p>2</p><h2>Y</h2>";
-		const out = wrapSectionsInHtml(body, 3);
-		expect(out).toContain('<section class="pdf-section-keep"><h3>a</h3><p>1</p></section>');
-		expect(out).toContain('<section class="pdf-section-keep"><h3>b</h3><p>2</p></section>');
-		// h2 自身は wrap されない
-		expect(out).toMatch(/<h2>X<\/h2>/);
-	});
-
-	it("対象見出しが無い場合は body をそのまま返す", () => {
-		const body = "<h1>T</h1><p>meta only</p>";
-		const out = wrapSectionsInHtml(body, 2);
-		expect(out).toBe(body);
-	});
-
-	it("空文字を渡しても crash しない", () => {
-		expect(wrapSectionsInHtml("", 2)).toBe("");
-	});
-
-	it("属性付き見出しタグ（<h2 id=...>）にも対応", () => {
-		const body = '<h2 id="sec">A</h2><p>a</p>';
-		const out = wrapSectionsInHtml(body, 2);
-		expect(out).toBe('<section class="pdf-section-keep"><h2 id="sec">A</h2><p>a</p></section>');
 	});
 });
 

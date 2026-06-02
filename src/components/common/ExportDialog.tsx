@@ -57,7 +57,7 @@ const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: st
 ];
 
 // 改ページ判定: section (default) はセクション全体を keep-together、
-// compact は heading + 直後ブロックのみ keep-together で中割れ許容 (#93 v5.4)。
+// compact は heading + 直後ブロックのみ keep-together で中割れ許容。
 const pageBreakCriterionOptions: { value: PageBreakCriterion; label: string }[] = [
 	{ value: "section", label: "節単位（中割れ防止）" },
 	{ value: "compact", label: "コンパクト（中割れ許容）" },
@@ -85,7 +85,7 @@ export function ExportDialog({
 	// の典型ケースをカバー）。
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
-	// default は section: セクション全体を keep-together し中割れを防ぐ (#93 v5.4)
+	// default は section: セクション全体を keep-together し中割れを防ぐ
 	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("section");
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);

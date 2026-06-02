@@ -1,44 +1,28 @@
 /**
- * PDF 改ページ補正スクリプト (#93) — minimal inline break-before injection (v5)。
+ * PDF 改ページ補正スクリプト (#93)。
  *
- * # 経緯
+ * 印刷直前 (fonts.ready + idle 後) に main の `executeJavaScript` 経由で
+ * webContents 内で実行される。ユーザ選択の smart-level / criterion を meta tag
+ * 経由で受け取り、各セクションの実 layout 高さを測定して「現ページ残量に
+ * 収まらない section」に inline `style.breakBefore = 'page'` を強制注入する。
  *
- * v1〜v4 はすべて wrapper（`<section>` / `<table>`）に CSS hint を当てる方式だったが、
- * Chromium はどの wrapper 形式でも `break-inside` を「各 wrapper を独立した新ページに送る」
- * と過剰解釈する quirk があり、無駄空白だらけの結果になっていた。
+ * Chromium の `break-inside: avoid` は wrapper 要素に対して unreliable (子要素間で
+ * break して wrapper の中割れを許容する)。明示的な inline `break-before` は確実に
+ * 尊重されるため、これで section の中割れを完全に防ぐ。
  *
- * # 設計 (v5: wrapper を完全に捨てる)
+ * # meta tag contract (renderer が emit)
  *
- * - **wrapper を使わない**。renderer 側で wrap されていれば DOM 操作で unwrap する。
- * - smart-level の見出し（h2 / h3 等）を自動検出し、各見出しを起点とする「section」の
- *   レンダリング高さを実測。
- * - 「現ページ残量に section が収まらない」ものに **inline `break-before: page` を
- *   見出し自身に直接注入**。Chromium は inline forced break を確実に尊重する。
- *
- * # buffer
- *
- * 15% safety buffer (≈38mm @ A4)。drift があっても sec4 のような小 section が
- * 現ページに収まる誤判定を防げる。逆に大きすぎると section 3 のような中サイズの
- * section まで force-break してしまうので、15% が経験則上のスイートスポット。
- *
- * # 診断
- *
- * 走査結果を JSON で return:
- *   - unwrapped: 削除した `.pdf-section-keep` wrapper 数
- *   - headingCounts: body 直下の h1〜h6 出現数
- *   - smartLevelUsed: 採用した smart level
- *   - sectionsTotal: 検出した section 数
- *   - sectionsBroken: break-before 注入した section 数
- *   - errors: 例外メッセージ
+ * - `<meta name="scripta-pdf-smart-level" content="1|2|3">`: 区切り対象見出しレベル。
+ *   省略時はスクリプトが body 直下の見出し分布から auto-detect する。
+ * - `<meta name="scripta-pdf-criterion" content="section|compact">`: keep 基準。
+ *   - section: 見出し + 次の同位以下見出しまでを 1 単位として keep-together
+ *   - compact: 見出し + 直後ブロックのみ keep (中割れ許容、詰めた配置)
  */
 
-/**
- * `executeJavaScript` で実行する文字列を返す。pure function (テスト容易性のため)。
- */
+/** `executeJavaScript` で実行する文字列を返す。pure function (テスト容易性のため)。 */
 export function buildSectionBreakScript(): string {
 	return `(function() {
   var result = {
-    unwrapped: 0,
     headingCounts: { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 },
     smartLevelUsed: null,
     criterion: 'section',
@@ -48,45 +32,44 @@ export function buildSectionBreakScript(): string {
   };
 
   try {
-    // 0. criterion を meta タグから読む。renderer が
-    //    <meta name="scripta-pdf-criterion" content="section|compact"> を埋め込んでいる。
-    //    無ければ default = "section" (whole section keep-together)。
+    // meta から smart-level と criterion を読む
+    var levelMeta = document.querySelector('meta[name="scripta-pdf-smart-level"]');
+    var requestedLevel = levelMeta ? parseInt(levelMeta.getAttribute('content') || '', 10) : NaN;
     var criterionMeta = document.querySelector('meta[name="scripta-pdf-criterion"]');
     var criterion = (criterionMeta && criterionMeta.getAttribute('content')) || 'section';
     if (criterion !== 'compact' && criterion !== 'section') criterion = 'section';
     result.criterion = criterion;
 
-    // 1. 既存の .pdf-section-keep wrapper を unwrap (子要素を親に flatten)
-    // renderer 側で wrap された場合の overcaution 源を削除する。
-    var wrappers = document.querySelectorAll('.pdf-section-keep');
-    result.unwrapped = wrappers.length;
-    for (var wi = 0; wi < wrappers.length; wi++) {
-      var w = wrappers[wi];
-      var p = w.parentNode;
-      if (!p) continue;
-      while (w.firstChild) p.insertBefore(w.firstChild, w);
-      p.removeChild(w);
+    // body 直下の見出し分布を 1-pass で測定
+    var bodyChildren = document.body.children;
+    for (var bi = 0; bi < bodyChildren.length; bi++) {
+      var tag = bodyChildren[bi].tagName;
+      if (tag.length === 2 && tag.charAt(0) === 'H') {
+        var d = parseInt(tag.charAt(1), 10);
+        if (d >= 1 && d <= 6) result.headingCounts['h' + d]++;
+      }
     }
 
-    // 2. body 直下の見出し分布を測定
-    for (var lvl = 1; lvl <= 6; lvl++) {
-      result.headingCounts['h' + lvl] =
-        document.querySelectorAll('body > h' + lvl).length;
-    }
-    var hc = result.headingCounts;
+    // smart-level の解決: meta で指定 & その level が body に複数あればそれを採用、
+    // そうでなければ「複数回現れる最も浅いレベル (h2 > h3 > h1 > h4)」で auto-detect。
+    // 大半のケースは meta 値がそのまま採用される。ユーザが選んだ level がドキュメント
+    // 構造と合わないとき (例: level=h2 だが doc 内に h2 が無く h3 だけ) は fallback する。
     var smartLevel = null;
-    if (hc.h2 >= 2) smartLevel = 2;
-    else if (hc.h3 >= 2) smartLevel = 3;
-    else if (hc.h1 >= 2) smartLevel = 1;
-    else if (hc.h4 >= 2) smartLevel = 4;
+    if (requestedLevel >= 1 && requestedLevel <= 6 && result.headingCounts['h' + requestedLevel] >= 2) {
+      smartLevel = requestedLevel;
+    } else {
+      var hc = result.headingCounts;
+      if (hc.h2 >= 2) smartLevel = 2;
+      else if (hc.h3 >= 2) smartLevel = 3;
+      else if (hc.h1 >= 2) smartLevel = 1;
+      else if (hc.h4 >= 2) smartLevel = 4;
+    }
     result.smartLevelUsed = smartLevel;
     if (smartLevel === null) return JSON.stringify(result);
 
-    // 3. ページ高さ (A4 - 上下 20mm margin = 257mm) を実測
-    // ruler は body 内に置くので body.style.zoom が適用される。zoom != 1 で
-    // ruler height がそのままだと「物理ページの半分 (zoom=0.5)」等を返してしまうため、
-    // ruler 高さを (257 / zoom) mm に補正して、rendered 値が常に物理 257mm 相当の
-    // viewport px になるようにする (#93 v5.4 zoom fix)。
+    // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測。
+    // ruler は body 内に置くと body.style.zoom が適用されるため、ruler 高さを
+    // (257 / zoom) mm に補正して rendered 値が常に物理 257mm 相当の viewport px になるようにする。
     var zoom = parseFloat(document.body.style.zoom) || 1;
     var ruler = document.createElement('div');
     ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:' + (257 / zoom) + 'mm;';
@@ -97,13 +80,11 @@ export function buildSectionBreakScript(): string {
       result.errors.push('pageHeight <= 0');
       return JSON.stringify(result);
     }
-    // 5% safety buffer。v5.1 で margin drift を解消したことで script の
-    // measurement 精度が向上。10% でも sec7 が境界ギリギリで break される
-    // 過剰反応があったため、さらに 5% まで詰める (#93 v5.3)。
-    // 5% (≈13mm @ A4) は font hinting や subpixel rendering 程度の誤差吸収用。
+    // 5% safety buffer は font hinting / subpixel rendering 程度の最小 drift 吸収用。
     var safetyBuffer = pageHeight * 0.05;
 
-    // 4. body を印刷幅 (170mm) に揃えてから measure
+    // body を印刷幅 (170mm) に揃えてから measure (screen 幅と print 幅で text wrap が
+    // 変わると section 高さが drift するため)。
     var origPadding = document.body.style.padding;
     var origWidth = document.body.style.width;
     var origMaxWidth = document.body.style.maxWidth;
@@ -118,16 +99,13 @@ export function buildSectionBreakScript(): string {
 
     try {
       var children = Array.prototype.slice.call(document.body.children);
-      // heights は「element box の高さ」ではなく「次要素 top までの距離」を使う。
-      // この方法で **ブロック間の上下マージン** が暗黙的に含まれ、virtualY の累積が
-      // 実 print layout と一致する。margin collapse が起きていても次要素の top を基準
-      // にすれば自動で正しい (旧 v2 で確立した方式、v5 で見落としていた #93 v5.1)。
+      // heights は「次要素 top - この要素 top」を使うことで margin collapse 後の
+      // 実際のブロック間距離 (= virtualY 累積に必要な値) が自動で含まれる。
       var heights = [];
       var bodyBottom = document.body.getBoundingClientRect().bottom;
       for (var i = 0; i < children.length; i++) {
         var top = children[i].getBoundingClientRect().top;
-        var nextTop =
-          i + 1 < children.length ? children[i + 1].getBoundingClientRect().top : bodyBottom;
+        var nextTop = i + 1 < children.length ? children[i + 1].getBoundingClientRect().top : bodyBottom;
         heights.push(Math.max(0, nextTop - top));
       }
 
@@ -148,14 +126,13 @@ export function buildSectionBreakScript(): string {
           continue;
         }
 
-        // smart-level 見出し → criterion に応じて needed height を算出して break-before 判定
+        // smart-level 見出し → criterion に応じて needed height を算出
         if (item.tagName === 'H' + smartLevel) {
           result.sectionsTotal++;
 
           var neededH;
           if (criterion === 'compact') {
-            // compact: 見出し + 直後の最初の本文ブロック (heading widow 防止のみ)
-            // 残りのコンテンツは現ページに溢れて自然分割を許容する詰めた挙動。
+            // compact: 見出し + 直後の最初の非見出しブロックのみ keep。
             neededH = h;
             if (i + 1 < children.length) {
               var first = children[i + 1];
@@ -164,8 +141,7 @@ export function buildSectionBreakScript(): string {
               }
             }
           } else {
-            // section (default): 見出し + 次の同位以下見出しまでの全コンテンツ
-            // 中割れを避けてセクション全体を次ページに送る strict 挙動。
+            // section: 見出し + 次の同位以下見出し or HR pagebreak までの全コンテンツ。
             neededH = h;
             for (var j = i + 1; j < children.length; j++) {
               var nx = children[j];
@@ -184,6 +160,7 @@ export function buildSectionBreakScript(): string {
 
           var inPage = virtualY % pageHeight;
           var remaining = pageHeight - inPage;
+          // 現ページに収まらない && 1 ページに収まる && 既にページ途中
           if (
             inPage > 0 &&
             (neededH + safetyBuffer) > remaining &&
