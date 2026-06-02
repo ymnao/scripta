@@ -38,9 +38,9 @@ describe("buildSectionBreakScript (#93 v5 inline break-before)", () => {
 		expect(s).toContain("height:257mm");
 	});
 
-	it("safety buffer (10%) で screen ⇔ print の layout drift を吸収する", () => {
+	it("safety buffer (5%) で screen ⇔ print の layout drift を吸収する", () => {
 		const s = buildSectionBreakScript();
-		expect(s).toContain("pageHeight * 0.1");
+		expect(s).toContain("pageHeight * 0.05");
 	});
 
 	it("section が現ページに収まらない時、見出し自身に inline break-before を注入する", () => {
