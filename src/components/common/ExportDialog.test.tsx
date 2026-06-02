@@ -153,7 +153,7 @@ describe("ExportDialog", () => {
 			expect(exportAsPdf).toHaveBeenCalled();
 		});
 
-		it("default で pageBreakLevel=h2 / smart=true / criterion=section が渡される (#93)", async () => {
+		it("default で pageBreakLevel=h2 / smart=true が渡される (#93, criterion 撤廃後)", async () => {
 			vi.mocked(exportAsPdf).mockResolvedValue(true);
 			renderDialog();
 			await switchToPdf();
@@ -164,7 +164,6 @@ describe("ExportDialog", () => {
 				expect.objectContaining({
 					pageBreakLevel: "h2",
 					smartPageBreak: true,
-					pageBreakCriterion: "section",
 				}),
 			);
 		});

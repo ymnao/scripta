@@ -467,6 +467,10 @@ export async function exportAsPdf(
 	options?: {
 		pageBreakLevel?: PageBreakLevel;
 		smartPageBreak?: boolean;
+		/**
+		 * @deprecated #93 redesign 後、criterion は廃止。smart=true + level !== "none" なら
+		 * 常に section wrap が走る。引数として渡されても無視される（後方互換のため保持）。
+		 */
 		pageBreakCriterion?: PageBreakCriterion;
 		zoom?: number;
 	},
@@ -484,7 +488,6 @@ export async function exportAsPdf(
 	const zoom = options?.zoom ?? 100;
 	const scaleFactor = zoom / 100;
 	const smart = options?.smartPageBreak ?? true;
-	const criterion: PageBreakCriterion = options?.pageBreakCriterion ?? "compact";
 
 	const pageBreak =
 		options?.pageBreakLevel && options.pageBreakLevel !== "none"
@@ -502,11 +505,24 @@ export async function exportAsPdf(
 	);
 	let bodyHtml = markdownToHtml(preprocessed, { breaks: true });
 
-	// criterion=section: smart-level の各セクションを `<section class="pdf-section-keep">`
-	// で wrap して Chromium 側で keep-together させる (#93 CSS-only)。
-	if (pageBreak?.smart && criterion === "section") {
+	// smart 改ページ時は常に smart-level のセクションを `<section class="pdf-section-keep">`
+	// で wrap (#93)。main 側の executeJavaScript hybrid 補正が「ページ境界をまたぐ section」
+	// を検出して break-before を inline 注入する。
+	// 旧 criterion option (compact / section) は撤廃: criterion=compact だと wrap が走らず
+	// hybrid 補正が機能せず中割れが残るため、選択肢を残すこと自体が UX バグだった。
+	let sectionsWrapped = 0;
+	if (pageBreak?.smart) {
+		const before = bodyHtml;
 		bodyHtml = wrapSectionsInHtml(bodyHtml, LEVEL_NUM[pageBreak.level]);
+		sectionsWrapped = (bodyHtml.match(/<section class="pdf-section-keep">/g) ?? []).length;
+		if (sectionsWrapped === 0 && before !== bodyHtml) {
+			// wrap してるはずなのに 0 件は起きないはず（保険）
+			console.warn("[scripta:#93] wrapSectionsInHtml ran but produced 0 sections");
+		}
 	}
+	console.log(
+		`[scripta:#93] exportAsPdf: level=${pageBreak?.level ?? "none"} smart=${pageBreak?.smart ?? false} wrappedSections=${sectionsWrapped}`,
+	);
 
 	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 

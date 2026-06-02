@@ -460,35 +460,34 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		expect(call[1]).toBe("/output/test.pdf");
 	});
 
-	it("smart=true + criterion=section: smart-level セクションを <section class=pdf-section-keep> で wrap する", async () => {
+	it("smart=true + level=h2: smart-level セクションを <section class=pdf-section-keep> で常に wrap する", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
-			pageBreakCriterion: "section",
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		// 2 つの h2 セクションそれぞれが wrap されている
 		expect(html.match(/<section class="pdf-section-keep">/g)?.length).toBe(2);
 	});
 
-	it("smart=true + criterion=compact: wrap は行わない", async () => {
+	it("criterion option を渡しても無視される (deprecated, #93 redesign)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
+		// 旧 criterion=compact を渡しても section wrap は走る
 		await exportAsPdf("# Title\n\n## A\n\nbody A\n\n## B\n\nbody B", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: true,
 			pageBreakCriterion: "compact",
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).not.toContain('<section class="pdf-section-keep">');
+		expect(html.match(/<section class="pdf-section-keep">/g)?.length).toBe(2);
 	});
 
-	it("smart=false: section wrap は行わない（criterion 無視）", async () => {
+	it("smart=false: section wrap は行わない", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "h2",
 			smartPageBreak: false,
-			pageBreakCriterion: "section",
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).not.toContain('<section class="pdf-section-keep">');
@@ -499,7 +498,6 @@ describe("exportAsPdf — CSS-only & section wrapping (#93)", () => {
 		await exportAsPdf("## A\n\nbody", "/workspace/test.md", {
 			pageBreakLevel: "none",
 			smartPageBreak: true,
-			pageBreakCriterion: "section",
 		});
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).not.toContain('<section class="pdf-section-keep">');

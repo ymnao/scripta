@@ -8,7 +8,6 @@ import {
 	exportAsPdf,
 	exportAsPrompt,
 	getDefaultPromptTemplate,
-	type PageBreakCriterion,
 	type PageBreakLevel,
 } from "../../lib/export";
 import {
@@ -55,11 +54,6 @@ const pageBreakLevelOptions: { value: Exclude<PageBreakLevel, "none">; label: st
 	{ value: "h3", label: "h3まで" },
 ];
 
-const pageBreakCriterionOptions: { value: PageBreakCriterion; label: string }[] = [
-	{ value: "compact", label: "コンパクト（見出し + 直後ブロック）" },
-	{ value: "section", label: "節単位（次の同位見出しまで）" },
-];
-
 export function ExportDialog({
 	open,
 	onClose,
@@ -81,11 +75,6 @@ export function ExportDialog({
 	// の典型ケースをカバー）。
 	const [pageBreakLevel, setPageBreakLevel] = useState<Exclude<PageBreakLevel, "none">>("h2");
 	const [smartPageBreak, setSmartPageBreak] = useState(true);
-	// default = section: Chromium の break-inside: avoid が wrapper では unreliable な
-	// ため、明示的に `<section class="pdf-section-keep">` で wrap + JS break-before 強制
-	// 注入の経路 (#93) を default で有効化する。compact は「重なってもよい」UX で、
-	// section の方が大半の用途で期待通りに動くので default。
-	const [pageBreakCriterion, setPageBreakCriterion] = useState<PageBreakCriterion>("section");
 	const [pdfZoom, setPdfZoom] = useState(100);
 	const [exporting, setExporting] = useState(false);
 	const [showScriptaDirConfirm, setShowScriptaDirConfirm] = useState(false);
@@ -114,7 +103,6 @@ export function ExportDialog({
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
-				pageBreakCriterion,
 				zoom: pdfZoom,
 			});
 			if (result) onClose();
@@ -242,15 +230,6 @@ export function ExportDialog({
 									onChange={setSmartPageBreak}
 									size="sm"
 								/>
-								{smartPageBreak && (
-									<SelectInput
-										id="export-pdf-page-break-criterion"
-										label="改ページ判定"
-										value={pageBreakCriterion}
-										options={pageBreakCriterionOptions}
-										onChange={setPageBreakCriterion}
-									/>
-								)}
 							</>
 						)}
 						<RangeInput
