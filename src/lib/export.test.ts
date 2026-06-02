@@ -580,6 +580,22 @@ describe("preprocessPageBreakMarkers (#93)", () => {
 		expect(out).toContain("`<!-- pagebreak -->`");
 		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
 	});
+
+	it("indented code block (4 space) 内のリテラル <!-- pagebreak --> も変換しない", () => {
+		const md =
+			"before\n\n    <!-- pagebreak -->\n    next line\n\nafter\n\n<!-- pagebreak -->\n\nend";
+		const out = preprocessPageBreakMarkers(md);
+		// indented code 内のものはそのまま、外側のものだけ hr に
+		expect(out).toContain("    <!-- pagebreak -->");
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
+
+	it("raw <pre>/<code> 内のリテラル <!-- pagebreak --> も変換しない", () => {
+		const md = "before\n\n<pre><!-- pagebreak --></pre>\n\nafter\n\n<!-- pagebreak -->\n\nend";
+		const out = preprocessPageBreakMarkers(md);
+		expect(out).toContain("<pre><!-- pagebreak --></pre>");
+		expect(out.match(/pdf-pagebreak/g)?.length).toBe(1);
+	});
 });
 
 describe("PDF 出力で pagebreak marker が HTML に伝わる (#93)", () => {

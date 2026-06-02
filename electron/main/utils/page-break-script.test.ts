@@ -29,12 +29,24 @@ describe("buildSectionBreakScript (#93)", () => {
 		expect(s).toMatch(/hc\.h2 >= 2/);
 	});
 
-	it("break-inside: avoid 要素が現ページに収まらないなら virtualY を次ページにジャンプ", () => {
+	it("break-inside: avoid 要素 (LI 含む) が現ページに収まらないなら virtualY を次ページにジャンプ", () => {
 		const s = buildSectionBreakScript();
 		expect(s).toContain("isAvoidBreakInside");
 		expect(s).toMatch(/'P' \|\| t === 'PRE'/);
+		expect(s).toContain("'LI'");
 		expect(s).toContain("mermaid-diagram");
 		expect(s).toMatch(/h > remainingA/);
+	});
+
+	it("body 直下の UL/OL を展開して LI を children に並べる (LI 単位の break-inside avoid 反映のため)", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toMatch(/c\.tagName === 'UL' \|\| c\.tagName === 'OL'/);
+		expect(s).toMatch(/lis\[li\]\.tagName === 'LI'/);
+	});
+
+	it("fallback で smart level が下がった場合、forceLevel を smartLevel-1 にクランプ", () => {
+		const s = buildSectionBreakScript();
+		expect(s).toMatch(/if \(forceLevel >= smartLevel\) forceLevel = smartLevel - 1/);
 	});
 
 	it("force-level meta を読み、該当見出しで virtualY を次ページ頭へジャンプする", () => {

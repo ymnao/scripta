@@ -89,6 +89,12 @@ export function buildSectionBreakScript(): string {
     result.smartLevelUsed = smartLevel;
     if (smartLevel === null) return JSON.stringify(result);
 
+    // fallback で smart level が下がった場合 (例: requested=3 → smartLevel=2)、
+    // renderer 由来の forceLevel (=2) のままだと loop が h2 を「上位 force-break」として
+    // 処理して continue し、smart-suppression に入らず fallback の意味が消える。
+    // forceLevel は常に smartLevel より浅い側 (= smartLevel - 1 以下) に clamp する。
+    if (forceLevel >= smartLevel) forceLevel = smartLevel - 1;
+
     // ページ高さ (A4 - 上下 20mm margin = 257mm) を実測。
     // ruler は body 内に置くと body.style.zoom が適用されるため、ruler 高さを
     // (257 / zoom) mm に補正して rendered 値が常に物理 257mm 相当の viewport px になるようにする。
@@ -120,7 +126,24 @@ export function buildSectionBreakScript(): string {
     document.body.offsetHeight; // 強制 reflow
 
     try {
-      var children = Array.prototype.slice.call(document.body.children);
+      // body 直下を走査しつつ、UL/OL は LI に展開する。CSS で li に break-inside: avoid
+      // が当たっているため、UL 全体を 1 つの自然高さで足すと最終 LI が実 print で次ページ
+      // に押し出される挙動を見逃す。LI 単位の高さで累積すれば LI 押し出しを正しく simulate
+      // できる。
+      var children = [];
+      var bodyDirectChildren = document.body.children;
+      for (var ci = 0; ci < bodyDirectChildren.length; ci++) {
+        var c = bodyDirectChildren[ci];
+        if (c.tagName === 'UL' || c.tagName === 'OL') {
+          var lis = c.children;
+          for (var li = 0; li < lis.length; li++) {
+            if (lis[li].tagName === 'LI') children.push(lis[li]);
+          }
+        } else {
+          children.push(c);
+        }
+      }
+
       // heights は「次要素 top - この要素 top」を使うことで margin collapse 後の
       // 実際のブロック間距離 (= virtualY 累積に必要な値) が自動で含まれる。
       var heights = [];
@@ -132,11 +155,15 @@ export function buildSectionBreakScript(): string {
       }
 
       // CSS で break-inside: avoid を当てている要素集合 (export.ts の @media print と同期)。
-      // これらの要素が現ページに収まらない場合、Chromium は次ページに送るので、virtualY
-      // の累積でも同じ挙動をシミュレートして実 print の paginated layout と一致させる。
+      // 現ページに収まらない場合 Chromium は次ページに送るので、virtualY 累積でも同じ
+      // 挙動をシミュレートして実 print の paginated layout と一致させる。LI も含める
+      // (UL/OL を expand したため、各 LI が直接 children に並ぶ)。
       function isAvoidBreakInside(el) {
         var t = el.tagName;
-        if (t === 'P' || t === 'PRE' || t === 'BLOCKQUOTE' || t === 'TABLE' || t === 'IMG') return true;
+        if (
+          t === 'P' || t === 'PRE' || t === 'BLOCKQUOTE' ||
+          t === 'TABLE' || t === 'IMG' || t === 'LI'
+        ) return true;
         return !!(el.classList && el.classList.contains('mermaid-diagram'));
       }
 

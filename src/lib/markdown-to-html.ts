@@ -24,8 +24,11 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
 	return merged;
 }
 
-/** Check whether `pos` falls inside any of the sorted, merged ranges. */
-function isInsideRanges(pos: number, ranges: Array<[number, number]>): boolean {
+/**
+ * Check whether `pos` falls inside any of the sorted, merged ranges.
+ * Exported alongside `collectRawCodeRanges` for shared use.
+ */
+export function isInsideRanges(pos: number, ranges: Array<[number, number]>): boolean {
 	let lo = 0;
 	let hi = ranges.length - 1;
 	while (lo <= hi) {
@@ -41,8 +44,12 @@ function isInsideRanges(pos: number, ranges: Array<[number, number]>): boolean {
 	return false;
 }
 
-/** Collect ranges of fenced / indented code blocks and inline code spans in raw markdown. */
-function collectRawCodeRanges(text: string): Array<[number, number]> {
+/**
+ * Collect ranges of fenced / indented code blocks and inline code spans in raw markdown.
+ * Exported so PDF preprocessing (`preprocessPageBreakMarkers`) can skip code regions when
+ * replacing `<!-- pagebreak -->` markers.
+ */
+export function collectRawCodeRanges(text: string): Array<[number, number]> {
 	const ranges: Array<[number, number]> = [];
 
 	// Fenced code blocks (``` or ~~~), including those nested inside

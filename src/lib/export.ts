@@ -2,7 +2,7 @@ import { version as katexVersion } from "katex/package.json";
 import type { PdfPageBreakCriterion } from "../types/pdf";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
-import { markdownToHtml } from "./markdown-to-html";
+import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { basename } from "./path";
 import { svgToPng } from "./svg-rasterize";
@@ -14,48 +14,20 @@ export type PageBreakCriterion = PdfPageBreakCriterion;
 const LEVEL_NUM: Record<Exclude<PageBreakLevel, "none">, 1 | 2 | 3> = { h1: 1, h2: 2, h3: 3 };
 
 /**
- * Fenced / inline code 範囲を簡易検出する (preprocessPageBreakMarkers が code 内の
- * リテラル `<!-- pagebreak -->` を誤って変換しないよう skip させるため)。
- */
-function findCodeRanges(markdown: string): Array<[number, number]> {
-	const ranges: Array<[number, number]> = [];
-	// Fenced code block (```/~~~). 行頭インデント 0〜3、開きと同種・同数以上の閉じ。
-	const fenceRe = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n[ \t]{0,3}\1[ \t]*(?=\n|$)/gm;
-	for (const m of markdown.matchAll(fenceRe)) {
-		const start = m.index ?? 0;
-		ranges.push([start, start + m[0].length]);
-	}
-	// Inline code span (`...`)。改行を跨がない単純なケースのみカバー。
-	for (const m of markdown.matchAll(/`+[^`\n]+?`+/g)) {
-		const start = m.index ?? 0;
-		ranges.push([start, start + m[0].length]);
-	}
-	ranges.sort((a, b) => a[0] - b[0]);
-	return ranges;
-}
-
-function isInsideAnyRange(pos: number, ranges: Array<[number, number]>): boolean {
-	for (let i = 0; i < ranges.length; i++) {
-		const [s, e] = ranges[i];
-		if (pos < s) return false; // sorted: それ以降は更に右
-		if (pos >= s && pos < e) return true;
-	}
-	return false;
-}
-
-/**
  * `<!-- pagebreak -->` を `<hr class="pdf-pagebreak"/>` に変換する (#93)。
  * markdown を渡す段階で適用し、HTML / PDF どちらの経路でも著者マーカーを有効化する。
  * CSS で visibility:hidden + @media print の break-before:page を当てるため、画面上は
  * 不可視・印刷時にだけページ送りされる。
  *
- * fenced/inline code 内の文字列リテラルは置換しない (機能をドキュメントする目的の
- * code sample 等を壊さないため)。
+ * fenced / indented / inline code / raw `<pre>` / `<code>` 内の文字列リテラルは
+ * 置換しない (機能をドキュメントする目的の code sample 等を壊さないため)。
+ * code 範囲検出は markdown-to-html.ts の `collectRawCodeRanges` を共有して、
+ * KaTeX 等の他経路と完全一致させる。
  */
 export function preprocessPageBreakMarkers(markdown: string): string {
-	const codeRanges = findCodeRanges(markdown);
+	const codeRanges = collectRawCodeRanges(markdown);
 	return markdown.replace(/<!--\s*pagebreak\s*-->/gi, (match, offset: number) =>
-		isInsideAnyRange(offset, codeRanges) ? match : '\n\n<hr class="pdf-pagebreak"/>\n\n',
+		isInsideRanges(offset, codeRanges) ? match : '\n\n<hr class="pdf-pagebreak"/>\n\n',
 	);
 }
 
