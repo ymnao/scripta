@@ -195,6 +195,24 @@ describe("pinSafeLookup - hostname resolution", () => {
 		mockedLookup.mockImplementation(() => new Promise(() => {}));
 		await expect(pinSafeLookup("slow.example", 30)).rejects.toThrow(/timeout/i);
 	});
+	it("rejects immediately when called with already-aborted signal (P3, hostname path)", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		// dns.lookup は呼ばれないはず（signal.aborted 早期 throw）
+		mockedLookup.mockImplementation(() => new Promise(() => {}));
+		await expect(pinSafeLookup("aborted.example", T, controller.signal)).rejects.toThrow(
+			/aborted/i,
+		);
+	});
+	it("rejects when signal aborts mid-DNS-lookup (P3, hostname path)", async () => {
+		// dns.lookup を pending のままにして外から abort を発火 → Promise.race の
+		// abort 側が勝って unblock されることを確認。
+		mockedLookup.mockImplementation(() => new Promise(() => {}));
+		const controller = new AbortController();
+		const p = pinSafeLookup("slow.example", T, controller.signal);
+		setTimeout(() => controller.abort(), 10);
+		await expect(p).rejects.toThrow(/aborted/i);
+	});
 });
 
 describe("pinSafeLookup - DNS rebinding defense", () => {

@@ -50,7 +50,9 @@ export function getCardDeleteRange(
 }
 
 type CacheEntry =
-	| { status: "loading"; cachedAt: number }
+	// loading.requestId は開始した plugin instance の発行 ID。cancel 時に
+	// 「自分が開始した loading」だけを delete するための owner 識別子。
+	| { status: "loading"; cachedAt: number; requestId: string }
 	| { status: "loaded"; data: OgpData; cachedAt: number }
 	| { status: "error"; errorAt: number };
 
@@ -58,12 +60,20 @@ const ogpCache = new Map<string, CacheEntry>();
 
 const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
-// loading entry はグローバル dedup として働く（複数 plugin が同じ URL を二重 fetch
-// しないため）。fetch を始めた plugin が cancel された場合、entry を消すと「他 plugin
-// が完了待ち中の状態」を壊して空 card のまま膠着するため delete はしない。代わりに
-// LOADING_STALE_MS を超えた loading は stale と見做して別 plugin が re-fetch を始める。
-const LOADING_STALE_MS = 60_000; // 60秒
+// 開始者の cancel 後に他 plugin が知らずに loading を待ち続けるのを防ぐ safety net。
+// 通常は ABORTED catch → cache.delete → broadcast event で即時復帰するが、何らかの
+// 理由で event が届かなかった場合 (broadcast 経路の bug 等) の fallback として 60s 後に
+// 別 plugin が re-fetch する。
+const LOADING_STALE_MS = 60_000;
 const MAX_CACHE_ENTRIES = 500;
+
+// 開始者が cancel された等で cache から消えた URL を、生存中の他 plugin に通知して
+// 即時 re-fetch させるための broadcast channel。CodeMirror の view 間 dispatch は
+// 直接的な手段がないため、window-level CustomEvent を使う（renderer 内に限られる）。
+const OGP_CACHE_INVALIDATED_EVENT = "scripta:ogp-cache-invalidated";
+interface OgpCacheInvalidatedDetail {
+	url: string;
+}
 
 function evictStaleCache() {
 	const now = Date.now();
@@ -283,11 +293,23 @@ class LinkCardDecorationPlugin implements PluginValue {
 	private pendingUpdate = false;
 	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 	private destroyed = false;
+	private cacheInvalidatedHandler: (e: Event) => void;
 
 	constructor(view: EditorView) {
 		this.view = view;
 		this.decorations = buildDecorations(view);
 		this.prevCursorLines = collectCursorLines(view);
+		// 他 plugin が ABORTED で cache を消したときに自分の view を再評価させるため
+		// の listener。view.dispatch で update を発火し、fetchMissingOgp で必要なら
+		// 再 fetch する。
+		this.cacheInvalidatedHandler = (e: Event) => {
+			if (this.destroyed) return;
+			const detail = (e as CustomEvent<OgpCacheInvalidatedDetail>).detail;
+			if (typeof detail?.url !== "string") return;
+			this.pendingUpdate = true;
+			this.view.dispatch({});
+		};
+		window.addEventListener(OGP_CACHE_INVALIDATED_EVENT, this.cacheInvalidatedHandler);
 		this.fetchMissingOgp(view);
 	}
 
@@ -313,8 +335,8 @@ class LinkCardDecorationPlugin implements PluginValue {
 				evictStaleCache();
 				evicted = true;
 			}
-			ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
 			const requestId = crypto.randomUUID();
+			ogpCache.set(url, { status: "loading", cachedAt: Date.now(), requestId });
 			this.fetchingUrls.set(url, requestId);
 
 			fetchOgp(requestId, url)
@@ -327,11 +349,22 @@ class LinkCardDecorationPlugin implements PluginValue {
 				})
 				.catch((err: unknown) => {
 					this.fetchingUrls.delete(url);
-					// cancel 経路（自分の destroy 経由）では cache を触らない。他 plugin が
-					// 同一 URL の loading entry を共有しており、ここで delete すると他 view
-					// が空 card のまま膠着するため。stale loading は LOADING_STALE_MS 後に
-					// 別 plugin が re-fetch する。
-					if (getErrorKind(err) === "ABORTED") return;
+					if (getErrorKind(err) === "ABORTED") {
+						// 自分が開始した loading entry だけを削除し、broadcast で他 plugin
+						// に即時 re-fetch を促す（他 plugin が loading を共有して待ち続ける
+						// 膠着を回避）。loading entry の owner が別の requestId なら触らない
+						// — その plugin の責任で更新される。
+						const cached = ogpCache.get(url);
+						if (cached?.status === "loading" && cached.requestId === requestId) {
+							ogpCache.delete(url);
+							window.dispatchEvent(
+								new CustomEvent<OgpCacheInvalidatedDetail>(OGP_CACHE_INVALIDATED_EVENT, {
+									detail: { url },
+								}),
+							);
+						}
+						return;
+					}
 					ogpCache.set(url, { status: "error", errorAt: Date.now() });
 					if (this.destroyed) return;
 					this.pendingUpdate = true;
@@ -409,6 +442,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 	destroy() {
 		this.destroyed = true;
 		this.cancelRebuild();
+		window.removeEventListener(OGP_CACHE_INVALIDATED_EVENT, this.cacheInvalidatedHandler);
 		// 文書切替 / unmount で自身が発行した requestId だけを cancel する（#101）。
 		// URL 単位の cancel だと他 view の後発 request を誤って巻き込むため、requestId
 		// ベースで個別停止する。

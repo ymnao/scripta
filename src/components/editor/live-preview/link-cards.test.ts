@@ -360,4 +360,41 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 		view.destroy();
 		expect(vi.mocked(commands.cancelOgpFetch).mock.calls.length).toBe(0);
 	});
+
+	// 開始者が cancel された後、生存中の別 view が同 URL を待ち続けないか。
+	// 主目的は ogpCache.delete を発火する条件（loading.requestId === own）と、
+	// 直後の scripta:ogp-cache-invalidated event broadcast の確認。実際の
+	// 「別 view が re-fetch する」連鎖は jsdom 上で event を listen している
+	// 別 plugin インスタンスに依る — ここでは event 発火と cache 状態を直接検証する。
+	it("ABORTED catch deletes own loading entry and broadcasts cache-invalidated event", async () => {
+		const ABORTED_ERROR = Object.assign(new Error("aborted"), { kind: "ABORTED" });
+		// fetchOgp は controller を介さず手動で reject を発火するため、reject 可能な
+		// promise を作って rejecter を box 経由で取り出す（control-flow narrowing 回避）。
+		const rejecterBox: { reject: ((err: unknown) => void) | null } = { reject: null };
+		vi.mocked(commands.fetchOgp).mockImplementation(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejecterBox.reject = reject;
+				}),
+		);
+
+		const view = mountEditor("hello\nhttps://example.com/x\n");
+		const events: CustomEvent[] = [];
+		const listener = (e: Event) => events.push(e as CustomEvent);
+		window.addEventListener("scripta:ogp-cache-invalidated", listener);
+
+		try {
+			expect(rejecterBox.reject).not.toBeNull();
+			rejecterBox.reject?.(ABORTED_ERROR);
+			// catch は microtask なので 1 tick 待つ
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(events.length).toBe(1);
+			expect(events[0].detail).toEqual({ url: "https://example.com/x" });
+		} finally {
+			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
+			view.destroy();
+		}
+	});
 });

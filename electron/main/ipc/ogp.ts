@@ -96,7 +96,7 @@ async function fetchWithRedirects(
 		// 「DNS + HTTP で 1 hop あたり最大 REQUEST_TIMEOUT_MS」を維持する。
 		const bareHost = stripIpBrackets(parsed.hostname);
 		const hopStart = Date.now();
-		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS);
+		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS, signal);
 		const httpTimeout = Math.max(1, REQUEST_TIMEOUT_MS - (Date.now() - hopStart));
 		const res = await httpFetch({
 			url: parsed,
@@ -158,8 +158,11 @@ async function fetchOgpImpl(requestId: string, url: string): Promise<OgpData> {
 	} catch (err) {
 		// IPC 越しに `err.name` は保たれないので、cancel 経路は ErrorKind="ABORTED" の
 		// StructuredError に変換して renderer に渡す（renderer は getErrorKind で判別）。
-		if (err instanceof AbortError) {
-			throw new StructuredError("ABORTED", err.message);
+		// AbortError は http-fetch 層からの socket abort、controller.signal.aborted
+		// は DNS lookup 中の abort も捕捉する（pinSafeLookup が ABORT_ERR で reject した
+		// 場合の err はカスタム Error なので signal 判定で拾う）。
+		if (err instanceof AbortError || controller.signal.aborted) {
+			throw new StructuredError("ABORTED", err instanceof Error ? err.message : String(err));
 		}
 		throw err;
 	} finally {
