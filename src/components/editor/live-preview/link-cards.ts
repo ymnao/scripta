@@ -12,14 +12,14 @@ import {
 import { fetchOgp, openExternal } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
-import { isSafeImageUrl, isSafeUrl } from "./links";
+import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
 import { collectCodeRanges, overlapsCodeBlock } from "./math";
 
-const STANDALONE_URL_RE = /^https?:\/\/[^\s]+$/i;
-
 export function isStandaloneUrlLine(lineText: string): string | null {
+	// `URL_PASTE_RE` と同じ shape (`/^https?:\/\/[^\s]+$/i`) — 単一行 URL 検出は
+	// paste 判定と同条件なので共有する。
 	const trimmed = lineText.trim();
-	return STANDALONE_URL_RE.test(trimmed) ? trimmed : null;
+	return URL_PASTE_RE.test(trimmed) ? trimmed : null;
 }
 
 /**

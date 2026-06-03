@@ -23,6 +23,7 @@ import {
 } from "react";
 import { openExternal } from "../../lib/commands";
 import { buildFence } from "../../lib/export";
+import { IS_MAC, PRIMARY_MOD_SYMBOL } from "../../lib/platform";
 import { useSettingsStore } from "../../stores/settings";
 import { Dialog } from "../common/Dialog";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
@@ -65,8 +66,6 @@ import {
 	wikilinkHoverTooltip,
 } from "./live-preview";
 import { MermaidEditorDialog } from "./MermaidEditorDialog";
-
-const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
 
 /**
  * Mouse event の target を Element に正規化する小ヘルパー。
@@ -484,7 +483,7 @@ export function MarkdownEditor({
 		const pasteItem: ContextMenuItem = {
 			id: "paste",
 			label: "貼り付け",
-			shortcut: `${isMac ? "⌘" : "Ctrl+"}V`,
+			shortcut: `${PRIMARY_MOD_SYMBOL}V`,
 			onClick: () => {
 				if (!navigator.clipboard) return;
 				navigator.clipboard.readText().then(
@@ -501,13 +500,13 @@ export function MarkdownEditor({
 			{
 				id: "undo",
 				label: "元に戻す",
-				shortcut: `${isMac ? "⌘" : "Ctrl+"}Z`,
+				shortcut: `${PRIMARY_MOD_SYMBOL}Z`,
 				onClick: withFocus(undo),
 			},
 			{
 				id: "redo",
 				label: "やり直す",
-				shortcut: isMac ? "⇧⌘Z" : "Ctrl+Y",
+				shortcut: IS_MAC ? "⇧⌘Z" : "Ctrl+Y",
 				onClick: withFocus(redo),
 			},
 		];
@@ -517,7 +516,7 @@ export function MarkdownEditor({
 				{
 					id: "cut",
 					label: "切り取り",
-					shortcut: `${isMac ? "⌘" : "Ctrl+"}X`,
+					shortcut: `${PRIMARY_MOD_SYMBOL}X`,
 					onClick: () => {
 						if (!navigator.clipboard) return;
 						const s = view.state.selection.main;
@@ -534,7 +533,7 @@ export function MarkdownEditor({
 				{
 					id: "copy",
 					label: "コピー",
-					shortcut: `${isMac ? "⌘" : "Ctrl+"}C`,
+					shortcut: `${PRIMARY_MOD_SYMBOL}C`,
 					onClick: () => {
 						if (!navigator.clipboard) return;
 						const s = view.state.selection.main;
@@ -552,19 +551,19 @@ export function MarkdownEditor({
 				{
 					id: "bold",
 					label: "太字",
-					shortcut: `${isMac ? "⌘" : "Ctrl+"}B`,
+					shortcut: `${PRIMARY_MOD_SYMBOL}B`,
 					onClick: withFocus(toggleBold),
 				},
 				{
 					id: "italic",
 					label: "斜体",
-					shortcut: `${isMac ? "⌘" : "Ctrl+"}I`,
+					shortcut: `${PRIMARY_MOD_SYMBOL}I`,
 					onClick: withFocus(toggleItalic),
 				},
 				{
 					id: "strikethrough",
 					label: "取り消し線",
-					shortcut: isMac ? "⇧⌘X" : "Ctrl+Shift+X",
+					shortcut: IS_MAC ? "⇧⌘X" : "Ctrl+Shift+X",
 					onClick: withFocus(toggleStrikethrough),
 				},
 			];
@@ -578,7 +577,7 @@ export function MarkdownEditor({
 			{
 				id: "insert-table",
 				label: "テーブルを挿入",
-				shortcut: isMac ? "⇧⌘T" : "Ctrl+Shift+T",
+				shortcut: IS_MAC ? "⇧⌘T" : "Ctrl+Shift+T",
 				onClick: withFocus(insertTable),
 			},
 			{ id: "insert-hr", label: "水平線を挿入", onClick: withFocus(insertHorizontalRule) },
@@ -597,7 +596,7 @@ export function MarkdownEditor({
 			{
 				id: "open-md-link",
 				label: "リンクを開く",
-				shortcut: `${isMac ? "⌘" : "Ctrl+"}クリック`,
+				shortcut: `${PRIMARY_MOD_SYMBOL}クリック`,
 				onClick: () => {
 					openExternal(url).catch((error) => {
 						console.error("Failed to open URL:", url, error);

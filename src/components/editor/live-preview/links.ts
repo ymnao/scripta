@@ -10,15 +10,18 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { openExternal } from "../../../lib/commands";
+import { IS_MAC, PRIMARY_MOD_SYMBOL } from "../../../lib/platform";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
-// Only allow http/https URLs without whitespace characters.
-// data: URLs are explicitly blocked as defense-in-depth.
-const SAFE_URL_RE = /^https?:\/\/[^\s]+$/i;
+// http/https のみ、whitespace 不可。
+// `isSafeUrl` / `urlPasteHandler` / `link-cards.ts isStandaloneUrlLine` の
+// 3 箇所で同じ正規表現が必要なので 1 つだけ宣言して使い回す。
+export const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
 
 export function isSafeUrl(url: string): boolean {
+	// data: URLs は defense-in-depth で明示拒否（URL_PASTE_RE でも弾けるが念のため）
 	if (/^data:/i.test(url)) return false;
-	return SAFE_URL_RE.test(url);
+	return URL_PASTE_RE.test(url);
 }
 
 /**
@@ -75,13 +78,6 @@ export function isSafeImageUrl(url: string): boolean {
 }
 
 /**
- * 実行時の Mac 判定。`navigator.platform` は deprecated 寄りだが Electron 環境
- * では安定して使える（ipc/main から userAgent 配るより軽い）。テストでは
- * jsdom が `""` を返すので非 Mac 扱いになる点に注意。
- */
-const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
-
-/**
  * 「リンクを開く」操作とみなす modifier 押下判定 (pure 版)。
  * - macOS: Cmd (metaKey) のみ。Ctrl+click は context menu 操作なので除外する
  * - その他 OS: Ctrl (ctrlKey) のみ
@@ -111,6 +107,13 @@ export function decideOpenLinkModifierKey(key: string, isMac: boolean): boolean 
 /** runtime 用: OS を自動判定。 */
 export function isOpenLinkModifierKey(key: string): boolean {
 	return decideOpenLinkModifierKey(key, IS_MAC);
+}
+
+/** ViewPlugin handler / widget keydown 両方から呼ばれる共通の URL open helper。 */
+function openLinkWidgetUrl(url: string): void {
+	openExternal(url).catch((error) => {
+		console.error("Failed to open external URL:", url, error);
+	});
 }
 
 /**
@@ -155,7 +158,7 @@ export class LinkWidget extends WidgetType {
 			// で preventDefault することで抑制する。
 			anchor.href = this.url;
 			anchor.dataset.linkWidgetUrl = this.url;
-			anchor.title = `${this.url} (${IS_MAC ? "⌘" : "Ctrl"}+クリックで開く)`;
+			anchor.title = `${this.url} (${PRIMARY_MOD_SYMBOL}クリックで開く)`;
 			anchor.tabIndex = 0;
 			// マウス系イベントは ViewPlugin.eventHandlers (linkPlugin) が捌くので
 			// widget DOM 上には listener を付けない。CodeMirror 公式の
@@ -217,6 +220,8 @@ function parseLinkNode(
 		} else if (cursor.name === "URL") {
 			url = stripUrlAngleBrackets(state.doc.sliceString(cursor.from, cursor.to));
 		}
+		// 必要な 3 要素が揃ったら以降の sibling を見る必要は無い
+		if (url && foundCloseBracket && textFrom >= 0) break;
 	} while (cursor.nextSibling());
 	if (!url || textFrom < 0 || textTo < 0) return null;
 	return { url, label: state.doc.sliceString(textFrom, textTo), textFrom, textTo };
@@ -331,11 +336,7 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 			if (event.button === 0 && isOpenLinkModifierEvent(event)) {
 				event.preventDefault();
 				const url = widgetEl.dataset.linkWidgetUrl;
-				if (url) {
-					openExternal(url).catch((error) => {
-						console.error("Failed to open external URL:", url, error);
-					});
-				}
+				if (url) openLinkWidgetUrl(url);
 				return true;
 			}
 
@@ -400,15 +401,11 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 			if (!url) return false;
 			event.preventDefault();
 			event.stopPropagation();
-			openExternal(url).catch((error) => {
-				console.error("Failed to open external URL:", url, error);
-			});
+			openLinkWidgetUrl(url);
 			return true;
 		},
 	},
 });
-
-export const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
 
 /** Escape label text for safe use inside Markdown link brackets. */
 export function escapeMarkdownLabel(label: string): string {
@@ -551,25 +548,25 @@ const urlPasteHandler = EditorView.domEventHandlers({
  * - それ以外（非 URL / whitespace-only / コードブロック内 URL）→ raw を lossless 挿入
  */
 export function applyClipboardPasteAsMdLink(view: EditorView, raw: string | null): void {
-	if (raw == null || raw === "") return;
+	if (!raw) return; // null / 空文字
 
 	const trimmed = raw.trim();
 	const isUrl = trimmed.length > 0 && URL_PASTE_RE.test(trimmed);
-	const inCode = anyRangeInCodeConstruct(view.state);
 
-	if (!isUrl || inCode) {
-		// raw を lossless 挿入 — 非 URL / whitespace-only / コードブロック内 URL
-		const { state } = view;
-		const changes = state.changeByRange((range) => ({
-			range: EditorSelection.cursor(range.from + raw.length),
-			changes: { from: range.from, to: range.to, insert: raw },
-		}));
-		view.dispatch({ ...changes, userEvent: "input.paste" });
+	// URL かつコードブロック外 → md リンク化。anyRangeInCodeConstruct は
+	// 構文木 walk を含むので URL のときだけ評価する（非 URL paste 時の hot path）
+	if (isUrl && !anyRangeInCodeConstruct(view.state)) {
+		dispatchUrlInsert(view, trimmed, /* forceConvert */ true);
 		return;
 	}
 
-	// URL かつコードブロック外 → md リンク化
-	dispatchUrlInsert(view, trimmed, /* forceConvert */ true);
+	// それ以外 (非 URL / whitespace-only / コードブロック内 URL) → raw を lossless 挿入
+	const { state } = view;
+	const changes = state.changeByRange((range) => ({
+		range: EditorSelection.cursor(range.from + raw.length),
+		changes: { from: range.from, to: range.to, insert: raw },
+	}));
+	view.dispatch({ ...changes, userEvent: "input.paste" });
 }
 
 /**
@@ -602,9 +599,11 @@ export function isLineOnlyMdLink(
 	linkStartInLine: number,
 	linkEndInLine: number,
 ): boolean {
-	const before = lineText.slice(0, linkStartInLine).trim();
-	const after = lineText.slice(linkEndInLine).trim();
-	return before === "" && after === "";
+	// link が行全体を占めるなら slice+trim を回避できる common case
+	if (linkStartInLine === 0 && linkEndInLine === lineText.length) return true;
+	return (
+		lineText.slice(0, linkStartInLine).trim() === "" && lineText.slice(linkEndInLine).trim() === ""
+	);
 }
 
 /**

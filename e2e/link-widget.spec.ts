@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
+import type { ElectronApiMock } from "./helpers/electron-api-mock";
+import { modKey } from "./helpers/electron-api-mock";
+import { openSingleFileWorkspace } from "./helpers/workspace-setup";
 
 /**
  * md link widget (`[label](<url>)` の青リンク表示) と OGP card 右クリックメニュー
@@ -19,48 +21,38 @@ const URL_EXAMPLE = "https://example.com";
 const URL_OTHER = "https://other.test";
 const URL_CARD = "https://standalone.test";
 
-const workspace = {
-	files: {
-		"/workspace/links.md": [
-			"intro line",
-			"",
-			`[Example](<${URL_EXAMPLE}>)`, // URL-only line, label != URL
-			"",
-			`prefix [Other](<${URL_OTHER}>) suffix`, // mixed-line (suppress "カードにする")
-			"",
-			URL_CARD, // standalone → OGP card
-			"",
-			"end",
-		].join("\n"),
-	},
-	directories: {
-		"/workspace": [{ name: "links.md", path: "/workspace/links.md", isDirectory: false }],
-	},
-};
+const linksMdContent = [
+	"intro line",
+	"",
+	`[Example](<${URL_EXAMPLE}>)`, // URL-only line, label != URL
+	"",
+	`prefix [Other](<${URL_OTHER}>) suffix`, // mixed-line (suppress "カードにする")
+	"",
+	URL_CARD, // standalone → OGP card
+	"",
+	"end",
+].join("\n");
 
 async function setupLinksFile(page: Page): Promise<ElectronApiMock> {
-	const mock = new ElectronApiMock(page);
-	await mock.setup({ fs: workspace, dialogResult: "/workspace" });
-	await page.goto("/");
-	await page.getByLabel("Open folder").click();
-	await page.getByLabel("links.md file").click();
-	const editor = page.locator(".cm-content");
-	await expect(editor).toBeVisible();
+	const { mock, editor } = await openSingleFileWorkspace(page, {
+		files: { "/workspace/links.md": linksMdContent },
+	});
 	await editor.click();
 	// カーソルを先頭に: link widget / card が render される位置から離す
 	await page.keyboard.press(`${modKey}+Home`);
 	// widget が render されるまで待つ
 	await expect(page.locator(".cm-link-widget").first()).toBeVisible({ timeout: 10000 });
+	// 各 test の openExternal assert を簡潔にするため初期 calls をクリア
+	await mock.clearCalls("openExternal");
 	return mock;
 }
 
 test.describe("md link widget — cmd/ctrl+click で URL を開く", () => {
 	test("modifier+click が openExternal を呼ぶ", async ({ page }) => {
 		const mock = await setupLinksFile(page);
-		await mock.clearCalls("openExternal");
 
 		const widget = page.locator(".cm-link-widget").first();
-		await widget.click({ modifiers: [modKey === "Meta" ? "Meta" : "Control"] });
+		await widget.click({ modifiers: [modKey] });
 
 		const calls = await mock.getCalls("openExternal");
 		expect(calls.length).toBeGreaterThan(0);
@@ -69,7 +61,6 @@ test.describe("md link widget — cmd/ctrl+click で URL を開く", () => {
 
 	test("plain click は openExternal を呼ばずカーソル移動だけする", async ({ page }) => {
 		const mock = await setupLinksFile(page);
-		await mock.clearCalls("openExternal");
 
 		// 「Example」widget をクリック → cursor が link 行に入り cursorInRange で
 		// 該当 widget が消える（残った widget は混在 line の "Other" 側 1 つだけ）
@@ -114,7 +105,6 @@ test.describe("md link widget — 右クリックメニュー", () => {
 
 	test("「リンクを開く」メニュー click で openExternal が呼ばれる", async ({ page }) => {
 		const mock = await setupLinksFile(page);
-		await mock.clearCalls("openExternal");
 
 		const widget = page.locator(".cm-link-widget").first();
 		await widget.click({ button: "right" });
@@ -190,7 +180,6 @@ test.describe("OGP card — 右クリックメニュー", () => {
 
 	test("「リンクを開く」が openExternal を呼ぶ", async ({ page }) => {
 		const mock = await setupLinksFile(page);
-		await mock.clearCalls("openExternal");
 
 		const card = page.locator(".cm-link-card").first();
 		await card.click({ button: "right" });
