@@ -542,20 +542,23 @@ const urlPasteHandler = EditorView.domEventHandlers({
  * Cmd+Shift+V で clipboard を読み終えた後に走る同期ロジック。
  * テスタビリティのため `pasteAsMarkdownLinkCommand` から切り出している。
  *
- * - URL なら強制的に md リンク化（selection あれば label に）
- * - 非 URL なら raw のまま挿入（先頭/末尾 whitespace を保持）
- * - コードブロック内なら常に plain
+ * `Mod-Shift-v` keymap が native paste を抑止する以上、plain insert する path
+ * では native paste と同じ "as-is" 体験を保証する（raw をそのまま挿入）。
  *
- * URL 判定は trim 後の値で行うが、非 URL を挿入する際は trim していない raw を
- * そのまま挿入する。これは native paste を `Mod-Shift-v` keymap が抑止する代わりに
- * 同じ "as-is" 体験を提供するため。
+ * 分岐:
+ * - clipboard が空文字 / null → no-op
+ * - clipboard が URL かつコードブロック外 → md リンク化（trimmed URL を [label](<url>) で wrap）
+ * - それ以外（非 URL / whitespace-only / コードブロック内 URL）→ raw を lossless 挿入
  */
 export function applyClipboardPasteAsMdLink(view: EditorView, raw: string | null): void {
-	if (raw == null) return;
+	if (raw == null || raw === "") return;
+
 	const trimmed = raw.trim();
-	if (!trimmed) return; // whitespace-only clipboard は no-op
-	if (!URL_PASTE_RE.test(trimmed)) {
-		// 非 URL は raw のまま挿入（lossless）
+	const isUrl = trimmed.length > 0 && URL_PASTE_RE.test(trimmed);
+	const inCode = anyRangeInCodeConstruct(view.state);
+
+	if (!isUrl || inCode) {
+		// raw を lossless 挿入 — 非 URL / whitespace-only / コードブロック内 URL
 		const { state } = view;
 		const changes = state.changeByRange((range) => ({
 			range: EditorSelection.cursor(range.from + raw.length),
@@ -564,6 +567,8 @@ export function applyClipboardPasteAsMdLink(view: EditorView, raw: string | null
 		view.dispatch({ ...changes, userEvent: "input.paste" });
 		return;
 	}
+
+	// URL かつコードブロック外 → md リンク化
 	dispatchUrlInsert(view, trimmed, /* forceConvert */ true);
 }
 

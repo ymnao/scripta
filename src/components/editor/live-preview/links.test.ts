@@ -450,29 +450,38 @@ describe("applyClipboardPasteAsMdLink", () => {
 		expect(dispatched[0].userEvent).toBe("input.paste");
 	});
 
-	it("does nothing when clipboard is empty/whitespace", () => {
-		const { view, dispatched } = makeView("", 0);
-		applyClipboardPasteAsMdLink(view, "   ");
-		expect(dispatched).toHaveLength(0);
-	});
-
 	it("does nothing when clipboard is null", () => {
 		const { view, dispatched } = makeView("", 0);
 		applyClipboardPasteAsMdLink(view, null);
 		expect(dispatched).toHaveLength(0);
 	});
 
-	it("inserts plain URL when cursor is in a code block (force convert overridden)", () => {
+	it("does nothing when clipboard is empty string", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "");
+		expect(dispatched).toHaveLength(0);
+	});
+
+	it("inserts whitespace-only clipboard as-is (lossless, no swallow)", () => {
+		// インデントや改行を意図的に paste するケースを保つ
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "   ");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("   ");
+	});
+
+	it("inserts raw (with whitespace) when cursor is in a code block, even for URL", () => {
+		// コードブロック内では md リンク化せず raw 挿入する → 前後 whitespace も保持
 		const doc = "```\ncode\n```";
 		const inCode = doc.indexOf("code") + 2;
 		const { view, dispatched } = makeView(doc, inCode);
-		applyClipboardPasteAsMdLink(view, "https://example.com");
+		applyClipboardPasteAsMdLink(view, "  https://example.com\n");
 		expect(dispatched).toHaveLength(1);
-		expect(dispatched[0].insert).toBe("https://example.com");
+		expect(dispatched[0].insert).toBe("  https://example.com\n");
 	});
 
-	it("trims whitespace from clipboard before checking URL pattern", () => {
-		// URL 判定は trim 後で行う（URL 周辺の whitespace は捨てて OK）
+	it("trims whitespace from URL only when wrapping into md link (outside code blocks)", () => {
+		// URL 周辺の whitespace は md リンクに包む際は捨てて良い（label/URL に混ぜない）
 		const { view, dispatched } = makeView("", 0);
 		applyClipboardPasteAsMdLink(view, "  https://example.com\n");
 		expect(dispatched[0].insert).toBe("[https://example.com](<https://example.com>)");
