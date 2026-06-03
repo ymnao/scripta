@@ -332,8 +332,29 @@ const orderedMarkerRe = /^([ \t]*)(\d+)([.)]) /;
 /** Matches any bullet/task marker capturing the indent and the bullet char separately */
 const anyBulletRe = /^([ \t]*)([-*+]) (\[[ xX]\] )?/;
 
-/** Indent unit used when nesting list items via Tab. Matches `indentUnit` config. */
+/**
+ * Fallback indent unit when there is no preceding sibling to copy the content
+ * offset from (e.g. Tab on a single isolated list item). Matches the editor's
+ * `indentUnit` config so behavior stays consistent with plain text Tab.
+ */
 const LIST_INDENT_UNIT = "  ";
+
+/**
+ * Column where the content of a list item starts (= indent + marker + trailing
+ * space). Nesting a sub-item to this column makes the markdown parser treat it
+ * as a child of this item, which is required for `insertNewlineContinueMarkup`
+ * to scope its `renumberList` to the nested level instead of walking parent
+ * siblings.
+ */
+function listContentOffset(info: ListLineInfo): number {
+	if (info.ordered) {
+		return info.indent.length + String(info.ordered.number).length + 2;
+	}
+	if (info.task) {
+		return info.indent.length + 6; // "- [ ] " or "- [x] "
+	}
+	return info.indent.length + 2; // "- "
+}
 
 export interface ListLineInfo {
 	indent: string;
@@ -371,6 +392,48 @@ function isInsideCodeBlock(state: EditorState, pos: number): boolean {
 		}
 	}
 	return false;
+}
+
+/**
+ * Determine the indent for a line being nested via Tab. Looks backward for the
+ * nearest list line at the same current indent (which becomes the parent after
+ * Tab) and matches its content offset so the markdown parser treats the result
+ * as a true nested list. Falls back to `oldIndent + LIST_INDENT_UNIT` when no
+ * suitable sibling exists.
+ */
+function computeIndentForNest(state: EditorState, lineNum: number, oldIndent: string): string {
+	for (let i = lineNum - 1; i >= 1; i--) {
+		const text = state.doc.line(i).text;
+		if (text.trim() === "") break;
+		const info = parseListLine(text);
+		if (!info) break;
+		if (info.indent.length > oldIndent.length) continue;
+		if (info.indent.length < oldIndent.length) break;
+		const targetCol = listContentOffset(info);
+		if (targetCol <= oldIndent.length) break;
+		return " ".repeat(targetCol);
+	}
+	return oldIndent + LIST_INDENT_UNIT;
+}
+
+/**
+ * Determine the indent for a line being un-nested via Shift+Tab. Walks back to
+ * find the nearest shallower list line (the parent) and matches its indent so
+ * the line becomes a sibling of that parent. Falls back to removing one
+ * `LIST_INDENT_UNIT` when no ancestor is found.
+ */
+function computeIndentForOutdent(state: EditorState, lineNum: number, oldIndent: string): string {
+	for (let i = lineNum - 1; i >= 1; i--) {
+		const text = state.doc.line(i).text;
+		if (text.trim() === "") break;
+		const info = parseListLine(text);
+		if (!info) break;
+		if (info.indent.length < oldIndent.length) {
+			return info.indent;
+		}
+	}
+	const removeCount = Math.min(oldIndent.length, LIST_INDENT_UNIT.length);
+	return oldIndent.slice(removeCount);
 }
 
 /**
@@ -414,11 +477,11 @@ export function computeListIndentChanges(
 		const oldIndent = info.indent;
 		let newIndent: string;
 		if (direction === 1) {
-			newIndent = oldIndent + LIST_INDENT_UNIT;
+			newIndent = computeIndentForNest(state, i, oldIndent);
 		} else {
 			if (oldIndent.length === 0) continue;
-			const removeCount = Math.min(oldIndent.length, LIST_INDENT_UNIT.length);
-			newIndent = oldIndent.slice(removeCount);
+			newIndent = computeIndentForOutdent(state, i, oldIndent);
+			if (newIndent.length === oldIndent.length) continue;
 		}
 		mods.push({ lineNum: i, lineFrom: line.from, oldIndent, newIndent });
 	}
