@@ -375,21 +375,32 @@ function isInsideCodeBlock(state: EditorState, pos: number): boolean {
 	return false;
 }
 
+/** Leading whitespace width of a line (treats tabs as 1 char). */
+function leadingWidth(text: string): number {
+	const m = /^[ \t]*/.exec(text);
+	return m ? m[0].length : 0;
+}
+
 /**
- * Walk back to find the closest list line that satisfies `predicate`, stopping
- * at blank or non-list lines. Used by both Tab (find sibling at same indent)
- * and Shift+Tab (find ancestor at shallower indent).
+ * Walk back to find the closest list line that satisfies `predicate`. Treats
+ * indented non-list lines as continuation paragraphs and walks past them,
+ * stopping only on blank lines, on non-list lines indented less than
+ * `boundaryIndentLen`, or when the predicate returns `"stop"`.
  */
 function findPrevListLine(
 	state: EditorState,
 	lineNum: number,
+	boundaryIndentLen: number,
 	predicate: (info: ListLineInfo) => boolean | "stop",
 ): ListLineInfo | null {
 	for (let i = lineNum - 1; i >= 1; i--) {
 		const text = state.doc.line(i).text;
 		if (text.trim() === "") return null;
 		const info = parseListLine(text);
-		if (!info) return null;
+		if (!info) {
+			if (leadingWidth(text) < boundaryIndentLen) return null;
+			continue; // continuation paragraph — keep walking
+		}
 		const r = predicate(info);
 		if (r === "stop") return null;
 		if (r) return info;
@@ -403,7 +414,7 @@ function findPrevListLine(
  * nesting; otherwise falls back to one `LIST_INDENT_UNIT`.
  */
 function computeIndentForNest(state: EditorState, lineNum: number, oldIndent: string): string {
-	const sibling = findPrevListLine(state, lineNum, (info) => {
+	const sibling = findPrevListLine(state, lineNum, oldIndent.length, (info) => {
 		if (info.indent.length > oldIndent.length) return false;
 		if (info.indent.length < oldIndent.length) return "stop";
 		return true;
@@ -423,6 +434,7 @@ function computeIndentForOutdent(state: EditorState, lineNum: number, oldIndent:
 	const ancestor = findPrevListLine(
 		state,
 		lineNum,
+		oldIndent.length,
 		(info) => info.indent.length < oldIndent.length,
 	);
 	if (ancestor) return ancestor.indent;
@@ -483,21 +495,21 @@ export function computeListIndentChanges(
 
 	if (newIndents.size === 0) return null;
 
-	// Walk back/forward from modified lines to find the affected list block.
-	// A block is broken by a blank line or a non-list line.
+	// A line belongs to the surrounding list block when it is a list marker
+	// line OR an indented non-list line (continuation paragraph). The block
+	// ends at the first blank line or non-indented non-list line.
+	const isBlockMember = (lineNum: number): boolean => {
+		const text = state.doc.line(lineNum).text;
+		if (text.trim() === "") return false;
+		if (getOrParse(lineNum)) return true;
+		return leadingWidth(text) > 0;
+	};
+
 	const modLineNums = [...newIndents.keys()].sort((a, b) => a - b);
 	let blockStart = modLineNums[0];
-	while (blockStart > 1) {
-		const prev = state.doc.line(blockStart - 1);
-		if (prev.text.trim() === "" || !getOrParse(blockStart - 1)) break;
-		blockStart--;
-	}
+	while (blockStart > 1 && isBlockMember(blockStart - 1)) blockStart--;
 	let blockEnd = modLineNums[modLineNums.length - 1];
-	while (blockEnd < state.doc.lines) {
-		const next = state.doc.line(blockEnd + 1);
-		if (next.text.trim() === "" || !getOrParse(blockEnd + 1)) break;
-		blockEnd++;
-	}
+	while (blockEnd < state.doc.lines && isBlockMember(blockEnd + 1)) blockEnd++;
 
 	// Per indent depth, track the next expected ordered-list number.
 	// Bullet/task at same indent breaks the run; shallower indent drops
@@ -527,12 +539,22 @@ export function computeListIndentChanges(
 		indentCounters.set(virtualIndent, startNum + 1);
 	}
 
-	// Cascade: when a renumber changes an ordered line's marker width
-	// (e.g. 9 → 10), its descendants need their indent shifted by the same
-	// delta to stay nested under the post-renumber content offset. Without
-	// this, `10. b` (content offset 4) followed by `   1. child` (indent 3)
-	// would not be CommonMark-nested.
+	// Effective indent length of a line (newIndents + already-applied cascade).
+	// For continuation paragraphs (non-list), uses raw leading whitespace.
 	const indentShifts = new Map<number, number>();
+	const effectiveIndentLen = (lineNum: number): number => {
+		const orig = getOrParse(lineNum);
+		const base = orig
+			? (newIndents.get(lineNum)?.length ?? orig.indent.length)
+			: leadingWidth(state.doc.line(lineNum).text);
+		return base + (indentShifts.get(lineNum) ?? 0);
+	};
+
+	// Cascade: when a renumber changes an ordered line's marker width
+	// (e.g. 9 → 10), every line in its content-offset scope (descendant
+	// list items AND their continuation paragraphs) needs its indent
+	// shifted by the same delta so the post-renumber doc still parses as
+	// nested under the post-renumber content offset.
 	for (let i = blockStart; i <= blockEnd; i++) {
 		const orig = getOrParse(i);
 		if (!orig?.ordered) continue;
@@ -541,37 +563,46 @@ export function computeListIndentChanges(
 		const delta = String(newNum).length - String(orig.ordered.number).length;
 		if (delta === 0) continue;
 
-		const lIndentLen =
-			(newIndents.get(i)?.length ?? orig.indent.length) + (indentShifts.get(i) ?? 0);
-		const lOldContentOffset = lIndentLen + orig.markerWidth;
-
+		const lOldContentOffset = effectiveIndentLen(i) + orig.markerWidth;
 		for (let j = i + 1; j <= blockEnd; j++) {
-			const jOrig = getOrParse(j);
-			if (!jOrig) break;
-			const jIndentLen =
-				(newIndents.get(j)?.length ?? jOrig.indent.length) + (indentShifts.get(j) ?? 0);
-			if (jIndentLen < lOldContentOffset) break;
+			const jLine = state.doc.line(j);
+			if (jLine.text.trim() === "") break;
+			if (effectiveIndentLen(j) < lOldContentOffset) break;
 			indentShifts.set(j, (indentShifts.get(j) ?? 0) + delta);
 		}
 	}
 
-	// Emit one change per affected line, in line order (no sort needed
-	// since we iterate in ascending order below).
+	// Apply a positive/negative shift to a leading-whitespace string by
+	// padding or trimming. Clamps at 0.
+	const applyShift = (leading: string, shift: number): string => {
+		if (shift > 0) return leading + " ".repeat(shift);
+		if (shift < 0) return leading.slice(0, Math.max(0, leading.length + shift));
+		return leading;
+	};
+
+	// Emit one change per affected line in line order. Block iteration is
+	// ascending so no sort step is needed.
 	const changes: ChangeSpec[] = [];
 	const lineNums = new Set([...newIndents.keys(), ...renumberMap.keys(), ...indentShifts.keys()]);
 	for (let i = blockStart; i <= blockEnd; i++) {
 		if (!lineNums.has(i)) continue;
-		const orig = getOrParse(i);
-		if (!orig) continue;
 		const line = state.doc.line(i);
+		const orig = getOrParse(i);
+
+		if (!orig) {
+			// Continuation paragraph — only the cascade shift applies.
+			const shift = indentShifts.get(i) ?? 0;
+			if (shift === 0) continue;
+			const m = /^[ \t]*/.exec(line.text);
+			const leading = m ? m[0] : "";
+			const newLeading = applyShift(leading, shift);
+			if (newLeading === leading) continue;
+			changes.push({ from: line.from, to: line.from + leading.length, insert: newLeading });
+			continue;
+		}
+
 		const baseIndent = newIndents.get(i) ?? orig.indent;
-		const shift = indentShifts.get(i) ?? 0;
-		const finalIndent =
-			shift > 0
-				? baseIndent + " ".repeat(shift)
-				: shift < 0
-					? baseIndent.slice(0, Math.max(0, baseIndent.length + shift))
-					: baseIndent;
+		const finalIndent = applyShift(baseIndent, indentShifts.get(i) ?? 0);
 		const newNum = renumberMap.get(i);
 		const oldNumStr = orig.ordered ? String(orig.ordered.number) : "";
 		const newNumStr = newNum !== undefined ? String(newNum) : oldNumStr;

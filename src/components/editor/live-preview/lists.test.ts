@@ -913,6 +913,27 @@ describe("computeListIndentChanges", () => {
 		);
 	});
 
+	// --- Continuation paragraphs (CommonMark "lazy continuation") ----------
+
+	it("Tab on item after a continuation paragraph aligns to parent's content offset", () => {
+		// `1. parent\n   continuation\n2. child`. Tab on "2. child" should
+		// nest under "1. parent" (content offset 3) — the continuation must
+		// not break the sibling search.
+		const doc = "1. parent\n   continuation\n2. child";
+		const cursor = doc.indexOf("2. child");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\n   continuation\n   1. child");
+	});
+
+	it("renumber cascade shifts continuation paragraphs under descendant items", () => {
+		// Shift+Tab on `   1. x` outdents it; `9. b` then renumbers to `10. b`
+		// (delta +1). Both the descendant list item `   1. child` and its
+		// continuation `      note` must shift by +1 to stay nested under
+		// the new content offsets of 10. b (4) and 1. child (7).
+		const doc = "8. a\n   1. x\n9. b\n   1. child\n      note";
+		const cursor = doc.indexOf("   1. x") + 3;
+		expect(applyChanges(doc, cursor, -1)).toBe("8. a\n9. x\n10. b\n    1. child\n       note");
+	});
+
 	// --- Regression: user-reported case from chat -------------------------
 
 	it("Enter Tab sequence on empty ordered list nests at parent content offset", () => {
