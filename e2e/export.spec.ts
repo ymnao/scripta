@@ -30,7 +30,8 @@ test.describe("export dialog", () => {
 		await expect(dialog).toBeVisible();
 		await expect(dialog.getByRole("heading", { name: "エクスポート" })).toBeVisible();
 
-		// HTML セクションがデフォルトでアクティブ
+		// #93 v5.4 で PDF が default になったので、HTML タブをクリックしてから出力
+		await dialog.getByRole("button", { name: "HTML", exact: true }).click();
 		await expect(dialog.getByRole("button", { name: "HTMLとしてエクスポート" })).toBeVisible();
 
 		await dialog.getByRole("button", { name: "HTMLとしてエクスポート" }).click();
@@ -140,7 +141,9 @@ test.describe("export dialog", () => {
 		const dialog = page.locator("dialog");
 		await expect(dialog).toBeVisible();
 
-		await dialog.getByRole("button", { name: "PDF" }).click();
+		// PDF tab は v5.4 で default だが、明示的にクリックして states を安定化する。
+		// `{ name: "PDF", exact: true }` で「PDFとしてエクスポート」 button との strict-mode 衝突を避ける。
+		await dialog.getByRole("button", { name: "PDF", exact: true }).click();
 		const exportBtn = dialog.getByRole("button", { name: "PDFとしてエクスポート" });
 		await expect(exportBtn).toBeVisible();
 
@@ -182,7 +185,9 @@ test.describe("export dialog", () => {
 		const initialBox = await dialog.boundingBox();
 
 		for (const section of ["PDF", "プロンプト", "HTML"]) {
-			await dialog.getByRole("button", { name: section }).click();
+			// `exact: true` で「PDFとしてエクスポート」「HTMLとしてエクスポート」等の
+			// submit button との strict-mode 衝突を避ける。
+			await dialog.getByRole("button", { name: section, exact: true }).click();
 			const box = await dialog.boundingBox();
 			expect(Math.abs((box?.height ?? 0) - (initialBox?.height ?? 0))).toBeLessThanOrEqual(1);
 			expect(Math.abs((box?.width ?? 0) - (initialBox?.width ?? 0))).toBeLessThanOrEqual(1);
