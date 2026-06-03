@@ -103,6 +103,8 @@ export class LinkWidget extends WidgetType {
 			// で preventDefault することで抑制する。
 			anchor.href = this.url;
 			anchor.dataset.linkWidgetUrl = this.url;
+			// [DEBUG] バンドル version 識別 — DevTools で見て確認
+			anchor.dataset.lwVersion = "viewplugin-eh-v1";
 			const isMac =
 				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
@@ -242,6 +244,12 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	// (ignoreEvent / Prec / built-in selection との競合) を回避する。
 	eventHandlers: {
 		mousedown(event: MouseEvent, _view) {
+			console.log("[link-widget mousedown]", {
+				button: event.button,
+				metaKey: event.metaKey,
+				ctrlKey: event.ctrlKey,
+				target: (event.target as Element)?.className,
+			});
 			const target = event.target;
 			if (!(target instanceof Element)) return false;
 			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
@@ -286,6 +294,9 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 		},
 
 		contextmenu(event: MouseEvent, view) {
+			console.log("[link-widget contextmenu]", {
+				target: (event.target as Element)?.className,
+			});
 			const target = event.target;
 			if (!(target instanceof Element)) return false;
 			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
