@@ -332,7 +332,7 @@ h4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.15em; }
 h5 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.1em; }
 h6 { font-size: 0.9em; font-weight: 600; margin: 0.5em 0 0.1em; }
 code {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 0.9em;
   padding: 0.2em 0.4em;
   border-radius: 3px;
