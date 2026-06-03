@@ -627,12 +627,22 @@ describe("ArrowRight keymap", () => {
 describe("parseListLine", () => {
 	it("parses ordered list with `.` delimiter", () => {
 		const info = parseListLine("1. a");
-		expect(info).toEqual({ indent: "", ordered: { number: 1, delim: "." }, task: false });
+		expect(info).toEqual({
+			indent: "",
+			ordered: { number: 1, delim: "." },
+			task: false,
+			markerWidth: 3,
+		});
 	});
 
 	it("parses ordered list with `)` delimiter", () => {
 		const info = parseListLine("12) hello");
-		expect(info).toEqual({ indent: "", ordered: { number: 12, delim: ")" }, task: false });
+		expect(info).toEqual({
+			indent: "",
+			ordered: { number: 12, delim: ")" },
+			task: false,
+			markerWidth: 4,
+		});
 	});
 
 	it("parses ordered list with leading indent", () => {
@@ -643,7 +653,7 @@ describe("parseListLine", () => {
 
 	it("parses bullet list", () => {
 		const info = parseListLine("- a");
-		expect(info).toEqual({ indent: "", ordered: null, task: false });
+		expect(info).toEqual({ indent: "", ordered: null, task: false, markerWidth: 2 });
 	});
 
 	it("parses indented bullet list", () => {
@@ -655,7 +665,7 @@ describe("parseListLine", () => {
 
 	it("parses task list", () => {
 		const info = parseListLine("- [ ] todo");
-		expect(info).toEqual({ indent: "", ordered: null, task: true });
+		expect(info).toEqual({ indent: "", ordered: null, task: true, markerWidth: 6 });
 	});
 
 	it("parses checked task list", () => {
@@ -678,23 +688,15 @@ describe("parseListLine", () => {
 });
 
 describe("computeListIndentChanges", () => {
-	function applyChanges(doc: string, cursorPos: number, direction: 1 | -1): string {
-		const state = createTestState(doc, cursorPos);
+	function applyChanges(doc: string, sel: number | EditorSelection, direction: 1 | -1): string {
+		const cursor = typeof sel === "number" ? sel : undefined;
+		const selection = typeof sel === "number" ? undefined : sel;
+		const state = createTestState(doc, cursor, undefined, selection);
 		const result = computeListIndentChanges(state, direction);
 		if (!result) return doc;
 		return state.update({ changes: result.changes }).state.doc.toString();
 	}
-
-	function applyChangesWithSelection(
-		doc: string,
-		selection: EditorSelection,
-		direction: 1 | -1,
-	): string {
-		const state = createTestState(doc, undefined, undefined, selection);
-		const result = computeListIndentChanges(state, direction);
-		if (!result) return doc;
-		return state.update({ changes: result.changes }).state.doc.toString();
-	}
+	const applyChangesWithSelection = applyChanges;
 
 	// --- The exact case from issue #118 -----------------------------------
 	// Note: nested indent matches the parent's content offset so the markdown
