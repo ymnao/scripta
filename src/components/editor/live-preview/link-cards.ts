@@ -10,6 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { cancelOgpFetch, fetchOgp, openExternal } from "../../../lib/commands";
+import { getErrorKind } from "../../../types/errors";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
@@ -313,10 +314,10 @@ class LinkCardDecorationPlugin implements PluginValue {
 				})
 				.catch((err: unknown) => {
 					this.fetchingUrls.delete(url);
-					// AbortError は「user の操作で cancel された」なので cache を error
-					// 状態にしない。次回 fetch で retry されるべき。文書再表示時の
-					// re-fetch を妨げないよう loading entry も外しておく。
-					if (err instanceof Error && err.name === "AbortError") {
+					// cancel 経路は cache に error を残さず削除して次回 retry を許可する。
+					// 検出は preload が復元した kind="ABORTED" で行う（IPC 越しに
+					// `err.name` は保たれない）。
+					if (getErrorKind(err) === "ABORTED") {
 						ogpCache.delete(url);
 						return;
 					}
@@ -397,19 +398,13 @@ class LinkCardDecorationPlugin implements PluginValue {
 	destroy() {
 		this.destroyed = true;
 		this.cancelRebuild();
-		// 文書切替 / editor unmount で in-flight な OGP fetch を main 側で abort する
-		// （#101）。abort 後の fetchOgp は AbortError で reject → 上の catch で cache
-		// 上書きを skip。`fetchingUrls` をスナップショットしてから cancel を発行する
-		// ことで、cancel→catch→fetchingUrls.delete の順序競合を回避（catch は同期で
-		// は走らないが、念のため）。cancel IPC の rejection はログに残すだけ（plugin
-		// 側はもう unmount 済みなので state 更新しない）。
-		const urls = [...this.fetchingUrls];
-		this.fetchingUrls.clear();
-		for (const url of urls) {
+		// 文書切替 / unmount で in-flight な OGP fetch を main 側で abort する（#101）。
+		for (const url of this.fetchingUrls) {
 			cancelOgpFetch(url).catch((error) => {
 				console.error("Failed to cancel OGP fetch:", url, error);
 			});
 		}
+		this.fetchingUrls.clear();
 	}
 }
 

@@ -40,6 +40,9 @@ export type ErrorKind =
 	| "NETWORK"
 	| "CONNECTION_REFUSED"
 	| "TIMEOUT"
+	// ユーザ操作（文書切替 / unmount 等）由来の cancel。renderer は cache を error
+	// 状態にせず削除して次回 retry を許可する。
+	| "ABORTED"
 	// 分類不能
 	| "UNKNOWN";
 

@@ -338,7 +338,6 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 		expect(vi.mocked(commands.fetchOgp).mock.calls.length).toBeGreaterThan(0);
 
 		view.destroy();
-		mounted.pop();
 
 		const cancelled = vi
 			.mocked(commands.cancelOgpFetch)
@@ -351,7 +350,6 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 		vi.mocked(commands.fetchOgp).mockImplementation(() => new Promise(() => {}));
 		const view = mountEditor("just text, no URL\n");
 		view.destroy();
-		mounted.pop();
 		expect(vi.mocked(commands.cancelOgpFetch).mock.calls.length).toBe(0);
 	});
 });

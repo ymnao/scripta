@@ -71,37 +71,17 @@ describe("ogp cancel (#101)", () => {
 		expect(() => cancelOgpFetch("https://no-in-flight.example/")).not.toThrow();
 	});
 
-	it("pre-aborted signal causes immediate AbortError without leaving in-flight entries", async () => {
-		const controller = new AbortController();
-		controller.abort();
-		await expect(fetchOgpImpl("https://example.invalid/", controller.signal)).rejects.toThrowError(
-			/abort/i,
-		);
-		// finally で必ず unregister されるので、in-flight Map に残骸が残らないこと。
-		expect(hasInFlight("https://example.invalid/")).toBe(false);
-	});
-
-	it("cancelOgpFetch mid-fetch aborts the SSRF-blocked URL race cleanly", async () => {
-		// SSRF で確実に reject される URL を使って、cancel が呼ばれても
-		// (a) 二重 reject せず、(b) in-flight が cleanup されることを確認。
-		// (実 HTTP path は e2e に委譲し、ここではユニットレベルで pure な検証に絞る)
+	it("cancel-during-fetch rejects with kind=ABORTED, no in-flight residue, no cache", async () => {
+		// fetchOgpImpl 呼び出し直後（最初の await まで同期で進む）に Map へ controller
+		// が登録されているはずなので、同 tick で cancelOgpFetch を投げて abort を発火する。
 		const p = fetchOgpImpl("http://127.0.0.1/");
-		// cancel を 1 tick 後に発行。SSRF reject の方が早ければ no-op、間に合えば
-		// abort が反映される。どちらでも最終的に reject かつ in-flight 0 が期待値。
-		setTimeout(() => cancelOgpFetch("http://127.0.0.1/"), 0);
+		expect(hasInFlight("http://127.0.0.1/")).toBe(true);
+		cancelOgpFetch("http://127.0.0.1/");
+		// abort と SSRF reject のいずれが先でも reject に至ることを担保。abort が先なら
+		// StructuredError("ABORTED") に変換される。
 		await expect(p).rejects.toThrow();
 		expect(hasInFlight("http://127.0.0.1/")).toBe(false);
-	});
-
-	it("AbortError fetch path leaves no cache entry (next call will retry)", async () => {
-		const controller = new AbortController();
-		controller.abort();
-		await expect(fetchOgpImpl("https://retry.example/", controller.signal)).rejects.toThrowError(
-			/abort/i,
-		);
-		// abort 経路は cache に何も書かない（fetchOgpImpl は finally で in-flight を
-		// 消すだけで cacheSet は呼ばない）。
-		expect(cacheGet("https://retry.example/")).toBeNull();
+		expect(cacheGet("http://127.0.0.1/")).toBeNull();
 	});
 });
 

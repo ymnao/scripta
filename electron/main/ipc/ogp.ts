@@ -4,6 +4,7 @@ import { AbortError, httpFetch } from "../utils/http-fetch";
 import { handle } from "../utils/ipc-handle";
 import { parseOgp } from "../utils/ogp-parser";
 import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
+import { StructuredError } from "../utils/structured-error";
 
 // OGP メタデータを取得する（`fetch_ogp`）。
 // SSRF 防御は redirect 1 hop ごとに `pinSafeLookup` で hostname を 1 度だけ解決し、
@@ -64,34 +65,13 @@ export function clearOgpCache(): void {
 	cache.clear();
 }
 
-// 同一 URL に対して同時 fetch が複数走るケース（複数 EditorView / window） も
-// 想定して Set で保持。cancel は登録済み controller を全部 abort する。
-// `fetchOgpImpl` の finally で必ず remove するので leak はしない。
-const inFlight = new Map<string, Set<AbortController>>();
-
-function registerInFlight(url: string, controller: AbortController): void {
-	let set = inFlight.get(url);
-	if (!set) {
-		set = new Set();
-		inFlight.set(url, set);
-	}
-	set.add(controller);
-}
-
-function unregisterInFlight(url: string, controller: AbortController): void {
-	const set = inFlight.get(url);
-	if (!set) return;
-	set.delete(controller);
-	if (set.size === 0) inFlight.delete(url);
-}
+// in-flight な fetch の cancel 用 controller を URL 単位で保持。同一 URL に対し
+// 複数 view から同時 fetch があった場合は後勝ち（Map.set で上書き）。識別子チェック
+// 付き unregister により displaced な fetch の completion 時にもエントリを壊さない。
+const inFlight = new Map<string, AbortController>();
 
 export function cancelOgpFetch(url: string): void {
-	const set = inFlight.get(url);
-	if (!set) return;
-	// abort 後の cleanup は fetchOgpImpl の finally で行うので、ここでは abort だけ。
-	for (const controller of set) {
-		controller.abort();
-	}
+	inFlight.get(url)?.abort();
 }
 
 async function fetchWithRedirects(
@@ -111,9 +91,6 @@ async function fetchWithRedirects(
 		// 「DNS + HTTP で 1 hop あたり最大 REQUEST_TIMEOUT_MS」を維持する。
 		const bareHost = stripIpBrackets(parsed.hostname);
 		const hopStart = Date.now();
-		// pinSafeLookup は DNS 待ち中の abort には反応しない。pinSafeLookup 自体は
-		// 通常数十 ms で抜けるので許容。abort されていた場合は httpFetch が即時 reject。
-		if (signal.aborted) throw new AbortError();
 		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS);
 		const httpTimeout = Math.max(1, REQUEST_TIMEOUT_MS - (Date.now() - hopStart));
 		const res = await httpFetch({
@@ -152,7 +129,7 @@ async function fetchWithRedirects(
 	throw new Error("Too many redirects");
 }
 
-async function fetchOgpImpl(url: string, signal?: AbortSignal): Promise<OgpData> {
+async function fetchOgpImpl(url: string): Promise<OgpData> {
 	const lower = url.toLowerCase();
 	if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
 		throw new Error("Only http and https URLs are supported");
@@ -160,14 +137,8 @@ async function fetchOgpImpl(url: string, signal?: AbortSignal): Promise<OgpData>
 	const cached = cacheGet(url);
 	if (cached) return cached;
 
-	// signal を渡された場合はそれを上書きせず chain させる。tests は signal を直接
-	// 渡せる（IPC handler は controller を自前で作って Map 管理する）。
 	const controller = new AbortController();
-	if (signal) {
-		if (signal.aborted) throw new AbortError();
-		signal.addEventListener("abort", () => controller.abort(), { once: true });
-	}
-	registerInFlight(url, controller);
+	inFlight.set(url, controller);
 	try {
 		const { contentType, body } = await fetchWithRedirects(url, controller.signal);
 		// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
@@ -179,8 +150,18 @@ async function fetchOgpImpl(url: string, signal?: AbortSignal): Promise<OgpData>
 		const ogp = parseOgp(html, url);
 		cacheSet(url, ogp);
 		return ogp;
+	} catch (err) {
+		// IPC 越しに `err.name` は保たれないので、cancel 経路は ErrorKind="ABORTED"
+		// の StructuredError へ変換して renderer に渡す（renderer は getErrorKind で
+		// 判別し、cache 汚染を回避する）。
+		if (err instanceof AbortError) {
+			throw new StructuredError("ABORTED", err.message);
+		}
+		throw err;
 	} finally {
-		unregisterInFlight(url, controller);
+		// 同一 URL に対する後発 fetch が Map を上書きしている可能性があるので、
+		// 自分の controller が現役のときだけ削除する。
+		if (inFlight.get(url) === controller) inFlight.delete(url);
 	}
 }
 
@@ -197,7 +178,7 @@ export const __testing = {
 	cacheSet,
 	clearCache: clearOgpCache,
 	cancelOgpFetch,
-	hasInFlight: (url: string) => (inFlight.get(url)?.size ?? 0) > 0,
+	hasInFlight: (url: string) => inFlight.has(url),
 	CACHE_TTL_MS,
 	MAX_CACHE_ENTRIES,
 };
