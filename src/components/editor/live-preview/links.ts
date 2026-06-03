@@ -74,6 +74,12 @@ export function isSafeImageUrl(url: string): boolean {
 	}
 }
 
+/** modifier 押下時のみ「開く」操作とみなすかを判定する pure 関数。 */
+export function isOpenLinkModifierEvent(event: MouseEvent | KeyboardEvent): boolean {
+	// Mac は metaKey (Cmd)、その他 OS は ctrlKey
+	return event.metaKey || event.ctrlKey;
+}
+
 export class LinkWidget extends WidgetType {
 	text: string;
 	url: string;
@@ -93,7 +99,10 @@ export class LinkWidget extends WidgetType {
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
 			anchor.href = this.url;
-			anchor.title = this.url;
+			// title に modifier ヒントを含める
+			const isMac =
+				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
+			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
 			anchor.tabIndex = 0;
 			const openUrl = () => {
 				openExternal(this.url).catch((error) => {
@@ -101,13 +110,20 @@ export class LinkWidget extends WidgetType {
 				});
 			};
 			anchor.addEventListener("click", (e) => {
-				e.preventDefault();
 				if (e.button !== 0) return;
-				openUrl();
+				if (isOpenLinkModifierEvent(e)) {
+					e.preventDefault();
+					e.stopPropagation();
+					openUrl();
+				}
+				// modifier 無しは preventDefault しない → editor が click を受けて
+				// cursor を行内に移動し raw md syntax を表示する
 			});
 			anchor.addEventListener("mousedown", (e) => {
 				if (e.button !== 0) return;
-				e.preventDefault();
+				if (isOpenLinkModifierEvent(e)) {
+					e.preventDefault();
+				}
 			});
 			anchor.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
@@ -126,10 +142,13 @@ export class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		// 安全な URL のときだけマウスイベントをウィジェット側で処理し、
-		// 無効リンクの場合はエディタ側に処理させてカーソル移動等を可能にする
-		if ((event.type === "mousedown" || event.type === "click") && isSafeUrl(this.url)) {
-			return true;
+		// 安全な URL かつ modifier 押下時のみ widget 側でハンドル（openUrl）。
+		// modifier 無しの mousedown/click は editor に渡してカーソル移動させ
+		// raw md syntax を表示する。
+		// contextmenu (右クリック) は常に editor 経由で処理（カスタムメニューを出す）。
+		if (event.type === "mousedown" || event.type === "click") {
+			if (!isSafeUrl(this.url)) return false;
+			return isOpenLinkModifierEvent(event as MouseEvent);
 		}
 		return false;
 	}
@@ -417,4 +436,134 @@ export function pasteAsMarkdownLinkCommand(view: EditorView): boolean {
 	return true;
 }
 
-export const linkDecoration: Extension = [linkPlugin, urlPasteHandler];
+/**
+ * `[label](<url>)` または `[label](url)` 形式の md リンクを pure に parse する。
+ *
+ * 右クリック「カードにする」判定で「行が md リンクのみ」を確認するために使う。
+ * Lezer 経由でも同じ情報は取れるが、テスタビリティと依存削減のため再実装。
+ *
+ * 厳密な CommonMark parser ではなく、よくある形のみ受け付ける（escape は最小限）。
+ */
+export function parseSingleMdLink(
+	source: string,
+): { label: string; url: string; from: number; to: number } | null {
+	// `[label](<url>)` or `[label](url)` を見つける。
+	// label 内は \] / \\ をサポート（buildMarkdownLink と対称）。
+	// plain 形 `(url)` は `<` で始まるものを除外（angle 形 `(<url>)` と区別する）
+	const re = /\[((?:\\.|[^\]\\])*)\](?:\(<([^>]+)>\)|\((?!<)([^)\s]+)\))/;
+	const m = re.exec(source);
+	if (!m) return null;
+	const label = m[1].replace(/\\(.)/g, "$1");
+	const url = m[2] ?? m[3];
+	if (!url) return null;
+	return { label, url, from: m.index, to: m.index + m[0].length };
+}
+
+/**
+ * `[link](<url>)` の md リンクを含む CM Link node から URL と label の range を取り出す。
+ * `links.ts` の buildDecorations と同じロジックを再利用。
+ */
+function extractLinkParts(
+	state: EditorState,
+	linkFrom: number,
+	linkTo: number,
+): { url: string; label: string } | null {
+	const tree = syntaxTree(state);
+	let linkNode = tree.resolveInner(linkFrom, 1);
+	while (linkNode && linkNode.name !== "Link") {
+		if (!linkNode.parent) return null;
+		linkNode = linkNode.parent;
+	}
+	if (!linkNode || linkNode.from !== linkFrom || linkNode.to !== linkTo) return null;
+	const cursor = linkNode.cursor();
+	if (!cursor.firstChild()) return null;
+	let textFrom = -1;
+	let textTo = -1;
+	let url = "";
+	let foundCloseBracket = false;
+	do {
+		if (cursor.name === "LinkMark") {
+			const markText = state.doc.sliceString(cursor.from, cursor.to);
+			if (markText === "[") textFrom = cursor.to;
+			else if (markText === "]" && !foundCloseBracket) {
+				textTo = cursor.from;
+				foundCloseBracket = true;
+			}
+		} else if (cursor.name === "URL") {
+			url = state.doc.sliceString(cursor.from, cursor.to);
+		}
+	} while (cursor.nextSibling());
+	if (!url || textFrom < 0 || textTo < 0) return null;
+	return { url, label: state.doc.sliceString(textFrom, textTo) };
+}
+
+/**
+ * 行内に md リンク以外のテキストが無い（前後 trim で空）かを判定する pure 関数。
+ * 右クリック「カードにする」をメニューに出す条件。
+ */
+export function isLineOnlyMdLink(
+	lineText: string,
+	lineFrom: number,
+	linkFrom: number,
+	linkTo: number,
+	lineTo: number,
+): boolean {
+	const before = lineText.slice(0, linkFrom - lineFrom).trim();
+	const after = lineText.slice(linkTo - lineFrom, lineTo - lineFrom).trim();
+	return before === "" && after === "";
+}
+
+const linkWidgetContextMenuHandler = EditorView.domEventHandlers({
+	contextmenu(event: MouseEvent, view: EditorView) {
+		const target = event.target;
+		if (!(target instanceof Element)) return false;
+		const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+		if (!widgetEl) return false;
+		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+
+		const pos = view.posAtDOM(widgetEl);
+		const tree = syntaxTree(view.state);
+		let linkNode = tree.resolveInner(pos, 1);
+		while (linkNode && linkNode.name !== "Link") {
+			if (!linkNode.parent) return false;
+			linkNode = linkNode.parent;
+		}
+		if (!linkNode) return false;
+
+		const parts = extractLinkParts(view.state, linkNode.from, linkNode.to);
+		if (!parts) return false;
+
+		const line = view.state.doc.lineAt(linkNode.from);
+		const lineText = view.state.doc.sliceString(line.from, line.to);
+		const isUrlOnlyLine = isLineOnlyMdLink(
+			lineText,
+			line.from,
+			linkNode.from,
+			linkNode.to,
+			line.to,
+		);
+
+		event.preventDefault();
+		view.dom.dispatchEvent(
+			new CustomEvent("link-widget-context-menu", {
+				bubbles: true,
+				detail: {
+					url: parts.url,
+					label: parts.label,
+					from: linkNode.from,
+					to: linkNode.to,
+					isUrlOnlyLine,
+					clientX: event.clientX,
+					clientY: event.clientY,
+				},
+			}),
+		);
+		return true;
+	},
+});
+
+export const linkDecoration: Extension = [
+	linkPlugin,
+	urlPasteHandler,
+	linkWidgetContextMenuHandler,
+];

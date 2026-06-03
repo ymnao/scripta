@@ -24,6 +24,7 @@ import {
 import { openExternal } from "../../lib/commands";
 import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
+import { Dialog } from "../common/Dialog";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
 import { ContextMenu } from "../filetree/ContextMenu";
 import { codeHighlightStyle, createDynamicEditorTheme, staticEditorTheme } from "./editor-theme";
@@ -159,6 +160,20 @@ export function MarkdownEditor({
 		lineFrom: number;
 		lineTo: number;
 	} | null>(null);
+	const [linkWidgetContextMenu, setLinkWidgetContextMenu] = useState<{
+		position: { x: number; y: number };
+		url: string;
+		label: string;
+		from: number;
+		to: number;
+		isUrlOnlyLine: boolean;
+	} | null>(null);
+	const [linkConvertConfirm, setLinkConvertConfirm] = useState<{
+		url: string;
+		label: string;
+		from: number;
+		to: number;
+	} | null>(null);
 	// 右クリック mousedown 前の選択状態を保持。
 	// mousedown → mousemove による意図しないマイクロ選択を無視するために使用
 	const preRightClickSelRef = useRef<{ from: number; to: number } | null>(null);
@@ -196,6 +211,25 @@ export function MarkdownEditor({
 		};
 		el.addEventListener("link-card-context-menu", onCardMenu);
 		return () => el.removeEventListener("link-card-context-menu", onCardMenu);
+	}, []);
+
+	// Listen for md リンク widget 右クリックメニューイベント
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+		const onMenu = (e: Event) => {
+			const { url, label, from, to, isUrlOnlyLine, clientX, clientY } = (e as CustomEvent).detail;
+			setLinkWidgetContextMenu({
+				position: { x: clientX, y: clientY },
+				url,
+				label,
+				from,
+				to,
+				isUrlOnlyLine,
+			});
+		};
+		el.addEventListener("link-widget-context-menu", onMenu);
+		return () => el.removeEventListener("link-widget-context-menu", onMenu);
 	}, []);
 
 	useEffect(() => {
@@ -381,11 +415,12 @@ export function MarkdownEditor({
 					? rawTarget.parentElement
 					: null;
 		if (!target) return;
-		// Mermaid・テーブルセル・OGP カード上のクリックは各専用メニューに委譲
+		// Mermaid・テーブルセル・OGP カード・md リンク widget は各専用メニューに委譲
 		if (
 			target.closest(".cm-mermaid-widget") ||
 			target.closest(".cm-table-cell") ||
-			target.closest(".cm-link-card")
+			target.closest(".cm-link-card") ||
+			target.closest(".cm-link-widget")
 		)
 			return;
 		// 他のハンドラが既に処理済みなら何もしない
@@ -662,6 +697,76 @@ export function MarkdownEditor({
 					onClose={() => setEditorContextMenu(null)}
 				/>
 			)}
+			{linkWidgetContextMenu && (
+				<ContextMenu
+					position={linkWidgetContextMenu.position}
+					items={(() => {
+						const { url, label, from, to, isUrlOnlyLine } = linkWidgetContextMenu;
+						const items: ContextMenuItem[] = [
+							{
+								id: "open-md-link",
+								label: "リンクを開く",
+								shortcut: `${isMac ? "⌘" : "Ctrl+"}クリック`,
+								onClick: () => {
+									openExternal(url).catch((error) => {
+										console.error("Failed to open URL:", url, error);
+									});
+								},
+							},
+							{
+								id: "copy-md-link-url",
+								label: "URL をコピー",
+								onClick: () => {
+									if (!navigator.clipboard) return;
+									navigator.clipboard.writeText(url).catch(() => {});
+								},
+							},
+						];
+						if (isUrlOnlyLine) {
+							items.push({
+								id: "make-card",
+								label: "カードにする",
+								onClick: () => {
+									// label が URL と同じなら直接変換、違うなら confirm dialog 経由
+									if (label.trim() === url.trim()) {
+										const view = editorRef.current?.view;
+										if (!view) return;
+										view.dispatch({ changes: { from, to, insert: url } });
+										view.focus();
+									} else {
+										setLinkConvertConfirm({ url, label, from, to });
+									}
+								},
+							});
+						}
+						return items;
+					})()}
+					onClose={() => setLinkWidgetContextMenu(null)}
+				/>
+			)}
+			<Dialog
+				open={linkConvertConfirm !== null}
+				title="md リンクをカードに変換"
+				description={
+					linkConvertConfirm
+						? `表示テキスト「${linkConvertConfirm.label}」が URL と異なります。カードに変換すると表示テキストは捨てられます。続行しますか？`
+						: ""
+				}
+				confirmLabel="変換する"
+				cancelLabel="キャンセル"
+				variant="danger"
+				onConfirm={() => {
+					if (!linkConvertConfirm) return;
+					const { url, from, to } = linkConvertConfirm;
+					const view = editorRef.current?.view;
+					if (view) {
+						view.dispatch({ changes: { from, to, insert: url } });
+						view.focus();
+					}
+					setLinkConvertConfirm(null);
+				}}
+				onCancel={() => setLinkConvertConfirm(null)}
+			/>
 			{cardContextMenu && (
 				<ContextMenu
 					position={cardContextMenu.position}

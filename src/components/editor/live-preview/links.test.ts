@@ -5,11 +5,14 @@ import {
 	buildMarkdownLink,
 	computeUrlPasteInsert,
 	escapeMarkdownLabel,
+	isLineOnlyMdLink,
+	isOpenLinkModifierEvent,
 	isPosInCodeConstruct,
 	isPrivateHostname,
 	isSafeImageUrl,
 	isSafeUrl,
 	LinkWidget,
+	parseSingleMdLink,
 	pasteAsMarkdownLinkCommand,
 	shouldConvertPasteToLink,
 	URL_PASTE_RE,
@@ -505,17 +508,135 @@ describe("pasteAsMarkdownLinkCommand", () => {
 	});
 });
 
+describe("isOpenLinkModifierEvent", () => {
+	it("returns true for metaKey (Cmd)", () => {
+		const e = new MouseEvent("click", { metaKey: true });
+		expect(isOpenLinkModifierEvent(e)).toBe(true);
+	});
+
+	it("returns true for ctrlKey", () => {
+		const e = new MouseEvent("click", { ctrlKey: true });
+		expect(isOpenLinkModifierEvent(e)).toBe(true);
+	});
+
+	it("returns false for plain event", () => {
+		const e = new MouseEvent("click");
+		expect(isOpenLinkModifierEvent(e)).toBe(false);
+	});
+
+	it("returns false for shift-only event", () => {
+		const e = new MouseEvent("click", { shiftKey: true });
+		expect(isOpenLinkModifierEvent(e)).toBe(false);
+	});
+});
+
+describe("parseSingleMdLink", () => {
+	it("parses angle-bracket form `[label](<url>)`", () => {
+		expect(parseSingleMdLink("[Example](<https://example.com>)")).toEqual({
+			label: "Example",
+			url: "https://example.com",
+			from: 0,
+			to: "[Example](<https://example.com>)".length,
+		});
+	});
+
+	it("parses plain form `[label](url)`", () => {
+		expect(parseSingleMdLink("[Example](https://example.com)")).toEqual({
+			label: "Example",
+			url: "https://example.com",
+			from: 0,
+			to: "[Example](https://example.com)".length,
+		});
+	});
+
+	it("returns null for plain text", () => {
+		expect(parseSingleMdLink("hello world")).toBeNull();
+	});
+
+	it("returns null when only opening bracket", () => {
+		expect(parseSingleMdLink("[Example")).toBeNull();
+	});
+
+	it("unescapes backslash sequences in label", () => {
+		expect(parseSingleMdLink("[a\\]b](<https://x>)")?.label).toBe("a]b");
+	});
+
+	it("finds link offset within larger string", () => {
+		const result = parseSingleMdLink("prefix [Example](<https://example.com>) suffix");
+		expect(result?.from).toBe(7);
+		expect(result?.label).toBe("Example");
+	});
+
+	it("returns null when URL is empty (angle form)", () => {
+		expect(parseSingleMdLink("[label](<>)")).toBeNull();
+	});
+});
+
+describe("isLineOnlyMdLink", () => {
+	it("returns true when link spans the entire line", () => {
+		const text = "[a](<https://x>)";
+		expect(isLineOnlyMdLink(text, 0, 0, text.length, text.length)).toBe(true);
+	});
+
+	it("returns true when only whitespace surrounds the link", () => {
+		const text = "  [a](<https://x>)  ";
+		const link = "[a](<https://x>)";
+		const linkStart = text.indexOf(link);
+		expect(isLineOnlyMdLink(text, 0, linkStart, linkStart + link.length, text.length)).toBe(true);
+	});
+
+	it("returns false when text precedes the link", () => {
+		const text = "see [a](<https://x>)";
+		const link = "[a](<https://x>)";
+		const linkStart = text.indexOf(link);
+		expect(isLineOnlyMdLink(text, 0, linkStart, linkStart + link.length, text.length)).toBe(false);
+	});
+
+	it("returns false when text follows the link", () => {
+		const text = "[a](<https://x>) end";
+		const link = "[a](<https://x>)";
+		expect(isLineOnlyMdLink(text, 0, 0, link.length, text.length)).toBe(false);
+	});
+
+	it("handles line range that does not start at 0 (lineFrom offset applied)", () => {
+		// e.g. line starts at doc pos 10
+		const lineText = "[a](<https://x>)";
+		const lineFrom = 10;
+		expect(
+			isLineOnlyMdLink(lineText, lineFrom, 10, 10 + lineText.length, lineFrom + lineText.length),
+		).toBe(true);
+	});
+});
+
 describe("LinkWidget", () => {
-	it("ignoreEvent returns true for mousedown (editor ignores, widget handles)", () => {
+	it("ignoreEvent returns false for plain click (editor handles → cursor move)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("click");
+		expect(widget.ignoreEvent(event)).toBe(false);
+	});
+
+	it("ignoreEvent returns false for plain mousedown (editor handles)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
 		const event = new MouseEvent("mousedown");
+		expect(widget.ignoreEvent(event)).toBe(false);
+	});
+
+	it("ignoreEvent returns true for cmd+click (widget handles → open URL)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("click", { metaKey: true });
 		expect(widget.ignoreEvent(event)).toBe(true);
 	});
 
-	it("ignoreEvent returns true for click (editor ignores, widget handles)", () => {
+	it("ignoreEvent returns true for ctrl+click", () => {
 		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click");
+		const event = new MouseEvent("click", { ctrlKey: true });
 		expect(widget.ignoreEvent(event)).toBe(true);
+	});
+
+	it("ignoreEvent returns false for contextmenu (editor handles → custom menu)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		const event = new MouseEvent("contextmenu");
+		expect(widget.ignoreEvent(event)).toBe(false);
 	});
 
 	it("ignoreEvent returns false for other events (editor handles them)", () => {
@@ -524,9 +645,9 @@ describe("LinkWidget", () => {
 		expect(widget.ignoreEvent(event)).toBe(false);
 	});
 
-	it("ignoreEvent returns false for disabled links (editor handles cursor)", () => {
+	it("ignoreEvent returns false for disabled links regardless of modifier", () => {
 		const widget = new LinkWidget("text", "ftp://example.com");
 		expect(widget.ignoreEvent(new MouseEvent("mousedown"))).toBe(false);
-		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(false);
+		expect(widget.ignoreEvent(new MouseEvent("click", { metaKey: true }))).toBe(false);
 	});
 });
