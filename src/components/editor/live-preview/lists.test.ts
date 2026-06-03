@@ -5,8 +5,10 @@ import {
 	BulletWidget,
 	buildDecorations,
 	CheckboxWidget,
+	computeListIndentChanges,
 	findMarkerRange,
 	listKeymap,
+	parseListLine,
 } from "./lists";
 import {
 	collectDecorations,
@@ -619,5 +621,464 @@ describe("ArrowRight keymap", () => {
 		const line = state.doc.lineAt(5);
 		const nextLine = state.doc.line(line.number + 1);
 		expect(findMarkerRange(state, nextLine)).toBeNull();
+	});
+});
+
+describe("parseListLine", () => {
+	it("parses ordered list with `.` delimiter", () => {
+		const info = parseListLine("1. a");
+		expect(info).toEqual({
+			indent: "",
+			ordered: { number: 1, delim: "." },
+			task: false,
+			markerWidth: 3,
+		});
+	});
+
+	it("parses ordered list with `)` delimiter", () => {
+		const info = parseListLine("12) hello");
+		expect(info).toEqual({
+			indent: "",
+			ordered: { number: 12, delim: ")" },
+			task: false,
+			markerWidth: 4,
+		});
+	});
+
+	it("parses ordered list with leading indent", () => {
+		const info = parseListLine("  3. nested");
+		expect(info?.indent).toBe("  ");
+		expect(info?.ordered).toEqual({ number: 3, delim: "." });
+	});
+
+	it("parses bullet list", () => {
+		const info = parseListLine("- a");
+		expect(info).toEqual({ indent: "", ordered: null, task: false, markerWidth: 2 });
+	});
+
+	it("parses indented bullet list", () => {
+		const info = parseListLine("    * x");
+		expect(info?.indent).toBe("    ");
+		expect(info?.ordered).toBeNull();
+		expect(info?.task).toBe(false);
+	});
+
+	it("parses task list", () => {
+		const info = parseListLine("- [ ] todo");
+		expect(info).toEqual({ indent: "", ordered: null, task: true, markerWidth: 6 });
+	});
+
+	it("parses checked task list", () => {
+		const info = parseListLine("  - [x] done");
+		expect(info?.task).toBe(true);
+		expect(info?.indent).toBe("  ");
+	});
+
+	it("returns null for plain text", () => {
+		expect(parseListLine("hello world")).toBeNull();
+	});
+
+	it("returns null for line starting with number but no marker", () => {
+		expect(parseListLine("123 abc")).toBeNull();
+	});
+
+	it("returns null for empty string", () => {
+		expect(parseListLine("")).toBeNull();
+	});
+});
+
+describe("computeListIndentChanges", () => {
+	function applyChanges(doc: string, sel: number | EditorSelection, direction: 1 | -1): string {
+		const cursor = typeof sel === "number" ? sel : undefined;
+		const selection = typeof sel === "number" ? undefined : sel;
+		const state = createTestState(doc, cursor, undefined, selection);
+		const result = computeListIndentChanges(state, direction);
+		if (!result) return doc;
+		return state.update({ changes: result.changes }).state.doc.toString();
+	}
+	const applyChangesWithSelection = applyChanges;
+
+	// --- The exact case from issue #118 -----------------------------------
+	// Note: nested indent matches the parent's content offset so the markdown
+	// parser sees a true CommonMark sub-list. For "1. a" the content offset is
+	// 3 columns; for bullets "- " it is 2; for tasks "- [ ] " it is 6.
+
+	it("Tab after Enter-continued ordered marker renumbers child to 1", () => {
+		// User typed "1. a", Enter (→ "2. "), Tab.
+		const doc = "1. a\n2. ";
+		const cursor = doc.length; // right after "2. "
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n   1. ");
+	});
+
+	it("Tab on doubly-nested item uses parent's content offset", () => {
+		// Tab on the deepest line. Parent "   1. b" has content offset 6,
+		// so deeper level indents to 6 columns.
+		const doc = "1. a\n   1. b\n   2. c";
+		expect(applyChanges(doc, doc.indexOf("c"), 1)).toBe("1. a\n   1. b\n      1. c");
+	});
+
+	// --- Tab on existing list items ----------------------------------------
+
+	it("Tab on second item indents it and renumbers later siblings", () => {
+		const doc = "1. a\n2. b\n3. c";
+		// Cursor on line 2
+		const cursor = doc.indexOf("2.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n   1. b\n2. c");
+	});
+
+	it("Tab on last item indents and renumbers", () => {
+		const doc = "1. a\n2. b";
+		const cursor = doc.indexOf("2.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n   1. b");
+	});
+
+	it("Tab on item that joins an existing sub-list continues numbering", () => {
+		const doc = "1. a\n   1. x\n   2. y\n2. b";
+		// Tab on "2. b" → joins the existing sub-list (at col 3) as item 3
+		const cursor = doc.lastIndexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n   1. x\n   2. y\n   3. b");
+	});
+
+	it("Tab on a bullet list line does not affect numbering", () => {
+		// Bullet content offset is 2, matching the default indent unit.
+		const doc = "- a\n- b\n- c";
+		const cursor = doc.indexOf("- b");
+		expect(applyChanges(doc, cursor, 1)).toBe("- a\n  - b\n- c");
+	});
+
+	it("Tab on a task list line indents it under task parent", () => {
+		// Task marker "- [ ] " has content offset 6.
+		const doc = "- [ ] a\n- [ ] b";
+		const cursor = doc.lastIndexOf("- [ ]");
+		expect(applyChanges(doc, cursor, 1)).toBe("- [ ] a\n      - [ ] b");
+	});
+
+	it("Tab on a plain text line falls through (returns null)", () => {
+		const state = createTestState("hello world", 5);
+		expect(computeListIndentChanges(state, 1)).toBeNull();
+	});
+
+	it("Tab on a line inside a fenced code block falls through", () => {
+		// Even if the line looks like a list, it should not be treated as one.
+		const state = createTestState("```\n1. inside\n```", "```\n1. ".length);
+		expect(computeListIndentChanges(state, 1)).toBeNull();
+	});
+
+	// --- Shift+Tab (outdent) ----------------------------------------------
+
+	it("Shift+Tab on first sub-item joins parent and renumbers continuation", () => {
+		// Sub-list now at parent's content offset (3 columns under `1. a`).
+		const doc = "1. a\n   1. b\n2. c";
+		const cursor = doc.indexOf("   1. b") + 3;
+		// Outdent line 2 → "1. a / 2. b / 3. c" (continuation at parent level).
+		expect(applyChanges(doc, cursor, -1)).toBe("1. a\n2. b\n3. c");
+	});
+
+	it("Shift+Tab on middle sub-item leaves remaining sub-item with original number", () => {
+		// `   2. c` was originally the second sub-item. After outdenting
+		// `   1. b`, the remaining `   2. c` keeps its number (we preserve
+		// user-chosen first-item numbers of un-touched runs).
+		const doc = "1. a\n   1. b\n   2. c";
+		const cursor = doc.indexOf("   1. b") + 3;
+		expect(applyChanges(doc, cursor, -1)).toBe("1. a\n2. b\n   2. c");
+	});
+
+	it("Shift+Tab on first sub-item promotes it and renumbers parent run", () => {
+		const doc = "1. a\n  1. b";
+		const cursor = doc.indexOf("  1. b") + 2;
+		expect(applyChanges(doc, cursor, -1)).toBe("1. a\n2. b");
+	});
+
+	it("Shift+Tab on top-level item returns null (no indent to remove)", () => {
+		const state = createTestState("1. a\n2. b", 5); // cursor on line 2
+		expect(computeListIndentChanges(state, -1)).toBeNull();
+	});
+
+	// --- Multi-line selection ---------------------------------------------
+
+	it("Tab on multi-line selection indents all list lines", () => {
+		const doc = "1. a\n2. b\n3. c";
+		const selection = EditorSelection.single(doc.indexOf("2."), doc.indexOf("3.") + 4);
+		expect(applyChangesWithSelection(doc, selection, 1)).toBe("1. a\n   1. b\n   2. c");
+	});
+
+	it("Tab on selection that ends at next-line boundary excludes the trailing line", () => {
+		// `EditorSelection.single(doc.indexOf("2."), doc.indexOf("3."))` selects
+		// from the start of "2. b" up to (but NOT including) "3. c". Only the
+		// "2. b" line should be indented; "3. c" must stay at the parent level
+		// and renumber from 3 to 2. Matches CM's `changeBySelectedLine` rule.
+		const doc = "1. a\n2. b\n3. c";
+		const selection = EditorSelection.single(doc.indexOf("2."), doc.indexOf("3."));
+		expect(applyChangesWithSelection(doc, selection, 1)).toBe("1. a\n   1. b\n2. c");
+	});
+
+	it("Shift+Tab on multi-line selection outdents and renumbers", () => {
+		const doc = "1. a\n   1. b\n   2. c\n   3. d";
+		const selection = EditorSelection.single(doc.indexOf("   2."), doc.indexOf("   3.") + 6);
+		// Outdent lines 3 and 4 → "" indent. Line 2 stays at "   1. b".
+		expect(applyChangesWithSelection(doc, selection, -1)).toBe("1. a\n   1. b\n2. c\n3. d");
+	});
+
+	// --- Edge cases --------------------------------------------------------
+
+	it("does not renumber if non-modified ordered list has gaps", () => {
+		// User wrote "1. a / 5. b" intentionally. We must NOT renumber 5 to 2.
+		// However if we Tab on "5. b", that line's number is forced to fresh = 1.
+		const doc = "1. a\n5. b";
+		const cursor = doc.indexOf("5.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n   1. b");
+	});
+
+	it("preserves user-chosen start number on non-modified lines", () => {
+		// Tabbing one item in a separate ordered list must not touch the other.
+		const doc = "5. a\n6. b\n7. c";
+		const cursor = doc.indexOf("6.");
+		// Modified line 2 → indent + fresh "1." at parent's content offset
+		// (col 3 for single-digit "5."). Line 3 renumbers from 7 to 6.
+		expect(applyChanges(doc, cursor, 1)).toBe("5. a\n   1. b\n6. c");
+	});
+
+	it("breaks ordered run at blank line", () => {
+		const doc = "1. a\n\n2. b\n3. c";
+		const cursor = doc.indexOf("3.");
+		// Block scanning stops at the blank line, so item 1 is untouched.
+		// Tab on "3. c" → parent on previous line is "2. b" (offset 3).
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n\n2. b\n   1. c");
+	});
+
+	it("respects ordered list separator (bullet between ordered items)", () => {
+		const doc = "1. a\n- separator\n2. b\n3. c";
+		const cursor = doc.indexOf("3.");
+		// Tab on "3. c" → parent on previous line is "2. b" (offset 3).
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n- separator\n2. b\n   1. c");
+	});
+
+	it("handles two-digit numbers in renumber", () => {
+		// Tab on item 5 of a 9-item list. Items 6..9 renumber to 5..8.
+		const lines = Array.from({ length: 9 }, (_, i) => `${i + 1}. item${i + 1}`).join("\n");
+		const cursor = lines.indexOf("5.");
+		const result = applyChanges(lines, cursor, 1);
+		const expected =
+			"1. item1\n2. item2\n3. item3\n4. item4\n   1. item5\n5. item6\n6. item7\n7. item8\n8. item9";
+		expect(result).toBe(expected);
+	});
+
+	it("handles renumbering 10 → 9 (number length shrinks)", () => {
+		// Tab on item 2 of a 10-item list. Items 3..10 renumber to 2..9; item 10 → "9" (length shrinks 2 → 1).
+		const items = Array.from({ length: 10 }, (_, i) => `${i + 1}. item${i + 1}`).join("\n");
+		const cursor = items.indexOf("2.");
+		const result = applyChanges(items, cursor, 1);
+		expect(result).toBe(
+			"1. item1\n   1. item2\n2. item3\n3. item4\n4. item5\n5. item6\n6. item7\n7. item8\n8. item9\n9. item10",
+		);
+	});
+
+	it("Tab on already-nested item nests it one more level", () => {
+		const doc = "1. a\n   1. b";
+		const cursor = doc.indexOf("   1. b") + 3;
+		// Parent on previous line is "   1. b" itself? No, look UP: previous
+		// non-deeper list line is "1. a" at col 0 — but "1. a" is shallower,
+		// so we fall through to "oldIndent + LIST_INDENT_UNIT" (3 + 2 = 5 cols).
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n     1. b");
+	});
+
+	it("Shift+Tab on a bullet item outdents it", () => {
+		const doc = "- a\n  - b";
+		const cursor = doc.indexOf("  - b") + 2;
+		expect(applyChanges(doc, cursor, -1)).toBe("- a\n- b");
+	});
+
+	// --- Cascade: renumber that changes marker width shifts descendants ----
+
+	it("renumber 9 → 10 shifts descendant indent by +1 to preserve nesting", () => {
+		// Shift+Tab on `   1. x` outdents it to the parent level. The renumber
+		// then bumps `9. b` to `10. b` (marker width grows 3 → 4). Without the
+		// cascade, `   1. child` (indent 3) would no longer be CommonMark-nested
+		// under `10. b` (content offset 4).
+		const doc = "8. a\n   1. x\n9. b\n   1. child";
+		const cursor = doc.indexOf("   1. x") + 3;
+		expect(applyChanges(doc, cursor, -1)).toBe("8. a\n9. x\n10. b\n    1. child");
+	});
+
+	it("renumber 10 → 9 shifts descendant indent by -1", () => {
+		// Tab on item 2 of `1. a / 2. b / .. / 10. j / [   1. child]` makes the
+		// 10-item parent list renumber 3..10 → 2..9. Item 10 (`10. j` → `9. j`)
+		// shrinks marker width by 1, so its descendant `   1. child` should
+		// outdent by 1 to stay aligned. Block ends after the descendant.
+		const doc = "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j\n    1. child";
+		const cursor = doc.indexOf("2. b");
+		const result = applyChanges(doc, cursor, 1);
+		expect(result).toBe(
+			"1. a\n   1. b\n2. c\n3. d\n4. e\n5. f\n6. g\n7. h\n8. i\n9. j\n   1. child",
+		);
+	});
+
+	// --- Continuation paragraphs (CommonMark) -----------------------------
+
+	it("Tab past an indented continuation finds the prior sibling list line", () => {
+		// `1. parent\n   continuation\n2. child`. Tab on "2. child" should
+		// nest under "1. parent" (content offset 3) — the indented
+		// continuation must not break the sibling search.
+		const doc = "1. parent\n   continuation\n2. child";
+		const cursor = doc.indexOf("2. child");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\n   continuation\n   1. child");
+	});
+
+	it("Tab past a lazy (un-indented) continuation still finds the prior sibling", () => {
+		// CommonMark "lazy continuation": an un-indented paragraph after a
+		// list item still belongs to the item, so the sibling search and the
+		// block scan both need to walk past it.
+		const doc = "1. parent\ncontinuation\n2. child";
+		const cursor = doc.indexOf("2. child");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\ncontinuation\n   1. child");
+	});
+
+	it("lazy continuation does not truncate the renumber block (`3. next` → `2. next`)", () => {
+		// `1. parent / continuation / 2. child / 3. next`. After Tab on
+		// `2. child`, the block scan must include `3. next` so it renumbers
+		// from 3 to 2 — marked/commonmark tokenises these four lines as a
+		// single ordered list, so they are functionally siblings.
+		const doc = "1. parent\ncontinuation\n2. child\n3. next";
+		const cursor = doc.indexOf("2. child");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\ncontinuation\n   1. child\n2. next");
+	});
+
+	// --- Paragraph-interrupting blocks end the list (NOT lazy continuation) -
+
+	it("ATX heading between list items ends the list — no cross-block sibling", () => {
+		// `1. a / # heading / 2. b` is list / heading / list (3 separate
+		// CommonMark blocks). Tab on `2. b` must NOT find `1. a` as sibling
+		// and must NOT pull `2. b` under it; falls back to LIST_INDENT_UNIT.
+		const doc = "1. a\n# heading\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n# heading\n  1. b");
+	});
+
+	it("thematic break between list items ends the list", () => {
+		// `---` is a thematic break (or setext heading underline). Either way
+		// it terminates the prior list.
+		const doc = "1. a\n---\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n---\n  1. b");
+	});
+
+	it("blockquote between list items ends the list", () => {
+		const doc = "1. a\n> quote\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n> quote\n  1. b");
+	});
+
+	it("fenced code block between list items ends the list", () => {
+		const doc = "1. a\n```\ncode\n```\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n```\ncode\n```\n  1. b");
+	});
+
+	it("HTML comment between list items ends the list", () => {
+		// marked tokenises `1. a\n<!-- comment -->\n2. b` as list / html / list
+		// per CommonMark §4.6 type 2.
+		const doc = "1. a\n<!-- comment -->\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<!-- comment -->\n  1. b");
+	});
+
+	it("HTML block element (<div>) between list items ends the list", () => {
+		// A blank line terminates the HTMLBlock per CommonMark §4.6 (type 6
+		// ends at a blank line) and matches @lezer/markdown's parse. Without
+		// the blank line, the parser keeps subsequent list-looking lines as
+		// HTMLBlock interior — see the "INSIDE an HTML block" tests below.
+		const doc = "1. a\n<div>x</div>\n\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<div>x</div>\n\n  1. b");
+	});
+
+	it("HTML <table> tag between list items ends the list", () => {
+		const doc = "1. a\n<table><tr><td>x</td></tr></table>\n\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<table><tr><td>x</td></tr></table>\n\n  1. b");
+	});
+
+	it("inline HTML tag (<span>) stays as continuation", () => {
+		// `1. a / <span>inline</span> / 2. b / 3. c`. @codemirror/lang-markdown
+		// parses this whole thing as one OrderedList. <span> is not in the
+		// CommonMark §4.6 block-level allowlist, so it stays inline.
+		const doc = "1. a\n<span>inline</span>\n2. b\n3. c";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<span>inline</span>\n   1. b\n2. c");
+	});
+
+	it("Tab on list-looking text INSIDE an HTML block is a no-op", () => {
+		// `<div>\n2. b\n</div>` is one HTMLBlock per @lezer/markdown. The
+		// inner `2. b` is HTML body, not a markdown list item — Tab must
+		// not nest or renumber it.
+		const doc = "<div>\n2. b\n</div>";
+		const cursor = doc.indexOf("2. b");
+		// computeListIndentChanges returns null when no list line is
+		// affected, so the doc is unchanged.
+		expect(applyChanges(doc, cursor, 1)).toBe(doc);
+	});
+
+	it("Shift+Tab on list-looking text INSIDE an HTML block is a no-op", () => {
+		const doc = "<div>\n   2. b\n</div>";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, -1)).toBe(doc);
+	});
+
+	it("sibling search treats HTML block interior as a hard boundary", () => {
+		// After the HTMLBlock ends (blank line per CommonMark §4.6 type 6),
+		// `3. c` is a fresh top-level list. Tab on `3. c` must NOT find
+		// `1. a` (or the inner `2. b inside html`) as sibling; the blank
+		// breaks the walk, so it falls back to a 2-column indent.
+		const doc = "1. a\n<div>\n2. b inside html\n</div>\n\n3. c";
+		const cursor = doc.indexOf("3. c");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<div>\n2. b inside html\n</div>\n\n  1. c");
+	});
+
+	it("inline anchor (<a>) stays as continuation", () => {
+		const doc = '1. a\n<a href="x">link</a>\n2. b\n3. c';
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe('1. a\n<a href="x">link</a>\n   1. b\n2. c');
+	});
+
+	it("standalone closing HTML tag opens an HTMLBlock per CommonMark spec", () => {
+		// `</div>` satisfies the type 6 start condition in CommonMark §4.6,
+		// so @lezer/markdown treats it (and the following list-looking lines)
+		// as HTMLBlock interior until a blank line. Tab on `2. b` is a no-op.
+		const doc = "1. a\n</div>\n2. b\n3. c";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe(doc);
+	});
+
+	it("ATX heading is NOT included in the renumber block", () => {
+		// `3. c` after the heading must keep its user-typed number because
+		// the heading severs it from `1. a`'s ordered run.
+		const doc = "1. a\n# heading\n2. b\n3. c";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n# heading\n  1. b\n3. c");
+	});
+
+	it("renumber cascade shifts continuation paragraphs under descendant items", () => {
+		// Shift+Tab on `   1. x` outdents it; `9. b` then renumbers to `10. b`
+		// (delta +1). Both the descendant list item `   1. child` and its
+		// continuation `      note` must shift by +1 to stay nested under
+		// the new content offsets of 10. b (4) and 1. child (7).
+		const doc = "8. a\n   1. x\n9. b\n   1. child\n      note";
+		const cursor = doc.indexOf("   1. x") + 3;
+		expect(applyChanges(doc, cursor, -1)).toBe("8. a\n9. x\n10. b\n    1. child\n       note");
+	});
+
+	// --- Regression: user-reported case from chat -------------------------
+
+	it("Enter Tab sequence on empty ordered list nests at parent content offset", () => {
+		// Initial state from user report: empty 1./2./3. list.
+		// Cursor at end of "1. ", Enter produces "1. \n2. " (continuation),
+		// then Tab on "2. " should produce "1. \n   1. \n3. \n4. " (because
+		// insertNewlineContinueMarkup will renumber 2 and 3 to 3 and 4).
+		// Here we just verify the Tab step in isolation: starting from
+		// "1. \n2. \n2. \n3. " (with a 2nd "2. " inserted by Enter continuation),
+		// Tab on line 2 yields a properly-nested sub-list.
+		const doc = "1. \n2. \n2. \n3. ";
+		const cursor = doc.indexOf("2.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. \n   1. \n2. \n3. ");
 	});
 });

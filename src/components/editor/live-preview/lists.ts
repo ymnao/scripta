@@ -1,6 +1,14 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, EditorState, Prec, type Range, Transaction } from "@codemirror/state";
 import {
+	type ChangeSpec,
+	EditorSelection,
+	EditorState,
+	Prec,
+	type Range,
+	Transaction,
+} from "@codemirror/state";
+import {
+	type Command,
 	Decoration,
 	type DecorationSet,
 	type EditorView,
@@ -315,45 +323,493 @@ const ensureTaskMarkerSpace = EditorState.transactionFilter.of((tr) => {
 	return [tr, { changes: inserts, sequential: true }];
 });
 
-/** Matches bullet list markers: `- `, `* `, `+ ` with optional leading indent */
 const bulletMarkerRe = /^([ \t]*[-*+] )/;
-/** Matches task list markers: `- [ ] `, `- [x] `, etc. with optional leading indent */
 const taskMarkerRe = /^([ \t]*[-*+] \[[ xX]\] )/;
+const orderedMarkerRe = /^([ \t]*)(\d+)([.)]) /;
+const anyBulletRe = /^([ \t]*)([-*+]) (\[[ xX]\] )?/;
+
+/** Fallback indent step when no preceding sibling exists. */
+const LIST_INDENT_UNIT = "  ";
+
+export interface ListLineInfo {
+	indent: string;
+	ordered: { number: number; delim: "." | ")" } | null;
+	task: boolean;
+	/** Width of `[marker][trailing space]` (excludes indent). */
+	markerWidth: number;
+}
+
+/** Classify a line as ordered / bullet / task list item, or `null`. */
+export function parseListLine(text: string): ListLineInfo | null {
+	const o = orderedMarkerRe.exec(text);
+	if (o) {
+		return {
+			indent: o[1],
+			ordered: { number: Number.parseInt(o[2], 10), delim: o[3] as "." | ")" },
+			task: false,
+			markerWidth: o[0].length - o[1].length,
+		};
+	}
+	const b = anyBulletRe.exec(text);
+	if (b) {
+		return {
+			indent: b[1],
+			ordered: null,
+			task: b[3] != null,
+			markerWidth: b[0].length - b[1].length,
+		};
+	}
+	return null;
+}
+
+/**
+ * Lezer node names whose interior is opaque to list-aware Tab/Shift+Tab —
+ * any list-looking text inside should be left alone. Covers fenced/indented
+ * code as well as HTML blocks (CommonMark §4.6), since `<div>...</div>` may
+ * literally contain `2. b` text that is HTML body, not a list item.
+ */
+const OPAQUE_BLOCK_NAMES = new Set<string>([
+	"FencedCode",
+	"CodeBlock",
+	"IndentedCode",
+	"HTMLBlock",
+	"CommentBlock",
+	"ProcessingInstructionBlock",
+]);
+
+function isInsideOpaqueBlock(state: EditorState, pos: number): boolean {
+	const tree = syntaxTree(state);
+	for (
+		let cur: { name: string; parent: typeof cur | null } | null = tree.resolve(pos, 1);
+		cur;
+		cur = cur.parent
+	) {
+		if (OPAQUE_BLOCK_NAMES.has(cur.name)) return true;
+	}
+	return false;
+}
+
+/** Leading whitespace width of a line (treats tabs as 1 char). */
+function leadingWidth(text: string): number {
+	const m = /^[ \t]*/.exec(text);
+	return m ? m[0].length : 0;
+}
+
+const ATX_HEADING_RE = /^[ \t]{0,3}#{1,6}(?:[ \t]|$)/;
+const THEMATIC_DASH_RE = /^[ \t]{0,3}(?:-[ \t]*){3,}$/;
+const THEMATIC_STAR_RE = /^[ \t]{0,3}(?:\*[ \t]*){3,}$/;
+const THEMATIC_UNDERSCORE_RE = /^[ \t]{0,3}(?:_[ \t]*){3,}$/;
+const BLOCKQUOTE_RE = /^[ \t]{0,3}>/;
+const FENCED_CODE_RE = /^[ \t]{0,3}(?:```|~~~)/;
+// Block-level HTML tag names that interrupt a paragraph per CommonMark §4.6
+// types 1 (script/style/pre/textarea) and 6 (block-level elements). Inline
+// tags like <span>, <a>, <em>, <code>, <strong>, and custom elements are not
+// in this set — they stay as inline content within the list item.
+const HTML_BLOCK_TAGS = new Set([
+	// Type 1
+	"script",
+	"pre",
+	"style",
+	"textarea",
+	// Type 6
+	"address",
+	"article",
+	"aside",
+	"base",
+	"basefont",
+	"blockquote",
+	"body",
+	"caption",
+	"center",
+	"col",
+	"colgroup",
+	"dd",
+	"details",
+	"dialog",
+	"dir",
+	"div",
+	"dl",
+	"dt",
+	"fieldset",
+	"figcaption",
+	"figure",
+	"footer",
+	"form",
+	"frame",
+	"frameset",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"head",
+	"header",
+	"hr",
+	"html",
+	"iframe",
+	"legend",
+	"li",
+	"link",
+	"main",
+	"menu",
+	"menuitem",
+	"nav",
+	"noframes",
+	"ol",
+	"optgroup",
+	"option",
+	"p",
+	"param",
+	"section",
+	"source",
+	"summary",
+	"table",
+	"tbody",
+	"td",
+	"tfoot",
+	"th",
+	"thead",
+	"title",
+	"tr",
+	"track",
+	"ul",
+]);
+// Comment / CDATA / declaration / processing instruction always interrupt.
+const HTML_OPENER_RE = /^[ \t]{0,3}<(?:!--|!\[CDATA\[|[!?])/;
+// Opening tag `<name` followed by whitespace, `>`, `/`, or EOL. Closing tags
+// (`</…`) are intentionally NOT matched: marked keeps a standalone closing
+// tag as part of the preceding list item, so treating it as a boundary would
+// split lists the parser sees as one block.
+const HTML_TAG_RE = /^[ \t]{0,3}<([a-zA-Z][a-zA-Z0-9-]*)(?:[\s>/]|$)/;
+
+function isHtmlBlock(text: string): boolean {
+	if (HTML_OPENER_RE.test(text)) return true;
+	const m = HTML_TAG_RE.exec(text);
+	return m !== null && HTML_BLOCK_TAGS.has(m[1].toLowerCase());
+}
+
+/**
+ * Lines that interrupt a paragraph in CommonMark and therefore end a list
+ * item's lazy continuation: ATX headings, thematic breaks, blockquotes, fenced
+ * code blocks, and HTML blocks. Returning `true` here makes the list-block
+ * scan and the sibling-search walks treat the line as a hard boundary.
+ */
+function isParagraphInterrupting(text: string): boolean {
+	return (
+		ATX_HEADING_RE.test(text) ||
+		THEMATIC_DASH_RE.test(text) ||
+		THEMATIC_STAR_RE.test(text) ||
+		THEMATIC_UNDERSCORE_RE.test(text) ||
+		BLOCKQUOTE_RE.test(text) ||
+		FENCED_CODE_RE.test(text) ||
+		isHtmlBlock(text)
+	);
+}
+
+/**
+ * Walk back to find the closest list line that satisfies `predicate`. Treats
+ * indented non-list lines as continuation paragraphs and walks past them,
+ * stopping only on blank lines, on non-list lines indented less than
+ * `boundaryIndentLen`, or when the predicate returns `"stop"`.
+ */
+function findPrevListLine(
+	state: EditorState,
+	lineNum: number,
+	boundaryIndentLen: number,
+	predicate: (info: ListLineInfo) => boolean | "stop",
+): ListLineInfo | null {
+	for (let i = lineNum - 1; i >= 1; i--) {
+		const line = state.doc.line(i);
+		if (line.text.trim() === "") return null;
+		// HTML/code blocks act as hard boundaries even when their interior
+		// text matches the list regex (e.g. `2. b` inside <div>...</div>).
+		if (isInsideOpaqueBlock(state, line.from)) return null;
+		const info = parseListLine(line.text);
+		if (!info) {
+			if (isParagraphInterrupting(line.text)) return null;
+			if (leadingWidth(line.text) < boundaryIndentLen) return null;
+			continue; // lazy/indented continuation — keep walking
+		}
+		const r = predicate(info);
+		if (r === "stop") return null;
+		if (r) return info;
+	}
+	return null;
+}
+
+/**
+ * Indent for a line being nested via Tab. Aligns to the preceding same-indent
+ * sibling's content offset so the markdown parser sees a true CommonMark
+ * nesting; otherwise falls back to one `LIST_INDENT_UNIT`.
+ */
+function computeIndentForNest(state: EditorState, lineNum: number, oldIndent: string): string {
+	const sibling = findPrevListLine(state, lineNum, oldIndent.length, (info) => {
+		if (info.indent.length > oldIndent.length) return false;
+		if (info.indent.length < oldIndent.length) return "stop";
+		return true;
+	});
+	if (sibling) {
+		const targetCol = sibling.indent.length + sibling.markerWidth;
+		if (targetCol > oldIndent.length) return " ".repeat(targetCol);
+	}
+	return oldIndent + LIST_INDENT_UNIT;
+}
+
+/**
+ * Indent for a line being un-nested via Shift+Tab. Aligns to the nearest
+ * shallower ancestor; otherwise drops one `LIST_INDENT_UNIT`.
+ */
+function computeIndentForOutdent(state: EditorState, lineNum: number, oldIndent: string): string {
+	const ancestor = findPrevListLine(
+		state,
+		lineNum,
+		oldIndent.length,
+		(info) => info.indent.length < oldIndent.length,
+	);
+	if (ancestor) return ancestor.indent;
+	return oldIndent.slice(Math.min(oldIndent.length, LIST_INDENT_UNIT.length));
+}
+
+/**
+ * Plan the indent / outdent + renumber changes for the current selection.
+ *
+ * For each list line in the selection: compute the new indent (Tab nests
+ * under the preceding sibling's content offset, Shift+Tab outdents to the
+ * ancestor's indent), then renumber the surrounding ordered list block so
+ * nested levels start fresh at 1 and sibling items continue sequentially.
+ *
+ * Returns `null` if no list line is affected — caller should fall through
+ * to the default Tab binding.
+ */
+export function computeListIndentChanges(
+	state: EditorState,
+	direction: 1 | -1,
+): { changes: ChangeSpec[] } | null {
+	const sel = state.selection.main;
+	const startLineNum = state.doc.lineAt(sel.from).number;
+	const endLine = state.doc.lineAt(sel.to);
+	// Exclude the trailing line when a non-empty selection ends exactly at
+	// its start — matches CM's `changeBySelectedLine` convention so range
+	// selections behave like the standard indent / outdent commands.
+	const endLineNum = !sel.empty && sel.to === endLine.from ? endLine.number - 1 : endLine.number;
+	if (endLineNum < startLineNum) return null;
+
+	// Parse each touched line once and reuse downstream.
+	const parsedLines = new Map<number, ListLineInfo>();
+	const newIndents = new Map<number, string>();
+
+	const getOrParse = (lineNum: number): ListLineInfo | null => {
+		const cached = parsedLines.get(lineNum);
+		if (cached) return cached;
+		const info = parseListLine(state.doc.line(lineNum).text);
+		if (info) parsedLines.set(lineNum, info);
+		return info;
+	};
+
+	for (let i = startLineNum; i <= endLineNum; i++) {
+		const line = state.doc.line(i);
+		if (isInsideOpaqueBlock(state, line.from)) continue;
+		const info = parseListLine(line.text);
+		if (!info) continue;
+		parsedLines.set(i, info);
+
+		const oldIndent = info.indent;
+		if (direction === -1 && oldIndent.length === 0) continue;
+		const newIndent =
+			direction === 1
+				? computeIndentForNest(state, i, oldIndent)
+				: computeIndentForOutdent(state, i, oldIndent);
+		if (newIndent !== oldIndent) newIndents.set(i, newIndent);
+	}
+
+	if (newIndents.size === 0) return null;
+
+	// A list block extends through list marker lines, indented continuation
+	// paragraphs, and CommonMark "lazy continuation" lines (unindented
+	// paragraph text that still belongs to the previous item). It ends at
+	// the first blank line, at a line that interrupts a paragraph in
+	// CommonMark (ATX heading, thematic break, blockquote, fenced code,
+	// block-level HTML), or inside an opaque block (code/HTML interior).
+	const isBlockMember = (lineNum: number): boolean => {
+		const line = state.doc.line(lineNum);
+		if (line.text.trim() === "") return false;
+		if (isInsideOpaqueBlock(state, line.from)) return false;
+		if (getOrParse(lineNum)) return true;
+		return !isParagraphInterrupting(line.text);
+	};
+
+	const modLineNums = [...newIndents.keys()].sort((a, b) => a - b);
+	let blockStart = modLineNums[0];
+	while (blockStart > 1 && isBlockMember(blockStart - 1)) blockStart--;
+	let blockEnd = modLineNums[modLineNums.length - 1];
+	while (blockEnd < state.doc.lines && isBlockMember(blockEnd + 1)) blockEnd++;
+
+	// Per indent depth, track the next expected ordered-list number.
+	// Bullet/task at same indent breaks the run; shallower indent drops
+	// deeper counters. A modified ordered line with no existing counter at
+	// its (new) indent forces a fresh start at 1; for unmodified first items
+	// we respect the user-typed number.
+	const indentCounters = new Map<string, number>();
+	const renumberMap = new Map<number, number>();
+
+	for (let i = blockStart; i <= blockEnd; i++) {
+		const orig = getOrParse(i);
+		if (!orig) continue;
+		const virtualIndent = newIndents.get(i) ?? orig.indent;
+
+		for (const k of indentCounters.keys()) {
+			if (k.length > virtualIndent.length) indentCounters.delete(k);
+		}
+
+		if (!orig.ordered) {
+			indentCounters.delete(virtualIndent);
+			continue;
+		}
+
+		const existing = indentCounters.get(virtualIndent);
+		const startNum = existing ?? (newIndents.has(i) ? 1 : orig.ordered.number);
+		if (startNum !== orig.ordered.number) renumberMap.set(i, startNum);
+		indentCounters.set(virtualIndent, startNum + 1);
+	}
+
+	// Effective indent length of a line (newIndents + already-applied cascade).
+	// For continuation paragraphs (non-list), uses raw leading whitespace.
+	const indentShifts = new Map<number, number>();
+	const effectiveIndentLen = (lineNum: number): number => {
+		const orig = getOrParse(lineNum);
+		const base = orig
+			? (newIndents.get(lineNum)?.length ?? orig.indent.length)
+			: leadingWidth(state.doc.line(lineNum).text);
+		return base + (indentShifts.get(lineNum) ?? 0);
+	};
+
+	// Cascade: when a renumber changes an ordered line's marker width
+	// (e.g. 9 → 10), every line in its content-offset scope (descendant
+	// list items AND their continuation paragraphs) needs its indent
+	// shifted by the same delta so the post-renumber doc still parses as
+	// nested under the post-renumber content offset.
+	for (let i = blockStart; i <= blockEnd; i++) {
+		const orig = getOrParse(i);
+		if (!orig?.ordered) continue;
+		const newNum = renumberMap.get(i);
+		if (newNum === undefined) continue;
+		const delta = String(newNum).length - String(orig.ordered.number).length;
+		if (delta === 0) continue;
+
+		const lOldContentOffset = effectiveIndentLen(i) + orig.markerWidth;
+		for (let j = i + 1; j <= blockEnd; j++) {
+			const jLine = state.doc.line(j);
+			if (jLine.text.trim() === "") break;
+			if (effectiveIndentLen(j) < lOldContentOffset) break;
+			indentShifts.set(j, (indentShifts.get(j) ?? 0) + delta);
+		}
+	}
+
+	// Apply a positive/negative shift to a leading-whitespace string by
+	// padding or trimming. Clamps at 0.
+	const applyShift = (leading: string, shift: number): string => {
+		if (shift > 0) return leading + " ".repeat(shift);
+		if (shift < 0) return leading.slice(0, Math.max(0, leading.length + shift));
+		return leading;
+	};
+
+	// Emit one change per affected line in line order. Block iteration is
+	// ascending so no sort step is needed.
+	const changes: ChangeSpec[] = [];
+	const lineNums = new Set([...newIndents.keys(), ...renumberMap.keys(), ...indentShifts.keys()]);
+	for (let i = blockStart; i <= blockEnd; i++) {
+		if (!lineNums.has(i)) continue;
+		const line = state.doc.line(i);
+		const orig = getOrParse(i);
+
+		if (!orig) {
+			// Continuation paragraph — only the cascade shift applies.
+			const shift = indentShifts.get(i) ?? 0;
+			if (shift === 0) continue;
+			const m = /^[ \t]*/.exec(line.text);
+			const leading = m ? m[0] : "";
+			const newLeading = applyShift(leading, shift);
+			if (newLeading === leading) continue;
+			changes.push({ from: line.from, to: line.from + leading.length, insert: newLeading });
+			continue;
+		}
+
+		const baseIndent = newIndents.get(i) ?? orig.indent;
+		const finalIndent = applyShift(baseIndent, indentShifts.get(i) ?? 0);
+		const newNum = renumberMap.get(i);
+		const oldNumStr = orig.ordered ? String(orig.ordered.number) : "";
+		const newNumStr = newNum !== undefined ? String(newNum) : oldNumStr;
+
+		if (finalIndent === orig.indent && newNumStr === oldNumStr) continue;
+
+		if (newNumStr === oldNumStr || !orig.ordered) {
+			changes.push({
+				from: line.from,
+				to: line.from + orig.indent.length,
+				insert: finalIndent,
+			});
+		} else {
+			changes.push({
+				from: line.from,
+				to: line.from + orig.indent.length + oldNumStr.length,
+				insert: finalIndent + newNumStr,
+			});
+		}
+	}
+
+	return changes.length === 0 ? null : { changes };
+}
+
+/**
+ * Tab handler: indent every list line in the selection and renumber the
+ * surrounding ordered list block. Falls through to the default Tab binding
+ * (which inserts `indentUnit`) when no list line is involved.
+ */
+export const indentListMore: Command = (view) => {
+	const result = computeListIndentChanges(view.state, 1);
+	if (!result) return false;
+	view.dispatch(
+		view.state.update({
+			changes: result.changes,
+			userEvent: "input.indent",
+		}),
+	);
+	return true;
+};
+
+/**
+ * Shift+Tab handler: outdent every list line in the selection and renumber the
+ * surrounding ordered list block. Falls through to the default Shift+Tab
+ * binding when no list line is involved or all selected list lines are already
+ * at column 0.
+ */
+export const indentListLess: Command = (view) => {
+	const result = computeListIndentChanges(view.state, -1);
+	if (!result) return false;
+	view.dispatch(
+		view.state.update({
+			changes: result.changes,
+			userEvent: "delete.dedent",
+		}),
+	);
+	return true;
+};
 
 /**
  * Find the marker range (ListMark + optional TaskMarker + trailing space)
- * for a bullet/task list item on the given line using regex.
- * Returns `{ from, to }` or `null` if not found.
+ * for a bullet/task list item on the given line. Returns `null` if the
+ * line has no bullet/task marker or if it sits inside a code or HTML block.
  */
 export function findMarkerRange(
 	state: EditorState,
 	line: { from: number; to: number; number: number },
 ): { from: number; to: number } | null {
 	const text = state.doc.sliceString(line.from, line.to);
-	const taskMatch = taskMarkerRe.exec(text);
-	const bulletMatch = !taskMatch ? bulletMarkerRe.exec(text) : null;
-
-	if (!taskMatch && !bulletMatch) return null;
-
-	// Guard: don't treat markers inside code blocks as list items.
-	// syntaxTree may be partially parsed (no EditorView in tests), in
-	// which case ancestors are just Document and the guard is a no-op.
-	const tree = syntaxTree(state);
-	const node = tree.resolve(line.from, 1);
-	for (let cur = node.parent; cur; cur = cur.parent) {
-		const name = cur.name;
-		if (name === "FencedCode" || name === "CodeBlock" || name === "IndentedCode") {
-			return null;
-		}
-	}
-
-	if (taskMatch) {
-		return { from: line.from, to: line.from + taskMatch[1].length };
-	}
-	// bulletMatch is guaranteed non-null here (early return above ensures
-	// at least one of taskMatch/bulletMatch matched).
-	const matched = bulletMatch as RegExpExecArray;
-	return { from: line.from, to: line.from + matched[1].length };
+	const match = taskMarkerRe.exec(text) ?? bulletMarkerRe.exec(text);
+	if (!match) return null;
+	if (isInsideOpaqueBlock(state, line.from)) return null;
+	return { from: line.from, to: line.from + match[1].length };
 }
 
 /**
@@ -452,6 +908,12 @@ export const listKeymap = [
 					return false;
 				},
 			},
+			// Tab / Shift+Tab on list lines: nest/un-nest the item and renumber
+			// the surrounding ordered list block (#118). Returns false when no
+			// list line is involved so the default indentWithTab handler takes
+			// over for plain text and code blocks.
+			{ key: "Tab", run: indentListMore },
+			{ key: "Shift-Tab", run: indentListLess },
 		]),
 	),
 ];

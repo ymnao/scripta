@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { waitForSaved } from "./helpers/assertions";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 // #91（マーカー挿入後のカーソル位置）/ #92（Enter によるリスト継続）の
@@ -115,5 +115,81 @@ test.describe("Enter によるリスト継続 (#92)", () => {
 		await waitForSaved(page);
 
 		expect(await lastWrite(mock)).toContain("> foo\n> bar");
+	});
+});
+
+test.describe("Tab / Shift+Tab で順序付きリストを再採番 (#118)", () => {
+	test("`1. a` Enter 直後の `2. ` で Tab → 子リスト `   1. ` から再開", async ({ page }) => {
+		const mock = await openWithContent(page, "1. a");
+
+		await page.keyboard.press("End");
+		await page.keyboard.press("Enter"); // → "1. a\n2. "
+		await page.keyboard.press("Tab"); // → "1. a\n   1. "
+		await page.keyboard.type("b");
+		await page.keyboard.press("Enter"); // → "1. a\n   1. b\n   2. "
+		await page.keyboard.type("c");
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		// processContent appends a trailing newline on save. Nested indent
+		// equals the parent's content offset (3 cols for "1. a") so the
+		// markdown parser treats it as a proper CommonMark sub-list.
+		expect(await lastWrite(mock)).toBe("1. a\n   1. b\n   2. c\n");
+	});
+
+	test("中間の項目で Tab → その項目が子レベルに下がり後続が再採番", async ({ page }) => {
+		const mock = await openWithContent(page, "1. a\n2. b\n3. c");
+
+		// 2 行目の行末へ移動して Tab
+		await page.keyboard.press(`${modKey}+Home`);
+		await page.keyboard.press("ArrowDown");
+		await page.keyboard.press("End");
+		await page.keyboard.press("Tab");
+		await waitForUnsaved(page);
+
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		expect(await lastWrite(mock)).toBe("1. a\n   1. b\n2. c\n");
+	});
+
+	test("子項目で Shift+Tab → 親レベルに戻り連番に復帰", async ({ page }) => {
+		const mock = await openWithContent(page, "1. a\n   1. b\n2. c");
+
+		// 2 行目の "   1. b" の行末にカーソルを置く
+		await page.keyboard.press(`${modKey}+Home`);
+		await page.keyboard.press("ArrowDown");
+		await page.keyboard.press("End");
+		await page.keyboard.press("Shift+Tab");
+		await waitForUnsaved(page);
+
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		expect(await lastWrite(mock)).toBe("1. a\n2. b\n3. c\n");
+	});
+
+	test("ユーザ報告シナリオ: 連続した Enter で親の番号が破綻しない (#118)", async ({ page }) => {
+		// 1. の行末で Enter → Tab (子の 1. を作成) → さらに改行を続けても
+		// 親レベルの後続番号が壊れず保たれることを確認するリグレッション。
+		// （コンテンツ付き項目で開始: insertNewlineContinueMarkup が exit branch
+		//   ではなく continuation branch に入る条件）
+		const mock = await openWithContent(page, "1. x\n2. y\n3. z");
+
+		// 1 行目末尾 → Enter → Tab → 子の 1. をネスト
+		await page.keyboard.press(`${modKey}+Home`);
+		await page.keyboard.press("End");
+		await page.keyboard.press("Enter");
+		await page.keyboard.press("Tab");
+		await page.keyboard.type("aあ");
+		await page.keyboard.press("Enter"); // 子の 2. を継続
+		await page.keyboard.type("a");
+		await waitForUnsaved(page);
+
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		// 親 "2. y" / "3. z" がそのまま保持され、子は "   1./   2." で継続する
+		expect(await lastWrite(mock)).toBe("1. x\n   1. aあ\n   2. a\n2. y\n3. z\n");
 	});
 });
