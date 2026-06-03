@@ -913,15 +913,34 @@ describe("computeListIndentChanges", () => {
 		);
 	});
 
-	// --- Continuation paragraphs (CommonMark "lazy continuation") ----------
+	// --- Continuation paragraphs (CommonMark) -----------------------------
 
-	it("Tab on item after a continuation paragraph aligns to parent's content offset", () => {
+	it("Tab past an indented continuation finds the prior sibling list line", () => {
 		// `1. parent\n   continuation\n2. child`. Tab on "2. child" should
-		// nest under "1. parent" (content offset 3) — the continuation must
-		// not break the sibling search.
+		// nest under "1. parent" (content offset 3) — the indented
+		// continuation must not break the sibling search.
 		const doc = "1. parent\n   continuation\n2. child";
 		const cursor = doc.indexOf("2. child");
 		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\n   continuation\n   1. child");
+	});
+
+	it("Tab past a lazy (un-indented) continuation still finds the prior sibling", () => {
+		// CommonMark "lazy continuation": an un-indented paragraph after a
+		// list item still belongs to the item, so the sibling search and the
+		// block scan both need to walk past it.
+		const doc = "1. parent\ncontinuation\n2. child";
+		const cursor = doc.indexOf("2. child");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\ncontinuation\n   1. child");
+	});
+
+	it("lazy continuation does not truncate the renumber block (`3. next` → `2. next`)", () => {
+		// `1. parent / continuation / 2. child / 3. next`. After Tab on
+		// `2. child`, the block scan must include `3. next` so it renumbers
+		// from 3 to 2 — marked/commonmark tokenises these four lines as a
+		// single ordered list, so they are functionally siblings.
+		const doc = "1. parent\ncontinuation\n2. child\n3. next";
+		const cursor = doc.indexOf("2. child");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\ncontinuation\n   1. child\n2. next");
 	});
 
 	it("renumber cascade shifts continuation paragraphs under descendant items", () => {

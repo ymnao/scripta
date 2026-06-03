@@ -495,15 +495,14 @@ export function computeListIndentChanges(
 
 	if (newIndents.size === 0) return null;
 
-	// A line belongs to the surrounding list block when it is a list marker
-	// line OR an indented non-list line (continuation paragraph). The block
-	// ends at the first blank line or non-indented non-list line.
-	const isBlockMember = (lineNum: number): boolean => {
-		const text = state.doc.line(lineNum).text;
-		if (text.trim() === "") return false;
-		if (getOrParse(lineNum)) return true;
-		return leadingWidth(text) > 0;
-	};
+	// A list block extends through any non-blank line: list marker lines,
+	// indented continuations, and CommonMark "lazy continuation" lines
+	// (unindented paragraph text that still belongs to the previous item).
+	// The block ends at the first blank line. The renumber walk safely
+	// skips non-list lines (no counter touched), and the cascade walk's
+	// indent comparison short-circuits at lines shallower than the
+	// current scope's content offset.
+	const isBlockMember = (lineNum: number): boolean => state.doc.line(lineNum).text.trim() !== "";
 
 	const modLineNums = [...newIndents.keys()].sort((a, b) => a - b);
 	let blockStart = modLineNums[0];
