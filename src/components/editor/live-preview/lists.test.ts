@@ -974,6 +974,26 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n```\ncode\n```\n  1. b");
 	});
 
+	it("HTML comment between list items ends the list", () => {
+		// marked tokenises `1. a\n<!-- comment -->\n2. b` as list / html / list
+		// per CommonMark §4.6 type 2.
+		const doc = "1. a\n<!-- comment -->\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<!-- comment -->\n  1. b");
+	});
+
+	it("HTML block element (<div>) between list items ends the list", () => {
+		const doc = "1. a\n<div>x</div>\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<div>x</div>\n  1. b");
+	});
+
+	it("HTML <table> tag between list items ends the list", () => {
+		const doc = "1. a\n<table><tr><td>x</td></tr></table>\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<table><tr><td>x</td></tr></table>\n  1. b");
+	});
+
 	it("ATX heading is NOT included in the renumber block", () => {
 		// `3. c` after the heading must keep its user-typed number because
 		// the heading severs it from `1. a`'s ordered run.
