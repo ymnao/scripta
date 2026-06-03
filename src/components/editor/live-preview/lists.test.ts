@@ -983,15 +983,19 @@ describe("computeListIndentChanges", () => {
 	});
 
 	it("HTML block element (<div>) between list items ends the list", () => {
-		const doc = "1. a\n<div>x</div>\n2. b";
+		// A blank line terminates the HTMLBlock per CommonMark §4.6 (type 6
+		// ends at a blank line) and matches @lezer/markdown's parse. Without
+		// the blank line, the parser keeps subsequent list-looking lines as
+		// HTMLBlock interior — see the "INSIDE an HTML block" tests below.
+		const doc = "1. a\n<div>x</div>\n\n2. b";
 		const cursor = doc.indexOf("2. b");
-		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<div>x</div>\n  1. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<div>x</div>\n\n  1. b");
 	});
 
 	it("HTML <table> tag between list items ends the list", () => {
-		const doc = "1. a\n<table><tr><td>x</td></tr></table>\n2. b";
+		const doc = "1. a\n<table><tr><td>x</td></tr></table>\n\n2. b";
 		const cursor = doc.indexOf("2. b");
-		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<table><tr><td>x</td></tr></table>\n  1. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<table><tr><td>x</td></tr></table>\n\n  1. b");
 	});
 
 	it("inline HTML tag (<span>) stays as continuation", () => {
@@ -1003,20 +1007,46 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<span>inline</span>\n   1. b\n2. c");
 	});
 
+	it("Tab on list-looking text INSIDE an HTML block is a no-op", () => {
+		// `<div>\n2. b\n</div>` is one HTMLBlock per @lezer/markdown. The
+		// inner `2. b` is HTML body, not a markdown list item — Tab must
+		// not nest or renumber it.
+		const doc = "<div>\n2. b\n</div>";
+		const cursor = doc.indexOf("2. b");
+		// computeListIndentChanges returns null when no list line is
+		// affected, so the doc is unchanged.
+		expect(applyChanges(doc, cursor, 1)).toBe(doc);
+	});
+
+	it("Shift+Tab on list-looking text INSIDE an HTML block is a no-op", () => {
+		const doc = "<div>\n   2. b\n</div>";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, -1)).toBe(doc);
+	});
+
+	it("sibling search treats HTML block interior as a hard boundary", () => {
+		// After the HTMLBlock ends (blank line per CommonMark §4.6 type 6),
+		// `3. c` is a fresh top-level list. Tab on `3. c` must NOT find
+		// `1. a` (or the inner `2. b inside html`) as sibling; the blank
+		// breaks the walk, so it falls back to a 2-column indent.
+		const doc = "1. a\n<div>\n2. b inside html\n</div>\n\n3. c";
+		const cursor = doc.indexOf("3. c");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<div>\n2. b inside html\n</div>\n\n  1. c");
+	});
+
 	it("inline anchor (<a>) stays as continuation", () => {
 		const doc = '1. a\n<a href="x">link</a>\n2. b\n3. c';
 		const cursor = doc.indexOf("2. b");
 		expect(applyChanges(doc, cursor, 1)).toBe('1. a\n<a href="x">link</a>\n   1. b\n2. c');
 	});
 
-	it("standalone closing HTML tag stays as continuation (matches marked)", () => {
-		// marked tokenises `1. a / </div> / 2. b / 3. c` as ONE ordered list.
-		// `</div>` is part of `1. a`'s text and `2. b` / `3. c` are siblings,
-		// so Tab on `2. b` must find `1. a` as sibling and renumber `3. c`
-		// to `2. c`. The closing tag itself is not a block boundary in marked.
+	it("standalone closing HTML tag opens an HTMLBlock per CommonMark spec", () => {
+		// `</div>` satisfies the type 6 start condition in CommonMark §4.6,
+		// so @lezer/markdown treats it (and the following list-looking lines)
+		// as HTMLBlock interior until a blank line. Tab on `2. b` is a no-op.
 		const doc = "1. a\n</div>\n2. b\n3. c";
 		const cursor = doc.indexOf("2. b");
-		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n</div>\n   1. b\n2. c");
+		expect(applyChanges(doc, cursor, 1)).toBe(doc);
 	});
 
 	it("ATX heading is NOT included in the renumber block", () => {

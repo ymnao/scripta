@@ -362,15 +362,29 @@ export function parseListLine(text: string): ListLineInfo | null {
 	return null;
 }
 
-function isInsideCodeBlock(state: EditorState, pos: number): boolean {
+/**
+ * Lezer node names whose interior is opaque to list-aware Tab/Shift+Tab —
+ * any list-looking text inside should be left alone. Covers fenced/indented
+ * code as well as HTML blocks (CommonMark §4.6), since `<div>...</div>` may
+ * literally contain `2. b` text that is HTML body, not a list item.
+ */
+const OPAQUE_BLOCK_NAMES = new Set<string>([
+	"FencedCode",
+	"CodeBlock",
+	"IndentedCode",
+	"HTMLBlock",
+	"CommentBlock",
+	"ProcessingInstructionBlock",
+]);
+
+function isInsideOpaqueBlock(state: EditorState, pos: number): boolean {
 	const tree = syntaxTree(state);
 	for (
 		let cur: { name: string; parent: typeof cur | null } | null = tree.resolve(pos, 1);
 		cur;
 		cur = cur.parent
 	) {
-		const name = cur.name;
-		if (name === "FencedCode" || name === "CodeBlock" || name === "IndentedCode") return true;
+		if (OPAQUE_BLOCK_NAMES.has(cur.name)) return true;
 	}
 	return false;
 }
@@ -506,12 +520,15 @@ function findPrevListLine(
 	predicate: (info: ListLineInfo) => boolean | "stop",
 ): ListLineInfo | null {
 	for (let i = lineNum - 1; i >= 1; i--) {
-		const text = state.doc.line(i).text;
-		if (text.trim() === "") return null;
-		const info = parseListLine(text);
+		const line = state.doc.line(i);
+		if (line.text.trim() === "") return null;
+		// HTML/code blocks act as hard boundaries even when their interior
+		// text matches the list regex (e.g. `2. b` inside <div>...</div>).
+		if (isInsideOpaqueBlock(state, line.from)) return null;
+		const info = parseListLine(line.text);
 		if (!info) {
-			if (isParagraphInterrupting(text)) return null;
-			if (leadingWidth(text) < boundaryIndentLen) return null;
+			if (isParagraphInterrupting(line.text)) return null;
+			if (leadingWidth(line.text) < boundaryIndentLen) return null;
 			continue; // lazy/indented continuation — keep walking
 		}
 		const r = predicate(info);
@@ -592,7 +609,7 @@ export function computeListIndentChanges(
 
 	for (let i = startLineNum; i <= endLineNum; i++) {
 		const line = state.doc.line(i);
-		if (isInsideCodeBlock(state, line.from)) continue;
+		if (isInsideOpaqueBlock(state, line.from)) continue;
 		const info = parseListLine(line.text);
 		if (!info) continue;
 		parsedLines.set(i, info);
@@ -611,13 +628,15 @@ export function computeListIndentChanges(
 	// A list block extends through list marker lines, indented continuation
 	// paragraphs, and CommonMark "lazy continuation" lines (unindented
 	// paragraph text that still belongs to the previous item). It ends at
-	// the first blank line OR at a line that interrupts a paragraph in
-	// CommonMark (ATX heading, thematic break, blockquote, fenced code).
+	// the first blank line, at a line that interrupts a paragraph in
+	// CommonMark (ATX heading, thematic break, blockquote, fenced code,
+	// block-level HTML), or inside an opaque block (code/HTML interior).
 	const isBlockMember = (lineNum: number): boolean => {
-		const text = state.doc.line(lineNum).text;
-		if (text.trim() === "") return false;
+		const line = state.doc.line(lineNum);
+		if (line.text.trim() === "") return false;
+		if (isInsideOpaqueBlock(state, line.from)) return false;
 		if (getOrParse(lineNum)) return true;
-		return !isParagraphInterrupting(text);
+		return !isParagraphInterrupting(line.text);
 	};
 
 	const modLineNums = [...newIndents.keys()].sort((a, b) => a - b);
@@ -780,7 +799,7 @@ export const indentListLess: Command = (view) => {
 /**
  * Find the marker range (ListMark + optional TaskMarker + trailing space)
  * for a bullet/task list item on the given line. Returns `null` if the
- * line has no bullet/task marker or if it sits inside a code block.
+ * line has no bullet/task marker or if it sits inside a code or HTML block.
  */
 export function findMarkerRange(
 	state: EditorState,
@@ -789,7 +808,7 @@ export function findMarkerRange(
 	const text = state.doc.sliceString(line.from, line.to);
 	const match = taskMarkerRe.exec(text) ?? bulletMarkerRe.exec(text);
 	if (!match) return null;
-	if (isInsideCodeBlock(state, line.from)) return null;
+	if (isInsideOpaqueBlock(state, line.from)) return null;
 	return { from: line.from, to: line.from + match[1].length };
 }
 
