@@ -1,6 +1,12 @@
 import type { Transaction } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
-import { containsPasteUserEvent, isStandaloneUrlLine, LinkCardWidget } from "./link-cards";
+import {
+	buildMdLinkFromCard,
+	containsPasteUserEvent,
+	getCardDeleteRange,
+	isStandaloneUrlLine,
+	LinkCardWidget,
+} from "./link-cards";
 
 vi.mock("../../../lib/commands", () => ({
 	fetchOgp: vi.fn(),
@@ -44,6 +50,105 @@ describe("isStandaloneUrlLine", () => {
 
 	it("returns null for whitespace-only string", () => {
 		expect(isStandaloneUrlLine("   ")).toBeNull();
+	});
+});
+
+describe("buildMdLinkFromCard", () => {
+	it("uses OGP title as label when available", () => {
+		expect(buildMdLinkFromCard("https://example.com", "Example Site")).toBe(
+			"[Example Site](<https://example.com>)",
+		);
+	});
+
+	it("falls back to URL when title is null", () => {
+		expect(buildMdLinkFromCard("https://example.com", null)).toBe(
+			"[https://example.com](<https://example.com>)",
+		);
+	});
+
+	it("falls back to URL when title is undefined", () => {
+		expect(buildMdLinkFromCard("https://example.com")).toBe(
+			"[https://example.com](<https://example.com>)",
+		);
+	});
+
+	it("falls back to URL when title is empty/whitespace", () => {
+		expect(buildMdLinkFromCard("https://example.com", "   ")).toBe(
+			"[https://example.com](<https://example.com>)",
+		);
+	});
+
+	it("trims title before using as label", () => {
+		expect(buildMdLinkFromCard("https://example.com", "  Title  ")).toBe(
+			"[Title](<https://example.com>)",
+		);
+	});
+
+	it("escapes square brackets in title", () => {
+		expect(buildMdLinkFromCard("https://example.com", "Foo [bar]")).toBe(
+			"[Foo \\[bar\\]](<https://example.com>)",
+		);
+	});
+
+	it("uses angle bracket URL form (URL not escaped)", () => {
+		// `)` を含む URL でもリンクが壊れないことを保証
+		expect(buildMdLinkFromCard("https://en.wikipedia.org/wiki/Foo_(bar)", "Wikipedia")).toBe(
+			"[Wikipedia](<https://en.wikipedia.org/wiki/Foo_(bar)>)",
+		);
+	});
+});
+
+describe("getCardDeleteRange", () => {
+	// Lightweight doc shape that matches what link-cards.ts uses
+	function makeDoc(lines: string[]) {
+		const fullText = lines.join("\n");
+		const lineStarts: number[] = [0];
+		for (let i = 0; i < lines.length - 1; i++) {
+			lineStarts.push(lineStarts[i] + lines[i].length + 1);
+		}
+		return {
+			length: fullText.length,
+			lines: lines.length,
+			lineAt: (pos: number) => {
+				let lineNum = lines.length;
+				for (let i = lines.length - 1; i >= 0; i--) {
+					if (pos >= lineStarts[i]) {
+						lineNum = i + 1;
+						break;
+					}
+				}
+				const idx = lineNum - 1;
+				return {
+					from: lineStarts[idx],
+					to: lineStarts[idx] + lines[idx].length,
+					number: lineNum,
+				};
+			},
+		};
+	}
+
+	it("middle line: deletes line + trailing newline (upper/lower lines join)", () => {
+		const doc = makeDoc(["a", "URL", "b"]);
+		const range = getCardDeleteRange(doc, 2); // pos in "URL" line
+		expect(range).toEqual({ from: 2, to: 6 }); // "URL\n" range
+	});
+
+	it("last line: deletes leading newline + line (no empty line left)", () => {
+		const doc = makeDoc(["a", "URL"]);
+		const range = getCardDeleteRange(doc, 2);
+		expect(range).toEqual({ from: 1, to: 5 }); // "\nURL"
+	});
+
+	it("only line in doc: deletes line content only (no newline to consume)", () => {
+		const doc = makeDoc(["URL"]);
+		const range = getCardDeleteRange(doc, 0);
+		expect(range).toEqual({ from: 0, to: 3 });
+	});
+
+	it("first line of multi-line doc: deletes line + newline", () => {
+		const doc = makeDoc(["URL", "b"]);
+		const range = getCardDeleteRange(doc, 0);
+		expect(range).toEqual({ from: 0, to: 4 }); // "URL\n"
 	});
 });
 

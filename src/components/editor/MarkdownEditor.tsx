@@ -21,6 +21,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { openExternal } from "../../lib/commands";
 import { buildFence } from "../../lib/export";
 import { useSettingsStore } from "../../stores/settings";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
@@ -39,9 +40,11 @@ import {
 import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
 import {
 	blockquoteDecoration,
+	buildMdLinkFromCard,
 	codeBlockCopyDecoration,
 	codeBlockDecoration,
 	emphasisDecoration,
+	getCardDeleteRange,
 	headingDecoration,
 	horizontalRuleDecoration,
 	imageDecoration,
@@ -149,6 +152,13 @@ export function MarkdownEditor({
 	const [editorContextMenu, setEditorContextMenu] = useState<{
 		position: { x: number; y: number };
 	} | null>(null);
+	const [cardContextMenu, setCardContextMenu] = useState<{
+		position: { x: number; y: number };
+		url: string;
+		title: string | null;
+		lineFrom: number;
+		lineTo: number;
+	} | null>(null);
 	// 右クリック mousedown 前の選択状態を保持。
 	// mousedown → mousemove による意図しないマイクロ選択を無視するために使用
 	const preRightClickSelRef = useRef<{ from: number; to: number } | null>(null);
@@ -168,6 +178,24 @@ export function MarkdownEditor({
 		};
 		el.addEventListener("mermaid-context-menu", onMermaidMenu);
 		return () => el.removeEventListener("mermaid-context-menu", onMermaidMenu);
+	}, []);
+
+	// Listen for OGP link-card right-click context menu events from CM extension
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+		const onCardMenu = (e: Event) => {
+			const { url, title, lineFrom, lineTo, clientX, clientY } = (e as CustomEvent).detail;
+			setCardContextMenu({
+				position: { x: clientX, y: clientY },
+				url,
+				title,
+				lineFrom,
+				lineTo,
+			});
+		};
+		el.addEventListener("link-card-context-menu", onCardMenu);
+		return () => el.removeEventListener("link-card-context-menu", onCardMenu);
 	}, []);
 
 	useEffect(() => {
@@ -353,8 +381,13 @@ export function MarkdownEditor({
 					? rawTarget.parentElement
 					: null;
 		if (!target) return;
-		// Mermaid・テーブルセル上のクリックは既存メニューに委譲
-		if (target.closest(".cm-mermaid-widget") || target.closest(".cm-table-cell")) return;
+		// Mermaid・テーブルセル・OGP カード上のクリックは各専用メニューに委譲
+		if (
+			target.closest(".cm-mermaid-widget") ||
+			target.closest(".cm-table-cell") ||
+			target.closest(".cm-link-card")
+		)
+			return;
 		// 他のハンドラが既に処理済みなら何もしない
 		if (e.defaultPrevented) return;
 		e.preventDefault();
@@ -627,6 +660,66 @@ export function MarkdownEditor({
 					position={editorContextMenu.position}
 					items={getEditorContextMenuItems()}
 					onClose={() => setEditorContextMenu(null)}
+				/>
+			)}
+			{cardContextMenu && (
+				<ContextMenu
+					position={cardContextMenu.position}
+					items={[
+						{
+							id: "open-card",
+							label: "リンクを開く",
+							onClick: () => {
+								openExternal(cardContextMenu.url).catch((error) => {
+									console.error("Failed to open URL:", cardContextMenu.url, error);
+								});
+							},
+						},
+						{
+							id: "copy-card-url",
+							label: "URL をコピー",
+							onClick: () => {
+								if (!navigator.clipboard) return;
+								navigator.clipboard.writeText(cardContextMenu.url).catch(() => {});
+							},
+						},
+						{
+							id: "convert-card-to-md",
+							label: "md リンクに変換",
+							onClick: () => {
+								const view = editorRef.current?.view;
+								if (!view) return;
+								const insert = buildMdLinkFromCard(cardContextMenu.url, cardContextMenu.title);
+								view.dispatch({
+									changes: {
+										from: cardContextMenu.lineFrom,
+										to: cardContextMenu.lineTo,
+										insert,
+									},
+								});
+								view.focus();
+							},
+						},
+						{
+							id: "delete-card-sep",
+							label: "",
+							separator: true,
+							onClick: () => {},
+						},
+						{
+							id: "delete-card",
+							label: "カードを削除",
+							danger: true,
+							onClick: () => {
+								const view = editorRef.current?.view;
+								if (!view) return;
+								const range = getCardDeleteRange(view.state.doc, cardContextMenu.lineFrom);
+								view.dispatch({ changes: { from: range.from, to: range.to, insert: "" } });
+								view.focus();
+							},
+						},
+					]}
+					onClose={() => setCardContextMenu(null)}
 				/>
 			)}
 			<MermaidEditorDialog

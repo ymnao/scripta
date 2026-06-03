@@ -5,7 +5,7 @@ export { emphasisDecoration } from "./emphasis";
 export { headingDecoration } from "./headings";
 export { horizontalRuleDecoration } from "./horizontal-rules";
 export { imageDecoration } from "./images";
-export { linkCardDecoration } from "./link-cards";
+export { buildMdLinkFromCard, getCardDeleteRange, linkCardDecoration } from "./link-cards";
 export { linkDecoration, pasteAsMarkdownLinkCommand } from "./links";
 export { listDecoration, listKeymap } from "./lists";
 export { mathDecoration } from "./math";

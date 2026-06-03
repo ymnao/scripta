@@ -23,6 +23,55 @@ export function isStandaloneUrlLine(lineText: string): string | null {
 }
 
 /**
+ * 行を削除する range を返す。最後の行でなければ末尾の改行も含めて
+ * 上下の行が連結するように削除する。最後の行なら直前の改行を含めて
+ * 「空行」を残さないようにする。文書が 1 行しかなければその行全体を空にする。
+ */
+export function getCardDeleteRange(
+	doc: {
+		length: number;
+		lineAt: (pos: number) => { from: number; to: number; number: number };
+		lines: number;
+	},
+	lineFrom: number,
+): { from: number; to: number } {
+	const line = doc.lineAt(lineFrom);
+	if (line.number < doc.lines) {
+		// 通常: 行 + 後ろの改行
+		return { from: line.from, to: Math.min(doc.length, line.to + 1) };
+	}
+	if (line.number > 1) {
+		// 最終行: 前の改行 + 行
+		return { from: Math.max(0, line.from - 1), to: line.to };
+	}
+	// 1 行しかない: 行内容のみ
+	return { from: line.from, to: line.to };
+}
+
+/**
+ * URL を md リンク表記に変換するときの行内容を作る。
+ * OGP title があれば label に使う、なければ URL を label にする（loss-less）。
+ */
+export function buildMdLinkFromCard(url: string, ogpTitle?: string | null): string {
+	const label = ogpTitle?.trim() ? ogpTitle.trim() : url;
+	// LinkWidget 側と同じ escape ルールを適用するため links.ts の helper を使う
+	return `[${escapeLabel(label)}](<${url}>)`;
+}
+
+function escapeLabel(label: string): string {
+	return label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+}
+
+/** ogpCache に loaded entry があれば title を返す。なければ null。 */
+export function getCachedOgpTitle(url: string): string | null {
+	const entry = ogpCache.get(url);
+	if (entry?.status === "loaded") {
+		return entry.data.title ?? null;
+	}
+	return null;
+}
+
+/**
  * paste 由来の transaction かを判定する。
  *
  * #96 派生: paste で URL を空行に挿入したとき、即座に OGP card（少なくとも
@@ -418,6 +467,37 @@ function createLinkCardClickGuard() {
 				iter.next();
 			}
 			return false;
+		},
+		contextmenu(event: MouseEvent, view: EditorView) {
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const cardEl = target.closest<HTMLElement>(".cm-link-card");
+			if (!cardEl) return false;
+
+			// dataset から URL を取得（widget DOM 構築時に設定済み）
+			const url = cardEl.dataset.linkCardUrl;
+			if (!url) return false;
+
+			// card の DOM 位置から doc position を割り出し、その line range を特定する
+			const pos = view.posAtDOM(cardEl);
+			const line = view.state.doc.lineAt(pos);
+			const title = getCachedOgpTitle(url);
+
+			event.preventDefault();
+			view.dom.dispatchEvent(
+				new CustomEvent("link-card-context-menu", {
+					bubbles: true,
+					detail: {
+						url,
+						title,
+						lineFrom: line.from,
+						lineTo: line.to,
+						clientX: event.clientX,
+						clientY: event.clientY,
+					},
+				}),
+			);
+			return true;
 		},
 	});
 }
