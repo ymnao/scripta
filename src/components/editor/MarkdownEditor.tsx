@@ -68,6 +68,41 @@ import { MermaidEditorDialog } from "./MermaidEditorDialog";
 
 const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
 
+/**
+ * Mouse event の target を Element に正規化する小ヘルパー。
+ * Text node なら parentElement、それ以外は null。`handleEditorMouseDown` /
+ * `handleEditorContextMenu` の冒頭で重複していた if-cascade を 1 箇所に集約。
+ */
+function resolveTargetElement(target: EventTarget | null): Element | null {
+	if (target instanceof Element) return target;
+	if (target instanceof Node) return target.parentElement;
+	return null;
+}
+
+/**
+ * CM extension が `view.dom.dispatchEvent(new CustomEvent(name, {detail}))` で
+ * 投げてくる widget 系右クリックメニュー event を React state に橋渡しする hook。
+ * mermaid / link-card / link-widget の 3 つで同じ useEffect コピペが重複していた。
+ *
+ * `onEvent` の最新版を ref で参照することで listener 登録は 1 回のみに保ち、
+ * stale closure も避ける。
+ */
+function useWidgetCustomEvent<T>(
+	containerRef: React.RefObject<HTMLElement | null>,
+	eventName: string,
+	onEvent: (detail: T) => void,
+): void {
+	const handlerRef = useRef(onEvent);
+	handlerRef.current = onEvent;
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+		const handler = (e: Event) => handlerRef.current((e as CustomEvent<T>).detail);
+		el.addEventListener(eventName, handler);
+		return () => el.removeEventListener(eventName, handler);
+	}, [containerRef, eventName]);
+}
+
 const listFoldService = foldService.of((state, lineStart, lineEnd) => {
 	const tree = syntaxTree(state);
 	let result: { from: number; to: number } | null = null;
@@ -182,41 +217,39 @@ export function MarkdownEditor({
 		return () => cancelAnimationFrame(statsRafIdRef.current);
 	}, []);
 
-	// Listen for mermaid right-click context menu events from CM extension
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		const onMermaidMenu = (e: Event) => {
-			const { source, from, to, clientX, clientY } = (e as CustomEvent).detail;
-			setMermaidContextMenu({ position: { x: clientX, y: clientY }, source, from, to });
-		};
-		el.addEventListener("mermaid-context-menu", onMermaidMenu);
-		return () => el.removeEventListener("mermaid-context-menu", onMermaidMenu);
-	}, []);
+	// Widget 右クリックメニューイベント 3 系統を共通 hook で配線
+	useWidgetCustomEvent<{
+		source: string;
+		from: number;
+		to: number;
+		clientX: number;
+		clientY: number;
+	}>(containerRef, "mermaid-context-menu", ({ source, from, to, clientX, clientY }) => {
+		setMermaidContextMenu({ position: { x: clientX, y: clientY }, source, from, to });
+	});
 
-	// Listen for OGP link-card right-click context menu events from CM extension
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		const onCardMenu = (e: Event) => {
-			const { url, lineFrom, lineTo, clientX, clientY } = (e as CustomEvent).detail;
-			setCardContextMenu({
-				position: { x: clientX, y: clientY },
-				url,
-				lineFrom,
-				lineTo,
-			});
-		};
-		el.addEventListener("link-card-context-menu", onCardMenu);
-		return () => el.removeEventListener("link-card-context-menu", onCardMenu);
-	}, []);
+	useWidgetCustomEvent<{
+		url: string;
+		lineFrom: number;
+		lineTo: number;
+		clientX: number;
+		clientY: number;
+	}>(containerRef, "link-card-context-menu", ({ url, lineFrom, lineTo, clientX, clientY }) => {
+		setCardContextMenu({ position: { x: clientX, y: clientY }, url, lineFrom, lineTo });
+	});
 
-	// Listen for md リンク widget 右クリックメニューイベント
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		const onMenu = (e: Event) => {
-			const { url, label, from, to, isUrlOnlyLine, clientX, clientY } = (e as CustomEvent).detail;
+	useWidgetCustomEvent<{
+		url: string;
+		label: string;
+		from: number;
+		to: number;
+		isUrlOnlyLine: boolean;
+		clientX: number;
+		clientY: number;
+	}>(
+		containerRef,
+		"link-widget-context-menu",
+		({ url, label, from, to, isUrlOnlyLine, clientX, clientY }) => {
 			setLinkWidgetContextMenu({
 				position: { x: clientX, y: clientY },
 				url,
@@ -225,10 +258,8 @@ export function MarkdownEditor({
 				to,
 				isUrlOnlyLine,
 			});
-		};
-		el.addEventListener("link-widget-context-menu", onMenu);
-		return () => el.removeEventListener("link-widget-context-menu", onMenu);
-	}, []);
+		},
+	);
 
 	useEffect(() => {
 		if (goToLine == null) return;
@@ -381,13 +412,7 @@ export function MarkdownEditor({
 
 	const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
 		if (e.button !== 2) return;
-		const rawTarget = e.target;
-		const target =
-			rawTarget instanceof Element
-				? rawTarget
-				: rawTarget instanceof Node
-					? rawTarget.parentElement
-					: null;
+		const target = resolveTargetElement(e.target);
 		if (!target) return;
 		// Mermaid・テーブルセル上の右クリック mousedown を阻止して
 		// カーソル移動によるデコレーション消失を防ぐ
@@ -405,13 +430,7 @@ export function MarkdownEditor({
 	}, []);
 
 	const handleEditorContextMenu = useCallback((e: ReactMouseEvent) => {
-		const rawTarget = e.target;
-		const target =
-			rawTarget instanceof Element
-				? rawTarget
-				: rawTarget instanceof Node
-					? rawTarget.parentElement
-					: null;
+		const target = resolveTargetElement(e.target);
 		if (!target) return;
 		// Mermaid・テーブルセル・OGP カード・md リンク widget は各専用メニューに委譲
 		if (
@@ -571,6 +590,49 @@ export function MarkdownEditor({
 		];
 	}, [editorContextMenu]);
 
+	const getLinkWidgetMenuItems = useCallback((): ContextMenuItem[] => {
+		if (!linkWidgetContextMenu) return [];
+		const { url, label, from, to, isUrlOnlyLine } = linkWidgetContextMenu;
+		const items: ContextMenuItem[] = [
+			{
+				id: "open-md-link",
+				label: "リンクを開く",
+				shortcut: `${isMac ? "⌘" : "Ctrl+"}クリック`,
+				onClick: () => {
+					openExternal(url).catch((error) => {
+						console.error("Failed to open URL:", url, error);
+					});
+				},
+			},
+			{
+				id: "copy-md-link-url",
+				label: "URL をコピー",
+				onClick: () => {
+					if (!navigator.clipboard) return;
+					navigator.clipboard.writeText(url).catch(() => {});
+				},
+			},
+		];
+		if (isUrlOnlyLine) {
+			items.push({
+				id: "make-card",
+				label: "カードにする",
+				onClick: () => {
+					// label が URL と一致するなら直接変換、違うなら confirm dialog 経由
+					if (label.trim() === url.trim()) {
+						const view = editorRef.current?.view;
+						if (!view) return;
+						view.dispatch({ changes: { from, to, insert: url } });
+						view.focus();
+					} else {
+						setLinkConvertConfirm({ url, label, from, to });
+					}
+				},
+			});
+		}
+		return items;
+	}, [linkWidgetContextMenu]);
+
 	const handleMermaidSave = useCallback(
 		(newSource: string) => {
 			const view = editorRef.current?.view;
@@ -698,47 +760,7 @@ export function MarkdownEditor({
 			{linkWidgetContextMenu && (
 				<ContextMenu
 					position={linkWidgetContextMenu.position}
-					items={(() => {
-						const { url, label, from, to, isUrlOnlyLine } = linkWidgetContextMenu;
-						const items: ContextMenuItem[] = [
-							{
-								id: "open-md-link",
-								label: "リンクを開く",
-								shortcut: `${isMac ? "⌘" : "Ctrl+"}クリック`,
-								onClick: () => {
-									openExternal(url).catch((error) => {
-										console.error("Failed to open URL:", url, error);
-									});
-								},
-							},
-							{
-								id: "copy-md-link-url",
-								label: "URL をコピー",
-								onClick: () => {
-									if (!navigator.clipboard) return;
-									navigator.clipboard.writeText(url).catch(() => {});
-								},
-							},
-						];
-						if (isUrlOnlyLine) {
-							items.push({
-								id: "make-card",
-								label: "カードにする",
-								onClick: () => {
-									// label が URL と同じなら直接変換、違うなら confirm dialog 経由
-									if (label.trim() === url.trim()) {
-										const view = editorRef.current?.view;
-										if (!view) return;
-										view.dispatch({ changes: { from, to, insert: url } });
-										view.focus();
-									} else {
-										setLinkConvertConfirm({ url, label, from, to });
-									}
-								},
-							});
-						}
-						return items;
-					})()}
+					items={getLinkWidgetMenuItems()}
 					onClose={() => setLinkWidgetContextMenu(null)}
 				/>
 			)}

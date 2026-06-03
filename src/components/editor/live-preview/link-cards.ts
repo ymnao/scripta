@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import type { Extension, Range, Transaction } from "@codemirror/state";
+import type { Extension, Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -46,23 +46,6 @@ export function getCardDeleteRange(
 	}
 	// 1 行しかない: 行内容のみ
 	return { from: line.from, to: line.to };
-}
-
-/**
- * paste 由来の transaction かを判定する。
- *
- * #96 派生: paste で URL を空行に挿入したとき、即座に OGP card（少なくとも
- * loading skeleton）を出したい。通常 typing の throttle (150ms) を skip して
- * 即時 rebuild するかの判定に使う。
- *
- * CodeMirror の `isUserEvent("input.paste")` はサブイベント（"input.paste.foo"）
- * もマッチさせるが、念のため自前実装。
- */
-export function containsPasteUserEvent(transactions: readonly Transaction[]): boolean {
-	for (const tr of transactions) {
-		if (tr.isUserEvent("input.paste")) return true;
-	}
-	return false;
 }
 
 type CacheEntry =
@@ -365,7 +348,8 @@ class LinkCardDecorationPlugin implements PluginValue {
 			this.prevCursorLines = collectCursorLines(update.view);
 			// paste で URL を空行に貼ったときは即時 card 表示したいので throttle を skip。
 			// 通常の typing は従来通り 150ms 遅延（連続入力中のチャタリング防止）。
-			if (containsPasteUserEvent(update.transactions)) {
+			const isPaste = update.transactions.some((tr) => tr.isUserEvent("input.paste"));
+			if (isPaste) {
 				this.cancelRebuild();
 				this.decorations = buildDecorations(update.view);
 				this.fetchMissingOgp(update.view);

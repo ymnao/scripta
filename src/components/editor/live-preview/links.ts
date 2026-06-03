@@ -154,6 +154,48 @@ export class LinkWidget extends WidgetType {
 	}
 }
 
+// `@lezer/common` は直接 dependency ではないので、Lezer node / cursor 型を
+// structural にローカル定義する（必要な API だけ拾う）。
+type LinkNodeCursor = {
+	name: string;
+	from: number;
+	to: number;
+	firstChild(): boolean;
+	nextSibling(): boolean;
+};
+type LinkSyntaxNode = { cursor(): LinkNodeCursor };
+
+/**
+ * Lezer の Link node から `[label](url)` の構成要素を取り出す pure helper。
+ * `buildDecorations` (decoration build) と `resolveLinkAtPos` (contextmenu) の
+ * 両方から呼ぶ単一の真実源。URL の angle bracket 剥がしもここで実施する。
+ */
+function parseLinkNode(
+	state: EditorState,
+	linkNode: LinkSyntaxNode,
+): { url: string; label: string; textFrom: number; textTo: number } | null {
+	const cursor = linkNode.cursor();
+	if (!cursor.firstChild()) return null;
+	let textFrom = -1;
+	let textTo = -1;
+	let url = "";
+	let foundCloseBracket = false;
+	do {
+		if (cursor.name === "LinkMark") {
+			const markText = state.doc.sliceString(cursor.from, cursor.to);
+			if (markText === "[") textFrom = cursor.to;
+			else if (markText === "]" && !foundCloseBracket) {
+				textTo = cursor.from;
+				foundCloseBracket = true;
+			}
+		} else if (cursor.name === "URL") {
+			url = stripUrlAngleBrackets(state.doc.sliceString(cursor.from, cursor.to));
+		}
+	} while (cursor.nextSibling());
+	if (!url || textFrom < 0 || textTo < 0) return null;
+	return { url, label: state.doc.sliceString(textFrom, textTo), textFrom, textTo };
+}
+
 function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const tree = syntaxTree(state);
@@ -189,35 +231,14 @@ function buildDecorations(view: EditorView): DecorationSet {
 				const endLine = state.doc.lineAt(node.to).number;
 				if (cursorInRange(cursorLines, startLine, endLine)) return;
 
-				const cursor = node.node.cursor();
-				if (!cursor.firstChild()) return;
+				// SyntaxNodeRef (iterate callback) → SyntaxNode via `.node`
+				const parts = parseLinkNode(state, node.node);
+				if (!parts) return;
 
-				let textFrom = -1;
-				let textTo = -1;
-				let url = "";
-				let foundCloseBracket = false;
-
-				do {
-					if (cursor.name === "LinkMark") {
-						const markText = state.doc.sliceString(cursor.from, cursor.to);
-						if (markText === "[") {
-							textFrom = cursor.to;
-						} else if (markText === "]" && !foundCloseBracket) {
-							textTo = cursor.from;
-							foundCloseBracket = true;
-						}
-					} else if (cursor.name === "URL") {
-						url = stripUrlAngleBrackets(state.doc.sliceString(cursor.from, cursor.to));
-					}
-				} while (cursor.nextSibling());
-
-				if (!url || textFrom === -1 || textTo === -1) return;
-
-				const rawText = state.doc.sliceString(textFrom, textTo);
-				const displayText = rawText.trim().length > 0 ? rawText : url;
+				const displayText = parts.label.trim().length > 0 ? parts.label : parts.url;
 				ranges.push(
 					Decoration.replace({
-						widget: new LinkWidget(displayText, url),
+						widget: new LinkWidget(displayText, parts.url),
 					}).range(node.from, node.to),
 				);
 			},
@@ -316,32 +337,22 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 			if (!widgetEl) return false;
 			if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
 
-			const pos = view.posAtDOM(widgetEl);
-			const linkRange = findEnclosingLinkNode(view.state, pos);
-			if (!linkRange) return false;
+			const link = resolveLinkAtPos(view.state, view.posAtDOM(widgetEl));
+			if (!link) return false;
 
-			const parts = extractLinkParts(view.state, linkRange.from, linkRange.to);
-			if (!parts) return false;
-
-			const line = view.state.doc.lineAt(linkRange.from);
+			const line = view.state.doc.lineAt(link.from);
 			const lineText = view.state.doc.sliceString(line.from, line.to);
-			const isUrlOnlyLine = isLineOnlyMdLink(
-				lineText,
-				line.from,
-				linkRange.from,
-				linkRange.to,
-				line.to,
-			);
+			const isUrlOnlyLine = isLineOnlyMdLink(lineText, link.from - line.from, link.to - line.from);
 
 			event.preventDefault();
 			view.dom.dispatchEvent(
 				new CustomEvent("link-widget-context-menu", {
 					bubbles: true,
 					detail: {
-						url: parts.url,
-						label: parts.label,
-						from: linkRange.from,
-						to: linkRange.to,
+						url: link.url,
+						label: link.label,
+						from: link.from,
+						to: link.to,
 						isUrlOnlyLine,
 						clientX: event.clientX,
 						clientY: event.clientY,
@@ -546,94 +557,38 @@ export function pasteAsMarkdownLinkCommand(view: EditorView): boolean {
 }
 
 /**
- * `[label](<url>)` または `[label](url)` 形式の md リンクを pure に parse する。
- *
- * 右クリック「カードにする」判定で「行が md リンクのみ」を確認するために使う。
- * Lezer 経由でも同じ情報は取れるが、テスタビリティと依存削減のため再実装。
- *
- * 厳密な CommonMark parser ではなく、よくある形のみ受け付ける（escape は最小限）。
- */
-export function parseSingleMdLink(
-	source: string,
-): { label: string; url: string; from: number; to: number } | null {
-	// `[label](<url>)` or `[label](url)` を見つける。
-	// label 内は \] / \\ をサポート（buildMarkdownLink と対称）。
-	// plain 形 `(url)` は `<` で始まるものを除外（angle 形 `(<url>)` と区別する）
-	const re = /\[((?:\\.|[^\]\\])*)\](?:\(<([^>]+)>\)|\((?!<)([^)\s]+)\))/;
-	const m = re.exec(source);
-	if (!m) return null;
-	const label = m[1].replace(/\\(.)/g, "$1");
-	const url = m[2] ?? m[3];
-	if (!url) return null;
-	return { label, url, from: m.index, to: m.index + m[0].length };
-}
-
-/**
- * `[link](<url>)` の md リンクを含む CM Link node から URL と label の range を取り出す。
- * `links.ts` の buildDecorations と同じロジックを再利用。
- */
-function extractLinkParts(
-	state: EditorState,
-	linkFrom: number,
-	linkTo: number,
-): { url: string; label: string } | null {
-	const tree = syntaxTree(state);
-	let linkNode = tree.resolveInner(linkFrom, 1);
-	while (linkNode && linkNode.name !== "Link") {
-		if (!linkNode.parent) return null;
-		linkNode = linkNode.parent;
-	}
-	if (!linkNode || linkNode.from !== linkFrom || linkNode.to !== linkTo) return null;
-	const cursor = linkNode.cursor();
-	if (!cursor.firstChild()) return null;
-	let textFrom = -1;
-	let textTo = -1;
-	let url = "";
-	let foundCloseBracket = false;
-	do {
-		if (cursor.name === "LinkMark") {
-			const markText = state.doc.sliceString(cursor.from, cursor.to);
-			if (markText === "[") textFrom = cursor.to;
-			else if (markText === "]" && !foundCloseBracket) {
-				textTo = cursor.from;
-				foundCloseBracket = true;
-			}
-		} else if (cursor.name === "URL") {
-			url = stripUrlAngleBrackets(state.doc.sliceString(cursor.from, cursor.to));
-		}
-	} while (cursor.nextSibling());
-	if (!url || textFrom < 0 || textTo < 0) return null;
-	return { url, label: state.doc.sliceString(textFrom, textTo) };
-}
-
-/**
  * 行内に md リンク以外のテキストが無い（前後 trim で空）かを判定する pure 関数。
+ * `linkStartInLine` / `linkEndInLine` は行頭からの offset。
  * 右クリック「カードにする」をメニューに出す条件。
  */
 export function isLineOnlyMdLink(
 	lineText: string,
-	lineFrom: number,
-	linkFrom: number,
-	linkTo: number,
-	lineTo: number,
+	linkStartInLine: number,
+	linkEndInLine: number,
 ): boolean {
-	const before = lineText.slice(0, linkFrom - lineFrom).trim();
-	const after = lineText.slice(linkTo - lineFrom, lineTo - lineFrom).trim();
+	const before = lineText.slice(0, linkStartInLine).trim();
+	const after = lineText.slice(linkEndInLine).trim();
 	return before === "" && after === "";
 }
 
-/** Walk up from `pos` until a Link node is found; return null if none. */
-function findEnclosingLinkNode(
+/**
+ * `pos` を含む Link node を見つけ、その範囲と `[label](url)` の構成要素を
+ * 1 回の tree 走査で取り出す。contextmenu handler 用の単一エントリポイント。
+ */
+function resolveLinkAtPos(
 	state: EditorState,
 	pos: number,
-): { from: number; to: number } | null {
+): { from: number; to: number; url: string; label: string } | null {
 	const tree = syntaxTree(state);
 	let node = tree.resolveInner(pos, 1);
 	while (node && node.name !== "Link") {
 		if (!node.parent) return null;
 		node = node.parent;
 	}
-	return node ? { from: node.from, to: node.to } : null;
+	if (!node) return null;
+	const parts = parseLinkNode(state, node);
+	if (!parts) return null;
+	return { from: node.from, to: node.to, url: parts.url, label: parts.label };
 }
 
 /**

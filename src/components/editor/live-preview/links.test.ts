@@ -13,7 +13,6 @@ import {
 	isSafeImageUrl,
 	isSafeUrl,
 	LinkWidget,
-	parseSingleMdLink,
 	pasteAsMarkdownLinkCommand,
 	shouldConvertPasteToLink,
 	stripUrlAngleBrackets,
@@ -589,81 +588,30 @@ describe("isOpenLinkModifierKey", () => {
 	});
 });
 
-describe("parseSingleMdLink", () => {
-	it("parses angle-bracket form `[label](<url>)`", () => {
-		expect(parseSingleMdLink("[Example](<https://example.com>)")).toEqual({
-			label: "Example",
-			url: "https://example.com",
-			from: 0,
-			to: "[Example](<https://example.com>)".length,
-		});
-	});
-
-	it("parses plain form `[label](url)`", () => {
-		expect(parseSingleMdLink("[Example](https://example.com)")).toEqual({
-			label: "Example",
-			url: "https://example.com",
-			from: 0,
-			to: "[Example](https://example.com)".length,
-		});
-	});
-
-	it("returns null for plain text", () => {
-		expect(parseSingleMdLink("hello world")).toBeNull();
-	});
-
-	it("returns null when only opening bracket", () => {
-		expect(parseSingleMdLink("[Example")).toBeNull();
-	});
-
-	it("unescapes backslash sequences in label", () => {
-		expect(parseSingleMdLink("[a\\]b](<https://x>)")?.label).toBe("a]b");
-	});
-
-	it("finds link offset within larger string", () => {
-		const result = parseSingleMdLink("prefix [Example](<https://example.com>) suffix");
-		expect(result?.from).toBe(7);
-		expect(result?.label).toBe("Example");
-	});
-
-	it("returns null when URL is empty (angle form)", () => {
-		expect(parseSingleMdLink("[label](<>)")).toBeNull();
-	});
-});
-
 describe("isLineOnlyMdLink", () => {
 	it("returns true when link spans the entire line", () => {
 		const text = "[a](<https://x>)";
-		expect(isLineOnlyMdLink(text, 0, 0, text.length, text.length)).toBe(true);
+		expect(isLineOnlyMdLink(text, 0, text.length)).toBe(true);
 	});
 
 	it("returns true when only whitespace surrounds the link", () => {
 		const text = "  [a](<https://x>)  ";
 		const link = "[a](<https://x>)";
-		const linkStart = text.indexOf(link);
-		expect(isLineOnlyMdLink(text, 0, linkStart, linkStart + link.length, text.length)).toBe(true);
+		const start = text.indexOf(link);
+		expect(isLineOnlyMdLink(text, start, start + link.length)).toBe(true);
 	});
 
 	it("returns false when text precedes the link", () => {
 		const text = "see [a](<https://x>)";
 		const link = "[a](<https://x>)";
-		const linkStart = text.indexOf(link);
-		expect(isLineOnlyMdLink(text, 0, linkStart, linkStart + link.length, text.length)).toBe(false);
+		const start = text.indexOf(link);
+		expect(isLineOnlyMdLink(text, start, start + link.length)).toBe(false);
 	});
 
 	it("returns false when text follows the link", () => {
 		const text = "[a](<https://x>) end";
 		const link = "[a](<https://x>)";
-		expect(isLineOnlyMdLink(text, 0, 0, link.length, text.length)).toBe(false);
-	});
-
-	it("handles line range that does not start at 0 (lineFrom offset applied)", () => {
-		// e.g. line starts at doc pos 10
-		const lineText = "[a](<https://x>)";
-		const lineFrom = 10;
-		expect(
-			isLineOnlyMdLink(lineText, lineFrom, 10, 10 + lineText.length, lineFrom + lineText.length),
-		).toBe(true);
+		expect(isLineOnlyMdLink(text, 0, link.length)).toBe(false);
 	});
 });
 
