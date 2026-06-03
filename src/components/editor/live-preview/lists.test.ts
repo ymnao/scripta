@@ -994,6 +994,16 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<table><tr><td>x</td></tr></table>\n  1. b");
 	});
 
+	it("standalone closing HTML tag stays as continuation (matches marked)", () => {
+		// marked tokenises `1. a / </div> / 2. b / 3. c` as ONE ordered list.
+		// `</div>` is part of `1. a`'s text and `2. b` / `3. c` are siblings,
+		// so Tab on `2. b` must find `1. a` as sibling and renumber `3. c`
+		// to `2. c`. The closing tag itself is not a block boundary in marked.
+		const doc = "1. a\n</div>\n2. b\n3. c";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n</div>\n   1. b\n2. c");
+	});
+
 	it("ATX heading is NOT included in the renumber block", () => {
 		// `3. c` after the heading must keep its user-typed number because
 		// the heading severs it from `1. a`'s ordered run.

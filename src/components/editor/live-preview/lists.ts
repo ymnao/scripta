@@ -387,12 +387,13 @@ const THEMATIC_STAR_RE = /^[ \t]{0,3}(?:\*[ \t]*){3,}$/;
 const THEMATIC_UNDERSCORE_RE = /^[ \t]{0,3}(?:_[ \t]*){3,}$/;
 const BLOCKQUOTE_RE = /^[ \t]{0,3}>/;
 const FENCED_CODE_RE = /^[ \t]{0,3}(?:```|~~~)/;
-// HTML block (CommonMark §4.6 types 1–7): line starts (after up to 3 spaces)
-// with `<!--`, `<![CDATA[`, `<!`, `<?`, or `<` followed by a tag name. This
-// is intentionally lenient — any `<…` opener is treated as a boundary, which
-// over-includes a few rare cases (e.g. `<3`) in exchange for catching every
-// real HTML block including comments, declarations, and element tags.
-const HTML_BLOCK_RE = /^[ \t]{0,3}<(?:!--|!\[CDATA\[|[!?]|\/?[a-zA-Z])/;
+// HTML block opener (CommonMark §4.6 types 1–6 START condition): line starts
+// (after up to 3 spaces) with `<!--`, `<![CDATA[`, `<!`, `<?`, or `<` followed
+// by an opening tag name. Closing tags (`</tag>`) and bare text are NOT
+// matched: this project's markdown parser (marked) keeps a standalone closing
+// tag as part of the preceding list item's text, so treating it as a hard
+// boundary would split lists that the parser sees as a single block.
+const HTML_BLOCK_RE = /^[ \t]{0,3}<(?:!--|!\[CDATA\[|[!?]|[a-zA-Z])/;
 
 /**
  * Lines that interrupt a paragraph in CommonMark and therefore end a list
