@@ -446,7 +446,12 @@ export function computeListIndentChanges(
 ): { changes: ChangeSpec[] } | null {
 	const sel = state.selection.main;
 	const startLineNum = state.doc.lineAt(sel.from).number;
-	const endLineNum = state.doc.lineAt(sel.to).number;
+	const endLine = state.doc.lineAt(sel.to);
+	// Exclude the trailing line when a non-empty selection ends exactly at
+	// its start — matches CM's `changeBySelectedLine` convention so range
+	// selections behave like the standard indent / outdent commands.
+	const endLineNum = !sel.empty && sel.to === endLine.from ? endLine.number - 1 : endLine.number;
+	if (endLineNum < startLineNum) return null;
 
 	// Parse each touched line once and reuse downstream.
 	const parsedLines = new Map<number, ListLineInfo>();

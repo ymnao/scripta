@@ -802,6 +802,16 @@ describe("computeListIndentChanges", () => {
 		expect(applyChangesWithSelection(doc, selection, 1)).toBe("1. a\n   1. b\n   2. c");
 	});
 
+	it("Tab on selection that ends at next-line boundary excludes the trailing line", () => {
+		// `EditorSelection.single(doc.indexOf("2."), doc.indexOf("3."))` selects
+		// from the start of "2. b" up to (but NOT including) "3. c". Only the
+		// "2. b" line should be indented; "3. c" must stay at the parent level
+		// and renumber from 3 to 2. Matches CM's `changeBySelectedLine` rule.
+		const doc = "1. a\n2. b\n3. c";
+		const selection = EditorSelection.single(doc.indexOf("2."), doc.indexOf("3."));
+		expect(applyChangesWithSelection(doc, selection, 1)).toBe("1. a\n   1. b\n2. c");
+	});
+
 	it("Shift+Tab on multi-line selection outdents and renumbers", () => {
 		const doc = "1. a\n   1. b\n   2. c\n   3. d";
 		const selection = EditorSelection.single(doc.indexOf("   2."), doc.indexOf("   3.") + 6);
