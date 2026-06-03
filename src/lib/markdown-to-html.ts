@@ -24,8 +24,11 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
 	return merged;
 }
 
-/** Check whether `pos` falls inside any of the sorted, merged ranges. */
-function isInsideRanges(pos: number, ranges: Array<[number, number]>): boolean {
+/**
+ * Check whether `pos` falls inside any of the sorted, merged ranges.
+ * Exported alongside `collectRawCodeRanges` for shared use.
+ */
+export function isInsideRanges(pos: number, ranges: Array<[number, number]>): boolean {
 	let lo = 0;
 	let hi = ranges.length - 1;
 	while (lo <= hi) {
@@ -41,19 +44,58 @@ function isInsideRanges(pos: number, ranges: Array<[number, number]>): boolean {
 	return false;
 }
 
-/** Collect ranges of fenced / indented code blocks and inline code spans in raw markdown. */
-function collectRawCodeRanges(text: string): Array<[number, number]> {
+/**
+ * Collect ranges of fenced / indented code blocks and inline code spans in raw markdown.
+ * Exported so PDF preprocessing (`preprocessPageBreakMarkers`) can skip code regions when
+ * replacing `<!-- pagebreak -->` markers.
+ */
+export function collectRawCodeRanges(text: string): Array<[number, number]> {
 	const ranges: Array<[number, number]> = [];
 
-	// Fenced code blocks (``` or ~~~), including those nested inside
-	// blockquotes / lists via the container prefix pattern.
+	// Container prefix for fenced / indented inside blockquotes / lists.
 	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
-	const fenceRe = new RegExp(
-		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
-		"gm",
-	);
-	for (const m of text.matchAll(fenceRe)) {
-		ranges.push([m.index, m.index + m[0].length]);
+
+	// Fenced code blocks (``` or ~~~). CommonMark spec: closing fence must use the
+	// **same character** and be **at least as long** as the opening fence. Regex can't
+	// express "back-reference with length ≥ captured" so scan line-by-line.
+	// `\r?` を行末で許容して CRLF 入力でも閉じフェンスを正しく検出 (split('\n') で
+	// 各行末に \r が残るため、明示的に許容しないと CRLF の正当な fenced code が
+	// 「未閉じ」と誤判定され doc 末尾まで code 扱いになる)。
+	const lines = text.split("\n");
+	const lineOffsets: number[] = [0];
+	for (let li = 0; li < lines.length; li++) {
+		lineOffsets.push(lineOffsets[li] + lines[li].length + 1);
+	}
+	const openRe = new RegExp(`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*$`);
+	let li = 0;
+	while (li < lines.length) {
+		const open = lines[li].match(openRe);
+		if (!open) {
+			li++;
+			continue;
+		}
+		const fenceChar = open[1][0]; // ` or ~
+		const fenceLen = open[1].length;
+		const start = lineOffsets[li];
+		const closeRe = new RegExp(
+			`^${containerPrefix.source}[ \\t]{0,3}\\${fenceChar}{${fenceLen},}[ \\t]*\\r?$`,
+		);
+		let closed = false;
+		for (let lj = li + 1; lj < lines.length; lj++) {
+			if (closeRe.test(lines[lj])) {
+				const end = lineOffsets[lj] + lines[lj].length;
+				ranges.push([start, end]);
+				li = lj + 1;
+				closed = true;
+				break;
+			}
+		}
+		if (!closed) {
+			// Unclosed fence: treat the rest of the document as code (matches CommonMark
+			// "to the end of the containing block / document" behaviour).
+			ranges.push([start, text.length]);
+			break;
+		}
 	}
 
 	// Indented code blocks: runs of lines indented by 4+ spaces or a tab,
@@ -179,17 +221,11 @@ function preprocessDisplayMath(
 ): string {
 	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
 
-	// Build ranges covered by fenced code blocks to skip them.
-	// CommonMark allows 0-3 spaces indent and both ``` and ~~~ fences.
-	// Also handles fences nested inside blockquotes / lists.
-	const codeRanges: Array<[number, number]> = [];
-	const fenceRe = new RegExp(
-		`^${containerPrefix.source}[ \\t]{0,3}(\`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?\\n${containerPrefix.source}[ \\t]{0,3}\\1[ \\t]*$`,
-		"gm",
-	);
-	for (const m of markdown.matchAll(fenceRe)) {
-		codeRanges.push([m.index, m.index + m[0].length]);
-	}
+	// Code 範囲を skip するため共通 helper を使う。`collectRawCodeRanges` は CommonMark
+	// 準拠で fenced (閉じ長 >= 開き長)・indented・raw `<pre>`/`<code>`・inline すべてを
+	// 扱う。以前は local の `\1` 正規表現で同長閉じのみ拾っており、`<pre>` や indented
+	// code 内の display math まで KaTeX 化してしまう不整合があった。
+	const codeRanges = collectRawCodeRanges(markdown);
 
 	// Match display math $$...$$ that spans at least one newline.
 	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
@@ -202,7 +238,7 @@ function preprocessDisplayMath(
 			"gm",
 		),
 		(match, prefix: string, rawTex: string, offset: number) => {
-			if (codeRanges.some(([s, e]) => offset >= s && offset < e)) {
+			if (isInsideRanges(offset, codeRanges)) {
 				return match;
 			}
 			// Determine the actual position of the opening $$ within the match

@@ -68,15 +68,15 @@ describe("ExportDialog", () => {
 			expect(screen.queryByText("エクスポート")).not.toBeInTheDocument();
 		});
 
-		it("初期状態で HTML セクションが表示される", () => {
+		it("初期状態で PDF セクションが表示される", () => {
 			renderDialog();
-			expect(screen.getByText("HTMLとしてエクスポート")).toBeInTheDocument();
+			expect(screen.getByText("PDFとしてエクスポート")).toBeInTheDocument();
 		});
 
-		it("タブクリックで PDF セクションに切り替わる", async () => {
+		it("タブクリックで HTML セクションに切り替わる", async () => {
 			renderDialog();
-			await userEvent.click(screen.getByText("PDF"));
-			expect(screen.getByText("PDFとしてエクスポート")).toBeInTheDocument();
+			await userEvent.click(screen.getByText("HTML"));
+			expect(screen.getByText("HTMLとしてエクスポート")).toBeInTheDocument();
 		});
 
 		it("タブクリックでプロンプトセクションに切り替わる", async () => {
@@ -94,8 +94,13 @@ describe("ExportDialog", () => {
 	});
 
 	describe("HTML セクション", () => {
-		it("テーマセレクトのデフォルトは「システム」", () => {
+		async function switchToHtml() {
+			await userEvent.click(screen.getByText("HTML"));
+		}
+
+		it("テーマセレクトのデフォルトは「システム」", async () => {
 			renderDialog();
+			await switchToHtml();
 			const select = screen.getByLabelText("テーマ");
 			expect(select).toHaveValue("system");
 		});
@@ -103,6 +108,7 @@ describe("ExportDialog", () => {
 		it("「HTMLとしてエクスポート」クリックで exportAsHtml が呼ばれる", async () => {
 			vi.mocked(exportAsHtml).mockResolvedValue(true);
 			renderDialog();
+			await switchToHtml();
 			await userEvent.click(screen.getByText("HTMLとしてエクスポート"));
 			expect(exportAsHtml).toHaveBeenCalledWith("# Hello", "/path/to/file.md", {
 				theme: "system",
@@ -113,6 +119,7 @@ describe("ExportDialog", () => {
 			vi.mocked(exportAsHtml).mockResolvedValue(true);
 			const onClose = vi.fn();
 			renderDialog({ onClose });
+			await switchToHtml();
 			await userEvent.click(screen.getByText("HTMLとしてエクスポート"));
 			expect(onClose).toHaveBeenCalled();
 		});
@@ -121,6 +128,7 @@ describe("ExportDialog", () => {
 			vi.mocked(exportAsHtml).mockResolvedValue(false);
 			const onClose = vi.fn();
 			renderDialog({ onClose });
+			await switchToHtml();
 			await userEvent.click(screen.getByText("HTMLとしてエクスポート"));
 			expect(onClose).not.toHaveBeenCalled();
 		});
@@ -151,6 +159,22 @@ describe("ExportDialog", () => {
 			await switchToPdf();
 			await userEvent.click(screen.getByText("PDFとしてエクスポート"));
 			expect(exportAsPdf).toHaveBeenCalled();
+		});
+
+		it("default で pageBreakLevel=h2 / smart=true / criterion=section が渡される (#93)", async () => {
+			vi.mocked(exportAsPdf).mockResolvedValue(true);
+			renderDialog();
+			await switchToPdf();
+			await userEvent.click(screen.getByText("PDFとしてエクスポート"));
+			expect(exportAsPdf).toHaveBeenCalledWith(
+				"# Hello",
+				"/path/to/file.md",
+				expect.objectContaining({
+					pageBreakLevel: "h2",
+					smartPageBreak: true,
+					pageBreakCriterion: "section",
+				}),
+			);
 		});
 
 		it("成功で onClose が呼ばれる", async () => {
@@ -256,6 +280,7 @@ describe("ExportDialog", () => {
 		it("exportAsHtml が throw → トースト表示", async () => {
 			vi.mocked(exportAsHtml).mockRejectedValue(new Error("fail"));
 			renderDialog();
+			await userEvent.click(screen.getByText("HTML"));
 			await userEvent.click(screen.getByText("HTMLとしてエクスポート"));
 			const { toasts } = useToastStore.getState();
 			expect(toasts).toHaveLength(1);

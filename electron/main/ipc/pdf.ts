@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { handle } from "../utils/ipc-handle";
+import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
@@ -186,6 +187,24 @@ export async function exportPdfImpl(
 				// ignore
 			}
 			await delay(POST_LOAD_IDLE_MS);
+
+			// Section の改ページ判定: 見出しに直接 inline `break-before: page` を注入する
+			// 方式 (#93)。wrapper への `break-inside: avoid` は Chromium で overcaution
+			// を起こす quirk (#601033) があり、inline forced break の方が確実。
+			// 診断ログは `SCRIPTA_PDF_DEBUG` 環境変数を立てた時だけ出力する。
+			try {
+				const diag = (await w.webContents.executeJavaScript(
+					buildSectionBreakScript(),
+					true,
+				)) as string;
+				if (process.env.SCRIPTA_PDF_DEBUG) {
+					process.stderr.write(
+						`[scripta:#93] break-before script: ${diag} (html ${html.length} bytes)\n`,
+					);
+				}
+			} catch (err) {
+				console.warn("[scripta:#93] break-before correction failed:", err);
+			}
 			return await w.webContents.printToPDF(PDF_OPTIONS);
 		})();
 		// timeout が race に勝った後 exportWork が遅れて reject すると unhandled

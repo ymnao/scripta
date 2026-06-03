@@ -1,13 +1,64 @@
 import { version as katexVersion } from "katex/package.json";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
-import { markdownToHtml } from "./markdown-to-html";
+import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { basename } from "./path";
 import { svgToPng } from "./svg-rasterize";
 
 export type ExportTheme = "system" | "light" | "dark";
 export type PageBreakLevel = "none" | "h1" | "h2" | "h3";
+/** smart 改ページの keep 基準 (#93)。 */
+export type PageBreakCriterion = "compact" | "section";
+
+const LEVEL_NUM: Record<Exclude<PageBreakLevel, "none">, 1 | 2 | 3> = { h1: 1, h2: 2, h3: 3 };
+
+/**
+ * 改ページ判定の smart-level を解決する (#93)。
+ *
+ * ユーザ選択 `requested` を尊重するが、bodyHtml に該当 level の見出しが 2 件未満なら
+ * 「複数回現れる最も浅いレベル (h2 > h3 > h1 > h4)」に自動補正する。これは
+ * 「h1=タイトル 1 個 + h3=section 多数」のような典型 markdown 構造で「h2 まで」を
+ * 選んでも適切に動作させるための妥協。
+ *
+ * 旧版は main 側 script の中 (executeJavaScript) で auto-detect していたが、policy を
+ * renderer に集約することで (a) pure TS で unit test できる、(b) renderer が
+ * `smart-level` と `force-level` を **一貫導出** できて clamp 不要、(c) script は
+ * meta を読むだけで簡潔、というメリットを得る。
+ *
+ * 戻り値 `null` は「smart 改ページの対象見出しが見つからない」を意味し、script は
+ * meta 不在 = no-op に degrade する。
+ */
+export function resolveSmartLevel(bodyHtml: string, requested: 1 | 2 | 3): 1 | 2 | 3 | 4 | null {
+	const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+	for (const m of bodyHtml.matchAll(/<h([1-6])\b/g)) {
+		counts[Number.parseInt(m[1], 10)]++;
+	}
+	if (counts[requested] >= 2) return requested;
+	if (counts[2] >= 2) return 2;
+	if (counts[3] >= 2) return 3;
+	if (counts[1] >= 2) return 1;
+	if (counts[4] >= 2) return 4;
+	return null;
+}
+
+/**
+ * `<!-- pagebreak -->` を `<hr class="pdf-pagebreak"/>` に変換する (#93)。
+ * markdown を渡す段階で適用し、HTML / PDF どちらの経路でも著者マーカーを有効化する。
+ * CSS で visibility:hidden + @media print の break-before:page を当てるため、画面上は
+ * 不可視・印刷時にだけページ送りされる。
+ *
+ * fenced / indented / inline code / raw `<pre>` / `<code>` 内の文字列リテラルは
+ * 置換しない (機能をドキュメントする目的の code sample 等を壊さないため)。
+ * code 範囲検出は markdown-to-html.ts の `collectRawCodeRanges` を共有して、
+ * KaTeX 等の他経路と完全一致させる。
+ */
+export function preprocessPageBreakMarkers(markdown: string): string {
+	const codeRanges = collectRawCodeRanges(markdown);
+	return markdown.replace(/<!--\s*pagebreak\s*-->/gi, (match, offset: number) =>
+		isInsideRanges(offset, codeRanges) ? match : '\n\n<hr class="pdf-pagebreak"/>\n\n',
+	);
+}
 
 // CDN の katex バージョンを bundle 同梱版と同期 (#79)。
 const KATEX_CSS_URL = `https://cdn.jsdelivr.net/npm/katex@${katexVersion}/dist/katex.min.css`;
@@ -184,243 +235,24 @@ export async function preprocessMermaidBlocks(
 	return result;
 }
 
-function buildPageBreakCss(level: PageBreakLevel, smart: boolean): string {
-	if (level === "none") return "";
-
-	const selectors: string[] = ["h1"];
-	if (level === "h2" || level === "h3") selectors.push("h2");
-	if (level === "h3") selectors.push("h3");
-
-	let css = `${selectors.join(", ")} { break-before: page; }`;
-
-	if (smart) {
-		css += "\n[data-no-break] { break-before: auto !important; }";
-	}
-
-	return css;
-}
-
-function applySmartPageBreaks(bodyHtml: string, level: PageBreakLevel): string {
-	if (level === "none") return bodyHtml;
-	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
-
-	// Collect block element positions once to avoid O(n^2) substring scanning.
-	const blockPattern = /<(?:p|ul|ol|pre|blockquote|table|hr|div)[\s>/]/gi;
-	const blockPositions: number[] = [];
-	for (let bm = blockPattern.exec(bodyHtml); bm !== null; bm = blockPattern.exec(bodyHtml)) {
-		blockPositions.push(bm.index);
-	}
-
-	const pattern = /<h([1-6])/g;
-	const suppressSet = new Set<number>();
-	let prevLevel = 0;
-	let lastMatchEnd = 0;
-	let blockIndex = 0;
-
-	for (let m = pattern.exec(bodyHtml); m !== null; m = pattern.exec(bodyHtml)) {
-		const current = Number.parseInt(m[1], 10);
-		if (current > maxLevel) continue;
-
-		// Advance blockIndex past elements before the previous heading
-		while (blockIndex < blockPositions.length && blockPositions[blockIndex] < lastMatchEnd) {
-			blockIndex++;
-		}
-		// Count block elements between previous heading and current one
-		let blockCount = 0;
-		let bi = blockIndex;
-		while (bi < blockPositions.length && blockPositions[bi] < m.index) {
-			blockCount++;
-			bi++;
-		}
-
-		if (prevLevel === 0 || (current > prevLevel && blockCount <= 1)) {
-			suppressSet.add(m.index);
-		}
-
-		prevLevel = current;
-		lastMatchEnd = m.index + m[0].length;
-	}
-
-	if (suppressSet.size === 0) return bodyHtml;
-
-	return bodyHtml.replace(/<h([1-6])/g, (match, levelStr: string, offset: number) => {
-		if (suppressSet.has(offset)) return `<h${levelStr} data-no-break`;
-		return match;
-	});
-}
-
 /**
- * PDF用WebView内で実行される動的改ページ判定スクリプトを生成する。
- * 要素の実測高さに基づいてページ残量に収まるか判定し、
- * 収まる場合は data-no-break 属性を付与して改ページを抑制する。
+ * 強制改ページ対象の CSS セレクタを構築する (#93)。
+ *
+ * - smart=true: smart 抑制対象 (= level そのもの) より「上位」レベルのみ force-break。
+ *   smart level 自体は break-after: avoid CSS + main 側 script の inline break-before
+ *   注入で扱う。
+ * - smart=false: level 自身と上位すべて force-break（旧 aggressive 動作）。
  */
-export function buildDynamicPageBreakScript(
-	level: Exclude<PageBreakLevel, "none">,
-	forceUpperBreak = false,
-): string {
-	const maxLevel = level === "h1" ? 1 : level === "h2" ? 2 : 3;
-	// forceUpperBreak: maxLevel未満の見出し（例: h3設定ならh1,h2）は常に改ページ
-	// h1設定時やオフ時は全レベルをsmart対象にする（forceLevel=0）
-	const forceLevel = forceUpperBreak && maxLevel > 1 ? maxLevel - 1 : 0;
-	return `(function() {
-  var maxLevel = ${maxLevel};
-  var forceLevel = ${forceLevel};
-  var selectors = [];
-  for (var i = 1; i <= maxLevel; i++) selectors.push('h' + i);
-  var sel = selectors.join(',');
-
-  // 1. A4印刷領域高さ(257mm = 297mm - 20mm*2)をルーラーdivで実測
-  //    CSS zoom適用時、getBoundingClientRect() はzoom後の座標を返す。
-  //    物理ページサイズは257mm固定なので、zoom分を補正して
-  //    「1物理ページにzoomed座標で何px分収まるか」を求める。
-  var zoom = parseFloat(document.body.style.zoom) || 1;
-  var ruler = document.createElement('div');
-  ruler.style.cssText = 'position:absolute;visibility:hidden;width:0;height:257mm;';
-  document.body.appendChild(ruler);
-  var pageHeight = ruler.getBoundingClientRect().height / zoom;
-  document.body.removeChild(ruler);
-  if (pageHeight <= 0) return;
-
-  // 2. 静的 applySmartPageBreaks の結果を全クリア
-  var allHeadings = document.querySelectorAll('[data-no-break]');
-  for (var i = 0; i < allHeadings.length; i++) {
-    allHeadings[i].removeAttribute('data-no-break');
-  }
-
-  // 3. 印刷レイアウトをシミュレーション
-  //    スクリーン幅(800px)と印刷幅(170mm≈644px)の差でテキスト折り返しが変わり
-  //    セクション高さが過小評価されるのを防ぐため、bodyを印刷幅に一時変更
-  var origPadding = document.body.style.padding;
-  var origWidth = document.body.style.width;
-  var origMaxWidth = document.body.style.maxWidth;
-  document.body.style.padding = '0';
-  var pw = (170 / zoom) + 'mm';
-  document.body.style.width = pw;
-  document.body.style.maxWidth = pw;
-
-  // 全対象見出しの break-before を一時無効化し自然レイアウトで高さ測定
-  // pre も印刷時と同じ折り返しモードにする
-  var style = document.createElement('style');
-  style.textContent = sel + ' { break-before: auto !important; } pre { white-space: pre-wrap !important; word-wrap: break-word !important; }';
-  document.head.appendChild(style);
-
-  // レイアウト再計算を強制
-  document.body.offsetHeight;
-
-  // 安全マージン: 行高さを実測し、pageHeight から差し引く
-  // スクリーンと印刷のレンダリング差（マージン折り畳み、リスト内のパディング、
-  // break-inside:avoid による要素移動等）で累積的な測定誤差が発生するため、
-  // 3行分の余裕を持たせて判定する
-  var lineRuler = document.createElement('p');
-  lineRuler.style.cssText = 'position:absolute;visibility:hidden;margin:0;padding:0;';
-  lineRuler.textContent = 'x';
-  document.body.appendChild(lineRuler);
-  var safetyBuffer = lineRuler.getBoundingClientRect().height;
-  document.body.removeChild(lineRuler);
-  var safePageHeight = pageHeight - safetyBuffer * 3;
-
-  // 4. body直下のブロック要素を列挙し、各要素の占有高さを測定
-  //    セクション単位ではなくブロック要素単位で追跡することで、
-  //    break-inside: avoid による段落移動を正確にシミュレーションする
-  //    UL/OL は直接子の LI に展開する（LI は break-inside: avoid だが
-  //    UL/OL 自体はリスト項目間で分割可能なため、LI 単位で追跡する必要がある）
-  var blockTags = {H1:1,H2:1,H3:1,H4:1,H5:1,H6:1,P:1,UL:1,OL:1,PRE:1,BLOCKQUOTE:1,TABLE:1,HR:1,IMG:1,DIV:1};
-  var avoidBreakTags = {P:1,LI:1,PRE:1,BLOCKQUOTE:1,TABLE:1,IMG:1};
-  var items = [];
-  var ch = document.body.children;
-  for (var i = 0; i < ch.length; i++) {
-    var tag = ch[i].tagName;
-    if (tag === 'UL' || tag === 'OL') {
-      var lis = ch[i].children;
-      for (var j = 0; j < lis.length; j++) {
-        if (lis[j].tagName === 'LI') items.push(lis[j]);
-      }
-    } else if (tag in blockTags) {
-      items.push(ch[i]);
-    }
-  }
-  if (items.length === 0) {
-    document.head.removeChild(style);
-    document.body.style.padding = origPadding;
-    document.body.style.width = origWidth;
-    document.body.style.maxWidth = origMaxWidth;
-    return;
-  }
-
-  // 各要素の占有高さ = 次要素のtopまでの距離（マージンを含む）
-  var heights = [];
-  for (var i = 0; i < items.length; i++) {
-    var top = items[i].getBoundingClientRect().top;
-    var nextTop = (i + 1 < items.length)
-      ? items[i + 1].getBoundingClientRect().top
-      : document.body.getBoundingClientRect().bottom;
-    heights.push(Math.max(0, nextTop - top));
-  }
-
-  // 5. ページフローをシミュレーション
-  //    見出し判定: 見出し + 直後コンテンツが現ページに収まるかチェック
-  //    収まらない場合は改ページし見出しを次ページ頭へ移動
-  //    （ページ頭の見出しなら段落が次ページへ溢れてOK）
-  //    pageUsed追跡: break-inside: avoid の要素は分割されず次ページへ移動
-  var pageUsed = 0;
-  var firstTargetHeading = true;
-  for (var i = 0; i < items.length; i++) {
-    var el = items[i];
-    var h = heights[i];
-    var tag = el.tagName;
-    var hMatch = tag.match(/^H([1-6])$/);
-    var isTargetHeading = hMatch && parseInt(hMatch[1]) <= maxLevel;
-
-    if (isTargetHeading) {
-      var headingLevel = parseInt(hMatch[1]);
-      if (firstTargetHeading) {
-        // 最初の見出し: 常に data-no-break（白紙1ページ目を防ぐ）
-        el.setAttribute('data-no-break', '');
-        firstTargetHeading = false;
-      } else if (forceLevel > 0 && headingLevel <= forceLevel) {
-        // 上位見出し強制改ページ: smart抑制の対象外 → 常に改ページ
-        pageUsed = 0;
-      } else {
-        // 見出し + 直後コンテンツ2ブロック分の最小必要高さを計算
-        // 1ブロックだけだと導入文のみで判定してしまい、見出し+導入文だけが
-        // ページ末尾に残って実際の内容が次ページに行く問題を防ぐ
-        var minNeeded = h;
-        var extra = 0;
-        for (var k = i + 1; k < items.length && extra < 2; k++) {
-          if (items[k].tagName.match(/^H[1-6]$/)) break;
-          minNeeded += heights[k];
-          extra++;
-        }
-
-        if (pageUsed + minNeeded <= safePageHeight) {
-          // 見出し+直後コンテンツが現ページに収まる → 改ページ抑制
-          el.setAttribute('data-no-break', '');
-        } else {
-          // 収まらない → 改ページ（見出しを次ページ頭へ）
-          pageUsed = 0;
-        }
-      }
-    }
-
-    // pageUsedを更新（break-inside: avoid を考慮）
-    var avoidBreak = (tag in avoidBreakTags);
-    if (avoidBreak && pageUsed > 0 && pageUsed + h > pageHeight) {
-      // break-inside: avoid の要素が現ページに収まらない → 次ページへ移動
-      pageUsed = h;
-    } else {
-      pageUsed += h;
-    }
-    while (pageUsed >= pageHeight) {
-      pageUsed -= pageHeight;
-    }
-  }
-
-  // 6. 一時スタイル・レイアウトを復元
-  document.head.removeChild(style);
-  document.body.style.padding = origPadding;
-  document.body.style.width = origWidth;
-  document.body.style.maxWidth = origMaxWidth;
-})();`;
+function buildForceBreakSelectors(level: PageBreakLevel, smart: boolean): string {
+	if (level === "none") return "";
+	const num = LEVEL_NUM[level];
+	// smart=true → force level = num - 1（h1 設定時は 0 で force-break なし）
+	// smart=false → force level = num（level 自身を含めて全部 force-break）
+	const maxForce = smart ? num - 1 : num;
+	if (maxForce <= 0) return "";
+	const sels: string[] = [];
+	for (let i = 1; i <= maxForce; i++) sels.push(`h${i}`);
+	return sels.join(", ");
 }
 
 function buildThemeCss(theme: ExportTheme): string {
@@ -441,14 +273,41 @@ export function buildHtmlDocument(
 	bodyHtml: string,
 	title: string,
 	theme: ExportTheme = "system",
-	pageBreak?: { level: PageBreakLevel; smart: boolean },
+	pageBreak?: { level: PageBreakLevel; smart: boolean; criterion?: PageBreakCriterion },
 ): string {
+	const forceSelectors = pageBreak
+		? buildForceBreakSelectors(pageBreak.level, pageBreak.smart)
+		: "";
+	// modern + legacy `page-break-*` を両方出すのは古い Chromium / WebKit 互換のため
+	// （pdf4.dev best practice ガイド準拠）。modern (`break-*`) は今後の標準、legacy は
+	// 古いレンダラやライブラリへの保険。
+	const forceBreakRule = forceSelectors
+		? `${forceSelectors} { break-before: page; page-break-before: always; }`
+		: "";
+
+	// smart 改ページ設定を meta tag 経由で main 側 script に伝える (#93)。
+	// - smart-level: bodyHtml の見出し分布も考慮した resolved レベル (1〜4)。script は
+	//   これを smart-suppression 対象として break-before を inline 注入する。
+	// - criterion: section (default, 全体 keep) / compact (heading + 直後ブロックのみ keep)。
+	// **meta tag が無い場合は script は即 return** (smart=false / level=none / 文書に
+	// 対象見出し不足 で確実に no-op)。
+	// force-level は smart-level - 1 として script 側で導出するので transport 不要。
+	let scriptMeta = "";
+	if (pageBreak?.smart && pageBreak.level !== "none") {
+		const smartLevel = resolveSmartLevel(bodyHtml, LEVEL_NUM[pageBreak.level]);
+		if (smartLevel !== null) {
+			scriptMeta =
+				`<meta name="scripta-pdf-smart-level" content="${smartLevel}">\n` +
+				`<meta name="scripta-pdf-criterion" content="${pageBreak.criterion ?? "section"}">\n`;
+		}
+	}
+
 	return `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(title)}</title>
+${scriptMeta}<title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="${KATEX_CSS_URL}">
 <style>
 :root {
@@ -508,6 +367,7 @@ img { max-width: 100%; height: auto; }
 .mermaid-diagram svg { max-width: 100%; height: auto; }
 .mermaid-diagram img { max-width: 100%; height: auto; }
 hr { border: none; border-top: 1px solid; margin: 1em 0; }
+hr.pdf-pagebreak { border: 0; margin: 0; height: 0; visibility: hidden; }
 ul, ol { padding-left: 1.5em; }
 ul > li::marker { font-size: 0.75em; }
 .task-list-item { list-style: none; }
@@ -521,14 +381,34 @@ ${buildThemeCss(theme)}
 @media print {
   body { padding: 0; }
   pre { white-space: pre-wrap; word-wrap: break-word; }
-  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
-  p, li, pre, blockquote, table, img { break-inside: avoid; }
-${pageBreak ? `  ${buildPageBreakCss(pageBreak.level, pageBreak.smart).split("\n").join("\n  ")}` : ""}
+
+  /* widow / orphan typographic guard (pdf4.dev: 3 is the recommended print value). */
+  p, li, blockquote { widows: 3; orphans: 3; }
+
+  /* 見出しは直後コンテンツと一緒に置く (heading widow 回避)。modern + legacy alias。 */
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* 各ブロック単位は途中分割しない。 */
+  p, li, pre, blockquote, table, img, .mermaid-diagram {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* 著者マーカー: \`<!-- pagebreak -->\` 由来。 */
+  hr.pdf-pagebreak {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  ${forceBreakRule}
 }
 </style>
 </head>
 <body>
-${pageBreak?.smart ? applySmartPageBreaks(addTaskListClass(bodyHtml), pageBreak.level) : addTaskListClass(bodyHtml)}
+${addTaskListClass(bodyHtml)}
 </body>
 </html>`;
 }
@@ -564,7 +444,8 @@ export async function exportAsHtml(
 	if (!savePath) return false;
 
 	const mermaidTheme = resolveMermaidTheme(options?.theme);
-	const preprocessed = await preprocessMermaidBlocks(markdown, mermaidTheme);
+	const withMarkers = preprocessPageBreakMarkers(markdown);
+	const preprocessed = await preprocessMermaidBlocks(withMarkers, mermaidTheme);
 	const bodyHtml = markdownToHtml(preprocessed);
 	// Mermaid SVG は固定テーマでレンダリングされるため、
 	// system の場合も解決済みテーマで HTML 全体を統一する
@@ -584,7 +465,12 @@ export async function exportAsPdf(
 	options?: {
 		pageBreakLevel?: PageBreakLevel;
 		smartPageBreak?: boolean;
-		forceUpperBreak?: boolean;
+		/**
+		 * #93 v5.4 で復活。`section` (default) はセクション全体を keep-together、
+		 * `compact` は heading + 直後ブロックのみ keep-together で中割れ許容。
+		 * smart=false の時は無視される。
+		 */
+		pageBreakCriterion?: PageBreakCriterion;
 		zoom?: number;
 	},
 ): Promise<boolean> {
@@ -600,32 +486,29 @@ export async function exportAsPdf(
 
 	const zoom = options?.zoom ?? 100;
 	const scaleFactor = zoom / 100;
+	const smart = options?.smartPageBreak ?? true;
+	const criterion: PageBreakCriterion = options?.pageBreakCriterion ?? "section";
 
 	const pageBreak =
 		options?.pageBreakLevel && options.pageBreakLevel !== "none"
-			? { level: options.pageBreakLevel, smart: options.smartPageBreak ?? true }
+			? { level: options.pageBreakLevel, smart, criterion }
 			: undefined;
 
 	// PDF 経路は SVG → PNG にラスタライズして印刷の SVG quirk を bypass (#106)。
 	// 詳細は preprocessMermaidBlocks の JSDoc を参照。
+	const withMarkers = preprocessPageBreakMarkers(markdown);
 	const preprocessed = await preprocessMermaidBlocks(
-		markdown,
+		withMarkers,
 		"light",
 		{ htmlLabels: false, useMaxWidth: false },
 		{ rasterize: true },
 	);
 	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
-	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
-	// PDF用: 静的判定を動的スクリプトで上書き
-	// 本文中に生HTMLの </body> が含まれる可能性があるため、最後の出現を置換する
-	if (pageBreak?.smart) {
-		const script = buildDynamicPageBreakScript(pageBreak.level, options?.forceUpperBreak ?? false);
-		const idx = html.lastIndexOf("</body>");
-		if (idx !== -1) {
-			html = `${html.slice(0, idx)}<script>${script}</script>\n</body>${html.slice(idx + 7)}`;
-		}
-	}
+	// section の改ページ判定は main 側 (pdf.ts) で executeJavaScript により行う (#93 v5)。
+	// renderer 側で wrap せず、main の script が heading 自身に inline break-before を
+	// 注入することで wrapper ベースの quirk (overcaution) を完全に回避する。
+	let html = buildHtmlDocument(bodyHtml, title, "light", pageBreak);
 
 	if (scaleFactor !== 1) {
 		// Compensate max-width so the content fills the same visual width
@@ -636,6 +519,11 @@ export async function exportAsPdf(
 			html = `${html.slice(0, idx)}<body style="zoom: ${scaleFactor}; max-width: ${maxWidth}px">${html.slice(idx + 6)}`;
 		}
 	}
+
+	// 改ページ判定は renderer 側で生成した HTML の meta tag (scripta-pdf-smart-level /
+	// criterion / force-level) を main 側 page-break-script が読み取り、見出しに inline
+	// `break-before: page` を実 layout 基準で注入する hybrid 設計 (#93)。renderer は
+	// 上位レベルの force-break CSS と meta tag emit までを担当する。
 	await exportPdf(html, savePath);
 	return true;
 }
