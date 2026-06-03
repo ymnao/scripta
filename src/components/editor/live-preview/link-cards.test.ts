@@ -326,7 +326,7 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 		return view;
 	}
 
-	it("calls cancelOgpFetch for each in-flight URL on destroy", () => {
+	it("calls cancelOgpFetch with the same requestIds that fetchOgp received", () => {
 		// fetchOgp は永遠に pending にして fetchingUrls を埋める。
 		vi.mocked(commands.fetchOgp).mockImplementation(() => new Promise(() => {}));
 
@@ -335,15 +335,23 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 		const view = mountEditor("hello\nhttps://example.com/a\nhttps://example.com/b\n");
 		// plugin constructor 内で fetchMissingOgp が同期 dispatch されており、
 		// この時点で fetchOgp が呼ばれている。
-		expect(vi.mocked(commands.fetchOgp).mock.calls.length).toBeGreaterThan(0);
+		const fetchCalls = vi.mocked(commands.fetchOgp).mock.calls;
+		expect(fetchCalls.length).toBe(2);
+		// fetchOgp(requestId, url) として呼ばれているはず。
+		const issuedRequestIds = fetchCalls.map((c) => c[0]).sort();
+		const fetchedUrls = fetchCalls.map((c) => c[1]).sort();
+		expect(fetchedUrls).toEqual(["https://example.com/a", "https://example.com/b"]);
+		// 各 requestId が unique であること。
+		expect(new Set(issuedRequestIds).size).toBe(issuedRequestIds.length);
 
 		view.destroy();
 
-		const cancelled = vi
+		// cancelOgpFetch は requestId だけを受け取る。発行した requestId と一致するはず。
+		const cancelledRequestIds = vi
 			.mocked(commands.cancelOgpFetch)
 			.mock.calls.map((c) => c[0])
 			.sort();
-		expect(cancelled).toEqual(["https://example.com/a", "https://example.com/b"]);
+		expect(cancelledRequestIds).toEqual(issuedRequestIds);
 	});
 
 	it("destroy is no-op for cancellation when no URL is in flight", () => {

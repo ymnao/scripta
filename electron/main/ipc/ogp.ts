@@ -65,13 +65,14 @@ export function clearOgpCache(): void {
 	cache.clear();
 }
 
-// in-flight な fetch の cancel 用 controller を URL 単位で保持。同一 URL に対し
-// 複数 view から同時 fetch があった場合は後勝ち（Map.set で上書き）。識別子チェック
-// 付き unregister により displaced な fetch の completion 時にもエントリを壊さない。
+// in-flight な fetch の cancel 用 controller を **request 単位**で保持する。
+// renderer 側が unique requestId を生成して `ogp:fetch` に渡し、destroy 時には
+// その requestId だけを `ogp:cancel` する。URL をキーにすると後勝ち上書きで他 view
+// の後発 request を誤 abort してしまうため、requestId で個別に追跡する。
 const inFlight = new Map<string, AbortController>();
 
-export function cancelOgpFetch(url: string): void {
-	inFlight.get(url)?.abort();
+export function cancelOgpFetch(requestId: string): void {
+	inFlight.get(requestId)?.abort();
 }
 
 async function fetchWithRedirects(
@@ -80,6 +81,10 @@ async function fetchWithRedirects(
 ): Promise<{ contentType: string; body: Buffer }> {
 	let current = urlStr;
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+		// hop 頭での abort 早期判定。pinSafeLookup / DNS 待ちは signal を受け取らない
+		// ため、abort が反映されないと最大 REQUEST_TIMEOUT_MS まで in-flight が残る。
+		// ここで弾くことで cancel の即時性を確保する（少なくとも次の hop に進まない）。
+		if (signal.aborted) throw new AbortError();
 		const parsed = new URL(current);
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 			throw new Error("Only http and https URLs are supported");
@@ -129,7 +134,7 @@ async function fetchWithRedirects(
 	throw new Error("Too many redirects");
 }
 
-async function fetchOgpImpl(url: string): Promise<OgpData> {
+async function fetchOgpImpl(requestId: string, url: string): Promise<OgpData> {
 	const lower = url.toLowerCase();
 	if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
 		throw new Error("Only http and https URLs are supported");
@@ -138,7 +143,7 @@ async function fetchOgpImpl(url: string): Promise<OgpData> {
 	if (cached) return cached;
 
 	const controller = new AbortController();
-	inFlight.set(url, controller);
+	inFlight.set(requestId, controller);
 	try {
 		const { contentType, body } = await fetchWithRedirects(url, controller.signal);
 		// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
@@ -151,24 +156,21 @@ async function fetchOgpImpl(url: string): Promise<OgpData> {
 		cacheSet(url, ogp);
 		return ogp;
 	} catch (err) {
-		// IPC 越しに `err.name` は保たれないので、cancel 経路は ErrorKind="ABORTED"
-		// の StructuredError へ変換して renderer に渡す（renderer は getErrorKind で
-		// 判別し、cache 汚染を回避する）。
+		// IPC 越しに `err.name` は保たれないので、cancel 経路は ErrorKind="ABORTED" の
+		// StructuredError に変換して renderer に渡す（renderer は getErrorKind で判別）。
 		if (err instanceof AbortError) {
 			throw new StructuredError("ABORTED", err.message);
 		}
 		throw err;
 	} finally {
-		// 同一 URL に対する後発 fetch が Map を上書きしている可能性があるので、
-		// 自分の controller が現役のときだけ削除する。
-		if (inFlight.get(url) === controller) inFlight.delete(url);
+		inFlight.delete(requestId);
 	}
 }
 
 export function registerOgpIpc(): void {
-	handle("ogp:fetch", (_event, url: string) => fetchOgpImpl(url));
-	handle("ogp:cancel", (_event, url: string) => {
-		cancelOgpFetch(url);
+	handle("ogp:fetch", (_event, requestId: string, url: string) => fetchOgpImpl(requestId, url));
+	handle("ogp:cancel", (_event, requestId: string) => {
+		cancelOgpFetch(requestId);
 	});
 }
 
@@ -178,7 +180,7 @@ export const __testing = {
 	cacheSet,
 	clearCache: clearOgpCache,
 	cancelOgpFetch,
-	hasInFlight: (url: string) => inFlight.has(url),
+	hasInFlight: (requestId: string) => inFlight.has(requestId),
 	CACHE_TTL_MS,
 	MAX_CACHE_ENTRIES,
 };

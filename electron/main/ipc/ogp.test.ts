@@ -30,14 +30,14 @@ const {
 describe("ogp scheme validation", () => {
 	beforeEach(() => clearCache());
 	it("rejects non-http(s) schemes", async () => {
-		await expect(fetchOgpImpl("file:///etc/passwd")).rejects.toThrow(/http and https/);
-		await expect(fetchOgpImpl("ftp://example.com")).rejects.toThrow(/http and https/);
-		await expect(fetchOgpImpl("javascript:alert(1)")).rejects.toThrow(/http and https/);
+		await expect(fetchOgpImpl("req1", "file:///etc/passwd")).rejects.toThrow(/http and https/);
+		await expect(fetchOgpImpl("req2", "ftp://example.com")).rejects.toThrow(/http and https/);
+		await expect(fetchOgpImpl("req3", "javascript:alert(1)")).rejects.toThrow(/http and https/);
 	});
 	it("scheme check is case-insensitive", async () => {
 		// HTTP:// 大文字でも scheme チェックは pass する（その後 SSRF / 接続 で失敗するが
 		// scheme 段階で reject されないことを確認）。
-		await expect(fetchOgpImpl("HTTP://localhost-not-real.invalid")).rejects.not.toThrow(
+		await expect(fetchOgpImpl("req4", "HTTP://localhost-not-real.invalid")).rejects.not.toThrow(
 			/http and https/,
 		);
 	});
@@ -49,39 +49,61 @@ describe("ogp SSRF defense via pinSafeLookup", () => {
 		// pinSafeLookup が literal IP 127.0.0.1 を isGlobalIp で弾き、connect 前に
 		// EACCES を返す。エラー文に "SSRF blocked" が含まれることまで確認し、判定
 		// 経路（DNS 失敗ではなく pin の reject）を固定する。
-		await expect(fetchOgpImpl("http://127.0.0.1/")).rejects.toThrow(/SSRF blocked/);
+		await expect(fetchOgpImpl("req-ssrf-v4", "http://127.0.0.1/")).rejects.toThrow(/SSRF blocked/);
 	});
 	it("blocks loopback v6 ::1 via SSRF (not DNS failure)", async () => {
 		// IPv6 リテラル URL は `URL.hostname` が `[::1]` 表現で返るが、ogp.ts が
 		// bracket を剥いて pinSafeLookup に渡すので、ENOTFOUND ではなく SSRF として
 		// 弾かれることを確認する。ここで bracket 正規化が壊れると判定経路が
 		// 「DNS 失敗で結果的に reject」に静かに退化するので回帰として固定する。
-		await expect(fetchOgpImpl("http://[::1]/")).rejects.toThrow(/SSRF blocked/);
+		await expect(fetchOgpImpl("req-ssrf-v6", "http://[::1]/")).rejects.toThrow(/SSRF blocked/);
 	});
 	it("blocks link-local v4 169.254.169.254 (cloud metadata)", async () => {
 		// AWS / GCP / Azure などの metadata service への SSRF を防ぐケース。
-		await expect(fetchOgpImpl("http://169.254.169.254/")).rejects.toThrow(/SSRF blocked/);
+		await expect(fetchOgpImpl("req-ssrf-meta", "http://169.254.169.254/")).rejects.toThrow(
+			/SSRF blocked/,
+		);
 	});
 });
 
 describe("ogp cancel (#101)", () => {
 	beforeEach(() => clearCache());
 
-	it("cancelOgpFetch on URL with no in-flight fetch is a no-op", () => {
-		expect(() => cancelOgpFetch("https://no-in-flight.example/")).not.toThrow();
+	it("cancelOgpFetch with unknown requestId is a no-op", () => {
+		expect(() => cancelOgpFetch("nonexistent-id")).not.toThrow();
 	});
 
-	it("cancel-during-fetch rejects with kind=ABORTED, no in-flight residue, no cache", async () => {
-		// fetchOgpImpl 呼び出し直後（最初の await まで同期で進む）に Map へ controller
-		// が登録されているはずなので、同 tick で cancelOgpFetch を投げて abort を発火する。
-		const p = fetchOgpImpl("http://127.0.0.1/");
-		expect(hasInFlight("http://127.0.0.1/")).toBe(true);
-		cancelOgpFetch("http://127.0.0.1/");
-		// abort と SSRF reject のいずれが先でも reject に至ることを担保。abort が先なら
+	it("cancel-during-fetch rejects with kind=ABORTED via requestId, no residue", async () => {
+		// fetchOgpImpl 呼び出し直後（最初の await まで同期で進む）に inFlight Map へ
+		// requestId が登録されているはず。同 tick で cancelOgpFetch して abort を発火。
+		const reqId = "req-cancel-A";
+		const p = fetchOgpImpl(reqId, "http://127.0.0.1/");
+		expect(hasInFlight(reqId)).toBe(true);
+		cancelOgpFetch(reqId);
+		// abort と SSRF reject のいずれが先でも reject に至る。abort が先なら
 		// StructuredError("ABORTED") に変換される。
 		await expect(p).rejects.toThrow();
-		expect(hasInFlight("http://127.0.0.1/")).toBe(false);
+		expect(hasInFlight(reqId)).toBe(false);
 		expect(cacheGet("http://127.0.0.1/")).toBeNull();
+	});
+
+	it("concurrent requests for the same URL register independently and clean up independently", async () => {
+		// requestId キーの Map なので、同じ URL の 2 つの concurrent request が両方
+		// 同時に in-flight に存在し、終了時にそれぞれ独立に cleanup される。URL キーの
+		// 旧設計ではどちらか一方が Map から displaced されていた（P2-2）。
+		const reqA = "req-conc-A";
+		const reqB = "req-conc-B";
+		const pA = fetchOgpImpl(reqA, "http://127.0.0.1/");
+		const pB = fetchOgpImpl(reqB, "http://127.0.0.1/");
+		expect(hasInFlight(reqA)).toBe(true);
+		expect(hasInFlight(reqB)).toBe(true);
+		// cancelOgpFetch(reqA) は reqA の controller だけを abort する（B の controller
+		// には影響しない）ことが requestId-scoped cancel の主旨。
+		cancelOgpFetch(reqA);
+		await expect(pA).rejects.toThrow();
+		await expect(pB).rejects.toThrow();
+		expect(hasInFlight(reqA)).toBe(false);
+		expect(hasInFlight(reqB)).toBe(false);
 	});
 });
 

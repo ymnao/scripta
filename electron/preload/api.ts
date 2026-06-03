@@ -62,8 +62,8 @@ export type Api = Readonly<{
 	scanUnresolvedWikilinks: (workspacePath: string) => Promise<UnresolvedWikilink[]>;
 	cancelWikilinkScan: () => Promise<void>;
 
-	fetchOgp: (url: string) => Promise<OgpData>;
-	ogpCancel: (url: string) => Promise<void>;
+	fetchOgp: (requestId: string, url: string) => Promise<OgpData>;
+	ogpCancel: (requestId: string) => Promise<void>;
 	exportPdf: (html: string, outputPath: string) => Promise<void>;
 	checkForUpdate: (currentVersion: string) => Promise<UpdateInfo>;
 

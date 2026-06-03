@@ -58,6 +58,11 @@ const ogpCache = new Map<string, CacheEntry>();
 
 const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
+// loading entry はグローバル dedup として働く（複数 plugin が同じ URL を二重 fetch
+// しないため）。fetch を始めた plugin が cancel された場合、entry を消すと「他 plugin
+// が完了待ち中の状態」を壊して空 card のまま膠着するため delete はしない。代わりに
+// LOADING_STALE_MS を超えた loading は stale と見做して別 plugin が re-fetch を始める。
+const LOADING_STALE_MS = 60_000; // 60秒
 const MAX_CACHE_ENTRIES = 500;
 
 function evictStaleCache() {
@@ -272,7 +277,9 @@ class LinkCardDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
 	prevCursorLines: Set<number>;
 	private view: EditorView;
-	private fetchingUrls = new Set<string>();
+	// URL → 自身が発行した requestId。destroy 時にこの requestId だけを cancel する
+	// （他 view の同 URL fetch を巻き込まないため）。
+	private fetchingUrls = new Map<string, string>();
 	private pendingUpdate = false;
 	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 	private destroyed = false;
@@ -292,6 +299,11 @@ class LinkCardDecorationPlugin implements PluginValue {
 			if (cached) {
 				if (cached.status === "error") {
 					if (Date.now() - cached.errorAt < ERROR_RETRY_MS) return;
+				} else if (cached.status === "loading") {
+					// 他 plugin が fetch 中なら待つ（その plugin の dispatch で結果が共有
+					// される）。ただし開始者が cancel された等で stale な loading は
+					// LOADING_STALE_MS 経過後に自分が re-fetch する。
+					if (Date.now() - cached.cachedAt < LOADING_STALE_MS) return;
 				} else if (Date.now() - cached.cachedAt < CACHE_TTL_MS) {
 					return;
 				}
@@ -302,9 +314,10 @@ class LinkCardDecorationPlugin implements PluginValue {
 				evicted = true;
 			}
 			ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
-			this.fetchingUrls.add(url);
+			const requestId = crypto.randomUUID();
+			this.fetchingUrls.set(url, requestId);
 
-			fetchOgp(url)
+			fetchOgp(requestId, url)
 				.then((data) => {
 					this.fetchingUrls.delete(url);
 					if (this.destroyed) return;
@@ -314,13 +327,11 @@ class LinkCardDecorationPlugin implements PluginValue {
 				})
 				.catch((err: unknown) => {
 					this.fetchingUrls.delete(url);
-					// cancel 経路は cache に error を残さず削除して次回 retry を許可する。
-					// 検出は preload が復元した kind="ABORTED" で行う（IPC 越しに
-					// `err.name` は保たれない）。
-					if (getErrorKind(err) === "ABORTED") {
-						ogpCache.delete(url);
-						return;
-					}
+					// cancel 経路（自分の destroy 経由）では cache を触らない。他 plugin が
+					// 同一 URL の loading entry を共有しており、ここで delete すると他 view
+					// が空 card のまま膠着するため。stale loading は LOADING_STALE_MS 後に
+					// 別 plugin が re-fetch する。
+					if (getErrorKind(err) === "ABORTED") return;
 					ogpCache.set(url, { status: "error", errorAt: Date.now() });
 					if (this.destroyed) return;
 					this.pendingUpdate = true;
@@ -398,10 +409,12 @@ class LinkCardDecorationPlugin implements PluginValue {
 	destroy() {
 		this.destroyed = true;
 		this.cancelRebuild();
-		// 文書切替 / unmount で in-flight な OGP fetch を main 側で abort する（#101）。
-		for (const url of this.fetchingUrls) {
-			cancelOgpFetch(url).catch((error) => {
-				console.error("Failed to cancel OGP fetch:", url, error);
+		// 文書切替 / unmount で自身が発行した requestId だけを cancel する（#101）。
+		// URL 単位の cancel だと他 view の後発 request を誤って巻き込むため、requestId
+		// ベースで個別停止する。
+		for (const requestId of this.fetchingUrls.values()) {
+			cancelOgpFetch(requestId).catch((error) => {
+				console.error("Failed to cancel OGP fetch:", requestId, error);
 			});
 		}
 		this.fetchingUrls.clear();
