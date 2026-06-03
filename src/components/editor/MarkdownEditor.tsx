@@ -52,6 +52,7 @@ import {
 	listKeymap,
 	mathDecoration,
 	mermaidDecoration,
+	pasteAsMarkdownLinkCommand,
 	strikethroughDecoration,
 	tableDecoration,
 	tableKeymap,
@@ -287,6 +288,9 @@ export function MarkdownEditor({
 				{ key: "Mod-4", run: toggleHeading(4) },
 				{ key: "Mod-5", run: toggleHeading(5) },
 				{ key: "Mod-6", run: toggleHeading(6) },
+				// clipboard の URL を強制的に md リンクとして貼り付け。
+				// 非 URL なら plain insert、コードブロック内も plain。
+				{ key: "Mod-Shift-v", run: pasteAsMarkdownLinkCommand },
 			]),
 			EditorView.updateListener.of((update) => {
 				if (!(update.docChanged || update.selectionSet)) return;

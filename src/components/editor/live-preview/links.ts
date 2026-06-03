@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type Extension, type Range } from "@codemirror/state";
+import { EditorSelection, type EditorState, type Extension, type Range } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -277,43 +277,144 @@ export function shouldConvertPasteToLink(opts: {
 	return opts.lineBefore.trim() !== "" || opts.lineAfter.trim() !== "";
 }
 
+/**
+ * 指定位置がコードブロック（fenced / indented / inline）の中かを判定する。
+ * URL paste のときに md リンク変換を抑制するために使う。
+ */
+export function isPosInCodeConstruct(state: EditorState, pos: number): boolean {
+	const tree = syntaxTree(state);
+	let node = tree.resolveInner(pos);
+	while (node) {
+		if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
+			return true;
+		}
+		if (!node.parent) break;
+		node = node.parent;
+	}
+	return false;
+}
+
+/** selection の少なくとも一つの range がコード構造内にあるか。 */
+export function anyRangeInCodeConstruct(state: EditorState): boolean {
+	for (const range of state.selection.ranges) {
+		if (isPosInCodeConstruct(state, range.from)) return true;
+	}
+	return false;
+}
+
+/**
+ * URL を 1 range に挿入するときの insert 文字列を決定する pure 関数。
+ *
+ * - `inCodeBlock` → 常に plain（コード内では md syntax を入れない）
+ * - `forceConvert` (Cmd+Shift+V 用) → 行コンテキストに関係なく md リンク化
+ * - それ以外は shouldConvertPasteToLink の判定に従う
+ */
+export function computeUrlPasteInsert(opts: {
+	text: string;
+	forceConvert: boolean;
+	inCodeBlock: boolean;
+	hasSelection: boolean;
+	selectedText: string;
+	lineBefore: string;
+	lineAfter: string;
+}): string {
+	if (opts.inCodeBlock) return opts.text;
+	const convert =
+		opts.forceConvert ||
+		shouldConvertPasteToLink({
+			hasSelection: opts.hasSelection,
+			lineBefore: opts.lineBefore,
+			lineAfter: opts.lineAfter,
+		});
+	return convert ? buildMarkdownLink(opts.text, opts.selectedText) : opts.text;
+}
+
+/**
+ * URL を全 selection range に dispatch する共通実装。
+ * Cmd+V 系の paste handler / Cmd+Shift+V のコマンドの両方から呼ぶ。
+ */
+function dispatchUrlInsert(view: EditorView, text: string, forceConvert: boolean): void {
+	const { state } = view;
+	const inCode = anyRangeInCodeConstruct(state);
+	const changes = state.changeByRange((range) => {
+		const hasSelection = range.from !== range.to;
+		const selectedText = state.doc.sliceString(range.from, range.to);
+		const line = state.doc.lineAt(range.from);
+		const lineBefore = state.doc.sliceString(line.from, range.from);
+		const lineAfter = state.doc.sliceString(range.to, line.to);
+		const insert = computeUrlPasteInsert({
+			text,
+			forceConvert,
+			inCodeBlock: inCode,
+			hasSelection,
+			selectedText,
+			lineBefore,
+			lineAfter,
+		});
+		return {
+			range: EditorSelection.cursor(range.from + insert.length),
+			changes: { from: range.from, to: range.to, insert },
+		};
+	});
+	view.dispatch({ ...changes, userEvent: "input.paste" });
+}
+
 const urlPasteHandler = EditorView.domEventHandlers({
 	paste(event: ClipboardEvent, view: EditorView) {
 		const text = event.clipboardData?.getData("text/plain")?.trim();
 		if (!text || !URL_PASTE_RE.test(text)) return false;
 
-		const { state } = view;
-		const tree = syntaxTree(state);
-
-		// コードブロック内では変換しない
-		for (const range of state.selection.ranges) {
-			let node = tree.resolveInner(range.from);
-			while (node) {
-				if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
-					return false;
-				}
-				if (!node.parent) break;
-				node = node.parent;
-			}
-		}
+		// コードブロック内では browser 既定 (plain paste) に委ねる
+		if (anyRangeInCodeConstruct(view.state)) return false;
 
 		event.preventDefault();
-		const changes = state.changeByRange((range) => {
-			const hasSelection = range.from !== range.to;
-			const selected = state.doc.sliceString(range.from, range.to);
-			const line = state.doc.lineAt(range.from);
-			const lineBefore = state.doc.sliceString(line.from, range.from);
-			const lineAfter = state.doc.sliceString(range.to, line.to);
-			const convert = shouldConvertPasteToLink({ hasSelection, lineBefore, lineAfter });
-			const insert = convert ? buildMarkdownLink(text, selected) : text;
-			return {
-				range: EditorSelection.cursor(range.from + insert.length),
-				changes: { from: range.from, to: range.to, insert },
-			};
-		});
-		view.dispatch({ ...changes, userEvent: "input.paste" });
+		dispatchUrlInsert(view, text, /* forceConvert */ false);
 		return true;
 	},
 });
+
+/**
+ * Cmd+Shift+V で clipboard を読み終えた後に走る同期ロジック。
+ * テスタビリティのため `pasteAsMarkdownLinkCommand` から切り出している。
+ *
+ * - URL なら強制的に md リンク化（selection あれば label に）
+ * - 非 URL なら plain text として挿入
+ * - コードブロック内なら常に plain
+ */
+export function applyClipboardPasteAsMdLink(view: EditorView, raw: string | null): void {
+	const text = raw?.trim() ?? "";
+	if (!text) return;
+	if (!URL_PASTE_RE.test(text)) {
+		// 非 URL は plain insert（selection あれば置換）
+		const { state } = view;
+		const changes = state.changeByRange((range) => ({
+			range: EditorSelection.cursor(range.from + text.length),
+			changes: { from: range.from, to: range.to, insert: text },
+		}));
+		view.dispatch({ ...changes, userEvent: "input.paste" });
+		return;
+	}
+	dispatchUrlInsert(view, text, /* forceConvert */ true);
+}
+
+/**
+ * Cmd+Shift+V 用のコマンド。clipboard を非同期で読み、結果を
+ * `applyClipboardPasteAsMdLink` に渡す。
+ *
+ * `navigator.clipboard.readText()` は async だが、CodeMirror のコマンドは
+ * 同期で boolean を返す必要があるため fire-and-forget。clipboard アクセスが
+ * できる時点（keydown 由来）で true を返してデフォルトの paste-and-match-style
+ * を抑制する。
+ */
+export function pasteAsMarkdownLinkCommand(view: EditorView): boolean {
+	if (!navigator.clipboard) return false;
+	navigator.clipboard.readText().then(
+		(raw) => applyClipboardPasteAsMdLink(view, raw),
+		() => {
+			// clipboard アクセス拒否時は何もしない
+		},
+	);
+	return true;
+}
 
 export const linkDecoration: Extension = [linkPlugin, urlPasteHandler];
