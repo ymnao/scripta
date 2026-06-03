@@ -98,38 +98,25 @@ export class LinkWidget extends WidgetType {
 		anchor.className = "cm-link-widget";
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
-			anchor.href = this.url;
-			// title に modifier ヒントを含める
+			// `href` を付けると Chromium の cmd+click が新規ウィンドウを開こうとして
+			// 自前 handler と競合する。dataset で URL を持たせて CM-level handler
+			// から参照する方式に変更。視覚的なリンク styling は CSS で担保する。
+			anchor.dataset.linkWidgetUrl = this.url;
 			const isMac =
 				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
 			anchor.tabIndex = 0;
-			const openUrl = () => {
-				openExternal(this.url).catch((error) => {
-					console.error("Failed to open external URL:", this.url, error);
-				});
-			};
-			anchor.addEventListener("click", (e) => {
-				if (e.button !== 0) return;
-				if (isOpenLinkModifierEvent(e)) {
-					e.preventDefault();
-					e.stopPropagation();
-					openUrl();
-				}
-				// modifier 無しは preventDefault しない → editor が click を受けて
-				// cursor を行内に移動し raw md syntax を表示する
-			});
-			anchor.addEventListener("mousedown", (e) => {
-				if (e.button !== 0) return;
-				if (isOpenLinkModifierEvent(e)) {
-					e.preventDefault();
-				}
-			});
+			// キーボード操作（Tab focus → Enter/Space）は widget DOM 上で処理。
+			// マウス操作は CM-level domEventHandlers (linkWidgetMouseHandler) で
+			// modifier を判定するので、widget には click/mousedown listener を
+			// 付けない。
 			anchor.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault();
 					e.stopPropagation();
-					openUrl();
+					openExternal(this.url).catch((error) => {
+						console.error("Failed to open external URL:", this.url, error);
+					});
 				}
 			});
 		} else {
@@ -142,15 +129,13 @@ export class LinkWidget extends WidgetType {
 	}
 
 	ignoreEvent(event: Event): boolean {
-		// 安全な URL かつ modifier 押下時のみ widget 側でハンドル（openUrl）。
-		// modifier 無しの mousedown/click は editor に渡してカーソル移動させ
-		// raw md syntax を表示する。
-		// contextmenu (右クリック) は常に editor 経由で処理（カスタムメニューを出す）。
-		if (event.type === "mousedown" || event.type === "click") {
-			if (!isSafeUrl(this.url)) return false;
-			return isOpenLinkModifierEvent(event as MouseEvent);
+		// マウス系・コンテキストメニューは editor 側（CM domEventHandlers）に
+		// 渡して modifier 判定 / メニュー dispatch を行う。
+		// キーボードは widget 側で処理（Tab focus 中の Enter/Space で開く）。
+		if (event.type === "mousedown" || event.type === "click" || event.type === "contextmenu") {
+			return false;
 		}
-		return false;
+		return true;
 	}
 }
 
@@ -513,7 +498,67 @@ export function isLineOnlyMdLink(
 	return before === "" && after === "";
 }
 
-const linkWidgetContextMenuHandler = EditorView.domEventHandlers({
+/** Walk up from `pos` until a Link node is found; return null if none. */
+function findEnclosingLinkNode(
+	state: EditorState,
+	pos: number,
+): { from: number; to: number } | null {
+	const tree = syntaxTree(state);
+	let node = tree.resolveInner(pos, 1);
+	while (node && node.name !== "Link") {
+		if (!node.parent) return null;
+		node = node.parent;
+	}
+	return node ? { from: node.from, to: node.to } : null;
+}
+
+/**
+ * md リンク widget へのマウス系イベントを CM-level で gate する handler。
+ * widget DOM に listener を付ける方式だと cursor 移動で widget が消えて
+ * click まで到達しないケースがあるため、すべて CM-level で処理する。
+ */
+const linkWidgetMouseHandler = EditorView.domEventHandlers({
+	mousedown(event: MouseEvent, _view: EditorView) {
+		const target = event.target;
+		if (!(target instanceof Element)) return false;
+		const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+		if (!widgetEl) return false;
+		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+
+		// 右クリック (button 2): 後続の contextmenu が widget 上で発火するよう
+		// cursor 移動を阻止して widget を残す。
+		if (event.button === 2) {
+			event.preventDefault();
+			return true;
+		}
+		// cmd/ctrl + 左クリック: 後続の click で URL を開くので widget を残す。
+		if (event.button === 0 && isOpenLinkModifierEvent(event)) {
+			event.preventDefault();
+			return true;
+		}
+		// modifier 無しの左クリック: editor に処理させて cursor を行内に移し
+		// raw md syntax を表示させる（widget は re-render で消える）。
+		return false;
+	},
+
+	click(event: MouseEvent, _view: EditorView) {
+		if (event.button !== 0) return false;
+		const target = event.target;
+		if (!(target instanceof Element)) return false;
+		const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+		if (!widgetEl) return false;
+		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+		if (!isOpenLinkModifierEvent(event)) return false;
+
+		const url = widgetEl.dataset.linkWidgetUrl;
+		if (!url) return false;
+		event.preventDefault();
+		openExternal(url).catch((error) => {
+			console.error("Failed to open external URL:", url, error);
+		});
+		return true;
+	},
+
 	contextmenu(event: MouseEvent, view: EditorView) {
 		const target = event.target;
 		if (!(target instanceof Element)) return false;
@@ -522,24 +567,19 @@ const linkWidgetContextMenuHandler = EditorView.domEventHandlers({
 		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
 
 		const pos = view.posAtDOM(widgetEl);
-		const tree = syntaxTree(view.state);
-		let linkNode = tree.resolveInner(pos, 1);
-		while (linkNode && linkNode.name !== "Link") {
-			if (!linkNode.parent) return false;
-			linkNode = linkNode.parent;
-		}
-		if (!linkNode) return false;
+		const linkRange = findEnclosingLinkNode(view.state, pos);
+		if (!linkRange) return false;
 
-		const parts = extractLinkParts(view.state, linkNode.from, linkNode.to);
+		const parts = extractLinkParts(view.state, linkRange.from, linkRange.to);
 		if (!parts) return false;
 
-		const line = view.state.doc.lineAt(linkNode.from);
+		const line = view.state.doc.lineAt(linkRange.from);
 		const lineText = view.state.doc.sliceString(line.from, line.to);
 		const isUrlOnlyLine = isLineOnlyMdLink(
 			lineText,
 			line.from,
-			linkNode.from,
-			linkNode.to,
+			linkRange.from,
+			linkRange.to,
 			line.to,
 		);
 
@@ -550,8 +590,8 @@ const linkWidgetContextMenuHandler = EditorView.domEventHandlers({
 				detail: {
 					url: parts.url,
 					label: parts.label,
-					from: linkNode.from,
-					to: linkNode.to,
+					from: linkRange.from,
+					to: linkRange.to,
 					isUrlOnlyLine,
 					clientX: event.clientX,
 					clientY: event.clientY,
@@ -562,8 +602,4 @@ const linkWidgetContextMenuHandler = EditorView.domEventHandlers({
 	},
 });
 
-export const linkDecoration: Extension = [
-	linkPlugin,
-	urlPasteHandler,
-	linkWidgetContextMenuHandler,
-];
+export const linkDecoration: Extension = [linkPlugin, urlPasteHandler, linkWidgetMouseHandler];

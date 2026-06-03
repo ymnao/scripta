@@ -49,29 +49,6 @@ export function getCardDeleteRange(
 }
 
 /**
- * URL を md リンク表記に変換するときの行内容を作る。
- * OGP title があれば label に使う、なければ URL を label にする（loss-less）。
- */
-export function buildMdLinkFromCard(url: string, ogpTitle?: string | null): string {
-	const label = ogpTitle?.trim() ? ogpTitle.trim() : url;
-	// LinkWidget 側と同じ escape ルールを適用するため links.ts の helper を使う
-	return `[${escapeLabel(label)}](<${url}>)`;
-}
-
-function escapeLabel(label: string): string {
-	return label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
-}
-
-/** ogpCache に loaded entry があれば title を返す。なければ null。 */
-export function getCachedOgpTitle(url: string): string | null {
-	const entry = ogpCache.get(url);
-	if (entry?.status === "loaded") {
-		return entry.data.title ?? null;
-	}
-	return null;
-}
-
-/**
  * paste 由来の transaction かを判定する。
  *
  * #96 派生: paste で URL を空行に挿入したとき、即座に OGP card（少なくとも
@@ -481,7 +458,6 @@ function createLinkCardClickGuard() {
 			// card の DOM 位置から doc position を割り出し、その line range を特定する
 			const pos = view.posAtDOM(cardEl);
 			const line = view.state.doc.lineAt(pos);
-			const title = getCachedOgpTitle(url);
 
 			event.preventDefault();
 			view.dom.dispatchEvent(
@@ -489,7 +465,6 @@ function createLinkCardClickGuard() {
 					bubbles: true,
 					detail: {
 						url,
-						title,
 						lineFrom: line.from,
 						lineTo: line.to,
 						clientX: event.clientX,

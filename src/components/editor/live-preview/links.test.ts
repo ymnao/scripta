@@ -609,45 +609,48 @@ describe("isLineOnlyMdLink", () => {
 });
 
 describe("LinkWidget", () => {
-	it("ignoreEvent returns false for plain click (editor handles → cursor move)", () => {
+	// マウス系・contextmenu は CM-level handler で gate するため editor に渡す → false
+	it("ignoreEvent returns false for mousedown (regardless of modifier)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click");
-		expect(widget.ignoreEvent(event)).toBe(false);
-	});
-
-	it("ignoreEvent returns false for plain mousedown (editor handles)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("mousedown");
-		expect(widget.ignoreEvent(event)).toBe(false);
-	});
-
-	it("ignoreEvent returns true for cmd+click (widget handles → open URL)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click", { metaKey: true });
-		expect(widget.ignoreEvent(event)).toBe(true);
-	});
-
-	it("ignoreEvent returns true for ctrl+click", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click", { ctrlKey: true });
-		expect(widget.ignoreEvent(event)).toBe(true);
-	});
-
-	it("ignoreEvent returns false for contextmenu (editor handles → custom menu)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("contextmenu");
-		expect(widget.ignoreEvent(event)).toBe(false);
-	});
-
-	it("ignoreEvent returns false for other events (editor handles them)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new KeyboardEvent("keydown");
-		expect(widget.ignoreEvent(event)).toBe(false);
-	});
-
-	it("ignoreEvent returns false for disabled links regardless of modifier", () => {
-		const widget = new LinkWidget("text", "ftp://example.com");
 		expect(widget.ignoreEvent(new MouseEvent("mousedown"))).toBe(false);
+		expect(widget.ignoreEvent(new MouseEvent("mousedown", { metaKey: true }))).toBe(false);
+	});
+
+	it("ignoreEvent returns false for click (regardless of modifier)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(false);
 		expect(widget.ignoreEvent(new MouseEvent("click", { metaKey: true }))).toBe(false);
+		expect(widget.ignoreEvent(new MouseEvent("click", { ctrlKey: true }))).toBe(false);
+	});
+
+	it("ignoreEvent returns false for contextmenu (CM handler dispatches custom event)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		expect(widget.ignoreEvent(new MouseEvent("contextmenu"))).toBe(false);
+	});
+
+	it("ignoreEvent returns true for keyboard events (widget handles Enter/Space)", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		expect(widget.ignoreEvent(new KeyboardEvent("keydown"))).toBe(true);
+		expect(widget.ignoreEvent(new KeyboardEvent("keyup"))).toBe(true);
+	});
+
+	it("ignoreEvent returns true for unknown event types", () => {
+		const widget = new LinkWidget("text", "https://example.com");
+		expect(widget.ignoreEvent(new Event("focus"))).toBe(true);
+	});
+
+	it("toDOM does not set href (CM handler reads dataset.linkWidgetUrl instead)", () => {
+		// href があると Chromium の cmd+click が新規ウィンドウを開こうとして競合する
+		const widget = new LinkWidget("Example", "https://example.com");
+		const el = widget.toDOM();
+		expect(el.getAttribute("href")).toBeNull();
+		expect((el as HTMLAnchorElement).dataset.linkWidgetUrl).toBe("https://example.com");
+	});
+
+	it("toDOM disabled link does not set dataset.linkWidgetUrl (unsafe URL)", () => {
+		const widget = new LinkWidget("Example", "ftp://example.com");
+		const el = widget.toDOM();
+		expect((el as HTMLAnchorElement).dataset.linkWidgetUrl).toBeUndefined();
+		expect(el.classList.contains("cm-link-widget-disabled")).toBe(true);
 	});
 });

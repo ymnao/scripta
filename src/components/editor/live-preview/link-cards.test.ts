@@ -1,7 +1,6 @@
 import type { Transaction } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
 import {
-	buildMdLinkFromCard,
 	containsPasteUserEvent,
 	getCardDeleteRange,
 	isStandaloneUrlLine,
@@ -50,51 +49,6 @@ describe("isStandaloneUrlLine", () => {
 
 	it("returns null for whitespace-only string", () => {
 		expect(isStandaloneUrlLine("   ")).toBeNull();
-	});
-});
-
-describe("buildMdLinkFromCard", () => {
-	it("uses OGP title as label when available", () => {
-		expect(buildMdLinkFromCard("https://example.com", "Example Site")).toBe(
-			"[Example Site](<https://example.com>)",
-		);
-	});
-
-	it("falls back to URL when title is null", () => {
-		expect(buildMdLinkFromCard("https://example.com", null)).toBe(
-			"[https://example.com](<https://example.com>)",
-		);
-	});
-
-	it("falls back to URL when title is undefined", () => {
-		expect(buildMdLinkFromCard("https://example.com")).toBe(
-			"[https://example.com](<https://example.com>)",
-		);
-	});
-
-	it("falls back to URL when title is empty/whitespace", () => {
-		expect(buildMdLinkFromCard("https://example.com", "   ")).toBe(
-			"[https://example.com](<https://example.com>)",
-		);
-	});
-
-	it("trims title before using as label", () => {
-		expect(buildMdLinkFromCard("https://example.com", "  Title  ")).toBe(
-			"[Title](<https://example.com>)",
-		);
-	});
-
-	it("escapes square brackets in title", () => {
-		expect(buildMdLinkFromCard("https://example.com", "Foo [bar]")).toBe(
-			"[Foo \\[bar\\]](<https://example.com>)",
-		);
-	});
-
-	it("uses angle bracket URL form (URL not escaped)", () => {
-		// `)` を含む URL でもリンクが壊れないことを保証
-		expect(buildMdLinkFromCard("https://en.wikipedia.org/wiki/Foo_(bar)", "Wikipedia")).toBe(
-			"[Wikipedia](<https://en.wikipedia.org/wiki/Foo_(bar)>)",
-		);
 	});
 });
 

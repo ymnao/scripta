@@ -41,7 +41,7 @@ import {
 import { highlightQueryExtension, setHighlightQuery } from "./highlight-query";
 import {
 	blockquoteDecoration,
-	buildMdLinkFromCard,
+	buildMarkdownLink,
 	codeBlockCopyDecoration,
 	codeBlockDecoration,
 	emphasisDecoration,
@@ -156,7 +156,6 @@ export function MarkdownEditor({
 	const [cardContextMenu, setCardContextMenu] = useState<{
 		position: { x: number; y: number };
 		url: string;
-		title: string | null;
 		lineFrom: number;
 		lineTo: number;
 	} | null>(null);
@@ -200,11 +199,10 @@ export function MarkdownEditor({
 		const el = containerRef.current;
 		if (!el) return;
 		const onCardMenu = (e: Event) => {
-			const { url, title, lineFrom, lineTo, clientX, clientY } = (e as CustomEvent).detail;
+			const { url, lineFrom, lineTo, clientX, clientY } = (e as CustomEvent).detail;
 			setCardContextMenu({
 				position: { x: clientX, y: clientY },
 				url,
-				title,
 				lineFrom,
 				lineTo,
 			});
@@ -794,7 +792,8 @@ export function MarkdownEditor({
 							onClick: () => {
 								const view = editorRef.current?.view;
 								if (!view) return;
-								const insert = buildMdLinkFromCard(cardContextMenu.url, cardContextMenu.title);
+								// label も URL を使う lossless 変換: `[url](<url>)`
+								const insert = buildMarkdownLink(cardContextMenu.url, "");
 								view.dispatch({
 									changes: {
 										from: cardContextMenu.lineFrom,
