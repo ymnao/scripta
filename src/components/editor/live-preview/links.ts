@@ -258,6 +258,25 @@ export function buildMarkdownLink(url: string, selectedText: string): string {
 	return `[${label}](<${url}>)`;
 }
 
+/**
+ * URL paste 時に md リンクへ変換すべきかを判定する pure 関数。
+ *
+ * 選択ありなら常に変換（ラップ）。選択なしの場合は paste 後の行が
+ * URL のみになるなら plain insert（link-cards が OGP card を起動）、
+ * 他テキストが混在するなら変換する。
+ *
+ * #96: link-cards の OGP card は行全体が URL の時のみ起動するため、
+ * URL only 行への paste で md リンクに変換すると card が出ない。
+ */
+export function shouldConvertPasteToLink(opts: {
+	hasSelection: boolean;
+	lineBefore: string;
+	lineAfter: string;
+}): boolean {
+	if (opts.hasSelection) return true;
+	return opts.lineBefore.trim() !== "" || opts.lineAfter.trim() !== "";
+}
+
 const urlPasteHandler = EditorView.domEventHandlers({
 	paste(event: ClipboardEvent, view: EditorView) {
 		const text = event.clipboardData?.getData("text/plain")?.trim();
@@ -280,8 +299,13 @@ const urlPasteHandler = EditorView.domEventHandlers({
 
 		event.preventDefault();
 		const changes = state.changeByRange((range) => {
+			const hasSelection = range.from !== range.to;
 			const selected = state.doc.sliceString(range.from, range.to);
-			const insert = buildMarkdownLink(text, selected);
+			const line = state.doc.lineAt(range.from);
+			const lineBefore = state.doc.sliceString(line.from, range.from);
+			const lineAfter = state.doc.sliceString(range.to, line.to);
+			const convert = shouldConvertPasteToLink({ hasSelection, lineBefore, lineAfter });
+			const insert = convert ? buildMarkdownLink(text, selected) : text;
 			return {
 				range: EditorSelection.cursor(range.from + insert.length),
 				changes: { from: range.from, to: range.to, insert },

@@ -6,6 +6,7 @@ import {
 	isSafeImageUrl,
 	isSafeUrl,
 	LinkWidget,
+	shouldConvertPasteToLink,
 	URL_PASTE_RE,
 } from "./links";
 
@@ -248,6 +249,47 @@ describe("buildMarkdownLink", () => {
 		expect(buildMarkdownLink("https://example.com/path?q=1&b=2", "link")).toBe(
 			"[link](<https://example.com/path?q=1&b=2>)",
 		);
+	});
+});
+
+describe("shouldConvertPasteToLink", () => {
+	it("converts when selection is non-empty (wraps selection as label)", () => {
+		expect(shouldConvertPasteToLink({ hasSelection: true, lineBefore: "", lineAfter: "" })).toBe(
+			true,
+		);
+		expect(shouldConvertPasteToLink({ hasSelection: true, lineBefore: "x", lineAfter: "y" })).toBe(
+			true,
+		);
+	});
+
+	it("does not convert on URL-only line (plain paste lets OGP card start)", () => {
+		expect(shouldConvertPasteToLink({ hasSelection: false, lineBefore: "", lineAfter: "" })).toBe(
+			false,
+		);
+	});
+
+	it("treats whitespace-only context as URL-only line", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "  ", lineAfter: "\t" }),
+		).toBe(false);
+	});
+
+	it("converts when other text precedes the cursor", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "prefix ", lineAfter: "" }),
+		).toBe(true);
+	});
+
+	it("converts when other text follows the cursor", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "", lineAfter: " suffix" }),
+		).toBe(true);
+	});
+
+	it("converts when text exists on both sides", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "a ", lineAfter: " b" }),
+		).toBe(true);
 	});
 });
 
