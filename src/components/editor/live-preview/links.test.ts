@@ -7,6 +7,7 @@ import {
 	escapeMarkdownLabel,
 	isLineOnlyMdLink,
 	isOpenLinkModifierEvent,
+	isOpenLinkModifierKey,
 	isPosInCodeConstruct,
 	isPrivateHostname,
 	isSafeImageUrl,
@@ -564,6 +565,27 @@ describe("isOpenLinkModifierEvent", () => {
 	it("returns false for shift-only event", () => {
 		const e = new MouseEvent("click", { shiftKey: true });
 		expect(isOpenLinkModifierEvent(e)).toBe(false);
+	});
+});
+
+describe("isOpenLinkModifierKey", () => {
+	it("returns true for Meta (Cmd on Mac)", () => {
+		expect(isOpenLinkModifierKey("Meta")).toBe(true);
+	});
+
+	it("returns true for Control", () => {
+		expect(isOpenLinkModifierKey("Control")).toBe(true);
+	});
+
+	it("returns false for other modifier keys", () => {
+		expect(isOpenLinkModifierKey("Shift")).toBe(false);
+		expect(isOpenLinkModifierKey("Alt")).toBe(false);
+	});
+
+	it("returns false for letter keys", () => {
+		expect(isOpenLinkModifierKey("a")).toBe(false);
+		expect(isOpenLinkModifierKey("Enter")).toBe(false);
+		expect(isOpenLinkModifierKey("")).toBe(false);
 	});
 });
 

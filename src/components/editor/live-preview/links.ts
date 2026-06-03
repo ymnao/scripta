@@ -80,6 +80,11 @@ export function isOpenLinkModifierEvent(event: MouseEvent | KeyboardEvent): bool
 	return event.metaKey || event.ctrlKey;
 }
 
+/** keydown / keyup の `event.key` が「リンクを開く modifier」かを判定。 */
+export function isOpenLinkModifierKey(key: string): boolean {
+	return key === "Meta" || key === "Control";
+}
+
 /**
  * Lezer markdown parser の URL ノードに含まれる `<>` を剥がす。
  *
@@ -631,4 +636,53 @@ function findEnclosingLinkNode(
 	return node ? { from: node.from, to: node.to } : null;
 }
 
-export const linkDecoration: Extension = [linkPlugin, urlPasteHandler];
+/**
+ * cmd/ctrl 押下中に editor wrapper (`view.dom`) に `cm-link-mod-down` クラスを
+ * 付与し、editor-theme 側の CSS で `.cm-link-widget` の cursor を pointer に
+ * 切り替えるための plugin。VS Code 等の cmd+hover 表示と同じ UX。
+ *
+ * window レベルで listen するのは hover 中 (editor 未 focus) でも反応させる
+ * ため。window blur / 別キー押下時の取り残し対策として blur と
+ * 全 modifier release 検知も入れる。
+ */
+const modifierTrackPlugin = ViewPlugin.fromClass(
+	class {
+		private view: EditorView;
+		private onKeyDown: (e: KeyboardEvent) => void;
+		private onKeyUp: (e: KeyboardEvent) => void;
+		private onBlur: () => void;
+
+		constructor(view: EditorView) {
+			this.view = view;
+			this.onKeyDown = (e) => {
+				if (isOpenLinkModifierKey(e.key)) {
+					this.view.dom.classList.add("cm-link-mod-down");
+				}
+			};
+			this.onKeyUp = (e) => {
+				// 単独 modifier 解放だけでなく、metaKey/ctrlKey の両方が false に
+				// なったら必ず class を外す（OS によっては key === "Meta" でなく
+				// "OS" などになる稀ケース対策）
+				if (isOpenLinkModifierKey(e.key) || (!e.metaKey && !e.ctrlKey)) {
+					this.view.dom.classList.remove("cm-link-mod-down");
+				}
+			};
+			this.onBlur = () => {
+				// cmd+Tab でアプリ切替時など keyup が来ないケースで取り残し回避
+				this.view.dom.classList.remove("cm-link-mod-down");
+			};
+			window.addEventListener("keydown", this.onKeyDown);
+			window.addEventListener("keyup", this.onKeyUp);
+			window.addEventListener("blur", this.onBlur);
+		}
+
+		destroy() {
+			window.removeEventListener("keydown", this.onKeyDown);
+			window.removeEventListener("keyup", this.onKeyUp);
+			window.removeEventListener("blur", this.onBlur);
+			this.view.dom.classList.remove("cm-link-mod-down");
+		}
+	},
+);
+
+export const linkDecoration: Extension = [linkPlugin, urlPasteHandler, modifierTrackPlugin];
