@@ -1,5 +1,6 @@
+import type { Transaction } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
-import { isStandaloneUrlLine, LinkCardWidget } from "./link-cards";
+import { containsPasteUserEvent, isStandaloneUrlLine, LinkCardWidget } from "./link-cards";
 
 vi.mock("../../../lib/commands", () => ({
 	fetchOgp: vi.fn(),
@@ -43,6 +44,41 @@ describe("isStandaloneUrlLine", () => {
 
 	it("returns null for whitespace-only string", () => {
 		expect(isStandaloneUrlLine("   ")).toBeNull();
+	});
+});
+
+describe("containsPasteUserEvent", () => {
+	function fakeTr(userEvent: string | null): Transaction {
+		return {
+			isUserEvent(name: string) {
+				if (userEvent == null) return false;
+				return userEvent === name || userEvent.startsWith(`${name}.`);
+			},
+		} as unknown as Transaction;
+	}
+
+	it("returns false for empty transactions array", () => {
+		expect(containsPasteUserEvent([])).toBe(false);
+	});
+
+	it("returns true when a transaction has input.paste userEvent", () => {
+		expect(containsPasteUserEvent([fakeTr("input.paste")])).toBe(true);
+	});
+
+	it("returns true when any transaction in the list has input.paste", () => {
+		expect(containsPasteUserEvent([fakeTr("input.type"), fakeTr("input.paste")])).toBe(true);
+	});
+
+	it("returns false for typing-only transactions", () => {
+		expect(containsPasteUserEvent([fakeTr("input.type"), fakeTr("delete.backward")])).toBe(false);
+	});
+
+	it("matches sub-events of input.paste (e.g. input.paste.markdown)", () => {
+		expect(containsPasteUserEvent([fakeTr("input.paste.markdown")])).toBe(true);
+	});
+
+	it("returns false when userEvent is null/absent", () => {
+		expect(containsPasteUserEvent([fakeTr(null)])).toBe(false);
 	});
 });
 
