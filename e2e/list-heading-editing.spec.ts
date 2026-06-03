@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { waitForSaved } from "./helpers/assertions";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 // #91（マーカー挿入後のカーソル位置）/ #92（Enter によるリスト継続）の
@@ -115,5 +115,55 @@ test.describe("Enter によるリスト継続 (#92)", () => {
 		await waitForSaved(page);
 
 		expect(await lastWrite(mock)).toContain("> foo\n> bar");
+	});
+});
+
+test.describe("Tab / Shift+Tab で順序付きリストを再採番 (#118)", () => {
+	test("`1. a` Enter 直後の `2. ` で Tab → 子リスト `  1. ` から再開", async ({ page }) => {
+		const mock = await openWithContent(page, "1. a");
+
+		await page.keyboard.press("End");
+		await page.keyboard.press("Enter"); // → "1. a\n2. "
+		await page.keyboard.press("Tab"); // → "1. a\n  1. "
+		await page.keyboard.type("b");
+		await page.keyboard.press("Enter"); // → "1. a\n  1. b\n  2. "
+		await page.keyboard.type("c");
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		// processContent appends a trailing newline on save
+		expect(await lastWrite(mock)).toBe("1. a\n  1. b\n  2. c\n");
+	});
+
+	test("中間の項目で Tab → その項目が子レベルに下がり後続が再採番", async ({ page }) => {
+		const mock = await openWithContent(page, "1. a\n2. b\n3. c");
+
+		// 2 行目の行末へ移動して Tab
+		await page.keyboard.press(`${modKey}+Home`);
+		await page.keyboard.press("ArrowDown");
+		await page.keyboard.press("End");
+		await page.keyboard.press("Tab");
+		await waitForUnsaved(page);
+
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		expect(await lastWrite(mock)).toBe("1. a\n  1. b\n2. c\n");
+	});
+
+	test("子項目で Shift+Tab → 親レベルに戻り連番に復帰", async ({ page }) => {
+		const mock = await openWithContent(page, "1. a\n  1. b\n2. c");
+
+		// 2 行目の "  1. b" の行末にカーソルを置く
+		await page.keyboard.press(`${modKey}+Home`);
+		await page.keyboard.press("ArrowDown");
+		await page.keyboard.press("End");
+		await page.keyboard.press("Shift+Tab");
+		await waitForUnsaved(page);
+
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		expect(await lastWrite(mock)).toBe("1. a\n2. b\n3. c\n");
 	});
 });

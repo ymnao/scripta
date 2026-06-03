@@ -5,8 +5,10 @@ import {
 	BulletWidget,
 	buildDecorations,
 	CheckboxWidget,
+	computeListIndentChanges,
 	findMarkerRange,
 	listKeymap,
+	parseListLine,
 } from "./lists";
 import {
 	collectDecorations,
@@ -619,5 +621,253 @@ describe("ArrowRight keymap", () => {
 		const line = state.doc.lineAt(5);
 		const nextLine = state.doc.line(line.number + 1);
 		expect(findMarkerRange(state, nextLine)).toBeNull();
+	});
+});
+
+describe("parseListLine", () => {
+	it("parses ordered list with `.` delimiter", () => {
+		const info = parseListLine("1. a");
+		expect(info).toEqual({ indent: "", ordered: { number: 1, delim: "." }, task: false });
+	});
+
+	it("parses ordered list with `)` delimiter", () => {
+		const info = parseListLine("12) hello");
+		expect(info).toEqual({ indent: "", ordered: { number: 12, delim: ")" }, task: false });
+	});
+
+	it("parses ordered list with leading indent", () => {
+		const info = parseListLine("  3. nested");
+		expect(info?.indent).toBe("  ");
+		expect(info?.ordered).toEqual({ number: 3, delim: "." });
+	});
+
+	it("parses bullet list", () => {
+		const info = parseListLine("- a");
+		expect(info).toEqual({ indent: "", ordered: null, task: false });
+	});
+
+	it("parses indented bullet list", () => {
+		const info = parseListLine("    * x");
+		expect(info?.indent).toBe("    ");
+		expect(info?.ordered).toBeNull();
+		expect(info?.task).toBe(false);
+	});
+
+	it("parses task list", () => {
+		const info = parseListLine("- [ ] todo");
+		expect(info).toEqual({ indent: "", ordered: null, task: true });
+	});
+
+	it("parses checked task list", () => {
+		const info = parseListLine("  - [x] done");
+		expect(info?.task).toBe(true);
+		expect(info?.indent).toBe("  ");
+	});
+
+	it("returns null for plain text", () => {
+		expect(parseListLine("hello world")).toBeNull();
+	});
+
+	it("returns null for line starting with number but no marker", () => {
+		expect(parseListLine("123 abc")).toBeNull();
+	});
+
+	it("returns null for empty string", () => {
+		expect(parseListLine("")).toBeNull();
+	});
+});
+
+describe("computeListIndentChanges", () => {
+	function applyChanges(doc: string, cursorPos: number, direction: 1 | -1): string {
+		const state = createTestState(doc, cursorPos);
+		const result = computeListIndentChanges(state, direction);
+		if (!result) return doc;
+		return state.update({ changes: result.changes }).state.doc.toString();
+	}
+
+	function applyChangesWithSelection(
+		doc: string,
+		selection: EditorSelection,
+		direction: 1 | -1,
+	): string {
+		const state = createTestState(doc, undefined, undefined, selection);
+		const result = computeListIndentChanges(state, direction);
+		if (!result) return doc;
+		return state.update({ changes: result.changes }).state.doc.toString();
+	}
+
+	// --- The exact case from issue #118 -----------------------------------
+
+	it("Tab after Enter-continued ordered marker renumbers child to 1", () => {
+		// User typed "1. a", Enter (→ "2. "), Tab.
+		const doc = "1. a\n2. ";
+		const cursor = doc.length; // right after "2. "
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n  1. ");
+	});
+
+	it("Tab + b + Enter + c reproduces the expected nested list", () => {
+		// Simulating the full flow from the issue:
+		//   1. a / 2. / Tab → "1. a / <indent>1. "
+		// Then a separate Enter on the resulting line would continue at "  2. ".
+		// Here we just verify the Tab step renumbers correctly.
+		const doc = "1. a\n  1. b\n  2. c";
+		// Verify a subsequent Tab in the middle of the sub-list does not break it
+		expect(applyChanges(doc, doc.indexOf("c"), 1)).toBe("1. a\n  1. b\n    1. c");
+	});
+
+	// --- Tab on existing list items ----------------------------------------
+
+	it("Tab on second item indents it and renumbers later siblings", () => {
+		const doc = "1. a\n2. b\n3. c";
+		// Cursor on line 2
+		const cursor = doc.indexOf("2.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n  1. b\n2. c");
+	});
+
+	it("Tab on last item indents and renumbers", () => {
+		const doc = "1. a\n2. b";
+		const cursor = doc.indexOf("2.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n  1. b");
+	});
+
+	it("Tab on item that joins an existing sub-list continues numbering", () => {
+		const doc = "1. a\n  1. x\n  2. y\n2. b";
+		// Tab on "2. b" → joins the existing 2-space sub-list as item 3
+		const cursor = doc.lastIndexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n  1. x\n  2. y\n  3. b");
+	});
+
+	it("Tab on a bullet list line does not affect numbering", () => {
+		const doc = "- a\n- b\n- c";
+		const cursor = doc.indexOf("- b");
+		expect(applyChanges(doc, cursor, 1)).toBe("- a\n  - b\n- c");
+	});
+
+	it("Tab on a task list line indents it", () => {
+		const doc = "- [ ] a\n- [ ] b";
+		const cursor = doc.lastIndexOf("- [ ]");
+		expect(applyChanges(doc, cursor, 1)).toBe("- [ ] a\n  - [ ] b");
+	});
+
+	it("Tab on a plain text line falls through (returns null)", () => {
+		const state = createTestState("hello world", 5);
+		expect(computeListIndentChanges(state, 1)).toBeNull();
+	});
+
+	it("Tab on a line inside a fenced code block falls through", () => {
+		// Even if the line looks like a list, it should not be treated as one.
+		const state = createTestState("```\n1. inside\n```", "```\n1. ".length);
+		expect(computeListIndentChanges(state, 1)).toBeNull();
+	});
+
+	// --- Shift+Tab (outdent) ----------------------------------------------
+
+	it("Shift+Tab on first sub-item joins parent and renumbers continuation", () => {
+		const doc = "1. a\n  1. b\n2. c";
+		const cursor = doc.indexOf("  1. b") + 2;
+		// Outdent line 2 → "1. a / 2. b / 3. c" (continuation at parent level).
+		expect(applyChanges(doc, cursor, -1)).toBe("1. a\n2. b\n3. c");
+	});
+
+	it("Shift+Tab on middle sub-item leaves remaining sub-item with original number", () => {
+		// `  2. c` was originally the second sub-item because of `  1. b` above.
+		// After outdenting `  1. b`, the remaining `  2. c` keeps its number
+		// (we preserve user-chosen first-item numbers of un-touched runs).
+		const doc = "1. a\n  1. b\n  2. c";
+		const cursor = doc.indexOf("  1. b") + 2;
+		expect(applyChanges(doc, cursor, -1)).toBe("1. a\n2. b\n  2. c");
+	});
+
+	it("Shift+Tab on first sub-item promotes it and renumbers parent run", () => {
+		const doc = "1. a\n  1. b";
+		const cursor = doc.indexOf("  1. b") + 2;
+		expect(applyChanges(doc, cursor, -1)).toBe("1. a\n2. b");
+	});
+
+	it("Shift+Tab on top-level item returns null (no indent to remove)", () => {
+		const state = createTestState("1. a\n2. b", 5); // cursor on line 2
+		expect(computeListIndentChanges(state, -1)).toBeNull();
+	});
+
+	// --- Multi-line selection ---------------------------------------------
+
+	it("Tab on multi-line selection indents all list lines", () => {
+		const doc = "1. a\n2. b\n3. c";
+		const selection = EditorSelection.single(doc.indexOf("2."), doc.indexOf("3.") + 4);
+		expect(applyChangesWithSelection(doc, selection, 1)).toBe("1. a\n  1. b\n  2. c");
+	});
+
+	it("Shift+Tab on multi-line selection outdents and renumbers", () => {
+		const doc = "1. a\n  1. b\n  2. c\n  3. d";
+		const selection = EditorSelection.single(doc.indexOf("  2."), doc.indexOf("  3.") + 6);
+		// Outdent lines 3 and 4 → "" indent. Line 2 stays at "  1. b".
+		expect(applyChangesWithSelection(doc, selection, -1)).toBe("1. a\n  1. b\n2. c\n3. d");
+	});
+
+	// --- Edge cases --------------------------------------------------------
+
+	it("does not renumber if non-modified ordered list has gaps", () => {
+		// User wrote "1. a / 5. b" intentionally. We must NOT renumber 5 to 2.
+		// However if we Tab on "5. b", that line's number is forced to fresh = 1.
+		const doc = "1. a\n5. b";
+		const cursor = doc.indexOf("5.");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n  1. b");
+	});
+
+	it("preserves user-chosen start number on non-modified lines", () => {
+		// Tabbing one item in a separate ordered list must not touch the other.
+		const doc = "5. a\n6. b\n7. c";
+		const cursor = doc.indexOf("6.");
+		// Modified line 2 → indent + fresh "1.", line 3 renumbers from 7 to 6.
+		expect(applyChanges(doc, cursor, 1)).toBe("5. a\n  1. b\n6. c");
+	});
+
+	it("breaks ordered run at blank line", () => {
+		const doc = "1. a\n\n2. b\n3. c";
+		const cursor = doc.indexOf("3.");
+		// Block scanning stops at the blank line, so item 1 is untouched.
+		// Tab on "3. c" → indent + fresh "1." at new indent. Item "2. b" stays.
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n\n2. b\n  1. c");
+	});
+
+	it("respects ordered list separator (bullet between ordered items)", () => {
+		const doc = "1. a\n- separator\n2. b\n3. c";
+		const cursor = doc.indexOf("3.");
+		// "- separator" breaks the ordered run at indent="".
+		// Tab on "3. c" → indented, fresh start. "2. b" preserved.
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n- separator\n2. b\n  1. c");
+	});
+
+	it("handles two-digit numbers in renumber", () => {
+		// Construct a list with 9 items, Tab on item 5 → renumbers 6..9 → 5..8
+		const lines = Array.from({ length: 9 }, (_, i) => `${i + 1}. item${i + 1}`).join("\n");
+		const cursor = lines.indexOf("5.");
+		const result = applyChanges(lines, cursor, 1);
+		const expected =
+			"1. item1\n2. item2\n3. item3\n4. item4\n  1. item5\n5. item6\n6. item7\n7. item8\n8. item9";
+		expect(result).toBe(expected);
+	});
+
+	it("handles renumbering 10 → 9 (number length shrinks)", () => {
+		// Tab on item 2 of a 10-item list. Items 3..10 renumber to 2..9; item 10 → "9" (length shrinks 2 → 1).
+		const items = Array.from({ length: 10 }, (_, i) => `${i + 1}. item${i + 1}`).join("\n");
+		const cursor = items.indexOf("2.");
+		const result = applyChanges(items, cursor, 1);
+		expect(result).toBe(
+			"1. item1\n  1. item2\n2. item3\n3. item4\n4. item5\n5. item6\n6. item7\n7. item8\n8. item9\n9. item10",
+		);
+	});
+
+	it("Tab in empty selection on a deeper indented item keeps it deeper", () => {
+		const doc = "1. a\n  1. b";
+		const cursor = doc.indexOf("  1. b") + 2;
+		// Tab on already-indented item → 4-space indent, fresh "1."
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n    1. b");
+	});
+
+	it("Shift+Tab on a bullet item outdents it", () => {
+		const doc = "- a\n  - b";
+		const cursor = doc.indexOf("  - b") + 2;
+		expect(applyChanges(doc, cursor, -1)).toBe("- a\n- b");
 	});
 });
