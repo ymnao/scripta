@@ -994,6 +994,21 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<table><tr><td>x</td></tr></table>\n  1. b");
 	});
 
+	it("inline HTML tag (<span>) stays as continuation", () => {
+		// `1. a / <span>inline</span> / 2. b / 3. c`. @codemirror/lang-markdown
+		// parses this whole thing as one OrderedList. <span> is not in the
+		// CommonMark §4.6 block-level allowlist, so it stays inline.
+		const doc = "1. a\n<span>inline</span>\n2. b\n3. c";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n<span>inline</span>\n   1. b\n2. c");
+	});
+
+	it("inline anchor (<a>) stays as continuation", () => {
+		const doc = '1. a\n<a href="x">link</a>\n2. b\n3. c';
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe('1. a\n<a href="x">link</a>\n   1. b\n2. c');
+	});
+
 	it("standalone closing HTML tag stays as continuation (matches marked)", () => {
 		// marked tokenises `1. a / </div> / 2. b / 3. c` as ONE ordered list.
 		// `</div>` is part of `1. a`'s text and `2. b` / `3. c` are siblings,

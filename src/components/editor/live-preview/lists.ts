@@ -387,13 +387,93 @@ const THEMATIC_STAR_RE = /^[ \t]{0,3}(?:\*[ \t]*){3,}$/;
 const THEMATIC_UNDERSCORE_RE = /^[ \t]{0,3}(?:_[ \t]*){3,}$/;
 const BLOCKQUOTE_RE = /^[ \t]{0,3}>/;
 const FENCED_CODE_RE = /^[ \t]{0,3}(?:```|~~~)/;
-// HTML block opener (CommonMark §4.6 types 1–6 START condition): line starts
-// (after up to 3 spaces) with `<!--`, `<![CDATA[`, `<!`, `<?`, or `<` followed
-// by an opening tag name. Closing tags (`</tag>`) and bare text are NOT
-// matched: this project's markdown parser (marked) keeps a standalone closing
-// tag as part of the preceding list item's text, so treating it as a hard
-// boundary would split lists that the parser sees as a single block.
-const HTML_BLOCK_RE = /^[ \t]{0,3}<(?:!--|!\[CDATA\[|[!?]|[a-zA-Z])/;
+// Block-level HTML tag names that interrupt a paragraph per CommonMark §4.6
+// types 1 (script/style/pre/textarea) and 6 (block-level elements). Inline
+// tags like <span>, <a>, <em>, <code>, <strong>, and custom elements are not
+// in this set — they stay as inline content within the list item.
+const HTML_BLOCK_TAGS = new Set([
+	// Type 1
+	"script",
+	"pre",
+	"style",
+	"textarea",
+	// Type 6
+	"address",
+	"article",
+	"aside",
+	"base",
+	"basefont",
+	"blockquote",
+	"body",
+	"caption",
+	"center",
+	"col",
+	"colgroup",
+	"dd",
+	"details",
+	"dialog",
+	"dir",
+	"div",
+	"dl",
+	"dt",
+	"fieldset",
+	"figcaption",
+	"figure",
+	"footer",
+	"form",
+	"frame",
+	"frameset",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"head",
+	"header",
+	"hr",
+	"html",
+	"iframe",
+	"legend",
+	"li",
+	"link",
+	"main",
+	"menu",
+	"menuitem",
+	"nav",
+	"noframes",
+	"ol",
+	"optgroup",
+	"option",
+	"p",
+	"param",
+	"section",
+	"source",
+	"summary",
+	"table",
+	"tbody",
+	"td",
+	"tfoot",
+	"th",
+	"thead",
+	"title",
+	"tr",
+	"track",
+	"ul",
+]);
+// Comment / CDATA / declaration / processing instruction always interrupt.
+const HTML_OPENER_RE = /^[ \t]{0,3}<(?:!--|!\[CDATA\[|[!?])/;
+// Opening tag `<name` followed by whitespace, `>`, `/`, or EOL. Closing tags
+// (`</…`) are intentionally NOT matched: marked keeps a standalone closing
+// tag as part of the preceding list item, so treating it as a boundary would
+// split lists the parser sees as one block.
+const HTML_TAG_RE = /^[ \t]{0,3}<([a-zA-Z][a-zA-Z0-9-]*)(?:[\s>/]|$)/;
+
+function isHtmlBlock(text: string): boolean {
+	if (HTML_OPENER_RE.test(text)) return true;
+	const m = HTML_TAG_RE.exec(text);
+	return m !== null && HTML_BLOCK_TAGS.has(m[1].toLowerCase());
+}
 
 /**
  * Lines that interrupt a paragraph in CommonMark and therefore end a list
@@ -409,7 +489,7 @@ function isParagraphInterrupting(text: string): boolean {
 		THEMATIC_UNDERSCORE_RE.test(text) ||
 		BLOCKQUOTE_RE.test(text) ||
 		FENCED_CODE_RE.test(text) ||
-		HTML_BLOCK_RE.test(text)
+		isHtmlBlock(text)
 	);
 }
 
