@@ -25,7 +25,8 @@
 		text-rendering: optimizeLegibility;
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
-		--editor-font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+		--font-family-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+		--editor-font-family: var(--font-family-mono);
 
 		/* Syntax highlighting (light) */
 		--color-syntax-keyword: #7c4dff;
@@ -333,7 +334,7 @@
 	font-size: 12px;
 	text-align: left;
 	cursor: pointer;
-	font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+	font-family: var(--font-family-mono);
 	line-height: 1.5;
 }
 
@@ -414,7 +415,7 @@
 }
 
 .slide-preview-content code {
-	font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+	font-family: var(--font-family-mono);
 	font-size: 0.9em;
 	padding: 0.15em 0.4em;
 	border-radius: 4px;

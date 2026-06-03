@@ -130,7 +130,7 @@ export const staticEditorTheme = EditorView.theme({
 	},
 	".cm-codeblock-line": {
 		backgroundColor: "var(--color-bg-secondary)",
-		fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+		fontFamily: FONT_FAMILY_MAP.monospace,
 	},
 	".cm-codeblock-copy-anchor": {
 		position: "relative",
@@ -268,7 +268,7 @@ export const staticEditorTheme = EditorView.theme({
 		display: "inline",
 	},
 	".cm-math-error": {
-		fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+		fontFamily: FONT_FAMILY_MAP.monospace,
 		backgroundColor: "color-mix(in srgb, var(--color-text-secondary) 10%, transparent)",
 		color: "var(--color-text-secondary)",
 	},
@@ -305,7 +305,7 @@ export const staticEditorTheme = EditorView.theme({
 		padding: "12px 0",
 	},
 	".cm-mermaid-error": {
-		fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+		fontFamily: FONT_FAMILY_MAP.monospace,
 		fontSize: "0.85em",
 		color: "#dc2626",
 		backgroundColor: "color-mix(in srgb, #dc2626 8%, transparent)",
