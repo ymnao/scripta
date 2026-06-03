@@ -1,8 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
-import { getCardDeleteRange, isStandaloneUrlLine, LinkCardWidget } from "./link-cards";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as commands from "../../../lib/commands";
+import {
+	getCardDeleteRange,
+	isStandaloneUrlLine,
+	LinkCardWidget,
+	linkCardDecoration,
+} from "./link-cards";
 
 vi.mock("../../../lib/commands", () => ({
 	fetchOgp: vi.fn(),
+	cancelOgpFetch: vi.fn(async () => {}),
 	openExternal: vi.fn(),
 }));
 
@@ -283,5 +294,64 @@ describe("LinkCardWidget", () => {
 			const event = new KeyboardEvent("keydown");
 			expect(widget.ignoreEvent(event)).toBe(false);
 		});
+	});
+});
+
+// #101: plugin destroy で in-flight な OGP fetch を main 側に cancel リクエスト
+// する経路。real EditorView を jsdom 上で起動し、fetchOgp を「永遠に pending」
+// な promise でモックすることで fetchingUrls を非空にしてから destroy する。
+describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			mounted.pop()?.destroy();
+		}
+		vi.mocked(commands.fetchOgp).mockReset();
+		vi.mocked(commands.cancelOgpFetch).mockClear();
+	});
+
+	function mountEditor(doc: string): EditorView {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			selection: EditorSelection.cursor(0),
+			extensions: [markdown({ base: markdownLanguage }), linkCardDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+		return view;
+	}
+
+	it("calls cancelOgpFetch for each in-flight URL on destroy", () => {
+		// fetchOgp は永遠に pending にして fetchingUrls を埋める。
+		vi.mocked(commands.fetchOgp).mockImplementation(() => new Promise(() => {}));
+
+		// カーソル行の URL は decoration されないので、適当な前置行を入れて URL を
+		// non-cursor 行に追いやる。
+		const view = mountEditor("hello\nhttps://example.com/a\nhttps://example.com/b\n");
+		// plugin constructor 内で fetchMissingOgp が同期 dispatch されており、
+		// この時点で fetchOgp が呼ばれている。
+		expect(vi.mocked(commands.fetchOgp).mock.calls.length).toBeGreaterThan(0);
+
+		view.destroy();
+		mounted.pop();
+
+		const cancelled = vi
+			.mocked(commands.cancelOgpFetch)
+			.mock.calls.map((c) => c[0])
+			.sort();
+		expect(cancelled).toEqual(["https://example.com/a", "https://example.com/b"]);
+	});
+
+	it("destroy is no-op for cancellation when no URL is in flight", () => {
+		vi.mocked(commands.fetchOgp).mockImplementation(() => new Promise(() => {}));
+		const view = mountEditor("just text, no URL\n");
+		view.destroy();
+		mounted.pop();
+		expect(vi.mocked(commands.cancelOgpFetch).mock.calls.length).toBe(0);
 	});
 });

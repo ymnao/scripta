@@ -36,10 +36,23 @@ export interface HttpFetchOptions {
 	// 接続時 lookup で SSRF を防ぐ。任意のホスト相手の fetch では指定し、信頼済み
 	// エンドポイント（GitHub API 等）相手では省略してシステム DNS を使う。
 	lookup?: SafeLookup;
+	// abort 経路。fire 時は req.destroy で in-flight を中断し AbortError で reject。
+	// 既に aborted な signal を渡すと request を投げずに即座に reject する。
+	signal?: AbortSignal;
+}
+
+export class AbortError extends Error {
+	readonly name = "AbortError";
+	constructor(message = "Request aborted") {
+		super(message);
+	}
 }
 
 export function httpFetch(opts: HttpFetchOptions): Promise<HttpFetchResult> {
-	const { url, timeoutMs, maxBodyBytes, onMaxExceeded } = opts;
+	const { url, timeoutMs, maxBodyBytes, onMaxExceeded, signal } = opts;
+	if (signal?.aborted) {
+		return Promise.reject(new AbortError());
+	}
 	return new Promise((resolve, reject) => {
 		const isHttps = url.protocol === "https:";
 		const requester = isHttps ? httpsRequest : httpRequest;
@@ -134,6 +147,19 @@ export function httpFetch(opts: HttpFetchOptions): Promise<HttpFetchResult> {
 			req.destroy(new Error("Request timeout"));
 		});
 		req.on("error", reject);
+		// abort signal は req.destroy を呼ぶだけ。後続の close/error 経路が既存の
+		// reject パスを発火するので reject 呼び出しの二重防止は不要（Promise は最初の
+		// settle で確定する）。signal listener は abort 発火 OR req close の双方で
+		// クリーンに外せるよう手動 remove する。
+		const onAbort = () => {
+			req.destroy(new AbortError());
+		};
+		if (signal) {
+			signal.addEventListener("abort", onAbort, { once: true });
+			req.once("close", () => {
+				signal.removeEventListener("abort", onAbort);
+			});
+		}
 		req.end();
 	});
 }

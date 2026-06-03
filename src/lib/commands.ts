@@ -131,6 +131,13 @@ export function fetchOgp(url: string): Promise<OgpData> {
 	return window.api.fetchOgp(url);
 }
 
+// 文書切替 / plugin destroy で in-flight OGP fetch を中断するための取消経路
+// （#101）。main 側で URL→AbortController set を持っており、cancel は登録済み
+// controller を全て abort する。in-flight が無い URL を渡しても no-op。
+export function cancelOgpFetch(url: string): Promise<void> {
+	return window.api.ogpCancel(url);
+}
+
 export function exportPdf(html: string, outputPath: string): Promise<void> {
 	return window.api.exportPdf(html, outputPath);
 }

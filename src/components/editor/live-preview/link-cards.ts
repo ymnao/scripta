@@ -9,7 +9,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { fetchOgp, openExternal } from "../../../lib/commands";
+import { cancelOgpFetch, fetchOgp, openExternal } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
@@ -306,13 +306,20 @@ class LinkCardDecorationPlugin implements PluginValue {
 			fetchOgp(url)
 				.then((data) => {
 					this.fetchingUrls.delete(url);
-					ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
 					if (this.destroyed) return;
+					ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
 					this.pendingUpdate = true;
 					this.view.dispatch({});
 				})
-				.catch(() => {
+				.catch((err: unknown) => {
 					this.fetchingUrls.delete(url);
+					// AbortError は「user の操作で cancel された」なので cache を error
+					// 状態にしない。次回 fetch で retry されるべき。文書再表示時の
+					// re-fetch を妨げないよう loading entry も外しておく。
+					if (err instanceof Error && err.name === "AbortError") {
+						ogpCache.delete(url);
+						return;
+					}
 					ogpCache.set(url, { status: "error", errorAt: Date.now() });
 					if (this.destroyed) return;
 					this.pendingUpdate = true;
@@ -390,6 +397,19 @@ class LinkCardDecorationPlugin implements PluginValue {
 	destroy() {
 		this.destroyed = true;
 		this.cancelRebuild();
+		// 文書切替 / editor unmount で in-flight な OGP fetch を main 側で abort する
+		// （#101）。abort 後の fetchOgp は AbortError で reject → 上の catch で cache
+		// 上書きを skip。`fetchingUrls` をスナップショットしてから cancel を発行する
+		// ことで、cancel→catch→fetchingUrls.delete の順序競合を回避（catch は同期で
+		// は走らないが、念のため）。cancel IPC の rejection はログに残すだけ（plugin
+		// 側はもう unmount 済みなので state 更新しない）。
+		const urls = [...this.fetchingUrls];
+		this.fetchingUrls.clear();
+		for (const url of urls) {
+			cancelOgpFetch(url).catch((error) => {
+				console.error("Failed to cancel OGP fetch:", url, error);
+			});
+		}
 	}
 }
 

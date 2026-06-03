@@ -63,6 +63,7 @@ export type Api = Readonly<{
 	cancelWikilinkScan: () => Promise<void>;
 
 	fetchOgp: (url: string) => Promise<OgpData>;
+	ogpCancel: (url: string) => Promise<void>;
 	exportPdf: (html: string, outputPath: string) => Promise<void>;
 	checkForUpdate: (currentVersion: string) => Promise<UpdateInfo>;
 

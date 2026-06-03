@@ -1,6 +1,6 @@
 import { URL } from "node:url";
 import type { OgpData } from "../../../src/types/ogp";
-import { httpFetch } from "../utils/http-fetch";
+import { AbortError, httpFetch } from "../utils/http-fetch";
 import { handle } from "../utils/ipc-handle";
 import { parseOgp } from "../utils/ogp-parser";
 import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
@@ -64,7 +64,40 @@ export function clearOgpCache(): void {
 	cache.clear();
 }
 
-async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string; body: Buffer }> {
+// 同一 URL に対して同時 fetch が複数走るケース（複数 EditorView / window） も
+// 想定して Set で保持。cancel は登録済み controller を全部 abort する。
+// `fetchOgpImpl` の finally で必ず remove するので leak はしない。
+const inFlight = new Map<string, Set<AbortController>>();
+
+function registerInFlight(url: string, controller: AbortController): void {
+	let set = inFlight.get(url);
+	if (!set) {
+		set = new Set();
+		inFlight.set(url, set);
+	}
+	set.add(controller);
+}
+
+function unregisterInFlight(url: string, controller: AbortController): void {
+	const set = inFlight.get(url);
+	if (!set) return;
+	set.delete(controller);
+	if (set.size === 0) inFlight.delete(url);
+}
+
+export function cancelOgpFetch(url: string): void {
+	const set = inFlight.get(url);
+	if (!set) return;
+	// abort 後の cleanup は fetchOgpImpl の finally で行うので、ここでは abort だけ。
+	for (const controller of set) {
+		controller.abort();
+	}
+}
+
+async function fetchWithRedirects(
+	urlStr: string,
+	signal: AbortSignal,
+): Promise<{ contentType: string; body: Buffer }> {
 	let current = urlStr;
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
 		const parsed = new URL(current);
@@ -78,6 +111,9 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 		// 「DNS + HTTP で 1 hop あたり最大 REQUEST_TIMEOUT_MS」を維持する。
 		const bareHost = stripIpBrackets(parsed.hostname);
 		const hopStart = Date.now();
+		// pinSafeLookup は DNS 待ち中の abort には反応しない。pinSafeLookup 自体は
+		// 通常数十 ms で抜けるので許容。abort されていた場合は httpFetch が即時 reject。
+		if (signal.aborted) throw new AbortError();
 		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS);
 		const httpTimeout = Math.max(1, REQUEST_TIMEOUT_MS - (Date.now() - hopStart));
 		const res = await httpFetch({
@@ -90,6 +126,7 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 			maxBodyBytes: MAX_BODY_BYTES,
 			onMaxExceeded: "truncate",
 			lookup: pin.lookup,
+			signal,
 		});
 		if (res.statusCode >= 300 && res.statusCode < 400) {
 			const loc = res.headers.location;
@@ -115,7 +152,7 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 	throw new Error("Too many redirects");
 }
 
-async function fetchOgpImpl(url: string): Promise<OgpData> {
+async function fetchOgpImpl(url: string, signal?: AbortSignal): Promise<OgpData> {
 	const lower = url.toLowerCase();
 	if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
 		throw new Error("Only http and https URLs are supported");
@@ -123,20 +160,35 @@ async function fetchOgpImpl(url: string): Promise<OgpData> {
 	const cached = cacheGet(url);
 	if (cached) return cached;
 
-	const { contentType, body } = await fetchWithRedirects(url);
-	// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
-	const lowerCt = contentType.toLowerCase();
-	if (!lowerCt.includes("text/html") && !lowerCt.includes("application/xhtml")) {
-		throw new Error(`Unsupported content type: ${contentType}`);
+	// signal を渡された場合はそれを上書きせず chain させる。tests は signal を直接
+	// 渡せる（IPC handler は controller を自前で作って Map 管理する）。
+	const controller = new AbortController();
+	if (signal) {
+		if (signal.aborted) throw new AbortError();
+		signal.addEventListener("abort", () => controller.abort(), { once: true });
 	}
-	const html = body.toString("utf8");
-	const ogp = parseOgp(html, url);
-	cacheSet(url, ogp);
-	return ogp;
+	registerInFlight(url, controller);
+	try {
+		const { contentType, body } = await fetchWithRedirects(url, controller.signal);
+		// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
+		const lowerCt = contentType.toLowerCase();
+		if (!lowerCt.includes("text/html") && !lowerCt.includes("application/xhtml")) {
+			throw new Error(`Unsupported content type: ${contentType}`);
+		}
+		const html = body.toString("utf8");
+		const ogp = parseOgp(html, url);
+		cacheSet(url, ogp);
+		return ogp;
+	} finally {
+		unregisterInFlight(url, controller);
+	}
 }
 
 export function registerOgpIpc(): void {
 	handle("ogp:fetch", (_event, url: string) => fetchOgpImpl(url));
+	handle("ogp:cancel", (_event, url: string) => {
+		cancelOgpFetch(url);
+	});
 }
 
 export const __testing = {
@@ -144,6 +196,8 @@ export const __testing = {
 	cacheGet,
 	cacheSet,
 	clearCache: clearOgpCache,
+	cancelOgpFetch,
+	hasInFlight: (url: string) => (inFlight.get(url)?.size ?? 0) > 0,
 	CACHE_TTL_MS,
 	MAX_CACHE_ENTRIES,
 };

@@ -7,7 +7,15 @@ vi.mock("electron", () => ({
 
 import { __testing } from "./ogp";
 
-const { fetchOgpImpl, cacheGet, cacheSet, clearCache, MAX_CACHE_ENTRIES } = __testing;
+const {
+	fetchOgpImpl,
+	cacheGet,
+	cacheSet,
+	clearCache,
+	cancelOgpFetch,
+	hasInFlight,
+	MAX_CACHE_ENTRIES,
+} = __testing;
 
 // SSRF defense (pinSafeLookup) が public IP のみ許可するため、local HTTP サーバを
 // 立てて round-trip を確認する integration test は接続段階で確実に reject される。
@@ -53,6 +61,47 @@ describe("ogp SSRF defense via pinSafeLookup", () => {
 	it("blocks link-local v4 169.254.169.254 (cloud metadata)", async () => {
 		// AWS / GCP / Azure などの metadata service への SSRF を防ぐケース。
 		await expect(fetchOgpImpl("http://169.254.169.254/")).rejects.toThrow(/SSRF blocked/);
+	});
+});
+
+describe("ogp cancel (#101)", () => {
+	beforeEach(() => clearCache());
+
+	it("cancelOgpFetch on URL with no in-flight fetch is a no-op", () => {
+		expect(() => cancelOgpFetch("https://no-in-flight.example/")).not.toThrow();
+	});
+
+	it("pre-aborted signal causes immediate AbortError without leaving in-flight entries", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		await expect(fetchOgpImpl("https://example.invalid/", controller.signal)).rejects.toThrowError(
+			/abort/i,
+		);
+		// finally で必ず unregister されるので、in-flight Map に残骸が残らないこと。
+		expect(hasInFlight("https://example.invalid/")).toBe(false);
+	});
+
+	it("cancelOgpFetch mid-fetch aborts the SSRF-blocked URL race cleanly", async () => {
+		// SSRF で確実に reject される URL を使って、cancel が呼ばれても
+		// (a) 二重 reject せず、(b) in-flight が cleanup されることを確認。
+		// (実 HTTP path は e2e に委譲し、ここではユニットレベルで pure な検証に絞る)
+		const p = fetchOgpImpl("http://127.0.0.1/");
+		// cancel を 1 tick 後に発行。SSRF reject の方が早ければ no-op、間に合えば
+		// abort が反映される。どちらでも最終的に reject かつ in-flight 0 が期待値。
+		setTimeout(() => cancelOgpFetch("http://127.0.0.1/"), 0);
+		await expect(p).rejects.toThrow();
+		expect(hasInFlight("http://127.0.0.1/")).toBe(false);
+	});
+
+	it("AbortError fetch path leaves no cache entry (next call will retry)", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		await expect(fetchOgpImpl("https://retry.example/", controller.signal)).rejects.toThrowError(
+			/abort/i,
+		);
+		// abort 経路は cache に何も書かない（fetchOgpImpl は finally で in-flight を
+		// 消すだけで cacheSet は呼ばない）。
+		expect(cacheGet("https://retry.example/")).toBeNull();
 	});
 });
 
