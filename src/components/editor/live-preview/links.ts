@@ -80,6 +80,25 @@ export function isOpenLinkModifierEvent(event: MouseEvent | KeyboardEvent): bool
 	return event.metaKey || event.ctrlKey;
 }
 
+/**
+ * Lezer markdown parser の URL ノードに含まれる `<>` を剥がす。
+ *
+ * CommonMark の `[label](<url>)` 形式では Lezer は URL ノードに angle bracket
+ * を含めて返す（例: `<https://example.com>`）。剥がさないと `isSafeUrl` の
+ * 正規表現 `/^https?:\/\/.../` が外れて widget が disabled 扱いになり、
+ * cmd+click / 右クリック handler が早期 return する。
+ *
+ * `buildMarkdownLink` は angle bracket 形で md リンクを生成するので、paste /
+ * Cmd+Shift+V 経由のリンクは全部この罠にハマる（過去にずっと再現していた
+ * cmd+click が効かない問題の真因）。
+ */
+export function stripUrlAngleBrackets(rawUrl: string): string {
+	if (rawUrl.startsWith("<") && rawUrl.endsWith(">")) {
+		return rawUrl.slice(1, -1);
+	}
+	return rawUrl;
+}
+
 export class LinkWidget extends WidgetType {
 	text: string;
 	url: string;
@@ -103,8 +122,6 @@ export class LinkWidget extends WidgetType {
 			// で preventDefault することで抑制する。
 			anchor.href = this.url;
 			anchor.dataset.linkWidgetUrl = this.url;
-			// [DEBUG] バンドル version 識別 — DevTools で見て確認
-			anchor.dataset.lwVersion = "viewplugin-eh-v1";
 			const isMac =
 				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
@@ -185,7 +202,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 							foundCloseBracket = true;
 						}
 					} else if (cursor.name === "URL") {
-						url = state.doc.sliceString(cursor.from, cursor.to);
+						url = stripUrlAngleBrackets(state.doc.sliceString(cursor.from, cursor.to));
 					}
 				} while (cursor.nextSibling());
 
@@ -244,12 +261,6 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	// (ignoreEvent / Prec / built-in selection との競合) を回避する。
 	eventHandlers: {
 		mousedown(event: MouseEvent, _view) {
-			console.log("[link-widget mousedown]", {
-				button: event.button,
-				metaKey: event.metaKey,
-				ctrlKey: event.ctrlKey,
-				target: (event.target as Element)?.className,
-			});
 			const target = event.target;
 			if (!(target instanceof Element)) return false;
 			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
@@ -294,9 +305,6 @@ const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 		},
 
 		contextmenu(event: MouseEvent, view) {
-			console.log("[link-widget contextmenu]", {
-				target: (event.target as Element)?.className,
-			});
 			const target = event.target;
 			if (!(target instanceof Element)) return false;
 			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
@@ -586,7 +594,7 @@ function extractLinkParts(
 				foundCloseBracket = true;
 			}
 		} else if (cursor.name === "URL") {
-			url = state.doc.sliceString(cursor.from, cursor.to);
+			url = stripUrlAngleBrackets(state.doc.sliceString(cursor.from, cursor.to));
 		}
 	} while (cursor.nextSibling());
 	if (!url || textFrom < 0 || textTo < 0) return null;

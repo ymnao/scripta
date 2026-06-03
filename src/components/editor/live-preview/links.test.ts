@@ -15,6 +15,7 @@ import {
 	parseSingleMdLink,
 	pasteAsMarkdownLinkCommand,
 	shouldConvertPasteToLink,
+	stripUrlAngleBrackets,
 	URL_PASTE_RE,
 } from "./links";
 import { createTestState } from "./test-helper";
@@ -510,6 +511,37 @@ describe("pasteAsMarkdownLinkCommand", () => {
 				Object.defineProperty(navigator, "clipboard", { value: original, configurable: true });
 			}
 		}
+	});
+});
+
+describe("stripUrlAngleBrackets", () => {
+	it("strips surrounding angle brackets", () => {
+		expect(stripUrlAngleBrackets("<https://example.com>")).toBe("https://example.com");
+	});
+
+	it("returns URL unchanged when no brackets", () => {
+		expect(stripUrlAngleBrackets("https://example.com")).toBe("https://example.com");
+	});
+
+	it("does not strip if only one side has bracket", () => {
+		expect(stripUrlAngleBrackets("<https://example.com")).toBe("<https://example.com");
+		expect(stripUrlAngleBrackets("https://example.com>")).toBe("https://example.com>");
+	});
+
+	it("handles empty string", () => {
+		expect(stripUrlAngleBrackets("")).toBe("");
+	});
+
+	it("strips brackets even from non-http URL (caller validates safety separately)", () => {
+		expect(stripUrlAngleBrackets("<ftp://example.com>")).toBe("ftp://example.com");
+	});
+
+	it("round-trips with buildMarkdownLink-style URL", () => {
+		// buildMarkdownLink(`<url>`) → `[label](<url>)` を decode するときに使う
+		const url = "https://en.wikipedia.org/wiki/Mars_(planet)";
+		const md = buildMarkdownLink(url, "Mars"); // `[Mars](<...>)`
+		const inner = md.match(/<([^>]+)>/)?.[1] ?? "";
+		expect(stripUrlAngleBrackets(`<${inner}>`)).toBe(url);
 	});
 });
 
