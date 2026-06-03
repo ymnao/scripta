@@ -93,55 +93,24 @@ export class LinkWidget extends WidgetType {
 		return this.text === other.text && this.url === other.url;
 	}
 
-	toDOM(view: EditorView): HTMLElement {
+	toDOM(): HTMLElement {
 		const anchor = document.createElement("a");
 		anchor.className = "cm-link-widget";
 		anchor.textContent = this.text;
 		if (isSafeUrl(this.url)) {
+			// href は accessibility / hover preview (status bar) のため設定。
+			// cmd+click の新規ウィンドウ動作は ViewPlugin の mousedown handler
+			// で preventDefault することで抑制する。
+			anchor.href = this.url;
 			anchor.dataset.linkWidgetUrl = this.url;
 			const isMac =
 				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
 			anchor.tabIndex = 0;
-
-			// LinkCardWidget と同じ atomic-widget パターン:
-			// `ignoreEvent` で mouse 系を CM から完全に隔離し、widget DOM 上の
-			// listener で全イベントを処理する。CM6 の built-in mouseSelection と
-			// の race condition を根絶できる。
-			//
-			// - cmd/ctrl + 左クリック → URL を開く
-			// - plain 左クリック → `view.dispatch` で手動カーソル移動（raw 表示へ）
-			// - 右クリック (button 2) → 何もしない。後続の contextmenu イベントを
-			//   CM-level handler (linkWidgetContextMenu) が拾って専用メニューを出す
-			anchor.addEventListener("mousedown", (e) => {
-				if (e.button !== 0) return;
-				e.preventDefault();
-				if (e.metaKey || e.ctrlKey) {
-					openExternal(this.url).catch((error) => {
-						console.error("Failed to open external URL:", this.url, error);
-					});
-				} else {
-					// Plain click: ignoreEvent=true で CM の cursor placement が
-					// 走らないので、ここで明示的に dispatch する。
-					const pos = view.posAtDOM(anchor);
-					view.dispatch({
-						selection: EditorSelection.cursor(pos),
-						scrollIntoView: false,
-					});
-					view.focus();
-				}
-			});
-
-			// キーボード操作（Tab focus → Enter/Space）
-			anchor.addEventListener("keydown", (e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					e.preventDefault();
-					e.stopPropagation();
-					openExternal(this.url).catch((error) => {
-						console.error("Failed to open external URL:", this.url, error);
-					});
-				}
-			});
+			// マウス系イベントは ViewPlugin.eventHandlers (linkPlugin) が捌くので
+			// widget DOM 上には listener を付けない。CodeMirror 公式の
+			// "Boolean Toggle Widget" 例 / 本リポジトリの CheckboxWidget と同じ
+			// パターン。Cf. https://codemirror.net/examples/decoration/
 		} else {
 			anchor.className = "cm-link-widget cm-link-widget-disabled";
 			anchor.title = `${this.url} (opens only http/https)`;
@@ -151,11 +120,13 @@ export class LinkWidget extends WidgetType {
 		return anchor;
 	}
 
-	ignoreEvent(event: Event): boolean {
-		// マウス系は widget DOM で全処理 → CM に渡さない (atomic-widget)
-		// contextmenu のみ CM に渡して専用メニューを dispatch させる
-		if (event.type === "contextmenu") return false;
-		return true;
+	ignoreEvent(): boolean {
+		// false: editor が普通にイベントを処理する → ViewPlugin.eventHandlers が
+		// 動く。CheckboxWidget と同じパターン。
+		// この方式だと CM6 が selection placement を試みる → plain click は
+		// cursor 移動して widget が再 render され raw 表示になる（意図通り）。
+		// cmd+click / 右クリックは ViewPlugin handler で preventDefault + 専用処理。
+		return false;
 	}
 }
 
@@ -265,6 +236,115 @@ class LinkDecorationPlugin implements PluginValue {
 
 const linkPlugin = ViewPlugin.fromClass(LinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
+	// CodeMirror 公式 "Boolean Toggle Widget" / 本リポジトリの CheckboxWidget と
+	// 同じパターン。widget の DOM 上にイベント listener を貼るのではなく、
+	// ViewPlugin の eventHandlers として登録することで、イベント順序の foot-gun
+	// (ignoreEvent / Prec / built-in selection との競合) を回避する。
+	eventHandlers: {
+		mousedown(event: MouseEvent, _view) {
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+			if (!widgetEl) return false;
+			if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+
+			// 右クリック (button 2): cursor 移動を阻止して widget を残し、
+			// 続く contextmenu event で専用メニューを出す。
+			if (event.button === 2) {
+				event.preventDefault();
+				return true;
+			}
+
+			// cmd/ctrl + 左クリック: その場で URL を開く（click event を待つと
+			// widget の再 render の race で取り逃すケースがあるため）。
+			if (event.button === 0 && isOpenLinkModifierEvent(event)) {
+				event.preventDefault();
+				const url = widgetEl.dataset.linkWidgetUrl;
+				if (url) {
+					openExternal(url).catch((error) => {
+						console.error("Failed to open external URL:", url, error);
+					});
+				}
+				return true;
+			}
+
+			// modifier 無し左クリック: false を返して CM の built-in selection に
+			// 処理させる → cursor が行内に入り widget が消えて raw 表示になる。
+			return false;
+		},
+
+		click(event: MouseEvent, _view) {
+			// href 属性を持つので click 既定動作 (navigate) を抑止する。
+			// 実際の open は mousedown で行うのでここでは preventDefault のみ。
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+			if (!widgetEl) return false;
+			if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+			event.preventDefault();
+			return false; // false: CM の他処理は通常通り走らせる
+		},
+
+		contextmenu(event: MouseEvent, view) {
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+			if (!widgetEl) return false;
+			if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+
+			const pos = view.posAtDOM(widgetEl);
+			const linkRange = findEnclosingLinkNode(view.state, pos);
+			if (!linkRange) return false;
+
+			const parts = extractLinkParts(view.state, linkRange.from, linkRange.to);
+			if (!parts) return false;
+
+			const line = view.state.doc.lineAt(linkRange.from);
+			const lineText = view.state.doc.sliceString(line.from, line.to);
+			const isUrlOnlyLine = isLineOnlyMdLink(
+				lineText,
+				line.from,
+				linkRange.from,
+				linkRange.to,
+				line.to,
+			);
+
+			event.preventDefault();
+			view.dom.dispatchEvent(
+				new CustomEvent("link-widget-context-menu", {
+					bubbles: true,
+					detail: {
+						url: parts.url,
+						label: parts.label,
+						from: linkRange.from,
+						to: linkRange.to,
+						isUrlOnlyLine,
+						clientX: event.clientX,
+						clientY: event.clientY,
+					},
+				}),
+			);
+			return true;
+		},
+
+		keydown(event: KeyboardEvent, _view) {
+			// Tab focus 中の Enter/Space で URL を開く
+			if (event.key !== "Enter" && event.key !== " ") return false;
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
+			if (!widgetEl) return false;
+			if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
+			const url = widgetEl.dataset.linkWidgetUrl;
+			if (!url) return false;
+			event.preventDefault();
+			event.stopPropagation();
+			openExternal(url).catch((error) => {
+				console.error("Failed to open external URL:", url, error);
+			});
+			return true;
+		},
+	},
 });
 
 export const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
@@ -532,59 +612,4 @@ function findEnclosingLinkNode(
 	return node ? { from: node.from, to: node.to } : null;
 }
 
-/**
- * md リンク widget 上の右クリックを拾って専用 contextmenu イベントを dispatch。
- *
- * mousedown / click は LinkWidget の `ignoreEvent`=true により CM 側で
- * 処理されないので、ここでは contextmenu のみ扱う。contextmenu は
- * `ignoreEvent`=false で CM 側で処理させる（atomic widget でも例外的に通す）。
- */
-const linkWidgetContextMenuHandler = EditorView.domEventHandlers({
-	contextmenu(event: MouseEvent, view: EditorView) {
-		const target = event.target;
-		if (!(target instanceof Element)) return false;
-		const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
-		if (!widgetEl) return false;
-		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
-
-		const pos = view.posAtDOM(widgetEl);
-		const linkRange = findEnclosingLinkNode(view.state, pos);
-		if (!linkRange) return false;
-
-		const parts = extractLinkParts(view.state, linkRange.from, linkRange.to);
-		if (!parts) return false;
-
-		const line = view.state.doc.lineAt(linkRange.from);
-		const lineText = view.state.doc.sliceString(line.from, line.to);
-		const isUrlOnlyLine = isLineOnlyMdLink(
-			lineText,
-			line.from,
-			linkRange.from,
-			linkRange.to,
-			line.to,
-		);
-
-		event.preventDefault();
-		view.dom.dispatchEvent(
-			new CustomEvent("link-widget-context-menu", {
-				bubbles: true,
-				detail: {
-					url: parts.url,
-					label: parts.label,
-					from: linkRange.from,
-					to: linkRange.to,
-					isUrlOnlyLine,
-					clientX: event.clientX,
-					clientY: event.clientY,
-				},
-			}),
-		);
-		return true;
-	},
-});
-
-export const linkDecoration: Extension = [
-	linkPlugin,
-	urlPasteHandler,
-	linkWidgetContextMenuHandler,
-];
+export const linkDecoration: Extension = [linkPlugin, urlPasteHandler];

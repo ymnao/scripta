@@ -614,183 +614,59 @@ describe("isLineOnlyMdLink", () => {
 });
 
 describe("LinkWidget", () => {
-	// atomic-widget pattern: マウス系は widget DOM で全部処理 → CM には渡さない
-	it("ignoreEvent returns true for mousedown (atomic — CM skips selection)", () => {
+	// CheckboxWidget と同じ「Boolean Toggle」公式パターン:
+	// ignoreEvent は false 固定。マウス操作は ViewPlugin.eventHandlers (linkPlugin)
+	// が捌くため widget DOM 上には listener を付けない。
+	it("ignoreEvent returns false (editor processes events; ViewPlugin handlers run)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
-		expect(widget.ignoreEvent(new MouseEvent("mousedown"))).toBe(true);
-		expect(widget.ignoreEvent(new MouseEvent("mousedown", { metaKey: true }))).toBe(true);
+		expect(widget.ignoreEvent()).toBe(false);
 	});
 
-	it("ignoreEvent returns true for click (atomic)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(true);
-		expect(widget.ignoreEvent(new MouseEvent("click", { metaKey: true }))).toBe(true);
-	});
-
-	it("ignoreEvent returns false for contextmenu (CM handler dispatches custom event)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		expect(widget.ignoreEvent(new MouseEvent("contextmenu"))).toBe(false);
-	});
-
-	it("ignoreEvent returns true for keyboard events (widget handles Enter/Space)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		expect(widget.ignoreEvent(new KeyboardEvent("keydown"))).toBe(true);
-		expect(widget.ignoreEvent(new KeyboardEvent("keyup"))).toBe(true);
-	});
-
-	it("toDOM does not set href (avoids Chromium cmd+click new-window conflict)", () => {
+	it("toDOM sets href, dataset.linkWidgetUrl, title and tabIndex for safe URL", () => {
 		const widget = new LinkWidget("Example", "https://example.com");
-		const view = makeMockView();
-		const el = widget.toDOM(view);
-		expect(el.getAttribute("href")).toBeNull();
-		expect((el as HTMLAnchorElement).dataset.linkWidgetUrl).toBe("https://example.com");
+		const el = widget.toDOM() as HTMLAnchorElement;
+		expect(el.tagName).toBe("A");
+		expect(el.href).toBe("https://example.com/");
+		expect(el.dataset.linkWidgetUrl).toBe("https://example.com");
+		expect(el.title).toContain("https://example.com");
+		expect(el.title).toMatch(/クリックで開く/);
+		expect(el.textContent).toBe("Example");
+		expect(el.tabIndex).toBe(0);
+		expect(el.classList.contains("cm-link-widget")).toBe(true);
+		expect(el.classList.contains("cm-link-widget-disabled")).toBe(false);
 	});
 
-	it("toDOM disabled link does not set dataset.linkWidgetUrl (unsafe URL)", () => {
+	it("toDOM marks unsafe URLs disabled (no href, no dataset)", () => {
 		const widget = new LinkWidget("Example", "ftp://example.com");
-		const view = makeMockView();
-		const el = widget.toDOM(view);
-		expect((el as HTMLAnchorElement).dataset.linkWidgetUrl).toBeUndefined();
+		const el = widget.toDOM() as HTMLAnchorElement;
 		expect(el.classList.contains("cm-link-widget-disabled")).toBe(true);
+		expect(el.getAttribute("href")).toBeNull();
+		expect(el.dataset.linkWidgetUrl).toBeUndefined();
+		expect(el.tabIndex).toBe(-1);
+		expect(el.getAttribute("aria-disabled")).toBe("true");
 	});
 
-	describe("widget DOM mousedown listener (atomic widget handles all mouse)", () => {
-		it("opens URL on cmd+left-click", () => {
-			openExternalMock.mockClear();
-			const widget = new LinkWidget("Example", "https://example.com");
-			const view = makeMockView();
-			const el = widget.toDOM(view);
-			document.body.appendChild(el);
-			try {
-				const ev = new MouseEvent("mousedown", {
-					bubbles: true,
-					cancelable: true,
-					button: 0,
-					metaKey: true,
-				});
-				el.dispatchEvent(ev);
-				expect(openExternalMock).toHaveBeenCalledWith("https://example.com");
-				expect(ev.defaultPrevented).toBe(true);
-				// modifier 付きクリックでは dispatch されない（cursor は動かない）
-				expect(view.dispatch).not.toHaveBeenCalled();
-			} finally {
-				el.remove();
-			}
-		});
-
-		it("opens URL on ctrl+left-click", () => {
-			openExternalMock.mockClear();
-			const widget = new LinkWidget("Example", "https://example.com");
-			const view = makeMockView();
-			const el = widget.toDOM(view);
-			document.body.appendChild(el);
-			try {
-				el.dispatchEvent(
-					new MouseEvent("mousedown", {
-						bubbles: true,
-						cancelable: true,
-						button: 0,
-						ctrlKey: true,
-					}),
-				);
-				expect(openExternalMock).toHaveBeenCalledWith("https://example.com");
-			} finally {
-				el.remove();
-			}
-		});
-
-		it("on plain left-click: dispatches cursor placement (no URL open)", () => {
-			openExternalMock.mockClear();
-			const widget = new LinkWidget("Example", "https://example.com");
-			const view = makeMockView({ posAtDOMReturn: 42 });
-			const el = widget.toDOM(view);
-			document.body.appendChild(el);
-			try {
-				const ev = new MouseEvent("mousedown", {
-					bubbles: true,
-					cancelable: true,
-					button: 0,
-				});
-				el.dispatchEvent(ev);
-				expect(openExternalMock).not.toHaveBeenCalled();
-				expect(ev.defaultPrevented).toBe(true);
-				expect(view.posAtDOM).toHaveBeenCalledWith(el);
-				expect(view.dispatch).toHaveBeenCalledTimes(1);
-				expect(view.focus).toHaveBeenCalled();
-			} finally {
-				el.remove();
-			}
-		});
-
-		it("does NOT open or dispatch on right-click (button 2)", () => {
-			openExternalMock.mockClear();
-			const widget = new LinkWidget("Example", "https://example.com");
-			const view = makeMockView();
-			const el = widget.toDOM(view);
-			document.body.appendChild(el);
-			try {
-				el.dispatchEvent(
-					new MouseEvent("mousedown", {
-						bubbles: true,
-						cancelable: true,
-						button: 2,
-					}),
-				);
-				expect(openExternalMock).not.toHaveBeenCalled();
-				expect(view.dispatch).not.toHaveBeenCalled();
-			} finally {
-				el.remove();
-			}
-		});
-
-		it("does NOT open URL when widget is disabled (unsafe URL)", () => {
-			openExternalMock.mockClear();
-			const widget = new LinkWidget("Example", "ftp://example.com");
-			const view = makeMockView();
-			const el = widget.toDOM(view);
-			document.body.appendChild(el);
-			try {
-				el.dispatchEvent(
-					new MouseEvent("mousedown", {
-						bubbles: true,
-						cancelable: true,
-						button: 0,
-						metaKey: true,
-					}),
-				);
-				expect(openExternalMock).not.toHaveBeenCalled();
-			} finally {
-				el.remove();
-			}
-		});
-
-		it("Enter key opens URL via widget DOM keydown listener", () => {
-			openExternalMock.mockClear();
-			const widget = new LinkWidget("Example", "https://example.com");
-			const view = makeMockView();
-			const el = widget.toDOM(view);
-			document.body.appendChild(el);
-			try {
-				el.dispatchEvent(
-					new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
-				);
-				expect(openExternalMock).toHaveBeenCalledWith("https://example.com");
-			} finally {
-				el.remove();
-			}
-		});
+	it("toDOM does NOT attach DOM event listeners (ViewPlugin handles all events)", () => {
+		// 防衛的: 万一 listener を直貼りしてしまうと CM のイベント順序と
+		// 競合する。ViewPlugin パターンに一本化することを enforce する。
+		const widget = new LinkWidget("Example", "https://example.com");
+		const el = widget.toDOM();
+		// dispatchEvent しても openExternal は呼ばれないことを確認
+		openExternalMock.mockClear();
+		el.dispatchEvent(
+			new MouseEvent("mousedown", {
+				bubbles: true,
+				cancelable: true,
+				button: 0,
+				metaKey: true,
+			}),
+		);
+		el.dispatchEvent(
+			new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }),
+		);
+		el.dispatchEvent(
+			new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+		);
+		expect(openExternalMock).not.toHaveBeenCalled();
 	});
 });
-
-// helper: LinkWidget.toDOM(view) に渡す最小 mock view
-function makeMockView(opts: { posAtDOMReturn?: number } = {}) {
-	return {
-		posAtDOM: vi.fn(() => opts.posAtDOMReturn ?? 0),
-		dispatch: vi.fn(),
-		focus: vi.fn(),
-	} as unknown as import("@codemirror/view").EditorView & {
-		posAtDOM: ReturnType<typeof vi.fn>;
-		dispatch: ReturnType<typeof vi.fn>;
-		focus: ReturnType<typeof vi.fn>;
-	};
-}
