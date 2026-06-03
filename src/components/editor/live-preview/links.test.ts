@@ -20,8 +20,13 @@ import {
 import { createTestState } from "./test-helper";
 
 vi.mock("../../../lib/commands", () => ({
-	openExternal: vi.fn(),
+	openExternal: vi.fn(() => Promise.resolve()),
 }));
+
+// 各テスト内で参照するために mock 後に import
+import { openExternal } from "../../../lib/commands";
+
+const openExternalMock = vi.mocked(openExternal);
 
 describe("isSafeUrl", () => {
 	it("allows http URLs", () => {
@@ -652,5 +657,132 @@ describe("LinkWidget", () => {
 		const el = widget.toDOM();
 		expect((el as HTMLAnchorElement).dataset.linkWidgetUrl).toBeUndefined();
 		expect(el.classList.contains("cm-link-widget-disabled")).toBe(true);
+	});
+
+	describe("widget DOM mousedown listener (defense-in-depth for cmd+click)", () => {
+		it("opens URL on cmd+left-click via widget DOM listener", () => {
+			openExternalMock.mockClear();
+			const widget = new LinkWidget("Example", "https://example.com");
+			const el = widget.toDOM();
+			document.body.appendChild(el);
+			try {
+				const ev = new MouseEvent("mousedown", {
+					bubbles: true,
+					cancelable: true,
+					button: 0,
+					metaKey: true,
+				});
+				el.dispatchEvent(ev);
+				expect(openExternalMock).toHaveBeenCalledWith("https://example.com");
+				expect(ev.defaultPrevented).toBe(true);
+			} finally {
+				el.remove();
+			}
+		});
+
+		it("opens URL on ctrl+left-click", () => {
+			openExternalMock.mockClear();
+			const widget = new LinkWidget("Example", "https://example.com");
+			const el = widget.toDOM();
+			document.body.appendChild(el);
+			try {
+				el.dispatchEvent(
+					new MouseEvent("mousedown", {
+						bubbles: true,
+						cancelable: true,
+						button: 0,
+						ctrlKey: true,
+					}),
+				);
+				expect(openExternalMock).toHaveBeenCalledWith("https://example.com");
+			} finally {
+				el.remove();
+			}
+		});
+
+		it("does NOT open URL on plain left-click (lets editor move cursor)", () => {
+			openExternalMock.mockClear();
+			const widget = new LinkWidget("Example", "https://example.com");
+			const el = widget.toDOM();
+			document.body.appendChild(el);
+			try {
+				const ev = new MouseEvent("mousedown", {
+					bubbles: true,
+					cancelable: true,
+					button: 0,
+				});
+				el.dispatchEvent(ev);
+				expect(openExternalMock).not.toHaveBeenCalled();
+				expect(ev.defaultPrevented).toBe(false);
+			} finally {
+				el.remove();
+			}
+		});
+
+		it("does NOT open URL on right-click (cmd+right shouldn't open either)", () => {
+			openExternalMock.mockClear();
+			const widget = new LinkWidget("Example", "https://example.com");
+			const el = widget.toDOM();
+			document.body.appendChild(el);
+			try {
+				el.dispatchEvent(
+					new MouseEvent("mousedown", {
+						bubbles: true,
+						cancelable: true,
+						button: 2,
+						metaKey: true,
+					}),
+				);
+				expect(openExternalMock).not.toHaveBeenCalled();
+			} finally {
+				el.remove();
+			}
+		});
+
+		it("stops propagation on cmd+click so CM built-in selection never sees it", () => {
+			openExternalMock.mockClear();
+			const widget = new LinkWidget("Example", "https://example.com");
+			const el = widget.toDOM();
+			const parent = document.createElement("div");
+			parent.appendChild(el);
+			document.body.appendChild(parent);
+			let bubbled = false;
+			parent.addEventListener("mousedown", () => {
+				bubbled = true;
+			});
+			try {
+				el.dispatchEvent(
+					new MouseEvent("mousedown", {
+						bubbles: true,
+						cancelable: true,
+						button: 0,
+						metaKey: true,
+					}),
+				);
+				expect(bubbled).toBe(false);
+			} finally {
+				parent.remove();
+			}
+		});
+
+		it("does NOT open URL when widget is disabled (unsafe URL)", () => {
+			openExternalMock.mockClear();
+			const widget = new LinkWidget("Example", "ftp://example.com");
+			const el = widget.toDOM();
+			document.body.appendChild(el);
+			try {
+				el.dispatchEvent(
+					new MouseEvent("mousedown", {
+						bubbles: true,
+						cancelable: true,
+						button: 0,
+						metaKey: true,
+					}),
+				);
+				expect(openExternalMock).not.toHaveBeenCalled();
+			} finally {
+				el.remove();
+			}
+		});
 	});
 });

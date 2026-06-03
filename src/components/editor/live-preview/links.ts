@@ -1,5 +1,11 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type EditorState, type Extension, type Range } from "@codemirror/state";
+import {
+	EditorSelection,
+	type EditorState,
+	type Extension,
+	Prec,
+	type Range,
+} from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -106,10 +112,25 @@ export class LinkWidget extends WidgetType {
 				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
 			anchor.tabIndex = 0;
+
+			// Widget DOM レベルの mousedown handler。これは defense-in-depth:
+			// CM-level handler (linkWidgetMouseHandler) と並走する。
+			// 早い段階 (capture-or-target) で modifier 付きクリックを掴んで
+			// stopPropagation することで、built-in selection や React の delegated
+			// handler が一切走らない最強の路線にする。
+			anchor.addEventListener("mousedown", (e) => {
+				if (e.button === 0 && (e.metaKey || e.ctrlKey)) {
+					e.preventDefault();
+					e.stopPropagation();
+					openExternal(this.url).catch((error) => {
+						console.error("Failed to open external URL:", this.url, error);
+					});
+				}
+				// 右クリック (button 2) は widget で握り潰さず CM-level handler に渡して
+				// 専用 contextmenu メニューを出させる。
+			});
+
 			// キーボード操作（Tab focus → Enter/Space）は widget DOM 上で処理。
-			// マウス操作は CM-level domEventHandlers (linkWidgetMouseHandler) で
-			// modifier を判定するので、widget には click/mousedown listener を
-			// 付けない。
 			anchor.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault();
@@ -514,8 +535,18 @@ function findEnclosingLinkNode(
 
 /**
  * md リンク widget へのマウス系イベントを CM-level で gate する handler。
- * widget DOM に listener を付ける方式だと cursor 移動で widget が消えて
- * click まで到達しないケースがあるため、すべて CM-level で処理する。
+ *
+ * 重要: CM6 では built-in の mouse selection 処理を上書きするには
+ * `Prec.highest` でラップする必要がある（[公式 docs][1]）。デフォルト
+ * precedence のままだと `return true` しても先に built-in が cursor を
+ * 動かしてしまうことがある。
+ *
+ * cmd/ctrl + 左クリック は mousedown の時点で開く（click event まで
+ * 待たない）。これは widget の再 render が click 到達前に起きるケースを
+ * 避けるため。LinkCardWidget は plain click 開閉なので mousedown→click
+ * 経路で動くが、md リンクは modifier 判定が入る分よりタイトに処理する。
+ *
+ * [1]: https://codemirror.net/docs/ref/#view.EditorView^domEventHandlers
  */
 const linkWidgetMouseHandler = EditorView.domEventHandlers({
 	mousedown(event: MouseEvent, _view: EditorView) {
@@ -525,38 +556,30 @@ const linkWidgetMouseHandler = EditorView.domEventHandlers({
 		if (!widgetEl) return false;
 		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
 
-		// 右クリック (button 2): 後続の contextmenu が widget 上で発火するよう
+		// 右クリック (button 2): contextmenu が widget 上で発火するよう
 		// cursor 移動を阻止して widget を残す。
 		if (event.button === 2) {
 			event.preventDefault();
 			return true;
 		}
-		// cmd/ctrl + 左クリック: 後続の click で URL を開くので widget を残す。
+
+		// cmd/ctrl + 左クリック: その場で開く（click event を待たない）。
+		// click を待つと widget 再 render の race で取り逃すケースがあるため、
+		// mousedown でユーザ意図を確定できた時点で動かす。
 		if (event.button === 0 && isOpenLinkModifierEvent(event)) {
 			event.preventDefault();
+			const url = widgetEl.dataset.linkWidgetUrl;
+			if (url) {
+				openExternal(url).catch((error) => {
+					console.error("Failed to open external URL:", url, error);
+				});
+			}
 			return true;
 		}
+
 		// modifier 無しの左クリック: editor に処理させて cursor を行内に移し
 		// raw md syntax を表示させる（widget は re-render で消える）。
 		return false;
-	},
-
-	click(event: MouseEvent, _view: EditorView) {
-		if (event.button !== 0) return false;
-		const target = event.target;
-		if (!(target instanceof Element)) return false;
-		const widgetEl = target.closest<HTMLElement>(".cm-link-widget");
-		if (!widgetEl) return false;
-		if (widgetEl.classList.contains("cm-link-widget-disabled")) return false;
-		if (!isOpenLinkModifierEvent(event)) return false;
-
-		const url = widgetEl.dataset.linkWidgetUrl;
-		if (!url) return false;
-		event.preventDefault();
-		openExternal(url).catch((error) => {
-			console.error("Failed to open external URL:", url, error);
-		});
-		return true;
 	},
 
 	contextmenu(event: MouseEvent, view: EditorView) {
@@ -602,4 +625,10 @@ const linkWidgetMouseHandler = EditorView.domEventHandlers({
 	},
 });
 
-export const linkDecoration: Extension = [linkPlugin, urlPasteHandler, linkWidgetMouseHandler];
+export const linkDecoration: Extension = [
+	linkPlugin,
+	urlPasteHandler,
+	// `Prec.highest` で built-in mouse selection より高い precedence を確保し、
+	// cmd+click / 右クリックでの cursor 移動を確実に阻止する。
+	Prec.highest(linkWidgetMouseHandler),
+];
