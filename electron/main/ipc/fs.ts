@@ -40,6 +40,15 @@ async function readFileImpl(senderId: number, path: string): Promise<string> {
 async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
 	const canonical = assertWritePathAllowed(senderId, path);
 	await fsp.mkdir(dirname(canonical), { recursive: true });
+	// **意図的に直接書き込み**。tmp + rename の atomic write は user workspace の
+	// .md ファイルには使わない。理由（VS Code microsoft/vscode#195539 と同方針）:
+	//   - inode が置き換わると symlink / hardlink が切れる
+	//   - macOS の任意 xattr（Finder タグ、独自 metadata）と ACL が失われる
+	//   - 外部 file watcher / Dropbox / iCloud / Git working tree の inode 安定性が崩れる
+	// 引き換えに ENOSPC / SIGKILL 中の partial write リスクは残るが、user 編集中
+	// ファイルでは metadata 保存と inode 安定性のほうが優先（#100 で wontfix 判断）。
+	// app 内部 data (settings.ts / pdf.ts) は inode 安定性が問題にならないため、
+	// そちらは引き続き write-file-atomic を使用している。
 	await fsp.writeFile(canonical, content, "utf8");
 	// 書き込み成功後にだけ transient capability を消費する。
 	// 失敗時は残り、renderer 側 withRetry で再試行できる。
