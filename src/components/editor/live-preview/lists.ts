@@ -381,6 +381,30 @@ function leadingWidth(text: string): number {
 	return m ? m[0].length : 0;
 }
 
+const ATX_HEADING_RE = /^[ \t]{0,3}#{1,6}(?:[ \t]|$)/;
+const THEMATIC_DASH_RE = /^[ \t]{0,3}(?:-[ \t]*){3,}$/;
+const THEMATIC_STAR_RE = /^[ \t]{0,3}(?:\*[ \t]*){3,}$/;
+const THEMATIC_UNDERSCORE_RE = /^[ \t]{0,3}(?:_[ \t]*){3,}$/;
+const BLOCKQUOTE_RE = /^[ \t]{0,3}>/;
+const FENCED_CODE_RE = /^[ \t]{0,3}(?:```|~~~)/;
+
+/**
+ * Lines that interrupt a paragraph in CommonMark and therefore end a list
+ * item's lazy continuation: ATX headings, thematic breaks, blockquotes, and
+ * fenced code blocks. Returning `true` here makes the list-block scan and the
+ * sibling-search walks treat the line as a hard boundary.
+ */
+function isParagraphInterrupting(text: string): boolean {
+	return (
+		ATX_HEADING_RE.test(text) ||
+		THEMATIC_DASH_RE.test(text) ||
+		THEMATIC_STAR_RE.test(text) ||
+		THEMATIC_UNDERSCORE_RE.test(text) ||
+		BLOCKQUOTE_RE.test(text) ||
+		FENCED_CODE_RE.test(text)
+	);
+}
+
 /**
  * Walk back to find the closest list line that satisfies `predicate`. Treats
  * indented non-list lines as continuation paragraphs and walks past them,
@@ -398,8 +422,9 @@ function findPrevListLine(
 		if (text.trim() === "") return null;
 		const info = parseListLine(text);
 		if (!info) {
+			if (isParagraphInterrupting(text)) return null;
 			if (leadingWidth(text) < boundaryIndentLen) return null;
-			continue; // continuation paragraph — keep walking
+			continue; // lazy/indented continuation — keep walking
 		}
 		const r = predicate(info);
 		if (r === "stop") return null;
@@ -495,14 +520,17 @@ export function computeListIndentChanges(
 
 	if (newIndents.size === 0) return null;
 
-	// A list block extends through any non-blank line: list marker lines,
-	// indented continuations, and CommonMark "lazy continuation" lines
-	// (unindented paragraph text that still belongs to the previous item).
-	// The block ends at the first blank line. The renumber walk safely
-	// skips non-list lines (no counter touched), and the cascade walk's
-	// indent comparison short-circuits at lines shallower than the
-	// current scope's content offset.
-	const isBlockMember = (lineNum: number): boolean => state.doc.line(lineNum).text.trim() !== "";
+	// A list block extends through list marker lines, indented continuation
+	// paragraphs, and CommonMark "lazy continuation" lines (unindented
+	// paragraph text that still belongs to the previous item). It ends at
+	// the first blank line OR at a line that interrupts a paragraph in
+	// CommonMark (ATX heading, thematic break, blockquote, fenced code).
+	const isBlockMember = (lineNum: number): boolean => {
+		const text = state.doc.line(lineNum).text;
+		if (text.trim() === "") return false;
+		if (getOrParse(lineNum)) return true;
+		return !isParagraphInterrupting(text);
+	};
 
 	const modLineNums = [...newIndents.keys()].sort((a, b) => a - b);
 	let blockStart = modLineNums[0];

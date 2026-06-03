@@ -943,6 +943,45 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, 1)).toBe("1. parent\ncontinuation\n   1. child\n2. next");
 	});
 
+	// --- Paragraph-interrupting blocks end the list (NOT lazy continuation) -
+
+	it("ATX heading between list items ends the list — no cross-block sibling", () => {
+		// `1. a / # heading / 2. b` is list / heading / list (3 separate
+		// CommonMark blocks). Tab on `2. b` must NOT find `1. a` as sibling
+		// and must NOT pull `2. b` under it; falls back to LIST_INDENT_UNIT.
+		const doc = "1. a\n# heading\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n# heading\n  1. b");
+	});
+
+	it("thematic break between list items ends the list", () => {
+		// `---` is a thematic break (or setext heading underline). Either way
+		// it terminates the prior list.
+		const doc = "1. a\n---\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n---\n  1. b");
+	});
+
+	it("blockquote between list items ends the list", () => {
+		const doc = "1. a\n> quote\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n> quote\n  1. b");
+	});
+
+	it("fenced code block between list items ends the list", () => {
+		const doc = "1. a\n```\ncode\n```\n2. b";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n```\ncode\n```\n  1. b");
+	});
+
+	it("ATX heading is NOT included in the renumber block", () => {
+		// `3. c` after the heading must keep its user-typed number because
+		// the heading severs it from `1. a`'s ordered run.
+		const doc = "1. a\n# heading\n2. b\n3. c";
+		const cursor = doc.indexOf("2. b");
+		expect(applyChanges(doc, cursor, 1)).toBe("1. a\n# heading\n  1. b\n3. c");
+	});
+
 	it("renumber cascade shifts continuation paragraphs under descendant items", () => {
 		// Shift+Tab on `   1. x` outdents it; `9. b` then renumbers to `10. b`
 		// (delta +1). Both the descendant list item `   1. child` and its
