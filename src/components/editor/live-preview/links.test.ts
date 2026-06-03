@@ -1,17 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+	anyRangeInCodeConstruct,
+	applyClipboardPasteAsMdLink,
 	buildMarkdownLink,
+	computeUrlPasteInsert,
+	decideOpenLinkModifier,
+	decideOpenLinkModifierKey,
 	escapeMarkdownLabel,
+	isLineOnlyMdLink,
+	isOpenLinkModifierEvent,
+	isPosInCodeConstruct,
 	isPrivateHostname,
 	isSafeImageUrl,
 	isSafeUrl,
 	LinkWidget,
+	pasteAsMarkdownLinkCommand,
+	shouldConvertPasteToLink,
+	stripUrlAngleBrackets,
 	URL_PASTE_RE,
 } from "./links";
+import { createTestState } from "./test-helper";
 
 vi.mock("../../../lib/commands", () => ({
-	openExternal: vi.fn(),
+	openExternal: vi.fn(() => Promise.resolve()),
 }));
+
+// 各テスト内で参照するために mock 後に import
+import { openExternal } from "../../../lib/commands";
+
+const openExternalMock = vi.mocked(openExternal);
 
 describe("isSafeUrl", () => {
 	it("allows http URLs", () => {
@@ -251,28 +268,443 @@ describe("buildMarkdownLink", () => {
 	});
 });
 
+describe("shouldConvertPasteToLink", () => {
+	it("converts when selection is non-empty (wraps selection as label)", () => {
+		expect(shouldConvertPasteToLink({ hasSelection: true, lineBefore: "", lineAfter: "" })).toBe(
+			true,
+		);
+		expect(shouldConvertPasteToLink({ hasSelection: true, lineBefore: "x", lineAfter: "y" })).toBe(
+			true,
+		);
+	});
+
+	it("does not convert on URL-only line (plain paste lets OGP card start)", () => {
+		expect(shouldConvertPasteToLink({ hasSelection: false, lineBefore: "", lineAfter: "" })).toBe(
+			false,
+		);
+	});
+
+	it("treats whitespace-only context as URL-only line", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "  ", lineAfter: "\t" }),
+		).toBe(false);
+	});
+
+	it("converts when other text precedes the cursor", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "prefix ", lineAfter: "" }),
+		).toBe(true);
+	});
+
+	it("converts when other text follows the cursor", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "", lineAfter: " suffix" }),
+		).toBe(true);
+	});
+
+	it("converts when text exists on both sides", () => {
+		expect(
+			shouldConvertPasteToLink({ hasSelection: false, lineBefore: "a ", lineAfter: " b" }),
+		).toBe(true);
+	});
+});
+
+describe("isPosInCodeConstruct", () => {
+	it("returns false for plain text", () => {
+		const state = createTestState("hello world");
+		expect(isPosInCodeConstruct(state, 3)).toBe(false);
+	});
+
+	it("returns true inside fenced code block", () => {
+		const doc = "before\n```\ncode here\n```\nafter";
+		const state = createTestState(doc);
+		const inside = doc.indexOf("code here") + 2;
+		expect(isPosInCodeConstruct(state, inside)).toBe(true);
+	});
+
+	it("returns true inside inline code", () => {
+		const doc = "text `inline code` end";
+		const state = createTestState(doc);
+		const inside = doc.indexOf("inline code") + 2;
+		expect(isPosInCodeConstruct(state, inside)).toBe(true);
+	});
+
+	it("returns false in normal text adjacent to code block", () => {
+		const doc = "outside\n```\ncode\n```\nalso outside";
+		const state = createTestState(doc);
+		expect(isPosInCodeConstruct(state, 2)).toBe(false);
+	});
+});
+
+describe("anyRangeInCodeConstruct", () => {
+	it("returns false when no range is in code", () => {
+		const state = createTestState("plain text", 3);
+		expect(anyRangeInCodeConstruct(state)).toBe(false);
+	});
+
+	it("returns true when sole range is inside fenced code", () => {
+		const doc = "```\ncode\n```";
+		const state = createTestState(doc, doc.indexOf("code") + 2);
+		expect(anyRangeInCodeConstruct(state)).toBe(true);
+	});
+
+	it("returns false when sole range is outside code (mixed-line variant)", () => {
+		const doc = "text `inline` more";
+		const state = createTestState(doc, 16); // cursor in " more"
+		expect(anyRangeInCodeConstruct(state)).toBe(false);
+	});
+});
+
+describe("computeUrlPasteInsert", () => {
+	const base = {
+		text: "https://example.com",
+		hasSelection: false,
+		selectedText: "",
+		lineBefore: "",
+		lineAfter: "",
+	};
+
+	it("inserts plain text when inside code block (forceConvert ignored)", () => {
+		expect(computeUrlPasteInsert({ ...base, forceConvert: true, inCodeBlock: true })).toBe(
+			"https://example.com",
+		);
+		expect(computeUrlPasteInsert({ ...base, forceConvert: false, inCodeBlock: true })).toBe(
+			"https://example.com",
+		);
+	});
+
+	it("Cmd+V on URL-only line: inserts plain (let OGP card start)", () => {
+		expect(computeUrlPasteInsert({ ...base, forceConvert: false, inCodeBlock: false })).toBe(
+			"https://example.com",
+		);
+	});
+
+	it("Cmd+V on mixed line: converts to md link", () => {
+		expect(
+			computeUrlPasteInsert({
+				...base,
+				lineBefore: "see ",
+				forceConvert: false,
+				inCodeBlock: false,
+			}),
+		).toBe("[https://example.com](<https://example.com>)");
+	});
+
+	it("Cmd+Shift+V on URL-only line: still converts (force)", () => {
+		expect(computeUrlPasteInsert({ ...base, forceConvert: true, inCodeBlock: false })).toBe(
+			"[https://example.com](<https://example.com>)",
+		);
+	});
+
+	it("Cmd+Shift+V with selection: uses selection as label", () => {
+		expect(
+			computeUrlPasteInsert({
+				...base,
+				hasSelection: true,
+				selectedText: "example site",
+				forceConvert: true,
+				inCodeBlock: false,
+			}),
+		).toBe("[example site](<https://example.com>)");
+	});
+});
+
+describe("applyClipboardPasteAsMdLink", () => {
+	function makeView(doc: string, cursorPos: number) {
+		const state = createTestState(doc, cursorPos);
+		const dispatched: Array<{ insert: string; userEvent: string | undefined }> = [];
+		const view = {
+			state,
+			dispatch: (spec: {
+				changes?: {
+					iterChanges: (
+						cb: (a: number, b: number, c: number, d: number, ins: { toString(): string }) => void,
+					) => void;
+				};
+				userEvent?: string;
+			}) => {
+				if (!spec.changes) return;
+				let insert = "";
+				spec.changes.iterChanges((_fromA, _toA, _fromB, _toB, ins) => {
+					insert += ins.toString();
+				});
+				dispatched.push({ insert, userEvent: spec.userEvent });
+			},
+		} as unknown as Parameters<typeof applyClipboardPasteAsMdLink>[0];
+		return { view, dispatched };
+	}
+
+	it("inserts md link when clipboard is a URL (force convert even on empty line)", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "https://example.com");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("[https://example.com](<https://example.com>)");
+		expect(dispatched[0].userEvent).toBe("input.paste");
+	});
+
+	it("inserts plain text when clipboard is not a URL", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "just some text");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("just some text");
+		expect(dispatched[0].userEvent).toBe("input.paste");
+	});
+
+	it("does nothing when clipboard is null", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, null);
+		expect(dispatched).toHaveLength(0);
+	});
+
+	it("does nothing when clipboard is empty string", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "");
+		expect(dispatched).toHaveLength(0);
+	});
+
+	it("inserts whitespace-only clipboard as-is (lossless, no swallow)", () => {
+		// インデントや改行を意図的に paste するケースを保つ
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "   ");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("   ");
+	});
+
+	it("inserts raw (with whitespace) when cursor is in a code block, even for URL", () => {
+		// コードブロック内では md リンク化せず raw 挿入する → 前後 whitespace も保持
+		const doc = "```\ncode\n```";
+		const inCode = doc.indexOf("code") + 2;
+		const { view, dispatched } = makeView(doc, inCode);
+		applyClipboardPasteAsMdLink(view, "  https://example.com\n");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("  https://example.com\n");
+	});
+
+	it("trims whitespace from URL only when wrapping into md link (outside code blocks)", () => {
+		// URL 周辺の whitespace は md リンクに包む際は捨てて良い（label/URL に混ぜない）
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "  https://example.com\n");
+		expect(dispatched[0].insert).toBe("[https://example.com](<https://example.com>)");
+	});
+
+	it("preserves leading/trailing whitespace for non-URL paste (lossless)", () => {
+		// 非 URL の場合は raw のまま挿入。trim すると一般 paste が破壊的になる
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "  hello world  ");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("  hello world  ");
+	});
+
+	it("preserves embedded newlines for multi-line non-URL paste", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "line1\nline2\n");
+		expect(dispatched[0].insert).toBe("line1\nline2\n");
+	});
+});
+
+describe("pasteAsMarkdownLinkCommand", () => {
+	it("returns false when clipboard is unavailable", () => {
+		const original = navigator.clipboard;
+		Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+		try {
+			const state = createTestState("hello", 0);
+			const view = { state, dispatch: vi.fn() } as unknown as Parameters<
+				typeof pasteAsMarkdownLinkCommand
+			>[0];
+			expect(pasteAsMarkdownLinkCommand(view)).toBe(false);
+		} finally {
+			if (original) {
+				Object.defineProperty(navigator, "clipboard", { value: original, configurable: true });
+			}
+		}
+	});
+
+	it("returns true when clipboard is available (defers actual work to .then)", () => {
+		const original = navigator.clipboard;
+		Object.defineProperty(navigator, "clipboard", {
+			value: { readText: () => Promise.resolve("https://example.com") },
+			configurable: true,
+		});
+		try {
+			const state = createTestState("", 0);
+			const view = { state, dispatch: vi.fn() } as unknown as Parameters<
+				typeof pasteAsMarkdownLinkCommand
+			>[0];
+			expect(pasteAsMarkdownLinkCommand(view)).toBe(true);
+		} finally {
+			if (original) {
+				Object.defineProperty(navigator, "clipboard", { value: original, configurable: true });
+			}
+		}
+	});
+});
+
+describe("stripUrlAngleBrackets", () => {
+	it("strips surrounding angle brackets", () => {
+		expect(stripUrlAngleBrackets("<https://example.com>")).toBe("https://example.com");
+	});
+
+	it("returns URL unchanged when no brackets", () => {
+		expect(stripUrlAngleBrackets("https://example.com")).toBe("https://example.com");
+	});
+
+	it("does not strip if only one side has bracket", () => {
+		expect(stripUrlAngleBrackets("<https://example.com")).toBe("<https://example.com");
+		expect(stripUrlAngleBrackets("https://example.com>")).toBe("https://example.com>");
+	});
+
+	it("handles empty string", () => {
+		expect(stripUrlAngleBrackets("")).toBe("");
+	});
+
+	it("strips brackets even from non-http URL (caller validates safety separately)", () => {
+		expect(stripUrlAngleBrackets("<ftp://example.com>")).toBe("ftp://example.com");
+	});
+
+	it("round-trips with buildMarkdownLink-style URL", () => {
+		// buildMarkdownLink(`<url>`) → `[label](<url>)` を decode するときに使う
+		const url = "https://en.wikipedia.org/wiki/Mars_(planet)";
+		const md = buildMarkdownLink(url, "Mars"); // `[Mars](<...>)`
+		const inner = md.match(/<([^>]+)>/)?.[1] ?? "";
+		expect(stripUrlAngleBrackets(`<${inner}>`)).toBe(url);
+	});
+});
+
+describe("decideOpenLinkModifier (OS-aware)", () => {
+	it("Mac: metaKey (Cmd) returns true, ctrlKey returns false", () => {
+		// macOS では Ctrl+click は context menu 操作なので URL 開く扱いから除外する
+		expect(decideOpenLinkModifier({ metaKey: true, ctrlKey: false }, true)).toBe(true);
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: true }, true)).toBe(false);
+	});
+
+	it("non-Mac: ctrlKey returns true, metaKey returns false", () => {
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: true }, false)).toBe(true);
+		expect(decideOpenLinkModifier({ metaKey: true, ctrlKey: false }, false)).toBe(false);
+	});
+
+	it("returns false when neither modifier is held (both OS)", () => {
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: false }, true)).toBe(false);
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: false }, false)).toBe(false);
+	});
+});
+
+describe("isOpenLinkModifierEvent (runtime OS detection)", () => {
+	// jsdom env: navigator.platform は通常 "" → 非 Mac 判定
+	it("delegates to decideOpenLinkModifier with runtime IS_MAC", () => {
+		const ctrl = new MouseEvent("click", { ctrlKey: true });
+		const meta = new MouseEvent("click", { metaKey: true });
+		// 実 OS によるが、両者で異なる値を返すことだけ確認
+		expect(isOpenLinkModifierEvent(ctrl)).not.toBe(isOpenLinkModifierEvent(meta));
+	});
+
+	it("returns false for plain / shift-only events", () => {
+		expect(isOpenLinkModifierEvent(new MouseEvent("click"))).toBe(false);
+		expect(isOpenLinkModifierEvent(new MouseEvent("click", { shiftKey: true }))).toBe(false);
+	});
+});
+
+describe("decideOpenLinkModifierKey (OS-aware)", () => {
+	it("Mac: 'Meta' returns true, 'Control' returns false", () => {
+		expect(decideOpenLinkModifierKey("Meta", true)).toBe(true);
+		expect(decideOpenLinkModifierKey("Control", true)).toBe(false);
+	});
+
+	it("non-Mac: 'Control' returns true, 'Meta' returns false", () => {
+		expect(decideOpenLinkModifierKey("Control", false)).toBe(true);
+		expect(decideOpenLinkModifierKey("Meta", false)).toBe(false);
+	});
+
+	it("other keys return false on both platforms", () => {
+		for (const isMac of [true, false]) {
+			expect(decideOpenLinkModifierKey("Shift", isMac)).toBe(false);
+			expect(decideOpenLinkModifierKey("Alt", isMac)).toBe(false);
+			expect(decideOpenLinkModifierKey("a", isMac)).toBe(false);
+			expect(decideOpenLinkModifierKey("", isMac)).toBe(false);
+		}
+	});
+});
+
+describe("isLineOnlyMdLink", () => {
+	it("returns true when link spans the entire line", () => {
+		const text = "[a](<https://x>)";
+		expect(isLineOnlyMdLink(text, 0, text.length)).toBe(true);
+	});
+
+	it("returns true when only whitespace surrounds the link", () => {
+		const text = "  [a](<https://x>)  ";
+		const link = "[a](<https://x>)";
+		const start = text.indexOf(link);
+		expect(isLineOnlyMdLink(text, start, start + link.length)).toBe(true);
+	});
+
+	it("returns false when text precedes the link", () => {
+		const text = "see [a](<https://x>)";
+		const link = "[a](<https://x>)";
+		const start = text.indexOf(link);
+		expect(isLineOnlyMdLink(text, start, start + link.length)).toBe(false);
+	});
+
+	it("returns false when text follows the link", () => {
+		const text = "[a](<https://x>) end";
+		const link = "[a](<https://x>)";
+		expect(isLineOnlyMdLink(text, 0, link.length)).toBe(false);
+	});
+});
+
 describe("LinkWidget", () => {
-	it("ignoreEvent returns true for mousedown (editor ignores, widget handles)", () => {
+	// CheckboxWidget と同じ「Boolean Toggle」公式パターン:
+	// ignoreEvent は false 固定。マウス操作は ViewPlugin.eventHandlers (linkPlugin)
+	// が捌くため widget DOM 上には listener を付けない。
+	it("ignoreEvent returns false (editor processes events; ViewPlugin handlers run)", () => {
 		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("mousedown");
-		expect(widget.ignoreEvent(event)).toBe(true);
+		expect(widget.ignoreEvent()).toBe(false);
 	});
 
-	it("ignoreEvent returns true for click (editor ignores, widget handles)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new MouseEvent("click");
-		expect(widget.ignoreEvent(event)).toBe(true);
+	it("toDOM sets href, dataset.linkWidgetUrl, title and tabIndex for safe URL", () => {
+		const widget = new LinkWidget("Example", "https://example.com");
+		const el = widget.toDOM() as HTMLAnchorElement;
+		expect(el.tagName).toBe("A");
+		expect(el.href).toBe("https://example.com/");
+		expect(el.dataset.linkWidgetUrl).toBe("https://example.com");
+		expect(el.title).toContain("https://example.com");
+		expect(el.title).toMatch(/クリックで開く/);
+		expect(el.textContent).toBe("Example");
+		expect(el.tabIndex).toBe(0);
+		expect(el.classList.contains("cm-link-widget")).toBe(true);
+		expect(el.classList.contains("cm-link-widget-disabled")).toBe(false);
 	});
 
-	it("ignoreEvent returns false for other events (editor handles them)", () => {
-		const widget = new LinkWidget("text", "https://example.com");
-		const event = new KeyboardEvent("keydown");
-		expect(widget.ignoreEvent(event)).toBe(false);
+	it("toDOM marks unsafe URLs disabled (no href, no dataset)", () => {
+		const widget = new LinkWidget("Example", "ftp://example.com");
+		const el = widget.toDOM() as HTMLAnchorElement;
+		expect(el.classList.contains("cm-link-widget-disabled")).toBe(true);
+		expect(el.getAttribute("href")).toBeNull();
+		expect(el.dataset.linkWidgetUrl).toBeUndefined();
+		expect(el.tabIndex).toBe(-1);
+		expect(el.getAttribute("aria-disabled")).toBe("true");
 	});
 
-	it("ignoreEvent returns false for disabled links (editor handles cursor)", () => {
-		const widget = new LinkWidget("text", "ftp://example.com");
-		expect(widget.ignoreEvent(new MouseEvent("mousedown"))).toBe(false);
-		expect(widget.ignoreEvent(new MouseEvent("click"))).toBe(false);
+	it("toDOM does NOT attach DOM event listeners (ViewPlugin handles all events)", () => {
+		// 防衛的: 万一 listener を直貼りしてしまうと CM のイベント順序と
+		// 競合する。ViewPlugin パターンに一本化することを enforce する。
+		const widget = new LinkWidget("Example", "https://example.com");
+		const el = widget.toDOM();
+		// dispatchEvent しても openExternal は呼ばれないことを確認
+		openExternalMock.mockClear();
+		el.dispatchEvent(
+			new MouseEvent("mousedown", {
+				bubbles: true,
+				cancelable: true,
+				button: 0,
+				metaKey: true,
+			}),
+		);
+		el.dispatchEvent(
+			new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }),
+		);
+		el.dispatchEvent(
+			new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+		);
+		expect(openExternalMock).not.toHaveBeenCalled();
 	});
 });

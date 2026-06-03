@@ -113,6 +113,12 @@ export const staticEditorTheme = EditorView.theme({
 		textDecoration: "none",
 		cursor: "default",
 	},
+	// cmd/ctrl 押下中は「クリックで開ける」サインとして pointer cursor。
+	// `cm-link-mod-down` クラスは modifierTrackPlugin (links.ts) が editor の
+	// 外側 wrapper (view.dom) に動的に付与する。
+	"&.cm-link-mod-down .cm-link-widget:not(.cm-link-widget-disabled)": {
+		cursor: "pointer",
+	},
 	".cm-image-widget img": {
 		maxWidth: "100%",
 		maxHeight: "400px",

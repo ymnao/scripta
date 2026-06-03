@@ -12,14 +12,40 @@ import {
 import { fetchOgp, openExternal } from "../../../lib/commands";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
-import { isSafeImageUrl, isSafeUrl } from "./links";
+import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
 import { collectCodeRanges, overlapsCodeBlock } from "./math";
 
-const STANDALONE_URL_RE = /^https?:\/\/[^\s]+$/i;
-
 export function isStandaloneUrlLine(lineText: string): string | null {
+	// `URL_PASTE_RE` と同じ shape (`/^https?:\/\/[^\s]+$/i`) — 単一行 URL 検出は
+	// paste 判定と同条件なので共有する。
 	const trimmed = lineText.trim();
-	return STANDALONE_URL_RE.test(trimmed) ? trimmed : null;
+	return URL_PASTE_RE.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * 行を削除する range を返す。最後の行でなければ末尾の改行も含めて
+ * 上下の行が連結するように削除する。最後の行なら直前の改行を含めて
+ * 「空行」を残さないようにする。文書が 1 行しかなければその行全体を空にする。
+ */
+export function getCardDeleteRange(
+	doc: {
+		length: number;
+		lineAt: (pos: number) => { from: number; to: number; number: number };
+		lines: number;
+	},
+	lineFrom: number,
+): { from: number; to: number } {
+	const line = doc.lineAt(lineFrom);
+	if (line.number < doc.lines) {
+		// 通常: 行 + 後ろの改行
+		return { from: line.from, to: Math.min(doc.length, line.to + 1) };
+	}
+	if (line.number > 1) {
+		// 最終行: 前の改行 + 行
+		return { from: Math.max(0, line.from - 1), to: line.to };
+	}
+	// 1 行しかない: 行内容のみ
+	return { from: line.from, to: line.to };
 }
 
 type CacheEntry =
@@ -320,7 +346,16 @@ class LinkCardDecorationPlugin implements PluginValue {
 		} else if (update.docChanged) {
 			this.decorations = this.decorations.map(update.changes);
 			this.prevCursorLines = collectCursorLines(update.view);
-			this.scheduleRebuild();
+			// paste で URL を空行に貼ったときは即時 card 表示したいので throttle を skip。
+			// 通常の typing は従来通り 150ms 遅延（連続入力中のチャタリング防止）。
+			const isPaste = update.transactions.some((tr) => tr.isUserEvent("input.paste"));
+			if (isPaste) {
+				this.cancelRebuild();
+				this.decorations = buildDecorations(update.view);
+				this.fetchMissingOgp(update.view);
+			} else {
+				this.scheduleRebuild();
+			}
 		} else if (update.selectionSet || update.focusChanged) {
 			const next = collectCursorLines(update.view);
 			if (cursorLinesChanged(this.prevCursorLines, next)) {
@@ -393,6 +428,35 @@ function createLinkCardClickGuard() {
 				iter.next();
 			}
 			return false;
+		},
+		contextmenu(event: MouseEvent, view: EditorView) {
+			const target = event.target;
+			if (!(target instanceof Element)) return false;
+			const cardEl = target.closest<HTMLElement>(".cm-link-card");
+			if (!cardEl) return false;
+
+			// dataset から URL を取得（widget DOM 構築時に設定済み）
+			const url = cardEl.dataset.linkCardUrl;
+			if (!url) return false;
+
+			// card の DOM 位置から doc position を割り出し、その line range を特定する
+			const pos = view.posAtDOM(cardEl);
+			const line = view.state.doc.lineAt(pos);
+
+			event.preventDefault();
+			view.dom.dispatchEvent(
+				new CustomEvent("link-card-context-menu", {
+					bubbles: true,
+					detail: {
+						url,
+						lineFrom: line.from,
+						lineTo: line.to,
+						clientX: event.clientX,
+						clientY: event.clientY,
+					},
+				}),
+			);
+			return true;
 		},
 	});
 }
