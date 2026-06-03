@@ -527,31 +527,68 @@ export function computeListIndentChanges(
 		indentCounters.set(virtualIndent, startNum + 1);
 	}
 
+	// Cascade: when a renumber changes an ordered line's marker width
+	// (e.g. 9 → 10), its descendants need their indent shifted by the same
+	// delta to stay nested under the post-renumber content offset. Without
+	// this, `10. b` (content offset 4) followed by `   1. child` (indent 3)
+	// would not be CommonMark-nested.
+	const indentShifts = new Map<number, number>();
+	for (let i = blockStart; i <= blockEnd; i++) {
+		const orig = getOrParse(i);
+		if (!orig?.ordered) continue;
+		const newNum = renumberMap.get(i);
+		if (newNum === undefined) continue;
+		const delta = String(newNum).length - String(orig.ordered.number).length;
+		if (delta === 0) continue;
+
+		const lIndentLen =
+			(newIndents.get(i)?.length ?? orig.indent.length) + (indentShifts.get(i) ?? 0);
+		const lOldContentOffset = lIndentLen + orig.markerWidth;
+
+		for (let j = i + 1; j <= blockEnd; j++) {
+			const jOrig = getOrParse(j);
+			if (!jOrig) break;
+			const jIndentLen =
+				(newIndents.get(j)?.length ?? jOrig.indent.length) + (indentShifts.get(j) ?? 0);
+			if (jIndentLen < lOldContentOffset) break;
+			indentShifts.set(j, (indentShifts.get(j) ?? 0) + delta);
+		}
+	}
+
 	// Emit one change per affected line, in line order (no sort needed
 	// since we iterate in ascending order below).
 	const changes: ChangeSpec[] = [];
-	const lineNums = new Set([...newIndents.keys(), ...renumberMap.keys()]);
+	const lineNums = new Set([...newIndents.keys(), ...renumberMap.keys(), ...indentShifts.keys()]);
 	for (let i = blockStart; i <= blockEnd; i++) {
 		if (!lineNums.has(i)) continue;
 		const orig = getOrParse(i);
 		if (!orig) continue;
 		const line = state.doc.line(i);
-		const newIndent = newIndents.get(i) ?? orig.indent;
+		const baseIndent = newIndents.get(i) ?? orig.indent;
+		const shift = indentShifts.get(i) ?? 0;
+		const finalIndent =
+			shift > 0
+				? baseIndent + " ".repeat(shift)
+				: shift < 0
+					? baseIndent.slice(0, Math.max(0, baseIndent.length + shift))
+					: baseIndent;
 		const newNum = renumberMap.get(i);
 		const oldNumStr = orig.ordered ? String(orig.ordered.number) : "";
 		const newNumStr = newNum !== undefined ? String(newNum) : oldNumStr;
+
+		if (finalIndent === orig.indent && newNumStr === oldNumStr) continue;
 
 		if (newNumStr === oldNumStr || !orig.ordered) {
 			changes.push({
 				from: line.from,
 				to: line.from + orig.indent.length,
-				insert: newIndent,
+				insert: finalIndent,
 			});
 		} else {
 			changes.push({
 				from: line.from,
 				to: line.from + orig.indent.length + oldNumStr.length,
-				insert: newIndent + newNumStr,
+				insert: finalIndent + newNumStr,
 			});
 		}
 	}

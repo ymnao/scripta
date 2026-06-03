@@ -888,6 +888,31 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, -1)).toBe("- a\n- b");
 	});
 
+	// --- Cascade: renumber that changes marker width shifts descendants ----
+
+	it("renumber 9 → 10 shifts descendant indent by +1 to preserve nesting", () => {
+		// Shift+Tab on `   1. x` outdents it to the parent level. The renumber
+		// then bumps `9. b` to `10. b` (marker width grows 3 → 4). Without the
+		// cascade, `   1. child` (indent 3) would no longer be CommonMark-nested
+		// under `10. b` (content offset 4).
+		const doc = "8. a\n   1. x\n9. b\n   1. child";
+		const cursor = doc.indexOf("   1. x") + 3;
+		expect(applyChanges(doc, cursor, -1)).toBe("8. a\n9. x\n10. b\n    1. child");
+	});
+
+	it("renumber 10 → 9 shifts descendant indent by -1", () => {
+		// Tab on item 2 of `1. a / 2. b / .. / 10. j / [   1. child]` makes the
+		// 10-item parent list renumber 3..10 → 2..9. Item 10 (`10. j` → `9. j`)
+		// shrinks marker width by 1, so its descendant `   1. child` should
+		// outdent by 1 to stay aligned. Block ends after the descendant.
+		const doc = "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j\n    1. child";
+		const cursor = doc.indexOf("2. b");
+		const result = applyChanges(doc, cursor, 1);
+		expect(result).toBe(
+			"1. a\n   1. b\n2. c\n3. d\n4. e\n5. f\n6. g\n7. h\n8. i\n9. j\n   1. child",
+		);
+	});
+
 	// --- Regression: user-reported case from chat -------------------------
 
 	it("Enter Tab sequence on empty ordered list nests at parent content offset", () => {
