@@ -4,10 +4,11 @@ import {
 	applyClipboardPasteAsMdLink,
 	buildMarkdownLink,
 	computeUrlPasteInsert,
+	decideOpenLinkModifier,
+	decideOpenLinkModifierKey,
 	escapeMarkdownLabel,
 	isLineOnlyMdLink,
 	isOpenLinkModifierEvent,
-	isOpenLinkModifierKey,
 	isPosInCodeConstruct,
 	isPrivateHostname,
 	isSafeImageUrl,
@@ -471,9 +472,24 @@ describe("applyClipboardPasteAsMdLink", () => {
 	});
 
 	it("trims whitespace from clipboard before checking URL pattern", () => {
+		// URL 判定は trim 後で行う（URL 周辺の whitespace は捨てて OK）
 		const { view, dispatched } = makeView("", 0);
 		applyClipboardPasteAsMdLink(view, "  https://example.com\n");
 		expect(dispatched[0].insert).toBe("[https://example.com](<https://example.com>)");
+	});
+
+	it("preserves leading/trailing whitespace for non-URL paste (lossless)", () => {
+		// 非 URL の場合は raw のまま挿入。trim すると一般 paste が破壊的になる
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "  hello world  ");
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].insert).toBe("  hello world  ");
+	});
+
+	it("preserves embedded newlines for multi-line non-URL paste", () => {
+		const { view, dispatched } = makeView("", 0);
+		applyClipboardPasteAsMdLink(view, "line1\nline2\n");
+		expect(dispatched[0].insert).toBe("line1\nline2\n");
 	});
 });
 
@@ -545,46 +561,57 @@ describe("stripUrlAngleBrackets", () => {
 	});
 });
 
-describe("isOpenLinkModifierEvent", () => {
-	it("returns true for metaKey (Cmd)", () => {
-		const e = new MouseEvent("click", { metaKey: true });
-		expect(isOpenLinkModifierEvent(e)).toBe(true);
+describe("decideOpenLinkModifier (OS-aware)", () => {
+	it("Mac: metaKey (Cmd) returns true, ctrlKey returns false", () => {
+		// macOS では Ctrl+click は context menu 操作なので URL 開く扱いから除外する
+		expect(decideOpenLinkModifier({ metaKey: true, ctrlKey: false }, true)).toBe(true);
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: true }, true)).toBe(false);
 	});
 
-	it("returns true for ctrlKey", () => {
-		const e = new MouseEvent("click", { ctrlKey: true });
-		expect(isOpenLinkModifierEvent(e)).toBe(true);
+	it("non-Mac: ctrlKey returns true, metaKey returns false", () => {
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: true }, false)).toBe(true);
+		expect(decideOpenLinkModifier({ metaKey: true, ctrlKey: false }, false)).toBe(false);
 	});
 
-	it("returns false for plain event", () => {
-		const e = new MouseEvent("click");
-		expect(isOpenLinkModifierEvent(e)).toBe(false);
-	});
-
-	it("returns false for shift-only event", () => {
-		const e = new MouseEvent("click", { shiftKey: true });
-		expect(isOpenLinkModifierEvent(e)).toBe(false);
+	it("returns false when neither modifier is held (both OS)", () => {
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: false }, true)).toBe(false);
+		expect(decideOpenLinkModifier({ metaKey: false, ctrlKey: false }, false)).toBe(false);
 	});
 });
 
-describe("isOpenLinkModifierKey", () => {
-	it("returns true for Meta (Cmd on Mac)", () => {
-		expect(isOpenLinkModifierKey("Meta")).toBe(true);
+describe("isOpenLinkModifierEvent (runtime OS detection)", () => {
+	// jsdom env: navigator.platform は通常 "" → 非 Mac 判定
+	it("delegates to decideOpenLinkModifier with runtime IS_MAC", () => {
+		const ctrl = new MouseEvent("click", { ctrlKey: true });
+		const meta = new MouseEvent("click", { metaKey: true });
+		// 実 OS によるが、両者で異なる値を返すことだけ確認
+		expect(isOpenLinkModifierEvent(ctrl)).not.toBe(isOpenLinkModifierEvent(meta));
 	});
 
-	it("returns true for Control", () => {
-		expect(isOpenLinkModifierKey("Control")).toBe(true);
+	it("returns false for plain / shift-only events", () => {
+		expect(isOpenLinkModifierEvent(new MouseEvent("click"))).toBe(false);
+		expect(isOpenLinkModifierEvent(new MouseEvent("click", { shiftKey: true }))).toBe(false);
+	});
+});
+
+describe("decideOpenLinkModifierKey (OS-aware)", () => {
+	it("Mac: 'Meta' returns true, 'Control' returns false", () => {
+		expect(decideOpenLinkModifierKey("Meta", true)).toBe(true);
+		expect(decideOpenLinkModifierKey("Control", true)).toBe(false);
 	});
 
-	it("returns false for other modifier keys", () => {
-		expect(isOpenLinkModifierKey("Shift")).toBe(false);
-		expect(isOpenLinkModifierKey("Alt")).toBe(false);
+	it("non-Mac: 'Control' returns true, 'Meta' returns false", () => {
+		expect(decideOpenLinkModifierKey("Control", false)).toBe(true);
+		expect(decideOpenLinkModifierKey("Meta", false)).toBe(false);
 	});
 
-	it("returns false for letter keys", () => {
-		expect(isOpenLinkModifierKey("a")).toBe(false);
-		expect(isOpenLinkModifierKey("Enter")).toBe(false);
-		expect(isOpenLinkModifierKey("")).toBe(false);
+	it("other keys return false on both platforms", () => {
+		for (const isMac of [true, false]) {
+			expect(decideOpenLinkModifierKey("Shift", isMac)).toBe(false);
+			expect(decideOpenLinkModifierKey("Alt", isMac)).toBe(false);
+			expect(decideOpenLinkModifierKey("a", isMac)).toBe(false);
+			expect(decideOpenLinkModifierKey("", isMac)).toBe(false);
+		}
 	});
 });
 

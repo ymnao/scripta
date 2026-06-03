@@ -74,15 +74,43 @@ export function isSafeImageUrl(url: string): boolean {
 	}
 }
 
-/** modifier 押下時のみ「開く」操作とみなすかを判定する pure 関数。 */
-export function isOpenLinkModifierEvent(event: MouseEvent | KeyboardEvent): boolean {
-	// Mac は metaKey (Cmd)、その他 OS は ctrlKey
-	return event.metaKey || event.ctrlKey;
+/**
+ * 実行時の Mac 判定。`navigator.platform` は deprecated 寄りだが Electron 環境
+ * では安定して使える（ipc/main から userAgent 配るより軽い）。テストでは
+ * jsdom が `""` を返すので非 Mac 扱いになる点に注意。
+ */
+const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
+
+/**
+ * 「リンクを開く」操作とみなす modifier 押下判定 (pure 版)。
+ * - macOS: Cmd (metaKey) のみ。Ctrl+click は context menu 操作なので除外する
+ * - その他 OS: Ctrl (ctrlKey) のみ
+ *
+ * `isMac` を引数で受けることで OS 依存ロジックをテスト可能にする。
+ */
+export function decideOpenLinkModifier(
+	event: { metaKey: boolean; ctrlKey: boolean },
+	isMac: boolean,
+): boolean {
+	return isMac ? event.metaKey : event.ctrlKey;
 }
 
-/** keydown / keyup の `event.key` が「リンクを開く modifier」かを判定。 */
+/** runtime 用: OS を自動判定。 */
+export function isOpenLinkModifierEvent(event: MouseEvent | KeyboardEvent): boolean {
+	return decideOpenLinkModifier(event, IS_MAC);
+}
+
+/**
+ * keydown / keyup の `event.key` が「リンクを開く modifier」かを判定 (pure 版)。
+ * macOS は "Meta" のみ、非 Mac は "Control" のみ。
+ */
+export function decideOpenLinkModifierKey(key: string, isMac: boolean): boolean {
+	return isMac ? key === "Meta" : key === "Control";
+}
+
+/** runtime 用: OS を自動判定。 */
 export function isOpenLinkModifierKey(key: string): boolean {
-	return key === "Meta" || key === "Control";
+	return decideOpenLinkModifierKey(key, IS_MAC);
 }
 
 /**
@@ -127,9 +155,7 @@ export class LinkWidget extends WidgetType {
 			// で preventDefault することで抑制する。
 			anchor.href = this.url;
 			anchor.dataset.linkWidgetUrl = this.url;
-			const isMac =
-				typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
-			anchor.title = `${this.url} (${isMac ? "⌘" : "Ctrl"}+クリックで開く)`;
+			anchor.title = `${this.url} (${IS_MAC ? "⌘" : "Ctrl"}+クリックで開く)`;
 			anchor.tabIndex = 0;
 			// マウス系イベントは ViewPlugin.eventHandlers (linkPlugin) が捌くので
 			// widget DOM 上には listener を付けない。CodeMirror 公式の
@@ -517,23 +543,28 @@ const urlPasteHandler = EditorView.domEventHandlers({
  * テスタビリティのため `pasteAsMarkdownLinkCommand` から切り出している。
  *
  * - URL なら強制的に md リンク化（selection あれば label に）
- * - 非 URL なら plain text として挿入
+ * - 非 URL なら raw のまま挿入（先頭/末尾 whitespace を保持）
  * - コードブロック内なら常に plain
+ *
+ * URL 判定は trim 後の値で行うが、非 URL を挿入する際は trim していない raw を
+ * そのまま挿入する。これは native paste を `Mod-Shift-v` keymap が抑止する代わりに
+ * 同じ "as-is" 体験を提供するため。
  */
 export function applyClipboardPasteAsMdLink(view: EditorView, raw: string | null): void {
-	const text = raw?.trim() ?? "";
-	if (!text) return;
-	if (!URL_PASTE_RE.test(text)) {
-		// 非 URL は plain insert（selection あれば置換）
+	if (raw == null) return;
+	const trimmed = raw.trim();
+	if (!trimmed) return; // whitespace-only clipboard は no-op
+	if (!URL_PASTE_RE.test(trimmed)) {
+		// 非 URL は raw のまま挿入（lossless）
 		const { state } = view;
 		const changes = state.changeByRange((range) => ({
-			range: EditorSelection.cursor(range.from + text.length),
-			changes: { from: range.from, to: range.to, insert: text },
+			range: EditorSelection.cursor(range.from + raw.length),
+			changes: { from: range.from, to: range.to, insert: raw },
 		}));
 		view.dispatch({ ...changes, userEvent: "input.paste" });
 		return;
 	}
-	dispatchUrlInsert(view, text, /* forceConvert */ true);
+	dispatchUrlInsert(view, trimmed, /* forceConvert */ true);
 }
 
 /**
