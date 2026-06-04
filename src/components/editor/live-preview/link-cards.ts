@@ -9,7 +9,8 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { fetchOgp, openExternal } from "../../../lib/commands";
+import { cancelOgpFetch, fetchOgp, openExternal } from "../../../lib/commands";
+import { getErrorKind } from "../../../types/errors";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
@@ -49,7 +50,9 @@ export function getCardDeleteRange(
 }
 
 type CacheEntry =
-	| { status: "loading"; cachedAt: number }
+	// loading.requestId は開始した plugin instance の発行 ID。cancel 時に
+	// 「自分が開始した loading」だけを delete するための owner 識別子。
+	| { status: "loading"; cachedAt: number; requestId: string }
 	| { status: "loaded"; data: OgpData; cachedAt: number }
 	| { status: "error"; errorAt: number };
 
@@ -57,7 +60,31 @@ const ogpCache = new Map<string, CacheEntry>();
 
 const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
+// 開始者の cancel 後に他 plugin が知らずに loading を待ち続けるのを防ぐ safety net。
+// 通常は ABORTED catch → cache.delete → broadcast event で即時復帰するが、何らかの
+// 理由で event が届かなかった場合 (broadcast 経路の bug 等) の fallback として 60s 後に
+// 別 plugin が re-fetch する。
+const LOADING_STALE_MS = 60_000;
 const MAX_CACHE_ENTRIES = 500;
+
+// 開始者の plugin instance が完了 (loaded / error) もしくは cancel (ABORTED) で cache
+// を更新したことを、生存中の他 plugin に通知する broadcast channel。loading を共有
+// している他 view（同じ URL を含む別 EditorView）はこの event でしか自分の view.dispatch
+// を発火できないため、cache state を遷移させた直後には必ず broadcast すること。
+// CodeMirror の view 間 dispatch は直接的な手段がないため window-level CustomEvent を
+// 使う（renderer 内のみ）。
+const OGP_CACHE_INVALIDATED_EVENT = "scripta:ogp-cache-invalidated";
+interface OgpCacheInvalidatedDetail {
+	url: string;
+}
+
+function broadcastOgpCacheInvalidated(url: string): void {
+	window.dispatchEvent(
+		new CustomEvent<OgpCacheInvalidatedDetail>(OGP_CACHE_INVALIDATED_EVENT, {
+			detail: { url },
+		}),
+	);
+}
 
 function evictStaleCache() {
 	const now = Date.now();
@@ -271,15 +298,29 @@ class LinkCardDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
 	prevCursorLines: Set<number>;
 	private view: EditorView;
-	private fetchingUrls = new Set<string>();
+	// URL → 自身が発行した requestId。destroy 時にこの requestId だけを cancel する
+	// （他 view の同 URL fetch を巻き込まないため）。
+	private fetchingUrls = new Map<string, string>();
 	private pendingUpdate = false;
 	private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 	private destroyed = false;
+	private cacheInvalidatedHandler: (e: Event) => void;
 
 	constructor(view: EditorView) {
 		this.view = view;
 		this.decorations = buildDecorations(view);
 		this.prevCursorLines = collectCursorLines(view);
+		// 他 plugin が ABORTED で cache を消したときに自分の view を再評価させるため
+		// の listener。view.dispatch で update を発火し、fetchMissingOgp で必要なら
+		// 再 fetch する。
+		this.cacheInvalidatedHandler = (e: Event) => {
+			if (this.destroyed) return;
+			const detail = (e as CustomEvent<OgpCacheInvalidatedDetail>).detail;
+			if (typeof detail?.url !== "string") return;
+			this.pendingUpdate = true;
+			this.view.dispatch({});
+		};
+		window.addEventListener(OGP_CACHE_INVALIDATED_EVENT, this.cacheInvalidatedHandler);
 		this.fetchMissingOgp(view);
 	}
 
@@ -291,6 +332,11 @@ class LinkCardDecorationPlugin implements PluginValue {
 			if (cached) {
 				if (cached.status === "error") {
 					if (Date.now() - cached.errorAt < ERROR_RETRY_MS) return;
+				} else if (cached.status === "loading") {
+					// 他 plugin が fetch 中なら待つ（その plugin の dispatch で結果が共有
+					// される）。ただし開始者が cancel された等で stale な loading は
+					// LOADING_STALE_MS 経過後に自分が re-fetch する。
+					if (Date.now() - cached.cachedAt < LOADING_STALE_MS) return;
 				} else if (Date.now() - cached.cachedAt < CACHE_TTL_MS) {
 					return;
 				}
@@ -300,23 +346,37 @@ class LinkCardDecorationPlugin implements PluginValue {
 				evictStaleCache();
 				evicted = true;
 			}
-			ogpCache.set(url, { status: "loading", cachedAt: Date.now() });
-			this.fetchingUrls.add(url);
+			const requestId = crypto.randomUUID();
+			ogpCache.set(url, { status: "loading", cachedAt: Date.now(), requestId });
+			this.fetchingUrls.set(url, requestId);
 
-			fetchOgp(url)
+			fetchOgp(requestId, url)
 				.then((data) => {
 					this.fetchingUrls.delete(url);
+					// destroyed でも cache の loading→loaded 遷移と broadcast は実行する。
+					// 同じ URL を loading で共有している他 view、および将来 mount される view
+					// のために結果を残す。`destroyed && skip` 経路だと共有 loading が消えず
+					// 待機 view が膠着する（P2）。
 					ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
-					if (this.destroyed) return;
-					this.pendingUpdate = true;
-					this.view.dispatch({});
+					broadcastOgpCacheInvalidated(url);
 				})
-				.catch(() => {
+				.catch((err: unknown) => {
 					this.fetchingUrls.delete(url);
+					if (getErrorKind(err) === "ABORTED") {
+						// 自分が開始した loading entry だけを削除し、broadcast で他 plugin
+						// に即時 re-fetch を促す（他 plugin が loading を共有して待ち続ける
+						// 膠着を回避）。loading entry の owner が別の requestId なら触らない
+						// — その plugin の責任で更新される。
+						const cached = ogpCache.get(url);
+						if (cached?.status === "loading" && cached.requestId === requestId) {
+							ogpCache.delete(url);
+							broadcastOgpCacheInvalidated(url);
+						}
+						return;
+					}
+					// error completion も同様に共有 loading を更新 + broadcast。
 					ogpCache.set(url, { status: "error", errorAt: Date.now() });
-					if (this.destroyed) return;
-					this.pendingUpdate = true;
-					this.view.dispatch({});
+					broadcastOgpCacheInvalidated(url);
 				});
 		});
 	}
@@ -390,6 +450,16 @@ class LinkCardDecorationPlugin implements PluginValue {
 	destroy() {
 		this.destroyed = true;
 		this.cancelRebuild();
+		window.removeEventListener(OGP_CACHE_INVALIDATED_EVENT, this.cacheInvalidatedHandler);
+		// 文書切替 / unmount で自身が発行した requestId だけを cancel する（#101）。
+		// URL 単位の cancel だと他 view の後発 request を誤って巻き込むため、requestId
+		// ベースで個別停止する。
+		for (const requestId of this.fetchingUrls.values()) {
+			cancelOgpFetch(requestId).catch((error) => {
+				console.error("Failed to cancel OGP fetch:", requestId, error);
+			});
+		}
+		this.fetchingUrls.clear();
 	}
 }
 

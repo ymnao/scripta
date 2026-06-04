@@ -629,9 +629,12 @@ function installApiMock(opts: {
 			track("cancelWikilinkScan", []);
 		},
 
-		fetchOgp: async (url: string): Promise<OgpData> => {
-			track("fetchOgp", [url]);
+		fetchOgp: async (requestId: string, url: string): Promise<OgpData> => {
+			track("fetchOgp", [requestId, url]);
 			return { title: null, description: null, image: null, siteName: null, url };
+		},
+		ogpCancel: async (requestId: string): Promise<void> => {
+			track("ogpCancel", [requestId]);
 		},
 		exportPdf: async (html: string, outputPath: string): Promise<void> => {
 			track("exportPdf", [html, outputPath]);

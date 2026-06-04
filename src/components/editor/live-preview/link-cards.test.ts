@@ -1,8 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
-import { getCardDeleteRange, isStandaloneUrlLine, LinkCardWidget } from "./link-cards";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as commands from "../../../lib/commands";
+import {
+	getCardDeleteRange,
+	isStandaloneUrlLine,
+	LinkCardWidget,
+	linkCardDecoration,
+} from "./link-cards";
 
 vi.mock("../../../lib/commands", () => ({
 	fetchOgp: vi.fn(),
+	cancelOgpFetch: vi.fn(async () => {}),
 	openExternal: vi.fn(),
 }));
 
@@ -283,5 +294,189 @@ describe("LinkCardWidget", () => {
 			const event = new KeyboardEvent("keydown");
 			expect(widget.ignoreEvent(event)).toBe(false);
 		});
+	});
+});
+
+// #101: plugin destroy で in-flight な OGP fetch を main 側に cancel リクエスト
+// する経路。real EditorView を jsdom 上で起動し、fetchOgp を「永遠に pending」
+// な promise でモックすることで fetchingUrls を非空にしてから destroy する。
+describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			mounted.pop()?.destroy();
+		}
+		vi.mocked(commands.fetchOgp).mockReset();
+		vi.mocked(commands.cancelOgpFetch).mockClear();
+	});
+
+	function mountEditor(doc: string): EditorView {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			selection: EditorSelection.cursor(0),
+			extensions: [markdown({ base: markdownLanguage }), linkCardDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+		return view;
+	}
+
+	it("calls cancelOgpFetch with the same requestIds that fetchOgp received", () => {
+		// fetchOgp は永遠に pending にして fetchingUrls を埋める。
+		vi.mocked(commands.fetchOgp).mockImplementation(() => new Promise(() => {}));
+
+		// カーソル行の URL は decoration されないので、適当な前置行を入れて URL を
+		// non-cursor 行に追いやる。
+		const view = mountEditor("hello\nhttps://example.com/a\nhttps://example.com/b\n");
+		// plugin constructor 内で fetchMissingOgp が同期 dispatch されており、
+		// この時点で fetchOgp が呼ばれている。
+		const fetchCalls = vi.mocked(commands.fetchOgp).mock.calls;
+		expect(fetchCalls.length).toBe(2);
+		// fetchOgp(requestId, url) として呼ばれているはず。
+		const issuedRequestIds = fetchCalls.map((c) => c[0]).sort();
+		const fetchedUrls = fetchCalls.map((c) => c[1]).sort();
+		expect(fetchedUrls).toEqual(["https://example.com/a", "https://example.com/b"]);
+		// 各 requestId が unique であること。
+		expect(new Set(issuedRequestIds).size).toBe(issuedRequestIds.length);
+
+		view.destroy();
+
+		// cancelOgpFetch は requestId だけを受け取る。発行した requestId と一致するはず。
+		const cancelledRequestIds = vi
+			.mocked(commands.cancelOgpFetch)
+			.mock.calls.map((c) => c[0])
+			.sort();
+		expect(cancelledRequestIds).toEqual(issuedRequestIds);
+	});
+
+	it("destroy is no-op for cancellation when no URL is in flight", () => {
+		vi.mocked(commands.fetchOgp).mockImplementation(() => new Promise(() => {}));
+		const view = mountEditor("just text, no URL\n");
+		view.destroy();
+		expect(vi.mocked(commands.cancelOgpFetch).mock.calls.length).toBe(0);
+	});
+
+	// 成功完了時にも broadcast を発火する（loading を共有する他 view を起こすため）
+	// 注: ogpCache はモジュールスコープなので URL は他テストと衝突しないユニーク値を使う。
+	it("successful fetch broadcasts cache-invalidated event for waiting views", async () => {
+		const url = "https://example.com/broadcast-success";
+		const ogpData = {
+			title: "ex",
+			description: null,
+			image: null,
+			siteName: null,
+			url,
+		};
+		const resolverBox: { resolve: ((data: typeof ogpData) => void) | null } = {
+			resolve: null,
+		};
+		vi.mocked(commands.fetchOgp).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolverBox.resolve = resolve as (d: typeof ogpData) => void;
+				}),
+		);
+
+		const view = mountEditor(`hello\n${url}\n`);
+		const events: CustomEvent[] = [];
+		const listener = (e: Event) => events.push(e as CustomEvent);
+		window.addEventListener("scripta:ogp-cache-invalidated", listener);
+
+		try {
+			expect(resolverBox.resolve).not.toBeNull();
+			resolverBox.resolve?.(ogpData);
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(events.some((e) => e.detail?.url === url)).toBe(true);
+		} finally {
+			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
+			view.destroy();
+		}
+	});
+
+	// destroy 後に fetch が成功 (cancel との race / cache hit 等) で resolve する
+	// シナリオ。開始者は cache を更新 + broadcast すべきで、共有 loading を待つ
+	// 他 view を膠着させてはならない。
+	it("late-success after destroy still updates shared cache and broadcasts", async () => {
+		const url = "https://example.com/broadcast-late";
+		const ogpData = {
+			title: "late",
+			description: null,
+			image: null,
+			siteName: null,
+			url,
+		};
+		const resolverBox: { resolve: ((data: typeof ogpData) => void) | null } = {
+			resolve: null,
+		};
+		vi.mocked(commands.fetchOgp).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolverBox.resolve = resolve as (d: typeof ogpData) => void;
+				}),
+		);
+
+		const view = mountEditor(`hello\n${url}\n`);
+		const events: CustomEvent[] = [];
+		const listener = (e: Event) => events.push(e as CustomEvent);
+		window.addEventListener("scripta:ogp-cache-invalidated", listener);
+
+		try {
+			// 先に destroy（plugin の destroyed フラグが true になる）
+			view.destroy();
+			// その後で fetch が成功で resolve（cancel と race して成功が勝つケースの模擬）
+			expect(resolverBox.resolve).not.toBeNull();
+			resolverBox.resolve?.(ogpData);
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// destroyed でも broadcast は走るはず（生存中の他 view を起こすため）
+			expect(events.some((e) => e.detail?.url === url)).toBe(true);
+		} finally {
+			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
+		}
+	});
+
+	// 開始者が cancel された後、生存中の別 view が同 URL を待ち続けないか。
+	// 主目的は ogpCache.delete を発火する条件（loading.requestId === own）と、
+	// 直後の scripta:ogp-cache-invalidated event broadcast の確認。実際の
+	// 「別 view が re-fetch する」連鎖は jsdom 上で event を listen している
+	// 別 plugin インスタンスに依る — ここでは event 発火と cache 状態を直接検証する。
+	it("ABORTED catch deletes own loading entry and broadcasts cache-invalidated event", async () => {
+		const url = "https://example.com/broadcast-aborted";
+		const ABORTED_ERROR = Object.assign(new Error("aborted"), { kind: "ABORTED" });
+		// fetchOgp は controller を介さず手動で reject を発火するため、reject 可能な
+		// promise を作って rejecter を box 経由で取り出す（control-flow narrowing 回避）。
+		const rejecterBox: { reject: ((err: unknown) => void) | null } = { reject: null };
+		vi.mocked(commands.fetchOgp).mockImplementation(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejecterBox.reject = reject;
+				}),
+		);
+
+		const view = mountEditor(`hello\n${url}\n`);
+		const events: CustomEvent[] = [];
+		const listener = (e: Event) => events.push(e as CustomEvent);
+		window.addEventListener("scripta:ogp-cache-invalidated", listener);
+
+		try {
+			expect(rejecterBox.reject).not.toBeNull();
+			rejecterBox.reject?.(ABORTED_ERROR);
+			// catch は microtask なので 1 tick 待つ
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(events.some((e) => e.detail?.url === url)).toBe(true);
+		} finally {
+			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
+			view.destroy();
+		}
 	});
 });

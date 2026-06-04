@@ -1,9 +1,10 @@
 import { URL } from "node:url";
 import type { OgpData } from "../../../src/types/ogp";
-import { httpFetch } from "../utils/http-fetch";
+import { AbortError, httpFetch } from "../utils/http-fetch";
 import { handle } from "../utils/ipc-handle";
 import { parseOgp } from "../utils/ogp-parser";
 import { pinSafeLookup, stripIpBrackets } from "../utils/ssrf-guard";
+import { StructuredError } from "../utils/structured-error";
 
 // OGP メタデータを取得する（`fetch_ogp`）。
 // SSRF 防御は redirect 1 hop ごとに `pinSafeLookup` で hostname を 1 度だけ解決し、
@@ -64,9 +65,26 @@ export function clearOgpCache(): void {
 	cache.clear();
 }
 
-async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string; body: Buffer }> {
+// in-flight な fetch の cancel 用 controller を **request 単位**で保持する。
+// renderer 側が unique requestId を生成して `ogp:fetch` に渡し、destroy 時には
+// その requestId だけを `ogp:cancel` する。URL をキーにすると後勝ち上書きで他 view
+// の後発 request を誤 abort してしまうため、requestId で個別に追跡する。
+const inFlight = new Map<string, AbortController>();
+
+export function cancelOgpFetch(requestId: string): void {
+	inFlight.get(requestId)?.abort();
+}
+
+async function fetchWithRedirects(
+	urlStr: string,
+	signal: AbortSignal,
+): Promise<{ contentType: string; body: Buffer }> {
 	let current = urlStr;
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+		// hop 頭での abort 早期判定。pinSafeLookup / DNS 待ちは signal を受け取らない
+		// ため、abort が反映されないと最大 REQUEST_TIMEOUT_MS まで in-flight が残る。
+		// ここで弾くことで cancel の即時性を確保する（少なくとも次の hop に進まない）。
+		if (signal.aborted) throw new AbortError();
 		const parsed = new URL(current);
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 			throw new Error("Only http and https URLs are supported");
@@ -78,7 +96,7 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 		// 「DNS + HTTP で 1 hop あたり最大 REQUEST_TIMEOUT_MS」を維持する。
 		const bareHost = stripIpBrackets(parsed.hostname);
 		const hopStart = Date.now();
-		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS);
+		const pin = await pinSafeLookup(bareHost, REQUEST_TIMEOUT_MS, signal);
 		const httpTimeout = Math.max(1, REQUEST_TIMEOUT_MS - (Date.now() - hopStart));
 		const res = await httpFetch({
 			url: parsed,
@@ -90,6 +108,7 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 			maxBodyBytes: MAX_BODY_BYTES,
 			onMaxExceeded: "truncate",
 			lookup: pin.lookup,
+			signal,
 		});
 		if (res.statusCode >= 300 && res.statusCode < 400) {
 			const loc = res.headers.location;
@@ -115,7 +134,7 @@ async function fetchWithRedirects(urlStr: string): Promise<{ contentType: string
 	throw new Error("Too many redirects");
 }
 
-async function fetchOgpImpl(url: string): Promise<OgpData> {
+async function fetchOgpImpl(requestId: string, url: string): Promise<OgpData> {
 	const lower = url.toLowerCase();
 	if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
 		throw new Error("Only http and https URLs are supported");
@@ -123,20 +142,39 @@ async function fetchOgpImpl(url: string): Promise<OgpData> {
 	const cached = cacheGet(url);
 	if (cached) return cached;
 
-	const { contentType, body } = await fetchWithRedirects(url);
-	// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
-	const lowerCt = contentType.toLowerCase();
-	if (!lowerCt.includes("text/html") && !lowerCt.includes("application/xhtml")) {
-		throw new Error(`Unsupported content type: ${contentType}`);
+	const controller = new AbortController();
+	inFlight.set(requestId, controller);
+	try {
+		const { contentType, body } = await fetchWithRedirects(url, controller.signal);
+		// RFC 7231 §3.1.1.1: media-type は case-insensitive（"Text/HTML" 等を許容）。
+		const lowerCt = contentType.toLowerCase();
+		if (!lowerCt.includes("text/html") && !lowerCt.includes("application/xhtml")) {
+			throw new Error(`Unsupported content type: ${contentType}`);
+		}
+		const html = body.toString("utf8");
+		const ogp = parseOgp(html, url);
+		cacheSet(url, ogp);
+		return ogp;
+	} catch (err) {
+		// IPC 越しに `err.name` は保たれないので、cancel 経路は ErrorKind="ABORTED" の
+		// StructuredError に変換して renderer に渡す（renderer は getErrorKind で判別）。
+		// AbortError は http-fetch 層からの socket abort、controller.signal.aborted
+		// は DNS lookup 中の abort も捕捉する（pinSafeLookup が ABORT_ERR で reject した
+		// 場合の err はカスタム Error なので signal 判定で拾う）。
+		if (err instanceof AbortError || controller.signal.aborted) {
+			throw new StructuredError("ABORTED", err instanceof Error ? err.message : String(err));
+		}
+		throw err;
+	} finally {
+		inFlight.delete(requestId);
 	}
-	const html = body.toString("utf8");
-	const ogp = parseOgp(html, url);
-	cacheSet(url, ogp);
-	return ogp;
 }
 
 export function registerOgpIpc(): void {
-	handle("ogp:fetch", (_event, url: string) => fetchOgpImpl(url));
+	handle("ogp:fetch", (_event, requestId: string, url: string) => fetchOgpImpl(requestId, url));
+	handle("ogp:cancel", (_event, requestId: string) => {
+		cancelOgpFetch(requestId);
+	});
 }
 
 export const __testing = {
@@ -144,6 +182,8 @@ export const __testing = {
 	cacheGet,
 	cacheSet,
 	clearCache: clearOgpCache,
+	cancelOgpFetch,
+	hasInFlight: (requestId: string) => inFlight.has(requestId),
 	CACHE_TTL_MS,
 	MAX_CACHE_ENTRIES,
 };

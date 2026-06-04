@@ -127,8 +127,14 @@ export function showInFolder(path: string): Promise<void> {
 	return window.api.showInFolder(path);
 }
 
-export function fetchOgp(url: string): Promise<OgpData> {
-	return window.api.fetchOgp(url);
+// renderer が unique な requestId を生成して渡す。後発 fetch を誤 abort しないよう、
+// cancel は requestId 単位で行う（同一 URL の多重 fetch が並走しても干渉しない）。
+export function fetchOgp(requestId: string, url: string): Promise<OgpData> {
+	return window.api.fetchOgp(requestId, url);
+}
+
+export function cancelOgpFetch(requestId: string): Promise<void> {
+	return window.api.ogpCancel(requestId);
 }
 
 export function exportPdf(html: string, outputPath: string): Promise<void> {

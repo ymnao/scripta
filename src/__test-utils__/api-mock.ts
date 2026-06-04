@@ -53,6 +53,7 @@ export function createApiMock(): Api {
 			siteName: null,
 			url: "",
 		})),
+		ogpCancel: vi.fn(async () => {}),
 		exportPdf: vi.fn(async () => {}),
 		checkForUpdate: vi.fn(async () => ({
 			hasUpdate: false,

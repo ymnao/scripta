@@ -44,6 +44,7 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 	NETWORK: "ネットワークに接続できません",
 	CONNECTION_REFUSED: "接続が拒否されました",
 	TIMEOUT: "操作がタイムアウトしました",
+	ABORTED: "操作がキャンセルされました",
 };
 
 export function translateError(error: unknown): string {
