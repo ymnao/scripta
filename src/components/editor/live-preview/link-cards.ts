@@ -67,12 +67,23 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
 const LOADING_STALE_MS = 60_000;
 const MAX_CACHE_ENTRIES = 500;
 
-// 開始者が cancel された等で cache から消えた URL を、生存中の他 plugin に通知して
-// 即時 re-fetch させるための broadcast channel。CodeMirror の view 間 dispatch は
-// 直接的な手段がないため、window-level CustomEvent を使う（renderer 内に限られる）。
+// 開始者の plugin instance が完了 (loaded / error) もしくは cancel (ABORTED) で cache
+// を更新したことを、生存中の他 plugin に通知する broadcast channel。loading を共有
+// している他 view（同じ URL を含む別 EditorView）はこの event でしか自分の view.dispatch
+// を発火できないため、cache state を遷移させた直後には必ず broadcast すること。
+// CodeMirror の view 間 dispatch は直接的な手段がないため window-level CustomEvent を
+// 使う（renderer 内のみ）。
 const OGP_CACHE_INVALIDATED_EVENT = "scripta:ogp-cache-invalidated";
 interface OgpCacheInvalidatedDetail {
 	url: string;
+}
+
+function broadcastOgpCacheInvalidated(url: string): void {
+	window.dispatchEvent(
+		new CustomEvent<OgpCacheInvalidatedDetail>(OGP_CACHE_INVALIDATED_EVENT, {
+			detail: { url },
+		}),
+	);
 }
 
 function evictStaleCache() {
@@ -342,10 +353,12 @@ class LinkCardDecorationPlugin implements PluginValue {
 			fetchOgp(requestId, url)
 				.then((data) => {
 					this.fetchingUrls.delete(url);
-					if (this.destroyed) return;
+					// destroyed でも cache の loading→loaded 遷移と broadcast は実行する。
+					// 同じ URL を loading で共有している他 view、および将来 mount される view
+					// のために結果を残す。`destroyed && skip` 経路だと共有 loading が消えず
+					// 待機 view が膠着する（P2）。
 					ogpCache.set(url, { status: "loaded", data, cachedAt: Date.now() });
-					this.pendingUpdate = true;
-					this.view.dispatch({});
+					broadcastOgpCacheInvalidated(url);
 				})
 				.catch((err: unknown) => {
 					this.fetchingUrls.delete(url);
@@ -357,18 +370,13 @@ class LinkCardDecorationPlugin implements PluginValue {
 						const cached = ogpCache.get(url);
 						if (cached?.status === "loading" && cached.requestId === requestId) {
 							ogpCache.delete(url);
-							window.dispatchEvent(
-								new CustomEvent<OgpCacheInvalidatedDetail>(OGP_CACHE_INVALIDATED_EVENT, {
-									detail: { url },
-								}),
-							);
+							broadcastOgpCacheInvalidated(url);
 						}
 						return;
 					}
+					// error completion も同様に共有 loading を更新 + broadcast。
 					ogpCache.set(url, { status: "error", errorAt: Date.now() });
-					if (this.destroyed) return;
-					this.pendingUpdate = true;
-					this.view.dispatch({});
+					broadcastOgpCacheInvalidated(url);
 				});
 		});
 	}

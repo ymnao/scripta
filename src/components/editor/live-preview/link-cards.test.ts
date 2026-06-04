@@ -361,12 +361,95 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 		expect(vi.mocked(commands.cancelOgpFetch).mock.calls.length).toBe(0);
 	});
 
+	// 成功完了時にも broadcast を発火する（loading を共有する他 view を起こすため）
+	// 注: ogpCache はモジュールスコープなので URL は他テストと衝突しないユニーク値を使う。
+	it("successful fetch broadcasts cache-invalidated event for waiting views", async () => {
+		const url = "https://example.com/broadcast-success";
+		const ogpData = {
+			title: "ex",
+			description: null,
+			image: null,
+			siteName: null,
+			url,
+		};
+		const resolverBox: { resolve: ((data: typeof ogpData) => void) | null } = {
+			resolve: null,
+		};
+		vi.mocked(commands.fetchOgp).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolverBox.resolve = resolve as (d: typeof ogpData) => void;
+				}),
+		);
+
+		const view = mountEditor(`hello\n${url}\n`);
+		const events: CustomEvent[] = [];
+		const listener = (e: Event) => events.push(e as CustomEvent);
+		window.addEventListener("scripta:ogp-cache-invalidated", listener);
+
+		try {
+			expect(resolverBox.resolve).not.toBeNull();
+			resolverBox.resolve?.(ogpData);
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(events.some((e) => e.detail?.url === url)).toBe(true);
+		} finally {
+			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
+			view.destroy();
+		}
+	});
+
+	// destroy 後に fetch が成功 (cancel との race / cache hit 等) で resolve する
+	// シナリオ。開始者は cache を更新 + broadcast すべきで、共有 loading を待つ
+	// 他 view を膠着させてはならない。
+	it("late-success after destroy still updates shared cache and broadcasts", async () => {
+		const url = "https://example.com/broadcast-late";
+		const ogpData = {
+			title: "late",
+			description: null,
+			image: null,
+			siteName: null,
+			url,
+		};
+		const resolverBox: { resolve: ((data: typeof ogpData) => void) | null } = {
+			resolve: null,
+		};
+		vi.mocked(commands.fetchOgp).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolverBox.resolve = resolve as (d: typeof ogpData) => void;
+				}),
+		);
+
+		const view = mountEditor(`hello\n${url}\n`);
+		const events: CustomEvent[] = [];
+		const listener = (e: Event) => events.push(e as CustomEvent);
+		window.addEventListener("scripta:ogp-cache-invalidated", listener);
+
+		try {
+			// 先に destroy（plugin の destroyed フラグが true になる）
+			view.destroy();
+			// その後で fetch が成功で resolve（cancel と race して成功が勝つケースの模擬）
+			expect(resolverBox.resolve).not.toBeNull();
+			resolverBox.resolve?.(ogpData);
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// destroyed でも broadcast は走るはず（生存中の他 view を起こすため）
+			expect(events.some((e) => e.detail?.url === url)).toBe(true);
+		} finally {
+			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
+		}
+	});
+
 	// 開始者が cancel された後、生存中の別 view が同 URL を待ち続けないか。
 	// 主目的は ogpCache.delete を発火する条件（loading.requestId === own）と、
 	// 直後の scripta:ogp-cache-invalidated event broadcast の確認。実際の
 	// 「別 view が re-fetch する」連鎖は jsdom 上で event を listen している
 	// 別 plugin インスタンスに依る — ここでは event 発火と cache 状態を直接検証する。
 	it("ABORTED catch deletes own loading entry and broadcasts cache-invalidated event", async () => {
+		const url = "https://example.com/broadcast-aborted";
 		const ABORTED_ERROR = Object.assign(new Error("aborted"), { kind: "ABORTED" });
 		// fetchOgp は controller を介さず手動で reject を発火するため、reject 可能な
 		// promise を作って rejecter を box 経由で取り出す（control-flow narrowing 回避）。
@@ -378,7 +461,7 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 				}),
 		);
 
-		const view = mountEditor("hello\nhttps://example.com/x\n");
+		const view = mountEditor(`hello\n${url}\n`);
 		const events: CustomEvent[] = [];
 		const listener = (e: Event) => events.push(e as CustomEvent);
 		window.addEventListener("scripta:ogp-cache-invalidated", listener);
@@ -390,8 +473,7 @@ describe("LinkCardDecorationPlugin destroy cancels in-flight OGP fetches", () =>
 			await Promise.resolve();
 			await Promise.resolve();
 
-			expect(events.length).toBe(1);
-			expect(events[0].detail).toEqual({ url: "https://example.com/x" });
+			expect(events.some((e) => e.detail?.url === url)).toBe(true);
 		} finally {
 			window.removeEventListener("scripta:ogp-cache-invalidated", listener);
 			view.destroy();
