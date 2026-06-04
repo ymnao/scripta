@@ -14,6 +14,7 @@ vi.mock("../lib/store", () => ({
 
 const { checkForUpdate, openExternal, getAppVersion } = await import("../lib/commands");
 const { loadLastUpdateCheck, saveLastUpdateCheck } = await import("../lib/store");
+const { useToastStore } = await import("../stores/toast");
 const { useUpdateCheck } = await import("./useUpdateCheck");
 
 const mockedGetVersion = getAppVersion as Mock;
@@ -43,10 +44,12 @@ describe("useUpdateCheck", () => {
 		mockedGetVersion.mockResolvedValue("0.1.0");
 		mockedLoadLastUpdateCheck.mockResolvedValue(0);
 		mockedCheckForUpdate.mockResolvedValue(noUpdate);
+		useToastStore.setState({ toasts: [] });
 	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		useToastStore.setState({ toasts: [] });
 	});
 
 	it("enabled=false のときチェックしない", async () => {
@@ -222,6 +225,130 @@ describe("useUpdateCheck", () => {
 
 		// cancelled なので checkForUpdate は呼ばれない
 		expect(mockedCheckForUpdate).not.toHaveBeenCalled();
+	});
+
+	describe("triggerManualCheck", () => {
+		it("更新ありのときダイアログを開く（auto check は無効でも動く）", async () => {
+			mockedLoadLastUpdateCheck.mockResolvedValue(Date.now()); // 24h 以内なので auto はスキップ
+			mockedCheckForUpdate.mockResolvedValue(updateAvailable);
+
+			const { result } = renderHook(() => useUpdateCheck(false));
+
+			await act(async () => {
+				await result.current.triggerManualCheck();
+			});
+
+			expect(result.current.dialogOpen).toBe(true);
+			expect(result.current.description).toContain("v1.0.0");
+			expect(useToastStore.getState().toasts).toHaveLength(0);
+		});
+
+		it("最新のとき success toast を出してダイアログは開かない", async () => {
+			mockedCheckForUpdate.mockResolvedValue(noUpdate);
+
+			const { result } = renderHook(() => useUpdateCheck(false));
+
+			await act(async () => {
+				await result.current.triggerManualCheck();
+			});
+
+			expect(result.current.dialogOpen).toBe(false);
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]?.type).toBe("success");
+			expect(toasts[0]?.message).toContain("v0.1.0");
+		});
+
+		it("失敗時 error toast を出してダイアログは開かない", async () => {
+			mockedCheckForUpdate.mockRejectedValue(new Error("Network error"));
+
+			const { result } = renderHook(() => useUpdateCheck(false));
+
+			await act(async () => {
+				await result.current.triggerManualCheck();
+			});
+
+			expect(result.current.dialogOpen).toBe(false);
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]?.type).toBe("error");
+		});
+
+		it("実行中は manualCheckInProgress=true、終了後 false", async () => {
+			let resolveCheck!: (v: typeof noUpdate) => void;
+			mockedCheckForUpdate.mockReturnValue(
+				new Promise((resolve) => {
+					resolveCheck = resolve;
+				}),
+			);
+
+			const { result } = renderHook(() => useUpdateCheck(false));
+			expect(result.current.manualCheckInProgress).toBe(false);
+
+			let trigger!: Promise<void>;
+			act(() => {
+				trigger = result.current.triggerManualCheck();
+			});
+
+			await vi.waitFor(() => {
+				expect(result.current.manualCheckInProgress).toBe(true);
+			});
+
+			await act(async () => {
+				resolveCheck(noUpdate);
+				await trigger;
+			});
+
+			expect(result.current.manualCheckInProgress).toBe(false);
+		});
+
+		it("実行中の多重起動は無視する", async () => {
+			let resolveCheck!: (v: typeof noUpdate) => void;
+			mockedCheckForUpdate.mockReturnValue(
+				new Promise((resolve) => {
+					resolveCheck = resolve;
+				}),
+			);
+
+			const { result } = renderHook(() => useUpdateCheck(false));
+
+			let firstTrigger!: Promise<void>;
+			act(() => {
+				firstTrigger = result.current.triggerManualCheck();
+			});
+
+			await vi.waitFor(() => {
+				expect(mockedCheckForUpdate).toHaveBeenCalledTimes(1);
+			});
+
+			// 2 回目は即 return → checkForUpdate は呼ばれない
+			await act(async () => {
+				await result.current.triggerManualCheck();
+			});
+			expect(mockedCheckForUpdate).toHaveBeenCalledTimes(1);
+
+			await act(async () => {
+				resolveCheck(noUpdate);
+				await firstTrigger;
+			});
+		});
+
+		it("hasUpdate のとき openReleasePage でブラウザを開く", async () => {
+			mockedCheckForUpdate.mockResolvedValue(updateAvailable);
+
+			const { result } = renderHook(() => useUpdateCheck(false));
+
+			await act(async () => {
+				await result.current.triggerManualCheck();
+			});
+
+			act(() => {
+				result.current.openReleasePage();
+			});
+
+			expect(openExternal).toHaveBeenCalledWith(updateAvailable.releaseUrl);
+			expect(result.current.dialogOpen).toBe(false);
+		});
 	});
 
 	it("loadLastUpdateCheck 待ち中にクリーンアップされたら後続処理をスキップする", async () => {

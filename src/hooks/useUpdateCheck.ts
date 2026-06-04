@@ -1,13 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { checkForUpdate, getAppVersion, openExternal } from "../lib/commands";
 import { loadLastUpdateCheck, saveLastUpdateCheck } from "../lib/store";
+import { useToastStore } from "../stores/toast";
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export function useUpdateCheck(enabled: boolean) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [description, setDescription] = useState("");
+	const [manualCheckInProgress, setManualCheckInProgress] = useState(false);
 	const releaseUrlRef = useRef("");
+	const inProgressRef = useRef(false);
+	const unmountedRef = useRef(false);
+
+	useEffect(() => {
+		return () => {
+			unmountedRef.current = true;
+		};
+	}, []);
 
 	useEffect(() => {
 		if (!enabled) return;
@@ -44,6 +54,44 @@ export function useUpdateCheck(enabled: boolean) {
 		};
 	}, [enabled]);
 
+	const triggerManualCheck = useCallback(async () => {
+		// 多重起動防止。state ではなく ref で判定して再レンダー間で race しないようにする。
+		if (inProgressRef.current) return;
+		inProgressRef.current = true;
+		setManualCheckInProgress(true);
+		try {
+			const currentVersion = await getAppVersion();
+			if (unmountedRef.current) return;
+
+			const info = await checkForUpdate(currentVersion);
+			if (unmountedRef.current) return;
+
+			// lastCheck の永続化失敗は手動チェック結果の表示を阻害しない。
+			void saveLastUpdateCheck(Date.now()).catch(() => {});
+
+			if (info.hasUpdate) {
+				setDescription(
+					`新しいバージョン v${info.latestVersion} が利用可能です（現在 v${info.currentVersion}）。GitHub Releases からダウンロードできます。`,
+				);
+				releaseUrlRef.current = info.releaseUrl;
+				setDialogOpen(true);
+			} else {
+				useToastStore
+					.getState()
+					.addToast("success", `お使いのバージョンは最新です (v${info.currentVersion})`);
+			}
+		} catch {
+			if (!unmountedRef.current) {
+				useToastStore.getState().addToast("error", "アップデートの確認に失敗しました");
+			}
+		} finally {
+			inProgressRef.current = false;
+			if (!unmountedRef.current) {
+				setManualCheckInProgress(false);
+			}
+		}
+	}, []);
+
 	const dismissDialog = () => setDialogOpen(false);
 	const openReleasePage = () => {
 		if (releaseUrlRef.current) {
@@ -52,5 +100,12 @@ export function useUpdateCheck(enabled: boolean) {
 		setDialogOpen(false);
 	};
 
-	return { dialogOpen, description, dismissDialog, openReleasePage };
+	return {
+		dialogOpen,
+		description,
+		dismissDialog,
+		openReleasePage,
+		triggerManualCheck,
+		manualCheckInProgress,
+	};
 }
