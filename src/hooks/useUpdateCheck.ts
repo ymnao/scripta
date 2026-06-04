@@ -11,13 +11,6 @@ export function useUpdateCheck(enabled: boolean) {
 	const [manualCheckInProgress, setManualCheckInProgress] = useState(false);
 	const releaseUrlRef = useRef("");
 	const inProgressRef = useRef(false);
-	const unmountedRef = useRef(false);
-
-	useEffect(() => {
-		return () => {
-			unmountedRef.current = true;
-		};
-	}, []);
 
 	useEffect(() => {
 		if (!enabled) return;
@@ -61,10 +54,7 @@ export function useUpdateCheck(enabled: boolean) {
 		setManualCheckInProgress(true);
 		try {
 			const currentVersion = await getAppVersion();
-			if (unmountedRef.current) return;
-
 			const info = await checkForUpdate(currentVersion);
-			if (unmountedRef.current) return;
 
 			// lastCheck の永続化失敗は手動チェック結果の表示を阻害しない。
 			void saveLastUpdateCheck(Date.now()).catch(() => {});
@@ -81,14 +71,10 @@ export function useUpdateCheck(enabled: boolean) {
 					.addToast("success", `お使いのバージョンは最新です (v${info.currentVersion})`);
 			}
 		} catch {
-			if (!unmountedRef.current) {
-				useToastStore.getState().addToast("error", "アップデートの確認に失敗しました");
-			}
+			useToastStore.getState().addToast("error", "アップデートの確認に失敗しました");
 		} finally {
 			inProgressRef.current = false;
-			if (!unmountedRef.current) {
-				setManualCheckInProgress(false);
-			}
+			setManualCheckInProgress(false);
 		}
 	}, []);
 

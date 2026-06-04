@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("../lib/commands", () => ({
@@ -331,6 +332,21 @@ describe("useUpdateCheck", () => {
 				resolveCheck(noUpdate);
 				await firstTrigger;
 			});
+		});
+
+		it("StrictMode 下でも結果反映されて manualCheckInProgress が解除される (regression)", async () => {
+			mockedCheckForUpdate.mockResolvedValue(noUpdate);
+
+			const { result } = renderHook(() => useUpdateCheck(false), { wrapper: StrictMode });
+
+			await act(async () => {
+				await result.current.triggerManualCheck();
+			});
+
+			expect(result.current.manualCheckInProgress).toBe(false);
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]?.type).toBe("success");
 		});
 
 		it("hasUpdate のとき openReleasePage でブラウザを開く", async () => {
