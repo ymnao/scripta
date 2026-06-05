@@ -8,6 +8,7 @@ import {
 	gitGetConflictedFiles,
 	gitResolveConflict,
 } from "../../lib/commands";
+import { translateError } from "../../lib/errors";
 import type { ConflictContent } from "../../types/git-sync";
 import { ConflictDiffView } from "./ConflictDiffView";
 import { ConflictFileList } from "./ConflictFileList";
@@ -48,7 +49,7 @@ export function ConflictWindow() {
 				});
 			})
 			.catch((err) => {
-				setError(String(err));
+				setError(translateError(err));
 				setLoading(false);
 			});
 	}, [workspacePath]);
@@ -66,7 +67,7 @@ export function ConflictWindow() {
 		gitGetConflictContent(workspacePath, selectedFile)
 			.then(setConflictContent)
 			.catch((err) => {
-				setError(String(err));
+				setError(translateError(err));
 				setConflictContent(null);
 			});
 	}, [workspacePath, selectedFile, resolvedFiles]);
@@ -79,7 +80,7 @@ export function ConflictWindow() {
 				await gitResolveConflict(workspacePath, selectedFile, content, resolution);
 				setResolvedFiles((prev) => new Set(prev).add(selectedFile));
 			} catch (err) {
-				setError(String(err));
+				setError(translateError(err));
 			}
 		},
 		[workspacePath, selectedFile],
@@ -99,7 +100,7 @@ export function ConflictWindow() {
 			await emitConflictResolved(workspacePath);
 			await closeWindow();
 		} catch (err) {
-			setError(String(err));
+			setError(translateError(err));
 		}
 	}, [workspacePath]);
 

@@ -5,7 +5,9 @@ import { invokeWithStructuredError as invoke } from "./ipc-error-decode";
 import { buildScriptaAssetUrl } from "./scripta-asset-url";
 
 // `invoke(ipcRenderer.invoke(...))` で全 IPC 呼び出しをラップする。main 側 handle() が
-// 構造化したエラーを preload で unmarshal し、renderer へ kind 付き Error として伝える。
+// 構造化したエラーを preload で正規化し、renderer へ伝える。contextBridge は Error の
+// カスタムプロパティ（kind 等）を剥がすため、kind は sentinel payload として message に
+// 載せて運ぶ（renderer は getErrorKind で復元。詳細は ./ipc-error-decode.ts）。
 // 成功 path は invoke の戻り値をそのまま透過する（ipcRenderer.invoke は any 返しのため
 // Api の各メソッドの戻り型はそのまま保たれる）。
 

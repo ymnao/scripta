@@ -24,7 +24,7 @@ import { gitError } from "../utils/structured-error";
 //   を主軸に使う（特に `git show :2:path` には raw 必須）。
 // - エラーは git stderr（LC_ALL=C で英語固定）を `gitError()` で ErrorKind に分類して
 //   throw する（GIT_CONFLICT / GIT_NOTHING_TO_COMMIT / NETWORK 等）。分類は main 側で
-//   1 度だけ行い、renderer は error.kind で分岐する（旧: renderer 側の正規表現パース）。
+//   1 度だけ行い、renderer は getErrorKind で kind を復元して分岐する（旧: renderer 側の正規表現パース）。
 
 // `git status --porcelain` の prefix で conflict（unmerged stage）を判定する。
 const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD "]);

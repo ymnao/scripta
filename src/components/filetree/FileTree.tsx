@@ -14,6 +14,7 @@ import { useDragStore } from "../../stores/drag";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { toRelativePath, useWorkspaceConfigStore } from "../../stores/workspace-config";
+import { getErrorKind } from "../../types/errors";
 import type { FileEntry } from "../../types/workspace";
 import { Dialog } from "../common/Dialog";
 import { EmojiInputDialog } from "../common/EmojiInputDialog";
@@ -529,8 +530,9 @@ export function FileTree({
 		try {
 			await createDirectory(getScriptaDir(workspacePath));
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (!msg.includes("Already exists")) {
+			// 既存なら ALREADY_EXISTS（.scripta が既にあるだけなので握りつぶす）。
+			// それ以外の作成失敗のみ通知する。
+			if (getErrorKind(err) !== "ALREADY_EXISTS") {
 				console.error("Failed to create .scripta directory:", err);
 				useToastStore
 					.getState()

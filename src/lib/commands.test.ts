@@ -14,8 +14,10 @@ import {
 // test-setup.ts の beforeEach が `window.api` を毎回新しい `createApiMock()` で置き換えるため、
 // 各テストでは `(window.api.<fn> as Mock).mockXxxValueOnce(...)` で個別の挙動を上書きする。
 //
-// non-transient 判定は preload で付与される `error.kind` ベースになったため、
-// 「再試行しない」検証には kindError() で kind 付きエラーを reject させる。
+// non-transient 判定は構造化エラーの kind ベース（renderer は getErrorKind で復元）になったため、
+// 「再試行しない」検証には kindError() で kind 付きエラーを reject させる
+// （ここでは own `kind` プロパティを直接持つ mock を使う。実 IPC 経路で kind が message
+// 経由になることの round-trip は e2e structured-error.electron.spec.ts でカバー）。
 
 describe("readFile with retry", () => {
 	beforeEach(() => {

@@ -1,18 +1,13 @@
-import { type ErrorKind, getErrorKind } from "../types/errors";
+import { type ErrorKind, getErrorKind, getStructuredMessage } from "../types/errors";
 
-// main から IPC 越しに渡る構造化エラー（preload で unmarshal 済み、`error.kind` を持つ）を
-// renderer で扱うためのユーティリティ。
+// main から IPC 越しに渡る構造化エラーを renderer で扱うためのユーティリティ。
 //
-// 旧実装はエラーの message 文字列を正規表現でパースして種別判定していたが、現在は
-// main 側で 1 度だけ分類した `error.kind`（discriminated union）で分岐する。
-// 種別ごとの分類ロジックは `electron/main/utils/structured-error.ts` に存在する
-// （設計判断の経緯は docs/adr/0008-structured-fs-error.md を参照）。
-
-function extractMessage(error: unknown): string {
-	if (typeof error === "string") return error;
-	if (error instanceof Error) return error.message;
-	return String(error);
-}
+// 種別ごとの分類ロジックは main 側 `electron/main/utils/structured-error.ts` が持ち、
+// kind は sentinel payload として `error.message` に載って renderer まで運ばれる
+// （contextBridge が `error.kind` プロパティを剥がすため、message 経由で運ぶ。詳細は
+// `src/types/errors.ts` の getErrorKind / getStructuredMessage と
+// `docs/adr/0008-structured-fs-error.md` を参照）。renderer は kind で分岐し、表示用の
+// 素メッセージは getStructuredMessage で取り出す（コンポーネントは原則 translateError を使う）。
 
 // ErrorKind → ユーザー向け日本語メッセージ。UNKNOWN は raw detail を併記するため別扱い。
 const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
@@ -55,7 +50,7 @@ export function translateError(error: unknown): string {
 	if (kind !== undefined && kind !== "UNKNOWN" && Object.hasOwn(KIND_MESSAGES, kind)) {
 		return KIND_MESSAGES[kind];
 	}
-	return `予期しないエラーが発生しました。詳細: ${extractMessage(error)}`;
+	return `予期しないエラーが発生しました。詳細: ${getStructuredMessage(error)}`;
 }
 
 // withRetry の対象外（再試行しても回復しない）種別。これら以外（EAGAIN/EBUSY 等の
