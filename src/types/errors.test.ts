@@ -37,6 +37,47 @@ describe("encodeIpcError / decodeIpcError", () => {
 		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}{not json`)).toBeNull();
 	});
 
+	it("decodes when an error stack is appended after the JSON (Electron 42 reject)", () => {
+		// Electron 42 以降、invoke reject の message に error stack が連結されると
+		// sentinel 以降を末尾まで JSON.parse できず kind が落ちていた（git の
+		// "nothing to commit" が「予期しないエラー」に化ける原因）。fallback の
+		// brace 走査で JSON 本体だけを取り出して復元する。
+		const encoded = encodeIpcError({
+			kind: "GIT_NOTHING_TO_COMMIT",
+			message: "On branch main\nnothing to commit, working tree clean",
+		});
+		const withStack = `${encoded}\n    at commitImpl (out/main/index.js:198:9)\n    at async Session.<anonymous>`;
+		expect(decodeIpcError(withStack)).toEqual({
+			kind: "GIT_NOTHING_TO_COMMIT",
+			message: "On branch main\nnothing to commit, working tree clean",
+		});
+	});
+
+	it("decodes with both Electron prefix wrap and a trailing stack", () => {
+		const encoded = encodeIpcError({ kind: "EACCES", message: "denied" });
+		const wrapped = `Error invoking remote method 'fs:read': Error: ${encoded}\n    at handler`;
+		expect(decodeIpcError(wrapped)).toEqual({ kind: "EACCES", message: "denied" });
+	});
+
+	it("extracts the JSON object even when the message value contains braces", () => {
+		// message に `{` / `}` が含まれていても brace 走査は文字列リテラル内を
+		// スキップするため誤って途中で閉じない。
+		const encoded = encodeIpcError({
+			kind: "INVALID_PATH",
+			message: 'bad path: {nested} and "quoted" stuff',
+		});
+		const withStack = `${encoded}\n    at somewhere`;
+		expect(decodeIpcError(withStack)).toEqual({
+			kind: "INVALID_PATH",
+			message: 'bad path: {nested} and "quoted" stuff',
+		});
+	});
+
+	it("still returns null when the appended trailing content is the only brace", () => {
+		// JSON 本体が無く trailing しか無い（= 完結オブジェクト無し）なら null。
+		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}not json at all { unclosed`)).toBeNull();
+	});
+
 	it("returns null when required fields are missing", () => {
 		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}{"message":"no kind"}`)).toBeNull();
 	});
