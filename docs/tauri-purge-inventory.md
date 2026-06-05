@@ -12,7 +12,7 @@
 
 ### 1.1 Rust `invoke_handler!` 32 コマンド
 
-旧版 `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs::invoke_handler!` 登録順。新版 IPC channel は `electron/preload/index.ts` を、ハンドラは `electron/main/ipc/*.ts` を参照。
+旧版 `~/development/tools/scripta/src-tauri/src/lib.rs::invoke_handler!` 登録順。新版 IPC channel は `electron/preload/index.ts` を、ハンドラは `electron/main/ipc/*.ts` を参照。
 
 #### File 系 (10)
 
@@ -91,7 +91,7 @@
 
 ### 1.2 旧 frontend `@tauri-apps/*` API → 新版 mapping
 
-旧版 `/Users/nakiym/development/tools/scripta/src/` で使われていた import を新版 `window.api` / Web 標準 API への置換と対応付け。
+旧版 `~/development/tools/scripta/src/` で使われていた import を新版 `window.api` / Web 標準 API への置換と対応付け。
 
 | 旧 import | 旧用途 | 新 API | 備考 |
 |---|---|---|---|

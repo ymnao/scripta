@@ -4,8 +4,7 @@
 >
 > このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta-tauri`、現在は private）を **Electron へ全書き直し** したプロジェクト。
 >
-> 旧リポジトリ（参照専用、ローカル）: `/Users/nakiym/development/tools/scripta`
-> 機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
+> 機能的なリファレンス・既存実装の参照元として、ローカル clone（`~/development/tools/scripta`）を参照する。新規実装は本リポジトリ側に行う。
 
 ## プロジェクト概要
 
@@ -228,13 +227,13 @@ pnpm check:legacy-residue
 
 ## 旧リポジトリ参照ガイド
 
-旧 scripta（Tauri 版）の実装を参照したい場合は絶対パスで読み出す。
+旧 scripta（Tauri 版）の実装を参照したい場合は、ローカル clone（`~/development/tools/scripta` 等、各自の clone path）から読み出す。
 
 ```
-/Users/nakiym/development/tools/scripta/src/...        # フロントエンド（流用元）
-/Users/nakiym/development/tools/scripta/src-tauri/...  # Rust バックエンド（再実装の参考に）
-/Users/nakiym/development/tools/scripta/docs/...       # 旧仕様書・実装手順書
-/Users/nakiym/development/tools/scripta/e2e/...        # 旧 e2e テスト（流用元）
+<旧 scripta clone>/src/...        # フロントエンド（流用元）
+<旧 scripta clone>/src-tauri/...  # Rust バックエンド（再実装の参考に）
+<旧 scripta clone>/docs/...       # 旧仕様書・実装手順書
+<旧 scripta clone>/e2e/...        # 旧 e2e テスト（流用元）
 ```
 
-旧リポジトリは引き続き本番稼働中のため、**書き換えは行わない**（参照専用）。
+旧リポジトリは参照専用（**書き換えは行わない**）。
