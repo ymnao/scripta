@@ -75,9 +75,20 @@ export function encodeIpcError(data: StructuredErrorData): string {
 // sentinel 直後の文字列から、最初の完結した JSON オブジェクト（`{...}`）だけを
 // 取り出す。文字列リテラル内の `{` / `}` とエスケープを考慮した brace 走査なので、
 // message 値に波括弧が含まれても誤検出しない。見つからなければ null。
+//
+// 先頭は `JSON.parse` と整合的に whitespace のみ許容し、最初の非 whitespace は `{`
+// を要求する。これにより sentinel 直後に任意の garbage がある payload
+// （例: `SCRIPTA_STRUCTURED_ERR:not-json{"kind":"NETWORK"}`）を decoder の trust
+// 境界として弾く。本 fallback の目的は「valid な sentinel + JSON の末尾に Electron
+// の stack が連結したケース」だけを救うこと。
 function extractFirstJsonObject(s: string): string | null {
-	const start = s.indexOf("{");
-	if (start === -1) return null;
+	let start = 0;
+	while (start < s.length) {
+		const ch = s[start];
+		if (ch !== " " && ch !== "\t" && ch !== "\n" && ch !== "\r") break;
+		start++;
+	}
+	if (s[start] !== "{") return null;
 	let depth = 0;
 	let inString = false;
 	let escaped = false;

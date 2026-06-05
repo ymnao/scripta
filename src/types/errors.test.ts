@@ -79,6 +79,25 @@ describe("encodeIpcError / decodeIpcError", () => {
 		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}not json at all { unclosed`)).toBeNull();
 	});
 
+	it("rejects garbage between the sentinel and the JSON object (fallback trust boundary)", () => {
+		// fallback は「valid な sentinel + JSON の末尾に Electron の stack が連結した
+		// ケース」だけを救う。sentinel 直後に任意の garbage を許すと、未ラップの IPC や
+		// user-controlled な raw message が混入したときに UI 表示や retry 判定を誤分類
+		// する余地ができる。先頭は JSON.parse と整合的に whitespace のみ許容する。
+		const validPayload = JSON.stringify({ kind: "NETWORK", message: "x" });
+		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}not json ${validPayload}`)).toBeNull();
+		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}garbage${validPayload}`)).toBeNull();
+	});
+
+	it("tolerates only leading whitespace between the sentinel and the JSON object", () => {
+		// JSON.parse と同じく先頭 whitespace は許容する。
+		const validPayload = JSON.stringify({ kind: "NETWORK", message: "x" });
+		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}  \t\n${validPayload}`)).toEqual({
+			kind: "NETWORK",
+			message: "x",
+		});
+	});
+
 	it("returns null when required fields are missing", () => {
 		expect(decodeIpcError(`${IPC_ERROR_SENTINEL}{"message":"no kind"}`)).toBeNull();
 	});
