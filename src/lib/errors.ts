@@ -7,12 +7,7 @@ import { type ErrorKind, getErrorKind, getStructuredMessage } from "../types/err
 // （contextBridge が `error.kind` プロパティを剥がすため、message 経由で運ぶ。詳細は
 // `src/types/errors.ts` の getErrorKind / getStructuredMessage と
 // `docs/adr/0008-structured-fs-error.md` を参照）。renderer は kind で分岐し、表示用の
-// 素メッセージは getStructuredMessage で取り出す。
-
-// 表示用の素メッセージ（sentinel payload を剥がした human-readable な detail）。
-// 直接 `error.message` を表示すると実 IPC 経路では sentinel 文字列が露出するため、
-// renderer で error の detail を出すときはこれを通すこと。
-export { getStructuredMessage } from "../types/errors";
+// 素メッセージは getStructuredMessage で取り出す（コンポーネントは原則 translateError を使う）。
 
 // ErrorKind → ユーザー向け日本語メッセージ。UNKNOWN は raw detail を併記するため別扱い。
 const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {

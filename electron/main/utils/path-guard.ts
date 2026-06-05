@@ -228,7 +228,7 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
-// 呼び出し側 / renderer は error.kind で 2 種類を区別できる。
+// 呼び出し側 / renderer は getErrorKind で kind を復元し 2 種類を区別できる。
 export function assertPathAllowed(windowId: number, p: string): string {
 	const target = realpathBestEffort(validatePath(p));
 	if (isWithinWindowAllowedRoot(windowId, target)) return target;

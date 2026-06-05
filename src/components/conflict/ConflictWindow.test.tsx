@@ -1,5 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { encodeIpcError } from "../../types/errors";
 
 vi.mock("../../lib/commands", () => ({
 	gitCheckRepo: vi.fn().mockResolvedValue(true),
@@ -105,14 +106,25 @@ describe("ConflictWindow", () => {
 	});
 
 	it("does not auto-close when gitGetConflictedFiles fails", async () => {
-		mockedGitGetConflictedFiles.mockRejectedValue(new Error("git not found"));
+		// 実 IPC 経路で renderer に届く形（kind が sentinel payload として message に載った
+		// Error）を模す。ConflictWindow は translateError 経由で localize して表示すること
+		// （生の sentinel 文字列を出さない＝contextBridge 対応の regression ガード）。
+		mockedGitGetConflictedFiles.mockRejectedValue(
+			new Error(
+				encodeIpcError({
+					kind: "GIT_NO_REMOTE_ACCESS",
+					message: "fatal: could not read from remote repository",
+				}),
+			),
+		);
 
 		await act(async () => {
 			render(<ConflictWindow />);
 		});
 
-		// Should show the error message, NOT auto-close
-		expect(screen.getByText("Error: git not found")).toBeInTheDocument();
+		// Should show the localized error message, NOT auto-close（生 sentinel を出さない）。
+		expect(screen.getByText("リモートリポジトリにアクセスできません")).toBeInTheDocument();
+		expect(screen.queryByText(/SCRIPTA_STRUCTURED_ERR/)).not.toBeInTheDocument();
 		expect(mockEmit).not.toHaveBeenCalled();
 		expect(mockClose).not.toHaveBeenCalled();
 	});
