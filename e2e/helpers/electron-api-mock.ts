@@ -9,7 +9,7 @@ import type { UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
 // renderer-only Playwright で `window.api` を addInitScript 注入するモック。
-// 旧 Tauri 版 `tauri-mock.ts` の Electron 移植版（参考: /Users/nakiym/development/tools/scripta/e2e/helpers/tauri-mock.ts）。
+// 旧 Tauri 版 `tauri-mock.ts` の Electron 移植版（参考: ~/development/tools/scripta/e2e/helpers/tauri-mock.ts）。
 
 export interface MockFileSystem {
 	files: Record<string, string>;

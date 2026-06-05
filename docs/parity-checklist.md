@@ -1,6 +1,6 @@
 # 機能パリティ確認チェックリスト（Tauri → Electron）
 
-> Stage 6 完了判定の一部。本リポジトリ（Electron 版）が旧 `ymnao/scripta`（Tauri 版、`/Users/nakiym/development/tools/scripta`）と同等以上であることを、リリース切り替え前に検証する。
+> Stage 6 完了判定の一部。本リポジトリ（Electron 版）が旧 `ymnao/scripta`（Tauri 版、`~/development/tools/scripta`）と同等以上であることを、リリース切り替え前に検証する。
 >
 > 各項目には **状態ラベル**（✅ 移植済 / 🟡 要実機検証 / ⚠️ 既知差分 / ⛔ 未実装）と参照ファイルパスを記載する。
 
@@ -13,7 +13,7 @@
 
 参照基準:
 
-- 旧 Tauri 版コマンド一覧: `/Users/nakiym/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（`commands::*` 31 個 + ルート定義の `clear_webview_browsing_data` で計 32）
+- 旧 Tauri 版コマンド一覧: `~/development/tools/scripta/src-tauri/src/lib.rs` の `invoke_handler!` ブロック（`commands::*` 31 個 + ルート定義の `clear_webview_browsing_data` で計 32）
 - 旧フロント側プラグイン使用: `@tauri-apps/api/{core,event,window,webviewWindow,app}` / `@tauri-apps/plugin-{shell,dialog,store}`
 - 新 Electron API 表面: `electron/preload/api.ts` の `Api` 型 + `electron/preload/index.ts` の `contextBridge.exposeInMainWorld`
 - 新フロント呼び出し: `src/lib/commands.ts` のラッパーに集約。`settings:*` 系も `commands.ts` の `settingsGet/Set/Delete/Save` 経由に統一済み（旧: `src/lib/store.ts` が `window.api.settings*` を直呼び → Phase 3 PR-3-3 で経由化、`ADR-0007`）。renderer から `window.api.*` を直呼びする箇所は無く、監査の索引は **`commands.ts` の 1 箇所**で足りる
@@ -170,7 +170,7 @@
 
 ### 既知差分
 
-- ⚠️ **`update.ts:GITHUB_API_URL`** は現在 `ymnao/scripta-next` を指している。リポジトリリネーム時に `ymnao/scripta` へ戻す必要あり（コメント記載済み、`docs/migration-plan.md` Stage 6 リリース切り替え項目で対応）。
+- ✅ **`update.ts:GITHUB_API_URL`** は `ymnao/scripta` を指している（リポジトリリネーム完了に伴い対応済み）。
 
 ### 運用方針
 
@@ -256,7 +256,7 @@
 
 ## 10. e2e テストカバレッジ
 
-| 旧 e2e（Tauri、`/Users/nakiym/development/tools/scripta/e2e/*.spec.ts`） | 新 e2e（Electron、`e2e/*.spec.ts`） | 状態 |
+| 旧 e2e（Tauri、`~/development/tools/scripta/e2e/*.spec.ts`） | 新 e2e（Electron、`e2e/*.spec.ts`） | 状態 |
 |---|---|---|
 | 23 spec（slide-view, file-watcher, settings-persistence, ...） | 同 23 spec + `smoke.spec.ts`（Stage 6-2 新規） | ✅ |
 | 旧 `playwright-tauri` 経由で実 Tauri バイナリ起動 | **2 モード並行**: renderer-only（mock 注入）+ 実 Electron 起動（`_electron.launch`, Phase 1 PR-3 で追加） | ✅ |
@@ -283,7 +283,7 @@
   - [ ] Git status / commit / pull / push が動く（§ 4 必須 #3 と兼用）
   - [ ] エクスポート全 3 形式が出力される（**PDF / HTML / Prompt(.md)**）。HTML / Prompt は workspace 外パス（例: `~/Desktop/`）への保存ダイアログ経由で、§ 5 transient write capability が機能することを確認
   - [ ] OGP リンクカードが表示される
-  - [ ] アップデートチェックが API を叩く（`update.ts` の URL は現状 `scripta-next` を指す）
+  - [ ] アップデートチェックが API を叩く（`update.ts` の URL は `ymnao/scripta` を指す）
   - [ ] ウィンドウ位置 / サイズが次回起動時に復元される
 - [x] Playwright `_electron` API ベース e2e の追加（Phase 1 PR-3, #33 / #82 C）。当初は「任意・1 本」だったが、Tauri purge（Phase 2-5）の safety net として 5 領域 + smoke を先行実装した（`e2e/electron/`）。packaged build 実機スモーク（§ 11）とは別レイヤの自動回帰検出を確立。
 
@@ -301,7 +301,7 @@
 ### 運用方針
 
 - **未署名で出荷**（旧 Tauri 版同等の方針）。コードサイニング / 公証は採用しない。macOS Gatekeeper / Windows SmartScreen の警告は受容し、README とリリースノートで起動手順を案内する。
-- `update.ts:GITHUB_API_URL` の `scripta-next` → `scripta` への切り替えはリポジトリリネーム時に行う（コード内コメントが canonical）。
+- `update.ts:GITHUB_API_URL` は `ymnao/scripta` を指す（リポジトリリネーム完了に伴い更新済み）。
 
 ---
 

@@ -11,10 +11,8 @@ import { compareSemver, parseSemver, stripVPrefix } from "../utils/semver-lite";
 // する（renderer 側 useUpdateCheck.ts は変更不要）。
 
 // 配布パイプライン (electron-builder.yml の publish / .github/workflows/release.yml の
-// gh release upload) は current repo を自動推定し ymnao/scripta-next の Release に成果物を
-// 置く。リリース切り替え (旧 ymnao/scripta を rename → 本リポを ymnao/scripta として公開)
-// のタイミングで本 URL も "scripta-next" → "scripta" に戻す必要がある。
-const GITHUB_API_URL = "https://api.github.com/repos/ymnao/scripta-next/releases/latest";
+// gh release upload) は current repo を自動推定し ymnao/scripta の Release に成果物を置く。
+const GITHUB_API_URL = "https://api.github.com/repos/ymnao/scripta/releases/latest";
 const MAX_RESPONSE_BYTES = 100 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 
