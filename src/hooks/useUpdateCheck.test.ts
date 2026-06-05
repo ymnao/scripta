@@ -45,6 +45,11 @@ describe("useUpdateCheck", () => {
 		mockedGetVersion.mockResolvedValue("0.1.0");
 		mockedLoadLastUpdateCheck.mockResolvedValue(0);
 		mockedCheckForUpdate.mockResolvedValue(noUpdate);
+		// 「saveLastUpdateCheck 待ち中にクリーンアップ…」テストで mockReturnValue を pending
+		// Promise に差し替えるため、後続テストへ leak しないよう default 実装に戻す。
+		// vi.clearAllMocks() は call history しか clear しない (実装は残る) ので
+		// 明示的に default の mockResolvedValue を再適用する。
+		mockedSaveLastUpdateCheck.mockReset().mockResolvedValue(undefined);
 		useToastStore.setState({ toasts: [] });
 	});
 

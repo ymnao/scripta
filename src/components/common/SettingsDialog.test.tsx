@@ -162,4 +162,37 @@ describe("SettingsDialog about section", () => {
 
 		expect(openExternal).toHaveBeenCalledWith(KOFI_URL);
 	});
+
+	it("「今すぐアップデートを確認」クリックで onCheckForUpdate が呼ばれる", async () => {
+		const onCheckForUpdate = vi.fn();
+		await act(async () => {
+			render(<SettingsDialog {...defaultProps} onCheckForUpdate={onCheckForUpdate} />);
+		});
+
+		await userEvent.click(screen.getByText("このアプリについて"));
+		await userEvent.click(screen.getByRole("button", { name: "今すぐアップデートを確認" }));
+
+		expect(onCheckForUpdate).toHaveBeenCalledTimes(1);
+	});
+
+	it("updateCheckInProgress=true でボタンが disabled かつ「確認中...」表示になる", async () => {
+		const onCheckForUpdate = vi.fn();
+		await act(async () => {
+			render(
+				<SettingsDialog
+					{...defaultProps}
+					onCheckForUpdate={onCheckForUpdate}
+					updateCheckInProgress={true}
+				/>,
+			);
+		});
+
+		await userEvent.click(screen.getByText("このアプリについて"));
+
+		const button = screen.getByRole("button", { name: "確認中..." });
+		expect(button).toBeDisabled();
+		// disabled state のクリックは onClick を発火させない
+		await userEvent.click(button);
+		expect(onCheckForUpdate).not.toHaveBeenCalled();
+	});
 });
