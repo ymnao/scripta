@@ -123,7 +123,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
 					// Find ListMark in parent ListItem
 					const parent = taskNode.parent;
-					if (!parent || parent.name !== "ListItem") return;
+					if (parent?.name !== "ListItem") return;
 
 					let listMarkFrom = -1;
 					const parentCursor = parent.cursor();
@@ -172,7 +172,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 				if (node.name === "ListItem") {
 					const listItemNode = node.node;
 					const parent = listItemNode.parent;
-					if (!parent || parent.name !== "BulletList") return;
+					if (parent?.name !== "BulletList") return;
 
 					// Skip if this ListItem contains a Task child
 					const itemCursor = listItemNode.cursor();
