@@ -2,15 +2,30 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { checkForUpdate, getAppVersion, openExternal } from "../lib/commands";
 import { loadLastUpdateCheck, saveLastUpdateCheck } from "../lib/store";
 import { useToastStore } from "../stores/toast";
+import type { UpdateInfo } from "../types/update";
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function formatUpdateDescription(info: UpdateInfo): string {
+	return `新しいバージョン v${info.latestVersion} が利用可能です（現在 v${info.currentVersion}）。GitHub Releases からダウンロードできます。`;
+}
 
 export function useUpdateCheck(enabled: boolean) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [description, setDescription] = useState("");
+	// state は UI 表示用、ref は trigger の race guard。React 19 でも StrictMode の
+	// 二重起動下で state 経由だと set→read 間に gap があるため両方を併用する。
 	const [manualCheckInProgress, setManualCheckInProgress] = useState(false);
 	const releaseUrlRef = useRef("");
 	const inProgressRef = useRef(false);
+
+	// auto / manual 両経路から呼ばれる dialog state 更新の single entry point。
+	// React setter は stable のため deps=[] で安定参照 (useEffect から呼ぶので memoize 必要)。
+	const applyUpdateInfo = useCallback((info: UpdateInfo) => {
+		setDescription(formatUpdateDescription(info));
+		releaseUrlRef.current = info.releaseUrl;
+		setDialogOpen(true);
+	}, []);
 
 	useEffect(() => {
 		if (!enabled) return;
@@ -31,11 +46,7 @@ export function useUpdateCheck(enabled: boolean) {
 				if (cancelled) return;
 
 				if (info.hasUpdate) {
-					setDescription(
-						`新しいバージョン v${info.latestVersion} が利用可能です（現在 v${info.currentVersion}）。GitHub Releases からダウンロードできます。`,
-					);
-					releaseUrlRef.current = info.releaseUrl;
-					setDialogOpen(true);
+					applyUpdateInfo(info);
 				}
 			} catch {
 				// ネットワークエラー等はサイレントにスキップ
@@ -45,10 +56,16 @@ export function useUpdateCheck(enabled: boolean) {
 		return () => {
 			cancelled = true;
 		};
-	}, [enabled]);
+	}, [enabled, applyUpdateInfo]);
 
-	const triggerManualCheck = useCallback(async () => {
-		// 多重起動防止。state ではなく ref で判定して再レンダー間で race しないようにする。
+	/**
+	 * 手動アップデートチェック。`enabled` (= autoUpdateCheck トグル) に関係なく
+	 * 常にネットワーク確認を行う (ユーザ明示操作なので auto 設定をオーバーライド)。
+	 * 多重起動は ref で抑止し、結果は更新あり=ダイアログ / 最新=success toast /
+	 * 失敗=error toast で通知する。24h timer も bump され、次回起動時の auto-check を
+	 * 抑制する (意図的 — 直近で手動確認した直後の再チェックは不要)。
+	 */
+	const triggerManualCheck = async (): Promise<void> => {
 		if (inProgressRef.current) return;
 		inProgressRef.current = true;
 		setManualCheckInProgress(true);
@@ -60,11 +77,7 @@ export function useUpdateCheck(enabled: boolean) {
 			void saveLastUpdateCheck(Date.now()).catch(() => {});
 
 			if (info.hasUpdate) {
-				setDescription(
-					`新しいバージョン v${info.latestVersion} が利用可能です（現在 v${info.currentVersion}）。GitHub Releases からダウンロードできます。`,
-				);
-				releaseUrlRef.current = info.releaseUrl;
-				setDialogOpen(true);
+				applyUpdateInfo(info);
 			} else {
 				useToastStore
 					.getState()
@@ -76,7 +89,7 @@ export function useUpdateCheck(enabled: boolean) {
 			inProgressRef.current = false;
 			setManualCheckInProgress(false);
 		}
-	}, []);
+	};
 
 	const dismissDialog = () => setDialogOpen(false);
 	const openReleasePage = () => {

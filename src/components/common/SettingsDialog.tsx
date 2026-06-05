@@ -22,8 +22,8 @@ interface SettingsDialogProps {
 	workspacePath?: string | null;
 	onOpenFile?: (path: string) => void;
 	onManualSync?: () => void;
-	onCheckForUpdate?: () => void;
-	updateCheckInProgress?: boolean;
+	onCheckForUpdate: () => void;
+	updateCheckInProgress: boolean;
 }
 
 const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -535,20 +535,15 @@ export function SettingsDialog({
 							checked={autoUpdateCheck}
 							onChange={setAutoUpdateCheck}
 						/>
-						{onCheckForUpdate && (
-							<button
-								type="button"
-								onClick={onCheckForUpdate}
-								disabled={updateCheckInProgress}
-								className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-bg-secondary px-3 py-2 text-xs font-medium text-text-primary hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/5"
-							>
-								<RefreshCw
-									size={12}
-									className={updateCheckInProgress ? "animate-spin" : undefined}
-								/>
-								{updateCheckInProgress ? "確認中..." : "今すぐアップデートを確認"}
-							</button>
-						)}
+						<button
+							type="button"
+							onClick={onCheckForUpdate}
+							disabled={updateCheckInProgress}
+							className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-bg-secondary px-3 py-2 text-xs font-medium text-text-primary hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/5"
+						>
+							<RefreshCw size={12} className={updateCheckInProgress ? "animate-spin" : undefined} />
+							{updateCheckInProgress ? "確認中..." : "今すぐアップデートを確認"}
+						</button>
 						<div className="rounded-md bg-bg-secondary px-4 py-3">
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								自分が使うために作っています。もし役立ったらコーヒー奢ってください。

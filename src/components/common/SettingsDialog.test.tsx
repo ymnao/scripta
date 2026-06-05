@@ -50,6 +50,8 @@ const defaultProps = {
 	onClose: vi.fn(),
 	workspacePath: "/workspace",
 	onOpenFile: vi.fn(),
+	onCheckForUpdate: vi.fn(),
+	updateCheckInProgress: false,
 };
 
 beforeEach(() => {

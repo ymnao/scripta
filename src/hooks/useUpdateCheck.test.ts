@@ -50,7 +50,6 @@ describe("useUpdateCheck", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
-		useToastStore.setState({ toasts: [] });
 	});
 
 	it("enabled=false のときチェックしない", async () => {
