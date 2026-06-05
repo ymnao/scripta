@@ -121,6 +121,8 @@ export function AppLayout() {
 		description: updateDescription,
 		dismissDialog: dismissUpdateDialog,
 		openReleasePage,
+		triggerManualCheck: triggerManualUpdateCheck,
+		manualCheckInProgress: updateCheckInProgress,
 	} = useUpdateCheck(autoUpdateCheck && !loading && !isNewWindow);
 	const [setupWizardOpen, setSetupWizardOpen] = useState(false);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -1298,6 +1300,8 @@ export function AppLayout() {
 				workspacePath={workspacePath}
 				onOpenFile={openTab}
 				onManualSync={manualSync}
+				onCheckForUpdate={() => void triggerManualUpdateCheck()}
+				updateCheckInProgress={updateCheckInProgress}
 			/>
 			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
 			{exportTarget && (

@@ -1,4 +1,4 @@
-import { Coffee, ExternalLink, Plus, X } from "lucide-react";
+import { Coffee, ExternalLink, Plus, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { openExternal, writeNewFile } from "../../lib/commands";
 import { getDefaultPromptTemplate } from "../../lib/export";
@@ -22,6 +22,8 @@ interface SettingsDialogProps {
 	workspacePath?: string | null;
 	onOpenFile?: (path: string) => void;
 	onManualSync?: () => void;
+	onCheckForUpdate: () => void;
+	updateCheckInProgress: boolean;
 }
 
 const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -212,6 +214,8 @@ export function SettingsDialog({
 	workspacePath,
 	onOpenFile,
 	onManualSync,
+	onCheckForUpdate,
+	updateCheckInProgress,
 }: SettingsDialogProps) {
 	const titleId = useId();
 	const gitAvailable = useGitSyncStore((s) => s.gitAvailable);
@@ -531,6 +535,15 @@ export function SettingsDialog({
 							checked={autoUpdateCheck}
 							onChange={setAutoUpdateCheck}
 						/>
+						<button
+							type="button"
+							onClick={onCheckForUpdate}
+							disabled={updateCheckInProgress}
+							className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-bg-secondary px-3 py-2 text-xs font-medium text-text-primary hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/5"
+						>
+							<RefreshCw size={12} className={updateCheckInProgress ? "animate-spin" : undefined} />
+							{updateCheckInProgress ? "確認中..." : "今すぐアップデートを確認"}
+						</button>
 						<div className="rounded-md bg-bg-secondary px-4 py-3">
 							<p className="text-[11px] leading-relaxed text-text-secondary">
 								自分が使うために作っています。もし役立ったらコーヒー奢ってください。
