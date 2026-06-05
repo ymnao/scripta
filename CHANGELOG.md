@@ -5,9 +5,9 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
-## [0.2.0] — 2026-05-14
+## [0.2.0] — _(unreleased)_
 
-旧 Tauri 版 [`ymnao/scripta`](https://github.com/ymnao/scripta) の **Electron への完全書き直し版**。Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite 8 + Biome を採用し、旧版とのパリティ + 新機能を提供する。
+旧 Tauri 版 `ymnao/scripta-tauri`（現在は private）の **Electron への完全書き直し版**。Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite 8 + Biome を採用し、旧版とのパリティ + 新機能を提供する。
 
 旧 Tauri 版の userData (`~/Library/Application Support/scripta/settings.json`) との互換を保持しているため、旧版から移行しても workspace / window state は引き継がれる（packaged build 限定。dev は `scripta-next` 名前空間に隔離）。
 
@@ -31,6 +31,7 @@
 - ローカル画像レンダリング用カスタムプロトコル `scripta-asset://`。`protocol.handle` + `net.fetch` 実装、CSP `img-src` に追加 (#22, #35)
 - View / Window メニュー（Reload / Toggle DevTools / Zoom / Minimize / Close）。Chromium 標準動作の補完目的 (#16)
 - ファイルツリーで隠しファイル / 除外パターンの表示制御 (#45)
+- Settings に「今すぐアップデートを確認」ボタンを追加（手動でのアップデートチェック）(#98 → #138)
 - OGP fetch の DNS rebinding 防御強化: `pinSafeLookup` で hostname を 1 度だけ resolve → `isGlobalIp` で validate → 解決済み IP を pin (#29)
 - `dialog:save` 経由の `registerTransientWritePath`: workspace 外への保存を window-scoped な短命 write capability で許可（書き込み成功で consume、window close で cleanup）
 
@@ -54,20 +55,33 @@
 - タイトルバー / タブバー UX 改善 (#41, #43)
 - 罫線 (`---`) のカーソル行で raw 表示に戻す (#42, #44)
 - `git.test.ts` の flaky なネットワークエラーテストを安定化 (#59)
+- テーブル系: セル内 paste / 境界カーソル / Cmd+Z / focusout の挙動を修正 (#88, #89, #90 → #116, #120)
+- リスト・見出し系: 番号付きリストの inline 改行 / Heading 装飾を修正 (#91, #92 → #117)
+- PDF export: Mermaid 改ページ / ハイライト改ページ / 番号付きリスト inline を修正 (#79, #93, #106 → #124, #130, #131)
+- フォント: monospace stack を Tailwind `--font-mono` に統合 (#97 → #132)
+- ファイル I/O: 末尾改行の正規化を renderer 側 `processContent` で安定化 (#100 → #134)
+- リンク UX: URL paste と md リンク / OGP カードの挙動を改善 (#96 → #135)
+- リスト Tab / Shift+Tab: list-aware なインデント + 再採番 (#118 → #136)
+- OGP fetch: AbortController で cancel 可能化 (#101 → #137)
 
 ### Dependencies
 
 主要バージョン（v0.2.0 リリース時点）:
 
-- electron 42.0.1
+- electron 42.3.3
 - react / react-dom 19.2.6
-- @codemirror/view 6.42.1 / @codemirror/autocomplete 6.20.2
+- @codemirror/view 6.43.0 / @codemirror/autocomplete 6.20.2
+- zustand 5.0.14
 - mermaid 11.15.0
+- marked 18.0.4
+- dompurify 3.4.8
+- js-yaml 4.2.0
+- lucide-react 1.17.0
 - tailwindcss 4.3.0 / @tailwindcss/vite 4.3.0
-- vite 8.0.12
-- vitest 4.1.6
+- vite 8.0.14
+- vitest 4.1.7
 - @playwright/test 1.60.0
-- @biomejs/biome 2.4.15
+- @biomejs/biome 2.4.16
 - write-file-atomic 8.0.0
 
 ### Security
@@ -83,4 +97,4 @@
 - approve リストはプロセス全体スコープ（#32 で window-scoped 化予定）
 - `realpath` は同期版（#31 で async 化予定）
 
-[0.2.0]: https://github.com/ymnao/scripta-next/releases/tag/v0.2.0
+[0.2.0]: https://github.com/ymnao/scripta/releases/tag/v0.2.0
