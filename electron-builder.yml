@@ -3,7 +3,7 @@
 # 継続は別途 electron/main/index.ts の app.setName("scripta") で行う。
 appId: com.scripta.app
 productName: scripta
-copyright: Copyright © 2025 ymnao
+copyright: Copyright © 2026 ymnao
 
 directories:
   output: release
