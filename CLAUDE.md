@@ -2,19 +2,10 @@
 
 > **このリポジトリの位置づけ**
 >
-> このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta`）を **Electron へ全書き直し** したプロジェクト。
+> このリポジトリは、Tauri v2 で実装された旧 scripta（`~/development/tools/scripta/` および GitHub `ymnao/scripta-tauri`、現在は private）を **Electron へ全書き直し** したプロジェクト。
 >
-> 旧リポジトリ（参照専用）: `/Users/nakiym/development/tools/scripta`
-> 旧リポジトリは新版への移行完了まで稼働継続するため、機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
-
-> **TODO（リポジトリリネーム時に更新、[issue #28](https://github.com/ymnao/scripta-next/issues/28)）**
->
-> 現状の作業ディレクトリ名は `scripta-next`（リネーム前）。issue #28 完了時に以下を更新する:
->
-> - 作業ディレクトリ名を `scripta` に統一
-> - GitHub remote URL: `ymnao/scripta-next` → `ymnao/scripta`（旧 Tauri 版は `ymnao/scripta-tauri` 等へリネーム）
-> - `electron/main/ipc/update.ts:GITHUB_API_URL` を `scripta` へ戻す
-> - 本 TODO blockquote 自体を削除
+> 旧リポジトリ（参照専用、ローカル）: `/Users/nakiym/development/tools/scripta`
+> 機能的なリファレンス・既存実装の参照元として活用する。新規実装は本リポジトリ側に行う。
 
 ## プロジェクト概要
 
@@ -102,7 +93,7 @@ renderer は `esnext` ではなく**実 Chromium 版**（`chrome148`）を指す
 ## アーキテクチャ概要
 
 ```
-scripta-next/
+scripta-next/                       # 作業ディレクトリ名（dev userData を本番 `scripta` から隔離する目的で `package.json:name` は scripta-next のまま）
 ├── electron/                       # Electron 本体（main / preload プロセス）
 │   ├── main/                       # メインプロセス（Node.js 実行環境）
 │   │   ├── index.ts                # エントリポイント・ウィンドウ管理

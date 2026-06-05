@@ -13,12 +13,12 @@ describe("compareVersions", () => {
 	it("hasUpdate when latest > current", () => {
 		const info = compareVersions("0.1.0", {
 			tag_name: "v1.0.0",
-			html_url: "https://github.com/ymnao/scripta-next/releases/tag/v1.0.0",
+			html_url: "https://github.com/ymnao/scripta/releases/tag/v1.0.0",
 		});
 		expect(info.hasUpdate).toBe(true);
 		expect(info.latestVersion).toBe("1.0.0");
 		expect(info.currentVersion).toBe("0.1.0");
-		expect(info.releaseUrl).toBe("https://github.com/ymnao/scripta-next/releases/tag/v1.0.0");
+		expect(info.releaseUrl).toBe("https://github.com/ymnao/scripta/releases/tag/v1.0.0");
 	});
 
 	it("no update when latest == current", () => {
