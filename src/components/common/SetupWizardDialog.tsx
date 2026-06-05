@@ -1,6 +1,7 @@
 import { FileText, FolderOpen, Settings, X } from "lucide-react";
 import { type ReactNode, useCallback, useId, useRef, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
+import { translateError } from "../../lib/errors";
 import { getDefaultPromptTemplate } from "../../lib/export";
 import {
 	fileExists,
@@ -94,12 +95,7 @@ export function SetupWizardDialog({
 			onClose();
 		} catch (err) {
 			// マーカー書き込み失敗時はダイアログを閉じず、リトライ可能にする
-			useToastStore
-				.getState()
-				.addToast(
-					"error",
-					`初期化に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-				);
+			useToastStore.getState().addToast("error", `初期化に失敗しました: ${translateError(err)}`);
 		} finally {
 			processingRef.current = false;
 			setProcessing(false);
@@ -125,9 +121,7 @@ export function SetupWizardDialog({
 						// ファイルが既に存在する場合はスキップ。
 						// 権限不足やディスクフル等で本当に作成できなかった場合は再送出。
 						if (await fileExists(path)) return false;
-						throw new Error(
-							`ファイルの作成に失敗しました: ${path}: ${err instanceof Error ? err.message : String(err)}`,
-						);
+						throw new Error(`ファイルの作成に失敗しました: ${path}: ${translateError(err)}`);
 					}
 				};
 
@@ -159,10 +153,7 @@ export function SetupWizardDialog({
 
 				onClose();
 			} catch (err) {
-				addToast(
-					"error",
-					`セットアップに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-				);
+				addToast("error", `セットアップに失敗しました: ${translateError(err)}`);
 			} finally {
 				processingRef.current = false;
 				setProcessing(false);

@@ -1,11 +1,15 @@
 // main プロセスと renderer / preload で共有する structured error の型 + ワイヤ codec。
 //
-// 背景: Electron IPC は handler の reject 時に `error.message`（と stack）しか
-// renderer へ運ばず、`error.code` / `error.kind` 等のカスタムプロパティは IPC を
-// 越えると失われる。そこで構造化エラーを `message` 文字列に JSON エンコードして
-// 運び（main: encodeIpcError）、preload で decode してプロパティへ復元する
-// （preload: decodeIpcError）。renderer は復元後の `error.kind` で分岐するため、
-// メッセージ文字列の正規表現パースは不要になる
+// 背景: Electron IPC / contextBridge は error の `message`（と stack）しか renderer へ
+// 運ばず、`error.code` / `error.kind` 等のカスタムプロパティは境界を越えると失われる
+// （ipcRenderer.invoke の reject も、preload→renderer の contextBridge も同様）。
+// そこで構造化エラーを `message` 文字列に JSON エンコードして運ぶ（main: encodeIpcError）。
+//
+// preload（ipc-error-decode）は Electron の prefix wrap / 末尾 stack を decode→再 encode で
+// 正規化し、**clean な sentinel payload を再び message に載せて** renderer へ渡す
+// （`error.kind` プロパティを付けても contextBridge で剥がれるため、kind は message 経由で運ぶ）。
+// renderer は `getErrorKind` / `getStructuredMessage` で message から kind / 表示メッセージを
+// 復元して分岐する（メッセージ文字列の正規表現パースは不要）。
 // （旧バックエンド由来の設計と移行経緯は docs/adr/0008-structured-fs-error.md を参照）。
 
 // 構造化エラーの種別（discriminated union の discriminant）。
@@ -154,13 +158,43 @@ export function decodeIpcError(message: string): StructuredErrorData | null {
 	return data;
 }
 
-// 任意の値から ErrorKind を取り出す（preload が復元時に付与した `kind` を読む）。
-// 構造化されていない値は undefined。
+// 任意の値から ErrorKind を取り出す。
+// 1. own property `kind`（テスト / mock が直接付与するケース。prototype 汚染は無視）
+// 2. それが無ければ `error.message` に埋まった sentinel payload から decode する
+//    （実 IPC 経路: contextBridge が `kind` プロパティを剥がすため、kind は preload が
+//    message へ載せ直した sentinel 経由でしか renderer に届かない）。
+// どちらも該当しなければ undefined。
 export function getErrorKind(error: unknown): ErrorKind | undefined {
-	// preload が付与する own property `kind` のみを読む（prototype 汚染で誤判定しない）。
 	if (typeof error === "object" && error !== null && Object.hasOwn(error, "kind")) {
 		const kind = (error as { kind?: unknown }).kind;
 		if (typeof kind === "string") return kind as ErrorKind;
 	}
+	const message = getRawErrorMessage(error);
+	if (message !== undefined) {
+		const decoded = decodeIpcError(message);
+		if (decoded !== null) return decoded.kind;
+	}
 	return undefined;
+}
+
+// Error / 文字列から生の message 文字列を取り出す（内部ヘルパ）。
+function getRawErrorMessage(error: unknown): string | undefined {
+	if (typeof error === "string") return error;
+	if (error instanceof Error) return error.message;
+	if (typeof error === "object" && error !== null && Object.hasOwn(error, "message")) {
+		const m = (error as { message?: unknown }).message;
+		if (typeof m === "string") return m;
+	}
+	return undefined;
+}
+
+// `error.message` に sentinel payload が埋まっていれば、その「素のメッセージ」
+// （main 側が保持した errno detail / git stderr 等）を取り出す。埋まっていなければ
+// 元の message をそのまま返す。表示や message テキスト判定はこれを通すこと
+// （実 IPC 経路では message が sentinel-encoded になっているため）。
+export function getStructuredMessage(error: unknown): string {
+	const message = getRawErrorMessage(error);
+	if (message === undefined) return String(error);
+	const decoded = decodeIpcError(message);
+	return decoded !== null ? decoded.message : message;
 }

@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { ErrorKind } from "../types/errors";
+import { type ErrorKind, encodeIpcError } from "../types/errors";
 import { isNetworkError, isTransientError, translateError } from "./errors";
 
 // preload が unmarshal 後に renderer へ渡す形（kind を持つ Error）を模す。
 function structuredError(kind: ErrorKind, message = "raw detail"): Error {
 	return Object.assign(new Error(message), { kind });
+}
+
+// 実 IPC 経路（contextBridge が kind プロパティを剥がし、kind は message の sentinel
+// payload にのみ残る）を模す。renderer はこの形で error を受け取る。
+function bridgedError(kind: ErrorKind, message = "raw detail"): Error {
+	return new Error(encodeIpcError({ kind, message }));
 }
 
 describe("translateError", () => {
@@ -75,6 +81,21 @@ describe("translateError", () => {
 	it("handles non-string non-Error values", () => {
 		expect(translateError(42)).toBe("予期しないエラーが発生しました。詳細: 42");
 	});
+
+	// 実 IPC 経路の回帰: contextBridge が kind プロパティを剥がしても、message の
+	// sentinel payload から kind を復元して正しく翻訳する。
+	it("translates a bridge-stripped error (kind only in the message payload)", () => {
+		expect(translateError(bridgedError("GIT_NOTHING_TO_COMMIT"))).toBe(
+			"コミットする変更がありません",
+		);
+		expect(translateError(bridgedError("NETWORK"))).toBe("ネットワークに接続できません");
+	});
+
+	it("shows the decoded detail (not the raw sentinel) for a bridged UNKNOWN error", () => {
+		expect(translateError(bridgedError("UNKNOWN", "boom detail"))).toBe(
+			"予期しないエラーが発生しました。詳細: boom detail",
+		);
+	});
 });
 
 describe("isTransientError", () => {
@@ -121,6 +142,11 @@ describe("isTransientError", () => {
 	it("returns true for kind-less errors (default retry)", () => {
 		expect(isTransientError(new Error("network failure"))).toBe(true);
 	});
+
+	it("classifies a bridge-stripped error via the message payload", () => {
+		expect(isTransientError(bridgedError("ENOENT"))).toBe(false);
+		expect(isTransientError(bridgedError("NETWORK"))).toBe(true);
+	});
 });
 
 describe("isNetworkError", () => {
@@ -148,5 +174,10 @@ describe("isNetworkError", () => {
 
 	it("returns false for non-string non-Error values", () => {
 		expect(isNetworkError(42)).toBe(false);
+	});
+
+	it("classifies a bridge-stripped error via the message payload", () => {
+		expect(isNetworkError(bridgedError("NETWORK"))).toBe(true);
+		expect(isNetworkError(bridgedError("GIT_AUTH"))).toBe(false);
 	});
 });

@@ -3,6 +3,7 @@ import {
 	decodeIpcError,
 	encodeIpcError,
 	getErrorKind,
+	getStructuredMessage,
 	IPC_ERROR_SENTINEL,
 	type StructuredErrorData,
 } from "./errors";
@@ -118,5 +119,44 @@ describe("getErrorKind", () => {
 	it("ignores kind inherited from the prototype chain (own property only)", () => {
 		const inherited = Object.create({ kind: "ENOENT" });
 		expect(getErrorKind(inherited)).toBeUndefined();
+	});
+
+	it("recovers kind from a sentinel-encoded message when no own kind (bridge stripped it)", () => {
+		// contextBridge は Error の kind プロパティを剥がすため、実 IPC 経路では
+		// message に載った sentinel payload からしか kind を取れない。
+		const encoded = encodeIpcError({ kind: "GIT_NOTHING_TO_COMMIT", message: "nothing" });
+		const bridged = new Error(encoded); // kind プロパティ無し（剥がされた状態を再現）
+		expect(getErrorKind(bridged)).toBe("GIT_NOTHING_TO_COMMIT");
+	});
+
+	it("prefers an own kind property over the message payload", () => {
+		const encoded = encodeIpcError({ kind: "NETWORK", message: "x" });
+		const err = Object.assign(new Error(encoded), { kind: "TIMEOUT" });
+		expect(getErrorKind(err)).toBe("TIMEOUT");
+	});
+
+	it("returns undefined for a plain (non-sentinel) message", () => {
+		expect(getErrorKind(new Error("just a normal failure"))).toBeUndefined();
+	});
+});
+
+describe("getStructuredMessage", () => {
+	it("extracts the human message from a sentinel-encoded message", () => {
+		const encoded = encodeIpcError({
+			kind: "GIT_NOTHING_TO_COMMIT",
+			message: "On branch main\nnothing to commit, working tree clean",
+		});
+		expect(getStructuredMessage(new Error(encoded))).toBe(
+			"On branch main\nnothing to commit, working tree clean",
+		);
+	});
+
+	it("returns the raw message for a non-sentinel error", () => {
+		expect(getStructuredMessage(new Error("plain failure"))).toBe("plain failure");
+	});
+
+	it("handles string and non-error inputs", () => {
+		expect(getStructuredMessage("a string")).toBe("a string");
+		expect(getStructuredMessage(42)).toBe("42");
 	});
 });

@@ -7,7 +7,7 @@ import {
 	renameEntry,
 	showInFolder,
 } from "../../lib/commands";
-import { translateError } from "../../lib/errors";
+import { getStructuredMessage, translateError } from "../../lib/errors";
 import { addTrailingSep, basename, dirname, joinPath, replaceName, SEP_RE } from "../../lib/path";
 import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useDragStore } from "../../stores/drag";
@@ -529,7 +529,7 @@ export function FileTree({
 		try {
 			await createDirectory(getScriptaDir(workspacePath));
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg = getStructuredMessage(err);
 			if (!msg.includes("Already exists")) {
 				console.error("Failed to create .scripta directory:", err);
 				useToastStore
