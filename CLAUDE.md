@@ -210,7 +210,8 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
 ```bash
 # コミット前の検証
 # (format / lint / typecheck / typecheck:e2e / unit / e2e / build)
-# CI の必須 job (lint / typecheck / test / e2e / electron-e2e / build) と parity。
+# CI の必須 job のうち electron-e2e を除いた分と parity。
+# 実 Electron e2e は別途 `pnpm test:e2e:electron` で実行する。
 pnpm verify
 ```
 

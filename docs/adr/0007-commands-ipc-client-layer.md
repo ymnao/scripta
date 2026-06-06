@@ -35,7 +35,7 @@ Issue #84（Phase 3）の PR-3-2 は当初、この疑問への対応として *
 
 - **transport との疎結合**: `window.api`（preload の形状）を renderer 全体に撒くと UI が transport に直結し、retry / logging / error 変換等の IPC 横断の関心事を後から足す際に call site を全面改修する必要が出る。client 層を 1 つ保つことでこの chokepoint を維持できる。
 - **PR-3-2 / PR-3-3 の矛盾を整合的に解消**: 両者を「完全で一貫した facade を作る」同一方向に揃えられるのは A だけである。
-- **「Tauri レガシー」の本体はラッパーの存在ではなく invoke ラッパーという暗黙の枠組み**であり、JSDoc での再定義（+ 本 ADR）で解消できる。`window.api` 呼び出しに Tauri keyword は無く、`pnpm check:legacy-residue` は既に green である。
+- **「Tauri レガシー」の本体はラッパーの存在ではなく invoke ラッパーという暗黙の枠組み**であり、JSDoc での再定義（+ 本 ADR）で解消できる。`window.api` 呼び出しに Tauri keyword は無く、legacy-residue CI ガード（v0.2.0 publish 後に撤去済み）でも green であった。
 - `CLAUDE.md`（checked-in のアーキテクチャ契約）と整合し、pre-release のリスクが最小。
 
 案 B が挙げる正当な批判（retry なし forward は `window.api` と重複する noise）は、**層の存在理由を JSDoc と本 ADR で明文化すること**で対処し、`window.api` を renderer に散らす方向は採らない。
