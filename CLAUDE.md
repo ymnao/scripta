@@ -209,14 +209,10 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
 
 ```bash
 # コミット前の検証
-# (format / lint / typecheck / typecheck:e2e / unit / e2e / build / legacy-residue)
-# CI の必須 job (lint / typecheck / test / e2e / build / legacy-residue) と parity。
-# legacy keyword (旧バックエンド由来) 残骸検出は Phase 5 (Issue #85) 完了で
-# 残骸ゼロを達成したため verify chain と CI の blocking job に合流済み。
+# (format / lint / typecheck / typecheck:e2e / unit / e2e / build)
+# CI の必須 job のうち electron-e2e を除いた分と parity。
+# 実 Electron e2e は別途 `pnpm test:e2e:electron` で実行する。
 pnpm verify
-
-# 個別実行する場合 (Issue #82 / Phase 1 PR-2 で導入、詳細は script ヘッダ参照)
-pnpm check:legacy-residue
 ```
 
 ## Issue・PR
