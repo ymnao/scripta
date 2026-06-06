@@ -14,6 +14,10 @@ export default defineConfig({
 					setupFiles: ["./src/test-setup.ts"],
 					include: ["src/**/*.test.{ts,tsx}"],
 					exclude: [...configDefaults.exclude, "e2e/**", "out/**"],
+					// Node.js 26+ の experimental localStorage が jsdom の
+					// window.localStorage を shadow する問題の回避。
+					// CI は Node 22 で無害、Node 26+ では根本原因を消す。
+					execArgv: ["--no-experimental-webstorage"],
 				},
 			},
 			{
