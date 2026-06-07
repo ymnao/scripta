@@ -939,6 +939,42 @@ describe("multi-cell selection (#119)", () => {
 		expect(ev.defaultPrevented).toBe(true);
 	});
 
+	it("Cmd+C の TSV に <br> リテラルが含まれず改行としてクォートされる", () => {
+		const tableWithBr = `| A | B |
+| --- | --- |
+| hello<br>world | x |`;
+		const view = mountEditor(tableWithBr);
+		const wrapper = getWrapper(view);
+		const cell00 = getCell(wrapper, 0, 0);
+		const cell10 = getCell(wrapper, 1, 1);
+
+		click(cell00);
+		shiftClick(cell10);
+
+		let copied = "";
+		Object.defineProperty(navigator, "clipboard", {
+			value: {
+				writeText: (t: string) => {
+					copied = t;
+					return Promise.resolve();
+				},
+			},
+			writable: true,
+			configurable: true,
+		});
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "c",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell00.dispatchEvent(ev);
+
+		expect(copied).not.toContain("<br>");
+		expect(copied).toBe('A\tB\n"hello\nworld"\tx');
+	});
+
 	it("Cmd+X でマルチセル選択時は preventDefault + セル内容クリア", () => {
 		const view = mountEditor(simpleTable);
 		const wrapper = getWrapper(view);

@@ -253,6 +253,25 @@ function hasMultiCellSelection(wrapper: HTMLElement): boolean {
 	return sel.anchor.row !== sel.head.row || sel.anchor.col !== sel.head.col;
 }
 
+function getCellPlainText(el: HTMLElement): string {
+	const parts: string[] = [];
+	for (const node of el.childNodes) {
+		if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR") {
+			parts.push("\n");
+		} else {
+			parts.push((node.textContent || "").replace(/​/g, ""));
+		}
+	}
+	return parts.join("");
+}
+
+function tsvQuote(value: string): string {
+	if (value.includes("\t") || value.includes("\n") || value.includes('"')) {
+		return `"${value.replace(/"/g, '""')}"`;
+	}
+	return value;
+}
+
 function getSelectedCellsText(wrapper: HTMLElement): string | null {
 	const sel = cellSelectionMap.get(wrapper);
 	if (!sel) return null;
@@ -264,7 +283,7 @@ function getSelectedCellsText(wrapper: HTMLElement): string | null {
 			const cell = wrapper.querySelector(
 				`[data-row="${r}"][data-col="${c}"]`,
 			) as HTMLElement | null;
-			cells.push(cell ? getCellTextContent(cell) : "");
+			cells.push(tsvQuote(cell ? getCellPlainText(cell) : ""));
 		}
 		lines.push(cells.join("\t"));
 	}
