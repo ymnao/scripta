@@ -5,7 +5,7 @@ import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildTableDecorations, tableDecoration } from "./table-decoration";
 import { createEmptyTable } from "./table-utils";
-import { insertTable, tableKeymap, tsvToMarkdownTable } from "./tables";
+import { buildTsvTableChanges, insertTable, tableKeymap, tsvToMarkdownTable } from "./tables";
 import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
 
 const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
@@ -372,5 +372,75 @@ describe("tsvToMarkdownTable", () => {
 		expect(lines[1]).toBe("| ---- | --- |");
 		// データ行: "太郎" も表示幅 4 でパディング不要
 		expect(lines[2]).toBe("| 太郎 | 20  |");
+	});
+});
+
+// ── buildTsvTableChanges (#147) ─────────────────────────
+//
+// changeByRange の挿入位置ロジックをテストする。テーブルがブロック要素として
+// 行内テキストに直結せず、前後が空行で分離されることを検証する。
+
+describe("buildTsvTableChanges", () => {
+	const simpleMd = tsvToMarkdownTable([
+		["A", "B"],
+		["1", "2"],
+	]);
+
+	/** EditorState を作り changeByRange の結果を適用して doc 文字列を返す */
+	function apply(doc: string, anchor: number, head?: number): string {
+		const sel = head != null ? EditorSelection.range(anchor, head) : EditorSelection.cursor(anchor);
+		const state = EditorState.create({
+			doc,
+			selection: EditorSelection.create([sel]),
+		});
+		return state.update(buildTsvTableChanges(state, simpleMd)).state.doc.toString();
+	}
+
+	it("空行上の空カーソルで行全体をテーブルに置き換える", () => {
+		const result = apply("above\n\nbelow", 6);
+		expect(result).toContain(simpleMd);
+		// テーブルは前後の行と空行で分離される
+		expect(result).toContain(`above\n\n${simpleMd}`);
+	});
+
+	it("非空行の行中カーソルでもテーブルは行末に挿入される", () => {
+		// "he|llo" — カーソルは行中だがテーブルは行全体の後に配置
+		const result = apply("hello", 2);
+		expect(result.startsWith("hello\n")).toBe(true);
+		expect(result).toContain(simpleMd);
+		// "llo" がテーブル最終行に直結しない
+		expect(result).not.toContain("|\nhello");
+	});
+
+	it("非空行の行末カーソルではテーブルが行の後に挿入される", () => {
+		const result = apply("hello", 5);
+		expect(result.startsWith("hello\n")).toBe(true);
+		expect(result).toContain(simpleMd);
+	});
+
+	it("行中選択の残余テキストがテーブルの後に分離される", () => {
+		// "he[ll]o" — "o" はテーブル最終行に直結せず別行へ
+		const result = apply("hello", 2, 4);
+		expect(result).toContain(simpleMd);
+		// テーブル最終行に "o" が直結しない
+		expect(result).not.toMatch(/\|o/);
+		// "o" は空行を挟んでテーブルの後に存在する
+		const tableEnd = result.indexOf(simpleMd) + simpleMd.length;
+		expect(result.slice(tableEnd)).toBe("\n\no");
+	});
+
+	it("行全体の選択ではテーブルで置換される（残余なし）", () => {
+		const result = apply("hello\nworld", 0, 5);
+		// "hello" がテーブルに置換され "world" は次行に残る
+		expect(result.startsWith(simpleMd)).toBe(true);
+		expect(result).toContain("world");
+	});
+
+	it("複数行にまたがる選択でも残余テキストが分離される", () => {
+		// "he[llo\\nwor]ld" — trailing "ld" がテーブル後に退避
+		const result = apply("hello\nworld", 2, 9);
+		expect(result).toContain(simpleMd);
+		const tableEnd = result.indexOf(simpleMd) + simpleMd.length;
+		expect(result.slice(tableEnd)).toBe("\n\nld");
 	});
 });

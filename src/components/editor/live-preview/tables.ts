@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type Extension, Prec } from "@codemirror/state";
+import { EditorSelection, type EditorState, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { getStringWidth } from "../../../lib/east-asian-width";
 import { focusCell, focusTableCellEffect, parseTsv } from "./table-decoration";
@@ -208,6 +208,65 @@ export function tsvToMarkdownTable(grid: string[][]): string {
 	return [formatRow(header), separator, ...dataRows.map(formatRow)].join("\n");
 }
 
+/**
+ * TSV ペースト時のテーブル挿入変更を構築する。
+ *
+ * 3 つのケースを処理する:
+ * 1. 空行上の空カーソル → 行全体をテーブルで置き換え
+ * 2. 非空行の空カーソル → 行末 (fromLine.to) に挿入（行中位置によらない）
+ * 3. 選択あり → 選択後の行内テキストを退避し、置換範囲を行末まで拡張
+ *
+ * ケース 2/3 はテーブル（ブロック要素）が行内テキストに直結してパース不能に
+ * なるのを防ぐ。
+ */
+export function buildTsvTableChanges(state: EditorState, md: string) {
+	return state.changeByRange((range) => {
+		const fromLine = state.doc.lineAt(range.from);
+		const toLine = state.doc.lineAt(range.to);
+
+		const onEmptyLine = range.empty && fromLine.text.trim().length === 0;
+
+		let from: number;
+		let to: number;
+		let trailing = "";
+
+		if (onEmptyLine) {
+			// 空行 → 行全体をテーブルで置き換える
+			from = fromLine.from;
+			to = fromLine.to;
+		} else if (range.empty) {
+			// 非空行の空カーソル → 行末に挿入（行中位置によらずテーブルは行の後に配置）
+			from = fromLine.to;
+			to = fromLine.to;
+		} else {
+			// 選択あり → 選択後の行内テキストを退避し、置換範囲を行末まで拡張
+			from = range.from;
+			to = toLine.to;
+			const afterSel = state.doc.sliceString(range.to, toLine.to);
+			if (afterSel.trim().length > 0) {
+				trailing = afterSel;
+			}
+		}
+
+		// テーブル前後に空行を確保（lezer がテーブルを認識するために必要）
+		const atLineStart = from === fromLine.from;
+		const prevLineBlank = fromLine.number === 1 || isLineBlank(state.doc, fromLine.number - 1);
+		const prefix = from === 0 || (atLineStart && prevLineBlank) ? "" : atLineStart ? "\n" : "\n\n";
+
+		const nextLineNum = toLine.number + 1;
+		const nextLineBlank = nextLineNum > state.doc.lines || isLineBlank(state.doc, nextLineNum);
+		// trailing がある場合は空行を挟んでテーブル後に別行として配置する。
+		// trailing が無い場合は後続行との分離のみ考慮する。
+		const suffix = trailing ? `\n\n${trailing}` : nextLineBlank ? "" : "\n";
+
+		const insert = `${prefix}${md}${suffix}`;
+		return {
+			range: EditorSelection.cursor(from + insert.length),
+			changes: { from, to, insert },
+		};
+	});
+}
+
 export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
 	paste(event: ClipboardEvent, view: EditorView) {
 		if (event.defaultPrevented) return false;
@@ -228,33 +287,7 @@ export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
 		event.preventDefault();
 
 		const md = tsvToMarkdownTable(grid);
-		const changes = state.changeByRange((range) => {
-			const fromLine = state.doc.lineAt(range.from);
-			const toLine = state.doc.lineAt(range.to);
-
-			// 空行上の空カーソル → 行全体をテーブルで置き換える
-			const onEmptyLine = range.empty && fromLine.text.trim().length === 0;
-			const from = onEmptyLine ? fromLine.from : range.from;
-			const to = onEmptyLine ? fromLine.to : range.to;
-
-			// テーブル前後に空行を確保（lezer がテーブルを認識するために必要）
-			const atLineStart = from === fromLine.from;
-			const prevLineBlank = fromLine.number === 1 || isLineBlank(state.doc, fromLine.number - 1);
-			const prefix =
-				from === 0 || (atLineStart && prevLineBlank) ? "" : atLineStart ? "\n" : "\n\n";
-
-			const nextLineNum = toLine.number + 1;
-			const suffix =
-				nextLineNum > state.doc.lines || isLineBlank(state.doc, nextLineNum) ? "" : "\n";
-
-			const insert = `${prefix}${md}${suffix}`;
-			return {
-				range: EditorSelection.cursor(from + insert.length),
-				changes: { from, to, insert },
-			};
-		});
-
-		view.dispatch({ ...changes, userEvent: "input.paste" });
+		view.dispatch({ ...buildTsvTableChanges(state, md), userEvent: "input.paste" });
 		return true;
 	},
 });
