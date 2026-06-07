@@ -340,10 +340,7 @@ describe("tsvToMarkdownTable", () => {
 	});
 
 	it("列数が不揃いでも最大列数に揃う", () => {
-		const grid = [
-			["A", "B", "C"],
-			["1"],
-		];
+		const grid = [["A", "B", "C"], ["1"]];
 		const result = tsvToMarkdownTable(grid);
 		const lines = result.split("\n");
 		// データ行もパイプ 4 本（3列分）
@@ -359,5 +356,21 @@ describe("tsvToMarkdownTable", () => {
 		const result = tsvToMarkdownTable(grid);
 		const lines = result.split("\n");
 		expect(lines).toHaveLength(4);
+	});
+
+	it("CJK 全角文字の列幅が表示幅ベースで揃う", () => {
+		const grid = [
+			["名前", "age"],
+			["太郎", "20"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		// "名前" は表示幅 4、"age" は表示幅 3 → 列幅 4 と 3
+		// ヘッダ行: "| 名前 | age |" — "名前" はパディング不要（幅4=列幅4）
+		expect(lines[0]).toBe("| 名前 | age |");
+		// 区切り行の幅がヘッダ表示幅と一致する
+		expect(lines[1]).toBe("| ---- | --- |");
+		// データ行: "太郎" も表示幅 4 でパディング不要
+		expect(lines[2]).toBe("| 太郎 | 20  |");
 	});
 });

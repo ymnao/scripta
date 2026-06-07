@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { getStringWidth } from "../../../lib/east-asian-width";
 import { focusCell, focusTableCellEffect, parseTsv } from "./table-decoration";
 import { createEmptyTable, isLineBlank } from "./table-utils";
 
@@ -188,14 +189,19 @@ export function tsvToMarkdownTable(grid: string[][]): string {
 	const colCount = Math.max(...grid.map((row) => row.length));
 	const escapeCell = (s: string) => s.replace(/\|/g, "\\|").trim();
 
+	// 表示幅ベースで列幅を計算（CJK 全角文字を 2 カラムとして扱う）
 	const widths = Array.from({ length: colCount }, (_, c) =>
-		Math.max(3, ...grid.map((row) => (c < row.length ? escapeCell(row[c]).length : 0))),
+		Math.max(3, ...grid.map((row) => (c < row.length ? getStringWidth(escapeCell(row[c])) : 0))),
 	);
 
-	const formatRow = (row: string[]) =>
-		`| ${Array.from({ length: colCount }, (_, c) =>
-			(c < row.length ? escapeCell(row[c]) : "").padEnd(widths[c]),
-		).join(" | ")} |`;
+	const formatRow = (row: string[]) => {
+		const parts = Array.from({ length: colCount }, (_, c) => {
+			const content = c < row.length ? escapeCell(row[c]) : "";
+			const pad = widths[c] - getStringWidth(content);
+			return content + " ".repeat(Math.max(0, pad));
+		});
+		return `| ${parts.join(" | ")} |`;
+	};
 
 	const separator = `| ${widths.map((w) => "-".repeat(w)).join(" | ")} |`;
 	const [header, ...dataRows] = grid;
@@ -213,7 +219,8 @@ export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
 		if (active instanceof HTMLElement && active.closest(".cm-table-widget")) return false;
 
 		const { state } = view;
-		if (isPosInCodeOrTable(state, state.selection.main.head)) return false;
+		// いずれかの range がコード / テーブル内なら plain paste に委ねる
+		if (state.selection.ranges.some((r) => isPosInCodeOrTable(state, r.from))) return false;
 
 		const grid = parseTsv(text);
 		if (grid.length === 0) return false;
@@ -221,21 +228,33 @@ export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
 		event.preventDefault();
 
 		const md = tsvToMarkdownTable(grid);
-		const pos = state.selection.main.head;
-		const line = state.doc.lineAt(pos);
-		const onEmptyLine = line.text.trim().length === 0;
-		const insertFrom = onEmptyLine ? line.from : line.to;
-		const prevLineBlank = line.number === 1 || isLineBlank(state.doc, line.number - 1);
-		const prefix = onEmptyLine ? (prevLineBlank ? "" : "\n") : "\n\n";
-		const suffix = isLineBlank(state.doc, line.number + 1) ? "" : "\n";
-		const insert = `${prefix}${md}${suffix}`;
+		const changes = state.changeByRange((range) => {
+			const fromLine = state.doc.lineAt(range.from);
+			const toLine = state.doc.lineAt(range.to);
 
-		view.dispatch({
-			changes: { from: insertFrom, to: onEmptyLine ? line.to : insertFrom, insert },
-			selection: EditorSelection.cursor(insertFrom + insert.length),
-			userEvent: "input.paste",
+			// 空行上の空カーソル → 行全体をテーブルで置き換える
+			const onEmptyLine = range.empty && fromLine.text.trim().length === 0;
+			const from = onEmptyLine ? fromLine.from : range.from;
+			const to = onEmptyLine ? fromLine.to : range.to;
+
+			// テーブル前後に空行を確保（lezer がテーブルを認識するために必要）
+			const atLineStart = from === fromLine.from;
+			const prevLineBlank = fromLine.number === 1 || isLineBlank(state.doc, fromLine.number - 1);
+			const prefix =
+				from === 0 || (atLineStart && prevLineBlank) ? "" : atLineStart ? "\n" : "\n\n";
+
+			const nextLineNum = toLine.number + 1;
+			const suffix =
+				nextLineNum > state.doc.lines || isLineBlank(state.doc, nextLineNum) ? "" : "\n";
+
+			const insert = `${prefix}${md}${suffix}`;
+			return {
+				range: EditorSelection.cursor(from + insert.length),
+				changes: { from, to, insert },
+			};
 		});
 
+		view.dispatch({ ...changes, userEvent: "input.paste" });
 		return true;
 	},
 });
