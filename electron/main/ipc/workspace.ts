@@ -25,11 +25,8 @@ const approvedWorkspacePaths = new Map<number, Set<string>>();
 
 export async function approveWorkspacePath(webContentsId: number, rawPath: string): Promise<void> {
 	const canonical = await canonicalize(rawPath);
-	let set = approvedWorkspacePaths.get(webContentsId);
-	if (set === undefined) {
-		set = new Set<string>();
-		approvedWorkspacePaths.set(webContentsId, set);
-	}
+	const set = approvedWorkspacePaths.get(webContentsId) ?? new Set<string>();
+	approvedWorkspacePaths.set(webContentsId, set);
 	set.add(canonical);
 }
 
@@ -150,13 +147,8 @@ export const __testing = {
 	setActiveWorkspaceForWindow,
 	unregisterWindow,
 	getWindowWorkspaces: (): Map<number, string> => new Map(windowWorkspaces),
-	getApprovedWorkspacePaths: (): Map<number, Set<string>> => {
-		const copy = new Map<number, Set<string>>();
-		for (const [id, set] of approvedWorkspacePaths) {
-			copy.set(id, new Set(set));
-		}
-		return copy;
-	},
+	getApprovedWorkspacePaths: (): Map<number, Set<string>> =>
+		structuredClone(approvedWorkspacePaths),
 	getVolatileWorkspacePersistenceWindows: (): Set<number> =>
 		new Set(volatileWorkspacePersistenceWindows),
 	reset: (): void => {
