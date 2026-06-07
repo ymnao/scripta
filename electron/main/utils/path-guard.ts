@@ -166,8 +166,8 @@ export async function registerTransientWritePath(windowId: number, p: string): P
 //
 // fs:write / fs:write-new は成功時に毎回これを呼ぶため、transient 未登録の
 // 通常保存（workspace 内 write）が hot path。
-//   1. 該当 window の Set が無ければ即 false（realpathSync を走らせない）
-//   2. ある場合も「canonical 前提」なので追加の realpathSync 呼び出しは不要
+//   1. 該当 window の Set が無ければ即 false（realpath を走らせない）
+//   2. ある場合も「canonical 前提」なので追加の realpath 呼び出しは不要
 // により hot path で realpath syscall を回避する。
 export function consumeTransientWritePath(windowId: number, canonicalPath: string): boolean {
 	const set = transientWritePaths.get(windowId);
