@@ -444,7 +444,10 @@ function applyPasteText(
 function handleCellMouseDown(e: MouseEvent, view: EditorView, wrapper: HTMLElement): void {
 	if (e.button !== 0) return;
 	const coord = cellCoordFromElement(e.target as Element);
-	if (!coord) return;
+	if (!coord) {
+		getFocusedCell(wrapper)?.blur();
+		return;
+	}
 
 	if (e.shiftKey) {
 		e.preventDefault();
@@ -734,15 +737,9 @@ class EditableTableWidget extends WidgetType {
 		) {
 			return false;
 		}
-		// セル外（padding 帯）のクリックはエディタに委譲し、カーソル配置を可能にする
-		if (e instanceof MouseEvent) {
-			const target = e.target;
-			const element =
-				target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
-			if (!element?.closest("td, th")) {
-				return false;
-			}
-		}
+		// セル外（padding 帯・テーブル右余白）のクリックはウィジェット側で消費し、
+		// CM がカーソルをウィジェット境界に置いて巨大キャレットを描画するのを防ぐ (#146)。
+		// handleCellMouseDown 側でフォーカスセルの blur を行う。
 		return true;
 	}
 
@@ -1584,29 +1581,34 @@ const tableAtomicRanges = EditorView.atomicRanges.of(
 );
 
 /**
- * 「実際に widget 化されているテーブル」の末尾境界（newDoc 座標）の集合を返す。
+ * 「実際に widget 化されているテーブル」の先頭・末尾境界（newDoc 座標）を返す。
  * tr.state は tr 適用後の state を遅延計算し、その過程で tableDecorationField の update も
  * 走るので、newDoc の現実の decoration が得られる。これにより
- *  - この transaction で削除されたテーブルの古い末尾が拾われ続けない（stale 退避防止）
- *  - この transaction で新規に作られたテーブルの末尾も拾える（新規テーブル境界の取りこぼし防止）
+ *  - この transaction で削除されたテーブルの古い境界が拾われ続けない（stale 退避防止）
+ *  - この transaction で新規に作られたテーブルの境界も拾える（取りこぼし防止）
  */
-function trailingEndsOfTables(tr: Transaction): Set<number> {
+function tableBoundaries(tr: Transaction): { starts: Set<number>; ends: Set<number> } {
 	const decos = tr.state.field(tableDecorationField, false);
+	const starts = new Set<number>();
 	const ends = new Set<number>();
-	if (!decos) return ends;
+	if (!decos) return { starts, ends };
 	const iter = decos.iter();
 	while (iter.value) {
+		starts.add(iter.from);
 		ends.add(iter.to);
 		iter.next();
 	}
-	return ends;
+	return { starts, ends };
 }
 
 /**
- * テーブル末尾境界に来たカーソルを次行先頭へ退避し、巨大キャレットを防ぐ。テーブルが
- * EOF で終わる（直下に行が無い）場合は改行を 1 つだけ補ってそこへ退避する（テーブル
- * 直下に常に編集可能な行を確保する不変条件。余分な空行は作らない / git 用の末尾改行は
- * 別概念で save 時の processContent が担う）。
+ * テーブル境界に来たカーソルを退避し、巨大キャレットを防ぐ。
+ *
+ * - 末尾境界（to）→ 次行先頭へ。テーブルが EOF なら改行を 1 つ補う。
+ * - 先頭境界（from）→ 前行末尾へ。テーブルが DOC 先頭なら改行を 1 つ補う。
+ *
+ * 改行補填はテーブル直上/直下に常に編集可能な行を確保する不変条件（余分な空行は
+ * 作らない / git 用の末尾改行は別概念で save 時の processContent が担う）。
  */
 const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	if (!tr.selection) return tr;
@@ -1616,31 +1618,42 @@ const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	const ev = tr.annotation(Transaction.userEvent);
 	if (ev === "undo" || ev === "redo") return tr;
 
-	const trailingEnds = trailingEndsOfTables(tr);
-	if (trailingEnds.size === 0) return tr;
+	const { starts, ends } = tableBoundaries(tr);
+	if (starts.size === 0) return tr;
 
 	const doc = tr.newDoc;
 	let appendNewlineAt: number | null = null;
+	let prependNewlineAt: number | null = null;
 	let modified = false;
 	const ranges = tr.selection.ranges.map((range) => {
-		if (!range.empty || !trailingEnds.has(range.head)) return range;
+		if (!range.empty) return range;
 
-		modified = true;
-		// 直下に行が無い（テーブルが EOF）なら改行を 1 つ補う。退避先は補った行頭になる。
-		if (range.head === doc.length) appendNewlineAt = range.head;
-		return EditorSelection.cursor(range.head + 1);
+		if (ends.has(range.head)) {
+			modified = true;
+			if (range.head === doc.length) appendNewlineAt = range.head;
+			return EditorSelection.cursor(range.head + 1);
+		}
+
+		if (starts.has(range.head)) {
+			modified = true;
+			if (range.head === 0) {
+				prependNewlineAt = 0;
+				return EditorSelection.cursor(0);
+			}
+			return EditorSelection.cursor(range.head - 1);
+		}
+
+		return range;
 	});
 
 	if (!modified) return tr;
 	const selection = EditorSelection.create(ranges, tr.selection.mainIndex);
 
-	// 追加 spec の selection は `sequential: true` で post-merged-changes 座標として扱う。
-	// これで docChanged（削除をまたぐ前方退避）でも changes でマップされない。EOF の場合は
-	// 直下に改行も 1 つ補う。
 	const extra: TransactionSpec = { selection, sequential: true };
-	if (appendNewlineAt !== null) {
-		extra.changes = { from: appendNewlineAt, insert: "\n" };
-	}
+	const changes: { from: number; insert: string }[] = [];
+	if (prependNewlineAt !== null) changes.push({ from: prependNewlineAt, insert: "\n" });
+	if (appendNewlineAt !== null) changes.push({ from: appendNewlineAt, insert: "\n" });
+	if (changes.length > 0) extra.changes = changes;
 	return [tr, extra];
 });
 

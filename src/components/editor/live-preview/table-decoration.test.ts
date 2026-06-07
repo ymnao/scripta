@@ -96,22 +96,22 @@ describe("buildTableDecorations", () => {
 			expect(widget.ignoreEvent(event)).toBe(true);
 		});
 
-		it("セル外（padding 帯）クリックは false を返す（エディタに委譲）", () => {
+		it("セル外（padding 帯）クリックは true を返す（巨大キャレット防止 #146）", () => {
 			const widget = getWidget();
 			const div = document.createElement("div");
 			const event = new MouseEvent("mousedown", { bubbles: true });
 			Object.defineProperty(event, "target", { value: div });
-			expect(widget.ignoreEvent(event)).toBe(false);
+			expect(widget.ignoreEvent(event)).toBe(true);
 		});
 
-		it("セル外の Text ノードは false を返す（エディタに委譲）", () => {
+		it("セル外の Text ノードは true を返す（巨大キャレット防止 #146）", () => {
 			const widget = getWidget();
 			const div = document.createElement("div");
 			const text = document.createTextNode("hello");
 			div.appendChild(text);
 			const event = new MouseEvent("mousedown", { bubbles: true });
 			Object.defineProperty(event, "target", { value: text });
-			expect(widget.ignoreEvent(event)).toBe(false);
+			expect(widget.ignoreEvent(event)).toBe(true);
 		});
 
 		it("セル内の Text ノードは parentElement 経由で true を返す", () => {
