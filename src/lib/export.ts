@@ -1,4 +1,5 @@
 import { katexInlineCss } from "../generated/katex-inline-css";
+import { buildFence } from "./code-fence";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
@@ -525,13 +526,7 @@ export async function exportAsPdf(
 	return true;
 }
 
-export function buildFence(content: string): string {
-	let max = 2;
-	for (const m of content.matchAll(/`{3,}/g)) {
-		if (m[0].length > max) max = m[0].length;
-	}
-	return "`".repeat(max + 1);
-}
+export { buildFence } from "./code-fence";
 
 export function getDefaultPromptTemplate(): string {
 	return `# HTML変換プロンプト

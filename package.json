@@ -14,7 +14,7 @@
 		"dev:e2e": "vite --config vite.config.e2e.ts",
 		"build": "node scripts/generate-katex-css.js && electron-vite build",
 		"preview": "node node_modules/electron/install.js && electron-vite preview",
-		"dist": "node node_modules/electron/install.js && electron-vite build && electron-builder --publish never",
+		"dist": "node node_modules/electron/install.js && node scripts/generate-katex-css.js && electron-vite build && electron-builder --publish never",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
@@ -24,7 +24,7 @@
 		"test:watch": "vitest",
 		"test:e2e": "node node_modules/electron/install.js && playwright test",
 		"test:e2e:ui": "node node_modules/electron/install.js && playwright test --ui",
-		"test:e2e:electron": "node node_modules/electron/install.js && electron-vite build && playwright test --config=playwright.electron.config.ts",
+		"test:e2e:electron": "node node_modules/electron/install.js && node scripts/generate-katex-css.js && electron-vite build && playwright test --config=playwright.electron.config.ts",
 		"verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm typecheck:e2e && pnpm test && pnpm test:e2e && pnpm build"
 	},
 	"dependencies": {
