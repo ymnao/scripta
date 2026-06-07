@@ -168,21 +168,31 @@ export const tableKeymap: Extension = Prec.high(
 
 // ── TSV paste → Markdown table (#147) ────────────────
 
-function isPosInCodeOrTable(state: Parameters<typeof syntaxTree>[0], pos: number): boolean {
-	let node = syntaxTree(state).resolveInner(pos);
-	while (node) {
-		if (
-			node.name === "FencedCode" ||
-			node.name === "CodeBlock" ||
-			node.name === "InlineCode" ||
-			node.name === "Table"
-		) {
-			return true;
-		}
-		if (!node.parent) break;
-		node = node.parent;
-	}
-	return false;
+/** 指定範囲 [from, to] が FencedCode / CodeBlock / InlineCode / Table ノードと重なるか判定する。
+ *  from === to（空カーソル）でもその位置を含むノードを検出する。 */
+function rangeOverlapsCodeOrTable(
+	state: Parameters<typeof syntaxTree>[0],
+	from: number,
+	to: number,
+): boolean {
+	let found = false;
+	syntaxTree(state).iterate({
+		from,
+		to,
+		enter(node) {
+			if (found) return false;
+			if (
+				node.name === "FencedCode" ||
+				node.name === "CodeBlock" ||
+				node.name === "InlineCode" ||
+				node.name === "Table"
+			) {
+				found = true;
+				return false;
+			}
+		},
+	});
+	return found;
 }
 
 export function tsvToMarkdownTable(grid: string[][]): string {
@@ -278,8 +288,9 @@ export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
 		if (active instanceof HTMLElement && active.closest(".cm-table-widget")) return false;
 
 		const { state } = view;
-		// いずれかの range がコード / テーブル内なら plain paste に委ねる
-		if (state.selection.ranges.some((r) => isPosInCodeOrTable(state, r.from))) return false;
+		// いずれかの range がコード / 既存テーブルと重なるなら plain paste に委ねる
+		if (state.selection.ranges.some((r) => rangeOverlapsCodeOrTable(state, r.from, r.to)))
+			return false;
 
 		const grid = parseTsv(text);
 		if (grid.length === 0) return false;
