@@ -1047,6 +1047,24 @@ describe("multi-cell selection (#119)", () => {
 		expect(view.state.doc.line(1).text).toBe("| X | Y |");
 		expect(view.state.doc.line(3).text).toBe("| Z | W |");
 	});
+
+	it("マルチセル選択中の plain text ペーストが選択矩形の左上セルに挿入される", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+
+		click(getCell(wrapper, 1, 1));
+		shiftClick(getCell(wrapper, 0, 0));
+
+		const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(pasteEvent, "clipboardData", {
+			value: { getData: () => "PASTED" },
+		});
+		getCell(wrapper, 1, 1).dispatchEvent(pasteEvent);
+
+		expect(getCell(wrapper, 0, 0).textContent).toBe("PASTED");
+		expect(view.state.doc.line(1).text).toBe("| PASTED | B |");
+		expect(view.state.doc.line(3).text).toBe("| 1 | 2 |");
+	});
 });
 
 describe("parseTsv", () => {

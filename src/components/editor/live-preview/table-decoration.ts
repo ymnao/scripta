@@ -347,6 +347,34 @@ export function parseTsv(text: string): string[][] {
 	return rows;
 }
 
+// DOM 上の指定行を読み取り、markdown 行との差分を 1 トランザクションで反映する。
+// pasteTsvGrid / clearSelectedCellContents の共通バックエンド。
+function syncRowsToDoc(wrapper: HTMLElement, view: EditorView, rows: number[]): void {
+	const tableNode = getTableNodeFor(view, wrapper);
+	if (!tableNode) return;
+	const changes: { from: number; to: number; insert: string }[] = [];
+	for (const r of rows) {
+		const lineOffset = widgetRowToLineOffset(r);
+		const lineNum = tableNode.startLine + lineOffset;
+		if (lineNum > view.state.doc.lines) continue;
+		const docLine = view.state.doc.line(lineNum);
+		const trEl = wrapper.querySelectorAll("tr")[r];
+		if (!trEl) continue;
+		const cellContents: string[] = [];
+		for (const td of trEl.querySelectorAll("th, td")) {
+			cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
+		}
+		const newLine = `| ${cellContents.join(" | ")} |`;
+		if (newLine !== view.state.doc.sliceString(docLine.from, docLine.to)) {
+			changes.push({ from: docLine.from, to: docLine.to, insert: newLine });
+		}
+	}
+	if (changes.length > 0) {
+		anchorEditorToTable(view, tableNode);
+		view.dispatch({ changes });
+	}
+}
+
 function pasteTsvGrid(
 	wrapper: HTMLElement,
 	view: EditorView,
@@ -359,6 +387,7 @@ function pasteTsvGrid(
 	const maxRow = data.rows.length - 1;
 	const maxCol = colCountOf(data) - 1;
 
+	const affectedRows: number[] = [];
 	for (let r = 0; r < grid.length; r++) {
 		const tr = startRow + r;
 		if (tr > maxRow) break;
@@ -370,30 +399,10 @@ function pasteTsvGrid(
 			) as HTMLElement | null;
 			if (cell) setCellContent(cell, grid[r][c].replace(/\n/g, "<br>"));
 		}
+		affectedRows.push(tr);
 	}
 
-	const tableNode = getTableNodeFor(view, wrapper);
-	if (!tableNode) return;
-	const changes: { from: number; to: number; insert: string }[] = [];
-	for (let r = 0; r < grid.length; r++) {
-		const tr = startRow + r;
-		if (tr > maxRow) break;
-		const lineOffset = widgetRowToLineOffset(tr);
-		const lineNum = tableNode.startLine + lineOffset;
-		if (lineNum > view.state.doc.lines) continue;
-		const docLine = view.state.doc.line(lineNum);
-		const trEl = wrapper.querySelectorAll("tr")[tr];
-		if (!trEl) continue;
-		const cellContents: string[] = [];
-		for (const td of trEl.querySelectorAll("th, td")) {
-			cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
-		}
-		const newLine = `| ${cellContents.join(" | ")} |`;
-		if (newLine !== view.state.doc.sliceString(docLine.from, docLine.to)) {
-			changes.push({ from: docLine.from, to: docLine.to, insert: newLine });
-		}
-	}
-	if (changes.length > 0) view.dispatch({ changes });
+	syncRowsToDoc(wrapper, view, affectedRows);
 }
 
 function clearSelectedCellContents(wrapper: HTMLElement, view: EditorView): void {
@@ -410,35 +419,36 @@ function clearSelectedCellContents(wrapper: HTMLElement, view: EditorView): void
 		}
 	}
 
-	// 全行分の変更を 1 トランザクションにまとめる（行ごとに dispatch すると
-	// updateDOM が途中行の DOM を元の値で上書きしてしまう）
-	const tableNode = getTableNodeFor(view, wrapper);
-	if (!tableNode) return;
-	const changes: { from: number; to: number; insert: string }[] = [];
-	for (let r = minRow; r <= maxRow; r++) {
-		const lineOffset = widgetRowToLineOffset(r);
-		const lineNum = tableNode.startLine + lineOffset;
-		if (lineNum > view.state.doc.lines) continue;
-		const docLine = view.state.doc.line(lineNum);
-		const trs = wrapper.querySelectorAll("tr");
-		const tr = trs[r];
-		if (!tr) continue;
-		const cellContents: string[] = [];
-		for (const td of tr.querySelectorAll("th, td")) {
-			cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
-		}
-		const newLine = `| ${cellContents.join(" | ")} |`;
-		if (newLine !== view.state.doc.sliceString(docLine.from, docLine.to)) {
-			changes.push({ from: docLine.from, to: docLine.to, insert: newLine });
-		}
-	}
-	if (changes.length > 0) view.dispatch({ changes });
+	const rows: number[] = [];
+	for (let r = minRow; r <= maxRow; r++) rows.push(r);
+	syncRowsToDoc(wrapper, view, rows);
 }
 
 function cellCoordFromElement(el: Element | null): CellCoord | null {
 	const cell = el?.closest?.("[data-row][data-col]") as HTMLElement | null;
 	if (!cell) return null;
 	return { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
+}
+
+function applyPasteText(
+	wrapper: HTMLElement,
+	view: EditorView,
+	text: string,
+	coord: CellCoord,
+	replaceCell = false,
+): void {
+	if (text.includes("\t")) {
+		pasteTsvGrid(wrapper, view, parseTsv(text), coord.row, coord.col);
+	} else {
+		const sanitized = sanitizePasteText(text);
+		if (!sanitized) return;
+		const target = wrapper.querySelector(
+			`[data-row="${coord.row}"][data-col="${coord.col}"]`,
+		) as HTMLElement | null;
+		if (!target) return;
+		if (replaceCell) target.textContent = "";
+		pasteIntoCell(target, sanitized, view, wrapper);
+	}
 }
 
 // ── Drag selection ───────────────────────────────────
@@ -550,6 +560,17 @@ function getTableNodeFor(view: EditorView, wrapperEl: HTMLElement) {
 	const pos = widgetPositions.get(wrapperEl);
 	if (pos === undefined) return null;
 	return findTableNode(view.state, pos);
+}
+
+// undo 時のカーソル復元先がテーブル付近になるよう、changes dispatch の前に
+// CM6 の選択位置をテーブル先頭へ移動する（history には載せない）。
+function anchorEditorToTable(view: EditorView, tableNode: { startLine: number }): void {
+	const anchor = view.state.doc.line(tableNode.startLine).from;
+	if (view.state.selection.main.head === anchor) return;
+	view.dispatch({
+		selection: EditorSelection.cursor(anchor),
+		annotations: Transaction.addToHistory.of(false),
+	});
 }
 
 export function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
@@ -781,28 +802,21 @@ class EditableTableWidget extends WidgetType {
 			const raw = e.clipboardData?.getData("text/plain") ?? "";
 			if (!raw) return;
 
-			if (raw.includes("\t")) {
-				const grid = parseTsv(raw);
-				const sel = cellSelectionMap.get(wrapper);
-				const target = e.target instanceof Element ? e.target : null;
-				const anchor = sel
-					? {
-							row: Math.min(sel.anchor.row, sel.head.row),
-							col: Math.min(sel.anchor.col, sel.head.col),
-						}
-					: cellCoordFromElement(getFocusedCell(wrapper) ?? target);
-				clearCellSelection(wrapper);
-				if (!anchor) return;
-				pasteTsvGrid(wrapper, view, grid, anchor.row, anchor.col);
-				return;
-			}
-
+			const sel = cellSelectionMap.get(wrapper);
+			const coord = sel
+				? {
+						row: Math.min(sel.anchor.row, sel.head.row),
+						col: Math.min(sel.anchor.col, sel.head.col),
+					}
+				: cellCoordFromElement(
+						getFocusedCell(wrapper) ??
+							(e.target instanceof Element ? e.target : null)?.closest?.("th, td") ??
+							null,
+					);
+			const hadSelection = !!sel;
 			clearCellSelection(wrapper);
-			const sanitized = sanitizePasteText(raw);
-			if (!sanitized) return;
-			const cell = getFocusedCell(wrapper);
-			if (!cell) return;
-			pasteIntoCell(cell, sanitized, view, wrapper);
+			if (!coord) return;
+			applyPasteText(wrapper, view, raw, coord, hadSelection);
 		});
 		wrapper.addEventListener("compositionstart", () => {
 			compositionState.set(wrapper, { active: true, composing: true });
@@ -949,23 +963,13 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	if (e.metaKey || e.ctrlKey) {
 		const key = e.key.toLowerCase();
 		if (key === "v") return;
-		if (key === "c") {
+		if (key === "c" || key === "x") {
 			if (hasMultiCellSelection(wrapperEl)) {
 				e.preventDefault();
 				e.stopPropagation();
 				const text = getSelectedCellsText(wrapperEl);
 				if (text) navigator.clipboard?.writeText(text).catch(() => {});
-				return;
-			}
-			return;
-		}
-		if (key === "x") {
-			if (hasMultiCellSelection(wrapperEl)) {
-				e.preventDefault();
-				e.stopPropagation();
-				const text = getSelectedCellsText(wrapperEl);
-				if (text) navigator.clipboard?.writeText(text).catch(() => {});
-				clearSelectedCellContents(wrapperEl, view);
+				if (key === "x") clearSelectedCellContents(wrapperEl, view);
 				return;
 			}
 			return;
@@ -1361,14 +1365,8 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 				if (!navigator.clipboard) return;
 				navigator.clipboard.readText().then(
 					(text) => {
-						if (text.includes("\t")) {
-							const grid = parseTsv(text);
-							const coord = cellCoordFromElement(target);
-							if (coord) pasteTsvGrid(wrapperEl, view, grid, coord.row, coord.col);
-						} else {
-							const sanitized = sanitizePasteText(text);
-							if (sanitized) pasteIntoCell(target, sanitized, view, wrapperEl);
-						}
+						const coord = cellCoordFromElement(target);
+						if (coord) applyPasteText(wrapperEl, view, text, coord);
 					},
 					() => {},
 				);
