@@ -12,7 +12,7 @@ export { mathDecoration } from "./math";
 export { mermaidDecoration } from "./mermaid";
 export { strikethroughDecoration } from "./strikethrough";
 export { tableDecoration } from "./table-decoration";
-export { insertTable, tableKeymap } from "./tables";
+export { insertTable, tableKeymap, tsvPasteHandler } from "./tables";
 export { wikilinkCompletion } from "./wikilink-completion";
 export { wikilinkHoverTooltip } from "./wikilink-hover";
 export { wikilinkDecoration } from "./wikilinks";

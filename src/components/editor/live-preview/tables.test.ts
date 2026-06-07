@@ -5,7 +5,7 @@ import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildTableDecorations, tableDecoration } from "./table-decoration";
 import { createEmptyTable } from "./table-utils";
-import { insertTable, tableKeymap } from "./tables";
+import { insertTable, tableKeymap, tsvToMarkdownTable } from "./tables";
 import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
 
 const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
@@ -301,5 +301,63 @@ describe("findTableNodeAt (via syntaxTree)", () => {
 			node = node.parent;
 		}
 		expect(found).toBe(false);
+	});
+});
+
+// ── tsvToMarkdownTable (#147) ────────────────────────
+
+describe("tsvToMarkdownTable", () => {
+	it("2行3列の TSV を Markdown テーブルに変換する", () => {
+		const grid = [
+			["名前", "年齢", "都市"],
+			["Alice", "30", "東京"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(3);
+		expect(lines[0]).toMatch(/^\| 名前\s+\| 年齢\s+\| 都市\s+\|$/);
+		expect(lines[1]).toMatch(/^\| ---/);
+		expect(lines[2]).toMatch(/^\| Alice\s+\| 30\s+\| 東京\s+\|$/);
+	});
+
+	it("1行の TSV はヘッダ＋区切り行のみ生成する", () => {
+		const grid = [["A", "B", "C"]];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toContain("| A");
+		expect(lines[1]).toMatch(/^\| ---/);
+	});
+
+	it("セル内のパイプがエスケープされる", () => {
+		const grid = [
+			["key", "value"],
+			["a|b", "c"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		expect(result).toContain("a\\|b");
+		expect(result).not.toMatch(/a\|b/);
+	});
+
+	it("列数が不揃いでも最大列数に揃う", () => {
+		const grid = [
+			["A", "B", "C"],
+			["1"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		// データ行もパイプ 4 本（3列分）
+		expect(lines[2].split("|").length - 1).toBe(4);
+	});
+
+	it("3行以上の TSV でヘッダ＋区切り＋複数データ行を生成する", () => {
+		const grid = [
+			["H1", "H2"],
+			["a", "b"],
+			["c", "d"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(4);
 	});
 });

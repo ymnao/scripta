@@ -1,7 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
-import { type Extension, Prec } from "@codemirror/state";
-import { type EditorView, keymap } from "@codemirror/view";
-import { focusCell, focusTableCellEffect } from "./table-decoration";
+import { EditorSelection, type Extension, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { focusCell, focusTableCellEffect, parseTsv } from "./table-decoration";
 import { createEmptyTable, isLineBlank } from "./table-utils";
 
 // ── Insert table (Mod-Shift-t) ────────
@@ -164,3 +164,78 @@ export const tableKeymap: Extension = Prec.high(
 		{ key: "Backspace", run: backspaceIntoTableFromBelow },
 	]),
 );
+
+// ── TSV paste → Markdown table (#147) ────────────────
+
+function isPosInCodeOrTable(state: Parameters<typeof syntaxTree>[0], pos: number): boolean {
+	let node = syntaxTree(state).resolveInner(pos);
+	while (node) {
+		if (
+			node.name === "FencedCode" ||
+			node.name === "CodeBlock" ||
+			node.name === "InlineCode" ||
+			node.name === "Table"
+		) {
+			return true;
+		}
+		if (!node.parent) break;
+		node = node.parent;
+	}
+	return false;
+}
+
+export function tsvToMarkdownTable(grid: string[][]): string {
+	const colCount = Math.max(...grid.map((row) => row.length));
+	const escapeCell = (s: string) => s.replace(/\|/g, "\\|").trim();
+
+	const widths = Array.from({ length: colCount }, (_, c) =>
+		Math.max(3, ...grid.map((row) => (c < row.length ? escapeCell(row[c]).length : 0))),
+	);
+
+	const formatRow = (row: string[]) =>
+		`| ${Array.from({ length: colCount }, (_, c) =>
+			(c < row.length ? escapeCell(row[c]) : "").padEnd(widths[c]),
+		).join(" | ")} |`;
+
+	const separator = `| ${widths.map((w) => "-".repeat(w)).join(" | ")} |`;
+	const [header, ...dataRows] = grid;
+	return [formatRow(header), separator, ...dataRows.map(formatRow)].join("\n");
+}
+
+export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
+	paste(event: ClipboardEvent, view: EditorView) {
+		if (event.defaultPrevented) return false;
+
+		const text = event.clipboardData?.getData("text/plain");
+		if (!text?.includes("\t")) return false;
+
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active.closest(".cm-table-widget")) return false;
+
+		const { state } = view;
+		if (isPosInCodeOrTable(state, state.selection.main.head)) return false;
+
+		const grid = parseTsv(text);
+		if (grid.length === 0) return false;
+
+		event.preventDefault();
+
+		const md = tsvToMarkdownTable(grid);
+		const pos = state.selection.main.head;
+		const line = state.doc.lineAt(pos);
+		const onEmptyLine = line.text.trim().length === 0;
+		const insertFrom = onEmptyLine ? line.from : line.to;
+		const prevLineBlank = line.number === 1 || isLineBlank(state.doc, line.number - 1);
+		const prefix = onEmptyLine ? (prevLineBlank ? "" : "\n") : "\n\n";
+		const suffix = isLineBlank(state.doc, line.number + 1) ? "" : "\n";
+		const insert = `${prefix}${md}${suffix}`;
+
+		view.dispatch({
+			changes: { from: insertFrom, to: onEmptyLine ? line.to : insertFrom, insert },
+			selection: EditorSelection.cursor(insertFrom + insert.length),
+			userEvent: "input.paste",
+		});
+
+		return true;
+	},
+});
