@@ -262,7 +262,7 @@ function getCellPlainText(el: HTMLElement): string {
 			parts.push((node.textContent || "").replace(/​/g, ""));
 		}
 	}
-	return parts.join("");
+	return parts.join("").replace(/\n$/, "");
 }
 
 function tsvQuote(value: string): string {
@@ -288,6 +288,112 @@ function getSelectedCellsText(wrapper: HTMLElement): string | null {
 		lines.push(cells.join("\t"));
 	}
 	return lines.join("\n");
+}
+
+export function parseTsv(text: string): string[][] {
+	const rows: string[][] = [];
+	let pos = 0;
+
+	while (pos <= text.length) {
+		const row: string[] = [];
+
+		while (true) {
+			let value: string;
+			if (pos < text.length && text[pos] === '"') {
+				pos++;
+				let buf = "";
+				while (pos < text.length) {
+					if (text[pos] === '"') {
+						if (pos + 1 < text.length && text[pos + 1] === '"') {
+							buf += '"';
+							pos += 2;
+						} else {
+							pos++;
+							break;
+						}
+					} else {
+						buf += text[pos++];
+					}
+				}
+				value = buf;
+			} else {
+				const start = pos;
+				while (
+					pos < text.length &&
+					text[pos] !== "\t" &&
+					text[pos] !== "\n" &&
+					text[pos] !== "\r"
+				) {
+					pos++;
+				}
+				value = text.slice(start, pos);
+			}
+			row.push(value);
+
+			if (pos >= text.length || text[pos] !== "\t") break;
+			pos++;
+		}
+
+		rows.push(row);
+		if (pos >= text.length) break;
+		if (text[pos] === "\r") pos++;
+		if (pos < text.length && text[pos] === "\n") pos++;
+	}
+
+	if (rows.length > 1) {
+		const last = rows[rows.length - 1];
+		if (last.length === 1 && last[0] === "") rows.pop();
+	}
+	return rows;
+}
+
+function pasteTsvGrid(
+	wrapper: HTMLElement,
+	view: EditorView,
+	grid: string[][],
+	startRow: number,
+	startCol: number,
+): void {
+	const data = getDataFor(wrapper);
+	if (!data) return;
+	const maxRow = data.rows.length - 1;
+	const maxCol = colCountOf(data) - 1;
+
+	for (let r = 0; r < grid.length; r++) {
+		const tr = startRow + r;
+		if (tr > maxRow) break;
+		for (let c = 0; c < grid[r].length; c++) {
+			const tc = startCol + c;
+			if (tc > maxCol) break;
+			const cell = wrapper.querySelector(
+				`[data-row="${tr}"][data-col="${tc}"]`,
+			) as HTMLElement | null;
+			if (cell) setCellContent(cell, grid[r][c].replace(/\n/g, "<br>"));
+		}
+	}
+
+	const tableNode = getTableNodeFor(view, wrapper);
+	if (!tableNode) return;
+	const changes: { from: number; to: number; insert: string }[] = [];
+	for (let r = 0; r < grid.length; r++) {
+		const tr = startRow + r;
+		if (tr > maxRow) break;
+		const lineOffset = widgetRowToLineOffset(tr);
+		const lineNum = tableNode.startLine + lineOffset;
+		if (lineNum > view.state.doc.lines) continue;
+		const docLine = view.state.doc.line(lineNum);
+		const trEl = wrapper.querySelectorAll("tr")[tr];
+		if (!trEl) continue;
+		const cellContents: string[] = [];
+		for (const td of trEl.querySelectorAll("th, td")) {
+			cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
+		}
+		const newLine = `| ${cellContents.join(" | ")} |`;
+		if (newLine !== view.state.doc.sliceString(docLine.from, docLine.to)) {
+			changes.push({ from: docLine.from, to: docLine.to, insert: newLine });
+		}
+	}
+	if (changes.length > 0) view.dispatch({ changes });
 }
 
 function clearSelectedCellContents(wrapper: HTMLElement, view: EditorView): void {
@@ -672,11 +778,28 @@ class EditableTableWidget extends WidgetType {
 		wrapper.addEventListener("mousedown", (e) => handleCellMouseDown(e, view, wrapper));
 		wrapper.addEventListener("paste", (e) => {
 			e.preventDefault();
+			const raw = e.clipboardData?.getData("text/plain") ?? "";
+			if (!raw) return;
+
+			if (raw.includes("\t")) {
+				const grid = parseTsv(raw);
+				const sel = cellSelectionMap.get(wrapper);
+				const target = e.target instanceof Element ? e.target : null;
+				const anchor = sel
+					? {
+							row: Math.min(sel.anchor.row, sel.head.row),
+							col: Math.min(sel.anchor.col, sel.head.col),
+						}
+					: cellCoordFromElement(getFocusedCell(wrapper) ?? target);
+				clearCellSelection(wrapper);
+				if (!anchor) return;
+				pasteTsvGrid(wrapper, view, grid, anchor.row, anchor.col);
+				return;
+			}
+
 			clearCellSelection(wrapper);
-			const sanitized = sanitizePasteText(e.clipboardData?.getData("text/plain") ?? "");
+			const sanitized = sanitizePasteText(raw);
 			if (!sanitized) return;
-			// フォーカスセルを正規化してから挿入する（e.target が text node /
-			// wrapper のケースで挿入先がずれて反映されないのを防ぐ）
 			const cell = getFocusedCell(wrapper);
 			if (!cell) return;
 			pasteIntoCell(cell, sanitized, view, wrapper);
@@ -1238,8 +1361,14 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 				if (!navigator.clipboard) return;
 				navigator.clipboard.readText().then(
 					(text) => {
-						const sanitized = sanitizePasteText(text);
-						if (sanitized) pasteIntoCell(target, sanitized, view, wrapperEl);
+						if (text.includes("\t")) {
+							const grid = parseTsv(text);
+							const coord = cellCoordFromElement(target);
+							if (coord) pasteTsvGrid(wrapperEl, view, grid, coord.row, coord.col);
+						} else {
+							const sanitized = sanitizePasteText(text);
+							if (sanitized) pasteIntoCell(target, sanitized, view, wrapperEl);
+						}
 					},
 					() => {},
 				);

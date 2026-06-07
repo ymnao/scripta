@@ -8,6 +8,7 @@ import {
 	buildTableDecorations,
 	clearCellSelection,
 	exitTableDown,
+	parseTsv,
 	pasteIntoCell,
 	sanitizePasteText,
 	tableDecoration,
@@ -993,5 +994,89 @@ describe("multi-cell selection (#119)", () => {
 		expect(ev.defaultPrevented).toBe(true);
 		expect(view.state.doc.line(1).text).toBe("|  |  |");
 		expect(view.state.doc.line(3).text).toBe("|  |  |");
+	});
+
+	it("Cmd+C で空セルを含むコピーに不要な改行が入らない", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell00 = getCell(wrapper, 0, 0);
+		const cell11 = getCell(wrapper, 1, 1);
+
+		cell00.textContent = "";
+		cell00.appendChild(document.createElement("br"));
+
+		click(cell00);
+		shiftClick(cell11);
+
+		let copied = "";
+		Object.defineProperty(navigator, "clipboard", {
+			value: {
+				writeText: (t: string) => {
+					copied = t;
+					return Promise.resolve();
+				},
+			},
+			writable: true,
+			configurable: true,
+		});
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "c",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell00.dispatchEvent(ev);
+
+		expect(copied).toBe("\tB\n1\t2");
+	});
+
+	it("TSV ペーストで複数セルに展開される", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+		click(cell);
+
+		const tsv = "X\tY\nZ\tW";
+		const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(pasteEvent, "clipboardData", {
+			value: { getData: () => tsv },
+		});
+		cell.dispatchEvent(pasteEvent);
+
+		expect(view.state.doc.line(1).text).toBe("| X | Y |");
+		expect(view.state.doc.line(3).text).toBe("| Z | W |");
+	});
+});
+
+describe("parseTsv", () => {
+	it("基本的な TSV をパースする", () => {
+		expect(parseTsv("A\tB\n1\t2")).toEqual([
+			["A", "B"],
+			["1", "2"],
+		]);
+	});
+
+	it("クォートされたフィールドを処理する", () => {
+		expect(parseTsv('"hello\nworld"\tx')).toEqual([["hello\nworld", "x"]]);
+	});
+
+	it("エスケープされたダブルクォートを処理する", () => {
+		expect(parseTsv('"say ""hi"""\tB')).toEqual([['say "hi"', "B"]]);
+	});
+
+	it("末尾の改行を無視する", () => {
+		expect(parseTsv("A\tB\n")).toEqual([["A", "B"]]);
+	});
+
+	it("空セルを保持する", () => {
+		expect(parseTsv("A\t\tC")).toEqual([["A", "", "C"]]);
+	});
+
+	it("CRLF を処理する", () => {
+		expect(parseTsv("A\tB\r\n1\t2")).toEqual([
+			["A", "B"],
+			["1", "2"],
+		]);
 	});
 });
