@@ -44,6 +44,7 @@ overrides:
   "@codemirror/view": $@codemirror/view
   "@lezer/common": ^1.5.2
   "brace-expansion@^5.0.0": ^5.0.6
+  "tmp@<0.2.6": ">=0.2.6"          # GHSA: Path Traversal (Dep #7)。tmp-promise → tmp@0.2.5 を修正版へ強制
 
 # 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
 #
