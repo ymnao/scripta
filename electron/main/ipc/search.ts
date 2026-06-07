@@ -33,7 +33,7 @@ async function collectMdFilesForWorkspace(
 	senderId: number,
 	workspacePath: string,
 ): Promise<MdFiles> {
-	const canonical = assertPathAllowed(senderId, workspacePath);
+	const canonical = await assertPathAllowed(senderId, workspacePath);
 	const inputBase = resolve(workspacePath);
 	const out: MdFiles = { io: [], input: [] };
 	await walkMdFiles(canonical, inputBase, out);
@@ -110,13 +110,15 @@ async function searchFilesImpl(
 	query: string,
 	caseSensitive = false,
 ): Promise<SearchResult[]> {
+	// stale checker は assert 前に確保する。await assertPathAllowed で microtask に
+	// yield した隙に cancelSearchForWindow が gen を bump するケースをカバーするため。
+	const isStale = makeStaleChecker(searchGeneration, senderId);
+
 	// 認可は空クエリでも先に通す（他 IPC ハンドラと整合）。早期 return が
 	// path-guard の前にあると、未認可 renderer が `""` で叩いて空配列を取得し、
 	// IPC 認可挙動が崩れる。
-	assertPathAllowed(senderId, workspacePath);
+	await assertPathAllowed(senderId, workspacePath);
 	if (query === "") return [];
-
-	const isStale = makeStaleChecker(searchGeneration, senderId);
 
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];

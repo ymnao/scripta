@@ -33,12 +33,12 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //   2. validate + realpath が impl 内で 1 回だけになり、二重正規化のオーバーヘッドが消える
 
 async function readFileImpl(senderId: number, path: string): Promise<string> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	return await fsp.readFile(canonical, "utf8");
 }
 
 async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
-	const canonical = assertWritePathAllowed(senderId, path);
+	const canonical = await assertWritePathAllowed(senderId, path);
 	await fsp.mkdir(dirname(canonical), { recursive: true });
 	// **意図的に直接書き込み**。tmp + rename の atomic write は user workspace の
 	// .md ファイルには使わない。理由（VS Code microsoft/vscode#195539 と同方針）:
@@ -56,7 +56,7 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 }
 
 async function writeNewFileImpl(senderId: number, path: string, content: string): Promise<void> {
-	const canonical = assertWritePathAllowed(senderId, path);
+	const canonical = await assertWritePathAllowed(senderId, path);
 	await fsp.mkdir(dirname(canonical), { recursive: true });
 	const fh = await fsp.open(canonical, "wx");
 	try {
@@ -72,7 +72,7 @@ async function listDirectoryImpl(
 	path: string,
 	opts?: unknown,
 ): Promise<FileEntry[]> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	const entries = await fsp.readdir(canonical, { withFileTypes: true });
 	// 戻り値の path は renderer が保持する workspacePath（raw 入力側）と表記を揃える。
 	// canonical（symlink 解決後）を返してしまうと、macOS の /var → /private/var、
@@ -102,7 +102,7 @@ async function listDirectoryImpl(
 }
 
 async function createFileImpl(senderId: number, path: string): Promise<void> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	await fsp.mkdir(dirname(canonical), { recursive: true });
 	try {
 		const fh = await fsp.open(canonical, "wx");
@@ -114,7 +114,7 @@ async function createFileImpl(senderId: number, path: string): Promise<void> {
 }
 
 async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	// 親は recursive で先に作る。対象自体は非 recursive にすることで
 	// 「既存なら EEXIST」を atomic に得る（race-free）。
 	await fsp.mkdir(dirname(canonical), { recursive: true });
@@ -127,12 +127,12 @@ async function createDirectoryImpl(senderId: number, path: string): Promise<void
 }
 
 async function pathExistsImpl(senderId: number, path: string): Promise<boolean> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	return pathExistsAt(canonical);
 }
 
 async function fileExistsImpl(senderId: number, path: string): Promise<boolean> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	try {
 		const stat = await fsp.stat(canonical);
 		return stat.isFile();
@@ -143,8 +143,8 @@ async function fileExistsImpl(senderId: number, path: string): Promise<boolean> 
 }
 
 async function renameEntryImpl(senderId: number, oldPath: string, newPath: string): Promise<void> {
-	const oldCanonical = assertPathAllowed(senderId, oldPath);
-	const newCanonical = assertPathAllowed(senderId, newPath);
+	const oldCanonical = await assertPathAllowed(senderId, oldPath);
+	const newCanonical = await assertPathAllowed(senderId, newPath);
 	if (!(await pathExistsAt(oldCanonical))) throw FsError.sourceNotFound(oldCanonical);
 	// fs.rename は target 既存時に上書きする default 挙動なので、
 	// 「Target already exists」を出すために事前 check が必要。
@@ -155,7 +155,7 @@ async function renameEntryImpl(senderId: number, oldPath: string, newPath: strin
 }
 
 async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	if (!(await pathExistsAt(canonical))) throw FsError.notFound(canonical);
 	await shell.trashItem(canonical);
 }

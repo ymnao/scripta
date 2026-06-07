@@ -202,7 +202,7 @@ function registerScriptaAssetProtocol(): void {
 				return new Response(null, { status: 400 });
 			}
 			const path = urlPathnameToFsPath(url.pathname);
-			if (!isPathWithinAnyAllowedRoot(path)) {
+			if (!(await isPathWithinAnyAllowedRoot(path))) {
 				console.warn(`[scripta-asset] denied outside workspace: ${path}`);
 				return new Response(null, { status: 403 });
 			}
@@ -214,7 +214,7 @@ function registerScriptaAssetProtocol(): void {
 	});
 }
 
-function approveSavedWorkspaceFromSettings(): void {
+async function approveSavedWorkspaceFromSettings(): Promise<void> {
 	// 起動時に「前回までの workspacePath」を approve リストへ入れる。
 	// register はしない（実際の register は renderer 側 AppLayout が
 	// workspaceSet を呼んだ時点で行う window 単位の管理）。
@@ -223,18 +223,18 @@ function approveSavedWorkspaceFromSettings(): void {
 	const savedPath = getWorkspacePathFromSettings();
 	if (savedPath === null) return;
 	try {
-		approveWorkspacePath(savedPath);
+		await approveWorkspacePath(savedPath);
 	} catch (e) {
 		console.warn("[bootstrap] failed to approve saved workspace path:", e);
 	}
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
 	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
 	registerScriptaAssetProtocol();
 	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
-	approveSavedWorkspaceFromSettings();
+	await approveSavedWorkspaceFromSettings();
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];

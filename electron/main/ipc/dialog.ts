@@ -45,7 +45,7 @@ export function registerDialogIpc(): void {
 		if (result.canceled || result.filePaths.length === 0) return null;
 		// OS ネイティブな folder picker を通過した path のみを「ユーザー承認済み」として
 		// approve リストに入れる。renderer が workspace:set を打つ際の信頼境界。
-		approveWorkspacePath(result.filePaths[0]);
+		await approveWorkspacePath(result.filePaths[0]);
 		return result.filePaths[0];
 	});
 
@@ -55,7 +55,7 @@ export function registerDialogIpc(): void {
 		// ユーザーが明示的に選択した保存先は workspace 外でも書き込みを許可する。
 		// transient 許可は (a) ダイアログを開いた window のスコープのみで有効、
 		// (b) 書き込み成功後に consume、(c) window close で cleanup される短命 capability。
-		registerTransientWritePath(event.sender.id, result.filePath);
+		await registerTransientWritePath(event.sender.id, result.filePath);
 		return result.filePath;
 	});
 }

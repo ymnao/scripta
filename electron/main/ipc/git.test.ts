@@ -136,7 +136,7 @@ afterEach(async () => {
 async function newWorkspace(): Promise<string> {
 	const dir = await initRepo();
 	dirsToCleanup.push(dir);
-	registerWorkspaceRoot(TEST_WIN, dir);
+	await registerWorkspaceRoot(TEST_WIN, dir);
 	return dir;
 }
 
@@ -155,7 +155,7 @@ describe("checkRepoImpl", () => {
 	it("returns false for a non-repo directory (no throw)", async () => {
 		const dir = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-test-")));
 		dirsToCleanup.push(dir);
-		registerWorkspaceRoot(TEST_WIN, dir);
+		await registerWorkspaceRoot(TEST_WIN, dir);
 		expect(await checkRepoImpl(TEST_WIN, dir)).toBe(false);
 	});
 
@@ -254,7 +254,7 @@ describe("pullImpl", () => {
 	it("succeeds for fast-forward pull from a real local remote (merge)", async () => {
 		const { work, remote } = await setupRepoWithRemote();
 		dirsToCleanup.push(work, remote);
-		registerWorkspaceRoot(TEST_WIN, work);
+		await registerWorkspaceRoot(TEST_WIN, work);
 		const wgit = createGit(work);
 		await wgit.raw(["push", "-u", "origin", "main"]);
 		// 別 working clone から remote に commit を追加
@@ -278,7 +278,7 @@ describe("pullImpl", () => {
 	it("supports rebase mode", async () => {
 		const { work, remote } = await setupRepoWithRemote();
 		dirsToCleanup.push(work, remote);
-		registerWorkspaceRoot(TEST_WIN, work);
+		await registerWorkspaceRoot(TEST_WIN, work);
 		await createGit(work).raw(["push", "-u", "origin", "main"]);
 		// no-op rebase pull は成功するはず
 		await pullImpl(TEST_WIN, work, "rebase");
@@ -289,7 +289,7 @@ describe("pushImpl", () => {
 	it("auto-retries with -u origin <branch> when no upstream is set", async () => {
 		const { work, remote } = await setupRepoWithRemote();
 		dirsToCleanup.push(work, remote);
-		registerWorkspaceRoot(TEST_WIN, work);
+		await registerWorkspaceRoot(TEST_WIN, work);
 		// upstream 未設定 → 自動 -u origin main で再試行 → 成功
 		await pushImpl(TEST_WIN, work);
 		// 再 push は upstream 済みなので普通に成功
@@ -532,7 +532,7 @@ describe("emitConflictResolvedImpl", () => {
 	it("succeeds when sender's allowedRoots contains the workspace", async () => {
 		const dir = await newWorkspace();
 		// 正規経路: 自 window の allowedRoots に登録されている path → throw しない
-		expect(() => emitConflictResolvedImpl(TEST_WIN, dir)).not.toThrow();
+		await expect(emitConflictResolvedImpl(TEST_WIN, dir)).resolves.not.toThrow();
 	});
 
 	it("rejects emit for a workspace not in sender's allowedRoots", async () => {
@@ -540,12 +540,12 @@ describe("emitConflictResolvedImpl", () => {
 		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-evict-")));
 		dirsToCleanup.push(outside);
 		// 別 window が偽装で他 workspace の path を流しても弾かれる
-		expect(() => emitConflictResolvedImpl(TEST_WIN, outside)).toThrow(/Permission denied/);
+		await expect(emitConflictResolvedImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
 	});
 
 	it("rejects emit from a window that has no workspace registered", async () => {
 		const dir = await newWorkspace();
 		// OTHER_WIN は何も登録されていない window → 自 workspace でも弾かれる
-		expect(() => emitConflictResolvedImpl(OTHER_WIN, dir)).toThrow(/Permission denied/);
+		await expect(emitConflictResolvedImpl(OTHER_WIN, dir)).rejects.toThrow(/Permission denied/);
 	});
 });

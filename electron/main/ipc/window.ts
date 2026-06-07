@@ -14,10 +14,10 @@ const conflictWindows = new Map<string, BrowserWindow>();
 // `workspacePath` 引数を信頼せず、main 側で再検証 → 子 window への登録までを
 // 一貫して main プロセスの責務に閉じ込める。
 async function createConflictWindow(parentSenderId: number, workspacePath: string): Promise<void> {
-	if (!isPathAllowed(parentSenderId, workspacePath)) {
+	if (!(await isPathAllowed(parentSenderId, workspacePath))) {
 		throw new Error("Permission denied: workspace not registered for parent window");
 	}
-	const canonical = canonicalize(workspacePath);
+	const canonical = await canonicalize(workspacePath);
 
 	const existing = conflictWindows.get(canonical);
 	if (existing && !existing.isDestroyed()) {
@@ -64,7 +64,7 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 	// ここで子 webContents.id 向けに registerWorkspaceRoot を実行しないと
 	// `gitCheckRepo` 等の path-guard が通らない。
 	// `setActiveWorkspaceForWindow` は内部で registerWorkspaceRoot を呼ぶ。
-	setActiveWorkspaceForWindow(win.webContents.id, canonical);
+	await setActiveWorkspaceForWindow(win.webContents.id, canonical);
 	conflictWindows.set(canonical, win);
 
 	const search = `?conflict=true&workspacePath=${encodeURIComponent(workspacePath)}`;
@@ -81,7 +81,7 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		// attachWindowLifecycle 経由でも cleanup が走るが、両者とも冪等なため
 		// explicit に書いておく（test mock では closed event が発火しないため）。
 		conflictWindows.delete(canonical);
-		setActiveWorkspaceForWindow(win.webContents.id, null);
+		await setActiveWorkspaceForWindow(win.webContents.id, null);
 		if (!win.isDestroyed()) win.destroy();
 		throw e;
 	}

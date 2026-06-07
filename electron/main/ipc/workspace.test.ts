@@ -53,93 +53,93 @@ afterEach(async () => {
 });
 
 describe("setActiveWorkspaceForWindow", () => {
-	it("registers the workspace root under the window's own slot", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
+	it("registers the workspace root under the window's own slot", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
-		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(await canonicalize(dirA));
 	});
 
-	it("does nothing if the window already has the same path", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
+	it("does nothing if the window already has the same path", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
 		const before = getWorkspaceRootsForWindow(WIN_A);
-		setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual(before);
 	});
 
-	it("unregisters the previous path when a window switches", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_A, dirB);
+	it("unregisters the previous path when a window switches", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_A, dirB);
 		const roots = getWorkspaceRootsForWindow(WIN_A);
 		expect(roots).toHaveLength(1);
 		expect(roots[0].endsWith(basename(dirB))).toBe(true);
 	});
 
-	it("clears the window's workspace when path is null", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_A, null);
+	it("clears the window's workspace when path is null", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_A, null);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
 		expect(getWindowWorkspaces().has(WIN_A)).toBe(false);
 	});
 });
 
 describe("multi-window isolation", () => {
-	it("does not leak one window's path to another window's allowedRoots view", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_B, dirB);
+	it("does not leak one window's path to another window's allowedRoots view", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_B, dirB);
 		// 各 window は自分の roots だけを持つ
 		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
 		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
-		expect(getWorkspaceRootsForWindow(WIN_A)[0]).toBe(canonicalize(dirA));
-		expect(getWorkspaceRootsForWindow(WIN_B)[0]).toBe(canonicalize(dirB));
+		expect(getWorkspaceRootsForWindow(WIN_A)[0]).toBe(await canonicalize(dirA));
+		expect(getWorkspaceRootsForWindow(WIN_B)[0]).toBe(await canonicalize(dirB));
 	});
 
-	it("does not unregister another window's path when one window switches", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_B, dirB);
+	it("does not unregister another window's path when one window switches", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_B, dirB);
 
-		setActiveWorkspaceForWindow(WIN_A, null);
+		await setActiveWorkspaceForWindow(WIN_A, null);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
 		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
 
-	it("registers the same path independently in each window", () => {
+	it("registers the same path independently in each window", async () => {
 		// 旧設計の ref-count は撤廃。各 window が自分の Set に持つ
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_B, dirA);
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_B, dirA);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
 		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
 
-	it("unregistering one window does not affect the other window even with shared path", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_B, dirA);
-		setActiveWorkspaceForWindow(WIN_A, null);
+	it("unregistering one window does not affect the other window even with shared path", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_B, dirA);
+		await setActiveWorkspaceForWindow(WIN_A, null);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
 		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
 	});
 });
 
 describe("unregisterWindow", () => {
-	it("removes the window's workspace from its own allowedRoots", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
+	it("removes the window's workspace from its own allowedRoots", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
 		unregisterWindow(WIN_A);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toEqual([]);
 		expect(getWindowWorkspaces().has(WIN_A)).toBe(false);
 	});
 
-	it("does not affect other windows' state", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
-		setActiveWorkspaceForWindow(WIN_B, dirA);
+	it("does not affect other windows' state", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_B, dirA);
 		unregisterWindow(WIN_A);
 		expect(getWorkspaceRootsForWindow(WIN_B)).toHaveLength(1);
-		expect(getWindowWorkspaces().get(WIN_B)).toBe(canonicalize(dirA));
+		expect(getWindowWorkspaces().get(WIN_B)).toBe(await canonicalize(dirA));
 	});
 
-	it("is a no-op for an unknown window id", () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
+	it("is a no-op for an unknown window id", async () => {
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
 		unregisterWindow(9999);
 		expect(getWorkspaceRootsForWindow(WIN_A)).toHaveLength(1);
-		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(await canonicalize(dirA));
 	});
 });
 
@@ -176,22 +176,22 @@ describe("workspace:set IPC handler — persistence gating", () => {
 	});
 
 	it("non-volatile windows: persists workspacePath", async () => {
-		approveWorkspacePath(dirA);
+		await approveWorkspacePath(dirA);
 		const handler = captureHandler();
 		await handler({ sender: { id: WIN_A } }, dirA);
 		expect(vi.mocked(persistWorkspacePath)).toHaveBeenCalledWith(dirA);
-		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(await canonicalize(dirA));
 	});
 
 	it("volatile windows (New Window): does NOT persist workspacePath but still registers in-memory", async () => {
 		// 補助ウィンドウから picker でフォルダを開いた瞬間に settings.json の
 		// 既定 workspacePath が上書きされるバグの回帰防止
-		approveWorkspacePath(dirA);
+		await approveWorkspacePath(dirA);
 		markWorkspacePersistenceVolatile(WIN_A);
 		const handler = captureHandler();
 		await handler({ sender: { id: WIN_A } }, dirA);
 		expect(vi.mocked(persistWorkspacePath)).not.toHaveBeenCalled();
-		expect(getWindowWorkspaces().get(WIN_A)).toBe(canonicalize(dirA));
+		expect(getWindowWorkspaces().get(WIN_A)).toBe(await canonicalize(dirA));
 	});
 
 	it("rejects unapproved path even for volatile windows", async () => {
@@ -203,7 +203,7 @@ describe("workspace:set IPC handler — persistence gating", () => {
 	});
 
 	it("after unregisterWindow, the same id is no longer volatile and persists again", async () => {
-		approveWorkspacePath(dirA);
+		await approveWorkspacePath(dirA);
 		markWorkspacePersistenceVolatile(WIN_A);
 		unregisterWindow(WIN_A);
 		const handler = captureHandler();
@@ -212,7 +212,7 @@ describe("workspace:set IPC handler — persistence gating", () => {
 	});
 
 	it("path === null (unregister) is allowed and gated by volatility flag", async () => {
-		setActiveWorkspaceForWindow(WIN_A, dirA);
+		await setActiveWorkspaceForWindow(WIN_A, dirA);
 		markWorkspacePersistenceVolatile(WIN_A);
 		const handler = captureHandler();
 		await handler({ sender: { id: WIN_A } }, null);
@@ -223,18 +223,18 @@ describe("workspace:set IPC handler — persistence gating", () => {
 });
 
 describe("approveWorkspacePath / isWorkspacePathApproved", () => {
-	it("approves a path and stores it in canonical form", () => {
-		approveWorkspacePath(dirA);
-		expect(getApprovedWorkspacePaths().has(canonicalize(dirA))).toBe(true);
+	it("approves a path and stores it in canonical form", async () => {
+		await approveWorkspacePath(dirA);
+		expect(getApprovedWorkspacePaths().has(await canonicalize(dirA))).toBe(true);
 	});
 
-	it("isWorkspacePathApproved returns true for an approved path", () => {
-		approveWorkspacePath(dirA);
-		expect(isWorkspacePathApproved(dirA)).toBe(true);
+	it("isWorkspacePathApproved returns true for an approved path", async () => {
+		await approveWorkspacePath(dirA);
+		expect(await isWorkspacePathApproved(dirA)).toBe(true);
 	});
 
-	it("isWorkspacePathApproved returns false for an unapproved path", () => {
-		expect(isWorkspacePathApproved(dirA)).toBe(false);
+	it("isWorkspacePathApproved returns false for an unapproved path", async () => {
+		expect(await isWorkspacePathApproved(dirA)).toBe(false);
 	});
 
 	it.skipIf(process.platform === "win32")(
@@ -243,21 +243,21 @@ describe("approveWorkspacePath / isWorkspacePathApproved", () => {
 			const link = join(tmpdir(), `scripta-ws-approve-link-${Date.now()}-${Math.random()}`);
 			await symlink(dirA, link);
 			try {
-				approveWorkspacePath(dirA);
-				expect(isWorkspacePathApproved(link)).toBe(true);
+				await approveWorkspacePath(dirA);
+				expect(await isWorkspacePathApproved(link)).toBe(true);
 			} finally {
 				await rm(link, { force: true });
 			}
 		},
 	);
 
-	it("returns false for invalid input (relative path / null byte) without throwing", () => {
-		expect(isWorkspacePathApproved("relative/path")).toBe(false);
-		expect(isWorkspacePathApproved("/tmp/\0evil")).toBe(false);
+	it("returns false for invalid input (relative path / null byte) without throwing", async () => {
+		expect(await isWorkspacePathApproved("relative/path")).toBe(false);
+		expect(await isWorkspacePathApproved("/tmp/\0evil")).toBe(false);
 	});
 
-	it("reset() clears approved paths along with windowWorkspaces", () => {
-		approveWorkspacePath(dirA);
+	it("reset() clears approved paths along with windowWorkspaces", async () => {
+		await approveWorkspacePath(dirA);
 		expect(getApprovedWorkspacePaths().size).toBe(1);
 		reset();
 		expect(getApprovedWorkspacePaths().size).toBe(0);
