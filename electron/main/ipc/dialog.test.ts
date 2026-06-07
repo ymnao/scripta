@@ -82,7 +82,7 @@ describe("dialog:open-directory", () => {
 		expect(vi.mocked(approveWorkspacePath)).not.toHaveBeenCalled();
 	});
 
-	it("approves selected path and returns it", async () => {
+	it("approves selected path and returns it (window-scoped)", async () => {
 		vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(fakeOwner("sender"));
 		mockOpen({ canceled: false, filePaths: ["/picked/workspace"] });
 
@@ -90,7 +90,7 @@ describe("dialog:open-directory", () => {
 		const result = await handler(fakeEvent(1));
 
 		expect(result).toBe("/picked/workspace");
-		expect(vi.mocked(approveWorkspacePath)).toHaveBeenCalledWith("/picked/workspace");
+		expect(vi.mocked(approveWorkspacePath)).toHaveBeenCalledWith(1, "/picked/workspace");
 		expect(vi.mocked(approveWorkspacePath)).toHaveBeenCalledTimes(1);
 	});
 });

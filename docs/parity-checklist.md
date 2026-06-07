@@ -59,7 +59,7 @@
 - `workspace:set` IPC（旧版は frontend 側 `loadSettings/saveWorkspacePath` で完結）
   - 役割: main 側に "approve list" を構築し、path-guard の判定基盤として機能。
   - 設計判断: 旧版は path-guard 自体が Rust 側 fs プラグインの permission 経由で行われていたが、新版はメインプロセスの自前 path-guard 実装に置換。
-  - 信頼境界: renderer から渡された任意の path は approve されない。OS ダイアログを経由した path のみ approve される（`dialog:open-directory` ハンドラ参照）。
+  - 信頼境界: renderer から渡された任意の path は approve されない。OS ダイアログを経由した path のみ approve される（`dialog:open-directory` ハンドラ参照）。approve リストは **window-scoped**（`Map<webContentsId, Set<path>>`）。window A で picker 承認した path は window B の `workspace:set` では受け付けない。起動時の saved workspacePath は `createWindow` で当該 window に対して approve される（`approveSavedWorkspaceForWindow`）。window close 時に `unregisterWindow` で該当 window の approve エントリも cleanup される。
 
 ### 検証項目
 

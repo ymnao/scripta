@@ -6,22 +6,41 @@ import {
 	unregisterWorkspaceRoot,
 } from "../utils/path-guard";
 import { StructuredError } from "../utils/structured-error";
-import { persistWorkspacePath } from "./settings";
+import { getWorkspacePathFromSettings, persistWorkspacePath } from "./settings";
 
 // renderer 経由で workspace:set を受け付ける際、main 側で「ユーザーが OS ネイティブ
 // な操作（dialog.showOpenDialog や前回 settings 経由）で承認した path」だけを
 // 許可するための approved 集合。
 // これがないと、悪意ある/侵害された renderer が workspaceSet("/") のような任意 path
 // で path-guard の allowedRoots を拡張し、ファイル I/O を全面解放できてしまう。
-const approvedWorkspacePaths = new Set<string>();
+//
+// window-scoped 設計: approve リストは webContents.id 単位で管理する。
+// window A で picker 承認した path は window B の workspace:set では受け付けない。
+// これにより「侵害された renderer B が、正規 window A のユーザー操作で approve された
+// path を利用して権限昇格する」攻撃経路を遮断する。
+//
+// 起動時の saved workspacePath は createWindow で当該 window に対して approve される。
+// 補助ウィンドウ (New Window) は workspace 自動復元しないため approve 不要。
+const approvedWorkspacePaths = new Map<number, Set<string>>();
 
-export async function approveWorkspacePath(rawPath: string): Promise<void> {
-	approvedWorkspacePaths.add(await canonicalize(rawPath));
+export async function approveWorkspacePath(webContentsId: number, rawPath: string): Promise<void> {
+	const canonical = await canonicalize(rawPath);
+	let set = approvedWorkspacePaths.get(webContentsId);
+	if (set === undefined) {
+		set = new Set<string>();
+		approvedWorkspacePaths.set(webContentsId, set);
+	}
+	set.add(canonical);
 }
 
-export async function isWorkspacePathApproved(rawPath: string): Promise<boolean> {
+export async function isWorkspacePathApproved(
+	webContentsId: number,
+	rawPath: string,
+): Promise<boolean> {
 	try {
-		return approvedWorkspacePaths.has(await canonicalize(rawPath));
+		const canonical = await canonicalize(rawPath);
+		const set = approvedWorkspacePaths.get(webContentsId);
+		return set?.has(canonical) ?? false;
 	} catch {
 		// validatePath が throw する不正入力（相対パス・null byte 等）も拒否扱い
 		return false;
@@ -33,11 +52,9 @@ export async function isWorkspacePathApproved(rawPath: string): Promise<boolean>
 // 持つので、各 window は自分の root Set だけを介して fs IPC が通る。
 // 旧設計にあった「全 window の union を ref-count で管理」は撤廃済み。
 //
-// 信頼境界の補足：approve リスト（approvedWorkspacePaths）はプロセス全体で
-// 共有される。これは UX 上の選択（ユーザーが picker で承認した、または前回
-// 起動時の saved workspacePath は別ウィンドウからも切り替えできる方が自然）。
-// 厳密な「window A から B の workspace を絶対に覗かせない」を保証するには
-// approve も window-scoped 化する設計変更が必要。詳しくは path-guard.ts を参照。
+// 信頼境界: approve リスト（approvedWorkspacePaths）も window-scoped。
+// window A で picker 承認した path は window B では使えない。起動時の saved
+// workspace は createWindow で当該 window に対して approve される。
 //
 // Map に格納する値は canonicalize()（validatePath + realpath 正規化）後の文字列。
 // raw 文字列のまま保持すると、symlink 経由・大小文字差・/var → /private/var
@@ -79,10 +96,11 @@ export async function setActiveWorkspaceForWindow(
 }
 
 // ウィンドウが close された時に呼ぶ。そのウィンドウの allowedRoots と
-// transientWritePaths を path-guard 側でまとめて消し、ゾンビ window-id 経由で
-// ガードが緩む事故を防ぐ。
+// transientWritePaths と approvedWorkspacePaths を path-guard 側でまとめて消し、
+// ゾンビ window-id 経由でガードが緩む事故を防ぐ。
 export function unregisterWindow(webContentsId: number): void {
 	windowWorkspaces.delete(webContentsId);
+	approvedWorkspacePaths.delete(webContentsId);
 	volatileWorkspacePersistenceWindows.delete(webContentsId);
 	clearWorkspaceRootsForWindow(webContentsId);
 }
@@ -92,7 +110,7 @@ export function registerWorkspaceIpc(): void {
 		// renderer は任意 path を投げ得る。dialog 経由 / settings 経由で main が
 		// 承認した path 集合に無い場合は拒否し、信頼境界を main 側に閉じ込める。
 		// path === null（unregister）は常に許可。
-		if (path !== null && !(await isWorkspacePathApproved(path))) {
+		if (path !== null && !(await isWorkspacePathApproved(event.sender.id, path))) {
 			console.warn(`[workspace] rejected non-approved path: ${path}`);
 			throw new StructuredError(
 				"PATH_OUTSIDE_WORKSPACE",
@@ -114,11 +132,31 @@ export function registerWorkspaceIpc(): void {
 	});
 }
 
+// 起動時に settings.json から読み込んだ workspacePath を、指定 window に対して
+// approve する。createWindow で BrowserWindow を生成した直後に呼ぶ。
+// renderer が workspace:set を打つ前に approve を完了させるため、renderer の
+// loadFile/loadURL より前に await する。
+export async function approveSavedWorkspaceForWindow(webContentsId: number): Promise<void> {
+	const savedPath = getWorkspacePathFromSettings();
+	if (savedPath === null) return;
+	try {
+		await approveWorkspacePath(webContentsId, savedPath);
+	} catch (e) {
+		console.warn("[bootstrap] failed to approve saved workspace path:", e);
+	}
+}
+
 export const __testing = {
 	setActiveWorkspaceForWindow,
 	unregisterWindow,
 	getWindowWorkspaces: (): Map<number, string> => new Map(windowWorkspaces),
-	getApprovedWorkspacePaths: (): Set<string> => new Set(approvedWorkspacePaths),
+	getApprovedWorkspacePaths: (): Map<number, Set<string>> => {
+		const copy = new Map<number, Set<string>>();
+		for (const [id, set] of approvedWorkspacePaths) {
+			copy.set(id, new Set(set));
+		}
+		return copy;
+	},
 	getVolatileWorkspacePersistenceWindows: (): Set<number> =>
 		new Set(volatileWorkspacePersistenceWindows),
 	reset: (): void => {

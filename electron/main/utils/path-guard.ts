@@ -6,17 +6,14 @@ import { StructuredError } from "./structured-error";
 // 構造を取り、ある window が `workspace:set` で申告して登録した root だけがその
 // window からの fs IPC で許可される（read/list/rename/delete/write 全て同じ Set）。
 //
-// 信頼境界の補足：approve リスト（workspace.ts の `approvedWorkspacePaths`）は
-// プロセス全体で共有される。これは UX 上の選択 — ユーザーが picker で承認した、
-// もしくは saved workspacePath として永続化された path は、別ウィンドウからも
-// `workspace:set` で切り替えできる方が自然なため。「ウィンドウ A から B の
-// workspace を絶対に覗かせない」という強い分離が必要になった場合は、approve も
-// window-scoped 化する設計変更が必要（その時は Sidebar の picker → approve の
-// 紐付けと、saved workspace 復元の入り口を window 単位で切り直す）。
+// 信頼境界: approve リスト（workspace.ts の `approvedWorkspacePaths`）も
+// window-scoped（Map<windowId, Set<string>>）。window A で picker 承認した path は
+// window B の workspace:set では受け付けない。saved workspacePath は createWindow で
+// 当該 window に対して approve される。
 //
-// 現状の保証は「approve 済みでない任意 path に対する権限昇格を防ぐ（main 側で
-// reject）」「ある window が register していない root には fs IPC が通らない」
-// の 2 点。
+// 保証する 2 点:
+//   1. approve 済みでない任意 path に対する権限昇格を防ぐ（main 側で reject）
+//   2. ある window が register していない root には fs IPC が通らない
 const windowAllowedRoots = new Map<number, Set<string>>();
 
 // dialog.showSaveDialog でユーザーが明示選択した保存先など、ワークスペース外でも
