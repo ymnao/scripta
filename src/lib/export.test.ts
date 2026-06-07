@@ -67,7 +67,10 @@ describe("exportAsHtml", () => {
 		await exportAsHtml("$x^2$", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
 		expect(html).toContain(".katex{");
+		expect(html).toContain("data:font/woff2;base64,");
 		expect(html).not.toContain("cdn.jsdelivr.net");
+		expect(html).not.toMatch(/url\(fonts\//);
+		expect(html).not.toMatch(/<link[^>]+href="https?:\/\//);
 	});
 
 	it("converts markdown content to HTML", async () => {
@@ -232,7 +235,10 @@ describe("exportAsPdf", () => {
 		await exportAsPdf("$x^2$", "/workspace/test.md");
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain(".katex{");
+		expect(html).toContain("data:font/woff2;base64,");
 		expect(html).not.toContain("cdn.jsdelivr.net");
+		expect(html).not.toMatch(/url\(fonts\//);
+		expect(html).not.toMatch(/<link[^>]+href="https?:\/\//);
 	});
 
 	it("PDF 出力では Mermaid を PNG ラスタライズして <img> として埋め込む (#106)", async () => {

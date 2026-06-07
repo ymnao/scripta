@@ -1,15 +1,11 @@
 #!/usr/bin/env node
-const { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } = require("node:fs");
+const { readFileSync, writeFileSync, mkdirSync } = require("node:fs");
 const { join, dirname } = require("node:path");
 
 const ROOT = join(__dirname, "..");
 const KATEX_CSS = join(ROOT, "node_modules/katex/dist/katex.min.css");
 const KATEX_DIST = dirname(KATEX_CSS);
 const OUT_FILE = join(ROOT, "src/generated/katex-inline-css.ts");
-
-if (existsSync(OUT_FILE) && statSync(OUT_FILE).mtimeMs >= statSync(KATEX_CSS).mtimeMs) {
-	process.exit(0);
-}
 
 let css = readFileSync(KATEX_CSS, "utf8");
 
@@ -19,6 +15,11 @@ css = css.replace(/url\(fonts\/([\w-]+\.woff2)\)/g, (_match, fileName) => {
 });
 
 css = css.replace(/,url\(fonts\/[\w-]+\.(?:woff|ttf)\) format\("(?:woff|truetype)"\)/g, "");
+
+if (/url\(fonts\//.test(css) || /https?:\/\//.test(css)) {
+	console.error("[generate-katex-css] ERROR: 変換後の CSS に外部参照が残っています");
+	process.exit(1);
+}
 
 mkdirSync(dirname(OUT_FILE), { recursive: true });
 
