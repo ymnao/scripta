@@ -1,4 +1,3 @@
-import { version as katexVersion } from "katex/package.json";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("./commands", () => ({
@@ -63,18 +62,12 @@ describe("exportAsHtml", () => {
 		expect(html).toContain("<title>my-note</title>");
 	});
 
-	it("includes KaTeX CDN link in HTML", async () => {
+	it("includes inline KaTeX CSS in HTML (#121)", async () => {
 		mockedSave.mockResolvedValue("/output/test.html");
 		await exportAsHtml("$x^2$", "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
-		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
-	});
-
-	it("syncs KaTeX CSS CDN version with installed katex package (#79)", async () => {
-		mockedSave.mockResolvedValue("/output/test.html");
-		await exportAsHtml("$x^2$", "/workspace/test.md");
-		const html = mockedWriteFile.mock.calls[0][1] as string;
-		expect(html).toContain(`katex@${katexVersion}/dist/katex.min.css`);
+		expect(html).toContain(".katex{");
+		expect(html).not.toContain("cdn.jsdelivr.net");
 	});
 
 	it("converts markdown content to HTML", async () => {
@@ -234,12 +227,12 @@ describe("exportAsPdf", () => {
 		expect(html).toContain("<br");
 	});
 
-	it("renders KaTeX math in PDF HTML", async () => {
+	it("renders KaTeX math in PDF HTML (#121)", async () => {
 		mockedSave.mockResolvedValue("/output/test.pdf");
 		await exportAsPdf("$x^2$", "/workspace/test.md");
 		const html = mockedExportPdf.mock.calls[0][0] as string;
-		expect(html).toContain("katex");
-		expect(html).toContain("cdn.jsdelivr.net/npm/katex");
+		expect(html).toContain(".katex{");
+		expect(html).not.toContain("cdn.jsdelivr.net");
 	});
 
 	it("PDF 出力では Mermaid を PNG ラスタライズして <img> として埋め込む (#106)", async () => {

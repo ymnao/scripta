@@ -9,10 +9,10 @@
 		"node": ">=22.13.0"
 	},
 	"scripts": {
-		"postinstall": "node node_modules/electron/install.js",
-		"dev": "node node_modules/electron/install.js && electron-vite dev",
+		"postinstall": "node node_modules/electron/install.js && node scripts/generate-katex-css.js",
+		"dev": "node node_modules/electron/install.js && node scripts/generate-katex-css.js && electron-vite dev",
 		"dev:e2e": "vite --config vite.config.e2e.ts",
-		"build": "electron-vite build",
+		"build": "node scripts/generate-katex-css.js && electron-vite build",
 		"preview": "node node_modules/electron/install.js && electron-vite preview",
 		"dist": "node node_modules/electron/install.js && electron-vite build && electron-builder --publish never",
 		"lint": "biome check .",

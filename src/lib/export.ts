@@ -1,4 +1,4 @@
-import { version as katexVersion } from "katex/package.json";
+import { katexInlineCss } from "../generated/katex-inline-css";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
@@ -59,9 +59,6 @@ export function preprocessPageBreakMarkers(markdown: string): string {
 		isInsideRanges(offset, codeRanges) ? match : '\n\n<hr class="pdf-pagebreak"/>\n\n',
 	);
 }
-
-// CDN の katex バージョンを bundle 同梱版と同期 (#79)。
-const KATEX_CSS_URL = `https://cdn.jsdelivr.net/npm/katex@${katexVersion}/dist/katex.min.css`;
 
 /** ExportTheme を Mermaid 用の "light" | "dark" に解決する。system の場合は OS 設定を参照。 */
 function resolveMermaidTheme(theme?: ExportTheme): "light" | "dark" {
@@ -308,7 +305,7 @@ export function buildHtmlDocument(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 ${scriptMeta}<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="${KATEX_CSS_URL}">
+<style>${katexInlineCss}</style>
 <style>
 :root {
   color-scheme: ${theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark"};
