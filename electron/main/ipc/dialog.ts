@@ -44,8 +44,8 @@ export function registerDialogIpc(): void {
 		const result = await showOpenDialog(event, { properties: ["openDirectory"] });
 		if (result.canceled || result.filePaths.length === 0) return null;
 		// OS ネイティブな folder picker を通過した path のみを「ユーザー承認済み」として
-		// approve リストに入れる。renderer が workspace:set を打つ際の信頼境界。
-		await approveWorkspacePath(result.filePaths[0]);
+		// approve リストに入れる。window-scoped: この event の sender window にのみ有効。
+		await approveWorkspacePath(event.sender.id, result.filePaths[0]);
 		return result.filePaths[0];
 	});
 

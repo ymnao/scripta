@@ -4,8 +4,8 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, net, protocol, session, shell } from "electron";
 import { urlPathnameToFsPath } from "../preload/scripta-asset-url";
 import { registerIpcHandlers } from "./ipc";
-import { getWindowState, getWorkspacePathFromSettings, persistWindowState } from "./ipc/settings";
-import { approveWorkspacePath, markWorkspacePersistenceVolatile } from "./ipc/workspace";
+import { getWindowState, persistWindowState } from "./ipc/settings";
+import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
 import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { isSafeExternalUrl } from "./utils/url";
@@ -97,7 +97,7 @@ interface CreateWindowOptions {
 	newWindow?: boolean;
 }
 
-function createWindow(opts: CreateWindowOptions = {}): void {
+async function createWindow(opts: CreateWindowOptions = {}): Promise<void> {
 	const isNew = opts.newWindow === true;
 	const initial = isNew ? resolveInitialGeometry(null) : resolveInitialGeometry(getWindowState());
 	const mainWindow = new BrowserWindow({
@@ -122,6 +122,10 @@ function createWindow(opts: CreateWindowOptions = {}): void {
 		// 補助ウィンドウからの workspace:set では settings.json の workspacePath を
 		// 上書きさせない（startup の workspace 復元抑止と整合させる）。
 		markWorkspacePersistenceVolatile(mainWindow.webContents.id);
+	} else {
+		// 非補助ウィンドウには saved workspace を approve する。renderer が
+		// workspace:set を打つ前に完了させるため loadFile/loadURL より前に await。
+		await approveSavedWorkspaceForWindow(mainWindow.webContents.id);
 	}
 	// New Window は state 永続化対象から外す（メイン window の bounds が上書きされる
 	// と「サブで一瞬開いただけ」のサイズで次回起動時にメイン window が起動する）
@@ -183,7 +187,7 @@ if (is.dev) {
 }
 
 app.on("activate", () => {
-	if (BrowserWindow.getAllWindows().length === 0) createWindow();
+	if (BrowserWindow.getAllWindows().length === 0) void createWindow();
 });
 
 app.on("window-all-closed", () => {
@@ -214,27 +218,11 @@ function registerScriptaAssetProtocol(): void {
 	});
 }
 
-async function approveSavedWorkspaceFromSettings(): Promise<void> {
-	// 起動時に「前回までの workspacePath」を approve リストへ入れる。
-	// register はしない（実際の register は renderer 側 AppLayout が
-	// workspaceSet を呼んだ時点で行う window 単位の管理）。
-	// この approve がないと、saved workspace を持っているユーザーでも
-	// renderer が workspace:set を打つと「未承認」として拒否されてしまう。
-	const savedPath = getWorkspacePathFromSettings();
-	if (savedPath === null) return;
-	try {
-		await approveWorkspacePath(savedPath);
-	} catch (e) {
-		console.warn("[bootstrap] failed to approve saved workspace path:", e);
-	}
-}
-
 app.whenReady().then(async () => {
 	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
 	registerScriptaAssetProtocol();
-	setApplicationMenu({ newWindow: () => createWindow({ newWindow: true }) });
-	await approveSavedWorkspaceFromSettings();
+	setApplicationMenu({ newWindow: () => void createWindow({ newWindow: true }) });
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]
 		: ["file:///*"];
@@ -254,5 +242,5 @@ app.whenReady().then(async () => {
 			});
 		},
 	);
-	createWindow();
+	await createWindow();
 });

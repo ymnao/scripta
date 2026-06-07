@@ -100,7 +100,7 @@ describe("exportPdfImpl", () => {
 		simulateState.printToPdfImpl = undefined;
 		simulateState.loadFileShouldHang = false;
 		workspace = await makeWorkspaceTmp();
-		registerWorkspaceRoot(SENDER_ID, workspace);
+		await registerWorkspaceRoot(SENDER_ID, workspace);
 	});
 
 	afterEach(async () => {
@@ -129,7 +129,7 @@ describe("exportPdfImpl", () => {
 	it("writes PDF for transient (saveDialog) path outside workspace", async () => {
 		const transientDir = await makeWorkspaceTmp();
 		const transientPath = join(transientDir, "save.pdf");
-		registerTransientWritePath(SENDER_ID, transientPath);
+		await registerTransientWritePath(SENDER_ID, transientPath);
 		await exportPdfImpl(SENDER_ID, "<html><body>hi</body></html>", transientPath);
 		const written = await fsp.readFile(transientPath);
 		expect(written.toString("utf8")).toContain("%PDF-1.4");

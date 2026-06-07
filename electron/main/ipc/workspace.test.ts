@@ -176,7 +176,7 @@ describe("workspace:set IPC handler — persistence gating", () => {
 	});
 
 	it("non-volatile windows: persists workspacePath", async () => {
-		await approveWorkspacePath(dirA);
+		await approveWorkspacePath(WIN_A, dirA);
 		const handler = captureHandler();
 		await handler({ sender: { id: WIN_A } }, dirA);
 		expect(vi.mocked(persistWorkspacePath)).toHaveBeenCalledWith(dirA);
@@ -186,7 +186,7 @@ describe("workspace:set IPC handler — persistence gating", () => {
 	it("volatile windows (New Window): does NOT persist workspacePath but still registers in-memory", async () => {
 		// 補助ウィンドウから picker でフォルダを開いた瞬間に settings.json の
 		// 既定 workspacePath が上書きされるバグの回帰防止
-		await approveWorkspacePath(dirA);
+		await approveWorkspacePath(WIN_A, dirA);
 		markWorkspacePersistenceVolatile(WIN_A);
 		const handler = captureHandler();
 		await handler({ sender: { id: WIN_A } }, dirA);
@@ -203,9 +203,11 @@ describe("workspace:set IPC handler — persistence gating", () => {
 	});
 
 	it("after unregisterWindow, the same id is no longer volatile and persists again", async () => {
-		await approveWorkspacePath(dirA);
+		// unregisterWindow は approve も消すので、再度 approve が必要
+		await approveWorkspacePath(WIN_A, dirA);
 		markWorkspacePersistenceVolatile(WIN_A);
 		unregisterWindow(WIN_A);
+		await approveWorkspacePath(WIN_A, dirA);
 		const handler = captureHandler();
 		await handler({ sender: { id: WIN_A } }, dirA);
 		expect(vi.mocked(persistWorkspacePath)).toHaveBeenCalledTimes(1);
@@ -220,21 +222,35 @@ describe("workspace:set IPC handler — persistence gating", () => {
 		expect(vi.mocked(persistWorkspacePath)).not.toHaveBeenCalled();
 		expect(getWindowWorkspaces().has(WIN_A)).toBe(false);
 	});
+
+	it("rejects path approved for a different window (window isolation)", async () => {
+		await approveWorkspacePath(WIN_B, dirA);
+		const handler = captureHandler();
+		await expect(handler({ sender: { id: WIN_A } }, dirA)).rejects.toThrow(/Permission denied/);
+	});
 });
 
 describe("approveWorkspacePath / isWorkspacePathApproved", () => {
-	it("approves a path and stores it in canonical form", async () => {
-		await approveWorkspacePath(dirA);
-		expect(getApprovedWorkspacePaths().has(await canonicalize(dirA))).toBe(true);
+	it("approves a path and stores it in canonical form under the window id", async () => {
+		await approveWorkspacePath(WIN_A, dirA);
+		const approved = getApprovedWorkspacePaths();
+		const set = approved.get(WIN_A);
+		expect(set).toBeDefined();
+		expect(set?.has(await canonicalize(dirA))).toBe(true);
 	});
 
 	it("isWorkspacePathApproved returns true for an approved path", async () => {
-		await approveWorkspacePath(dirA);
-		expect(await isWorkspacePathApproved(dirA)).toBe(true);
+		await approveWorkspacePath(WIN_A, dirA);
+		expect(await isWorkspacePathApproved(WIN_A, dirA)).toBe(true);
 	});
 
 	it("isWorkspacePathApproved returns false for an unapproved path", async () => {
-		expect(await isWorkspacePathApproved(dirA)).toBe(false);
+		expect(await isWorkspacePathApproved(WIN_A, dirA)).toBe(false);
+	});
+
+	it("isWorkspacePathApproved returns false for a path approved under a different window", async () => {
+		await approveWorkspacePath(WIN_A, dirA);
+		expect(await isWorkspacePathApproved(WIN_B, dirA)).toBe(false);
 	});
 
 	it.skipIf(process.platform === "win32")(
@@ -243,8 +259,8 @@ describe("approveWorkspacePath / isWorkspacePathApproved", () => {
 			const link = join(tmpdir(), `scripta-ws-approve-link-${Date.now()}-${Math.random()}`);
 			await symlink(dirA, link);
 			try {
-				await approveWorkspacePath(dirA);
-				expect(await isWorkspacePathApproved(link)).toBe(true);
+				await approveWorkspacePath(WIN_A, dirA);
+				expect(await isWorkspacePathApproved(WIN_A, link)).toBe(true);
 			} finally {
 				await rm(link, { force: true });
 			}
@@ -252,14 +268,29 @@ describe("approveWorkspacePath / isWorkspacePathApproved", () => {
 	);
 
 	it("returns false for invalid input (relative path / null byte) without throwing", async () => {
-		expect(await isWorkspacePathApproved("relative/path")).toBe(false);
-		expect(await isWorkspacePathApproved("/tmp/\0evil")).toBe(false);
+		expect(await isWorkspacePathApproved(WIN_A, "relative/path")).toBe(false);
+		expect(await isWorkspacePathApproved(WIN_A, "/tmp/\0evil")).toBe(false);
 	});
 
 	it("reset() clears approved paths along with windowWorkspaces", async () => {
-		await approveWorkspacePath(dirA);
+		await approveWorkspacePath(WIN_A, dirA);
 		expect(getApprovedWorkspacePaths().size).toBe(1);
 		reset();
 		expect(getApprovedWorkspacePaths().size).toBe(0);
+	});
+
+	it("unregisterWindow clears approved paths for that window", async () => {
+		await approveWorkspacePath(WIN_A, dirA);
+		await approveWorkspacePath(WIN_B, dirB);
+		unregisterWindow(WIN_A);
+		expect(getApprovedWorkspacePaths().has(WIN_A)).toBe(false);
+		expect(getApprovedWorkspacePaths().has(WIN_B)).toBe(true);
+	});
+
+	it("approves multiple paths for the same window", async () => {
+		await approveWorkspacePath(WIN_A, dirA);
+		await approveWorkspacePath(WIN_A, dirB);
+		expect(await isWorkspacePathApproved(WIN_A, dirA)).toBe(true);
+		expect(await isWorkspacePathApproved(WIN_A, dirB)).toBe(true);
 	});
 });
