@@ -48,6 +48,27 @@ interface TableData {
 	alignments: Alignment[];
 }
 
+// ── Cell selection ───────────────────────────────────
+
+interface CellCoord {
+	row: number;
+	col: number;
+}
+
+interface CellSelection {
+	anchor: CellCoord;
+	head: CellCoord;
+}
+
+const cellSelectionMap = new WeakMap<HTMLElement, CellSelection>();
+
+let dragState: {
+	wrapper: HTMLElement;
+	view: EditorView;
+	anchor: CellCoord;
+	mode: "pending" | "cells" | "cross-boundary";
+} | null = null;
+
 // ── Parsing ───────────────────────────────────────────
 
 function parseRowCells(text: string): string[] {
@@ -191,6 +212,319 @@ function widgetRowToLineOffset(widgetRow: number): number {
 	return widgetRow >= 1 ? widgetRow + 1 : widgetRow;
 }
 
+// ── Cell selection helpers ───────────────────────────
+
+function getCellRect(anchor: CellCoord, head: CellCoord) {
+	return {
+		minRow: Math.min(anchor.row, head.row),
+		maxRow: Math.max(anchor.row, head.row),
+		minCol: Math.min(anchor.col, head.col),
+		maxCol: Math.max(anchor.col, head.col),
+	};
+}
+
+const lastClickedCell = new WeakMap<HTMLElement, CellCoord>();
+
+function applyCellSelection(wrapper: HTMLElement, selection: CellSelection | null): void {
+	for (const cell of wrapper.querySelectorAll(".cm-table-cell-selected")) {
+		cell.classList.remove("cm-table-cell-selected");
+	}
+	if (!selection) {
+		cellSelectionMap.delete(wrapper);
+		return;
+	}
+	cellSelectionMap.set(wrapper, selection);
+	const { minRow, maxRow, minCol, maxCol } = getCellRect(selection.anchor, selection.head);
+	for (let r = minRow; r <= maxRow; r++) {
+		for (let c = minCol; c <= maxCol; c++) {
+			const cell = wrapper.querySelector(`[data-row="${r}"][data-col="${c}"]`);
+			if (cell) cell.classList.add("cm-table-cell-selected");
+		}
+	}
+}
+
+export function clearCellSelection(wrapper: HTMLElement): void {
+	applyCellSelection(wrapper, null);
+}
+
+function hasMultiCellSelection(wrapper: HTMLElement): boolean {
+	const sel = cellSelectionMap.get(wrapper);
+	if (!sel) return false;
+	return sel.anchor.row !== sel.head.row || sel.anchor.col !== sel.head.col;
+}
+
+function getCellPlainText(el: HTMLElement): string {
+	const parts: string[] = [];
+	for (const node of el.childNodes) {
+		if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "BR") {
+			parts.push("\n");
+		} else {
+			parts.push((node.textContent || "").replace(/​/g, ""));
+		}
+	}
+	return parts.join("").replace(/\n$/, "");
+}
+
+function tsvQuote(value: string): string {
+	if (value.includes("\t") || value.includes("\n") || value.includes('"')) {
+		return `"${value.replace(/"/g, '""')}"`;
+	}
+	return value;
+}
+
+function getSelectedCellsText(wrapper: HTMLElement): string | null {
+	const sel = cellSelectionMap.get(wrapper);
+	if (!sel) return null;
+	const { minRow, maxRow, minCol, maxCol } = getCellRect(sel.anchor, sel.head);
+	const lines: string[] = [];
+	for (let r = minRow; r <= maxRow; r++) {
+		const cells: string[] = [];
+		for (let c = minCol; c <= maxCol; c++) {
+			const cell = wrapper.querySelector(
+				`[data-row="${r}"][data-col="${c}"]`,
+			) as HTMLElement | null;
+			cells.push(tsvQuote(cell ? getCellPlainText(cell) : ""));
+		}
+		lines.push(cells.join("\t"));
+	}
+	return lines.join("\n");
+}
+
+export function parseTsv(text: string): string[][] {
+	const rows: string[][] = [];
+	let pos = 0;
+
+	while (pos <= text.length) {
+		const row: string[] = [];
+
+		while (true) {
+			let value: string;
+			if (pos < text.length && text[pos] === '"') {
+				pos++;
+				let buf = "";
+				while (pos < text.length) {
+					if (text[pos] === '"') {
+						if (pos + 1 < text.length && text[pos + 1] === '"') {
+							buf += '"';
+							pos += 2;
+						} else {
+							pos++;
+							break;
+						}
+					} else {
+						buf += text[pos++];
+					}
+				}
+				value = buf;
+			} else {
+				const start = pos;
+				while (
+					pos < text.length &&
+					text[pos] !== "\t" &&
+					text[pos] !== "\n" &&
+					text[pos] !== "\r"
+				) {
+					pos++;
+				}
+				value = text.slice(start, pos);
+			}
+			row.push(value);
+
+			if (pos >= text.length || text[pos] !== "\t") break;
+			pos++;
+		}
+
+		rows.push(row);
+		if (pos >= text.length) break;
+		if (text[pos] === "\r") pos++;
+		if (pos < text.length && text[pos] === "\n") pos++;
+	}
+
+	if (rows.length > 1) {
+		const last = rows[rows.length - 1];
+		if (last.length === 1 && last[0] === "") rows.pop();
+	}
+	return rows;
+}
+
+// DOM 上の指定行を読み取り、markdown 行との差分を 1 トランザクションで反映する。
+// pasteTsvGrid / clearSelectedCellContents の共通バックエンド。
+function syncRowsToDoc(wrapper: HTMLElement, view: EditorView, rows: number[]): void {
+	const tableNode = getTableNodeFor(view, wrapper);
+	if (!tableNode) return;
+	const changes: { from: number; to: number; insert: string }[] = [];
+	for (const r of rows) {
+		const lineOffset = widgetRowToLineOffset(r);
+		const lineNum = tableNode.startLine + lineOffset;
+		if (lineNum > view.state.doc.lines) continue;
+		const docLine = view.state.doc.line(lineNum);
+		const trEl = wrapper.querySelectorAll("tr")[r];
+		if (!trEl) continue;
+		const cellContents: string[] = [];
+		for (const td of trEl.querySelectorAll("th, td")) {
+			cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
+		}
+		const newLine = `| ${cellContents.join(" | ")} |`;
+		if (newLine !== view.state.doc.sliceString(docLine.from, docLine.to)) {
+			changes.push({ from: docLine.from, to: docLine.to, insert: newLine });
+		}
+	}
+	if (changes.length > 0) {
+		anchorEditorToTable(view, tableNode);
+		view.dispatch({ changes });
+	}
+}
+
+function pasteTsvGrid(
+	wrapper: HTMLElement,
+	view: EditorView,
+	grid: string[][],
+	startRow: number,
+	startCol: number,
+): void {
+	const data = getDataFor(wrapper);
+	if (!data) return;
+	const maxRow = data.rows.length - 1;
+	const maxCol = colCountOf(data) - 1;
+
+	const affectedRows: number[] = [];
+	for (let r = 0; r < grid.length; r++) {
+		const tr = startRow + r;
+		if (tr > maxRow) break;
+		for (let c = 0; c < grid[r].length; c++) {
+			const tc = startCol + c;
+			if (tc > maxCol) break;
+			const cell = wrapper.querySelector(
+				`[data-row="${tr}"][data-col="${tc}"]`,
+			) as HTMLElement | null;
+			if (cell) setCellContent(cell, grid[r][c].replace(/\n/g, "<br>"));
+		}
+		affectedRows.push(tr);
+	}
+
+	syncRowsToDoc(wrapper, view, affectedRows);
+}
+
+function clearSelectedCellContents(wrapper: HTMLElement, view: EditorView): void {
+	const sel = cellSelectionMap.get(wrapper);
+	if (!sel) return;
+	const { minRow, maxRow, minCol, maxCol } = getCellRect(sel.anchor, sel.head);
+
+	for (let r = minRow; r <= maxRow; r++) {
+		for (let c = minCol; c <= maxCol; c++) {
+			const cell = wrapper.querySelector(
+				`[data-row="${r}"][data-col="${c}"]`,
+			) as HTMLElement | null;
+			if (cell) cell.textContent = "";
+		}
+	}
+
+	const rows: number[] = [];
+	for (let r = minRow; r <= maxRow; r++) rows.push(r);
+	syncRowsToDoc(wrapper, view, rows);
+}
+
+function cellCoordFromElement(el: Element | null): CellCoord | null {
+	const cell = el?.closest?.("[data-row][data-col]") as HTMLElement | null;
+	if (!cell) return null;
+	return { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
+}
+
+function applyPasteText(
+	wrapper: HTMLElement,
+	view: EditorView,
+	text: string,
+	coord: CellCoord,
+	replaceCell = false,
+): void {
+	if (text.includes("\t")) {
+		pasteTsvGrid(wrapper, view, parseTsv(text), coord.row, coord.col);
+	} else {
+		const sanitized = sanitizePasteText(text);
+		if (!sanitized) return;
+		const target = wrapper.querySelector(
+			`[data-row="${coord.row}"][data-col="${coord.col}"]`,
+		) as HTMLElement | null;
+		if (!target) return;
+		if (replaceCell) target.textContent = "";
+		pasteIntoCell(target, sanitized, view, wrapper);
+	}
+}
+
+// ── Drag selection ───────────────────────────────────
+
+function handleCellMouseDown(e: MouseEvent, view: EditorView, wrapper: HTMLElement): void {
+	if (e.button !== 0) return;
+	const coord = cellCoordFromElement(e.target as Element);
+	if (!coord) return;
+
+	if (e.shiftKey) {
+		e.preventDefault();
+		const existing = cellSelectionMap.get(wrapper);
+		const anchor = existing?.anchor ?? lastClickedCell.get(wrapper) ?? coord;
+		applyCellSelection(wrapper, { anchor, head: coord });
+		return;
+	}
+
+	clearCellSelection(wrapper);
+	lastClickedCell.set(wrapper, coord);
+
+	dragState = { wrapper, view, anchor: coord, mode: "pending" };
+
+	const onMouseMove = (ev: MouseEvent) => {
+		if (!dragState || dragState.wrapper !== wrapper) return;
+
+		const target = document.elementFromPoint(ev.clientX, ev.clientY);
+		const inTable = target && (wrapper.contains(target) || wrapper === target);
+
+		if (inTable) {
+			const headCoord = cellCoordFromElement(target);
+
+			if (dragState.mode === "pending") {
+				if (!headCoord) return;
+				if (headCoord.row === dragState.anchor.row && headCoord.col === dragState.anchor.col)
+					return;
+				dragState.mode = "cells";
+				window.getSelection()?.removeAllRanges();
+			}
+
+			if (dragState.mode === "cells" || dragState.mode === "cross-boundary") {
+				if (headCoord) {
+					dragState.mode = "cells";
+					applyCellSelection(wrapper, { anchor: dragState.anchor, head: headCoord });
+				}
+			}
+		} else {
+			if (dragState.mode === "pending" || dragState.mode === "cells") {
+				dragState.mode = "cross-boundary";
+				clearCellSelection(wrapper);
+				(document.activeElement as HTMLElement)?.blur();
+			}
+
+			const tableNode = getTableNodeFor(view, wrapper);
+			if (!tableNode) return;
+
+			const pos = view.posAtCoords({ x: ev.clientX, y: ev.clientY });
+			if (pos === null) return;
+
+			const tableFrom = view.state.doc.line(tableNode.startLine).from;
+			const tableTo = view.state.doc.line(tableNode.endLine).to;
+			const anchor = pos < tableFrom ? tableTo : tableFrom;
+			view.dispatch({ selection: EditorSelection.range(anchor, pos) });
+			view.focus();
+		}
+	};
+
+	const onMouseUp = () => {
+		document.removeEventListener("mousemove", onMouseMove);
+		document.removeEventListener("mouseup", onMouseUp);
+		dragState = null;
+	};
+
+	document.addEventListener("mousemove", onMouseMove);
+	document.addEventListener("mouseup", onMouseUp);
+}
+
 // ── Widget ────────────────────────────────────────────
 
 const widgetPositions = new WeakMap<HTMLElement, number>();
@@ -226,6 +560,17 @@ function getTableNodeFor(view: EditorView, wrapperEl: HTMLElement) {
 	const pos = widgetPositions.get(wrapperEl);
 	if (pos === undefined) return null;
 	return findTableNode(view.state, pos);
+}
+
+// undo 時のカーソル復元先がテーブル付近になるよう、changes dispatch の前に
+// CM6 の選択位置をテーブル先頭へ移動する（history には載せない）。
+function anchorEditorToTable(view: EditorView, tableNode: { startLine: number }): void {
+	const anchor = view.state.doc.line(tableNode.startLine).from;
+	if (view.state.selection.main.head === anchor) return;
+	view.dispatch({
+		selection: EditorSelection.cursor(anchor),
+		annotations: Transaction.addToHistory.of(false),
+	});
 }
 
 export function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
@@ -380,6 +725,10 @@ class EditableTableWidget extends WidgetType {
 			requestAnimationFrame(() => focusCell(dom, focus.row, focus.col));
 		}
 
+		// セル選択状態を DOM 更新後に再適用（新規セル要素にクラスが欠けるのを防ぐ）
+		const sel = cellSelectionMap.get(dom);
+		if (sel) applyCellSelection(dom, sel);
+
 		return true;
 	}
 
@@ -447,15 +796,27 @@ class EditableTableWidget extends WidgetType {
 		// 横取りすると CM の経路と重複し、history の整合性を壊しうる。
 		wrapper.addEventListener("focusout", () => handleFocusOut(wrapper));
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
+		wrapper.addEventListener("mousedown", (e) => handleCellMouseDown(e, view, wrapper));
 		wrapper.addEventListener("paste", (e) => {
 			e.preventDefault();
-			const sanitized = sanitizePasteText(e.clipboardData?.getData("text/plain") ?? "");
-			if (!sanitized) return;
-			// フォーカスセルを正規化してから挿入する（e.target が text node /
-			// wrapper のケースで挿入先がずれて反映されないのを防ぐ）
-			const cell = getFocusedCell(wrapper);
-			if (!cell) return;
-			pasteIntoCell(cell, sanitized, view, wrapper);
+			const raw = e.clipboardData?.getData("text/plain") ?? "";
+			if (!raw) return;
+
+			const sel = cellSelectionMap.get(wrapper);
+			const coord = sel
+				? {
+						row: Math.min(sel.anchor.row, sel.head.row),
+						col: Math.min(sel.anchor.col, sel.head.col),
+					}
+				: cellCoordFromElement(
+						getFocusedCell(wrapper) ??
+							(e.target instanceof Element ? e.target : null)?.closest?.("th, td") ??
+							null,
+					);
+			const hadSelection = !!sel;
+			clearCellSelection(wrapper);
+			if (!coord) return;
+			applyPasteText(wrapper, view, raw, coord, hadSelection);
 		});
 		wrapper.addEventListener("compositionstart", () => {
 			compositionState.set(wrapper, { active: true, composing: true });
@@ -601,30 +962,62 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	// だけが変わり markdown と desync する）等が走ってしまうのを防ぐ。
 	if (e.metaKey || e.ctrlKey) {
 		const key = e.key.toLowerCase();
-		// クリップボード操作 (V/C/X) は native の paste/copy/cut を効かせるため何もしない。
-		if (key === "v" || key === "c" || key === "x") return;
-		// undo / redo (Z / Shift+Z): CM の history（keymap + beforeinput）に委譲する。
-		// stopPropagation せず・preventDefault せず通す。CM の Mod-z バインディングが
-		// 走り、preventDefault されるので native の per-cell undo はその過程で抑止される。
-		if (key === "z") return;
-		// 全選択 (A): セル内容のみを選択する（doc 全選択を抑止）。
-		if (key === "a") {
-			e.preventDefault();
-			e.stopPropagation();
-			const cell = (e.target as HTMLElement | null)?.closest?.("th, td") as HTMLElement | null;
-			if (cell) {
-				const range = document.createRange();
-				range.selectNodeContents(cell);
-				const sel = window.getSelection();
-				sel?.removeAllRanges();
-				sel?.addRange(range);
+		if (key === "v") return;
+		if (key === "c" || key === "x") {
+			if (hasMultiCellSelection(wrapperEl)) {
+				e.preventDefault();
+				e.stopPropagation();
+				const text = getSelectedCellsText(wrapperEl);
+				if (text) navigator.clipboard?.writeText(text).catch(() => {});
+				if (key === "x") clearSelectedCellContents(wrapperEl, view);
+				return;
 			}
 			return;
 		}
-		// それ以外の Mod+key は contentEditable のリッチテキストコマンド（太字等）を抑止
-		// しつつ、stopPropagation せず CM6 のキーマップ (Mod-s, Mod-b 等) へ委譲する。
+		if (key === "z") return;
+		if (key === "a") {
+			e.preventDefault();
+			e.stopPropagation();
+			if (hasMultiCellSelection(wrapperEl)) {
+				const data = getDataFor(wrapperEl);
+				if (data) {
+					applyCellSelection(wrapperEl, {
+						anchor: { row: 0, col: 0 },
+						head: { row: data.rows.length - 1, col: colCountOf(data) - 1 },
+					});
+				}
+			} else {
+				const cell = (e.target as HTMLElement | null)?.closest?.("th, td") as HTMLElement | null;
+				if (cell) {
+					const range = document.createRange();
+					range.selectNodeContents(cell);
+					const sel = window.getSelection();
+					sel?.removeAllRanges();
+					sel?.addRange(range);
+				}
+			}
+			return;
+		}
 		e.preventDefault();
 		return;
+	}
+
+	// マルチセル選択中の操作
+	if (hasMultiCellSelection(wrapperEl)) {
+		if (e.key === "Delete" || e.key === "Backspace") {
+			e.preventDefault();
+			e.stopPropagation();
+			clearSelectedCellContents(wrapperEl, view);
+			clearCellSelection(wrapperEl);
+			return;
+		}
+		if (e.key === "Escape") {
+			e.preventDefault();
+			e.stopPropagation();
+			clearCellSelection(wrapperEl);
+			return;
+		}
+		clearCellSelection(wrapperEl);
 	}
 
 	const target = e.target as HTMLElement;
@@ -761,12 +1154,15 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 }
 
 function handleFocusOut(wrapperEl: HTMLElement): void {
-	// フォーカスがテーブル外に移動したら IME フラグをリセット。
-	// 以前はここで formatTableLines による列幅揃えを dispatch していたが、
-	// 「セル編集 → 保存 → 表外へフォーカス移動」だけで保存済みのドキュメントを
-	// 再 dispatch して dirty に戻す副作用があり、ユーザーが「編集していないのに
-	// 編集扱い」になる現象を引き起こしていた。focusout では何もしない。
 	compositionState.delete(wrapperEl);
+	// フォーカスがテーブル外に完全に移動したらセル選択をクリア。
+	// focusout は新しい要素にフォーカスが移る前に発火するため、
+	// requestAnimationFrame で実際の移動先を確認する。
+	requestAnimationFrame(() => {
+		if (!wrapperEl.contains(document.activeElement)) {
+			clearCellSelection(wrapperEl);
+		}
+	});
 }
 
 // ── Row operations ───────────────────────────────────
@@ -969,8 +1365,8 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 				if (!navigator.clipboard) return;
 				navigator.clipboard.readText().then(
 					(text) => {
-						const sanitized = sanitizePasteText(text);
-						if (sanitized) pasteIntoCell(target, sanitized, view, wrapperEl);
+						const coord = cellCoordFromElement(target);
+						if (coord) applyPasteText(wrapperEl, view, text, coord);
 					},
 					() => {},
 				);

@@ -6,7 +6,9 @@ import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	buildTableDecorations,
+	clearCellSelection,
 	exitTableDown,
+	parseTsv,
 	pasteIntoCell,
 	sanitizePasteText,
 	tableDecoration,
@@ -697,5 +699,402 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		view.dispatch({ selection: { anchor: line1End } });
 		expect(view.state.selection.main.head).toBe(line1End);
 		expect(view.state.doc.toString()).toBe("| not a table\nmore");
+	});
+});
+
+// ── multi-cell selection (#119) ──
+
+describe("multi-cell selection (#119)", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			mounted.pop()?.destroy();
+		}
+	});
+
+	function mountEditor(doc: string): EditorView {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			selection: EditorSelection.cursor(0),
+			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		view.focus();
+		mounted.push(view);
+		return view;
+	}
+
+	function getWrapper(view: EditorView): HTMLElement {
+		return view.dom.querySelector(".cm-table-widget") as HTMLElement;
+	}
+
+	function getCell(wrapper: HTMLElement, row: number, col: number): HTMLElement {
+		return wrapper.querySelector(`[data-row="${row}"][data-col="${col}"]`) as HTMLElement;
+	}
+
+	function click(cell: HTMLElement): void {
+		cell.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+		cell.focus();
+	}
+
+	function shiftClick(cell: HTMLElement): void {
+		cell.dispatchEvent(
+			new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey: true }),
+		);
+	}
+
+	function selectedCount(wrapper: HTMLElement): number {
+		return wrapper.querySelectorAll(".cm-table-cell-selected").length;
+	}
+
+	it("Shift+click でフォーカス中セルから矩形選択が適用される", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cellA = getCell(wrapper, 0, 0);
+		const cellB = getCell(wrapper, 1, 1);
+
+		click(cellA);
+		shiftClick(cellB);
+
+		expect(selectedCount(wrapper)).toBe(4);
+		expect(cellA.classList.contains("cm-table-cell-selected")).toBe(true);
+		expect(cellB.classList.contains("cm-table-cell-selected")).toBe(true);
+	});
+
+	it("Shift+click で既存選択のアンカーを維持して拡張する", () => {
+		const table = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |";
+		const view = mountEditor(table);
+		const wrapper = getWrapper(view);
+
+		click(getCell(wrapper, 0, 0));
+		shiftClick(getCell(wrapper, 1, 1));
+		expect(selectedCount(wrapper)).toBe(4);
+
+		shiftClick(getCell(wrapper, 2, 2));
+		expect(selectedCount(wrapper)).toBe(9);
+	});
+
+	it("通常クリック（mousedown）でセル選択がクリアされる", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+
+		click(getCell(wrapper, 0, 0));
+		shiftClick(getCell(wrapper, 1, 1));
+		expect(selectedCount(wrapper)).toBe(4);
+
+		getCell(wrapper, 0, 0).dispatchEvent(
+			new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+		);
+		expect(selectedCount(wrapper)).toBe(0);
+	});
+
+	it("Escape でセル選択がクリアされる", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+
+		click(cell);
+		shiftClick(getCell(wrapper, 1, 1));
+		expect(selectedCount(wrapper)).toBe(4);
+
+		cell.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+		);
+		expect(selectedCount(wrapper)).toBe(0);
+	});
+
+	it("Delete で選択セルの内容がクリアされドキュメントに反映される", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+
+		click(cell);
+		shiftClick(getCell(wrapper, 1, 1));
+
+		cell.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }),
+		);
+
+		expect(selectedCount(wrapper)).toBe(0);
+		expect(view.state.doc.line(1).text).toBe("|  |  |");
+		expect(view.state.doc.line(3).text).toBe("|  |  |");
+	});
+
+	it("Backspace で選択セルの内容がクリアされる", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+
+		click(cell);
+		shiftClick(getCell(wrapper, 1, 1));
+
+		cell.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }),
+		);
+
+		expect(selectedCount(wrapper)).toBe(0);
+		expect(view.state.doc.line(1).text).toBe("|  |  |");
+	});
+
+	it("通常キー入力でセル選択がクリアされ通常編集に戻る", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+
+		click(cell);
+		shiftClick(getCell(wrapper, 1, 1));
+		expect(selectedCount(wrapper)).toBe(4);
+
+		cell.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+		expect(selectedCount(wrapper)).toBe(0);
+	});
+
+	it("Cmd+A でマルチセル選択時にテーブル全セルが選択される", () => {
+		const table = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |";
+		const view = mountEditor(table);
+		const wrapper = getWrapper(view);
+
+		click(getCell(wrapper, 0, 0));
+		shiftClick(getCell(wrapper, 0, 1));
+		expect(selectedCount(wrapper)).toBe(2);
+
+		getCell(wrapper, 0, 0).dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "a",
+				metaKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(selectedCount(wrapper)).toBe(9);
+	});
+
+	it("Cmd+A でマルチセル選択が無い場合はセル内容を選択する（既存動作維持）", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+		cell.focus();
+
+		cell.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "a",
+				metaKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(selectedCount(wrapper)).toBe(0);
+		expect(window.getSelection()?.toString()).toBe("A");
+	});
+
+	it("clearCellSelection で選択状態が完全にクリアされる", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+
+		click(getCell(wrapper, 0, 0));
+		shiftClick(getCell(wrapper, 1, 1));
+		expect(selectedCount(wrapper)).toBe(4);
+
+		clearCellSelection(wrapper);
+		expect(selectedCount(wrapper)).toBe(0);
+	});
+
+	it("Cmd+C でマルチセル選択が無い場合は preventDefault されない（native copy 維持）", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+		click(cell);
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "c",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(false);
+	});
+
+	it("Cmd+C でマルチセル選択時は preventDefault される（カスタムコピー）", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+
+		click(cell);
+		shiftClick(getCell(wrapper, 1, 1));
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "c",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(true);
+	});
+
+	it("Cmd+C の TSV に <br> リテラルが含まれず改行としてクォートされる", () => {
+		const tableWithBr = `| A | B |
+| --- | --- |
+| hello<br>world | x |`;
+		const view = mountEditor(tableWithBr);
+		const wrapper = getWrapper(view);
+		const cell00 = getCell(wrapper, 0, 0);
+		const cell10 = getCell(wrapper, 1, 1);
+
+		click(cell00);
+		shiftClick(cell10);
+
+		let copied = "";
+		Object.defineProperty(navigator, "clipboard", {
+			value: {
+				writeText: (t: string) => {
+					copied = t;
+					return Promise.resolve();
+				},
+			},
+			writable: true,
+			configurable: true,
+		});
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "c",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell00.dispatchEvent(ev);
+
+		expect(copied).not.toContain("<br>");
+		expect(copied).toBe('A\tB\n"hello\nworld"\tx');
+	});
+
+	it("Cmd+X でマルチセル選択時は preventDefault + セル内容クリア", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+
+		click(cell);
+		shiftClick(getCell(wrapper, 1, 1));
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "x",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(true);
+		expect(view.state.doc.line(1).text).toBe("|  |  |");
+		expect(view.state.doc.line(3).text).toBe("|  |  |");
+	});
+
+	it("Cmd+C で空セルを含むコピーに不要な改行が入らない", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell00 = getCell(wrapper, 0, 0);
+		const cell11 = getCell(wrapper, 1, 1);
+
+		cell00.textContent = "";
+		cell00.appendChild(document.createElement("br"));
+
+		click(cell00);
+		shiftClick(cell11);
+
+		let copied = "";
+		Object.defineProperty(navigator, "clipboard", {
+			value: {
+				writeText: (t: string) => {
+					copied = t;
+					return Promise.resolve();
+				},
+			},
+			writable: true,
+			configurable: true,
+		});
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "c",
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		cell00.dispatchEvent(ev);
+
+		expect(copied).toBe("\tB\n1\t2");
+	});
+
+	it("TSV ペーストで複数セルに展開される", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+		const cell = getCell(wrapper, 0, 0);
+		click(cell);
+
+		const tsv = "X\tY\nZ\tW";
+		const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(pasteEvent, "clipboardData", {
+			value: { getData: () => tsv },
+		});
+		cell.dispatchEvent(pasteEvent);
+
+		expect(view.state.doc.line(1).text).toBe("| X | Y |");
+		expect(view.state.doc.line(3).text).toBe("| Z | W |");
+	});
+
+	it("マルチセル選択中の plain text ペーストが選択矩形の左上セルに挿入される", () => {
+		const view = mountEditor(simpleTable);
+		const wrapper = getWrapper(view);
+
+		click(getCell(wrapper, 1, 1));
+		shiftClick(getCell(wrapper, 0, 0));
+
+		const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(pasteEvent, "clipboardData", {
+			value: { getData: () => "PASTED" },
+		});
+		getCell(wrapper, 1, 1).dispatchEvent(pasteEvent);
+
+		expect(getCell(wrapper, 0, 0).textContent).toBe("PASTED");
+		expect(view.state.doc.line(1).text).toBe("| PASTED | B |");
+		expect(view.state.doc.line(3).text).toBe("| 1 | 2 |");
+	});
+});
+
+describe("parseTsv", () => {
+	it("基本的な TSV をパースする", () => {
+		expect(parseTsv("A\tB\n1\t2")).toEqual([
+			["A", "B"],
+			["1", "2"],
+		]);
+	});
+
+	it("クォートされたフィールドを処理する", () => {
+		expect(parseTsv('"hello\nworld"\tx')).toEqual([["hello\nworld", "x"]]);
+	});
+
+	it("エスケープされたダブルクォートを処理する", () => {
+		expect(parseTsv('"say ""hi"""\tB')).toEqual([['say "hi"', "B"]]);
+	});
+
+	it("末尾の改行を無視する", () => {
+		expect(parseTsv("A\tB\n")).toEqual([["A", "B"]]);
+	});
+
+	it("空セルを保持する", () => {
+		expect(parseTsv("A\t\tC")).toEqual([["A", "", "C"]]);
+	});
+
+	it("CRLF を処理する", () => {
+		expect(parseTsv("A\tB\r\n1\t2")).toEqual([
+			["A", "B"],
+			["1", "2"],
+		]);
 	});
 });
