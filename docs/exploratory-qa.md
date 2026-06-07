@@ -69,7 +69,7 @@ pnpm dist
 - [ ] **画像**: 相対パス `![](img.png)` / 絶対パス / **wikilink-image** `![[img.png]]` (旧 Tauri 版の `convertFileSrc` 経由 → 新版は `scripta-asset://`)
 - [ ] **リンク**: 内部 wikilink `[[foo]]` / 外部 URL クリックでブラウザ起動
 - [ ] **OGP リンクカード**: 外部 URL のメタ情報取得とプレビュー (sanitize 効いているか)
-- [ ] **ヒント**: PDF 改ページバグは #93 で調査中。#79 は PDF export 用 HTML の KaTeX CSS を CDN から読み込む実装が対象（Live Preview は同梱 CSS を使用）。
+- [ ] **ヒント**: PDF 改ページバグは #93 で修正済み。KaTeX CSS は #121 で完全オフライン化済み（font を data: URI で inline、CDN 不使用）。
 
 ### 2.5 Export (PDF / HTML)
 
@@ -78,7 +78,7 @@ pnpm dist
 - [ ] 画像（相対パス / wikilink-image）を含む Markdown → PDF export で画像が出るか
 - [ ] PDF export の **ファイル名** に日本語 / 絵文字 / 特殊文字を含めて保存
 - [ ] HTML export → 出力 HTML を別タブで開き、CSS / 数式 / 画像が独立して表示できるか
-- [ ] **ヒント**: 既知 bug は #79 (CSS CDN URL 古い) / #93 (改ページ過剰)。これ以外の異常 (フォントずれ / 改行位置 / 表崩れ) を見たい
+- [ ] **ヒント**: #79 (CSS CDN URL) は #121 で解消済み、#93 (改ページ過剰) も修正済み。これ以外の異常 (フォントずれ / 改行位置 / 表崩れ) を見たい
 
 ### 2.6 Git Sync
 
@@ -160,7 +160,7 @@ QA 終了後に user が本ファイルの「## 4. 発見した bug ログ」を
 
 | # | 領域 | タイトル要約 |
 |---|---|---|
-| #79 | PDF | KaTeX CSS CDN URL が `katex@0.16.33` 固定 (bundle と乖離) |
+| #79 | PDF | ~~KaTeX CSS CDN URL が固定 (bundle と乖離)~~ → #121 で解消（inline 化） |
 | #88 | Editor / Table | テーブル挿入ショートカットを Mod-Shift-T に統一 |
 | #89 | Editor / Table | テーブルセル内ペーストの修復 |
 | #90 | Editor / Table | テーブル境界カーソル挙動修正 |

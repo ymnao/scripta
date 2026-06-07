@@ -44,5 +44,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Generated (build-time)
+src/generated/
+
 # Electron
 .electron-builder-cache/

@@ -1,4 +1,5 @@
-import { version as katexVersion } from "katex/package.json";
+import { katexInlineCss } from "../generated/katex-inline-css";
+import { buildFence } from "./code-fence";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
@@ -59,9 +60,6 @@ export function preprocessPageBreakMarkers(markdown: string): string {
 		isInsideRanges(offset, codeRanges) ? match : '\n\n<hr class="pdf-pagebreak"/>\n\n',
 	);
 }
-
-// CDN の katex バージョンを bundle 同梱版と同期 (#79)。
-const KATEX_CSS_URL = `https://cdn.jsdelivr.net/npm/katex@${katexVersion}/dist/katex.min.css`;
 
 /** ExportTheme を Mermaid 用の "light" | "dark" に解決する。system の場合は OS 設定を参照。 */
 function resolveMermaidTheme(theme?: ExportTheme): "light" | "dark" {
@@ -308,7 +306,7 @@ export function buildHtmlDocument(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 ${scriptMeta}<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="${KATEX_CSS_URL}">
+<style>${katexInlineCss}</style>
 <style>
 :root {
   color-scheme: ${theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark"};
@@ -528,13 +526,7 @@ export async function exportAsPdf(
 	return true;
 }
 
-export function buildFence(content: string): string {
-	let max = 2;
-	for (const m of content.matchAll(/`{3,}/g)) {
-		if (m[0].length > max) max = m[0].length;
-	}
-	return "`".repeat(max + 1);
-}
+export { buildFence } from "./code-fence";
 
 export function getDefaultPromptTemplate(): string {
 	return `# HTML変換プロンプト
@@ -544,10 +536,10 @@ export function getDefaultPromptTemplate(): string {
 ## 要件
 
 - 完全なHTMLドキュメント（DOCTYPE、head、body）
-- スタイルは原則インラインCSSで記述（ただし数式用の KaTeX CSS/JS は CDN から読み込み可）
+- スタイルは原則インラインCSSで記述
 - レスポンシブデザイン対応
 - @media (prefers-color-scheme: dark) によるダーク/ライト自動切替
-- 数式は KaTeX を用い、CDN から必要な CSS/JS を読み込んでレンダリング
+- 数式は KaTeX を用い、CSS と font は外部ネットワーク不要な形式（インライン CSS + data URL font）で埋め込む
 - コードブロックはモノスペースフォント + 背景色付き
 - テーブルは罫線付き
 - @media print ルールを含む

@@ -36,3 +36,11 @@ export class CodeFenceTracker {
 		return this.inCodeBlock;
 	}
 }
+
+export function buildFence(content: string): string {
+	let max = 2;
+	for (const m of content.matchAll(/`{3,}/g)) {
+		if (m[0].length > max) max = m[0].length;
+	}
+	return "`".repeat(max + 1);
+}

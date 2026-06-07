@@ -21,8 +21,8 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { buildFence } from "../../lib/code-fence";
 import { openExternal } from "../../lib/commands";
-import { buildFence } from "../../lib/export";
 import { IS_MAC, PRIMARY_MOD_SYMBOL } from "../../lib/platform";
 import { useSettingsStore } from "../../stores/settings";
 import { Dialog } from "../common/Dialog";
