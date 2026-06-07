@@ -234,6 +234,9 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-table-cell:focus": {
 		boxShadow: "inset 0 0 0 2px var(--color-text-link)",
 	},
+	".cm-table-cell-selected": {
+		background: "color-mix(in srgb, var(--color-text-link) 15%, transparent)",
+	},
 	".cm-table-widget th": {
 		fontWeight: "700",
 	},
