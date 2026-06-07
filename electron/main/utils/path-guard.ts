@@ -254,9 +254,9 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 }
 
 // 全 window の登録 root を union で評価する process-wide 版。リクエスト元 webContents を
-// 特定できない経路（カスタムプロトコルハンドラ等）専用。現状の approve / register 設計
-// が「別ウィンドウ間で workspace を相互参照可」を許容している点を継承する（冒頭コメント
-// 参照）。approve を window-scoped 化する場合は本関数も window-scoped 版へ移行する。
+// 特定できない経路（カスタムプロトコルハンドラ等）専用。approve は window-scoped 化済み
+// だが、protocol.handle コールバックに webContentsId を紐づける仕組みがないため
+// この関数は引き続き process-wide union のまま維持している。
 export async function isPathWithinAnyAllowedRoot(p: string): Promise<boolean> {
 	let target: string;
 	try {
