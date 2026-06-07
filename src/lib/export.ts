@@ -536,10 +536,10 @@ export function getDefaultPromptTemplate(): string {
 ## 要件
 
 - 完全なHTMLドキュメント（DOCTYPE、head、body）
-- スタイルは原則インラインCSSで記述（ただし数式用の KaTeX CSS/JS は CDN から読み込み可）
+- スタイルは原則インラインCSSで記述
 - レスポンシブデザイン対応
 - @media (prefers-color-scheme: dark) によるダーク/ライト自動切替
-- 数式は KaTeX を用い、CDN から必要な CSS/JS を読み込んでレンダリング
+- 数式は KaTeX を用い、CSS と font は外部ネットワーク不要な形式（インライン CSS + data URL font）で埋め込む
 - コードブロックはモノスペースフォント + 背景色付き
 - テーブルは罫線付き
 - @media print ルールを含む
