@@ -41,7 +41,7 @@ async function checkAvailableImpl(): Promise<boolean> {
 async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
 	let canonical: string;
 	try {
-		canonical = assertPathAllowed(senderId, path);
+		canonical = await assertPathAllowed(senderId, path);
 	} catch {
 		return false;
 	}
@@ -54,7 +54,7 @@ async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
 }
 
 async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
 	// 3 つの git 呼び出しは独立しているので並列化する。useGitSync の refresh
 	// で頻繁に呼ばれるホットパスのため、逐次（3 spawn 順次）→ 並列で 1/3 程度に短縮。
@@ -79,7 +79,7 @@ async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
 }
 
 async function addAllImpl(senderId: number, path: string): Promise<void> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	try {
 		await createGit(canonical).raw(["add", "-A"]);
 	} catch (e) {
@@ -88,7 +88,7 @@ async function addAllImpl(senderId: number, path: string): Promise<void> {
 }
 
 async function commitImpl(senderId: number, path: string, message: string): Promise<string> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	let out: string;
 	try {
 		out = (await createGit(canonical).raw(["commit", "-m", message])).trim();
@@ -106,7 +106,7 @@ async function commitImpl(senderId: number, path: string, message: string): Prom
 }
 
 async function pullImpl(senderId: number, path: string, syncMethod: string): Promise<string> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	if (syncMethod !== "merge" && syncMethod !== "rebase") {
 		throw new Error(`Invalid sync_method: ${syncMethod}. Expected "merge" or "rebase".`);
 	}
@@ -122,7 +122,7 @@ async function pullImpl(senderId: number, path: string, syncMethod: string): Pro
 }
 
 async function pushImpl(senderId: number, path: string): Promise<string> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
 	let firstError: unknown;
 	try {
@@ -155,7 +155,7 @@ async function pushImpl(senderId: number, path: string): Promise<string> {
 }
 
 async function getConflictedFilesImpl(senderId: number, path: string): Promise<string[]> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	try {
 		const out = await createGit(canonical).raw(["diff", "--name-only", "--diff-filter=U"]);
 		return out.split("\n").filter((l) => l.length > 0);
@@ -169,7 +169,7 @@ async function getConflictContentImpl(
 	path: string,
 	filePath: string,
 ): Promise<ConflictContent> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	validateRelativePath(filePath);
 	const git = createGit(canonical);
 	const fetchStage = async (n: 2 | 3, label: "ours" | "theirs"): Promise<string> => {
@@ -205,7 +205,7 @@ async function resolveConflictImpl(
 	content: string,
 	resolution: "modify" | "delete",
 ): Promise<void> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	validateRelativePath(filePath);
 	if (resolution !== "modify" && resolution !== "delete") {
 		throw new Error(`Invalid resolution: ${resolution}. Expected "modify" or "delete".`);
@@ -234,7 +234,7 @@ async function resolveConflictImpl(
 	// 親ディレクトリの canonical を取得して、その配下で I/O する。fs.ts と同じく
 	// 「判定に使った canonical をそのまま実 I/O に使う」方針で TOCTOU を最小化。
 	// assertPathAllowed が realpathBestEffort で symlink を解決し、bounds 違反なら throw。
-	const canonicalParent = assertPathAllowed(senderId, dirname(target));
+	const canonicalParent = await assertPathAllowed(senderId, dirname(target));
 	const canonicalTarget = join(canonicalParent, basename(target));
 	await fsp.mkdir(canonicalParent, { recursive: true });
 	await fsp.writeFile(canonicalTarget, content, "utf8");
@@ -247,7 +247,7 @@ async function resolveConflictImpl(
 }
 
 async function finishConflictResolutionImpl(senderId: number, path: string): Promise<string> {
-	const canonical = assertPathAllowed(senderId, path);
+	const canonical = await assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
 	const gitDirRaw = (await git.raw(["rev-parse", "--git-dir"])).trim();
 	const gitDir = isAbsolute(gitDirRaw) ? gitDirRaw : pathResolve(canonical, gitDirRaw);
@@ -280,13 +280,13 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 	throw new Error("Not in a merge or rebase state");
 }
 
-function emitConflictResolvedImpl(senderId: number, workspacePath: string): void {
+async function emitConflictResolvedImpl(senderId: number, workspacePath: string): Promise<void> {
 	// 認可: 送信元の allowedRoots に当該 workspace が含まれることを確認してから
 	// broadcast する。renderer は信頼できない前提なので、別 window から偽装
 	// emit で他 workspace の `pausedRef` を解除されないように防ぐ。
 	// 正規経路（conflict window）は createConflictWindow 内で
 	// `setActiveWorkspaceForWindow(childId, canonical)` 済みのため pass する。
-	assertPathAllowed(senderId, workspacePath);
+	await assertPathAllowed(senderId, workspacePath);
 	// 該当 workspace のみ受信側で `pausedRef` をクリアできるよう、
 	// payload に workspace path を載せて broadcast する。受信側
 	// (useGitSync.ts) で照合し、別 workspace の未解決 conflict が
@@ -301,7 +301,7 @@ function emitConflictResolvedImpl(senderId: number, workspacePath: string): void
 async function getLastCommitTimeImpl(senderId: number, path: string): Promise<string | null> {
 	let canonical: string;
 	try {
-		canonical = assertPathAllowed(senderId, path);
+		canonical = await assertPathAllowed(senderId, path);
 	} catch {
 		return null;
 	}

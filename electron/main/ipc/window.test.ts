@@ -112,7 +112,7 @@ beforeEach(async () => {
 	createdWindows.length = 0;
 	workspaceDir = await realpath(await mkdtemp(join(tmpdir(), "scripta-window-test-")));
 	// parent window の allowedRoots に workspace を登録
-	registerWorkspaceRoot(PARENT_WIN, workspaceDir);
+	await registerWorkspaceRoot(PARENT_WIN, workspaceDir);
 });
 
 afterEach(async () => {
@@ -201,7 +201,7 @@ describe("createConflictWindow", () => {
 		const parentMock = new ParentClass({});
 		const parentSenderId = parentMock.webContents.id;
 		// 親 window の allowedRoots に workspace を登録（PARENT_WIN とは別の id）
-		registerWorkspaceRoot(parentSenderId, workspaceDir);
+		await registerWorkspaceRoot(parentSenderId, workspaceDir);
 
 		await createConflictWindow(parentSenderId, workspaceDir);
 

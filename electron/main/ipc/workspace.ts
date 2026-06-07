@@ -15,13 +15,13 @@ import { persistWorkspacePath } from "./settings";
 // で path-guard の allowedRoots を拡張し、ファイル I/O を全面解放できてしまう。
 const approvedWorkspacePaths = new Set<string>();
 
-export function approveWorkspacePath(rawPath: string): void {
-	approvedWorkspacePaths.add(canonicalize(rawPath));
+export async function approveWorkspacePath(rawPath: string): Promise<void> {
+	approvedWorkspacePaths.add(await canonicalize(rawPath));
 }
 
-export function isWorkspacePathApproved(rawPath: string): boolean {
+export async function isWorkspacePathApproved(rawPath: string): Promise<boolean> {
 	try {
-		return approvedWorkspacePaths.has(canonicalize(rawPath));
+		return approvedWorkspacePaths.has(await canonicalize(rawPath));
 	} catch {
 		// validatePath が throw する不正入力（相対パス・null byte 等）も拒否扱い
 		return false;
@@ -59,19 +59,22 @@ export function markWorkspacePersistenceVolatile(webContentsId: number): void {
 	volatileWorkspacePersistenceWindows.add(webContentsId);
 }
 
-export function setActiveWorkspaceForWindow(webContentsId: number, path: string | null): void {
-	const canonical = path === null ? null : canonicalize(path);
+export async function setActiveWorkspaceForWindow(
+	webContentsId: number,
+	path: string | null,
+): Promise<void> {
+	const canonical = path === null ? null : await canonicalize(path);
 	const previous = windowWorkspaces.get(webContentsId);
 	if (previous === canonical) return;
 
 	if (previous !== undefined) {
 		windowWorkspaces.delete(webContentsId);
-		unregisterWorkspaceRoot(webContentsId, previous);
+		await unregisterWorkspaceRoot(webContentsId, previous);
 	}
 
 	if (canonical !== null) {
 		windowWorkspaces.set(webContentsId, canonical);
-		registerWorkspaceRoot(webContentsId, canonical);
+		await registerWorkspaceRoot(webContentsId, canonical);
 	}
 }
 
@@ -89,7 +92,7 @@ export function registerWorkspaceIpc(): void {
 		// renderer は任意 path を投げ得る。dialog 経由 / settings 経由で main が
 		// 承認した path 集合に無い場合は拒否し、信頼境界を main 側に閉じ込める。
 		// path === null（unregister）は常に許可。
-		if (path !== null && !isWorkspacePathApproved(path)) {
+		if (path !== null && !(await isWorkspacePathApproved(path))) {
 			console.warn(`[workspace] rejected non-approved path: ${path}`);
 			throw new StructuredError(
 				"PATH_OUTSIDE_WORKSPACE",
@@ -107,7 +110,7 @@ export function registerWorkspaceIpc(): void {
 		if (!volatileWorkspacePersistenceWindows.has(event.sender.id)) {
 			persistWorkspacePath(path);
 		}
-		setActiveWorkspaceForWindow(event.sender.id, path);
+		await setActiveWorkspaceForWindow(event.sender.id, path);
 	});
 }
 

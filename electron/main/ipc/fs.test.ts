@@ -42,7 +42,7 @@ let workspaceDir = "";
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-fs-test-"));
-	registerWorkspaceRoot(TEST_WIN, workspaceDir);
+	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	vi.mocked(shell.trashItem).mockClear();
 });
 
@@ -104,7 +104,7 @@ describe("writeFileImpl", () => {
 
 	it("permits a SaveDialog-style transient write path and consumes it on success", async () => {
 		const outside = join(tmpdir(), `scripta-outside-success-${Date.now()}.md`);
-		registerTransientWritePath(TEST_WIN, outside);
+		await registerTransientWritePath(TEST_WIN, outside);
 		try {
 			await writeFileImpl(TEST_WIN, outside, "exported");
 			expect(await readFile(outside, "utf8")).toBe("exported");
@@ -120,7 +120,7 @@ describe("writeFileImpl", () => {
 		// 「対象自体がディレクトリ」のケースを使う（writeFile が EISDIR を返す）。
 		const outsideDir = await mkdtemp(join(tmpdir(), "scripta-outside-dir-"));
 		try {
-			registerTransientWritePath(TEST_WIN, outsideDir);
+			await registerTransientWritePath(TEST_WIN, outsideDir);
 			await expect(writeFileImpl(TEST_WIN, outsideDir, "x")).rejects.toThrow();
 			// 失敗したので transient はまだ残っており、withRetry で再試行可能
 			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
@@ -131,7 +131,7 @@ describe("writeFileImpl", () => {
 
 	it("rejects when another window's transient is used (no cross-window leakage)", async () => {
 		const outside = join(tmpdir(), `scripta-outside-cross-${Date.now()}.md`);
-		registerTransientWritePath(OTHER_WIN, outside);
+		await registerTransientWritePath(OTHER_WIN, outside);
 		await expect(writeFileImpl(TEST_WIN, outside, "x")).rejects.toThrow(/Permission denied/);
 	});
 });
@@ -165,7 +165,7 @@ describe("writeNewFileImpl", () => {
 		const outside = join(tmpdir(), `scripta-outside-exists-${Date.now()}.md`);
 		await writeFile(outside, "preexisting", "utf8");
 		try {
-			registerTransientWritePath(TEST_WIN, outside);
+			await registerTransientWritePath(TEST_WIN, outside);
 			await expect(writeNewFileImpl(TEST_WIN, outside, "new")).rejects.toThrow(/EEXIST/);
 			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
 		} finally {
@@ -396,7 +396,7 @@ describe("deleteEntryImpl", () => {
 		// trashItem には canonical（realpath 済み）が渡される — 判定と I/O で同じ
 		// パスを使うことで TOCTOU を防ぐ。symlink 差し替え攻撃で workspace 外の
 		// ファイルを誤削除しないことの担保
-		expect(shell.trashItem).toHaveBeenCalledWith(canonicalize(path));
+		expect(shell.trashItem).toHaveBeenCalledWith(await canonicalize(path));
 	});
 
 	it("throws Not found for missing entries", async () => {

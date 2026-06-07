@@ -26,7 +26,7 @@ let workspaceDir = "";
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-search-test-"));
-	registerWorkspaceRoot(TEST_WIN, workspaceDir);
+	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 });
 
 afterEach(async () => {
@@ -461,7 +461,7 @@ describe("searchFilesImpl", () => {
 			await writeFile(join(realDir, "note.md"), "hello world");
 			await symlink(realDir, symlinkPath, "dir");
 			clearWorkspaceRoots();
-			registerWorkspaceRoot(TEST_WIN, symlinkPath);
+			await registerWorkspaceRoot(TEST_WIN, symlinkPath);
 			const out = await searchFilesImpl(TEST_WIN, symlinkPath, "hello");
 			expect(out).toHaveLength(1);
 			// filePath は input-base = symlinkPath 配下を指すべき（canonical = realDir 配下では「ない」）

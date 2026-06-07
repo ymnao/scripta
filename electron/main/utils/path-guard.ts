@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { StructuredError } from "./structured-error";
 
@@ -48,21 +48,13 @@ export function validatePath(p: string): string {
 //  - 中間ディレクトリが symlink の場合も正しく解決される（symlink-in-the-middle 対策）
 // すべての祖先が解決失敗した場合は入力をそのまま返す（fall-through）。
 //
-// fs IPC のたびに realpathSync を呼ぶとイベントループをブロックするため、
 // 実在する祖先の realpath 結果を簡易 LRU でキャッシュする。Symlink target の
 // 変更は process 寿命中に発生する稀有なケースで、Electron app の典型的な
 // 使用シナリオでは許容範囲内と判断。
-//
-// 将来検討: cache miss 時の realpathSync は同期 I/O なので、深いパス階層 /
-// network FS / 大量ファイルアクセス時に main プロセスのイベントループを
-// ブロックしうる。`fs.promises.realpath` への async 化（assertPathAllowed /
-// assertWritePathAllowed / canonicalize / 全 fs IPC ハンドラまで波及する API
-// 変更）は Stage 2 以降で検討する。現状は LRU 256 entries + 通常運用での
-// hit 率の高さで実用上の問題を回避できると判断。
 const realpathCache = new Map<string, string>();
 const REALPATH_CACHE_MAX = 256;
 
-function cachedRealpathSync(p: string): string {
+async function cachedRealpath(p: string): Promise<string> {
 	const cached = realpathCache.get(p);
 	if (cached !== undefined) {
 		// LRU: 末尾に move（Map は insertion order を保つ）
@@ -70,7 +62,7 @@ function cachedRealpathSync(p: string): string {
 		realpathCache.set(p, cached);
 		return cached;
 	}
-	const result = realpathSync(p);
+	const result = await realpath(p);
 	if (realpathCache.size >= REALPATH_CACHE_MAX) {
 		const oldest = realpathCache.keys().next().value;
 		if (oldest !== undefined) realpathCache.delete(oldest);
@@ -83,12 +75,12 @@ export function clearRealpathCache(): void {
 	realpathCache.clear();
 }
 
-function realpathBestEffort(p: string): string {
+async function realpathBestEffort(p: string): Promise<string> {
 	let current = p;
 	let suffix = "";
 	while (true) {
 		try {
-			const real = cachedRealpathSync(current);
+			const real = await cachedRealpath(current);
 			return suffix ? join(real, suffix) : real;
 		} catch {
 			const parent = dirname(current);
@@ -101,12 +93,12 @@ function realpathBestEffort(p: string): string {
 
 // validatePath + realpath 正規化済みのパスを返す。workspace.ts のように
 // 「path-guard と整合した正規形」で値を保持したい呼び出し側用の helper。
-export function canonicalize(p: string): string {
+export async function canonicalize(p: string): Promise<string> {
 	return realpathBestEffort(validatePath(p));
 }
 
-export function registerWorkspaceRoot(windowId: number, p: string): void {
-	const canonical = canonicalize(p);
+export async function registerWorkspaceRoot(windowId: number, p: string): Promise<void> {
+	const canonical = await canonicalize(p);
 	let set = windowAllowedRoots.get(windowId);
 	if (set === undefined) {
 		set = new Set<string>();
@@ -115,8 +107,8 @@ export function registerWorkspaceRoot(windowId: number, p: string): void {
 	set.add(canonical);
 }
 
-export function unregisterWorkspaceRoot(windowId: number, p: string): void {
-	const canonical = canonicalize(p);
+export async function unregisterWorkspaceRoot(windowId: number, p: string): Promise<void> {
+	const canonical = await canonicalize(p);
 	const set = windowAllowedRoots.get(windowId);
 	if (set === undefined) return;
 	set.delete(canonical);
@@ -158,8 +150,8 @@ export function findContainingWorkspaceRoot(windowId: number, canonical: string)
 	return best;
 }
 
-export function registerTransientWritePath(windowId: number, p: string): void {
-	const canonical = canonicalize(p);
+export async function registerTransientWritePath(windowId: number, p: string): Promise<void> {
+	const canonical = await canonicalize(p);
 	let set = transientWritePaths.get(windowId);
 	if (set === undefined) {
 		set = new Set<string>();
@@ -174,8 +166,8 @@ export function registerTransientWritePath(windowId: number, p: string): void {
 //
 // fs:write / fs:write-new は成功時に毎回これを呼ぶため、transient 未登録の
 // 通常保存（workspace 内 write）が hot path。
-//   1. 該当 window の Set が無ければ即 false（realpathSync を走らせない）
-//   2. ある場合も「canonical 前提」なので追加の realpathSync 呼び出しは不要
+//   1. 該当 window の Set が無ければ即 false（realpath を走らせない）
+//   2. ある場合も「canonical 前提」なので追加の realpath 呼び出しは不要
 // により hot path で realpath syscall を回避する。
 export function consumeTransientWritePath(windowId: number, canonicalPath: string): boolean {
 	const set = transientWritePaths.get(windowId);
@@ -229,8 +221,8 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
 // 呼び出し側 / renderer は getErrorKind で kind を復元し 2 種類を区別できる。
-export function assertPathAllowed(windowId: number, p: string): string {
-	const target = realpathBestEffort(validatePath(p));
+export async function assertPathAllowed(windowId: number, p: string): Promise<string> {
+	const target = await realpathBestEffort(validatePath(p));
 	if (isWithinWindowAllowedRoot(windowId, target)) return target;
 	// 違反パスはレンダラに返さず、main 側ログにだけ残す（情報漏洩防止）
 	console.warn(`[path-guard] denied outside workspace: ${p}`);
@@ -244,8 +236,8 @@ export function assertPathAllowed(windowId: number, p: string): string {
 //
 // 戻り値: 許可された場合の canonical パス（assertPathAllowed と同じ理由で I/O 側も
 // この canonical を使うこと。TOCTOU 防止 + 重複正規化回避）。
-export function assertWritePathAllowed(windowId: number, p: string): string {
-	const target = realpathBestEffort(validatePath(p));
+export async function assertWritePathAllowed(windowId: number, p: string): Promise<string> {
+	const target = await realpathBestEffort(validatePath(p));
 	if (isWithinWindowAllowedRoot(windowId, target)) return target;
 	const set = transientWritePaths.get(windowId);
 	if (set?.has(target)) return target;
@@ -256,9 +248,9 @@ export function assertWritePathAllowed(windowId: number, p: string): string {
 // 副作用なし boolean 判定。validatePath が throw する不正入力でも例外を飲んで
 // false を返す（boolean 契約）。assertPathAllowed の throw 経路で「権限エラー」と
 // 「不正入力エラー」を区別したい呼び出し側は assertPathAllowed を使う。
-export function isPathAllowed(windowId: number, p: string): boolean {
+export async function isPathAllowed(windowId: number, p: string): Promise<boolean> {
 	try {
-		return isWithinWindowAllowedRoot(windowId, realpathBestEffort(validatePath(p)));
+		return isWithinWindowAllowedRoot(windowId, await realpathBestEffort(validatePath(p)));
 	} catch {
 		return false;
 	}
@@ -268,10 +260,10 @@ export function isPathAllowed(windowId: number, p: string): boolean {
 // 特定できない経路（カスタムプロトコルハンドラ等）専用。現状の approve / register 設計
 // が「別ウィンドウ間で workspace を相互参照可」を許容している点を継承する（冒頭コメント
 // 参照）。approve を window-scoped 化する場合は本関数も window-scoped 版へ移行する。
-export function isPathWithinAnyAllowedRoot(p: string): boolean {
+export async function isPathWithinAnyAllowedRoot(p: string): Promise<boolean> {
 	let target: string;
 	try {
-		target = realpathBestEffort(validatePath(p));
+		target = await realpathBestEffort(validatePath(p));
 	} catch {
 		return false;
 	}

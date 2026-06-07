@@ -140,7 +140,7 @@ export function registerWatcherIpc(): void {
 	handle("watcher:start", async (event, rawPath: string) => {
 		// 必ず path-guard を通す。未承認 path で chokidar を起動させないため。
 		// canonical を chokidar に渡すことで TOCTOU 抑止 + workspace.ts の表記と整合する。
-		const canonical = assertPathAllowed(event.sender.id, rawPath);
+		const canonical = await assertPathAllowed(event.sender.id, rawPath);
 		const inputRoot = resolve(rawPath);
 		stopWatcherForWindow(event.sender.id);
 		sessions.set(event.sender.id, startSession(event.sender, canonical, inputRoot));

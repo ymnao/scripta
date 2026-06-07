@@ -133,7 +133,7 @@ export async function exportPdfImpl(
 	html: string,
 	outputPath: string,
 ): Promise<void> {
-	const canonical = assertWritePathAllowed(senderId, outputPath);
+	const canonical = await assertWritePathAllowed(senderId, outputPath);
 
 	// session.fromPartition は app ready 後でないと動かないため、IPC 受信時 (=必ず
 	// app ready 後) に lazy install する。多重 install は flag で防止。
