@@ -6,7 +6,6 @@ import {
 	type Range,
 	StateEffect,
 	StateField,
-	type Text,
 	Transaction,
 	type TransactionSpec,
 } from "@codemirror/state";
@@ -18,7 +17,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { findUnescapedPipe } from "./table-utils";
+import { findUnescapedPipe, trimToLastTableLine } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -118,17 +117,6 @@ function parseTableFromLines(lines: string[]): TableData | null {
 }
 
 // ── Helpers ───────────────────────────────────────────
-
-/**
- * lezer の Table ノードは直後の本文行を含むことがある。パイプを含む最後の行まで詰めて
- * 実際のテーブル最終行を返す（findTableNode と buildTableDecorations で共有）。
- */
-function trimToLastTableLine(doc: Text, startLine: number, endLine: number): number {
-	while (endLine > startLine && !doc.line(endLine).text.includes("|")) {
-		endLine--;
-	}
-	return endLine;
-}
 
 function findTableNode(
 	state: EditorState,

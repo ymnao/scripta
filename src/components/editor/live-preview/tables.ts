@@ -3,7 +3,7 @@ import { EditorSelection, type EditorState, type Extension, Prec } from "@codemi
 import { EditorView, keymap } from "@codemirror/view";
 import { getStringWidth } from "../../../lib/east-asian-width";
 import { focusCell, focusTableCellEffect, parseTsv } from "./table-decoration";
-import { createEmptyTable, isLineBlank } from "./table-utils";
+import { createEmptyTable, isLineBlank, trimToLastTableLine } from "./table-utils";
 
 // ── Insert table (Mod-Shift-t) ────────
 
@@ -169,25 +169,33 @@ export const tableKeymap: Extension = Prec.high(
 // ── TSV paste → Markdown table (#147) ────────────────
 
 /** 指定範囲 [from, to] が FencedCode / CodeBlock / InlineCode / Table ノードと重なるか判定する。
- *  from === to（空カーソル）でもその位置を含むノードを検出する。 */
-function rangeOverlapsCodeOrTable(
-	state: Parameters<typeof syntaxTree>[0],
-	from: number,
-	to: number,
-): boolean {
+ *  from === to（空カーソル）でもその位置を含むノードを検出する。
+ *
+ *  Table ノードは lezer が直後の本文行まで含めてしまうことがあるため、
+ *  trimToLastTableLine でパイプを含む最後の行まで詰めた実際の範囲で判定する
+ *  （table-decoration.ts の buildTableDecorations / findTableNode と同じ補正）。 */
+function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number): boolean {
+	const doc = state.doc;
 	let found = false;
 	syntaxTree(state).iterate({
 		from,
 		to,
 		enter(node) {
 			if (found) return false;
-			if (
-				node.name === "FencedCode" ||
-				node.name === "CodeBlock" ||
-				node.name === "InlineCode" ||
-				node.name === "Table"
-			) {
+			if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
 				found = true;
+				return false;
+			}
+			if (node.name === "Table") {
+				// lezer の Table 範囲をパイプ行末尾まで詰める
+				const startLine = doc.lineAt(node.from).number;
+				const rawEndLine = doc.lineAt(node.to).number;
+				const trimmedEndLine = trimToLastTableLine(doc, startLine, rawEndLine);
+				const trimmedTo = doc.line(trimmedEndLine).to;
+				// 詰めた範囲と [from, to] が重なるか判定
+				if (node.from <= to && trimmedTo >= from) {
+					found = true;
+				}
 				return false;
 			}
 		},
