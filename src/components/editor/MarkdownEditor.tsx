@@ -61,6 +61,7 @@ import {
 	strikethroughDecoration,
 	tableDecoration,
 	tableKeymap,
+	tsvPasteHandler,
 	wikilinkCompletion,
 	wikilinkDecoration,
 	wikilinkHoverTooltip,
@@ -322,6 +323,7 @@ export function MarkdownEditor({
 		() => [
 			listKeymap,
 			tableKeymap,
+			tsvPasteHandler,
 			EditorView.lineWrapping,
 			staticEditorTheme,
 			createDynamicEditorTheme(fontSize),

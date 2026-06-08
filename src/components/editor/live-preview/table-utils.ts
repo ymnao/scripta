@@ -7,6 +7,17 @@ export function isLineBlank(doc: Text, lineNum: number): boolean {
 	return lineNum >= 1 && lineNum <= doc.lines && doc.line(lineNum).text.trim().length === 0;
 }
 
+/**
+ * lezer の Table ノードは直後の本文行を含むことがある。パイプを含む最後の行まで詰めて
+ * 実際のテーブル最終行を返す。
+ */
+export function trimToLastTableLine(doc: Text, startLine: number, endLine: number): number {
+	while (endLine > startLine && !doc.line(endLine).text.includes("|")) {
+		endLine--;
+	}
+	return endLine;
+}
+
 // ── Types ──────────────────────────────────────────────
 
 export interface CellInfo {

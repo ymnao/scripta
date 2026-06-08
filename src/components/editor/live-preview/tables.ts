@@ -1,8 +1,9 @@
 import { syntaxTree } from "@codemirror/language";
-import { type Extension, Prec } from "@codemirror/state";
-import { type EditorView, keymap } from "@codemirror/view";
-import { focusCell, focusTableCellEffect } from "./table-decoration";
-import { createEmptyTable, isLineBlank } from "./table-utils";
+import { EditorSelection, type EditorState, type Extension, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { getStringWidth } from "../../../lib/east-asian-width";
+import { focusCell, focusTableCellEffect, parseTsv } from "./table-decoration";
+import { createEmptyTable, isLineBlank, trimToLastTableLine } from "./table-utils";
 
 // ── Insert table (Mod-Shift-t) ────────
 
@@ -164,3 +165,176 @@ export const tableKeymap: Extension = Prec.high(
 		{ key: "Backspace", run: backspaceIntoTableFromBelow },
 	]),
 );
+
+// ── TSV paste → Markdown table (#147) ────────────────
+
+/** 指定範囲が FencedCode / CodeBlock / InlineCode / Table ノードと重なるか判定する。
+ *  from === to（空カーソル）ではその位置を含むノードを検出する（inclusive）。
+ *  from < to（非空選択）では半開区間 [from, to) として判定し、選択範囲が
+ *  コード/テーブルの直前で終わるだけの境界接触は「重なり」としない。
+ *
+ *  syntaxTree().iterate({ from, to }) は inclusive に重なるノードを返すため、
+ *  非空選択では iterate が返した境界ノードを追加フィルタで除外する。
+ *
+ *  Table ノードは lezer が直後の本文行まで含めてしまうことがあるため、
+ *  trimToLastTableLine でパイプを含む最後の行まで詰めた実際の範囲で判定する
+ *  （table-decoration.ts の buildTableDecorations / findTableNode と同じ補正）。 */
+export function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number): boolean {
+	const doc = state.doc;
+	const isEmpty = from === to;
+	let found = false;
+	syntaxTree(state).iterate({
+		from,
+		to,
+		enter(node) {
+			if (found) return false;
+			if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
+				// 非空選択: 半開区間で重ならない境界接触を除外
+				if (!isEmpty && (node.from >= to || node.to <= from)) return false;
+				found = true;
+				return false;
+			}
+			if (node.name === "Table") {
+				// lezer の Table 範囲をパイプ行末尾まで詰める
+				const startLine = doc.lineAt(node.from).number;
+				const rawEndLine = doc.lineAt(node.to).number;
+				const trimmedEndLine = trimToLastTableLine(doc, startLine, rawEndLine);
+				const trimmedTo = doc.line(trimmedEndLine).to;
+				if (isEmpty) {
+					// 空カーソル: inclusive（カーソルがテーブル内にあるか）
+					if (node.from <= from && trimmedTo >= from) {
+						found = true;
+					}
+				} else {
+					// 非空選択: 半開区間の重なり（境界接触のみは除外）
+					if (node.from < to && trimmedTo > from) {
+						found = true;
+					}
+				}
+				return false;
+			}
+		},
+	});
+	return found;
+}
+
+export function tsvToMarkdownTable(grid: string[][]): string {
+	const colCount = Math.max(...grid.map((row) => row.length));
+	// セル内改行をスペースに正規化してからパイプをエスケープする。
+	// parseTsv は quoted field 内の改行を保持するが、Markdown テーブルの行中に
+	// 改行があるとテーブル構造が壊れる（table-decoration.ts の sanitizePasteText と同じ方針）。
+	//
+	// パイプのエスケープは findUnescapedPipe（table-utils.ts）と整合させる必要がある。
+	// パーサーは | 直前の連続 \ が偶数なら未エスケープ区切りとして扱うため、
+	// 単純な replace(/\|/g, "\\|") では入力 `a\|b` が `a\\|b`（偶数 → 区切り）になり
+	// 1 セルが 2 セルに割れる。(\\*)\| で直前の \ 列を倍にして無効化してから \| を
+	// 付加することで、出力の | 直前は常に奇数個の \ になる。
+	const escapeCell = (s: string) =>
+		s
+			.replace(/[\r\n]+/g, " ")
+			.replace(/(\\*)\|/g, (_, bs: string) => `${"\\".repeat(bs.length * 2)}\\|`)
+			.trim();
+
+	// 表示幅ベースで列幅を計算（CJK 全角文字を 2 カラムとして扱う）
+	const widths = Array.from({ length: colCount }, (_, c) =>
+		Math.max(3, ...grid.map((row) => (c < row.length ? getStringWidth(escapeCell(row[c])) : 0))),
+	);
+
+	const formatRow = (row: string[]) => {
+		const parts = Array.from({ length: colCount }, (_, c) => {
+			const content = c < row.length ? escapeCell(row[c]) : "";
+			const pad = widths[c] - getStringWidth(content);
+			return content + " ".repeat(Math.max(0, pad));
+		});
+		return `| ${parts.join(" | ")} |`;
+	};
+
+	const separator = `| ${widths.map((w) => "-".repeat(w)).join(" | ")} |`;
+	const [header, ...dataRows] = grid;
+	return [formatRow(header), separator, ...dataRows.map(formatRow)].join("\n");
+}
+
+/**
+ * TSV ペースト時のテーブル挿入変更を構築する。
+ *
+ * 3 つのケースを処理する:
+ * 1. 空行上の空カーソル → 行全体をテーブルで置き換え
+ * 2. 非空行の空カーソル → 行末 (fromLine.to) に挿入（行中位置によらない）
+ * 3. 選択あり → 選択後の行内テキストを退避し、置換範囲を行末まで拡張
+ *
+ * ケース 2/3 はテーブル（ブロック要素）が行内テキストに直結してパース不能に
+ * なるのを防ぐ。
+ */
+export function buildTsvTableChanges(state: EditorState, md: string) {
+	return state.changeByRange((range) => {
+		const fromLine = state.doc.lineAt(range.from);
+		const toLine = state.doc.lineAt(range.to);
+
+		const onEmptyLine = range.empty && fromLine.text.trim().length === 0;
+
+		let from: number;
+		let to: number;
+		let trailing = "";
+
+		if (onEmptyLine) {
+			// 空行 → 行全体をテーブルで置き換える
+			from = fromLine.from;
+			to = fromLine.to;
+		} else if (range.empty) {
+			// 非空行の空カーソル → 行末に挿入（行中位置によらずテーブルは行の後に配置）
+			from = fromLine.to;
+			to = fromLine.to;
+		} else {
+			// 選択あり → 選択後の行内テキストを退避し、置換範囲を行末まで拡張
+			from = range.from;
+			to = toLine.to;
+			const afterSel = state.doc.sliceString(range.to, toLine.to);
+			if (afterSel.trim().length > 0) {
+				trailing = afterSel;
+			}
+		}
+
+		// テーブル前後に空行を確保（lezer がテーブルを認識するために必要）
+		const atLineStart = from === fromLine.from;
+		const prevLineBlank = fromLine.number === 1 || isLineBlank(state.doc, fromLine.number - 1);
+		const prefix = from === 0 || (atLineStart && prevLineBlank) ? "" : atLineStart ? "\n" : "\n\n";
+
+		const nextLineNum = toLine.number + 1;
+		const nextLineBlank = nextLineNum > state.doc.lines || isLineBlank(state.doc, nextLineNum);
+		// trailing がある場合は空行を挟んでテーブル後に別行として配置する。
+		// trailing が無い場合は後続行との分離のみ考慮する。
+		const suffix = trailing ? `\n\n${trailing}` : nextLineBlank ? "" : "\n";
+
+		const insert = `${prefix}${md}${suffix}`;
+		return {
+			range: EditorSelection.cursor(from + insert.length),
+			changes: { from, to, insert },
+		};
+	});
+}
+
+export const tsvPasteHandler: Extension = EditorView.domEventHandlers({
+	paste(event: ClipboardEvent, view: EditorView) {
+		if (event.defaultPrevented) return false;
+
+		const text = event.clipboardData?.getData("text/plain");
+		if (!text?.includes("\t")) return false;
+
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active.closest(".cm-table-widget")) return false;
+
+		const { state } = view;
+		// いずれかの range がコード / 既存テーブルと重なるなら plain paste に委ねる
+		if (state.selection.ranges.some((r) => rangeOverlapsCodeOrTable(state, r.from, r.to)))
+			return false;
+
+		const grid = parseTsv(text);
+		if (grid.length === 0) return false;
+
+		event.preventDefault();
+
+		const md = tsvToMarkdownTable(grid);
+		view.dispatch({ ...buildTsvTableChanges(state, md), userEvent: "input.paste" });
+		return true;
+	},
+});

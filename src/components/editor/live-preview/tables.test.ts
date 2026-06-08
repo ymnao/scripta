@@ -5,7 +5,13 @@ import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildTableDecorations, tableDecoration } from "./table-decoration";
 import { createEmptyTable } from "./table-utils";
-import { insertTable, tableKeymap } from "./tables";
+import {
+	buildTsvTableChanges,
+	insertTable,
+	rangeOverlapsCodeOrTable,
+	tableKeymap,
+	tsvToMarkdownTable,
+} from "./tables";
 import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
 
 const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
@@ -301,5 +307,261 @@ describe("findTableNodeAt (via syntaxTree)", () => {
 			node = node.parent;
 		}
 		expect(found).toBe(false);
+	});
+});
+
+// ── tsvToMarkdownTable (#147) ────────────────────────
+
+describe("tsvToMarkdownTable", () => {
+	it("2行3列の TSV を Markdown テーブルに変換する", () => {
+		const grid = [
+			["名前", "年齢", "都市"],
+			["Alice", "30", "東京"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(3);
+		expect(lines[0]).toMatch(/^\| 名前\s+\| 年齢\s+\| 都市\s+\|$/);
+		expect(lines[1]).toMatch(/^\| ---/);
+		expect(lines[2]).toMatch(/^\| Alice\s+\| 30\s+\| 東京\s+\|$/);
+	});
+
+	it("1行の TSV はヘッダ＋区切り行のみ生成する", () => {
+		const grid = [["A", "B", "C"]];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toContain("| A");
+		expect(lines[1]).toMatch(/^\| ---/);
+	});
+
+	it("セル内のパイプがエスケープされる", () => {
+		const grid = [
+			["key", "value"],
+			["a|b", "c"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		expect(result).toContain("a\\|b");
+		expect(result).not.toMatch(/a\|b/);
+	});
+
+	it("バックスラッシュ直後のパイプがセルを割らない", () => {
+		// TSV の 1 セル "a\|b" — リテラル \ + | がセル内容。
+		// findUnescapedPipe は | 直前の \ が偶数なら区切りとして扱うので、
+		// 出力の | 直前は奇数個の \ でなければならない。
+		const grid = [["H"], ["a\\|b"]];
+		const result = tsvToMarkdownTable(grid);
+		const dataLine = result.split("\n")[2];
+		// 出力は a\\\\| ではなく a\\\|b（\ が 3 個 = 奇数）になるべき
+		expect(dataLine).toContain("a\\\\\\|b");
+	});
+
+	it("複数バックスラッシュ + パイプも正しくエスケープされる", () => {
+		// "a\\|b" — 2 つの \ + |。パーサーは偶数 \\ を見て | を区切りと判定する。
+		// エスケープ後は \\（元の2つを倍にして4つ）+ \|（パイプエスケープ）= 5つ（奇数）
+		const grid = [["H"], ["a\\\\|b"]];
+		const result = tsvToMarkdownTable(grid);
+		const dataLine = result.split("\n")[2];
+		// \\\\\（4つ）+ \|（1つ）= 5つの \ + |
+		expect(dataLine).toContain("a\\\\\\\\\\|b");
+	});
+
+	it("列数が不揃いでも最大列数に揃う", () => {
+		const grid = [["A", "B", "C"], ["1"]];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		// データ行もパイプ 4 本（3列分）
+		expect(lines[2].split("|").length - 1).toBe(4);
+	});
+
+	it("3行以上の TSV でヘッダ＋区切り＋複数データ行を生成する", () => {
+		const grid = [
+			["H1", "H2"],
+			["a", "b"],
+			["c", "d"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(4);
+	});
+
+	it("CJK 全角文字の列幅が表示幅ベースで揃う", () => {
+		const grid = [
+			["名前", "age"],
+			["太郎", "20"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		// "名前" は表示幅 4、"age" は表示幅 3 → 列幅 4 と 3
+		// ヘッダ行: "| 名前 | age |" — "名前" はパディング不要（幅4=列幅4）
+		expect(lines[0]).toBe("| 名前 | age |");
+		// 区切り行の幅がヘッダ表示幅と一致する
+		expect(lines[1]).toBe("| ---- | --- |");
+		// データ行: "太郎" も表示幅 4 でパディング不要
+		expect(lines[2]).toBe("| 太郎 | 20  |");
+	});
+
+	it("セル内改行がスペースに正規化される", () => {
+		const grid = [
+			["A", "B"],
+			["hello\nworld", "x"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		// テーブルは 3 行（ヘッダ + 区切り + データ）で壊れない
+		expect(lines).toHaveLength(3);
+		// 改行がスペースに置換されている
+		expect(lines[2]).toContain("hello world");
+		expect(lines[2]).not.toContain("\n");
+	});
+
+	it("連続改行・CRLF もスペース 1 つに正規化される", () => {
+		const grid = [["H"], ["a\r\nb"], ["c\n\n\nd"]];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(4); // header + sep + 2 data
+		expect(lines[2]).toContain("a b");
+		expect(lines[3]).toContain("c d");
+	});
+});
+
+// ── buildTsvTableChanges (#147) ─────────────────────────
+//
+// changeByRange の挿入位置ロジックをテストする。テーブルがブロック要素として
+// 行内テキストに直結せず、前後が空行で分離されることを検証する。
+
+describe("buildTsvTableChanges", () => {
+	const simpleMd = tsvToMarkdownTable([
+		["A", "B"],
+		["1", "2"],
+	]);
+
+	/** EditorState を作り changeByRange の結果を適用して doc 文字列を返す */
+	function apply(doc: string, anchor: number, head?: number): string {
+		const sel = head != null ? EditorSelection.range(anchor, head) : EditorSelection.cursor(anchor);
+		const state = EditorState.create({
+			doc,
+			selection: EditorSelection.create([sel]),
+		});
+		return state.update(buildTsvTableChanges(state, simpleMd)).state.doc.toString();
+	}
+
+	it("空行上の空カーソルで行全体をテーブルに置き換える", () => {
+		const result = apply("above\n\nbelow", 6);
+		expect(result).toContain(simpleMd);
+		// テーブルは前後の行と空行で分離される
+		expect(result).toContain(`above\n\n${simpleMd}`);
+	});
+
+	it("非空行の行中カーソルでもテーブルは行末に挿入される", () => {
+		// "he|llo" — カーソルは行中だがテーブルは行全体の後に配置
+		const result = apply("hello", 2);
+		expect(result.startsWith("hello\n")).toBe(true);
+		expect(result).toContain(simpleMd);
+		// "llo" がテーブル最終行に直結しない
+		expect(result).not.toContain("|\nhello");
+	});
+
+	it("非空行の行末カーソルではテーブルが行の後に挿入される", () => {
+		const result = apply("hello", 5);
+		expect(result.startsWith("hello\n")).toBe(true);
+		expect(result).toContain(simpleMd);
+	});
+
+	it("行中選択の残余テキストがテーブルの後に分離される", () => {
+		// "he[ll]o" — "o" はテーブル最終行に直結せず別行へ
+		const result = apply("hello", 2, 4);
+		expect(result).toContain(simpleMd);
+		// テーブル最終行に "o" が直結しない
+		expect(result).not.toMatch(/\|o/);
+		// "o" は空行を挟んでテーブルの後に存在する
+		const tableEnd = result.indexOf(simpleMd) + simpleMd.length;
+		expect(result.slice(tableEnd)).toBe("\n\no");
+	});
+
+	it("行全体の選択ではテーブルで置換される（残余なし）", () => {
+		const result = apply("hello\nworld", 0, 5);
+		// "hello" がテーブルに置換され "world" は次行に残る
+		expect(result.startsWith(simpleMd)).toBe(true);
+		expect(result).toContain("world");
+	});
+
+	it("複数行にまたがる選択でも残余テキストが分離される", () => {
+		// "he[llo\\nwor]ld" — trailing "ld" がテーブル後に退避
+		const result = apply("hello\nworld", 2, 9);
+		expect(result).toContain(simpleMd);
+		const tableEnd = result.indexOf(simpleMd) + simpleMd.length;
+		expect(result.slice(tableEnd)).toBe("\n\nld");
+	});
+});
+
+// ── rangeOverlapsCodeOrTable (#147) ──────────────────
+//
+// 半開区間の境界判定を検証する。syntaxTree().iterate は inclusive に重なる
+// ノードを返すが、非空選択では [from, to) として境界接触を除外する。
+
+describe("rangeOverlapsCodeOrTable", () => {
+	const tableDoc = `abc\n\n${simpleTable}`;
+	const fencedDoc = "abc\n\n```\ncode\n```";
+
+	it("空カーソルがテーブル内にあるとき true", () => {
+		const state = createTestState(tableDoc);
+		// テーブル開始行の先頭にカーソル
+		const tableFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, tableFrom, tableFrom)).toBe(true);
+	});
+
+	it("空カーソルがテーブル外にあるとき false", () => {
+		const state = createTestState(tableDoc);
+		// "abc" の先頭
+		expect(rangeOverlapsCodeOrTable(state, 0, 0)).toBe(false);
+	});
+
+	it("選択がテーブルの直前で終わる場合 false（境界接触は除外）", () => {
+		const state = createTestState(tableDoc);
+		// "abc\n\n" を選択 — to はテーブル開始位置と同じだが半開区間では含まない
+		const tableFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, tableFrom)).toBe(false);
+	});
+
+	it("選択がテーブルに 1 文字でも入ると true", () => {
+		const state = createTestState(tableDoc);
+		const tableFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, tableFrom + 1)).toBe(true);
+	});
+
+	it("選択がテーブルの直後から始まる場合 false（境界接触は除外）", () => {
+		// テーブル最終行の to の次（= 空行の from）から選択開始
+		const state = createTestState(`${simpleTable}\n\nabc`);
+		const tableTo = state.doc.line(3).to;
+		const afterTable = tableTo + 1; // 空行の from
+		expect(rangeOverlapsCodeOrTable(state, afterTable, state.doc.length)).toBe(false);
+	});
+
+	it("選択が fenced code の直前で終わる場合 false（境界接触は除外）", () => {
+		const state = createTestState(fencedDoc);
+		// "abc\n\n" を選択 — to は ``` 開始位置と同じ
+		const codeFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, codeFrom)).toBe(false);
+	});
+
+	it("選択が fenced code に 1 文字でも入ると true", () => {
+		const state = createTestState(fencedDoc);
+		const codeFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, codeFrom + 1)).toBe(true);
+	});
+
+	it("空カーソルが fenced code 内にあるとき true", () => {
+		const state = createTestState(fencedDoc);
+		const codeLine = state.doc.line(4).from; // "code" 行
+		expect(rangeOverlapsCodeOrTable(state, codeLine, codeLine)).toBe(true);
+	});
+
+	it("テーブル直後の本文行（lezer Table 範囲内だが trimmed 外）では false", () => {
+		// lezer は Table ノードに直後の本文行を含む場合がある
+		const doc = `${simpleTable}\ntext`;
+		const state = createTestState(doc);
+		const textLine = state.doc.line(4);
+		expect(rangeOverlapsCodeOrTable(state, textLine.from, textLine.to)).toBe(false);
 	});
 });
