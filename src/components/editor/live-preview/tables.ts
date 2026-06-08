@@ -168,14 +168,20 @@ export const tableKeymap: Extension = Prec.high(
 
 // ── TSV paste → Markdown table (#147) ────────────────
 
-/** 指定範囲 [from, to] が FencedCode / CodeBlock / InlineCode / Table ノードと重なるか判定する。
- *  from === to（空カーソル）でもその位置を含むノードを検出する。
+/** 指定範囲が FencedCode / CodeBlock / InlineCode / Table ノードと重なるか判定する。
+ *  from === to（空カーソル）ではその位置を含むノードを検出する（inclusive）。
+ *  from < to（非空選択）では半開区間 [from, to) として判定し、選択範囲が
+ *  コード/テーブルの直前で終わるだけの境界接触は「重なり」としない。
+ *
+ *  syntaxTree().iterate({ from, to }) は inclusive に重なるノードを返すため、
+ *  非空選択では iterate が返した境界ノードを追加フィルタで除外する。
  *
  *  Table ノードは lezer が直後の本文行まで含めてしまうことがあるため、
  *  trimToLastTableLine でパイプを含む最後の行まで詰めた実際の範囲で判定する
  *  （table-decoration.ts の buildTableDecorations / findTableNode と同じ補正）。 */
-function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number): boolean {
+export function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number): boolean {
 	const doc = state.doc;
+	const isEmpty = from === to;
 	let found = false;
 	syntaxTree(state).iterate({
 		from,
@@ -183,6 +189,8 @@ function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number):
 		enter(node) {
 			if (found) return false;
 			if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") {
+				// 非空選択: 半開区間で重ならない境界接触を除外
+				if (!isEmpty && (node.from >= to || node.to <= from)) return false;
 				found = true;
 				return false;
 			}
@@ -192,9 +200,16 @@ function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number):
 				const rawEndLine = doc.lineAt(node.to).number;
 				const trimmedEndLine = trimToLastTableLine(doc, startLine, rawEndLine);
 				const trimmedTo = doc.line(trimmedEndLine).to;
-				// 詰めた範囲と [from, to] が重なるか判定
-				if (node.from <= to && trimmedTo >= from) {
-					found = true;
+				if (isEmpty) {
+					// 空カーソル: inclusive（カーソルがテーブル内にあるか）
+					if (node.from <= from && trimmedTo >= from) {
+						found = true;
+					}
+				} else {
+					// 非空選択: 半開区間の重なり（境界接触のみは除外）
+					if (node.from < to && trimmedTo > from) {
+						found = true;
+					}
 				}
 				return false;
 			}

@@ -5,7 +5,13 @@ import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildTableDecorations, tableDecoration } from "./table-decoration";
 import { createEmptyTable } from "./table-utils";
-import { buildTsvTableChanges, insertTable, tableKeymap, tsvToMarkdownTable } from "./tables";
+import {
+	buildTsvTableChanges,
+	insertTable,
+	rangeOverlapsCodeOrTable,
+	tableKeymap,
+	tsvToMarkdownTable,
+} from "./tables";
 import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
 
 const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
@@ -442,5 +448,76 @@ describe("buildTsvTableChanges", () => {
 		expect(result).toContain(simpleMd);
 		const tableEnd = result.indexOf(simpleMd) + simpleMd.length;
 		expect(result.slice(tableEnd)).toBe("\n\nld");
+	});
+});
+
+// ── rangeOverlapsCodeOrTable (#147) ──────────────────
+//
+// 半開区間の境界判定を検証する。syntaxTree().iterate は inclusive に重なる
+// ノードを返すが、非空選択では [from, to) として境界接触を除外する。
+
+describe("rangeOverlapsCodeOrTable", () => {
+	const tableDoc = `abc\n\n${simpleTable}`;
+	const fencedDoc = "abc\n\n```\ncode\n```";
+
+	it("空カーソルがテーブル内にあるとき true", () => {
+		const state = createTestState(tableDoc);
+		// テーブル開始行の先頭にカーソル
+		const tableFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, tableFrom, tableFrom)).toBe(true);
+	});
+
+	it("空カーソルがテーブル外にあるとき false", () => {
+		const state = createTestState(tableDoc);
+		// "abc" の先頭
+		expect(rangeOverlapsCodeOrTable(state, 0, 0)).toBe(false);
+	});
+
+	it("選択がテーブルの直前で終わる場合 false（境界接触は除外）", () => {
+		const state = createTestState(tableDoc);
+		// "abc\n\n" を選択 — to はテーブル開始位置と同じだが半開区間では含まない
+		const tableFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, tableFrom)).toBe(false);
+	});
+
+	it("選択がテーブルに 1 文字でも入ると true", () => {
+		const state = createTestState(tableDoc);
+		const tableFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, tableFrom + 1)).toBe(true);
+	});
+
+	it("選択がテーブルの直後から始まる場合 false（境界接触は除外）", () => {
+		// テーブル最終行の to の次（= 空行の from）から選択開始
+		const state = createTestState(`${simpleTable}\n\nabc`);
+		const tableTo = state.doc.line(3).to;
+		const afterTable = tableTo + 1; // 空行の from
+		expect(rangeOverlapsCodeOrTable(state, afterTable, state.doc.length)).toBe(false);
+	});
+
+	it("選択が fenced code の直前で終わる場合 false（境界接触は除外）", () => {
+		const state = createTestState(fencedDoc);
+		// "abc\n\n" を選択 — to は ``` 開始位置と同じ
+		const codeFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, codeFrom)).toBe(false);
+	});
+
+	it("選択が fenced code に 1 文字でも入ると true", () => {
+		const state = createTestState(fencedDoc);
+		const codeFrom = state.doc.line(3).from;
+		expect(rangeOverlapsCodeOrTable(state, 0, codeFrom + 1)).toBe(true);
+	});
+
+	it("空カーソルが fenced code 内にあるとき true", () => {
+		const state = createTestState(fencedDoc);
+		const codeLine = state.doc.line(4).from; // "code" 行
+		expect(rangeOverlapsCodeOrTable(state, codeLine, codeLine)).toBe(true);
+	});
+
+	it("テーブル直後の本文行（lezer Table 範囲内だが trimmed 外）では false", () => {
+		// lezer は Table ノードに直後の本文行を含む場合がある
+		const doc = `${simpleTable}\ntext`;
+		const state = createTestState(doc);
+		const textLine = state.doc.line(4);
+		expect(rangeOverlapsCodeOrTable(state, textLine.from, textLine.to)).toBe(false);
 	});
 });
