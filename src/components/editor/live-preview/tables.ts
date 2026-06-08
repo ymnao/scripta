@@ -220,7 +220,14 @@ export function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: n
 
 export function tsvToMarkdownTable(grid: string[][]): string {
 	const colCount = Math.max(...grid.map((row) => row.length));
-	const escapeCell = (s: string) => s.replace(/\|/g, "\\|").trim();
+	// セル内改行をスペースに正規化してからパイプをエスケープする。
+	// parseTsv は quoted field 内の改行を保持するが、Markdown テーブルの行中に
+	// 改行があるとテーブル構造が壊れる（table-decoration.ts の sanitizePasteText と同じ方針）。
+	const escapeCell = (s: string) =>
+		s
+			.replace(/[\r\n]+/g, " ")
+			.replace(/\|/g, "\\|")
+			.trim();
 
 	// 表示幅ベースで列幅を計算（CJK 全角文字を 2 カラムとして扱う）
 	const widths = Array.from({ length: colCount }, (_, c) =>

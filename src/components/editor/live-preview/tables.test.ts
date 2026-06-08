@@ -379,6 +379,29 @@ describe("tsvToMarkdownTable", () => {
 		// データ行: "太郎" も表示幅 4 でパディング不要
 		expect(lines[2]).toBe("| 太郎 | 20  |");
 	});
+
+	it("セル内改行がスペースに正規化される", () => {
+		const grid = [
+			["A", "B"],
+			["hello\nworld", "x"],
+		];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		// テーブルは 3 行（ヘッダ + 区切り + データ）で壊れない
+		expect(lines).toHaveLength(3);
+		// 改行がスペースに置換されている
+		expect(lines[2]).toContain("hello world");
+		expect(lines[2]).not.toContain("\n");
+	});
+
+	it("連続改行・CRLF もスペース 1 つに正規化される", () => {
+		const grid = [["H"], ["a\r\nb"], ["c\n\n\nd"]];
+		const result = tsvToMarkdownTable(grid);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(4); // header + sep + 2 data
+		expect(lines[2]).toContain("a b");
+		expect(lines[3]).toContain("c d");
+	});
 });
 
 // ── buildTsvTableChanges (#147) ─────────────────────────
