@@ -43,7 +43,7 @@
 		"js-yaml": "^4.2.0",
 		"katex": "^0.17.0",
 		"lucide-react": "^1.17.0",
-		"marked": "^18.0.4",
+		"marked": "^18.0.5",
 		"mermaid": "^11.15.0",
 		"react": "^19.2.6",
 		"react-dom": "^19.2.6",
