@@ -345,6 +345,27 @@ describe("tsvToMarkdownTable", () => {
 		expect(result).not.toMatch(/a\|b/);
 	});
 
+	it("バックスラッシュ直後のパイプがセルを割らない", () => {
+		// TSV の 1 セル "a\|b" — リテラル \ + | がセル内容。
+		// findUnescapedPipe は | 直前の \ が偶数なら区切りとして扱うので、
+		// 出力の | 直前は奇数個の \ でなければならない。
+		const grid = [["H"], ["a\\|b"]];
+		const result = tsvToMarkdownTable(grid);
+		const dataLine = result.split("\n")[2];
+		// 出力は a\\\\| ではなく a\\\|b（\ が 3 個 = 奇数）になるべき
+		expect(dataLine).toContain("a\\\\\\|b");
+	});
+
+	it("複数バックスラッシュ + パイプも正しくエスケープされる", () => {
+		// "a\\|b" — 2 つの \ + |。パーサーは偶数 \\ を見て | を区切りと判定する。
+		// エスケープ後は \\（元の2つを倍にして4つ）+ \|（パイプエスケープ）= 5つ（奇数）
+		const grid = [["H"], ["a\\\\|b"]];
+		const result = tsvToMarkdownTable(grid);
+		const dataLine = result.split("\n")[2];
+		// \\\\\（4つ）+ \|（1つ）= 5つの \ + |
+		expect(dataLine).toContain("a\\\\\\\\\\|b");
+	});
+
 	it("列数が不揃いでも最大列数に揃う", () => {
 		const grid = [["A", "B", "C"], ["1"]];
 		const result = tsvToMarkdownTable(grid);

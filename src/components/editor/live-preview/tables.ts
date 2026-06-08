@@ -223,10 +223,16 @@ export function tsvToMarkdownTable(grid: string[][]): string {
 	// セル内改行をスペースに正規化してからパイプをエスケープする。
 	// parseTsv は quoted field 内の改行を保持するが、Markdown テーブルの行中に
 	// 改行があるとテーブル構造が壊れる（table-decoration.ts の sanitizePasteText と同じ方針）。
+	//
+	// パイプのエスケープは findUnescapedPipe（table-utils.ts）と整合させる必要がある。
+	// パーサーは | 直前の連続 \ が偶数なら未エスケープ区切りとして扱うため、
+	// 単純な replace(/\|/g, "\\|") では入力 `a\|b` が `a\\|b`（偶数 → 区切り）になり
+	// 1 セルが 2 セルに割れる。(\\*)\| で直前の \ 列を倍にして無効化してから \| を
+	// 付加することで、出力の | 直前は常に奇数個の \ になる。
 	const escapeCell = (s: string) =>
 		s
 			.replace(/[\r\n]+/g, " ")
-			.replace(/\|/g, "\\|")
+			.replace(/(\\*)\|/g, (_, bs: string) => `${"\\".repeat(bs.length * 2)}\\|`)
 			.trim();
 
 	// 表示幅ベースで列幅を計算（CJK 全角文字を 2 カラムとして扱う）
