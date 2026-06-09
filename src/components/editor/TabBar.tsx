@@ -306,12 +306,11 @@ export function TabBar({
 						>
 							<FileIcon size={14} className="shrink-0 text-text-secondary" />
 							<span className="flex items-center gap-1.5">
-								{tab.dirty && (
-									<span
-										className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-secondary"
-										aria-hidden="true"
-									/>
-								)}
+								{/* 未セーブドットは常時描画して opacity で切替。タブ幅を dirty 状態に依存させない。 */}
+								<span
+									className={`h-1.5 w-1.5 shrink-0 rounded-full bg-text-secondary ${tab.dirty ? "opacity-100" : "opacity-0"}`}
+									aria-hidden="true"
+								/>
 								{fileName}
 							</span>
 							<button

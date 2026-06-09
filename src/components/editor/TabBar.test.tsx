@@ -114,7 +114,7 @@ describe("TabBar", () => {
 		expect(onCloseTab).toHaveBeenCalledWith(1);
 	});
 
-	it("shows dirty indicator for dirty tabs", () => {
+	it("shows dirty indicator only for dirty tabs (always rendered, opacity-toggled)", () => {
 		setTabs(
 			[
 				{ id: 1, path: "/workspace/a.md", dirty: true },
@@ -125,7 +125,11 @@ describe("TabBar", () => {
 
 		const { container } = render(<TabBar {...defaultProps} />);
 		const dots = container.querySelectorAll(".rounded-full");
-		expect(dots).toHaveLength(1);
+		// ドットは全タブに常時描画される（タブ幅を dirty 状態に依存させないため）
+		expect(dots).toHaveLength(2);
+		// 表示されているのは dirty=true の 1 つだけ
+		const visibleDots = Array.from(dots).filter((d) => !d.className.includes("opacity-0"));
+		expect(visibleDots).toHaveLength(1);
 	});
 
 	it("announces unsaved changes via aria-label on dirty tab", () => {
