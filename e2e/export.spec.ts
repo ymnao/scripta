@@ -20,7 +20,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
@@ -58,7 +58,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
@@ -78,7 +78,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		// ファイルを開かずに menu-export を発火 → ダイアログは出ない
 		await mock.emitMenuEvent("export");
@@ -96,7 +96,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
@@ -132,7 +132,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
@@ -174,7 +174,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
@@ -203,7 +203,7 @@ test.describe("export dialog", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.getByLabel("note.md file").click({ button: "right" });
 

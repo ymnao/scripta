@@ -22,7 +22,7 @@ async function openWithContent(page: Page, content: string): Promise<ElectronApi
 	const mock = new ElectronApiMock(page);
 	await mock.setup({ fs: makeWorkspace(content), dialogResult: "/workspace" });
 	await page.goto("/");
-	await page.getByLabel("Open folder").click();
+	await page.getByLabel("フォルダを開く").click();
 	await page.getByLabel("test.md file").click();
 	const editor = page.locator(".cm-content");
 	await expect(editor).toBeVisible();

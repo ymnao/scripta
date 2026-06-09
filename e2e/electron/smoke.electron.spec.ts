@@ -9,7 +9,7 @@ test.describe("electron smoke", () => {
 		const { page } = await launch();
 
 		// workspace 未設定の temp userData なので Open Folder ボタンが描画される。
-		await expect(page.getByLabel("Open folder")).toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).toBeVisible();
 	});
 
 	test("preload contextBridge 経由で window.api が露出している", async ({ launch }) => {

@@ -199,7 +199,7 @@ export function SearchBar({
 	return (
 		<search
 			className="search-bar"
-			aria-label="Find and replace"
+			aria-label="検索と置換"
 			onKeyDown={(e) => {
 				if (e.key === "Escape") {
 					e.preventDefault();
@@ -212,7 +212,7 @@ export function SearchBar({
 					type="button"
 					className="search-bar-icon-btn"
 					onClick={() => setExpanded((v) => !v)}
-					aria-label={expanded ? "Collapse replace" : "Expand replace"}
+					aria-label={expanded ? "置換を閉じる" : "置換を開く"}
 					aria-expanded={expanded}
 				>
 					{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -223,8 +223,8 @@ export function SearchBar({
 						ref={searchInputRef}
 						type="text"
 						className="search-bar-input"
-						placeholder="Find"
-						aria-label="Find"
+						placeholder="検索"
+						aria-label="検索"
 						value={searchText}
 						onChange={(e) => setSearchText(e.target.value)}
 						onKeyDown={handleSearchKeyDown}
@@ -238,7 +238,7 @@ export function SearchBar({
 					type="button"
 					className="search-bar-icon-btn"
 					onClick={handleFindPrevious}
-					aria-label="Previous match"
+					aria-label="前の一致"
 					disabled={matchInfo.total === 0}
 				>
 					<ArrowUp size={14} />
@@ -247,7 +247,7 @@ export function SearchBar({
 					type="button"
 					className="search-bar-icon-btn"
 					onClick={handleFindNext}
-					aria-label="Next match"
+					aria-label="次の一致"
 					disabled={matchInfo.total === 0}
 				>
 					<ArrowDown size={14} />
@@ -256,7 +256,7 @@ export function SearchBar({
 					type="button"
 					className="search-bar-icon-btn"
 					onClick={handleClose}
-					aria-label="Close search"
+					aria-label="検索を閉じる"
 				>
 					<X size={14} />
 				</button>
@@ -270,8 +270,8 @@ export function SearchBar({
 							ref={replaceInputRef}
 							type="text"
 							className="search-bar-input"
-							placeholder="Replace"
-							aria-label="Replace"
+							placeholder="置換"
+							aria-label="置換"
 							value={replaceText}
 							onChange={(e) => setReplaceText(e.target.value)}
 							onKeyDown={handleReplaceKeyDown}
@@ -281,9 +281,9 @@ export function SearchBar({
 						type="button"
 						className="search-bar-icon-btn"
 						onClick={handleReplaceNext}
-						aria-label="Replace"
+						aria-label="置換"
 						disabled={matchInfo.total === 0}
-						title="Replace"
+						title="置換"
 					>
 						<ReplaceIcon />
 					</button>
@@ -291,9 +291,9 @@ export function SearchBar({
 						type="button"
 						className="search-bar-icon-btn"
 						onClick={handleReplaceAll}
-						aria-label="Replace all"
+						aria-label="すべて置換"
 						disabled={matchInfo.total === 0}
-						title="Replace all"
+						title="すべて置換"
 					>
 						<ReplaceAllIcon />
 					</button>

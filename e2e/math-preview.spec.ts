@@ -18,7 +18,7 @@ test.describe("math preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("math.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -37,7 +37,7 @@ test.describe("math preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("math.md file").click();
 
 		const editor = page.locator(".cm-content");

@@ -157,7 +157,7 @@ test.describe("settings dialog", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 		await expect(page.locator(".cm-content")).toBeVisible();
 

@@ -1056,10 +1056,7 @@ export function AppLayout() {
 					void closeWindow();
 				}
 			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
-				// Skip sidebar toggle when editor has focus — CodeMirror handles Mod-b for bold
-				const view = editorViewRef.current;
-				if (view?.hasFocus) return;
+			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "/") {
 				e.preventDefault();
 				setSidebarVisible((prev) => !prev);
 				return;
@@ -1191,7 +1188,9 @@ export function AppLayout() {
 				onReorderTab={reorderTab}
 			/>
 			<div className="min-h-0 flex flex-1">
-				{sidebarVisible && (
+				<div
+					className={`sidebar-wrapper shrink-0 overflow-hidden ${sidebarVisible ? "w-60 border-r border-border" : "w-0 invisible"}`}
+				>
 					<Sidebar
 						activePanel={sidebarPanel}
 						onShowFiles={handleShowFiles}
@@ -1205,7 +1204,7 @@ export function AppLayout() {
 						onFileDeleted={handleFileDeleted}
 						onExport={handleExport}
 					/>
-				)}
+				</div>
 				<main className="relative min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
 					{activeTabPath && !isNewTab ? (
 						editorError ? (
@@ -1283,6 +1282,8 @@ export function AppLayout() {
 				slideViewActive={slideViewActive}
 				onToggleScratchpad={workspacePath ? toggleScratchpad : undefined}
 				scratchpadOpen={scratchpadOpen}
+				onToggleSidebar={() => setSidebarVisible((prev) => !prev)}
+				sidebarVisible={sidebarVisible}
 			/>
 
 			{workspacePath && (

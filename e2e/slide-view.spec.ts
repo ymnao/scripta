@@ -26,7 +26,7 @@ const fs = {
 
 async function openSlideFile(page: import("@playwright/test").Page) {
 	await page.goto("/");
-	await page.getByLabel("Open folder").click();
+	await page.getByLabel("フォルダを開く").click();
 	await page.getByLabel("slides.md file").click();
 	const editor = page.locator(".cm-content");
 	await expect(editor).toBeVisible();

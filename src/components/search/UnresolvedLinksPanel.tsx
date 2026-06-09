@@ -105,7 +105,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 				</div>
 			</div>
 
-			<section className="flex-1 overflow-y-auto" aria-label="Unresolved wikilinks">
+			<section className="flex-1 overflow-y-auto" aria-label="未解決リンク">
 				{loading && sortedLinks.length === 0 && (
 					<div className="flex items-center justify-center py-8">
 						<Loader2 size={16} className="animate-spin text-text-secondary" />

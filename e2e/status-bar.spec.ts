@@ -17,7 +17,7 @@ test.describe("status bar", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		await expect(page.getByText(/\d+ 行, \d+ 列/)).toBeVisible();
@@ -48,7 +48,7 @@ test.describe("status bar", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 
 		await expect(page.getByTestId("file-path")).toHaveText("note.md");
@@ -69,7 +69,7 @@ test.describe("status bar", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		const editor = page.locator(".cm-content");

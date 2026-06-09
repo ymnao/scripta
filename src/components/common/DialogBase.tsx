@@ -77,11 +77,11 @@ export function DialogBase({
 	if (!open) return null;
 
 	return createPortal(
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+		<div className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-black/50">
 			{!preventClose && (
 				<button
 					type="button"
-					aria-label="Close"
+					aria-label="ダイアログを閉じる"
 					data-testid="dialog-backdrop"
 					className="absolute inset-0"
 					onMouseDown={onClose}
@@ -94,7 +94,7 @@ export function DialogBase({
 				aria-modal="true"
 				aria-labelledby={ariaLabelledBy}
 				aria-describedby={ariaDescribedBy}
-				className={`relative mx-4 my-6 max-h-[calc(100vh-3rem)] w-full overflow-hidden flex flex-col rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${widthClasses[size]}${fixedHeight ? " h-[32rem]" : ""}`}
+				className={`relative mx-4 my-6 max-h-[calc(100vh-3rem)] w-full animate-dialog-in overflow-hidden flex flex-col rounded-lg border border-border bg-bg-primary p-5 shadow-lg outline-none ${widthClasses[size]}${fixedHeight ? " h-[32rem]" : ""}`}
 				onMouseDown={(e) => e.stopPropagation()}
 				onCancel={(e) => {
 					e.preventDefault();

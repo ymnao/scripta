@@ -41,7 +41,7 @@ export async function openSingleFileWorkspace(
 		settings: options.settings,
 	});
 	await page.goto("/");
-	await page.getByLabel("Open folder").click();
+	await page.getByLabel("フォルダを開く").click();
 	await page.getByLabel(fileLabel).click();
 
 	const editor = page.locator(".cm-content");

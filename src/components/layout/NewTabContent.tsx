@@ -27,7 +27,7 @@ const quickActions = [
 const shortcuts = [
 	{ keys: [mod, "T"], label: "新しいタブ" },
 	{ keys: [mod, "S"], label: "保存" },
-	{ keys: [mod, "B"], label: "サイドバー" },
+	{ keys: [mod, "/"], label: "サイドバー" },
 	{ keys: [mod, "L"], label: "リスト切り替え" },
 ] as const;
 

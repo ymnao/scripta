@@ -53,7 +53,7 @@ describe("TabBar", () => {
 
 	it("renders tablist with aria-label", () => {
 		render(<TabBar {...defaultProps} />);
-		expect(screen.getByRole("tablist", { name: "Editor tabs" })).toBeInTheDocument();
+		expect(screen.getByRole("tablist", { name: "エディタタブ" })).toBeInTheDocument();
 	});
 
 	it("renders empty when no tabs", () => {

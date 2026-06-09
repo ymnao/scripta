@@ -19,7 +19,7 @@ async function openFileAndWaitForMermaid(page: Page) {
 	const mock = new ElectronApiMock(page);
 	await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 	await page.goto("/");
-	await page.getByLabel("Open folder").click();
+	await page.getByLabel("フォルダを開く").click();
 	await page.getByLabel("mermaid.md file").click();
 
 	const editor = page.locator(".cm-content");

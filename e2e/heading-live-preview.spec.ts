@@ -32,7 +32,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -57,7 +57,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -88,7 +88,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -124,7 +124,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -153,7 +153,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("first-line-heading.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -185,7 +185,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("first-line-heading.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -215,7 +215,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("first-line-blockquote.md file").click();
 
 		const editor = page.locator(".cm-content");
@@ -244,7 +244,7 @@ test.describe("heading live preview", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("test.md file").click();
 
 		const editor = page.locator(".cm-content");

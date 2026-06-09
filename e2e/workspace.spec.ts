@@ -21,7 +21,7 @@ test.describe("workspace", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("hello.md file")).toBeVisible();
 		await expect(page.getByLabel("notes.md file")).toBeVisible();
 	});
@@ -44,7 +44,7 @@ test.describe("workspace", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("docs folder")).toBeVisible();
 
 		await page.getByLabel("docs folder").click();
@@ -66,7 +66,7 @@ test.describe("workspace", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click({ button: "right" });
 		await page.getByText("フォルダで表示").click();
 
@@ -90,7 +90,7 @@ test.describe("workspace", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("hello.md file")).toBeVisible();
 
 		await page.getByLabel("hello.md file").click({ button: "right" });
@@ -117,7 +117,7 @@ test.describe("workspace", () => {
 		await mock.setup({});
 
 		await page.goto("/");
-		await expect(page.getByText("Open a folder to get started")).toBeVisible();
+		await expect(page.getByText("フォルダを開いて始めましょう")).toBeVisible();
 	});
 
 	test("削除確認ダイアログが狭いビューポートに収まる", async ({ page }) => {
@@ -134,7 +134,7 @@ test.describe("workspace", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click({ button: "right" });
 		await page.getByText("Delete").click();
 
@@ -162,7 +162,7 @@ test.describe("workspace", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click({ button: "right" });
 		await page.getByText("アイコンを設定...").click();
 
@@ -173,6 +173,6 @@ test.describe("workspace", () => {
 		expect(box?.height).toBeLessThanOrEqual(500);
 
 		await expect(page.getByLabel("絵文字一覧")).toBeVisible();
-		await expect(page.getByRole("button", { name: "設定" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "設定", exact: true })).toBeVisible();
 	});
 });
