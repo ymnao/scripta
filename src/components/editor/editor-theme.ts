@@ -33,12 +33,6 @@ export function createDynamicEditorTheme(
 			padding: "1px 0",
 			overflowWrap: "break-word",
 		},
-		// 複数行選択時、CodeMirror は .cm-content の border-box 全幅を埋めるよう selection rect を描画する
-		// (RectangleMarker.forRange in @codemirror/view) ため、左右 padding 領域までハイライトが伸びる。
-		// selection layer を padding の内側だけにクリップして、テキストエリア内に視覚的に閉じ込める。
-		".cm-selectionLayer": {
-			clipPath: `inset(0 ${horizontal})`,
-		},
 	});
 }
 
