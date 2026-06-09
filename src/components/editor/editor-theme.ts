@@ -9,36 +9,14 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
-/** CSS shorthand padding 文字列から left/right の px 値を抽出する。
- *  CodeMirror の selectionLayer は .cm-content の border-box 内で position: absolute されるため、
- *  selection rect が .cm-content の padding 領域 (= テキスト外) まで伸びる現象を clip-path で防ぐ目的で使う。
- *  `parseInt` ベースなので `px` 以外の単位 (em/rem) は意図通り動かないが、本プロジェクトの contentPadding は
- *  すべて px 指定で統一されている。parse 失敗時は 0 (clip しない) にフォールバック。 */
-export function parseHorizontalPadding(padding: string): { left: number; right: number } {
-	const parts = padding.trim().split(/\s+/);
-	const toPx = (v: string | undefined) => {
-		const n = Number.parseInt(v ?? "", 10);
-		return Number.isFinite(n) ? n : 0;
-	};
-	switch (parts.length) {
-		case 1: {
-			const v = toPx(parts[0]);
-			return { left: v, right: v };
-		}
-		case 2:
-		case 3: {
-			const v = toPx(parts[1]);
-			return { left: v, right: v };
-		}
-		case 4:
-			return { left: toPx(parts[3]), right: toPx(parts[1]) };
-		default:
-			return { left: 0, right: 0 };
-	}
-}
-
-export function createDynamicEditorTheme(fontSize: number, contentPadding = "8px 48px") {
-	const { left, right } = parseHorizontalPadding(contentPadding);
+export function createDynamicEditorTheme(
+	fontSize: number,
+	contentPadding: { vertical: string; horizontal: string } = {
+		vertical: "8px",
+		horizontal: "48px",
+	},
+) {
+	const { vertical, horizontal } = contentPadding;
 	return EditorView.theme({
 		"&": {
 			height: "100%",
@@ -47,7 +25,7 @@ export function createDynamicEditorTheme(fontSize: number, contentPadding = "8px
 			color: "var(--color-text-primary)",
 		},
 		".cm-content": {
-			padding: contentPadding,
+			padding: `${vertical} ${horizontal}`,
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
 		},
@@ -59,7 +37,7 @@ export function createDynamicEditorTheme(fontSize: number, contentPadding = "8px
 		// (RectangleMarker.forRange in @codemirror/view) ため、左右 padding 領域までハイライトが伸びる。
 		// selection layer を padding の内側だけにクリップして、テキストエリア内に視覚的に閉じ込める。
 		".cm-selectionLayer": {
-			clipPath: `inset(0 ${right}px 0 ${left}px)`,
+			clipPath: `inset(0 ${horizontal})`,
 		},
 	});
 }

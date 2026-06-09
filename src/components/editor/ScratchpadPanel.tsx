@@ -201,7 +201,7 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 			listKeymap,
 			EditorView.lineWrapping,
 			staticEditorTheme,
-			createDynamicEditorTheme(fontSize, "4px 12px"),
+			createDynamicEditorTheme(fontSize, { vertical: "4px", horizontal: "12px" }),
 			indentUnit.of("  "),
 			EditorState.tabSize.of(2),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
