@@ -11,7 +11,7 @@ import {
 	type Command,
 	Decoration,
 	type DecorationSet,
-	type EditorView,
+	EditorView,
 	keymap,
 	type PluginValue,
 	ViewPlugin,
@@ -86,11 +86,23 @@ export class CheckboxWidget extends WidgetType {
 	}
 }
 
-export function buildDecorations(view: EditorView): DecorationSet {
+export interface ListDecorations {
+	decorations: DecorationSet;
+	/**
+	 * Replace decorations only — fed to `EditorView.atomicRanges` so the
+	 * cursor cannot land inside a marker range (between widget and content
+	 * text). Excludes mark decorations like `cm-task-checked`, which must
+	 * stay non-atomic so the user can place the cursor within task content.
+	 */
+	atomicRanges: DecorationSet;
+}
+
+export function buildDecorations(view: EditorView): ListDecorations {
 	const { state } = view;
 	const tree = syntaxTree(state);
 
 	const ranges: Range<Decoration>[] = [];
+	const atomicRangesList: Range<Decoration>[] = [];
 
 	for (const { from, to } of view.visibleRanges) {
 		tree.iterate({
@@ -144,17 +156,13 @@ export function buildDecorations(view: EditorView): DecorationSet {
 						replaceEnd += 1;
 					}
 
-					// Replace ListMark through TaskMarker with checkbox widget
-					ranges.push(
-						Decoration.replace({
-							widget: new CheckboxWidget(checked, taskMarkerFrom),
-						}).range(listMarkFrom, taskMarkerTo),
-					);
-
-					// Hide trailing space separately (keeps cursor away from widget boundary)
-					if (replaceEnd > taskMarkerTo) {
-						ranges.push(Decoration.replace({}).range(taskMarkerTo, replaceEnd));
-					}
+					// Single replace covers ListMark + TaskMarker + trailing space so
+					// no decoration boundary sits between widget and content text.
+					const taskReplace = Decoration.replace({
+						widget: new CheckboxWidget(checked, taskMarkerFrom),
+					}).range(listMarkFrom, replaceEnd);
+					ranges.push(taskReplace);
+					atomicRangesList.push(taskReplace);
 
 					// Apply strikethrough for checked tasks
 					if (checked) {
@@ -197,11 +205,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
 									break;
 								}
 								const replaceEnd = afterMark + 1;
-								ranges.push(
-									Decoration.replace({
-										widget: new BulletWidget(),
-									}).range(markCursor.from, replaceEnd),
-								);
+								const bulletReplace = Decoration.replace({
+									widget: new BulletWidget(),
+								}).range(markCursor.from, replaceEnd);
+								ranges.push(bulletReplace);
+								atomicRangesList.push(bulletReplace);
 								break;
 							}
 						} while (markCursor.nextSibling());
@@ -211,19 +219,28 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		});
 	}
 
-	return Decoration.set(ranges, true);
+	return {
+		decorations: Decoration.set(ranges, true),
+		atomicRanges: Decoration.set(atomicRangesList, true),
+	};
 }
 
 class ListDecorationPlugin implements PluginValue {
 	decorations: DecorationSet;
+	atomicRanges: DecorationSet;
 
 	constructor(view: EditorView) {
-		this.decorations = buildDecorations(view);
+		const built = buildDecorations(view);
+		this.decorations = built.decorations;
+		this.atomicRanges = built.atomicRanges;
 	}
 
 	update(update: ViewUpdate) {
 		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+			if (update.docChanged) {
+				this.decorations = this.decorations.map(update.changes);
+				this.atomicRanges = this.atomicRanges.map(update.changes);
+			}
 			return;
 		}
 		if (
@@ -231,7 +248,9 @@ class ListDecorationPlugin implements PluginValue {
 			update.viewportChanged ||
 			syntaxTree(update.state) !== syntaxTree(update.startState)
 		) {
-			this.decorations = buildDecorations(update.view);
+			const built = buildDecorations(update.view);
+			this.decorations = built.decorations;
+			this.atomicRanges = built.atomicRanges;
 		}
 	}
 }
@@ -931,6 +950,10 @@ function toggleCheckbox(view: EditorView, checkbox: Element): void {
 
 export const listDecoration = ViewPlugin.fromClass(ListDecorationPlugin, {
 	decorations: (v) => v.decorations,
+	provide: (plugin) =>
+		EditorView.atomicRanges.of((view) => {
+			return view.plugin(plugin)?.atomicRanges ?? Decoration.none;
+		}),
 	eventHandlers: {
 		click(event: MouseEvent, view: EditorView) {
 			const target = event.target;

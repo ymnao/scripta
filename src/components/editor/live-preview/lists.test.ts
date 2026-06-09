@@ -97,17 +97,18 @@ describe("BulletWidget", () => {
 });
 
 describe("buildDecorations", () => {
-	it("creates two replace decorations for a task item", () => {
+	it("creates a single replace decoration for a task item covering marker + trailing space", () => {
 		const view = createViewForTest("text\n\n- [ ] task");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const replaces = replaceDecorations(decos);
-		// 1 replace+widget for ListMark through TaskMarker, 1 replace for trailing space
-		expect(replaces).toHaveLength(2);
+		// One replace covers ListMark + TaskMarker + trailing space so the
+		// cursor cannot land at a decoration boundary inside the marker area.
+		expect(replaces).toHaveLength(1);
 	});
 
 	it("widget has checked=false for [ ]", () => {
 		const view = createViewForTest("text\n\n- [ ] task");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
 		const widget = widgets[0].value.spec.widget as CheckboxWidget;
@@ -116,7 +117,7 @@ describe("buildDecorations", () => {
 
 	it("widget has checked=true for [x]", () => {
 		const view = createViewForTest("text\n\n- [x] task");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
 		const widget = widgets[0].value.spec.widget as CheckboxWidget;
@@ -125,7 +126,7 @@ describe("buildDecorations", () => {
 
 	it("widget has checked=true for [X] (uppercase)", () => {
 		const view = createViewForTest("text\n\n- [X] task");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
 		const widget = widgets[0].value.spec.widget as CheckboxWidget;
@@ -135,14 +136,14 @@ describe("buildDecorations", () => {
 	it("handles multiple task items", () => {
 		const doc = "text\n\n- [ ] one\n- [x] two\n- [ ] three";
 		const view = createViewForTest(doc, 0);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(3);
 	});
 
 	it("replaces bullet markers with bullet widget for regular list items", () => {
 		const view = createViewForTest("text\n\n- item one\n- item two");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(2);
 		for (const w of widgets) {
@@ -152,7 +153,7 @@ describe("buildDecorations", () => {
 
 	it("replaces * and + bullet markers with bullet widget", () => {
 		const view = createViewForTest("text\n\n* item one\n+ item two");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(2);
 		for (const w of widgets) {
@@ -163,14 +164,14 @@ describe("buildDecorations", () => {
 	it("does not decorate bullet marker without trailing space", () => {
 		// "-" alone at end of line should not become a bullet widget
 		const view = createViewForTest("text\n\n-");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(0);
 	});
 
 	it("does not replace markers for ordered list items", () => {
 		const view = createViewForTest("text\n\n1. first\n2. second");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		expect(decos).toHaveLength(0);
 	});
 
@@ -178,7 +179,7 @@ describe("buildDecorations", () => {
 		const doc = "text\n\n- item one\n- item two";
 		const cursorPos = doc.indexOf("- item one");
 		const view = createViewForTest(doc, cursorPos);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(2);
 	});
@@ -186,7 +187,7 @@ describe("buildDecorations", () => {
 	it("replacement range covers marker and trailing space only", () => {
 		const doc = "text\n\n- item one";
 		const view = createViewForTest(doc);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const replaces = replaceDecorations(decos);
 		expect(replaces).toHaveLength(1);
 		const dashPos = doc.indexOf("- ");
@@ -197,7 +198,7 @@ describe("buildDecorations", () => {
 
 	it("applies cm-task-checked mark for checked tasks", () => {
 		const view = createViewForTest("text\n\n- [x] done task");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const marks = markDecorations(decos);
 		expect(marks).toHaveLength(1);
 		expect((marks[0].value.spec as { class: string }).class).toBe("cm-task-checked");
@@ -205,7 +206,7 @@ describe("buildDecorations", () => {
 
 	it("does not apply cm-task-checked mark for unchecked tasks", () => {
 		const view = createViewForTest("text\n\n- [ ] pending task");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const marks = markDecorations(decos);
 		expect(marks).toHaveLength(0);
 	});
@@ -214,23 +215,21 @@ describe("buildDecorations", () => {
 		const doc = "text\n\n- [ ] task";
 		const cursorPos = doc.indexOf("- [ ]");
 		const view = createViewForTest(doc, cursorPos);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
 	});
 
-	it("replace ranges cover ListMark-TaskMarker and trailing space separately", () => {
+	it("task replace range covers ListMark through trailing space without a gap", () => {
 		const doc = "text\n\n- [ ] task";
 		const view = createViewForTest(doc);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const replaces = replaceDecorations(decos);
+		expect(replaces).toHaveLength(1);
 		const listMarkPos = doc.indexOf("- [ ]");
-		// First replace: ListMark through TaskMarker "- [ ]" = 5 chars
+		// Single replace: "- [ ] " = 5 marker chars + 1 trailing space = 6 chars.
 		expect(replaces[0].from).toBe(listMarkPos);
-		expect(replaces[0].to).toBe(listMarkPos + 5);
-		// Second replace: trailing space
-		expect(replaces[1].from).toBe(listMarkPos + 5);
-		expect(replaces[1].to).toBe(listMarkPos + 6);
+		expect(replaces[0].to).toBe(listMarkPos + 6);
 	});
 
 	it("both bullet and checkbox widgets use cm-list-marker container", () => {
@@ -245,7 +244,7 @@ describe("buildDecorations", () => {
 	it("decorates nested bullet list items", () => {
 		const doc = "text\n\n- parent\n  - child";
 		const view = createViewForTest(doc);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(2);
 		for (const w of widgets) {
@@ -256,7 +255,7 @@ describe("buildDecorations", () => {
 	it("decorates nested task list items", () => {
 		const doc = "text\n\n- [ ] parent\n  - [ ] child";
 		const view = createViewForTest(doc);
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(2);
 		for (const w of widgets) {
@@ -266,8 +265,58 @@ describe("buildDecorations", () => {
 
 	it("returns empty set for document without lists", () => {
 		const view = createViewForTest("hello world\n\nno lists here");
-		const decos = collectDecorations(buildDecorations(view));
+		const decos = collectDecorations(buildDecorations(view).decorations);
 		expect(decos).toHaveLength(0);
+	});
+});
+
+describe("buildDecorations atomicRanges", () => {
+	it("returns the bullet replace decoration as an atomic range", () => {
+		const doc = "text\n\n- item";
+		const view = createViewForTest(doc);
+		const { atomicRanges } = buildDecorations(view);
+		const atomics = collectDecorations(atomicRanges);
+		expect(atomics).toHaveLength(1);
+		const bulletPos = doc.indexOf("- ");
+		expect(atomics[0].from).toBe(bulletPos);
+		expect(atomics[0].to).toBe(bulletPos + 2);
+	});
+
+	it("returns the task replace decoration as an atomic range covering the full marker", () => {
+		const doc = "text\n\n- [ ] task";
+		const view = createViewForTest(doc);
+		const { atomicRanges } = buildDecorations(view);
+		const atomics = collectDecorations(atomicRanges);
+		expect(atomics).toHaveLength(1);
+		const listMarkPos = doc.indexOf("- [ ]");
+		expect(atomics[0].from).toBe(listMarkPos);
+		expect(atomics[0].to).toBe(listMarkPos + 6);
+	});
+
+	it("excludes cm-task-checked mark decoration from atomic ranges", () => {
+		// Without this exclusion, the cursor could not be placed inside the
+		// text body of a checked task — which would make editing impossible.
+		const doc = "text\n\n- [x] done task";
+		const view = createViewForTest(doc);
+		const { atomicRanges } = buildDecorations(view);
+		const atomics = collectDecorations(atomicRanges);
+		expect(atomics).toHaveLength(1); // only the marker replace, not the mark
+		const listMarkPos = doc.indexOf("- [x]");
+		expect(atomics[0].from).toBe(listMarkPos);
+		expect(atomics[0].to).toBe(listMarkPos + 6);
+	});
+
+	it("returns empty atomic ranges for document without lists", () => {
+		const view = createViewForTest("plain text\n\nno lists");
+		const { atomicRanges } = buildDecorations(view);
+		expect(collectDecorations(atomicRanges)).toHaveLength(0);
+	});
+
+	it("returns atomic ranges for nested bullets and tasks", () => {
+		const doc = "text\n\n- parent\n  - [ ] child";
+		const view = createViewForTest(doc);
+		const { atomicRanges } = buildDecorations(view);
+		expect(collectDecorations(atomicRanges)).toHaveLength(2);
 	});
 });
 
