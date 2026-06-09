@@ -145,6 +145,15 @@ export function useAutoSave(
 			debounceTimerRef.current = null;
 		}
 
+		// 前回の filePath 変更で IME composition 中のフラッシュタイマーが
+		// 残っていた場合、ここでクリアしないと「2 つ前の filePath の中間
+		// IME 状態を書き戻す」ゴーストが後で発火する。新しい flush は
+		// この effect 内で改めてスケジュールされる。
+		if (flushTimerRef.current) {
+			clearTimeout(flushTimerRef.current);
+			flushTimerRef.current = null;
+		}
+
 		// Clear retry state on file switch
 		clearRetryState();
 
@@ -254,6 +263,13 @@ export function useAutoSave(
 			debounceTimerRef.current = null;
 		}
 		clearRetryState();
+		// 手動セーブが走った時点で autosave のゲートも解除する。
+		// 通常は markSaved がゲートを下ろすが、親 component の状態管理ミスや
+		// ファイル読み込み race で markSaved が呼ばれずゲートが立ったまま
+		// になると、それ以降の自動セーブが永久に走らなくなる。手動セーブ
+		// 完了後は明らかに「現在のファイルに対する書き込み」を行ったので
+		// このゲートを保持する意味がない。safety net として強制リセット。
+		awaitingNewFileRef.current = false;
 		const promise = save(contentRef.current, { skipRetry: true });
 		// Capture the saveId that save() just assigned so we can detect
 		// whether a newer save superseded this one before the error fires.
