@@ -5,6 +5,7 @@ import {
 	CircleHelp,
 	GitBranch,
 	GitCommitHorizontal,
+	PanelLeft,
 	Plus,
 	Presentation,
 	Settings,
@@ -34,6 +35,8 @@ interface StatusBarProps {
 	scratchpadOpen?: boolean;
 	onToggleSlideView?: () => void;
 	slideViewActive?: boolean;
+	onToggleSidebar?: () => void;
+	sidebarVisible?: boolean;
 }
 
 function GitSyncStatus({
@@ -108,6 +111,8 @@ export function StatusBar({
 	scratchpadOpen,
 	onToggleSlideView,
 	slideViewActive,
+	onToggleSidebar,
+	sidebarVisible,
 }: StatusBarProps) {
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef(0);
@@ -131,6 +136,20 @@ export function StatusBar({
 	return (
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary pl-2 pr-3 text-text-secondary">
 			<div className="flex min-w-0 items-center gap-3 text-xs">
+				{onToggleSidebar && (
+					<button
+						type="button"
+						onClick={onToggleSidebar}
+						aria-label="サイドバー"
+						aria-pressed={sidebarVisible}
+						title="サイドバー"
+						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+							sidebarVisible ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
+						}`}
+					>
+						<PanelLeft size={15} />
+					</button>
+				)}
 				{gitReady && gitAction != null && (
 					<GitSyncStatus
 						gitAction={gitAction}
@@ -180,9 +199,10 @@ export function StatusBar({
 						type="button"
 						onClick={onToggleSlideView}
 						aria-label="スライドビュー"
+						aria-pressed={slideViewActive}
 						title="スライドビュー"
 						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
-							slideViewActive ? "text-text-primary" : ""
+							slideViewActive ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
 						}`}
 					>
 						<Presentation size={15} />
@@ -193,9 +213,10 @@ export function StatusBar({
 						type="button"
 						onClick={onToggleScratchpad}
 						aria-label="スクラッチパッド"
+						aria-pressed={scratchpadOpen}
 						title="スクラッチパッド"
 						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
-							scratchpadOpen ? "text-text-primary" : ""
+							scratchpadOpen ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
 						}`}
 					>
 						<StickyNote size={15} />
@@ -204,8 +225,8 @@ export function StatusBar({
 				<button
 					type="button"
 					onClick={onOpenSettings}
-					aria-label="Settings"
-					title="Settings"
+					aria-label="設定を開く"
+					title="設定"
 					className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
 				>
 					<Settings size={15} />
@@ -213,8 +234,8 @@ export function StatusBar({
 				<button
 					type="button"
 					onClick={onOpenHelp}
-					aria-label="Keyboard Shortcuts"
-					title="Keyboard Shortcuts"
+					aria-label="キーボードショートカット"
+					title="キーボードショートカット"
 					className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
 				>
 					<CircleHelp size={15} />

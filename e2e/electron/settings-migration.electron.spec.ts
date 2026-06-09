@@ -35,7 +35,7 @@ test.describe("settings migration (electron)", () => {
 		const { page } = await launch();
 
 		// 既定 system テーマ。host が light 想定なので .dark は付かない。
-		await expect(page.getByLabel("Open folder")).toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).toBeVisible();
 
 		await expect
 			.poll(() => readSettings(userDataDir)?.themePreference, { timeout: 5000 })

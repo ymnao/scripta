@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 test.describe("sidebar toggle", () => {
-	test("Cmd+B でサイドバーが開閉する", async ({ page }) => {
+	test("Cmd+/ でサイドバーが開閉する", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({
 			fs: {
@@ -17,13 +17,13 @@ test.describe("sidebar toggle", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("test.md file")).toBeVisible();
 
-		await page.keyboard.press(`${modKey}+b`);
+		await page.keyboard.press(`${modKey}+/`);
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
 
-		await page.keyboard.press(`${modKey}+b`);
+		await page.keyboard.press(`${modKey}+/`);
 		await expect(page.getByLabel("test.md file")).toBeVisible();
 	});
 });

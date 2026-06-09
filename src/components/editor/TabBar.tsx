@@ -206,7 +206,7 @@ export function TabBar({
 			<div
 				className="flex items-center overflow-x-auto border-l border-border"
 				role="tablist"
-				aria-label="Editor tabs"
+				aria-label="エディタタブ"
 				ref={tablistRef}
 				style={NO_DRAG_REGION_STYLE}
 			>
@@ -321,7 +321,7 @@ export function TabBar({
 									e.stopPropagation();
 									onCloseTab(tab.id);
 								}}
-								className="rounded p-0.5 opacity-0 transition-opacity duration-100 hover:bg-black/10 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-white/10"
+								className={`rounded p-0.5 transition-opacity duration-100 hover:bg-black/10 dark:hover:bg-white/10 ${isActive ? "opacity-60 hover:opacity-100" : "opacity-0 focus:opacity-100 group-hover:opacity-100"}`}
 							>
 								<X size={12} />
 							</button>

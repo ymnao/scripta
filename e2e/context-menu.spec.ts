@@ -14,7 +14,7 @@ async function openFile(page: import("@playwright/test").Page) {
 	const mock = new ElectronApiMock(page);
 	await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 	await page.goto("/");
-	await page.getByLabel("Open folder").click();
+	await page.getByLabel("フォルダを開く").click();
 	await page.getByLabel("test.md file").click();
 	const editor = page.locator(".cm-content");
 	await expect(editor).toBeVisible();

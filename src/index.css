@@ -21,6 +21,66 @@
 	   macOS で proportional fallback する (#97)。同名 family を保つことで util と
 	   独自 var(--font-mono) 参照を単一 source にする。 */
 	--font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+	/* Animations */
+	--animate-toast-in: toast-in 0.2s ease-out;
+	--animate-toast-out: toast-out 0.15s ease-out forwards;
+	--animate-dialog-in: dialog-in 0.15s ease-out;
+	--animate-backdrop-in: backdrop-in 0.15s ease-out;
+	--animate-menu-in: menu-in 0.12s ease-out;
+}
+
+@keyframes toast-in {
+	from {
+		opacity: 0;
+		transform: translateX(100%);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes toast-out {
+	from {
+		opacity: 1;
+		transform: translateX(0);
+	}
+	to {
+		opacity: 0;
+		transform: translateX(100%);
+	}
+}
+
+@keyframes dialog-in {
+	from {
+		opacity: 0;
+		transform: translateY(-8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes backdrop-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes menu-in {
+	from {
+		opacity: 0;
+		transform: scale(0.95) translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1) translateY(0);
+	}
 }
 
 @layer base {
@@ -80,6 +140,20 @@
 		--color-syntax-comment: #5c6370;
 		--color-syntax-invalid: #f44747;
 	}
+}
+
+/* Sidebar width + visibility transition.
+   Opening: visibility becomes visible instantly, width animates.
+   Closing: width animates first, visibility becomes hidden after the transition. */
+.sidebar-wrapper {
+	transition:
+		width 200ms ease-out,
+		visibility 0s;
+}
+.sidebar-wrapper.invisible {
+	transition:
+		width 200ms ease-out,
+		visibility 0s 200ms;
 }
 
 /* Editor font — applied via CSS custom property so that font-family
@@ -190,8 +264,8 @@
 	cursor: pointer;
 	flex-shrink: 0;
 	transition:
-		background-color 0.1s,
-		color 0.1s;
+		background-color 0.1s ease-out,
+		color 0.1s ease-out;
 }
 
 .search-bar-icon-btn:hover:not(:disabled) {

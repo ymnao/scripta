@@ -104,8 +104,8 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					ref={ref}
 					type="text"
 					className="search-panel-input"
-					placeholder="Search in files…"
-					aria-label="Search in workspace"
+					placeholder="ファイル内を検索…"
+					aria-label="ワークスペース内を検索"
 					value={query}
 					onChange={(e) => setQuery(e.target.value)}
 				/>
@@ -113,25 +113,24 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					type="button"
 					className={`search-panel-option-btn ${caseSensitive ? "search-panel-option-btn-active" : ""}`}
 					onClick={() => setCaseSensitive((v) => !v)}
-					aria-label="Match case"
+					aria-label="大文字/小文字を区別"
 					aria-pressed={caseSensitive}
-					title="Match case"
+					title="大文字/小文字を区別"
 				>
 					Aa
 				</button>
 			</div>
 
-			<section className="search-panel-results" aria-label="Search results">
+			<section className="search-panel-results" aria-label="検索結果">
 				{!searched && !query.trim() && (
-					<p className="px-3 py-2 text-xs text-text-secondary">Type to search across all files</p>
+					<p className="px-3 py-2 text-xs text-text-secondary">入力して全ファイルを検索</p>
 				)}
 				{searched && results.length === 0 && (
-					<p className="px-3 py-2 text-xs text-text-secondary">No results</p>
+					<p className="px-3 py-2 text-xs text-text-secondary">結果なし</p>
 				)}
 				{searched && results.length > 0 && (
 					<p className="px-3 py-1 text-xs text-text-secondary">
-						{totalMatches} result{totalMatches !== 1 ? "s" : ""} in {results.length} file
-						{results.length !== 1 ? "s" : ""}
+						{results.length} ファイル中 {totalMatches} 件
 					</p>
 				)}
 				{results.map((group) => (

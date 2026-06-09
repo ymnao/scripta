@@ -8,7 +8,7 @@ test.describe("smoke", () => {
 
 		await page.goto("/");
 
-		await expect(page.getByLabel("Open folder")).toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).toBeVisible();
 	});
 
 	test("Open Folder ボタンを押すと openDirectoryPicker が呼ばれる", async ({ page }) => {
@@ -16,7 +16,7 @@ test.describe("smoke", () => {
 		await mock.setup({ dialogResult: null });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		const calls = await mock.getCalls("openDirectoryPicker");
 		expect(calls.length).toBeGreaterThanOrEqual(1);

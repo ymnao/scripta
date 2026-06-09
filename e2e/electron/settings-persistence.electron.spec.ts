@@ -20,7 +20,7 @@ test.describe("settings persistence (electron)", () => {
 		await expect(page.getByRole("button", { name: "ワークスペース検索" })).toBeVisible();
 		// sidebar 非表示 → ファイルツリー（test.md）も sidebar 内 Open folder も出ない。
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
-		await expect(page.getByLabel("Open folder")).not.toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).not.toBeVisible();
 	});
 
 	test("UI で sidebar を閉じるとディスクに永続化され、再起動後も復元される", async ({
@@ -31,10 +31,10 @@ test.describe("settings persistence (electron)", () => {
 		writeWorkspaceFiles(workspaceDir, { "test.md": "# Hello" });
 		seedSettings(userDataDir, { workspacePath: workspaceDir, sidebarVisible: true });
 
-		// 1 回目: sidebar 表示状態で起動 → Cmd/Ctrl+B で閉じる。
+		// 1 回目: sidebar 表示状態で起動 → Cmd/Ctrl+/ で閉じる。
 		const first = await launch();
 		await expect(first.page.getByLabel("test.md file")).toBeVisible();
-		await first.page.keyboard.press(`${modKey}+b`);
+		await first.page.keyboard.press(`${modKey}+/`);
 		await expect(first.page.getByLabel("test.md file")).not.toBeVisible();
 
 		// store が settingsSet+settingsSave で settings.json を atomic write する。

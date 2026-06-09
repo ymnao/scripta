@@ -52,7 +52,7 @@ export const staticEditorTheme = EditorView.theme({
 		cursor: "pointer",
 		color: "var(--color-text-secondary)",
 		opacity: "0",
-		transition: "opacity 0.15s",
+		transition: "opacity 0.15s ease-out",
 	},
 	".cm-gutters:hover .cm-foldGutter .cm-gutterElement": {
 		opacity: "1",
@@ -158,7 +158,7 @@ export const staticEditorTheme = EditorView.theme({
 		cursor: "pointer",
 		opacity: "0",
 		pointerEvents: "none",
-		transition: "opacity 0.15s, background-color 0.15s",
+		transition: "opacity 0.15s ease-out, background-color 0.15s ease-out",
 	},
 	".cm-codeblock-copy:focus-visible": {
 		opacity: "1",
@@ -207,7 +207,7 @@ export const staticEditorTheme = EditorView.theme({
 		border: "1.5px solid var(--color-text-secondary)",
 		cursor: "pointer",
 		backgroundColor: "transparent",
-		transition: "background-color 0.15s, border-color 0.15s",
+		transition: "background-color 0.15s ease-out, border-color 0.15s ease-out",
 		flexShrink: "0",
 	},
 	".cm-task-checkbox-checked": {
@@ -329,7 +329,7 @@ export const staticEditorTheme = EditorView.theme({
 		padding: "8px 12px",
 		maxWidth: "600px",
 		cursor: "pointer",
-		transition: "background-color 0.15s",
+		transition: "background-color 0.15s ease-out",
 		margin: "2px 0",
 		color: "inherit",
 		textDecoration: "none",

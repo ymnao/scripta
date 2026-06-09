@@ -20,13 +20,13 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.keyboard.press(`${modKey}+f`);
 		await expect(page.locator(".search-bar")).toBeVisible();
-		await expect(page.getByRole("textbox", { name: "Find" })).toBeVisible();
+		await expect(page.getByRole("textbox", { name: "検索" })).toBeVisible();
 	});
 
 	test("サイドバーにフォーカスがある状態でも Cmd+F で検索バーが開く", async ({ page }) => {
@@ -34,7 +34,7 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
@@ -48,7 +48,7 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await page.keyboard.press(`${modKey}+f`);
@@ -63,12 +63,12 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await page.keyboard.press(`${modKey}+h`);
 		await expect(page.locator(".search-bar")).toBeVisible();
-		await expect(page.getByRole("textbox", { name: "Replace" })).toBeVisible();
+		await expect(page.getByRole("textbox", { name: "置換" })).toBeVisible();
 	});
 
 	test("検索時にマッチ件数が表示される", async ({ page }) => {
@@ -76,12 +76,12 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.keyboard.press(`${modKey}+f`);
-		await page.getByRole("textbox", { name: "Find" }).fill("Hello");
+		await page.getByRole("textbox", { name: "検索" }).fill("Hello");
 		await expect(page.locator(".search-bar-match-count")).toContainText(/\d+ (of \d+|results)/);
 	});
 
@@ -90,14 +90,14 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
 
 		await page.keyboard.press(`${modKey}+f`);
-		await page.getByRole("textbox", { name: "Find" }).fill("Hello");
+		await page.getByRole("textbox", { name: "検索" }).fill("Hello");
 
-		await page.getByLabel("Next match").click();
+		await page.getByLabel("次の一致").click();
 		await expect(page.locator(".search-bar-match-count")).toContainText(/\d+ of \d+/);
 	});
 
@@ -106,20 +106,20 @@ test.describe("in-file search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await page.keyboard.press(`${modKey}+f`);
 		await expect(page.locator(".search-bar")).toBeVisible();
 
 		// Cmd+F は collapsed で開くので、最初は Replace は非表示
-		await expect(page.getByRole("textbox", { name: "Replace" })).not.toBeVisible();
+		await expect(page.getByRole("textbox", { name: "置換" })).not.toBeVisible();
 
-		await page.getByLabel("Expand replace").click();
-		await expect(page.getByRole("textbox", { name: "Replace" })).toBeVisible();
+		await page.getByLabel("置換を開く").click();
+		await expect(page.getByRole("textbox", { name: "置換" })).toBeVisible();
 
-		await page.getByLabel("Collapse replace").click();
-		await expect(page.getByRole("textbox", { name: "Replace" })).not.toBeVisible();
+		await page.getByLabel("置換を閉じる").click();
+		await expect(page.getByRole("textbox", { name: "置換" })).not.toBeVisible();
 	});
 });
 
@@ -129,11 +129,11 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+Shift+f`);
 		await expect(page.getByText("Search", { exact: true })).toBeVisible();
-		await expect(page.getByRole("textbox", { name: "Search in workspace" })).toBeVisible();
+		await expect(page.getByRole("textbox", { name: "ワークスペース内を検索" })).toBeVisible();
 	});
 
 	test("虫眼鏡アイコンでも検索パネルを開ける", async ({ page }) => {
@@ -141,11 +141,11 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
-		await page.getByLabel("Search in workspace").click();
+		await page.getByLabel("ワークスペース内を検索").click();
 		await expect(page.getByText("Search", { exact: true })).toBeVisible();
-		await expect(page.getByRole("textbox", { name: "Search in workspace" })).toBeVisible();
+		await expect(page.getByRole("textbox", { name: "ワークスペース内を検索" })).toBeVisible();
 	});
 
 	test("検索結果がファイルごとにグルーピング表示される", async ({ page }) => {
@@ -153,10 +153,10 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+Shift+f`);
-		await page.getByRole("textbox", { name: "Search in workspace" }).fill("hello");
+		await page.getByRole("textbox", { name: "ワークスペース内を検索" }).fill("hello");
 
 		await expect(page.locator(".search-panel-file-header")).toHaveCount(2, { timeout: 5000 });
 		await expect(page.locator(".search-panel-file-header").first()).toContainText("hello.md");
@@ -168,10 +168,10 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+Shift+f`);
-		await page.getByRole("textbox", { name: "Search in workspace" }).fill("hello");
+		await page.getByRole("textbox", { name: "ワークスペース内を検索" }).fill("hello");
 
 		await expect(page.locator(".search-panel-match").first()).toBeVisible({ timeout: 5000 });
 		await page.locator(".search-panel-match").first().click();
@@ -192,10 +192,10 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: emojiWorkspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+Shift+f`);
-		await page.getByRole("textbox", { name: "Search in workspace" }).fill("hello");
+		await page.getByRole("textbox", { name: "ワークスペース内を検索" }).fill("hello");
 
 		const highlights = page.locator(".search-panel-highlight");
 		await expect(highlights.first()).toBeVisible({ timeout: 5000 });
@@ -219,10 +219,10 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: emojiWorkspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+Shift+f`);
-		await page.getByRole("textbox", { name: "Search in workspace" }).fill("test");
+		await page.getByRole("textbox", { name: "ワークスペース内を検索" }).fill("test");
 
 		const highlight = page.locator(".search-panel-highlight");
 		await expect(highlight).toBeVisible({ timeout: 5000 });
@@ -234,12 +234,12 @@ test.describe("workspace search", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
-		await page.getByRole("button", { name: "Search in workspace" }).click();
+		await page.getByRole("button", { name: "ワークスペース内を検索" }).click();
 		await expect(page.getByText("Search", { exact: true })).toBeVisible();
 
-		await page.getByRole("button", { name: "Show file explorer" }).click();
+		await page.getByRole("button", { name: "ファイルエクスプローラーを表示" }).click();
 		await expect(page.getByText("Files")).toBeVisible();
 	});
 });

@@ -25,13 +25,13 @@ test.describe("command palette", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+p`);
-		await expect(page.getByLabel("Search files by name")).toBeVisible();
+		await expect(page.getByLabel("ファイル名で検索")).toBeVisible();
 
 		await page.keyboard.press("Escape");
-		await expect(page.getByLabel("Search files by name")).not.toBeVisible();
+		await expect(page.getByLabel("ファイル名で検索")).not.toBeVisible();
 	});
 
 	test("開いた直後はパレット内に全ファイルが表示される", async ({ page }) => {
@@ -39,12 +39,12 @@ test.describe("command palette", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+p`);
 		// パレット内 listbox に絞ってチェックする。.first() で素のテキストを掴むと
 		// 背後のファイルツリーで同名要素を拾って false positive になる。
-		const options = page.getByRole("listbox", { name: "File results" }).getByRole("option");
+		const options = page.getByRole("listbox", { name: "検索結果" }).getByRole("option");
 		await expect(options).toHaveCount(3);
 		// 表示順は basename の byte 比較（searchFilenames の仕様）→ hello / notes / readme
 		await expect(options.nth(0)).toContainText("hello.md");
@@ -57,13 +57,13 @@ test.describe("command palette", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+p`);
-		await page.getByLabel("Search files by name").fill("read");
+		await page.getByLabel("ファイル名で検索").fill("read");
 
 		// readme.md だけがマッチして、hello.md / notes.md は消える
-		const options = page.getByRole("listbox", { name: "File results" }).getByRole("option");
+		const options = page.getByRole("listbox", { name: "検索結果" }).getByRole("option");
 		await expect(options).toHaveCount(1);
 		await expect(options.nth(0)).toContainText("readme.md");
 	});
@@ -73,21 +73,21 @@ test.describe("command palette", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+p`);
-		await expect(page.getByLabel("Search files by name")).toBeVisible();
+		await expect(page.getByLabel("ファイル名で検索")).toBeVisible();
 
 		// Enter 前に「先頭の hello.md が選択されている」ことを保証する。
 		// これが無いとファイルが開いたという結果だけで通り、selectedIndex の
 		// 初期化バグ（例: index=-1 で 0 番目以外が開く）を取り逃す。
-		const listbox = page.getByRole("listbox", { name: "File results" });
+		const listbox = page.getByRole("listbox", { name: "検索結果" });
 		const selected = listbox.getByRole("option", { selected: true });
 		await expect(selected).toContainText("hello.md");
 
 		await page.keyboard.press("Enter");
 
-		await expect(page.getByLabel("Search files by name")).not.toBeVisible();
+		await expect(page.getByLabel("ファイル名で検索")).not.toBeVisible();
 		await expect(page.getByRole("tab")).toHaveCount(1);
 		await expect(page.locator(".cm-content")).toContainText("Hello");
 	});
@@ -97,12 +97,12 @@ test.describe("command palette", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+p`);
-		await expect(page.getByLabel("Search files by name")).toBeVisible();
+		await expect(page.getByLabel("ファイル名で検索")).toBeVisible();
 
 		await page.mouse.click(10, 10);
-		await expect(page.getByLabel("Search files by name")).not.toBeVisible();
+		await expect(page.getByLabel("ファイル名で検索")).not.toBeVisible();
 	});
 });

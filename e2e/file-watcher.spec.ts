@@ -21,7 +21,7 @@ test.describe("file watcher", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("hello.md file")).toBeVisible();
 
 		await mock.simulateFileCreate(
@@ -39,7 +39,7 @@ test.describe("file watcher", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
@@ -54,7 +54,7 @@ test.describe("file watcher", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.getByRole("tab")).toHaveCount(1);
@@ -69,7 +69,7 @@ test.describe("file watcher", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
@@ -91,7 +91,7 @@ test.describe("file watcher", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
@@ -126,7 +126,7 @@ test.describe("file watcher", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("a.md file")).toBeVisible();
 
 		const calls1 = await mock1.getCalls("startWatcher");
@@ -148,7 +148,7 @@ test.describe("file watcher", () => {
 		});
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await expect(page.getByLabel("x.md file")).toBeVisible();
 
 		const calls2 = await mock2.getCalls("startWatcher");

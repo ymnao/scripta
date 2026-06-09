@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from "lucide-react";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { type ToastItem, type ToastType, useToastStore } from "../../stores/toast";
 
@@ -44,13 +44,21 @@ const TOAST_STYLES: Record<
 	},
 };
 
+const EXIT_DURATION_MS = 150;
+
 function ToastMessage({ toast }: { toast: ToastItem }) {
 	const removeToast = useToastStore((s) => s.removeToast);
+	const [dismissing, setDismissing] = useState(false);
+
+	const dismiss = useCallback(() => {
+		setDismissing(true);
+		setTimeout(() => removeToast(toast.id), EXIT_DURATION_MS);
+	}, [toast.id, removeToast]);
 
 	useEffect(() => {
-		const timer = setTimeout(() => removeToast(toast.id), AUTO_DISMISS_MS);
+		const timer = setTimeout(dismiss, AUTO_DISMISS_MS);
 		return () => clearTimeout(timer);
-	}, [toast.id, removeToast]);
+	}, [dismiss]);
 
 	const style = TOAST_STYLES[toast.type] ?? TOAST_STYLES.info;
 	const Icon = style.icon;
@@ -59,7 +67,7 @@ function ToastMessage({ toast }: { toast: ToastItem }) {
 		<div
 			role={style.role}
 			aria-live={style.live}
-			className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 shadow-lg ${style.className}`}
+			className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 shadow-lg ${dismissing ? "animate-toast-out" : "animate-toast-in"} ${style.className}`}
 		>
 			<Icon size={16} className="mt-0.5 shrink-0" />
 			<span className="flex-1 text-sm">{toast.message}</span>
@@ -67,7 +75,7 @@ function ToastMessage({ toast }: { toast: ToastItem }) {
 				type="button"
 				aria-label="閉じる"
 				className="shrink-0 rounded p-0.5 opacity-60 hover:opacity-100"
-				onClick={() => removeToast(toast.id)}
+				onClick={dismiss}
 			>
 				<X size={14} />
 			</button>
@@ -81,7 +89,7 @@ export function ToastContainer() {
 	if (toasts.length === 0) return null;
 
 	return createPortal(
-		<div className="fixed right-4 bottom-10 z-50 flex w-80 flex-col gap-2">
+		<div className="fixed right-4 bottom-10 z-60 flex w-80 flex-col gap-2">
 			{toasts.map((toast) => (
 				<ToastMessage key={toast.id} toast={toast} />
 			))}

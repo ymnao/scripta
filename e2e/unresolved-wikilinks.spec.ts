@@ -22,9 +22,9 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		await expect(page.getByText("未解決リンク", { exact: true })).toBeVisible();
 	});
@@ -34,8 +34,8 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		await expect(page.getByText("件の未解決リンク")).toBeVisible();
 	});
@@ -45,8 +45,8 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		// missing-page は note.md と ref.md で参照されるので "2"、
 		// another-missing は note.md のみなので "1"。
@@ -68,7 +68,7 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.keyboard.press(`${modKey}+Shift+u`);
 		await expect(page.getByText("未解決リンク", { exact: true })).toBeVisible();
@@ -82,8 +82,8 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		await expect(page.getByText("another-missing")).toBeVisible();
 
@@ -107,8 +107,8 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		const fileNames = page.locator(".search-panel-file-name");
 
@@ -129,7 +129,7 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("note.md file").click();
 		await expect(page.locator(".cm-content")).toContainText("Notes");
 
@@ -142,10 +142,10 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
-		await page.getByLabel("Show unresolved wikilinks").click();
-		const panel = page.locator('section[aria-label="Unresolved wikilinks"]');
+		await page.getByLabel("未解決リンクを表示").click();
+		const panel = page.locator('section[aria-label="未解決リンク"]');
 		await expect(panel.getByText("another-missing")).toBeVisible();
 		await expect(panel.getByText("missing-page")).toBeVisible();
 
@@ -153,8 +153,8 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setFileContent("/workspace/note.md", "# Notes\nSee [[missing-page]] for details");
 
 		// 一旦離れて戻ることで再 mount + 再 scan を強制
-		await page.getByLabel("Show file explorer").click();
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("ファイルエクスプローラーを表示").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		// missing-page は ref.md にあるので残る
 		await expect(panel.getByText("missing-page")).toBeVisible({ timeout: 5000 });
@@ -167,7 +167,7 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
 		await page.getByLabel("note.md file").click();
 		const editor = page.locator(".cm-content");
@@ -204,8 +204,8 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: noUnresolved, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		await expect(page.getByText("未解決のリンクはありません")).toBeVisible();
 	});
@@ -227,9 +227,9 @@ test.describe("unresolved wikilinks panel", () => {
 		await mock.setup({ fs: cleanWorkspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 
-		await page.getByLabel("Show unresolved wikilinks").click();
+		await page.getByLabel("未解決リンクを表示").click();
 
 		// 別ワークスペースの "missing-page" 等が leak してこないこと
 		await expect(page.getByText("未解決のリンクはありません")).toBeVisible({ timeout: 5000 });

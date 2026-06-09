@@ -21,7 +21,7 @@ test.describe("file editing", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
@@ -33,7 +33,7 @@ test.describe("file editing", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
@@ -49,7 +49,7 @@ test.describe("file editing", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");
@@ -74,7 +74,7 @@ test.describe("file editing", () => {
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
 
 		await page.goto("/");
-		await page.getByLabel("Open folder").click();
+		await page.getByLabel("フォルダを開く").click();
 		await page.getByLabel("hello.md file").click();
 
 		await expect(page.locator(".cm-content")).toContainText("Hello World");

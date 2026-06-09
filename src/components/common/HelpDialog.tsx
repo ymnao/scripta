@@ -73,7 +73,7 @@ const groups: ShortcutGroup[] = [
 	{
 		title: "表示",
 		shortcuts: [
-			{ keys: [[mod, "B"]], action: "サイドバーの切り替え（エディタ外）" },
+			{ keys: [[mod, "/"]], action: "サイドバーの切り替え" },
 			{ keys: [[mod, shift, "S"]], action: "スライドビュー" },
 			{ keys: [[mod, "J"]], action: "スクラッチパッド" },
 			{ keys: [[mod, "E"]], action: "ファイルエクスプローラー" },
@@ -112,7 +112,7 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
 				<button
 					type="button"
 					onClick={onClose}
-					aria-label="Close"
+					aria-label="閉じる"
 					className="rounded p-0.5 text-text-secondary hover:bg-black/10 hover:text-text-primary dark:hover:bg-white/10"
 				>
 					<X size={16} />

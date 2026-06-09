@@ -28,9 +28,9 @@ test.describe("settings persistence", () => {
 		// だけだと「workspace 復元失敗で空状態」と区別がつかず、本来検出したい
 		// 「sidebar=false が復元されたが workspace は読み込まれた」を取り逃す。
 		await expect(page.getByRole("button", { name: "ワークスペース検索" })).toBeVisible();
-		// sidebar 非表示なのでファイルツリーも sidebar 内の "Open folder" ボタンも出ない
+		// sidebar 非表示なのでファイルツリーも sidebar 内の "フォルダを開く" ボタンも出ない
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
-		await expect(page.getByLabel("Open folder")).not.toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).not.toBeVisible();
 	});
 
 	test("起動時に sidebarVisible=true が復元される", async ({ page }) => {
@@ -63,7 +63,7 @@ test.describe("settings persistence", () => {
 		// workspace は読み込まれず、Open folder ボタン + motto が表示される
 		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
 		await expect(page.getByLabel("test.md file")).not.toBeVisible();
-		await expect(page.getByLabel("Open folder")).toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).toBeVisible();
 	});
 
 	test("保存された workspace パスが無効な場合は空状態にフォールバック", async ({ page }) => {
@@ -80,6 +80,6 @@ test.describe("settings persistence", () => {
 		await page.goto("/");
 		// パス検証に失敗して workspace が設定されないので motto が表示される
 		await expect(page.getByText("Verba volant, scripta manent.")).toBeVisible();
-		await expect(page.getByLabel("Open folder")).toBeVisible();
+		await expect(page.getByLabel("フォルダを開く")).toBeVisible();
 	});
 });

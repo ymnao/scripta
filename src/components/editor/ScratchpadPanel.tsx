@@ -274,7 +274,7 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 					extensions={extensions}
 					height="100%"
 					theme="none"
-					aria-label="Scratchpad editor"
+					aria-label="スクラッチパッドエディタ"
 					basicSetup={{
 						lineNumbers: false,
 						foldGutter: false,

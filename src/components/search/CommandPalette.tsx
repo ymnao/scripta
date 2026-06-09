@@ -150,7 +150,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 		<div className="fixed inset-0 z-50 flex justify-center bg-black/30 pt-[15vh]">
 			<button
 				type="button"
-				aria-label="Close"
+				aria-label="閉じる"
 				className="absolute inset-0"
 				onMouseDown={onClose}
 				tabIndex={-1}
@@ -158,7 +158,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 			<div
 				role="dialog"
 				aria-modal="true"
-				aria-label="Command palette"
+				aria-label="コマンドパレット"
 				className="flex h-fit max-h-[60vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-bg-primary shadow-xl"
 				onMouseDown={(e) => e.stopPropagation()}
 				onKeyDown={handleKeyDown}
@@ -170,8 +170,8 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 						role="combobox"
 						value={query}
 						onChange={handleChange}
-						placeholder="Search files by name..."
-						aria-label="Search files by name"
+						placeholder="ファイル名で検索..."
+						aria-label="ファイル名で検索"
 						aria-controls="command-palette-listbox"
 						aria-activedescendant={
 							files.length > 0 && selectedIndex >= 0
@@ -183,14 +183,14 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 					/>
 				</div>
 				{files.length === 0 && (
-					<p className="px-3 py-2 text-xs text-text-secondary">No files found</p>
+					<p className="px-3 py-2 text-xs text-text-secondary">ファイルが見つかりません</p>
 				)}
 				<div
 					ref={listRef}
 					id="command-palette-listbox"
 					role="listbox"
 					className="overflow-y-auto"
-					aria-label="File results"
+					aria-label="検索結果"
 				>
 					{files.map((filePath, index) => (
 						<div

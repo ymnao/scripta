@@ -79,14 +79,14 @@ export function Sidebar({
 		`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary ${active ? "text-text-primary" : "text-text-secondary hover:bg-black/10 dark:hover:bg-white/10"}`;
 
 	return (
-		<aside className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-primary text-text-primary">
+		<aside className="flex w-60 shrink-0 flex-col bg-bg-primary text-text-primary">
 			<div className="flex items-center justify-between p-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">
 				<span>{panelLabels[activePanel]}</span>
 				<div className="flex items-center gap-1">
 					<button
 						type="button"
 						onClick={onShowFiles}
-						aria-label="Show file explorer"
+						aria-label="ファイルエクスプローラーを表示"
 						aria-pressed={activePanel === "files"}
 						className={iconBtnClass(activePanel === "files")}
 					>
@@ -95,7 +95,7 @@ export function Sidebar({
 					<button
 						type="button"
 						onClick={onShowSearch}
-						aria-label="Search in workspace"
+						aria-label="ワークスペース内を検索"
 						aria-pressed={activePanel === "search"}
 						className={iconBtnClass(activePanel === "search")}
 					>
@@ -104,7 +104,7 @@ export function Sidebar({
 					<button
 						type="button"
 						onClick={onShowUnresolved}
-						aria-label="Show unresolved wikilinks"
+						aria-label="未解決リンクを表示"
 						aria-pressed={activePanel === "unresolved"}
 						className={iconBtnClass(activePanel === "unresolved")}
 					>
@@ -133,15 +133,15 @@ export function Sidebar({
 					/>
 				) : (
 					<div className="flex flex-col items-center gap-3 px-4 py-8">
-						<p className="text-center text-xs text-text-secondary">Open a folder to get started</p>
+						<p className="text-center text-xs text-text-secondary">フォルダを開いて始めましょう</p>
 						<button
 							type="button"
 							onClick={handleOpenFolder}
-							aria-label="Open folder"
+							aria-label="フォルダを開く"
 							className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-text-primary hover:bg-bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary"
 						>
 							<FolderOpen size={14} />
-							Open Folder
+							フォルダを開く
 						</button>
 					</div>
 				)}
