@@ -1162,5 +1162,97 @@ describe("useAutoSave", () => {
 			// onFlushComplete called with old path and raw content
 			expect(onFlushComplete).toHaveBeenCalledWith("a.md", "edited A");
 		});
+
+		it("does not leak a stale composition-flush timer when files switch rapidly", async () => {
+			const composing = { value: true };
+			const isComposing = () => composing.value;
+			const onFlushComplete = vi.fn();
+
+			const { result, rerender } = renderHook(
+				({ filePath, content }) => useAutoSave(filePath, content, isComposing, onFlushComplete),
+				{ initialProps: { filePath: "a.md", content: "initial A" } },
+			);
+
+			act(() => {
+				result.current.markSaved("initial A");
+			});
+
+			// Make A dirty
+			rerender({ filePath: "a.md", content: "edited A" });
+
+			// Switch A → B while composing (schedules flush of A)
+			await act(async () => {
+				rerender({ filePath: "b.md", content: "edited A" });
+			});
+
+			// Mark B as loaded with some content so a B→C switch can find unsaved diff
+			act(() => {
+				result.current.markSaved("initial B");
+			});
+			rerender({ filePath: "b.md", content: "edited B" });
+
+			// Switch B → C while composing (schedules flush of B — must NOT leave A's flush dangling)
+			await act(async () => {
+				rerender({ filePath: "c.md", content: "edited B" });
+			});
+
+			// Mark C as loaded
+			act(() => {
+				result.current.markSaved("initial C");
+			});
+
+			// End composition. Only B's flush should fire (A's was cleared when switching B→C).
+			composing.value = false;
+			await act(async () => {
+				vi.advanceTimersByTime(200);
+			});
+
+			// 防御策が無いと A → b.md の意図しない上書きが起きうる。クリア後は B の flush 1 回のみ。
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+			expect(mockedWriteFile).toHaveBeenCalledWith("b.md", "edited B\n");
+			expect(onFlushComplete).toHaveBeenCalledTimes(1);
+			expect(onFlushComplete).toHaveBeenCalledWith("b.md", "edited B");
+		});
+	});
+
+	describe("recovery defenses", () => {
+		it("saveNow clears the awaiting-new-file gate so autosave resumes if markSaved was missed", async () => {
+			const { result, rerender } = renderHook(
+				({ filePath, content }) => useAutoSave(filePath, content),
+				{ initialProps: { filePath: "a.md", content: "initial" } },
+			);
+
+			act(() => {
+				result.current.markSaved("initial");
+			});
+
+			// Switch to B but never call markSaved (simulates parent component bug or
+			// readFile race that drops markSaved). awaitingNewFileRef stays true.
+			await act(async () => {
+				rerender({ filePath: "b.md", content: "initial" });
+			});
+
+			// Subsequent edits to B should be blocked from autosave (current behavior).
+			rerender({ filePath: "b.md", content: "edited B" });
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			// User manually saves. saveNow MUST clear the gate so autosave resumes.
+			await act(async () => {
+				await result.current.saveNow();
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("b.md", "edited B\n");
+
+			mockedWriteFile.mockClear();
+
+			// Further edits should now autosave — gate is lifted by the manual save.
+			rerender({ filePath: "b.md", content: "edited B more" });
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledWith("b.md", "edited B more\n");
+		});
 	});
 });
