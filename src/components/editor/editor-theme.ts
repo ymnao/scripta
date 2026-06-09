@@ -50,6 +50,11 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			width: "3px",
 			backgroundColor: "var(--color-border)",
 		},
+		// .cm-line に horizontal padding を持たせた結果、anchor (= .cm-line) 右端
+		// 基準の right: 4px (static theme) は背景外側になる。padding 分内側に補正。
+		".cm-codeblock-copy": {
+			right: `calc(${horizontal} + 4px)`,
+		},
 	});
 }
 
@@ -173,7 +178,9 @@ export const staticEditorTheme = EditorView.theme({
 	},
 	".cm-codeblock-copy": {
 		position: "absolute",
-		right: "4px",
+		// right は dynamic theme で horizontal padding を考慮した値に override する
+		// (.cm-line に horizontal padding を持たせた副作用で、anchor (= .cm-line) 右端
+		// 基準の単純な right: 4px だとボタンが codeblock 背景の外に出てしまうため)
 		top: "50%",
 		transform: "translateY(-50%)",
 		display: "flex",
