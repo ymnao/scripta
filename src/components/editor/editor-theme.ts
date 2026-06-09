@@ -24,13 +24,20 @@ export function createDynamicEditorTheme(
 			backgroundColor: "var(--color-bg-primary)",
 			color: "var(--color-text-primary)",
 		},
+		// horizontal padding を .cm-line 側に持たせる。
+		// CodeMirror の RectangleMarker.forRange (drawSelection) は selection rect の
+		// left/right を .cm-line の paddingLeft/Right で補正するため、.cm-content 側に
+		// horizontal padding を置くと selection が padding 領域まではみ出す。
+		// CSS 変数 --cm-horizontal-padding で静的セレクタ (blockquote の擬似要素 border 等)
+		// にも値を共有する。
 		".cm-content": {
-			padding: `${vertical} ${horizontal}`,
+			padding: `${vertical} 0`,
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
+			"--cm-horizontal-padding": horizontal,
 		},
 		".cm-line": {
-			padding: "1px 0",
+			padding: `1px ${horizontal}`,
 			overflowWrap: "break-word",
 		},
 	});
@@ -144,6 +151,11 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-codeblock-line": {
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: FONT_FAMILY_MAP.monospace,
+		// .cm-line の左右 padding (horizontal) 領域には背景を描かず、テキスト幅に揃える。
+		// horizontal padding が .cm-content から .cm-line に移った副作用で、行背景が
+		// エディタ全幅に広がってしまうのを content-box にクリップして抑制する。
+		backgroundOrigin: "content-box",
+		backgroundClip: "content-box",
 	},
 	".cm-codeblock-copy-anchor": {
 		position: "relative",
@@ -247,9 +259,25 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-table-widget th": {
 		fontWeight: "700",
 	},
-	".cm-blockquote-line": {
-		borderLeft: "3px solid var(--color-border)",
-		paddingLeft: "8px",
+	// blockquote 装飾。.cm-line に horizontal padding を持たせた副作用で、単純な
+	// border-left/padding-left では border 位置がテキストから大きく離れてしまうため、
+	// 擬似要素で「テキスト直前 (= horizontal padding の位置)」に border を描き直す。
+	// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト
+	// 位置を維持。.cm-line { padding } shorthand と shorthand-vs-longhand specificity
+	// が同点になり source order 負けするため、`.cm-content .cm-blockquote-line` の
+	// 2-class compound selector に specificity を上げて確実に勝つようにする。
+	".cm-content .cm-blockquote-line": {
+		position: "relative",
+		paddingLeft: "calc(var(--cm-horizontal-padding) + 11px)",
+	},
+	".cm-blockquote-line::before": {
+		content: '""',
+		position: "absolute",
+		left: "var(--cm-horizontal-padding)",
+		top: "0",
+		bottom: "0",
+		width: "3px",
+		backgroundColor: "var(--color-border)",
 	},
 	".cm-hr-widget": {
 		border: "none",
