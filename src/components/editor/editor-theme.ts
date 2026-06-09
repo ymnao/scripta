@@ -9,14 +9,7 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
-export function createDynamicEditorTheme(
-	fontSize: number,
-	contentPadding: { vertical: string; horizontal: string } = {
-		vertical: "8px",
-		horizontal: "48px",
-	},
-) {
-	const { vertical, horizontal } = contentPadding;
+export function createDynamicEditorTheme(fontSize: number, vertical = "8px", horizontal = "48px") {
 	return EditorView.theme({
 		"&": {
 			height: "100%",
@@ -24,21 +17,38 @@ export function createDynamicEditorTheme(
 			backgroundColor: "var(--color-bg-primary)",
 			color: "var(--color-text-primary)",
 		},
-		// horizontal padding を .cm-line 側に持たせる。
-		// CodeMirror の RectangleMarker.forRange (drawSelection) は selection rect の
-		// left/right を .cm-line の paddingLeft/Right で補正するため、.cm-content 側に
-		// horizontal padding を置くと selection が padding 領域まではみ出す。
-		// CSS 変数 --cm-horizontal-padding で静的セレクタ (blockquote の擬似要素 border 等)
-		// にも値を共有する。
+		// horizontal padding を .cm-line 側に持たせる。CodeMirror の RectangleMarker.forRange
+		// (drawSelection) は selection rect の left/right を .cm-line の paddingLeft/Right で
+		// 補正するため、.cm-content 側に horizontal padding を置くと selection が padding
+		// 領域まではみ出す。
 		".cm-content": {
 			padding: `${vertical} 0`,
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
-			"--cm-horizontal-padding": horizontal,
 		},
 		".cm-line": {
 			padding: `1px ${horizontal}`,
 			overflowWrap: "break-word",
+		},
+		// blockquote 装飾を dynamic theme 内に置くのは「static theme の .cm-blockquote-line」
+		// が「dynamic theme の .cm-line { padding } shorthand」と specificity 同点になり、
+		// source order で勝てないため。dynamic theme は staticEditorTheme より後に登録される
+		// (MarkdownEditor.tsx / ScratchpadPanel.tsx の extensions 配列) ので、同じテーマ内
+		// に書けば source order で勝つ。
+		// border は擬似要素で「テキスト直前 (= horizontal padding の位置)」に描画、
+		// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト位置を維持。
+		".cm-blockquote-line": {
+			position: "relative",
+			paddingLeft: `calc(${horizontal} + 11px)`,
+		},
+		".cm-blockquote-line::before": {
+			content: '""',
+			position: "absolute",
+			left: horizontal,
+			top: "0",
+			bottom: "0",
+			width: "3px",
+			backgroundColor: "var(--color-border)",
 		},
 	});
 }
@@ -151,9 +161,10 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-codeblock-line": {
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: FONT_FAMILY_MAP.monospace,
-		// .cm-line の左右 padding (horizontal) 領域には背景を描かず、テキスト幅に揃える。
-		// horizontal padding が .cm-content から .cm-line に移った副作用で、行背景が
-		// エディタ全幅に広がってしまうのを content-box にクリップして抑制する。
+		// .cm-line の horizontal padding 領域に背景がはみ出すのを content-box にクリップ。
+		// 全ての editor で lineWrapping 有効前提 (long line が横スクロールしないため
+		// content-box が常に viewport 幅と一致)。lineWrapping を切ると長い行の背景が
+		// 切れて見える可能性あり。
 		backgroundOrigin: "content-box",
 		backgroundClip: "content-box",
 	},
@@ -259,26 +270,8 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-table-widget th": {
 		fontWeight: "700",
 	},
-	// blockquote 装飾。.cm-line に horizontal padding を持たせた副作用で、単純な
-	// border-left/padding-left では border 位置がテキストから大きく離れてしまうため、
-	// 擬似要素で「テキスト直前 (= horizontal padding の位置)」に border を描き直す。
-	// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト
-	// 位置を維持。.cm-line { padding } shorthand と shorthand-vs-longhand specificity
-	// が同点になり source order 負けするため、`.cm-content .cm-blockquote-line` の
-	// 2-class compound selector に specificity を上げて確実に勝つようにする。
-	".cm-content .cm-blockquote-line": {
-		position: "relative",
-		paddingLeft: "calc(var(--cm-horizontal-padding) + 11px)",
-	},
-	".cm-blockquote-line::before": {
-		content: '""',
-		position: "absolute",
-		left: "var(--cm-horizontal-padding)",
-		top: "0",
-		bottom: "0",
-		width: "3px",
-		backgroundColor: "var(--color-border)",
-	},
+	// .cm-blockquote-line は dynamic theme に移動 (horizontal padding 値が必要 +
+	// source order で .cm-line { padding } に勝つため)
 	".cm-hr-widget": {
 		border: "none",
 		borderTop: "1px solid var(--color-border)",
