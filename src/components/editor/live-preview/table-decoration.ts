@@ -577,8 +577,8 @@ function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (tableNode) {
 		const startLinePos = view.state.doc.line(tableNode.startLine).from;
-		// テーブルが doc 先頭のときは anchor 0 が先頭境界に当たるが、tableCursorFilter が
-		// 改行を補って退避する（直上行確保の不変条件は filter が担う）。
+		// 呼び出し元（ArrowUp）のガードにより doc 先頭テーブルではここに来ない。
+		// 仮に anchor 0 が先頭境界に当たっても tableCursorFilter が補填して退避する。
 		const before = Math.max(startLinePos - 1, 0);
 		view.dispatch({ selection: { anchor: before } });
 		view.focus();
@@ -1093,7 +1093,9 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 			return;
 		}
 		// ドキュメント先頭のテーブルなら、抜ける先が無いのでセル内に留める。
-		// （以前は上に空行を補っていたが、意図しないドキュメント改変になるため取りやめ）
+		// （以前は上に空行を補っていたが、意図しないドキュメント改変になるため取りやめ。
+		// テーブル前に行を足したいときは余白クリック / Cmd+Home が tableCursorFilter の
+		// 補填で応える。キー操作は行き過ぎ等のうっかり発火が多いため閉じ込めを維持 #146）
 		const tableNode = getTableNodeFor(view, wrapperEl);
 		if (tableNode && tableNode.startLine === 1) return;
 		exitTableUp(view, wrapperEl);
@@ -1604,6 +1606,10 @@ function tableBoundaries(tr: Transaction): { starts: Set<number>; ends: Set<numb
  *
  * 改行補填はテーブル直上/直下に常に編集可能な行を確保する不変条件（余分な空行は
  * 作らない / git 用の末尾改行は別概念で save 時の processContent が担う）。
+ * selection を置くだけの操作（余白クリック / Cmd+Home 等）でも doc が変わり dirty に
+ * なる trade-off は許容する（テーブル前後に行を足す唯一の UI 手段であり、EOF 側の
+ * 既存挙動と対称）。なおセル内からの ArrowUp 脱出は handleKeydown 側で閉じ込めて
+ * いるため（#90）、キー操作のうっかり発火でこの補填が走ることはない。
  */
 const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	if (!tr.selection) return tr;
@@ -1617,26 +1623,32 @@ const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	if (starts.size === 0) return tr;
 
 	const doc = tr.newDoc;
+	// 先頭への \n 挿入（テーブルが doc 先頭）は後続のすべての selection 座標を +1 ずらす。
+	// sequential selection は extra.changes 適用後の座標で書く必要があるため、map の前に
+	// prepend の有無を確定してシフト量を固定する（multi-cursor で BOF 退避と他の
+	// カーソルが同時に起きるケースの座標ずれ防止）。
+	const prependNewline = starts.has(0) && tr.selection.ranges.some((r) => r.empty && r.head === 0);
+	const shift = prependNewline ? 1 : 0;
 	let appendNewline = false; // テーブルが EOF: 末尾に \n を補う
-	let prependNewline = false; // テーブルが doc 先頭: 先頭に \n を補う
 	let modified = false;
 	const ranges = tr.selection.ranges.map((range) => {
-		if (!range.empty) return range;
+		if (!range.empty) {
+			return shift === 0 ? range : EditorSelection.range(range.anchor + shift, range.head + shift);
+		}
 
 		if (ends.has(range.head)) {
 			modified = true;
 			if (range.head === doc.length) appendNewline = true;
-			return EditorSelection.cursor(range.head + 1);
+			return EditorSelection.cursor(range.head + 1 + shift);
 		}
 
 		if (starts.has(range.head)) {
 			modified = true;
-			// doc 先頭では補った改行の前（= 補った空行の先頭）に留まる
-			if (range.head === 0) prependNewline = true;
-			return EditorSelection.cursor(Math.max(range.head - 1, 0));
+			// doc 先頭（head=0）では補った改行の前（= 補った空行の先頭）に留まる
+			return EditorSelection.cursor(range.head === 0 ? 0 : range.head - 1 + shift);
 		}
 
-		return range;
+		return shift === 0 ? range : EditorSelection.cursor(range.head + shift);
 	});
 
 	if (!modified) return tr;

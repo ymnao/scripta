@@ -1,7 +1,7 @@
 import { history, redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -178,13 +178,13 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		}
 	});
 
-	function mountEditor(doc: string, cursorPos = 0): EditorView {
+	function mountEditor(doc: string, cursorPos = 0, extraExtensions: Extension[] = []): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
 		let state = EditorState.create({
 			doc,
 			selection: EditorSelection.cursor(cursorPos),
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
+			extensions: [markdown({ base: markdownLanguage }), tableDecoration, ...extraExtensions],
 		});
 		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
 		state = state.update({}).state;
@@ -341,6 +341,37 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		view.dispatch({ selection: { anchor: 0 } });
 		expect(view.state.doc.toString()).toBe(afterFirst);
 		expect(view.state.doc.toString()).toBe(`\n${simpleTable}`);
+	});
+
+	it("multi-cursor で BOF と EOF の境界に同時に来ても両カーソルが正しく退避する (#146)", () => {
+		// 先頭挿入は後続の全座標を +1 ずらすため、prepend と append が同時に起きると
+		// 末尾側の退避先にシフトを織り込む必要がある（multi-cursor 限定の座標バグ回帰）
+		const view = mountEditor(simpleTable, 0, [EditorState.allowMultipleSelections.of(true)]);
+		view.dispatch({
+			selection: EditorSelection.create(
+				[EditorSelection.cursor(0), EditorSelection.cursor(simpleTable.length)],
+				0,
+			),
+		});
+		// 先頭・末尾に改行が 1 つずつ補われる
+		expect(view.state.doc.toString()).toBe(`\n${simpleTable}\n`);
+		// 補った先頭空行の行頭(0)と補った末尾空行の行頭(L+2)に 2 カーソルが残る
+		expect(view.state.selection.ranges.map((r) => r.head)).toEqual([0, simpleTable.length + 2]);
+	});
+
+	it("multi-cursor で BOF 退避と通常カーソルが共存しても通常カーソルがずれない (#146)", () => {
+		const doc = `${simpleTable}\n\ntext`;
+		const view = mountEditor(doc, 0, [EditorState.allowMultipleSelections.of(true)]);
+		const textPos = doc.indexOf("text");
+		view.dispatch({
+			selection: EditorSelection.create(
+				[EditorSelection.cursor(0), EditorSelection.cursor(textPos)],
+				0,
+			),
+		});
+		expect(view.state.doc.toString()).toBe(`\n${doc}`);
+		// BOF カーソルは補った空行頭(0)、通常カーソルは "text" の頭（prepend で +1）
+		expect(view.state.selection.ranges.map((r) => r.head)).toEqual([0, textPos + 1]);
 	});
 
 	it("exitTableDown: 直下に行が無ければ改行を 1 つ補ってカーソルを置く", () => {
