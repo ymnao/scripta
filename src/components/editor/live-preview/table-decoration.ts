@@ -1,5 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import {
+	Annotation,
+	ChangeSet,
 	EditorSelection,
 	EditorState,
 	type Extension,
@@ -13,6 +15,8 @@ import {
 	Decoration,
 	type DecorationSet,
 	EditorView,
+	layer,
+	RectangleMarker,
 	ViewPlugin,
 	type ViewUpdate,
 	WidgetType,
@@ -566,8 +570,8 @@ export function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (!tableNode) return;
 
-	// テーブル末尾境界に selection を置くと tableCursorFilter が次行先頭へ退避し、
-	// EOF なら改行も 1 つ補う（直下行確保の不変条件は filter に一本化）。
+	// テーブル末尾境界に selection を置くと、中間境界なら tableCursorFilter が次行先頭へ
+	// 退避し、文書末尾なら EOF gap として文書を変えずに留まる（#167）。
 	view.dispatch({ selection: { anchor: view.state.doc.line(tableNode.endLine).to } });
 	view.focus();
 }
@@ -577,8 +581,8 @@ function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (tableNode) {
 		const startLinePos = view.state.doc.line(tableNode.startLine).from;
-		// 呼び出し元（ArrowUp）のガードにより doc 先頭テーブルではここに来ない。
-		// 仮に anchor 0 が先頭境界に当たっても tableCursorFilter が補填して退避する。
+		// 中間境界なら tableCursorFilter が前行末尾へ退避し、doc 先頭テーブルでは
+		// anchor 0 = BOF gap として文書を変えずに留まる（#167）。
 		const before = Math.max(startLinePos - 1, 0);
 		view.dispatch({ selection: { anchor: before } });
 		view.focus();
@@ -1092,19 +1096,16 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 			focusCell(wrapperEl, rowIdx - 1, colIdx);
 			return;
 		}
-		// ドキュメント先頭のテーブルなら、抜ける先が無いのでセル内に留める。
-		// （以前は上に空行を補っていたが、意図しないドキュメント改変になるため取りやめ。
-		// テーブル前に行を足したいときは余白クリック / Cmd+Home が tableCursorFilter の
-		// 補填で応える。キー操作は行き過ぎ等のうっかり発火が多いため閉じ込めを維持 #146）
-		const tableNode = getTableNodeFor(view, wrapperEl);
-		if (tableNode && tableNode.startLine === 1) return;
+		// 最上行からは前行末尾へ抜ける。ドキュメント先頭のテーブルでは抜ける先の行が
+		// 無いが、BOF gap（#167）に文書を変えずに留まれるのでそのまま抜けてよい。
 		exitTableUp(view, wrapperEl);
 		return;
 	}
 
 	if (e.key === "ArrowLeft") {
 		// セル内の通常の左移動はネイティブの contentEditable に任せる。
-		// 抜ける先（先頭テーブルの左上セルでカーソルがセル先頭）の場合のみ抑止する。
+		// 先頭テーブルの左上セルでカーソルがセル先頭の場合のみ、BOF gap へ明示的に
+		// 抜ける（native に任せると widget の外の DOM へ予測しづらい移動をするため）。
 		if (rowIdx === 0 && colIdx === 0) {
 			const sel = window.getSelection();
 			// 空セル: anchor === td それ自体。非空セル: anchor === td.firstChild（先頭テキストノード）。
@@ -1115,6 +1116,7 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 			if (atCellStart && tableNode && tableNode.startLine === 1) {
 				e.preventDefault();
 				e.stopPropagation();
+				exitTableUp(view, wrapperEl);
 				return;
 			}
 		}
@@ -1559,19 +1561,21 @@ const treeChangeDetector = ViewPlugin.fromClass(
 	},
 );
 
-// ── Atomic table ranges + trailing-boundary cursor dodge ──
+// ── Atomic table ranges + boundary cursor handling ──
 //
 // テーブルは `Decoration.replace({ block: true })` で 1 つの block widget になる。
-// selection がこの置換範囲に絡むと CM が widget 高さ分の巨大キャレットを描画し、特に
-// テーブル末尾境界（最終行の行末）で顕著になる。これを 2 段で防ぐ:
+// selection がこの置換範囲に絡むと CM (drawSelection) が widget 高さ分の巨大キャレットを
+// 描画するため、境界へのカーソルを 3 段で扱う:
 //
 // 1. atomicRanges — テーブルの置換範囲を 1 単位として宣言し、カーソル移動・クリックが
 //    範囲内部へ潜り込まないようにする（blockquote / heading と同じ方式）。
-// 2. tableCursorFilter — それでも末尾境界（block widget の直後）にカーソルが来ると
-//    巨大キャレットが残るため、その位置なら次行先頭へ退避する。境界判定は
-//    tableDecorationField（実際に widget 化されているテーブルだけを含む）から行うので、
-//    code fence 等に紛れたパイプ行で誤発火しない。docChanged ではデコレーションの末尾を
-//    tr.changes で newDoc 座標へマップしてから比較する。
+// 2. tableCursorFilter — 文書中間のテーブル境界（前後に通常の行がある）に来たカーソルは
+//    隣接行へ退避する。境界判定は tableDecorationField（実際に widget 化されている
+//    テーブルだけを含む）から行うので、code fence 等に紛れたパイプ行で誤発火しない。
+// 3. gap cursor (#167) — 文書先頭/末尾がテーブルの場合は退避先の行が存在しない。この
+//    位置は「gap」として文書を一切変えずにカーソルが留まれるようにする（ProseMirror の
+//    gapcursor 相当）。描画は tableGapCursorLayer が、入力時の改行補填（materialize）は
+//    tableGapMaterialize（typing / paste）と tableGapImeKeydown（IME）が担う。
 
 const tableAtomicRanges = EditorView.atomicRanges.of(
 	(view) => view.state.field(tableDecorationField, false) ?? Decoration.none,
@@ -1599,23 +1603,34 @@ function tableBoundaries(tr: Transaction): { starts: Set<number>; ends: Set<numb
 }
 
 /**
- * テーブル境界に来たカーソルを退避し、巨大キャレットを防ぐ。
+ * head が gap（文書先頭/末尾の widget 境界 = 退避先の行が無い位置）にあるかを返す。
+ */
+function gapAt(state: EditorState, head: number): "bof" | "eof" | null {
+	const decos = state.field(tableDecorationField, false);
+	if (!decos) return null;
+	const iter = decos.iter();
+	while (iter.value) {
+		if (head === 0 && iter.from === 0) return "bof";
+		if (head === state.doc.length && iter.to === state.doc.length) return "eof";
+		iter.next();
+	}
+	return null;
+}
+
+/**
+ * 文書中間のテーブル境界に来たカーソルを隣接行へ退避し、巨大キャレットを防ぐ。
  *
- * - 末尾境界（to）→ 次行先頭へ。テーブルが EOF なら改行を 1 つ補う。
- * - 先頭境界（from）→ 前行末尾へ。テーブルが DOC 先頭なら改行を 1 つ補う。
+ * - 末尾境界（to）→ 次行先頭へ
+ * - 先頭境界（from）→ 前行末尾へ
  *
- * 改行補填はテーブル直上/直下に常に編集可能な行を確保する不変条件（余分な空行は
- * 作らない / git 用の末尾改行は別概念で save 時の processContent が担う）。
- * selection を置くだけの操作（余白クリック / Cmd+Home 等）でも doc が変わり dirty に
- * なる trade-off は許容する（テーブル前後に行を足す唯一の UI 手段であり、EOF 側の
- * 既存挙動と対称）。なおセル内からの ArrowUp 脱出は handleKeydown 側で閉じ込めて
- * いるため（#90）、キー操作のうっかり発火でこの補填が走ることはない。
+ * 文書先頭/末尾の境界（退避先の行が無い）は gap としてそのまま許容し、文書は一切
+ * 変更しない（#167）。gap での描画は tableGapCursorLayer が、入力時の改行補填は
+ * tableGapMaterialize / tableGapImeKeydown が担う。
  */
 const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	if (!tr.selection) return tr;
 	// undo / redo は履歴上の状態を忠実に復元するためのトランザクションなので、ここで
-	// カーソルを別位置に動かしたり改行を補ったりしない（さもないと undo 順序が
-	// 直感と合わなくなる）。
+	// カーソルを別位置に動かさない（さもないと undo 順序が直感と合わなくなる）。
 	const ev = tr.annotation(Transaction.userEvent);
 	if (ev === "undo" || ev === "redo") return tr;
 
@@ -1623,43 +1638,191 @@ const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	if (starts.size === 0) return tr;
 
 	const doc = tr.newDoc;
-	// 先頭への \n 挿入（テーブルが doc 先頭）は後続のすべての selection 座標を +1 ずらす。
-	// sequential selection は extra.changes 適用後の座標で書く必要があるため、map の前に
-	// prepend の有無を確定してシフト量を固定する（multi-cursor で BOF 退避と他の
-	// カーソルが同時に起きるケースの座標ずれ防止）。
-	const prependNewline = starts.has(0) && tr.selection.ranges.some((r) => r.empty && r.head === 0);
-	const shift = prependNewline ? 1 : 0;
-	let appendNewline = false; // テーブルが EOF: 末尾に \n を補う
 	let modified = false;
 	const ranges = tr.selection.ranges.map((range) => {
-		if (!range.empty) {
-			return shift === 0 ? range : EditorSelection.range(range.anchor + shift, range.head + shift);
-		}
+		if (!range.empty) return range;
 
-		if (ends.has(range.head)) {
+		if (ends.has(range.head) && range.head !== doc.length) {
 			modified = true;
-			if (range.head === doc.length) appendNewline = true;
-			return EditorSelection.cursor(range.head + 1 + shift);
+			return EditorSelection.cursor(range.head + 1);
 		}
 
-		if (starts.has(range.head)) {
+		if (starts.has(range.head) && range.head !== 0) {
 			modified = true;
-			// doc 先頭（head=0）では補った改行の前（= 補った空行の先頭）に留まる
-			return EditorSelection.cursor(range.head === 0 ? 0 : range.head - 1 + shift);
+			return EditorSelection.cursor(range.head - 1);
 		}
 
-		return shift === 0 ? range : EditorSelection.cursor(range.head + shift);
+		return range;
 	});
 
 	if (!modified) return tr;
 	const selection = EditorSelection.create(ranges, tr.selection.mainIndex);
+	// selection は tr 適用後（newDoc）の座標で計算済みなので sequential で扱い、
+	// tr.changes による二重マップを避ける。
+	return [tr, { selection, sequential: true }];
+});
 
-	const extra: TransactionSpec = { selection, sequential: true };
-	const changes: { from: number; insert: string }[] = [];
-	if (prependNewline) changes.push({ from: 0, insert: "\n" });
-	if (appendNewline) changes.push({ from: doc.length, insert: "\n" });
-	if (changes.length > 0) extra.changes = changes;
-	return [tr, extra];
+/** IME 先行 materialize（tableGapImeKeydown）由来の tr に付け、二重補填を防ぐ。 */
+const gapMaterialized = Annotation.define<boolean>();
+
+/**
+ * gap への挿入に改行を補い、入力テキストがテーブルの Markdown 行に食い込んで構文を
+ * 壊すのを防ぐ（gap cursor の materialize、#167）。
+ *
+ * - BOF gap への挿入 → `<入力>\n`（テーブルの前に行ができる）
+ * - EOF gap への挿入 → `\n<入力>`（テーブルの後ろに行ができる）
+ *
+ * 挿入テキスト自身がテーブルと反対側の端で改行している場合（gap での Enter や
+ * 改行終わりのペースト）は分離が既に成立しているので補わない。typing / paste は
+ * ここで変形する。IME は composition 開始後の文書変更が Chromium で composition を
+ * 壊すため tableGapImeKeydown の先行 materialize が担い、その tr は gapMaterialized
+ * annotation で本 filter をスキップする。
+ */
+const tableGapMaterialize = EditorState.transactionFilter.of((tr) => {
+	if (!tr.docChanged) return tr;
+	if (tr.annotation(gapMaterialized)) return tr;
+	const ev = tr.annotation(Transaction.userEvent);
+	if (ev === "undo" || ev === "redo") return tr;
+
+	// gap 判定は挿入前（startState）の decoration で行う
+	const startDoc = tr.startState.doc;
+	const decos = tr.startState.field(tableDecorationField, false);
+	if (!decos) return tr;
+	let bofGap = false;
+	let eofGap = false;
+	const iter = decos.iter();
+	while (iter.value) {
+		if (iter.from === 0) bofGap = true;
+		if (iter.to === startDoc.length) eofGap = true;
+		iter.next();
+	}
+	if (!bofGap && !eofGap) return tr;
+
+	const specs: { from: number; to: number; insert: string }[] = [];
+	// 「元 changes 適用後の doc」→「補った \n 込みの新 doc」の座標差分。元 tr の
+	// selection（元 changes 適用後の座標）を新 doc へマップするために組み立てる。
+	const extraInserts: { from: number; insert: string }[] = [];
+	tr.changes.iterChanges((fromA, toA, fromB, _toB, inserted) => {
+		const text = inserted.toString();
+		const pureInsert = fromA === toA && text.length > 0;
+		if (pureInsert && bofGap && fromA === 0 && !text.endsWith("\n")) {
+			specs.push({ from: fromA, to: toA, insert: `${text}\n` });
+			extraInserts.push({ from: fromB + text.length, insert: "\n" });
+		} else if (pureInsert && eofGap && fromA === startDoc.length && !text.startsWith("\n")) {
+			specs.push({ from: fromA, to: toA, insert: `\n${text}` });
+			extraInserts.push({ from: fromB, insert: "\n" });
+		} else {
+			specs.push({ from: fromA, to: toA, insert: text });
+		}
+	});
+	if (extraInserts.length === 0) return tr;
+
+	const changes = ChangeSet.of(specs, startDoc.length);
+	const extraMap = ChangeSet.of(extraInserts, tr.newDoc.length);
+	// assoc -1: 補った \n の挿入点ちょうどの座標（typing 後のカーソル = 挿入テキスト直後）
+	// を \n の前側に留める。
+	const selection = tr.selection
+		? EditorSelection.create(
+				tr.selection.ranges.map((r) =>
+					EditorSelection.range(extraMap.mapPos(r.anchor, -1), extraMap.mapPos(r.head, -1)),
+				),
+				tr.selection.mainIndex,
+			)
+		: undefined;
+
+	const spec: TransactionSpec = {
+		changes,
+		selection,
+		effects: tr.effects,
+		scrollIntoView: tr.scrollIntoView,
+	};
+	if (ev) spec.annotations = Transaction.userEvent.of(ev);
+	return spec;
+});
+
+// gap cursor の見た目（ProseMirror の gapcursor 相当の水平バー）
+const GAP_CURSOR_WIDTH = 20;
+const GAP_CURSOR_HEIGHT = 2;
+/** widget 端からバーまでの距離（.cm-table-widget の上下 margin 4px の中に収める） */
+const GAP_CURSOR_OFFSET = 3;
+
+/**
+ * gap cursor の描画レイヤー（#167）。BOF/EOF gap にカーソルがあるとき、テーブル widget
+ * の直上/直下に水平バーを描く（ProseMirror gapcursor 相当の見た目）。drawSelection の
+ * cursorLayer は widget 境界で widget 全高の巨大キャレットを描いてしまうため、gap 滞在中
+ * は tableGapActiveClass + theme の CSS で primary cursor を隠し、このレイヤーが代わりを
+ * 担う。表示・blink は theme 側 CSS（.cm-table-gap-cursor）で制御する。
+ */
+const tableGapCursorLayer = layer({
+	above: true,
+	class: "cm-tableGapCursorLayer",
+	markers(view) {
+		const markers: RectangleMarker[] = [];
+		const { state } = view;
+		for (const r of state.selection.ranges) {
+			if (!r.empty) continue;
+			const gap = gapAt(state, r.head);
+			if (!gap) continue;
+			// 境界の coordsAtPos は block widget 全体の rect を返すので、その上端/下端と
+			// 左端（widget は .cm-line と同じ horizontal inset を margin で持つ）を使う
+			const coords = view.coordsAtPos(r.head, gap === "bof" ? 1 : -1);
+			if (!coords) continue;
+			const scroller = view.scrollDOM.getBoundingClientRect();
+			const baseLeft = scroller.left - view.scrollDOM.scrollLeft * view.scaleX;
+			const baseTop = scroller.top - view.scrollDOM.scrollTop * view.scaleY;
+			const top =
+				gap === "bof"
+					? coords.top - GAP_CURSOR_OFFSET - GAP_CURSOR_HEIGHT
+					: coords.bottom + GAP_CURSOR_OFFSET;
+			markers.push(
+				new RectangleMarker(
+					"cm-table-gap-cursor",
+					coords.left - baseLeft,
+					top - baseTop,
+					GAP_CURSOR_WIDTH,
+					GAP_CURSOR_HEIGHT,
+				),
+			);
+		}
+		return markers;
+	},
+	update(update) {
+		return (
+			update.docChanged || update.selectionSet || update.geometryChanged || update.viewportChanged
+		);
+	},
+});
+
+/**
+ * gap 滞在中（main selection が gap）にエディタへ .cm-table-gap-active を付け、theme 側
+ * で drawSelection の primary cursor（widget 全高の巨大キャレット）を隠す。
+ */
+const tableGapActiveClass = EditorView.editorAttributes.of((view) =>
+	gapAt(view.state, view.state.selection.main.head) ? { class: "cm-table-gap-active" } : null,
+);
+
+/**
+ * IME 入力の gap materialize（#167）。Chromium は composition 開始後の文書変更で
+ * composition を確定・中断するため、transactionFilter（tableGapMaterialize）での変形
+ * では composition 中の入力が壊れる。IME 開始の keydown（keyCode 229）の時点で gap に
+ * 空行を先行して作り、composition を通常の行の上で開始させる。
+ */
+const tableGapImeKeydown = EditorView.domEventHandlers({
+	keydown(event, view) {
+		if (event.keyCode !== 229) return false;
+		const { state } = view;
+		const head = state.selection.main.head;
+		const gap = gapAt(state, head);
+		if (!gap) return false;
+		view.dispatch({
+			changes: { from: head, insert: "\n" },
+			// BOF は補った空行の行頭（= 0）、EOF は補った空行の行頭（= 改行の直後）
+			selection: EditorSelection.cursor(gap === "bof" ? 0 : head + 1),
+			userEvent: "input",
+			annotations: gapMaterialized.of(true),
+		});
+		return false;
+	},
 });
 
 // ── Extension ─────────────────────────────────────────
@@ -1668,5 +1831,11 @@ export const tableDecoration: Extension = [
 	tableDecorationField,
 	treeChangeDetector,
 	tableAtomicRanges,
+	// transactionFilter は配列順に適用される: materialize が changes を変形した後に
+	// cursorFilter が selection を補正する。
+	tableGapMaterialize,
 	tableCursorFilter,
+	tableGapImeKeydown,
+	tableGapCursorLayer,
+	tableGapActiveClass,
 ];

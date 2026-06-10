@@ -203,7 +203,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.selection.main.head).toBe(endTo + 1);
 	});
 
-	it("先頭テーブルの左上セルで ArrowUp は何もしない（ドキュメントを改変しない, #90）", () => {
+	it("先頭テーブルの左上セルで ArrowUp は文書を変えずに BOF gap へ抜ける (#167)", () => {
 		const view = mountEditor(simpleTable); // テーブルが doc 先頭
 		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
 		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
@@ -213,11 +213,13 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		cell.dispatchEvent(
 			new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
 		);
-		// ドキュメント・カーソルとも変化しない
+		// 旧 #90 はセル内に閉じ込めていた（補填による改変を避けるため）。gap 導入で
+		// 文書を変えずに抜けられるようになったので、ArrowDown 側と対称の脱出になる。
 		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(0);
 	});
 
-	it("先頭テーブルの左上セルでセル先頭 ArrowLeft は preventDefault され抑止される（巨大キャレット防止, #90）", () => {
+	it("先頭テーブルの左上セルでセル先頭 ArrowLeft は文書を変えずに BOF gap へ抜ける (#167)", () => {
 		const view = mountEditor(simpleTable);
 		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
 		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
@@ -238,9 +240,10 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 			cancelable: true,
 		});
 		cell.dispatchEvent(ev);
-		// セル外へ抜けない（native の caret 移動も止める）
+		// native の予測しづらい移動は止めて（preventDefault）、明示的に gap へ移動する
 		expect(ev.defaultPrevented).toBe(true);
 		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(0);
 	});
 
 	it("唯一のテーブルを削除する transaction で stale な末尾境界に退避しない（#90）", () => {
@@ -254,17 +257,17 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.selection.main.head).toBe(0);
 	});
 
-	it("空 doc にテーブルを insert して selection がその末尾に来るなら退避が走る（新規テーブル境界, #90）", () => {
+	it("空 doc にテーブルを insert した直後の末尾は EOF gap として留まれる（新規テーブル境界, #90/#167）", () => {
 		// この transaction で初めて生まれるテーブルは tr.startState の decoration には
-		// 含まれないため、startState ベースだと dodge も EOF 改行補完も走らず巨大キャレット
-		// が出てしまう。tr.state を見れば新規テーブル境界もきちんと拾える。
+		// 含まれない。tableCursorFilter は tr.state（適用後）の decoration を見るので、
+		// 新規テーブルの末尾も gap として扱われ、改行は補われない。
 		const view = mountEditor("");
 		view.dispatch({
 			changes: { from: 0, insert: simpleTable },
 			selection: { anchor: simpleTable.length },
 		});
-		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
-		expect(view.state.selection.main.head).toBe(simpleTable.length + 1);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(simpleTable.length);
 	});
 
 	it("fenced code block 内のパイプ行は退避対象にしない（widget でない場所での誤発火防止, #90）", () => {
@@ -287,7 +290,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.selection.main.head).toBe(textPos);
 	});
 
-	it("末尾境界が EOF（直下に行が無い既存テーブル）なら改行を 1 つ補ってそこへ退避する", () => {
+	it("EOF gap（テーブルで終わる文書の末尾境界）には文書を変えずに留まれる (#167)", () => {
 		// 手入力・インポート済みファイルにありがちな「テーブルで終わる」ドキュメント
 		const view = mountEditor(simpleTable);
 		const endTo = view.state.doc.line(3).to;
@@ -295,23 +298,41 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 
 		view.dispatch({ selection: { anchor: endTo } });
 
-		// 改行が 1 つだけ補われ（余分な空行を作らない）、巨大キャレット位置（endTo）に留まらない
-		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
-		expect(view.state.selection.main.head).toBe(endTo + 1);
-		// テーブル直下に編集可能な 1 行ができている
-		const { doc } = view.state;
-		expect(doc.line(doc.lines).text).toBe("");
+		// selection を置くだけでは文書は改変されない（gap cursor）
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(endTo);
 	});
 
-	it("EOF 退避で補った行へは再入（無限ループ）せず、改行を二重に補わない", () => {
+	it("EOF gap での typing は改行を補って挿入される（materialize, #167)", () => {
 		const view = mountEditor(simpleTable);
-		const endTo = view.state.doc.line(3).to;
+		const endTo = simpleTable.length;
 		view.dispatch({ selection: { anchor: endTo } });
-		// 一度補ったら以降は直下に行が存在するので二重に改行を補わない
-		const afterFirst = view.state.doc.toString();
-		view.dispatch({ selection: { anchor: view.state.doc.line(3).to } });
-		expect(view.state.doc.toString()).toBe(afterFirst);
+
+		view.dispatch({
+			changes: { from: endTo, insert: "x" },
+			selection: { anchor: endTo + 1 },
+			userEvent: "input.type",
+		});
+
+		// テーブルの後ろに行ができ、カーソルは入力テキストの直後
+		expect(view.state.doc.toString()).toBe(`${simpleTable}\nx`);
+		expect(view.state.selection.main.head).toBe(endTo + 2);
+	});
+
+	it("EOF gap での Enter（改行始まりの挿入）は二重に補わない (#167)", () => {
+		const view = mountEditor(simpleTable);
+		const endTo = simpleTable.length;
+		view.dispatch({ selection: { anchor: endTo } });
+
+		view.dispatch({
+			changes: { from: endTo, insert: "\n" },
+			selection: { anchor: endTo + 1 },
+			userEvent: "input.type",
+		});
+
+		// 挿入自身が分離を成立させているので \n は 1 つだけ
 		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
+		expect(view.state.selection.main.head).toBe(endTo + 1);
 	});
 
 	it("selection head がテーブル先頭境界に来ると前行末尾へ退避する (#146)", () => {
@@ -324,28 +345,86 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.doc.toString()).toBe(doc);
 	});
 
-	it("先頭境界が DOC 先頭（直上に行が無いテーブル）なら改行を 1 つ補ってそこへ退避する (#146)", () => {
+	it("BOF gap（テーブルで始まる文書の先頭境界）には文書を変えずに留まれる (#167)", () => {
 		const view = mountEditor(simpleTable);
 		view.dispatch({ selection: { anchor: 0 } });
-		// 改行が 1 つだけ補われ、カーソルは補った空行の先頭（巨大キャレット位置に留まらない）
+		// selection を置くだけでは文書は改変されない（gap cursor）
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(0);
+	});
+
+	it("BOF gap での typing は改行を補って挿入される（materialize, #167)", () => {
+		const view = mountEditor(simpleTable);
+		view.dispatch({ selection: { anchor: 0 } });
+
+		view.dispatch({
+			changes: { from: 0, insert: "x" },
+			selection: { anchor: 1 },
+			userEvent: "input.type",
+		});
+
+		// テーブルの前に行ができ、カーソルは入力テキストの直後（補った改行の前）
+		expect(view.state.doc.toString()).toBe(`x\n${simpleTable}`);
+		expect(view.state.selection.main.head).toBe(1);
+	});
+
+	it("BOF gap での Enter（改行終わりの挿入）は二重に補わない (#167)", () => {
+		const view = mountEditor(simpleTable);
+		view.dispatch({ selection: { anchor: 0 } });
+
+		view.dispatch({
+			changes: { from: 0, insert: "\n" },
+			selection: { anchor: 1 },
+			userEvent: "input.type",
+		});
+
+		// \n は 1 つだけ補われ、カーソルは中間境界の退避で空行頭へ戻る
 		expect(view.state.doc.toString()).toBe(`\n${simpleTable}`);
 		expect(view.state.selection.main.head).toBe(0);
-		expect(view.state.doc.line(1).text).toBe("");
 	});
 
-	it("DOC 先頭退避で補った行へは再入せず、改行を二重に補わない (#146)", () => {
+	it("BOF gap への改行終わりペーストは補わず、本文がテーブルと分離される (#167)", () => {
 		const view = mountEditor(simpleTable);
 		view.dispatch({ selection: { anchor: 0 } });
-		const afterFirst = view.state.doc.toString();
-		// 一度補ったらテーブル先頭境界は 1 にずれるので、0 への再 dispatch では何も起きない
-		view.dispatch({ selection: { anchor: 0 } });
-		expect(view.state.doc.toString()).toBe(afterFirst);
-		expect(view.state.doc.toString()).toBe(`\n${simpleTable}`);
+
+		view.dispatch({
+			changes: { from: 0, insert: "abc\n" },
+			selection: { anchor: 4 },
+			userEvent: "input.paste",
+		});
+
+		expect(view.state.doc.toString()).toBe(`abc\n${simpleTable}`);
 	});
 
-	it("multi-cursor で BOF と EOF の境界に同時に来ても両カーソルが正しく退避する (#146)", () => {
-		// 先頭挿入は後続の全座標を +1 ずらすため、prepend と append が同時に起きると
-		// 末尾側の退避先にシフトを織り込む必要がある（multi-cursor 限定の座標バグ回帰）
+	it("IME 開始（keydown 229）で gap に空行が先行 materialize される (#167)", () => {
+		const view = mountEditor(simpleTable);
+		view.dispatch({ selection: { anchor: 0 } });
+
+		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true });
+		Object.defineProperty(event, "keyCode", { value: 229 });
+		view.contentDOM.dispatchEvent(event);
+
+		// composition が通常の行で始められるよう、空行が先にできている
+		expect(view.state.doc.toString()).toBe(`\n${simpleTable}`);
+		expect(view.state.selection.main.head).toBe(0);
+	});
+
+	it("materialize（補った改行 + 入力）は 1 回の undo でまとめて戻る (#167)", () => {
+		const view = mountEditor(simpleTable, 0, [history()]);
+		view.dispatch({ selection: { anchor: 0 } });
+		view.dispatch({
+			changes: { from: 0, insert: "x" },
+			selection: { anchor: 1 },
+			userEvent: "input.type",
+		});
+		expect(view.state.doc.toString()).toBe(`x\n${simpleTable}`);
+
+		undo(view);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(0);
+	});
+
+	it("multi-cursor で BOF gap と EOF gap に同時に来ても文書は変わらない (#167)", () => {
 		const view = mountEditor(simpleTable, 0, [EditorState.allowMultipleSelections.of(true)]);
 		view.dispatch({
 			selection: EditorSelection.create(
@@ -353,37 +432,20 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 				0,
 			),
 		});
-		// 先頭・末尾に改行が 1 つずつ補われる
-		expect(view.state.doc.toString()).toBe(`\n${simpleTable}\n`);
-		// 補った先頭空行の行頭(0)と補った末尾空行の行頭(L+2)に 2 カーソルが残る
-		expect(view.state.selection.ranges.map((r) => r.head)).toEqual([0, simpleTable.length + 2]);
+		// 両カーソルとも gap に留まり、文書は不変
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.ranges.map((r) => r.head)).toEqual([0, simpleTable.length]);
 	});
 
-	it("multi-cursor で BOF 退避と通常カーソルが共存しても通常カーソルがずれない (#146)", () => {
-		const doc = `${simpleTable}\n\ntext`;
-		const view = mountEditor(doc, 0, [EditorState.allowMultipleSelections.of(true)]);
-		const textPos = doc.indexOf("text");
-		view.dispatch({
-			selection: EditorSelection.create(
-				[EditorSelection.cursor(0), EditorSelection.cursor(textPos)],
-				0,
-			),
-		});
-		expect(view.state.doc.toString()).toBe(`\n${doc}`);
-		// BOF カーソルは補った空行頭(0)、通常カーソルは "text" の頭（prepend で +1）
-		expect(view.state.selection.ranges.map((r) => r.head)).toEqual([0, textPos + 1]);
-	});
-
-	it("exitTableDown: 直下に行が無ければ改行を 1 つ補ってカーソルを置く", () => {
+	it("exitTableDown: 直下に行が無ければ EOF gap に置く（文書を変えない, #167）", () => {
 		const view = mountEditor(simpleTable); // テーブルが EOF（直下に空行なし）
 		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
 		expect(wrapper).not.toBeNull();
 		if (!wrapper) return;
 
 		exitTableDown(view, wrapper);
-		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
-		// 補った空行の先頭にカーソル
-		expect(view.state.selection.main.head).toBe(simpleTable.length + 1);
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(simpleTable.length);
 	});
 
 	it("exitTableDown: 直下に行があれば追加せずその行頭へ", () => {
@@ -699,17 +761,17 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.doc.toString()).toBe(simpleTable);
 	});
 
-	it("削除でテーブル末尾境界(EOF)に取り残されたら同期で改行を補い退避する", () => {
+	it("テーブル直下の空行を削除すると削除が成立し、カーソルは EOF gap に乗る (#167)", () => {
 		const view = mountEditor(`${simpleTable}\n`); // テーブル + 直下に 1 行
 		const endTo = view.state.doc.line(3).to; // テーブル最終行末尾
 
 		// 直下の改行を削除し、カーソルを EOF 境界(endTo)へ（空行先頭からの Backspace 相当）
 		view.dispatch({ changes: { from: endTo, to: endTo + 1 }, selection: { anchor: endTo } });
 
-		// docChanged トランザクションでも filter が同期で改行を補完し、直下行へ退避する
-		// （queueMicrotask 待ちは不要）
-		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
-		expect(view.state.selection.main.head).toBe(endTo + 1);
+		// 旧設計はここで改行を補い直していた（= 最後の空行が実質消せない）。gap 設計では
+		// 削除がそのまま成立し、カーソルは gap に留まる。
+		expect(view.state.doc.toString()).toBe(simpleTable);
+		expect(view.state.selection.main.head).toBe(endTo);
 	});
 
 	it("テーブル直下の空行を削除して本文を密着させると、カーソルは本文行頭へ退避する（#90）", () => {
