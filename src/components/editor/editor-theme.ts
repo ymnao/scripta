@@ -25,10 +25,8 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			padding: `${vertical} 0`,
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
-			// codeblock コピーボタン (.cm-codeblock-copy in static theme) が
-			// `right: calc(var(--cm-horizontal-padding, 0px) + 4px)` で参照する。
-			// dynamic theme が消えた場合のフォールバックとして static 側に 0px を
-			// 持たせてあるので、最悪 right: 4px (= 元の static 値) で動作する。
+			// static theme 側の consumer (.cm-codeblock-copy の right 補正、block widget の
+			// margin 補正) が参照する。fallback 契約の詳細は .cm-codeblock-copy 側コメント参照。
 			"--cm-horizontal-padding": horizontal,
 		},
 		".cm-line": {
@@ -280,8 +278,6 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-table-widget th": {
 		fontWeight: "700",
 	},
-	// .cm-blockquote-line は dynamic theme に移動 (horizontal padding 値が必要 +
-	// source order で .cm-line { padding } に勝つため)
 	".cm-hr-widget": {
 		border: "none",
 		borderTop: "1px solid var(--color-border)",
@@ -359,6 +355,15 @@ export const staticEditorTheme = EditorView.theme({
 		padding: "8px 12px",
 		borderRadius: "4px",
 		whiteSpace: "pre-wrap",
+	},
+	// table / mermaid / display math は Decoration.replace({ block: true }) の block widget
+	// で、.cm-line の外 (.cm-content 直下) に render されるため .cm-line の horizontal
+	// padding を受けられない。margin で同じインセットを与えてテキスト列と左右を揃える。
+	// この rule は .cm-mermaid-widget の margin: "4px 0" shorthand より後 (source order)
+	// に置くこと — 前に置くと shorthand に horizontal channel を上書きされる。
+	".cm-table-widget, .cm-mermaid-widget, .cm-math-display": {
+		marginLeft: "var(--cm-horizontal-padding, 0px)",
+		marginRight: "var(--cm-horizontal-padding, 0px)",
 	},
 	".cm-link-card": {
 		display: "block",
