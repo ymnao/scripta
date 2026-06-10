@@ -444,10 +444,7 @@ function applyPasteText(
 function handleCellMouseDown(e: MouseEvent, view: EditorView, wrapper: HTMLElement): void {
 	if (e.button !== 0) return;
 	const coord = cellCoordFromElement(e.target as Element);
-	if (!coord) {
-		getFocusedCell(wrapper)?.blur();
-		return;
-	}
+	if (!coord) return;
 
 	if (e.shiftKey) {
 		e.preventDefault();
@@ -569,21 +566,9 @@ export function exitTableDown(view: EditorView, wrapperEl: HTMLElement): void {
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (!tableNode) return;
 
-	const { doc } = view.state;
-	const belowLineNum = tableNode.endLine + 1;
-
-	if (belowLineNum <= doc.lines) {
-		// テーブル直下に行（空行 / 本文）がある: その行頭へ移動する（挿入しない）。
-		// 本文が密着していても巻き込まず、本文行頭へ抜ける。
-		view.dispatch({ selection: { anchor: doc.line(belowLineNum).from } });
-	} else {
-		// EOF（直下に行が無い）: 改行を 1 つ補って行を作りその行頭へ
-		const endTo = doc.line(tableNode.endLine).to;
-		view.dispatch({
-			changes: { from: endTo, insert: "\n" },
-			selection: { anchor: endTo + 1 },
-		});
-	}
+	// テーブル末尾境界に selection を置くと tableCursorFilter が次行先頭へ退避し、
+	// EOF なら改行も 1 つ補う（直下行確保の不変条件は filter に一本化）。
+	view.dispatch({ selection: { anchor: view.state.doc.line(tableNode.endLine).to } });
 	view.focus();
 }
 
@@ -592,6 +577,8 @@ function exitTableUp(view: EditorView, wrapperEl: HTMLElement): void {
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (tableNode) {
 		const startLinePos = view.state.doc.line(tableNode.startLine).from;
+		// テーブルが doc 先頭のときは anchor 0 が先頭境界に当たるが、tableCursorFilter が
+		// 改行を補って退避する（直上行確保の不変条件は filter が担う）。
 		const before = Math.max(startLinePos - 1, 0);
 		view.dispatch({ selection: { anchor: before } });
 		view.focus();
@@ -737,9 +724,17 @@ class EditableTableWidget extends WidgetType {
 		) {
 			return false;
 		}
-		// セル外（padding 帯・テーブル右余白）のクリックはウィジェット側で消費し、
-		// CM がカーソルをウィジェット境界に置いて巨大キャレットを描画するのを防ぐ (#146)。
-		// handleCellMouseDown 側でフォーカスセルの blur を行う。
+		// セル外（padding 帯・テーブル右余白）のクリックはエディタに委譲し、カーソル配置を
+		// 可能にする。クリックはテーブル境界 position に解決されるが、tableCursorFilter が
+		// 隣接行へ退避するので巨大キャレットにはならない (#146)。
+		if (e instanceof MouseEvent) {
+			const target = e.target;
+			const element =
+				target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+			if (!element?.closest("td, th")) {
+				return false;
+			}
+		}
 		return true;
 	}
 
@@ -1622,25 +1617,23 @@ const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 	if (starts.size === 0) return tr;
 
 	const doc = tr.newDoc;
-	let appendNewlineAt: number | null = null;
-	let prependNewlineAt: number | null = null;
+	let appendNewline = false; // テーブルが EOF: 末尾に \n を補う
+	let prependNewline = false; // テーブルが doc 先頭: 先頭に \n を補う
 	let modified = false;
 	const ranges = tr.selection.ranges.map((range) => {
 		if (!range.empty) return range;
 
 		if (ends.has(range.head)) {
 			modified = true;
-			if (range.head === doc.length) appendNewlineAt = range.head;
+			if (range.head === doc.length) appendNewline = true;
 			return EditorSelection.cursor(range.head + 1);
 		}
 
 		if (starts.has(range.head)) {
 			modified = true;
-			if (range.head === 0) {
-				prependNewlineAt = 0;
-				return EditorSelection.cursor(0);
-			}
-			return EditorSelection.cursor(range.head - 1);
+			// doc 先頭では補った改行の前（= 補った空行の先頭）に留まる
+			if (range.head === 0) prependNewline = true;
+			return EditorSelection.cursor(Math.max(range.head - 1, 0));
 		}
 
 		return range;
@@ -1651,8 +1644,8 @@ const tableCursorFilter = EditorState.transactionFilter.of((tr) => {
 
 	const extra: TransactionSpec = { selection, sequential: true };
 	const changes: { from: number; insert: string }[] = [];
-	if (prependNewlineAt !== null) changes.push({ from: prependNewlineAt, insert: "\n" });
-	if (appendNewlineAt !== null) changes.push({ from: appendNewlineAt, insert: "\n" });
+	if (prependNewline) changes.push({ from: 0, insert: "\n" });
+	if (appendNewline) changes.push({ from: doc.length, insert: "\n" });
 	if (changes.length > 0) extra.changes = changes;
 	return [tr, extra];
 });

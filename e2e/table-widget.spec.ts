@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
-import { ElectronApiMock } from "./helpers/electron-api-mock";
+import { expect, type Locator, type Page, test } from "@playwright/test";
+import { openSingleFileWorkspace } from "./helpers/workspace-setup";
 
 const tableContent = `# Table test
 
@@ -10,82 +10,61 @@ const tableContent = `# Table test
 after text
 `;
 
-const workspace = {
-	files: {
-		"/workspace/table.md": tableContent,
-		"/workspace/.scripta/initialized.json": '{"initializedAt":"2026-01-01T00:00:00.000Z"}',
-	},
-	directories: {
-		"/workspace": [{ name: "table.md", path: "/workspace/table.md", isDirectory: false }],
-	},
-};
+async function openTableFile(page: Page): Promise<Locator> {
+	await openSingleFileWorkspace(page, {
+		files: { "/workspace/table.md": tableContent },
+	});
+	const widget = page.locator(".cm-table-widget");
+	await expect(widget).toBeVisible();
+	return widget;
+}
 
-async function openTableFile(page: import("@playwright/test").Page): Promise<void> {
-	const mock = new ElectronApiMock(page);
-	await mock.setup({ fs: workspace, dialogResult: "/workspace" });
+/** テーブル右側の余白（widget 内・table 要素の外）をクリックし、widget の矩形を返す */
+async function clickTableRightMargin(
+	page: Page,
+	widget: Locator,
+): Promise<{ width: number; height: number }> {
+	const box = await widget.boundingBox();
+	if (!box) throw new Error("widget bounding box not found");
+	await page.mouse.click(box.x + box.width - 8, box.y + box.height / 2);
+	return box;
+}
 
-	await page.goto("/");
-	await page.getByLabel("フォルダを開く").click();
-	await page.getByLabel("table.md file").click();
-
-	await expect(page.locator(".cm-table-widget")).toBeVisible();
+function isCellFocused(page: Page): Promise<boolean> {
+	return page.evaluate(() => {
+		const el = document.activeElement;
+		return el?.tagName === "TD" || el?.tagName === "TH";
+	});
 }
 
 test.describe("table widget", () => {
-	test("テーブル右余白クリックで巨大キャレットが描画されない (#146)", async ({ page }) => {
-		await openTableFile(page);
+	test("テーブル右余白クリックで巨大キャレットにならず隣接行にカーソルが置かれる (#146)", async ({
+		page,
+	}) => {
+		const widget = await openTableFile(page);
+		const widgetBox = await clickTableRightMargin(page, widget);
 
-		const widget = page.locator(".cm-table-widget");
-		const widgetBox = await widget.boundingBox();
-		expect(widgetBox).not.toBeNull();
-		if (!widgetBox) return;
+		// クリックはエディタに委譲され、カーソルが置かれる（デッドゾーンにならない）
+		const cursor = page.locator(".cm-cursor-primary");
+		await expect(cursor).toBeVisible();
 
-		// テーブル右側の余白（widget 内・table 要素の外）をクリック
-		await page.mouse.click(widgetBox.x + widgetBox.width - 8, widgetBox.y + widgetBox.height / 2);
+		// キャレットは通常の行高（widget 全高の巨大キャレットでない）
+		const cursorBox = await cursor.boundingBox();
+		if (!cursorBox) throw new Error("cursor bounding box not found");
+		expect(cursorBox.height).toBeLessThan(widgetBox.height / 2);
 
-		// 表示中のキャレットがあれば通常の行高であること（widget 全高の巨大キャレットでない）
-		const cursors = page.locator(".cm-cursor");
-		const count = await cursors.count();
-		for (let i = 0; i < count; i++) {
-			const box = await cursors.nth(i).boundingBox();
-			if (box) {
-				expect(box.height).toBeLessThan(widgetBox.height / 2);
-			}
-		}
-
-		// クリックはウィジェット側で消費され、ドキュメントは改変されない
-		await expect(page.locator(".cm-table-widget")).toBeVisible();
+		// tableCursorFilter の退避は selection のみで、ドキュメントは改変されない
+		await expect(widget).toBeVisible();
 		await expect(page.locator(".cm-content")).toContainText("after text");
 	});
 
 	test("テーブル右余白クリックでフォーカス中のセルが blur される (#146)", async ({ page }) => {
-		await openTableFile(page);
+		const widget = await openTableFile(page);
 
-		const widget = page.locator(".cm-table-widget");
-		const cell = widget.locator('[data-row="1"][data-col="0"]');
-		await cell.click();
-		await expect
-			.poll(() =>
-				page.evaluate(() => {
-					const el = document.activeElement;
-					return el?.tagName === "TD" || el?.tagName === "TH";
-				}),
-			)
-			.toBe(true);
+		await widget.locator('[data-row="1"][data-col="0"]').click();
+		await expect.poll(() => isCellFocused(page)).toBe(true);
 
-		const widgetBox = await widget.boundingBox();
-		expect(widgetBox).not.toBeNull();
-		if (!widgetBox) return;
-
-		await page.mouse.click(widgetBox.x + widgetBox.width - 8, widgetBox.y + widgetBox.height / 2);
-
-		await expect
-			.poll(() =>
-				page.evaluate(() => {
-					const el = document.activeElement;
-					return el?.tagName === "TD" || el?.tagName === "TH";
-				}),
-			)
-			.toBe(false);
+		await clickTableRightMargin(page, widget);
+		await expect.poll(() => isCellFocused(page)).toBe(false);
 	});
 });
