@@ -9,7 +9,7 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
-export function createDynamicEditorTheme(fontSize: number, contentPadding = "8px 48px") {
+export function createDynamicEditorTheme(fontSize: number, vertical = "8px", horizontal = "48px") {
 	return EditorView.theme({
 		"&": {
 			height: "100%",
@@ -17,14 +17,42 @@ export function createDynamicEditorTheme(fontSize: number, contentPadding = "8px
 			backgroundColor: "var(--color-bg-primary)",
 			color: "var(--color-text-primary)",
 		},
+		// horizontal padding を .cm-line 側に持たせる。CodeMirror の RectangleMarker.forRange
+		// (drawSelection) は selection rect の left/right を .cm-line の paddingLeft/Right で
+		// 補正するため、.cm-content 側に horizontal padding を置くと selection が padding
+		// 領域まではみ出す。
 		".cm-content": {
-			padding: contentPadding,
+			padding: `${vertical} 0`,
 			fontSynthesis: "style",
 			overflowWrap: "break-word",
+			// static theme 側の consumer (.cm-codeblock-copy の right 補正、block widget の
+			// margin 補正) が参照する。fallback 契約の詳細は .cm-codeblock-copy 側コメント参照。
+			"--cm-horizontal-padding": horizontal,
 		},
 		".cm-line": {
-			padding: "1px 0",
+			padding: `1px ${horizontal}`,
 			overflowWrap: "break-word",
+		},
+		// blockquote 装飾。horizontal を直接補間するため dynamic theme 内に置き、
+		// 同一 module 内で .cm-line { padding } shorthand より後 (key 順) に並べることで
+		// paddingLeft longhand が確実に勝つ。
+		// 注意: theme module は登録の逆順で mount されるため「dynamic が後に登録されるから
+		// 勝つ」は成立しない (inter-module では static が後勝ち)。ここは同一 module 内の
+		// key 順だけに依存している。
+		// border は擬似要素で「テキスト直前 (= horizontal padding の位置)」に描画、
+		// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト位置を維持。
+		".cm-blockquote-line": {
+			position: "relative",
+			paddingLeft: `calc(${horizontal} + 11px)`,
+		},
+		".cm-blockquote-line::before": {
+			content: '""',
+			position: "absolute",
+			left: horizontal,
+			top: "0",
+			bottom: "0",
+			width: "3px",
+			backgroundColor: "var(--color-border)",
 		},
 	});
 }
@@ -66,41 +94,52 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-selectionBackground": {
 		background: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent) !important",
 	},
+	// 見出しは Decoration.line で .cm-line 自身に付く。padding は top/bottom の longhand
+	// のみ指定すること — shorthand ("0.6em 0 0.2em" 等) だと left/right が 0 になり、
+	// .cm-line (dynamic theme) の horizontal padding を打ち消して見出し行だけ左端に
+	// 張り付く。theme module は登録の逆順で mount されるため、static theme が
+	// dynamic theme より document 上で後ろ = 同 specificity では static が勝つ。
 	".cm-heading-1": {
 		fontSize: "1.8em",
 		fontWeight: "700",
 		lineHeight: "1.3",
-		padding: "0.6em 0 0.2em",
+		paddingTop: "0.6em",
+		paddingBottom: "0.2em",
 	},
 	".cm-heading-2": {
 		fontSize: "1.5em",
 		fontWeight: "700",
 		lineHeight: "1.3",
-		padding: "0.5em 0 0.15em",
+		paddingTop: "0.5em",
+		paddingBottom: "0.15em",
 	},
 	".cm-heading-3": {
 		fontSize: "1.25em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.4em 0 0.1em",
+		paddingTop: "0.4em",
+		paddingBottom: "0.1em",
 	},
 	".cm-heading-4": {
 		fontSize: "1.1em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.3em 0 0.1em",
+		paddingTop: "0.3em",
+		paddingBottom: "0.1em",
 	},
 	".cm-heading-5": {
 		fontSize: "1em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.2em 0 0.05em",
+		paddingTop: "0.2em",
+		paddingBottom: "0.05em",
 	},
 	".cm-heading-6": {
 		fontSize: "0.9em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.2em 0 0.05em",
+		paddingTop: "0.2em",
+		paddingBottom: "0.05em",
 	},
 	".cm-strong": { fontWeight: "700" },
 	".cm-emphasis": { fontStyle: "italic" },
@@ -137,13 +176,24 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-codeblock-line": {
 		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: FONT_FAMILY_MAP.monospace,
+		// .cm-line の horizontal padding 領域に背景がはみ出すのを content-box にクリップ。
+		// 全ての editor で lineWrapping 有効前提 (long line が横スクロールしないため
+		// content-box が常に viewport 幅と一致)。lineWrapping を切ると長い行の背景が
+		// 切れて見える可能性あり。
+		backgroundOrigin: "content-box",
+		backgroundClip: "content-box",
 	},
 	".cm-codeblock-copy-anchor": {
 		position: "relative",
 	},
 	".cm-codeblock-copy": {
 		position: "absolute",
-		right: "4px",
+		// anchor (= .cm-codeblock-copy-anchor = .cm-line) 右端は .cm-line に horizontal
+		// padding が乗っている分だけ codeblock 背景より右に出てしまうため、
+		// --cm-horizontal-padding (dynamic theme が .cm-content に設定) 分内側へ補正。
+		// fallback 0px は dynamic theme が何らかの理由で未適用でも right: 4px (= 元の
+		// 静的値) で安全側に倒すための defense-in-depth。
+		right: "calc(var(--cm-horizontal-padding, 0px) + 4px)",
 		top: "50%",
 		transform: "translateY(-50%)",
 		display: "flex",
@@ -240,10 +290,6 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-table-widget th": {
 		fontWeight: "700",
 	},
-	".cm-blockquote-line": {
-		borderLeft: "3px solid var(--color-border)",
-		paddingLeft: "8px",
-	},
 	".cm-hr-widget": {
 		border: "none",
 		borderTop: "1px solid var(--color-border)",
@@ -321,6 +367,15 @@ export const staticEditorTheme = EditorView.theme({
 		padding: "8px 12px",
 		borderRadius: "4px",
 		whiteSpace: "pre-wrap",
+	},
+	// table / mermaid / display math は Decoration.replace({ block: true }) の block widget
+	// で、.cm-line の外 (.cm-content 直下) に render されるため .cm-line の horizontal
+	// padding を受けられない。margin で同じインセットを与えてテキスト列と左右を揃える。
+	// この rule は .cm-mermaid-widget の margin: "4px 0" shorthand より後 (source order)
+	// に置くこと — 前に置くと shorthand に horizontal channel を上書きされる。
+	".cm-table-widget, .cm-mermaid-widget, .cm-math-display": {
+		marginLeft: "var(--cm-horizontal-padding, 0px)",
+		marginRight: "var(--cm-horizontal-padding, 0px)",
 	},
 	".cm-link-card": {
 		display: "block",
