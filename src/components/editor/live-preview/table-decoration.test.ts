@@ -314,6 +314,35 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		expect(view.state.doc.toString()).toBe(`${simpleTable}\n`);
 	});
 
+	it("selection head がテーブル先頭境界に来ると前行末尾へ退避する (#146)", () => {
+		const doc = `text\n\n${simpleTable}`;
+		const view = mountEditor(doc);
+		const tableFrom = doc.indexOf("|");
+		view.dispatch({ selection: { anchor: tableFrom } });
+		// 巨大キャレットを避けて前行（空行）の末尾へ
+		expect(view.state.selection.main.head).toBe(tableFrom - 1);
+		expect(view.state.doc.toString()).toBe(doc);
+	});
+
+	it("先頭境界が DOC 先頭（直上に行が無いテーブル）なら改行を 1 つ補ってそこへ退避する (#146)", () => {
+		const view = mountEditor(simpleTable);
+		view.dispatch({ selection: { anchor: 0 } });
+		// 改行が 1 つだけ補われ、カーソルは補った空行の先頭（巨大キャレット位置に留まらない）
+		expect(view.state.doc.toString()).toBe(`\n${simpleTable}`);
+		expect(view.state.selection.main.head).toBe(0);
+		expect(view.state.doc.line(1).text).toBe("");
+	});
+
+	it("DOC 先頭退避で補った行へは再入せず、改行を二重に補わない (#146)", () => {
+		const view = mountEditor(simpleTable);
+		view.dispatch({ selection: { anchor: 0 } });
+		const afterFirst = view.state.doc.toString();
+		// 一度補ったらテーブル先頭境界は 1 にずれるので、0 への再 dispatch では何も起きない
+		view.dispatch({ selection: { anchor: 0 } });
+		expect(view.state.doc.toString()).toBe(afterFirst);
+		expect(view.state.doc.toString()).toBe(`\n${simpleTable}`);
+	});
+
 	it("exitTableDown: 直下に行が無ければ改行を 1 つ補ってカーソルを置く", () => {
 		const view = mountEditor(simpleTable); // テーブルが EOF（直下に空行なし）
 		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
