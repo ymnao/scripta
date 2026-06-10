@@ -33,11 +33,12 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			padding: `1px ${horizontal}`,
 			overflowWrap: "break-word",
 		},
-		// blockquote 装飾を dynamic theme 内に置くのは「static theme の .cm-blockquote-line」
-		// が「dynamic theme の .cm-line { padding } shorthand」と specificity 同点になり、
-		// source order で勝てないため。dynamic theme は staticEditorTheme より後に登録される
-		// (MarkdownEditor.tsx / ScratchpadPanel.tsx の extensions 配列) ので、同じテーマ内
-		// に書けば source order で勝つ。
+		// blockquote 装飾。horizontal を直接補間するため dynamic theme 内に置き、
+		// 同一 module 内で .cm-line { padding } shorthand より後 (key 順) に並べることで
+		// paddingLeft longhand が確実に勝つ。
+		// 注意: theme module は登録の逆順で mount されるため「dynamic が後に登録されるから
+		// 勝つ」は成立しない (inter-module では static が後勝ち)。ここは同一 module 内の
+		// key 順だけに依存している。
 		// border は擬似要素で「テキスト直前 (= horizontal padding の位置)」に描画、
 		// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト位置を維持。
 		".cm-blockquote-line": {
@@ -93,41 +94,52 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-selectionBackground": {
 		background: "color-mix(in srgb, var(--color-text-secondary) 25%, transparent) !important",
 	},
+	// 見出しは Decoration.line で .cm-line 自身に付く。padding は top/bottom の longhand
+	// のみ指定すること — shorthand ("0.6em 0 0.2em" 等) だと left/right が 0 になり、
+	// .cm-line (dynamic theme) の horizontal padding を打ち消して見出し行だけ左端に
+	// 張り付く。theme module は登録の逆順で mount されるため、static theme が
+	// dynamic theme より document 上で後ろ = 同 specificity では static が勝つ。
 	".cm-heading-1": {
 		fontSize: "1.8em",
 		fontWeight: "700",
 		lineHeight: "1.3",
-		padding: "0.6em 0 0.2em",
+		paddingTop: "0.6em",
+		paddingBottom: "0.2em",
 	},
 	".cm-heading-2": {
 		fontSize: "1.5em",
 		fontWeight: "700",
 		lineHeight: "1.3",
-		padding: "0.5em 0 0.15em",
+		paddingTop: "0.5em",
+		paddingBottom: "0.15em",
 	},
 	".cm-heading-3": {
 		fontSize: "1.25em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.4em 0 0.1em",
+		paddingTop: "0.4em",
+		paddingBottom: "0.1em",
 	},
 	".cm-heading-4": {
 		fontSize: "1.1em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.3em 0 0.1em",
+		paddingTop: "0.3em",
+		paddingBottom: "0.1em",
 	},
 	".cm-heading-5": {
 		fontSize: "1em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.2em 0 0.05em",
+		paddingTop: "0.2em",
+		paddingBottom: "0.05em",
 	},
 	".cm-heading-6": {
 		fontSize: "0.9em",
 		fontWeight: "600",
 		lineHeight: "1.3",
-		padding: "0.2em 0 0.05em",
+		paddingTop: "0.2em",
+		paddingBottom: "0.05em",
 	},
 	".cm-strong": { fontWeight: "700" },
 	".cm-emphasis": { fontStyle: "italic" },
