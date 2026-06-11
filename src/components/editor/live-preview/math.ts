@@ -22,6 +22,9 @@ import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-
 
 export { isEscaped };
 
+// Lenient $$...$$ match (position-independent). markdown-to-html.ts の
+// preprocessDisplayMath と寛容さを揃えており、Live Preview と PDF のパリティを
+// 保証している (#169)。マッチ規則を変更する際は両方を同期すること。
 const DISPLAY_MATH_RE = /\$\$([\s\S]+?)\$\$/g;
 const INLINE_MATH_RE = /\$((?:[^\n$\\]|\\.)+)\$/g;
 

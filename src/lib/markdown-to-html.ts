@@ -208,79 +208,90 @@ function preprocessEscapedDollars(text: string, nonce: string): string {
 	return segments.join("");
 }
 
+// Container prefix that can legitimately precede an opening `$$` on its line:
+// only blockquote (`>`) / list (`-`/`*`/`+`/`N.`) markers and surrounding
+// whitespace. Matches the empty string too (top-level, no container). Used to
+// decide whether the opening-line prefix is structural (strip it from each TeX
+// line) or body text (an in-line `$$`, leave content untouched).
+const OPENING_LINE_PREFIX_RE = /^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*$/;
+
 /**
  * Replace multi-line display math ($$...\n...\n$$) in raw markdown
  * before lexing. With `breaks: true`, newlines inside display math
  * would be converted to <br>, breaking KaTeX rendering.
  * Single-line $$...$$ is handled later by walkTokens.
+ *
+ * Matching uses the same lenient `$$...$$` pattern as the editor
+ * (`DISPLAY_MATH_RE` in live-preview/math.ts) so Live Preview and PDF stay in
+ * parity (#169): display math that starts mid-line or whose closing `$$` is
+ * followed by trailing text is now captured here too, instead of leaking out
+ * as raw `$$` (and being mis-parsed into lists/paragraphs). The line/end
+ * anchors were dropped; only multi-line matches are placeholdered (single-line
+ * ones stay with walkTokens, which is why preprocess exists — to stop
+ * `breaks: true` from inserting <br> inside a math block).
  */
 function preprocessDisplayMath(
 	markdown: string,
 	placeholders: MathPlaceholder[],
 	nonce: string,
 ): string {
-	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
-
 	// Code 範囲を skip するため共通 helper を使う。`collectRawCodeRanges` は CommonMark
 	// 準拠で fenced (閉じ長 >= 開き長)・indented・raw `<pre>`/`<code>`・inline すべてを
 	// 扱う。以前は local の `\1` 正規表現で同長閉じのみ拾っており、`<pre>` や indented
 	// code 内の display math まで KaTeX 化してしまう不整合があった。
 	const codeRanges = collectRawCodeRanges(markdown);
+	const dollarPh = `%%EDOLLAR_${nonce}%%`;
 
-	// Match display math $$...$$ that spans at least one newline.
-	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
-	// Uses (?:(?!\$\$)[\s\S]) to prevent matching across $$ boundaries.
-	// Allows optional container prefixes for blockquote / list contexts.
-	// Capture the prefix to preserve the container structure.
-	return markdown.replace(
-		new RegExp(
-			`^(?=[ \\t]{0,3}\\S)(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,
-			"gm",
-		),
-		(match, prefix: string, rawTex: string, offset: number) => {
-			if (isInsideRanges(offset, codeRanges)) {
-				return match;
-			}
-			// Determine the actual position of the opening $$ within the match
-			const openingRelPos = match.indexOf("$$");
-			if (openingRelPos === -1) return match;
-			const openingPos = offset + openingRelPos;
-			if (isEscaped(markdown, openingPos)) return match;
-			// Determine the actual position of the closing $$
-			const closingRelPos = match.trimEnd().lastIndexOf("$$");
-			if (closingRelPos === -1 || closingRelPos === openingRelPos) return match;
-			const closingPos = offset + closingRelPos;
-			if (isEscaped(markdown, closingPos)) return match;
+	// Lenient $$...$$ match (no line/end anchors), with a $$ boundary guard so a
+	// match never spans across an intervening $$ pair. `String.replace` visits
+	// every match.
+	return markdown.replace(/\$\$((?:(?!\$\$)[\s\S])+?)\$\$/g, (match, rawTex: string, offset) => {
+		// Single-line $$...$$ → leave for walkTokens (Pass 1). preprocess only
+		// owns multi-line math (its sole job is preventing `breaks: true` from
+		// turning the inner newlines into <br>).
+		if (!rawTex.includes("\n")) return match;
+		// Skip math inside code (fenced / indented / raw <pre>/<code> / inline).
+		if (isInsideRanges(offset, codeRanges)) return match;
+		// Escape guard on the opening and closing $$.
+		if (isEscaped(markdown, offset)) return match;
+		const closingPos = offset + match.length - 2;
+		if (isEscaped(markdown, closingPos)) return match;
 
-			// Strip only the container prefix captured on the opening $$ line.
-			// Do NOT use the generic containerPrefix pattern here — it would
-			// incorrectly strip leading -, +, * etc. from normal TeX content.
-			const escapedPrefix = prefix ? prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
-			const stripRe = escapedPrefix ? new RegExp(`^${escapedPrefix}`) : null;
-			const dollarPh = `%%EDOLLAR_${nonce}%%`;
-			const tex = rawTex
-				.split("\n")
-				.map((line) => (stripRe ? line.replace(stripRe, "") : line))
-				.join("\n")
-				.replaceAll(dollarPh, "\\$");
+		// The opening line's leading text (line start → opening $$). If it is a
+		// pure container prefix (blockquote/list markers, or empty), strip that
+		// same prefix from every TeX line so the inner content is clean. If it is
+		// body text (mid-line $$), leave the TeX as-is — there is no prefix to
+		// strip.
+		const lineStart = markdown.lastIndexOf("\n", offset - 1) + 1;
+		const openingLinePrefix = markdown.slice(lineStart, offset);
+		const stripRe =
+			OPENING_LINE_PREFIX_RE.test(openingLinePrefix) && openingLinePrefix.length > 0
+				? new RegExp(`^${openingLinePrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+				: null;
 
-			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
-			try {
-				const html = katex.renderToString(tex.trim(), {
-					displayMode: true,
-					throwOnError: false,
-				});
-				placeholders.push({ placeholder, html });
-			} catch {
-				placeholders.push({
-					placeholder,
-					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
-				});
-			}
-			// Preserve container prefix so blockquote/list structure remains intact
-			return `${prefix}${placeholder}`;
-		},
-	);
+		const tex = rawTex
+			.split("\n")
+			.map((line) => (stripRe ? line.replace(stripRe, "") : line))
+			.join("\n")
+			.replaceAll(dollarPh, "\\$");
+
+		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
+		try {
+			const html = katex.renderToString(tex.trim(), {
+				displayMode: true,
+				throwOnError: false,
+			});
+			placeholders.push({ placeholder, html });
+		} catch {
+			placeholders.push({
+				placeholder,
+				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+			});
+		}
+		// The opening-line prefix is now outside the match, so it stays in the
+		// output naturally — return only the placeholder.
+		return placeholder;
+	});
 }
 
 function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {

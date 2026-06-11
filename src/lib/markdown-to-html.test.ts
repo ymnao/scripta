@@ -284,6 +284,29 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("katex-display");
 	});
 
+	it("renders multi-line display math that starts mid-line as KaTeX (#169)", () => {
+		// Pattern A: opening $$ appears after body text and spans a newline.
+		const html = markdownToHtml("text $$x\n+ y$$ more");
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+	});
+
+	it("renders multi-line display math with leading text and preserves it (#169)", () => {
+		// Pattern B: text precedes the opening $$ on its line.
+		const html = markdownToHtml("leading $$\nE=mc^2\n$$");
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).toContain("leading");
+	});
+
+	it("renders multi-line display math with trailing text and preserves it (#169)", () => {
+		// Pattern C: text follows the closing $$ on its line.
+		const html = markdownToHtml("$$\nE=mc^2\n$$ trailing");
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).toContain("trailing");
+	});
+
 	it("does not convert single newlines to <br> by default", () => {
 		const html = markdownToHtml("line1\nline2");
 		expect(html).not.toContain("<br");
