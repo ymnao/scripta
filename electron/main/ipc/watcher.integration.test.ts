@@ -74,7 +74,7 @@ beforeEach(async () => {
 	createdWatchers.length = 0;
 	clearWorkspaceRoots();
 	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-watcher-int-"));
-	registerWorkspaceRoot(TEST_WIN, workspaceDir);
+	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	webContents = {
 		id: TEST_WIN,
 		send: vi.fn(),
@@ -200,7 +200,7 @@ describe("watcher.ts: start/stop race", () => {
 			symlinkSync(realDir, symlinkDir);
 			try {
 				clearWorkspaceRoots();
-				registerWorkspaceRoot(TEST_WIN, symlinkDir);
+				await registerWorkspaceRoot(TEST_WIN, symlinkDir);
 				const start = getHandler("watcher:start");
 				await start({ sender: webContents }, symlinkDir);
 				expect(createdWatchers).toHaveLength(1);
