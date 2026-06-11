@@ -97,6 +97,26 @@ test.describe("editor context menu", () => {
 		await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("hello");
 	});
 
+	test("貼り付け後にカーソルが貼り付けテキストの直後に進む", async ({ page, context }) => {
+		await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+		const editor = await openFile(page);
+		await editor.click();
+
+		// クリップボードに貼り付け対象を仕込む
+		await page.evaluate(() => navigator.clipboard.writeText("PASTED"));
+
+		// 行頭にカーソルを置いてから右クリック → 貼り付け
+		await rightClickOnLine(page);
+		await page.getByRole("menuitem", { name: "貼り付け" }).click();
+
+		// 貼り付けは clipboard.readText() の解決後に非同期で反映されるので待つ
+		await expect(editor).toContainText("PASTED");
+
+		// 続けて入力した文字が貼り付けテキストの直後に入る（カーソルが直後へ進んだ証拠）
+		await page.keyboard.type("X");
+		await expect(editor).toContainText("PASTEDX");
+	});
+
 	test("選択外右クリックで選択が解除されカーソルが移動する", async ({ page }) => {
 		const editor = await openFile(page);
 		await editor.click();

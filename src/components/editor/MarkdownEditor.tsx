@@ -491,7 +491,15 @@ export function MarkdownEditor({
 				navigator.clipboard.readText().then(
 					(text) => {
 						const s = view.state.selection.main;
-						view.dispatch({ changes: { from: s.from, to: s.to, insert: text } });
+						// selection を明示しないと挿入位置ちょうどのカーソルは CM デフォルト
+						// （assoc=-1）で挿入前に留まる。貼り付けテキスト直後へ進める。
+						// BOF/EOF gap では tr.selection の存在が tableGapMaterialize の
+						// selection マップ経路を有効にし、補う改行の手前へカーソルが進む。
+						view.dispatch({
+							changes: { from: s.from, to: s.to, insert: text },
+							selection: { anchor: s.from + text.length },
+							userEvent: "input.paste",
+						});
 						view.focus();
 					},
 					() => {},

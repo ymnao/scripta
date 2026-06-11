@@ -61,6 +61,31 @@ export const staticEditorTheme = EditorView.theme({
 	"&.cm-focused .cm-cursor": {
 		borderLeftColor: "var(--color-text-primary)",
 	},
+	// gap cursor (#167): 文書先頭/末尾がテーブルのとき、境界（gap）に留まるカーソルの
+	// 描画。実体は table-decoration.ts の tableGapCursorLayer が置く水平バー。
+	".cm-tableGapCursorLayer": {
+		pointerEvents: "none",
+	},
+	// position: absolute は base theme の `.cm-layer > *` が当てる（cm-blink 同様、
+	// layer 機構の base theme に依存する）
+	".cm-table-gap-cursor": {
+		display: "none",
+		backgroundColor: "var(--color-text-primary)",
+		borderRadius: "1px",
+	},
+	"&.cm-focused .cm-table-gap-cursor": {
+		display: "block",
+		// cm-blink keyframes は drawSelection の base theme が定義する
+		animation: "steps(1) cm-blink 1.2s infinite",
+	},
+	// gap 滞在中は drawSelection の primary cursor（widget 全高の巨大キャレット）を隠し、
+	// gap cursor バーに置き換える。multi-cursor の secondary が gap に来るケースは稀なので
+	// 割り切って primary のみ対象にする。baseTheme の表示側セレクタ（class 5 個）との
+	// specificity 競争は upstream の構造変更で静かに壊れるため、!important で降りる
+	// （.cm-selectionBackground と同じ手法）。
+	"&.cm-table-gap-active .cm-cursor-primary": {
+		display: "none !important",
+	},
 	".cm-gutters": {
 		backgroundColor: "var(--color-bg-primary)",
 		color: "var(--color-text-secondary)",
