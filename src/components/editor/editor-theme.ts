@@ -66,8 +66,9 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-tableGapCursorLayer": {
 		pointerEvents: "none",
 	},
+	// position: absolute は base theme の `.cm-layer > *` が当てる（cm-blink 同様、
+	// layer 機構の base theme に依存する）
 	".cm-table-gap-cursor": {
-		position: "absolute",
 		display: "none",
 		backgroundColor: "var(--color-text-primary)",
 		borderRadius: "1px",
@@ -79,11 +80,11 @@ export const staticEditorTheme = EditorView.theme({
 	},
 	// gap 滞在中は drawSelection の primary cursor（widget 全高の巨大キャレット）を隠し、
 	// gap cursor バーに置き換える。multi-cursor の secondary が gap に来るケースは稀なので
-	// 割り切って primary のみ対象にする。セレクタは drawSelection baseTheme の表示側
-	// `&.cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor`（class 5 個）より
-	// specificity を上げる必要がある（theme の mount 順では specificity が先に効く）。
-	"&.cm-table-gap-active.cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor-primary": {
-		display: "none",
+	// 割り切って primary のみ対象にする。baseTheme の表示側セレクタ（class 5 個）との
+	// specificity 競争は upstream の構造変更で静かに壊れるため、!important で降りる
+	// （.cm-selectionBackground と同じ手法）。
+	"&.cm-table-gap-active .cm-cursor-primary": {
+		display: "none !important",
 	},
 	".cm-gutters": {
 		backgroundColor: "var(--color-bg-primary)",

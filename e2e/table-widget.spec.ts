@@ -26,9 +26,9 @@ const eofTableContent = `before text
 | --- | --- |
 | 1 | 2 |`;
 
-async function openTableFile(page: Page): Promise<Locator> {
+async function openTableFile(page: Page, content = tableContent): Promise<Locator> {
 	await openSingleFileWorkspace(page, {
-		files: { "/workspace/table.md": tableContent },
+		files: { "/workspace/table.md": content },
 	});
 	const widget = page.locator(".cm-table-widget");
 	await expect(widget).toBeVisible();
@@ -87,10 +87,7 @@ test.describe("table widget", () => {
 	test("BOF gap: 文書先頭への移動で文書を変えず gap cursor が表示される (#167)", async ({
 		page,
 	}) => {
-		await openSingleFileWorkspace(page, {
-			files: { "/workspace/bof-table.md": bofTableContent },
-		});
-		await expect(page.locator(".cm-table-widget")).toBeVisible();
+		await openTableFile(page, bofTableContent);
 
 		// 本文にカーソルを置いてから文書先頭（BOF gap）へ移動
 		await page.getByText("after text").click();
@@ -110,10 +107,7 @@ test.describe("table widget", () => {
 	});
 
 	test("EOF gap: 文書末尾への移動で文書を変えず、入力で行が生える (#167)", async ({ page }) => {
-		await openSingleFileWorkspace(page, {
-			files: { "/workspace/eof-table.md": eofTableContent },
-		});
-		await expect(page.locator(".cm-table-widget")).toBeVisible();
+		await openTableFile(page, eofTableContent);
 
 		await page.getByText("before text").click();
 		await page.keyboard.press(`${modKey}+End`);

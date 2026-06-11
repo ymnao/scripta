@@ -248,9 +248,9 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 
 	it("唯一のテーブルを削除する transaction で stale な末尾境界に退避しない（#90）", () => {
 		// tr.startState の decoration の末尾を newDoc にマップするだけだと、削除した
-		// テーブルの「古い末尾 → 削除後 0」が trailing と誤認され空 doc に \n が補われる。
+		// テーブルの「古い末尾 → 削除後 0」が境界と誤認され stale な退避が起きる。
 		// tr.state（適用後 state）の decoration を読むことで、消えたテーブルは初めから
-		// 末尾候補に含まれない。
+		// 境界候補に含まれない。
 		const view = mountEditor(simpleTable);
 		view.dispatch({ changes: { from: 0, to: simpleTable.length }, selection: { anchor: 0 } });
 		expect(view.state.doc.toString()).toBe("");
