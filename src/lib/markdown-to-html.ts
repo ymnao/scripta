@@ -372,38 +372,31 @@ function createMathExtensions(
 		return renderMathPlaceholder(t.tex, t.type === "mathDisplay", placeholders, nonce);
 	};
 
-	const displayExtension: TokenizerAndRendererExtension = {
-		name: "mathDisplay",
+	// display / inline は開始 marker と正規表現以外同形なので共通生成する。
+	const make = (
+		name: MathToken["type"],
+		marker: string,
+		re: RegExp,
+	): TokenizerAndRendererExtension => ({
+		name,
 		level: "inline",
 		start(src) {
-			return src.indexOf("$$");
+			return src.indexOf(marker);
 		},
 		tokenizer(src) {
-			const m = INLINE_DISPLAY_MATH_RE.exec(src);
+			const m = re.exec(src);
 			if (!m) return undefined;
-			const token: MathToken = { type: "mathDisplay", raw: m[0], tex: m[1] };
+			const token: MathToken = { type: name, raw: m[0], tex: m[1] };
 			return token;
 		},
 		renderer,
-	};
-
-	const inlineExtension: TokenizerAndRendererExtension = {
-		name: "mathInline",
-		level: "inline",
-		start(src) {
-			return src.indexOf("$");
-		},
-		tokenizer(src) {
-			const m = INLINE_MATH_RE.exec(src);
-			if (!m) return undefined;
-			const token: MathToken = { type: "mathInline", raw: m[0], tex: m[1] };
-			return token;
-		},
-		renderer,
-	};
+	});
 
 	// 優先関係は順序非依存（JSDoc 参照）。可読性のため display を先に並べる。
-	return [displayExtension, inlineExtension];
+	return [
+		make("mathDisplay", "$$", INLINE_DISPLAY_MATH_RE),
+		make("mathInline", "$", INLINE_MATH_RE),
+	];
 }
 
 /**
