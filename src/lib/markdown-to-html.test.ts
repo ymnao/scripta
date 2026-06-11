@@ -284,6 +284,80 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("katex-display");
 	});
 
+	it("renders multi-line display math that starts mid-line as KaTeX (#169)", () => {
+		// Pattern A: opening $$ appears after body text and spans a newline.
+		const html = markdownToHtml("text $$x\n+ y$$ more");
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+	});
+
+	it("renders multi-line display math with leading text and preserves it (#169)", () => {
+		// Pattern B: text precedes the opening $$ on its line.
+		const html = markdownToHtml("leading $$\nE=mc^2\n$$");
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).toContain("leading");
+	});
+
+	it("renders multi-line display math with trailing text and preserves it (#169)", () => {
+		// Pattern C: text follows the closing $$ on its line.
+		const html = markdownToHtml("$$\nE=mc^2\n$$ trailing");
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).toContain("trailing");
+	});
+
+	// 単一行 display / inline math の inline tokenizer extension 化 (#170)。
+	// walkTokens 方式は math 内の escape (`\,`) / emphasis (`_`) で text トークンが
+	// 分断され、`$$` 生出力・`<em>` 混入・inline `$` のペアずれを起こしていた。
+	// PDF 経路は { breaks: true } なので主要ケースは breaks: true で検証する。
+	it("renders single-line display math with escape and emphasis chars (#170)", () => {
+		// ベイズ式: `\,` (escape) と `_` (emphasis 成立) と `|` を含む。
+		const html = markdownToHtml(
+			"$$p(C_k|\\mathbf{x}) = \\frac{p(\\mathbf{x}|C_k) \\, p(C_k)}{p(\\mathbf{x})}$$",
+			{ breaks: true },
+		);
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).not.toContain("<em>");
+	});
+
+	it("renders single-line display math with underscore subscripts (#170)", () => {
+		const html = markdownToHtml("$$\\int_{\\mathcal{R}_j} L_{kj}$$", { breaks: true });
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).not.toContain("<em>");
+	});
+
+	it("does not mis-pair inline $ across Japanese text between two math spans (#170)", () => {
+		const html = markdownToHtml(
+			"積の規則 $p(\\mathbf{x}, C_k) = p(C_k|\\mathbf{x}) \\, p(\\mathbf{x})$ を使うと、共通因子の $p(\\mathbf{x})$ を消す",
+			{ breaks: true },
+		);
+		expect(html).toContain("katex");
+		expect(html).not.toContain("<em>");
+		// 「を使うと、共通因子の」は数式の外（KaTeX annotation の外）にプレーンテキストで残る。
+		const annotations = [...html.matchAll(/<annotation[^>]*>([\s\S]*?)<\/annotation>/g)].map(
+			(m) => m[1],
+		);
+		expect(annotations.some((a) => a.includes("を使うと、共通因子の"))).toBe(false);
+		expect(html).toContain("を使うと、共通因子の");
+	});
+
+	it("renders inline math inside a heading (#170)", () => {
+		const html = markdownToHtml("# 式 $x_i$ の説明", { breaks: true });
+		expect(html).toContain("katex");
+		expect(html).toContain("<h1");
+	});
+
+	it("renders inline math inside a GFM table cell (#170)", () => {
+		// walkTokens はテーブルの header/rows を再帰しないため壊れていた。
+		const md = "| 変数 | 説明 |\n| --- | --- |\n| $x_i$ | 入力 |";
+		const html = markdownToHtml(md, { breaks: true });
+		expect(html).toContain("<table>");
+		expect(html).toContain("katex");
+	});
+
 	it("does not convert single newlines to <br> by default", () => {
 		const html = markdownToHtml("line1\nline2");
 		expect(html).not.toContain("<br");
@@ -292,5 +366,73 @@ describe("markdownToHtml", () => {
 	it("converts single newlines to <br> when breaks option is true", () => {
 		const html = markdownToHtml("line1\nline2", { breaks: true });
 		expect(html).toContain("<br");
+	});
+
+	// image alt 内の math は属性値文脈なので KaTeX HTML ではなくプレーン TeX を保持する (#170)。
+	it("keeps inline math as plain TeX in image alt (not KaTeX HTML)", () => {
+		const html = markdownToHtml("![alt $x$](img.png)", { breaks: true });
+		expect(html).toContain('alt="alt $x$"');
+		expect(html).not.toContain('alt="alt <span');
+		// img タグの中に katex クラスが入らない
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("keeps single-line display math as plain TeX in image alt", () => {
+		// alt 属性値に $$ が残るのが正しい（KaTeX HTML に展開してはならない）
+		const html = markdownToHtml("![v $$x$$](i.png)", { breaks: true });
+		expect(html).toContain('alt="v $$x$$"');
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("keeps inline math as plain TeX in image alt inside a GFM table cell", () => {
+		// ヘッダ行 + 区切り行 + ボディ行でテーブルを構成し、<td> を含む出力を確認する
+		const md = "| img |\n| --- |\n| ![alt $x$](img.png) |";
+		const html = markdownToHtml(md, { breaks: true });
+		// td の中に img が存在し、その alt がプレーンのまま
+		expect(html).toContain("<td>");
+		expect(html).toContain('alt="alt $x$"');
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("still renders KaTeX in link label (text context) after image alt fix", () => {
+		// リンクテキストはテキスト文脈なので KaTeX 化が正しい（回帰確認）
+		const html = markdownToHtml("[$x$](http://example.com)", { breaks: true });
+		expect(html).toContain("katex");
+	});
+
+	it("renders surrounding math as KaTeX while keeping image alt plain", () => {
+		// 画像の周囲の math は KaTeX 化され、alt はプレーンのまま
+		const html = markdownToHtml("$y$ ![alt $x$](img.png) $z$", { breaks: true });
+		// 周囲の $y$ と $z$ が KaTeX 化されて 2 回以上 katex が現れる
+		const katexCount = (html.match(/katex/g) ?? []).length;
+		expect(katexCount).toBeGreaterThanOrEqual(2);
+		expect(html).toContain('alt="alt $x$"');
+	});
+
+	it("keeps multi-line display math as plain TeX in image alt without losing $", () => {
+		// 複数行 display math は preprocess の placeholder として alt に入る経路。
+		// 原文復元の replacement に `$$` が含まれるため、文字列 replacement の
+		// 特殊パターン解釈（$$ → $）で $ が欠ける回帰を防ぐ（関数形式で回避）。
+		const html = markdownToHtml("![alt $$x\n+y$$](u.png)", { breaks: true });
+		expect(html).toContain('alt="alt $$x\n+y$$"');
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("does not duplicate document content when TeX contains a $` sequence", () => {
+		// KaTeX annotation には TeX 原文が入るため、placeholder 復元が文字列
+		// replacement だと「$`」が『マッチ前の全文』として展開され文書が複製される。
+		// 関数形式での復元によりリテラルのまま挿入されることを固定する。
+		const html = markdownToHtml("before $a\\$`b$ after", { breaks: true });
+		expect(html).toContain("katex");
+		expect((html.match(/before/g) ?? []).length).toBe(1);
+		expect((html.match(/after/g) ?? []).length).toBe(1);
 	});
 });

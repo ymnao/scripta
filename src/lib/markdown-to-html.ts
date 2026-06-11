@@ -1,11 +1,20 @@
 import DOMPurify from "dompurify";
 import katex from "katex";
-import { Marked, type Token, type Tokens } from "marked";
+import {
+	Marked,
+	type RendererExtensionFunction,
+	type Token,
+	type TokenizerAndRendererExtension,
+	type Tokens,
+} from "marked";
 import { escapeHtml, isEscaped } from "./content";
 
 interface MathPlaceholder {
 	placeholder: string;
 	html: string;
+	/** placeholder 化前の原文全体（例: `$x$` / `$$x$$` / 複数行 `$$...\n...$$` のマッチ全体）。
+	 * image alt など属性値文脈で placeholder を原文に戻す際に使用する。 */
+	raw: string;
 }
 
 /** Merge and sort an array of [start, end) ranges. */
@@ -208,173 +217,195 @@ function preprocessEscapedDollars(text: string, nonce: string): string {
 	return segments.join("");
 }
 
+// Container prefix that can legitimately precede an opening `$$` on its line:
+// only blockquote (`>`) / list (`-`/`*`/`+`/`N.`) markers and surrounding
+// whitespace. Matches the empty string too (top-level, no container). Used to
+// decide whether the opening-line prefix is structural (strip it from each TeX
+// line) or body text (an in-line `$$`, leave content untouched).
+const OPENING_LINE_PREFIX_RE = /^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*$/;
+
 /**
  * Replace multi-line display math ($$...\n...\n$$) in raw markdown
  * before lexing. With `breaks: true`, newlines inside display math
  * would be converted to <br>, breaking KaTeX rendering.
- * Single-line $$...$$ is handled later by walkTokens.
+ * Single-line $$...$$ is handled later by the `mathDisplay` inline extension.
+ *
+ * Matching uses the same lenient `$$...$$` pattern as the editor
+ * (`DISPLAY_MATH_RE` in live-preview/math.ts) so Live Preview and PDF stay in
+ * parity (#169): display math that starts mid-line or whose closing `$$` is
+ * followed by trailing text is now captured here too, instead of leaking out
+ * as raw `$$` (and being mis-parsed into lists/paragraphs). The line/end
+ * anchors were dropped; only multi-line matches are placeholdered (single-line
+ * ones stay with the inline extension, which is why preprocess exists — to stop
+ * `breaks: true` from inserting <br> inside a math block).
  */
 function preprocessDisplayMath(
 	markdown: string,
 	placeholders: MathPlaceholder[],
 	nonce: string,
 ): string {
-	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
-
 	// Code 範囲を skip するため共通 helper を使う。`collectRawCodeRanges` は CommonMark
 	// 準拠で fenced (閉じ長 >= 開き長)・indented・raw `<pre>`/`<code>`・inline すべてを
 	// 扱う。以前は local の `\1` 正規表現で同長閉じのみ拾っており、`<pre>` や indented
 	// code 内の display math まで KaTeX 化してしまう不整合があった。
 	const codeRanges = collectRawCodeRanges(markdown);
-
-	// Match display math $$...$$ that spans at least one newline.
-	// Handles both "$$ on its own line" and "$$content\nmore$$" patterns.
-	// Uses (?:(?!\$\$)[\s\S]) to prevent matching across $$ boundaries.
-	// Allows optional container prefixes for blockquote / list contexts.
-	// Capture the prefix to preserve the container structure.
-	return markdown.replace(
-		new RegExp(
-			`^(?=[ \\t]{0,3}\\S)(${containerPrefix.source})[ \\t]*\\$\\$((?:(?!\\$\\$)[\\s\\S])*?\\n(?:(?!\\$\\$)[\\s\\S])*?)\\$\\$[ \\t]*$`,
-			"gm",
-		),
-		(match, prefix: string, rawTex: string, offset: number) => {
-			if (isInsideRanges(offset, codeRanges)) {
-				return match;
-			}
-			// Determine the actual position of the opening $$ within the match
-			const openingRelPos = match.indexOf("$$");
-			if (openingRelPos === -1) return match;
-			const openingPos = offset + openingRelPos;
-			if (isEscaped(markdown, openingPos)) return match;
-			// Determine the actual position of the closing $$
-			const closingRelPos = match.trimEnd().lastIndexOf("$$");
-			if (closingRelPos === -1 || closingRelPos === openingRelPos) return match;
-			const closingPos = offset + closingRelPos;
-			if (isEscaped(markdown, closingPos)) return match;
-
-			// Strip only the container prefix captured on the opening $$ line.
-			// Do NOT use the generic containerPrefix pattern here — it would
-			// incorrectly strip leading -, +, * etc. from normal TeX content.
-			const escapedPrefix = prefix ? prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
-			const stripRe = escapedPrefix ? new RegExp(`^${escapedPrefix}`) : null;
-			const dollarPh = `%%EDOLLAR_${nonce}%%`;
-			const tex = rawTex
-				.split("\n")
-				.map((line) => (stripRe ? line.replace(stripRe, "") : line))
-				.join("\n")
-				.replaceAll(dollarPh, "\\$");
-
-			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
-			try {
-				const html = katex.renderToString(tex.trim(), {
-					displayMode: true,
-					throwOnError: false,
-				});
-				placeholders.push({ placeholder, html });
-			} catch {
-				placeholders.push({
-					placeholder,
-					html: `<span class="math-error">${escapeHtml(tex)}</span>`,
-				});
-			}
-			// Preserve container prefix so blockquote/list structure remains intact
-			return `${prefix}${placeholder}`;
-		},
-	);
-}
-
-function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
-	let processed = text;
 	const dollarPh = `%%EDOLLAR_${nonce}%%`;
 
-	// Pass 1: Display math ($$...$$) — handles remaining $$...$$ after
-	// preprocessDisplayMath has replaced multi-line instances.
-	processed = processed.replace(
-		/\$\$((?:(?!\$\$)[^\n])+)\$\$/g,
-		(match, tex: string, offset: number) => {
-			if (isEscaped(processed, offset)) return match;
-			const closingDisplayPos = offset + match.length - 2;
-			if (isEscaped(processed, closingDisplayPos)) return match;
+	// Lenient $$...$$ match (no line/end anchors), with a $$ boundary guard so a
+	// match never spans across an intervening $$ pair. `String.replace` visits
+	// every match.
+	return markdown.replace(/\$\$((?:(?!\$\$)[\s\S])+?)\$\$/g, (match, rawTex: string, offset) => {
+		// Single-line $$...$$ → leave for the `mathDisplay` inline extension.
+		// preprocess only owns multi-line math (its sole job is preventing
+		// `breaks: true` from turning the inner newlines into <br>).
+		if (!rawTex.includes("\n")) return match;
+		// Skip math inside code (fenced / indented / raw <pre>/<code> / inline).
+		if (isInsideRanges(offset, codeRanges)) return match;
+		// Escape guard on the opening and closing $$.
+		if (isEscaped(markdown, offset)) return match;
+		const closingPos = offset + match.length - 2;
+		if (isEscaped(markdown, closingPos)) return match;
 
-			const texForKatex = tex.replaceAll(dollarPh, "\\$");
-			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
-			try {
-				const html = katex.renderToString(texForKatex.trim(), {
-					displayMode: true,
-					throwOnError: false,
-				});
-				placeholders.push({ placeholder, html });
-			} catch {
-				placeholders.push({
-					placeholder,
-					html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
-				});
-			}
-			return placeholder;
-		},
-	);
+		// The opening line's leading text (line start → opening $$). If it is a
+		// pure container prefix (blockquote/list markers, or empty), strip that
+		// same prefix from every TeX line so the inner content is clean. If it is
+		// body text (mid-line $$), leave the TeX as-is — there is no prefix to
+		// strip.
+		const lineStart = markdown.lastIndexOf("\n", offset - 1) + 1;
+		const openingLinePrefix = markdown.slice(lineStart, offset);
+		const stripRe =
+			OPENING_LINE_PREFIX_RE.test(openingLinePrefix) && openingLinePrefix.length > 0
+				? new RegExp(`^${openingLinePrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+				: null;
 
-	// Pass 2: Inline math ($...$)
-	processed = processed.replace(
-		/\$((?:[^\n$\\]|\\.)+)\$/g,
-		(match, tex: string, offset: number) => {
-			if (isEscaped(processed, offset)) return match;
-			const closingInlinePos = offset + match.length - 1;
-			if (isEscaped(processed, closingInlinePos)) return match;
+		const tex = rawTex
+			.split("\n")
+			.map((line) => (stripRe ? line.replace(stripRe, "") : line))
+			.join("\n")
+			.replaceAll(dollarPh, "\\$");
 
-			const texForKatex = tex.replaceAll(dollarPh, "\\$");
-			const placeholder = `%%MATH_I_${nonce}_${placeholders.length}%%`;
-			try {
-				const html = katex.renderToString(texForKatex.trim(), {
-					displayMode: false,
-					throwOnError: false,
-				});
-				placeholders.push({ placeholder, html });
-			} catch {
-				placeholders.push({
-					placeholder,
-					html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
-				});
-			}
-			return placeholder;
-		},
-	);
-
-	return processed;
+		const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
+		try {
+			const html = katex.renderToString(tex.trim(), {
+				displayMode: true,
+				throwOnError: false,
+			});
+			placeholders.push({ placeholder, html, raw: match });
+		} catch {
+			placeholders.push({
+				placeholder,
+				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+				raw: match,
+			});
+		}
+		// The opening-line prefix is now outside the match, so it stays in the
+		// output naturally — return only the placeholder.
+		return placeholder;
+	});
 }
 
-function walkTokens(tokens: Token[], placeholders: MathPlaceholder[], nonce: string): void {
-	for (const token of tokens) {
-		// Only replace math in text tokens (not in code, link URLs, etc.)
-		if (token.type === "text") {
-			const t = token as Tokens.Text;
-			t.text = replaceMath(t.text, placeholders, nonce);
-			if (t.raw) t.raw = t.text;
-		}
+// marked の inline tokenizer extension が生成する math トークン。
+// Tokens.Generic を拡張し、tokenizer の戻り値と renderer 引数の絞り込みに使う。
+interface MathToken extends Tokens.Generic {
+	type: "mathDisplay" | "mathInline";
+	tex: string;
+}
 
-		// Paragraphs contain inline math in their raw text; re-lex after replacement
-		if (token.type === "paragraph") {
-			const p = token as Tokens.Paragraph;
-			p.text = replaceMath(p.text, placeholders, nonce);
-			// Paragraph raw also needs updating so Marked doesn't re-parse the original
-			if (p.raw) p.raw = replaceMath(p.raw, placeholders, nonce);
-		}
+// 単一行 display math: /^\$\$...\$\$/。インライン tokenizer なので preprocessDisplayMath
+// が複数行 ($$\n...\n$$) を placeholder 化した後の単一行だけが残る。
+const INLINE_DISPLAY_MATH_RE = /^\$\$((?:(?!\$\$)[^\n])+)\$\$/;
+// インライン math: /^\$...\$/。エディタ live-preview/math.ts の INLINE_MATH_RE と同形。
+const INLINE_MATH_RE = /^\$((?:[^\n$\\]|\\.)+)\$/;
 
-		// Recurse into child tokens
-		if ("tokens" in token && Array.isArray(token.tokens)) {
-			walkTokens(token.tokens, placeholders, nonce);
-		}
-
-		// List items have nested tokens
-		if (token.type === "list") {
-			const list = token as Tokens.List;
-			for (const item of list.items) {
-				if (Array.isArray(item.tokens)) {
-					walkTokens(item.tokens, placeholders, nonce);
-				}
-			}
-		}
+/**
+ * KaTeX で tex を描画し、placeholder を発行して返す共通処理。
+ * tex 中の EDOLLAR placeholder（\$ のエスケープ退避）を `\$` に復元してから描画する。
+ * katex throw 時は replaceMath 時代と同形の `<span class="math-error">` を発行する。
+ * raw には placeholder 化前の原文全体を渡す（image alt 等、属性値文脈での原文復元に使用）。
+ */
+function renderMathPlaceholder(
+	tex: string,
+	displayMode: boolean,
+	placeholders: MathPlaceholder[],
+	nonce: string,
+	raw: string,
+): string {
+	const dollarPh = `%%EDOLLAR_${nonce}%%`;
+	const texForKatex = tex.replaceAll(dollarPh, "\\$");
+	const kind = displayMode ? "D" : "I";
+	const placeholder = `%%MATH_${kind}_${nonce}_${placeholders.length}%%`;
+	try {
+		const html = katex.renderToString(texForKatex.trim(), {
+			displayMode,
+			throwOnError: false,
+		});
+		placeholders.push({ placeholder, html, raw });
+	} catch {
+		placeholders.push({
+			placeholder,
+			html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
+			raw,
+		});
 	}
+	return placeholder;
+}
+
+/**
+ * marked の inline tokenizer extension を生成するファクトリ。
+ * placeholders / nonce をクロージャに閉じ込めるため markdownToHtml 呼び出し毎に
+ * `new Marked` + `use` する。
+ *
+ * walkTokens 方式（text/paragraph の text/raw だけ書き換えて子トークンは触らない）は
+ * math 内の `\,`（escape）や `_`（emphasis）で text トークンが分断され、正規表現が
+ * `$$...$$` 全体にマッチせず生 `$$` 出力・`<em>` 混入・inline `$` のペアずれを起こす。
+ * inline tokenizer で `$`/`$$` を最優先に消費することで、emphasis/escape より先に
+ * math 範囲が確定し、これらの分断を構造的に防ぐ。
+ *
+ * display / inline の優先関係: marked の `use()` は tokenizer を unshift で登録する
+ * ため実際の試行順は配列と逆（inline → display）だが、INLINE_MATH_RE は中身 1 文字
+ * 以上を要求し先頭が `$`（= `$$` の 2 文字目）だと必ず失敗するので、`$$...$$` は
+ * 試行順に依らず display 側が拾う（エディタの Pass 1 → Pass 2 と同じ結果になる）。
+ *
+ * escape ガードについて: `\$` は preprocessEscapedDollars で EDOLLAR placeholder 化
+ * 済みなので、tokenizer に到達する `$` は未エスケープのみ。よって isEscaped ガードは不要。
+ */
+function createMathExtensions(
+	placeholders: MathPlaceholder[],
+	nonce: string,
+): TokenizerAndRendererExtension[] {
+	// renderer は marked の RendererExtensionFunction 互換シグネチャ。引数は
+	// この tokenizer が生成した token のみが渡るので MathToken への絞り込みは安全。
+	// t.raw を渡すことで image alt 等の属性値文脈で原文復元に使えるようにする。
+	const renderer: RendererExtensionFunction = (token) => {
+		const t = token as MathToken;
+		return renderMathPlaceholder(t.tex, t.type === "mathDisplay", placeholders, nonce, t.raw);
+	};
+
+	// display / inline は開始 marker と正規表現以外同形なので共通生成する。
+	const make = (
+		name: MathToken["type"],
+		marker: string,
+		re: RegExp,
+	): TokenizerAndRendererExtension => ({
+		name,
+		level: "inline",
+		start(src) {
+			return src.indexOf(marker);
+		},
+		tokenizer(src) {
+			const m = re.exec(src);
+			if (!m) return undefined;
+			const token: MathToken = { type: name, raw: m[0], tex: m[1] };
+			return token;
+		},
+		renderer,
+	});
+
+	// 優先関係は順序非依存（JSDoc 参照）。可読性のため display を先に並べる。
+	return [
+		make("mathDisplay", "$$", INLINE_DISPLAY_MATH_RE),
+		make("mathInline", "$", INLINE_MATH_RE),
+	];
 }
 
 /**
@@ -409,11 +440,42 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 
 	const breaks = options?.breaks ?? false;
 	const marked = new Marked({ gfm: true, breaks });
+	// inline tokenizer extension で単一行 display ($$...$$) / inline ($...$) math を
+	// 処理する。emphasis/escape より先に math 範囲を確定させるため、text/paragraph の
+	// text を後段で書き換える walkTokens 方式から置き換えた（子トークン分断対策）。
+	marked.use({ extensions: createMathExtensions(placeholders, nonce) });
 	const tokens = marked.lexer(preprocessed);
 
-	// Walk token tree and replace math only in text nodes,
-	// leaving link URLs, image paths, code spans etc. untouched.
-	walkTokens(tokens, placeholders, nonce);
+	// 画像 alt（label）内の math はプレーン TeX に戻す。alt は属性値であり、
+	// placeholder のまま残すと sanitize 後の文字列復元で KaTeX HTML が属性内に
+	// 展開されて HTML が壊れる（テキスト文脈でない場所に math placeholder を
+	// 残してはならない）。
+	marked.walkTokens(tokens, (token) => {
+		if (token.type !== "image") return;
+		const img = token as Tokens.Image;
+		img.tokens = img.tokens.map((t: Token) => {
+			if (t.type === "mathDisplay" || t.type === "mathInline") {
+				// inline extension が生成した math token → 原文の text token に差し戻す
+				return { type: "text", raw: t.raw, text: t.raw } satisfies Tokens.Text;
+			}
+			return t;
+		});
+		// 複数行 display math は preprocess（raw 段階）で placeholder 化されるため、
+		// text token の中に placeholder 文字列として残っている可能性がある。原文に戻す。
+		// 置換は関数形式必須: raw は `$$...$$` を含み、文字列 replacement では
+		// `$$` が「リテラル $ 1 個」の特殊パターンとして解釈され $ が欠ける。
+		for (const t of img.tokens) {
+			if (t.type === "text") {
+				const textToken = t as Tokens.Text;
+				for (const ph of placeholders) {
+					if (textToken.text.includes(ph.placeholder)) {
+						textToken.text = textToken.text.replaceAll(ph.placeholder, () => ph.raw);
+						textToken.raw = textToken.raw.replaceAll(ph.placeholder, () => ph.raw);
+					}
+				}
+			}
+		}
+	});
 
 	// Render tokens to HTML
 	let html = marked.parser(tokens);
@@ -421,9 +483,11 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	// Sanitize before restoring math placeholders so KaTeX output is not affected.
 	html = DOMPurify.sanitize(html);
 
-	// Restore math placeholders
+	// Restore math placeholders. 関数形式必須: KaTeX HTML の annotation には TeX 原文が
+	// 入るため、文字列 replacement だと `$` + 後続文字（$` $' $& 等）が特殊パターン
+	// として解釈され、文書の一部が複製される事故が起こりうる。
 	for (const { placeholder, html: mathHtml } of placeholders) {
-		html = html.replace(placeholder, mathHtml);
+		html = html.replace(placeholder, () => mathHtml);
 	}
 
 	// Restore escaped dollar placeholders to literal $
