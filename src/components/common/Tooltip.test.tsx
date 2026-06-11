@@ -1,10 +1,40 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { Tooltip } from "./Tooltip";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetTooltipWarmupForTest, TOOLTIP_SHOW_DELAY_MS, Tooltip } from "./Tooltip";
+
+// 表示遅延（warm-up）はモジュール状態を共有するため、テスト毎にリセットする。
+beforeEach(() => {
+	vi.useFakeTimers();
+	resetTooltipWarmupForTest();
+});
+
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+// NOTE: 当初の仕様では userEvent.setup({ advanceTimers }) を使う想定だったが、本リポジトリの
+// 実行環境（vitest 4 + jsdom + @testing-library/user-event）では vi.useFakeTimers() 下で
+// userEvent.hover / tab の await が解決せずデッドロックする（advanceTimers / delay:null でも回避不可。
+// 素の <button> でも再現）。500ms 表示遅延を fake timers で検証する都合上、interaction は
+// fireEvent（同期・fake timers と両立）で発火する。pointer / focus / blur / keydown いずれも
+// component のハンドラを直接叩くため、各テストの意図（warm-up / skip delay / keyboard 即時表示）は
+// そのまま担保される。
+
+/** 表示遅延ぶんタイマーを進める（setState を act で包む）。 */
+function advanceShowDelay() {
+	act(() => {
+		vi.advanceTimersByTime(TOOLTIP_SHOW_DELAY_MS);
+	});
+}
+
+/** クリック相当（pointerdown → focus）を発火する。pointer 由来 focus 抑制ロジックを通す。 */
+function clickLikePointer(el: HTMLElement) {
+	fireEvent.pointerDown(el);
+	fireEvent.focus(el);
+}
 
 describe("Tooltip", () => {
-	it("hover で label と keys が表示され、trigger に aria-describedby が付く", async () => {
+	it("hover → 500ms 経過で label と keys が表示され、trigger に aria-describedby が付く", () => {
 		render(
 			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
 				<button type="button">トグル</button>
@@ -13,7 +43,8 @@ describe("Tooltip", () => {
 		const trigger = screen.getByRole("button", { name: "トグル" });
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 
-		await userEvent.hover(trigger);
+		fireEvent.mouseEnter(trigger);
+		advanceShowDelay();
 
 		const tooltip = screen.getByRole("tooltip");
 		expect(tooltip).toHaveTextContent("サイドバー");
@@ -26,7 +57,7 @@ describe("Tooltip", () => {
 		expect(trigger).toHaveAttribute("aria-describedby", tooltip.id);
 	});
 
-	it("unhover で消える", async () => {
+	it("hover 直後（499ms）はまだ表示されず、500ms 到達で表示される", () => {
 		render(
 			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
 				<button type="button">トグル</button>
@@ -34,35 +65,130 @@ describe("Tooltip", () => {
 		);
 		const trigger = screen.getByRole("button", { name: "トグル" });
 
-		await userEvent.hover(trigger);
+		fireEvent.mouseEnter(trigger);
+		act(() => {
+			vi.advanceTimersByTime(TOOLTIP_SHOW_DELAY_MS - 1);
+		});
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(screen.getByRole("tooltip")).toBeInTheDocument();
+	});
+
+	it("遅延中に unhover するとキャンセルされ、その後 500ms 進めても表示されない", () => {
+		render(
+			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
+				<button type="button">トグル</button>
+			</Tooltip>,
+		);
+		const trigger = screen.getByRole("button", { name: "トグル" });
+
+		fireEvent.mouseEnter(trigger);
+		act(() => {
+			vi.advanceTimersByTime(200);
+		});
+		fireEvent.mouseLeave(trigger);
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		advanceShowDelay();
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+	});
+
+	it("unhover で消える", () => {
+		render(
+			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
+				<button type="button">トグル</button>
+			</Tooltip>,
+		);
+		const trigger = screen.getByRole("button", { name: "トグル" });
+
+		fireEvent.mouseEnter(trigger);
+		advanceShowDelay();
 		expect(screen.getByRole("tooltip")).toBeInTheDocument();
 
-		await userEvent.unhover(trigger);
+		fireEvent.mouseLeave(trigger);
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 		expect(trigger).not.toHaveAttribute("aria-describedby");
 	});
 
-	it("キーボードフォーカスで表示、blur で消える", async () => {
+	it("skip delay: 直前に消えた tooltip がある場合、別 trigger の hover はタイマーを進めずに即表示", () => {
 		render(
 			<>
-				<Tooltip label="サイドバー" keys={["⌘", "/"]}>
-					<button type="button">トグル</button>
+				<Tooltip label="ボタン A">
+					<button type="button">A</button>
 				</Tooltip>
-				<button type="button">別ボタン</button>
+				<Tooltip label="ボタン B">
+					<button type="button">B</button>
+				</Tooltip>
 			</>,
 		);
+		const a = screen.getByRole("button", { name: "A" });
+		const b = screen.getByRole("button", { name: "B" });
 
-		// tab で最初の button にフォーカス
-		await userEvent.tab();
-		expect(screen.getByRole("button", { name: "トグル" })).toHaveFocus();
+		// まず A を 500ms 待って表示
+		fireEvent.mouseEnter(a);
+		advanceShowDelay();
+		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン A");
+
+		// A を unhover（消えると lastHiddenAt が更新される）して B へ移る
+		fireEvent.mouseLeave(a);
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		// skip delay 窓内（advance せず）なので B はタイマーを進めずに即表示される
+		fireEvent.mouseEnter(b);
+		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン B");
+	});
+
+	it("消滅から 300ms を超えた後の hover は再び 500ms 遅延する", () => {
+		render(
+			<>
+				<Tooltip label="ボタン A">
+					<button type="button">A</button>
+				</Tooltip>
+				<Tooltip label="ボタン B">
+					<button type="button">B</button>
+				</Tooltip>
+			</>,
+		);
+		const a = screen.getByRole("button", { name: "A" });
+		const b = screen.getByRole("button", { name: "B" });
+
+		fireEvent.mouseEnter(a);
+		advanceShowDelay();
+		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン A");
+
+		fireEvent.mouseLeave(a);
+		// skip delay 窓（300ms）を超えて時間を進める
+		act(() => {
+			vi.advanceTimersByTime(301);
+		});
+
+		// B の hover は即時表示されず、500ms 遅延を要する
+		fireEvent.mouseEnter(b);
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+		advanceShowDelay();
+		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン B");
+	});
+
+	it("キーボードフォーカスはタイマーを進めずに即表示、blur で消える", () => {
+		render(
+			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
+				<button type="button">トグル</button>
+			</Tooltip>,
+		);
+		const trigger = screen.getByRole("button", { name: "トグル" });
+
+		// keyboard focus（先行する pointerdown なし）→ 遅延なしで即表示
+		fireEvent.focus(trigger);
 		expect(screen.getByRole("tooltip")).toBeInTheDocument();
 
-		// さらに tab で blur
-		await userEvent.tab();
+		fireEvent.blur(trigger);
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 	});
 
-	it("クリック（pointerdown）で消え、マウスクリック由来の focus では表示しない", async () => {
+	it("クリック（pointerdown）で消え、マウスクリック由来の focus では表示しない", () => {
 		render(
 			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
 				<button type="button">トグル</button>
@@ -71,15 +197,16 @@ describe("Tooltip", () => {
 		const trigger = screen.getByRole("button", { name: "トグル" });
 
 		// hover で一度表示してから click
-		await userEvent.hover(trigger);
+		fireEvent.mouseEnter(trigger);
+		advanceShowDelay();
 		expect(screen.getByRole("tooltip")).toBeInTheDocument();
 
-		await userEvent.click(trigger);
+		clickLikePointer(trigger);
 		// pointerdown で消え、直後の focus でも再表示しない
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 	});
 
-	it("Escape で消える", async () => {
+	it("Escape で消える", () => {
 		render(
 			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
 				<button type="button">トグル</button>
@@ -87,14 +214,15 @@ describe("Tooltip", () => {
 		);
 		const trigger = screen.getByRole("button", { name: "トグル" });
 
-		await userEvent.hover(trigger);
+		fireEvent.mouseEnter(trigger);
+		advanceShowDelay();
 		expect(screen.getByRole("tooltip")).toBeInTheDocument();
 
-		await userEvent.keyboard("{Escape}");
+		fireEvent.keyDown(document, { key: "Escape" });
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 	});
 
-	it("keys 省略時は label のみ（kbd 要素なし）", async () => {
+	it("keys 省略時は label のみ（kbd 要素なし）", () => {
 		render(
 			<Tooltip label="手動同期">
 				<button type="button">同期</button>
@@ -102,13 +230,14 @@ describe("Tooltip", () => {
 		);
 		const trigger = screen.getByRole("button", { name: "同期" });
 
-		await userEvent.hover(trigger);
+		fireEvent.mouseEnter(trigger);
+		advanceShowDelay();
 		const tooltip = screen.getByRole("tooltip");
 		expect(tooltip).toHaveTextContent("手動同期");
 		expect(tooltip.querySelectorAll("kbd")).toHaveLength(0);
 	});
 
-	it("children 既存の onMouseEnter / onFocus ハンドラが合成されて呼ばれる", async () => {
+	it("children 既存の onMouseEnter / onFocus ハンドラが合成されて呼ばれる", () => {
 		const onMouseEnter = vi.fn();
 		const onFocus = vi.fn();
 		render(
@@ -120,13 +249,14 @@ describe("Tooltip", () => {
 		);
 		const trigger = screen.getByRole("button", { name: "トグル" });
 
-		await userEvent.hover(trigger);
+		fireEvent.mouseEnter(trigger);
+		advanceShowDelay();
 		expect(onMouseEnter).toHaveBeenCalledTimes(1);
 		expect(screen.getByRole("tooltip")).toBeInTheDocument();
 
-		await userEvent.unhover(trigger);
+		fireEvent.mouseLeave(trigger);
 		// キーボードフォーカスで既存 onFocus も呼ばれる
-		await userEvent.tab();
+		fireEvent.focus(trigger);
 		expect(onFocus).toHaveBeenCalled();
 	});
 });

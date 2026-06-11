@@ -3,7 +3,9 @@ import { type CSSProperties, useCallback, useEffect, useRef, useState } from "re
 import { useShallow } from "zustand/react/shallow";
 import { getFileIcon } from "../../lib/file-icon";
 import { isNewTabPath } from "../../lib/path";
+import { MOD_KEY_LABEL } from "../../lib/platform";
 import { useWorkspaceStore } from "../../stores/workspace";
+import { Tooltip } from "../common/Tooltip";
 
 const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
 
@@ -20,25 +22,28 @@ const ICON_BUTTON_CLASS =
 function TabBarIconButton({
 	icon: Icon,
 	label,
+	keys,
 	onClick,
 	disabled,
 }: {
 	icon: LucideIcon;
 	label: string;
+	keys?: string[];
 	onClick: () => void;
 	disabled?: boolean;
 }) {
 	return (
-		<button
-			type="button"
-			onClick={onClick}
-			disabled={disabled}
-			aria-label={label}
-			title={label}
-			className={`${ICON_BUTTON_CLASS} ${disabled ? "opacity-30" : ""}`}
-		>
-			<Icon size={14} />
-		</button>
+		<Tooltip label={label} keys={keys} side="bottom">
+			<button
+				type="button"
+				onClick={onClick}
+				disabled={disabled}
+				aria-label={label}
+				className={`${ICON_BUTTON_CLASS} ${disabled ? "opacity-30" : ""}`}
+			>
+				<Icon size={14} />
+			</button>
+		</Tooltip>
 	);
 }
 
@@ -193,12 +198,14 @@ export function TabBar({
 				<TabBarIconButton
 					icon={ChevronLeft}
 					label="戻る"
+					keys={[MOD_KEY_LABEL, "["]}
 					onClick={onGoBack}
 					disabled={!canGoBack}
 				/>
 				<TabBarIconButton
 					icon={ChevronRight}
 					label="進む"
+					keys={[MOD_KEY_LABEL, "]"]}
 					onClick={onGoForward}
 					disabled={!canGoForward}
 				/>
@@ -332,6 +339,7 @@ export function TabBar({
 				<TabBarIconButton
 					icon={Plus}
 					label="新しいタブ"
+					keys={[MOD_KEY_LABEL, "T"]}
 					onClick={openNewTab}
 					disabled={!workspacePath}
 				/>

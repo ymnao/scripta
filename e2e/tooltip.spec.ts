@@ -44,4 +44,54 @@ test.describe("icon button tooltip", () => {
 		await page.getByLabel("test.md file").hover();
 		await expect(page.getByRole("tooltip")).not.toBeVisible();
 	});
+
+	test("ステータスバーのファイルパスに hover で tooltip にパスが表示される", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		// status bar はワークスペース相対パスを表示する。ネストしたファイルを開いて
+		// 複数階層の相対パス（truncate されうる本来の用途）が tooltip に出ることを確認する。
+		await mock.setup({
+			fs: {
+				files: {
+					"/workspace/docs/readme.md": "# Readme",
+				},
+				directories: {
+					"/workspace": [{ name: "docs", path: "/workspace/docs", isDirectory: true }],
+					"/workspace/docs": [
+						{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+					],
+				},
+			},
+			dialogResult: "/workspace",
+		});
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("docs folder").click();
+		await page.getByLabel("readme.md file").click();
+
+		const filePath = page.getByTestId("file-path");
+		await expect(filePath).toBeVisible();
+		await filePath.hover();
+
+		const tooltip = page.getByRole("tooltip");
+		await expect(tooltip).toBeVisible();
+		await expect(tooltip).toContainText("docs/readme.md");
+	});
+
+	test("新しいタブボタンに hover で tooltip が表示される", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs, dialogResult: "/workspace" });
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await expect(page.getByLabel("test.md file")).toBeVisible();
+
+		// 既定の「新しいタブ」タブの Close ボタン（aria-label="Close 新しいタブ"）と
+		// 区別するため、ツールバーの追加ボタンを exact name で限定する。
+		await page.getByRole("button", { name: "新しいタブ", exact: true }).hover();
+
+		const tooltip = page.getByRole("tooltip");
+		await expect(tooltip).toBeVisible();
+		await expect(tooltip).toContainText("新しいタブ");
+	});
 });

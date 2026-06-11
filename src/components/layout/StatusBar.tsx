@@ -165,15 +165,16 @@ export function StatusBar({
 					/>
 				)}
 				{filePath && (
-					<button
-						type="button"
-						onClick={handleCopyPath}
-						className="min-w-0 truncate rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
-						title={filePath}
-						data-testid="file-path"
-					>
-						{copied ? "コピーしました" : filePath}
-					</button>
+					<Tooltip label={filePath}>
+						<button
+							type="button"
+							onClick={handleCopyPath}
+							className="min-w-0 truncate rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
+							data-testid="file-path"
+						>
+							{copied ? "コピーしました" : filePath}
+						</button>
+					</Tooltip>
 				)}
 			</div>
 			<div className="flex items-center gap-3 text-xs">
