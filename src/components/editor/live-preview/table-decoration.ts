@@ -32,6 +32,11 @@ export const focusTableCellEffect = StateEffect.define<{
 
 const rebuildTableDecos = StateEffect.define<null>();
 
+// テーブルセル（widget 内の contentEditable）へ実フォーカスが入った/外れたを CM state に
+// 持ち込む effect。gap 判定（tableGapCursorLayer / tableGapActiveClass）がセル編集中かを
+// 知るために使う。詳細は tableCellFocusField の JSDoc 参照（#167）。
+const setCellFocusEffect = StateEffect.define<boolean>();
+
 // ── Types ─────────────────────────────────────────────
 
 interface CellData {
@@ -775,7 +780,16 @@ class EditableTableWidget extends WidgetType {
 		// 注: undo / redo は CM6 の history() に任せる（ignoreEvent で historyUndo /
 		// historyRedo の InputEvent を CM へ通すように設定済み）。ここで beforeinput を
 		// 横取りすると CM の経路と重複し、history の整合性を壊しうる。
-		wrapper.addEventListener("focusout", () => handleFocusOut(wrapper));
+		// セルへ実フォーカスが入ったら field を true にし、gap 描画を抑制する（#167）。
+		// 既に true なら dispatch しない（重複 dispatch 回避）。
+		wrapper.addEventListener("focusin", (e) => {
+			const cell = (e.target as Element | null)?.closest?.("th, td");
+			if (!cell) return;
+			if (!view.state.field(tableCellFocusField, false)) {
+				view.dispatch({ effects: setCellFocusEffect.of(true) });
+			}
+		});
+		wrapper.addEventListener("focusout", () => handleFocusOut(view, wrapper));
 		wrapper.addEventListener("contextmenu", (e) => showContextMenu(e as MouseEvent, view, wrapper));
 		wrapper.addEventListener("mousedown", (e) => handleCellMouseDown(e, view, wrapper));
 		wrapper.addEventListener("paste", (e) => {
@@ -1134,14 +1148,19 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	e.stopPropagation();
 }
 
-function handleFocusOut(wrapperEl: HTMLElement): void {
+function handleFocusOut(view: EditorView, wrapperEl: HTMLElement): void {
 	compositionState.delete(wrapperEl);
-	// フォーカスがテーブル外に完全に移動したらセル選択をクリア。
-	// focusout は新しい要素にフォーカスが移る前に発火するため、
-	// requestAnimationFrame で実際の移動先を確認する。
+	// フォーカスがテーブル外に完全に移動したらセル選択をクリアし、セルフォーカス field を
+	// 下ろして gap 描画の抑制を解く（#167）。focusout は新しい要素にフォーカスが移る前に
+	// 発火するため、requestAnimationFrame で実際の移動先を確認する。
 	requestAnimationFrame(() => {
-		if (!wrapperEl.contains(document.activeElement)) {
-			clearCellSelection(wrapperEl);
+		if (wrapperEl.contains(document.activeElement)) return;
+		clearCellSelection(wrapperEl);
+		// rAF 時点で view が destroy されている可能性がある（dispatch すると例外）。
+		// dom が DOM ツリーから外れていたら触らない。
+		if (!view.dom.isConnected) return;
+		if (view.state.field(tableCellFocusField, false)) {
+			view.dispatch({ effects: setCellFocusEffect.of(false) });
 		}
 	});
 }
@@ -1722,6 +1741,30 @@ const tableGapMaterialize = EditorState.transactionFilter.of((tr) => {
 	return [tr, { changes: extra, selection, sequential: true }];
 });
 
+/**
+ * テーブルセル（widget 内の contentEditable）に実フォーカスがあるかを保持する field（#167）。
+ *
+ * 文書先頭/末尾がテーブルのとき、セルをクリックして編集していても
+ * `anchorEditorToTable`（undo 復元先確保のため）が CM selection をテーブル先頭境界
+ *（文書先頭テーブルなら 0 = BOF gap）に置く。このため selection だけでは「セル編集中」と
+ *「gap にカーソルがいる」を区別できず、セル編集中ずっと gap 判定が真になって
+ * gap cursor バー（.cm-table-gap-cursor）や .cm-table-gap-active が出てしまう。
+ *
+ * 描画時に `document.activeElement` を直接読む案は、エディタ未フォーカスから
+ * セルを直接クリックした場合に CM の update が一切起きず再評価されないため不採用。
+ * 代わりにセルの focusin / focusout を effect で field に持ち込み、gap 判定側で
+ * この field が true のときは gap 描画を抑制する。
+ */
+export const tableCellFocusField = StateField.define<boolean>({
+	create: () => false,
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(setCellFocusEffect)) return e.value;
+		}
+		return value;
+	},
+});
+
 // gap cursor の見た目（ProseMirror の gapcursor 相当の水平バー）
 const GAP_CURSOR_WIDTH = 20;
 const GAP_CURSOR_HEIGHT = 2;
@@ -1741,6 +1784,9 @@ const tableGapCursorLayer = layer({
 	markers(view) {
 		const markers: RectangleMarker[] = [];
 		const { state } = view;
+		// セル編集中は anchorEditorToTable が selection をテーブル先頭境界へ置くため
+		// selection だけでは gap と区別できない。セルフォーカス中は gap バーを描かない（#167）。
+		if (state.field(tableCellFocusField, false)) return markers;
 		for (const r of state.selection.ranges) {
 			if (!r.empty) continue;
 			const gap = gapAt(state, r.head);
@@ -1771,7 +1817,13 @@ const tableGapCursorLayer = layer({
 	},
 	update(update) {
 		return (
-			update.docChanged || update.selectionSet || update.geometryChanged || update.viewportChanged
+			update.docChanged ||
+			update.selectionSet ||
+			update.geometryChanged ||
+			update.viewportChanged ||
+			// セルフォーカス field の変化でも再計算する（gap バーの表示/非表示が切り替わる, #167）
+			update.startState.field(tableCellFocusField, false) !==
+				update.state.field(tableCellFocusField, false)
 		);
 	},
 });
@@ -1780,9 +1832,14 @@ const tableGapCursorLayer = layer({
  * gap 滞在中（main selection が gap）にエディタへ .cm-table-gap-active を付け、theme 側
  * で drawSelection の primary cursor（widget 全高の巨大キャレット）を隠す。
  */
-const tableGapActiveClass = EditorView.editorAttributes.of((view) =>
-	gapAt(view.state, view.state.selection.main.head) ? { class: "cm-table-gap-active" } : null,
-);
+const tableGapActiveClass = EditorView.editorAttributes.of((view) => {
+	// セル編集中は anchorEditorToTable が selection をテーブル先頭境界に置くため gap 判定が
+	// 真になるが、実フォーカスはセル内にある。巨大キャレットも出ないのでクラスを付けない（#167）。
+	if (view.state.field(tableCellFocusField, false)) return null;
+	return gapAt(view.state, view.state.selection.main.head)
+		? { class: "cm-table-gap-active" }
+		: null;
+});
 
 /**
  * IME 入力の gap materialize（#167）。Chromium は composition 開始後の文書変更で
@@ -1814,6 +1871,7 @@ const tableGapImeKeydown = EditorView.domEventHandlers({
 
 export const tableDecoration: Extension = [
 	tableDecorationField,
+	tableCellFocusField,
 	treeChangeDetector,
 	tableAtomicRanges,
 	// 同一 precedence の transactionFilter は登録の逆順に適用される（@codemirror/state の

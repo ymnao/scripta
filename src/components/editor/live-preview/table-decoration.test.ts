@@ -11,6 +11,7 @@ import {
 	parseTsv,
 	pasteIntoCell,
 	sanitizePasteText,
+	tableCellFocusField,
 	tableDecoration,
 } from "./table-decoration";
 import {
@@ -351,6 +352,58 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		// selection を置くだけでは文書は改変されない（gap cursor）
 		expect(view.state.doc.toString()).toBe(simpleTable);
 		expect(view.state.selection.main.head).toBe(0);
+	});
+
+	it("BOF gap 滞在中にセルへ focusin すると cm-table-gap-active が外れ、wrapper 外へ focusout すると復活する (#167)", async () => {
+		const view = mountEditor(simpleTable); // テーブルが doc 先頭（BOF gap）
+		view.dispatch({ selection: { anchor: 0 } });
+		// selection が BOF gap にあるので巨大キャレット抑制クラスが付く
+		expect(view.dom.classList.contains("cm-table-gap-active")).toBe(true);
+
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+
+		// セルへフォーカスを移す。jsdom では cell.focus() が focusin を発火するが、
+		// 環境差で発火しない場合に備え、未反映なら明示的に focusin を投げる。
+		cell.focus();
+		if (view.dom.classList.contains("cm-table-gap-active")) {
+			cell.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+		}
+		// セル編集中は anchorEditorToTable が selection を BOF gap に置いたままでも、
+		// セルフォーカス field により gap 判定が抑制されクラスが外れる
+		expect(view.dom.classList.contains("cm-table-gap-active")).toBe(false);
+
+		// wrapper 外（CM の contentDOM）へフォーカスを移して focusout を発火
+		view.contentDOM.focus();
+		cell.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+		// focusout は rAF で移動先を確認してから field を下ろすので 1 フレーム待つ
+		await new Promise(requestAnimationFrame);
+
+		// セルフォーカスが外れたので gap 判定の抑制が解け、クラスが復活する
+		expect(view.dom.classList.contains("cm-table-gap-active")).toBe(true);
+	});
+
+	it("セル focusin / focusout で tableCellFocusField の状態が遷移する (#167)", async () => {
+		const view = mountEditor(simpleTable);
+		view.dispatch({ selection: { anchor: 0 } });
+		expect(view.state.field(tableCellFocusField)).toBe(false);
+
+		const wrapper = view.dom.querySelector(".cm-table-widget") as HTMLElement | null;
+		const cell = wrapper?.querySelector('[data-row="0"][data-col="0"]') as HTMLElement | null;
+		expect(cell).not.toBeNull();
+		if (!cell) return;
+
+		// focusin で true になる
+		cell.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+		expect(view.state.field(tableCellFocusField)).toBe(true);
+
+		// wrapper 外へ移して focusout → rAF 後に false へ戻る
+		view.contentDOM.focus();
+		cell.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+		await new Promise(requestAnimationFrame);
+		expect(view.state.field(tableCellFocusField)).toBe(false);
 	});
 
 	it("BOF gap での typing は改行を補って挿入される（materialize, #167)", () => {

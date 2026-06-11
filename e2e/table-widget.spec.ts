@@ -106,6 +106,28 @@ test.describe("table widget", () => {
 		await expect(page.locator(".cm-line").first()).toHaveText("hello");
 	});
 
+	test("セル編集中は gap cursor が消える (#167)", async ({ page }) => {
+		// 文書先頭がテーブルのとき、セル編集中も anchorEditorToTable が CM selection を
+		// BOF gap に置くため、以前はセル編集中ずっと gap cursor バーが出ていた。
+		await openTableFile(page, bofTableContent);
+
+		// データ行のセルをクリックして編集に入る
+		await page.locator('[data-row="1"][data-col="0"]').click();
+		await expect.poll(() => isCellFocused(page)).toBe(true);
+
+		// セル編集中は gap cursor バーが描かれない
+		await expect(page.locator(".cm-table-gap-cursor")).toHaveCount(0);
+
+		// セル内で ArrowUp を 2 回押して最上行 → BOF gap へ抜ける
+		await page.keyboard.press("ArrowUp");
+		await page.keyboard.press("ArrowUp");
+
+		// セルからフォーカスが外れ BOF gap に来たので gap cursor バーが 1 個復活する
+		await expect.poll(() => isCellFocused(page)).toBe(false);
+		await expect(page.locator(".cm-table-gap-cursor")).toHaveCount(1);
+		await expect(page.locator(".cm-table-gap-cursor")).toBeVisible();
+	});
+
 	test("EOF gap: 文書末尾への移動で文書を変えず、入力で行が生える (#167)", async ({ page }) => {
 		await openTableFile(page, eofTableContent);
 
