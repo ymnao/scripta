@@ -262,7 +262,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		let cancelled = false;
 		const path = workspacePath;
 
-		(async () => {
+		void (async () => {
 			try {
 				const available = await gitCheckAvailable();
 				if (cancelled) return;

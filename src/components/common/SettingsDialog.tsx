@@ -87,7 +87,7 @@ function WorkspaceSection({
 		setLoading(true);
 		setFiles([]);
 
-		(async () => {
+		void (async () => {
 			const definitions = getTemplateDefinitions(getDefaultPromptTemplate);
 			const templates = definitions.map((def) => ({
 				name: def.name,
