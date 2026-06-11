@@ -2,8 +2,10 @@ import { Files, FolderOpen, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
 import { openDirectoryPicker, workspaceSet } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
+import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
+import { Tooltip } from "../common/Tooltip";
 import { FileTree } from "../filetree/FileTree";
 import { SearchPanel } from "../search/SearchPanel";
 import { UnresolvedLinksPanel } from "../search/UnresolvedLinksPanel";
@@ -83,33 +85,43 @@ export function Sidebar({
 			<div className="flex items-center justify-between p-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">
 				<span>{panelLabels[activePanel]}</span>
 				<div className="flex items-center gap-1">
-					<button
-						type="button"
-						onClick={onShowFiles}
-						aria-label="ファイルエクスプローラーを表示"
-						aria-pressed={activePanel === "files"}
-						className={iconBtnClass(activePanel === "files")}
+					<Tooltip label="ファイルエクスプローラー" keys={[MOD_KEY_LABEL, "E"]} side="bottom">
+						<button
+							type="button"
+							onClick={onShowFiles}
+							aria-label="ファイルエクスプローラーを表示"
+							aria-pressed={activePanel === "files"}
+							className={iconBtnClass(activePanel === "files")}
+						>
+							<Files size={14} />
+						</button>
+					</Tooltip>
+					<Tooltip
+						label="ワークスペース検索"
+						keys={[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "F"]}
+						side="bottom"
 					>
-						<Files size={14} />
-					</button>
-					<button
-						type="button"
-						onClick={onShowSearch}
-						aria-label="ワークスペース内を検索"
-						aria-pressed={activePanel === "search"}
-						className={iconBtnClass(activePanel === "search")}
-					>
-						<Search size={14} />
-					</button>
-					<button
-						type="button"
-						onClick={onShowUnresolved}
-						aria-label="未解決リンクを表示"
-						aria-pressed={activePanel === "unresolved"}
-						className={iconBtnClass(activePanel === "unresolved")}
-					>
-						<Link2Off size={14} />
-					</button>
+						<button
+							type="button"
+							onClick={onShowSearch}
+							aria-label="ワークスペース内を検索"
+							aria-pressed={activePanel === "search"}
+							className={iconBtnClass(activePanel === "search")}
+						>
+							<Search size={14} />
+						</button>
+					</Tooltip>
+					<Tooltip label="未解決リンク" keys={[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "U"]} side="bottom">
+						<button
+							type="button"
+							onClick={onShowUnresolved}
+							aria-label="未解決リンクを表示"
+							aria-pressed={activePanel === "unresolved"}
+							className={iconBtnClass(activePanel === "unresolved")}
+						>
+							<Link2Off size={14} />
+						</button>
+					</Tooltip>
 				</div>
 			</div>
 			<div className="flex-1 overflow-y-auto">

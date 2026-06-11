@@ -28,6 +28,7 @@
 	--animate-dialog-in: dialog-in 0.15s ease-out;
 	--animate-backdrop-in: backdrop-in 0.15s ease-out;
 	--animate-menu-in: menu-in 0.12s ease-out;
+	--animate-tooltip-in: tooltip-in 0.1s ease-out;
 }
 
 @keyframes toast-in {
@@ -80,6 +81,15 @@
 	to {
 		opacity: 1;
 		transform: scale(1) translateY(0);
+	}
+}
+
+@keyframes tooltip-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
 	}
 }
 

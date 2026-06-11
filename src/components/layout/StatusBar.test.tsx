@@ -121,7 +121,7 @@ describe("StatusBar", () => {
 				onOpenConflictResolver={onOpenConflictResolver}
 			/>,
 		);
-		const button = screen.getByTitle("コンフリクト解消ウィンドウを開く");
+		const button = screen.getByLabelText("コンフリクト解消ウィンドウを開く");
 		await userEvent.click(button);
 		expect(onOpenConflictResolver).toHaveBeenCalledTimes(1);
 		expect(onGitSync).not.toHaveBeenCalled();
@@ -140,7 +140,7 @@ describe("StatusBar", () => {
 				onOpenConflictResolver={onOpenConflictResolver}
 			/>,
 		);
-		const button = screen.getByTitle("手動同期");
+		const button = screen.getByLabelText("手動同期");
 		await userEvent.click(button);
 		expect(onGitSync).toHaveBeenCalledTimes(1);
 		expect(onOpenConflictResolver).not.toHaveBeenCalled();

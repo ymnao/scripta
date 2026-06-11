@@ -15,3 +15,8 @@ export const IS_MAC =
 
 /** UI ラベル用の primary modifier 表記。Mac は ⌘、それ以外は Ctrl+。 */
 export const PRIMARY_MOD_SYMBOL = IS_MAC ? "⌘" : "Ctrl+";
+
+/** Kbd 単位表示用の modifier ラベル。Mac は ⌘、それ以外は Ctrl。 */
+export const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
+/** Kbd 単位表示用の Shift ラベル。Mac は ⇧、それ以外は Shift。 */
+export const SHIFT_KEY_LABEL = IS_MAC ? "⇧" : "Shift";

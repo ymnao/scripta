@@ -13,7 +13,9 @@ import {
 	WifiOff,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import type { GitAction } from "../../types/git-sync";
+import { Tooltip } from "../common/Tooltip";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
 export type SaveStatus = "saved" | "unsaved" | "saving" | "error" | "retrying";
@@ -81,16 +83,17 @@ function GitSyncStatus({
 	}
 
 	return (
-		<button
-			type="button"
-			onClick={hasConflicts ? onOpenConflictResolver : onGitSync}
-			className="flex items-center gap-1 rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
-			title={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}
-			aria-label={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}
-		>
-			{icon}
-			{label && <span>{label}</span>}
-		</button>
+		<Tooltip label={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}>
+			<button
+				type="button"
+				onClick={hasConflicts ? onOpenConflictResolver : onGitSync}
+				className="flex items-center gap-1 rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
+				aria-label={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}
+			>
+				{icon}
+				{label && <span>{label}</span>}
+			</button>
+		</Tooltip>
 	);
 }
 
@@ -137,18 +140,19 @@ export function StatusBar({
 		<div className="flex h-6 items-center justify-between border-t border-border bg-bg-primary pl-2 pr-3 text-text-secondary">
 			<div className="flex min-w-0 items-center gap-3 text-xs">
 				{onToggleSidebar && (
-					<button
-						type="button"
-						onClick={onToggleSidebar}
-						aria-label="サイドバー"
-						aria-pressed={sidebarVisible}
-						title="サイドバー"
-						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
-							sidebarVisible ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
-						}`}
-					>
-						<PanelLeft size={15} />
-					</button>
+					<Tooltip label="サイドバー" keys={[MOD_KEY_LABEL, "/"]}>
+						<button
+							type="button"
+							onClick={onToggleSidebar}
+							aria-label="サイドバー"
+							aria-pressed={sidebarVisible}
+							className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+								sidebarVisible ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
+							}`}
+						>
+							<PanelLeft size={15} />
+						</button>
+					</Tooltip>
 				)}
 				{gitReady && gitAction != null && (
 					<GitSyncStatus
@@ -195,51 +199,55 @@ export function StatusBar({
 					{saveStatus === "retrying" && "リトライ中..."}
 				</output>
 				{onToggleSlideView && (
-					<button
-						type="button"
-						onClick={onToggleSlideView}
-						aria-label="スライドビュー"
-						aria-pressed={slideViewActive}
-						title="スライドビュー"
-						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
-							slideViewActive ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
-						}`}
-					>
-						<Presentation size={15} />
-					</button>
+					<Tooltip label="スライドビュー" keys={[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "S"]}>
+						<button
+							type="button"
+							onClick={onToggleSlideView}
+							aria-label="スライドビュー"
+							aria-pressed={slideViewActive}
+							className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+								slideViewActive ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
+							}`}
+						>
+							<Presentation size={15} />
+						</button>
+					</Tooltip>
 				)}
 				{onToggleScratchpad && (
+					<Tooltip label="スクラッチパッド" keys={[MOD_KEY_LABEL, "J"]}>
+						<button
+							type="button"
+							onClick={onToggleScratchpad}
+							aria-label="スクラッチパッド"
+							aria-pressed={scratchpadOpen}
+							className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
+								scratchpadOpen ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
+							}`}
+						>
+							<StickyNote size={15} />
+						</button>
+					</Tooltip>
+				)}
+				<Tooltip label="設定" keys={[MOD_KEY_LABEL, ","]}>
 					<button
 						type="button"
-						onClick={onToggleScratchpad}
-						aria-label="スクラッチパッド"
-						aria-pressed={scratchpadOpen}
-						title="スクラッチパッド"
-						className={`flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10 ${
-							scratchpadOpen ? "bg-black/10 text-text-primary dark:bg-white/10" : ""
-						}`}
+						onClick={onOpenSettings}
+						aria-label="設定を開く"
+						className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
 					>
-						<StickyNote size={15} />
+						<Settings size={15} />
 					</button>
-				)}
-				<button
-					type="button"
-					onClick={onOpenSettings}
-					aria-label="設定を開く"
-					title="設定"
-					className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
-				>
-					<Settings size={15} />
-				</button>
-				<button
-					type="button"
-					onClick={onOpenHelp}
-					aria-label="キーボードショートカット"
-					title="キーボードショートカット"
-					className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
-				>
-					<CircleHelp size={15} />
-				</button>
+				</Tooltip>
+				<Tooltip label="キーボードショートカット" keys={["F1"]}>
+					<button
+						type="button"
+						onClick={onOpenHelp}
+						aria-label="キーボードショートカット"
+						className="flex items-center justify-center rounded p-0.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-secondary dark:hover:bg-white/10"
+					>
+						<CircleHelp size={15} />
+					</button>
+				</Tooltip>
 			</div>
 		</div>
 	);

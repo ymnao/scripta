@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useId } from "react";
+import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { DialogBase } from "./DialogBase";
 import { Kbd } from "./Kbd";
 
@@ -7,10 +8,6 @@ interface HelpDialogProps {
 	open: boolean;
 	onClose: () => void;
 }
-
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-const mod = isMac ? "\u2318" : "Ctrl";
-const shift = isMac ? "\u21E7" : "Shift";
 
 interface ShortcutGroup {
 	title: string;
@@ -21,32 +18,32 @@ const groups: ShortcutGroup[] = [
 	{
 		title: "書式",
 		shortcuts: [
-			{ keys: [[mod, "B"]], action: "太字（エディタ内）" },
-			{ keys: [[mod, "I"]], action: "斜体" },
-			{ keys: [[mod, shift, "X"]], action: "取り消し線" },
-			{ keys: [[mod, "1\u20136"]], action: "見出し 1\u20136" },
-			{ keys: [[mod, "L"]], action: "リストの切り替え" },
-			{ keys: [[mod, shift, "L"]], action: "チェックボックスの切り替え" },
-			{ keys: [[mod, "\u21A9"]], action: "チェック / チェック解除" },
-			{ keys: [[mod, shift, "T"]], action: "テーブルを挿入" },
+			{ keys: [[MOD_KEY_LABEL, "B"]], action: "太字（エディタ内）" },
+			{ keys: [[MOD_KEY_LABEL, "I"]], action: "斜体" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "X"]], action: "取り消し線" },
+			{ keys: [[MOD_KEY_LABEL, "1\u20136"]], action: "見出し 1\u20136" },
+			{ keys: [[MOD_KEY_LABEL, "L"]], action: "リストの切り替え" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "L"]], action: "チェックボックスの切り替え" },
+			{ keys: [[MOD_KEY_LABEL, "\u21A9"]], action: "チェック / チェック解除" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "T"]], action: "テーブルを挿入" },
 		],
 	},
 	{
 		title: "ファイル",
 		shortcuts: [
-			{ keys: [[mod, "S"]], action: "保存" },
-			{ keys: [[mod, "T"]], action: "新しいタブ" },
-			{ keys: [[mod, "W"]], action: "タブを閉じる" },
+			{ keys: [[MOD_KEY_LABEL, "S"]], action: "保存" },
+			{ keys: [[MOD_KEY_LABEL, "T"]], action: "新しいタブ" },
+			{ keys: [[MOD_KEY_LABEL, "W"]], action: "タブを閉じる" },
 			{
 				keys: [
-					[mod, "["],
+					[MOD_KEY_LABEL, "["],
 					["Alt", "\u2190"],
 				],
 				action: "戻る",
 			},
 			{
 				keys: [
-					[mod, "]"],
+					[MOD_KEY_LABEL, "]"],
 					["Alt", "\u2192"],
 				],
 				action: "進む",
@@ -56,30 +53,30 @@ const groups: ShortcutGroup[] = [
 	{
 		title: "ナビゲーション",
 		shortcuts: [
-			{ keys: [[mod, shift, "["]], action: "前のタブ" },
-			{ keys: [[mod, shift, "]"]], action: "次のタブ" },
-			{ keys: [[mod, "G"]], action: "指定行へジャンプ" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "["]], action: "前のタブ" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "]"]], action: "次のタブ" },
+			{ keys: [[MOD_KEY_LABEL, "G"]], action: "指定行へジャンプ" },
 		],
 	},
 	{
 		title: "検索",
 		shortcuts: [
-			{ keys: [[mod, "F"]], action: "検索" },
-			{ keys: [[mod, "H"]], action: "置換" },
-			{ keys: [[mod, "P"]], action: "コマンドパレット" },
-			{ keys: [[mod, shift, "F"]], action: "ワークスペース検索" },
+			{ keys: [[MOD_KEY_LABEL, "F"]], action: "検索" },
+			{ keys: [[MOD_KEY_LABEL, "H"]], action: "置換" },
+			{ keys: [[MOD_KEY_LABEL, "P"]], action: "コマンドパレット" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "F"]], action: "ワークスペース検索" },
 		],
 	},
 	{
 		title: "表示",
 		shortcuts: [
-			{ keys: [[mod, "/"]], action: "サイドバーの切り替え" },
-			{ keys: [[mod, shift, "S"]], action: "スライドビュー" },
-			{ keys: [[mod, "J"]], action: "スクラッチパッド" },
-			{ keys: [[mod, "E"]], action: "ファイルエクスプローラー" },
-			{ keys: [[mod, shift, "E"]], action: "エクスポート" },
-			{ keys: [[mod, shift, "U"]], action: "未解決リンク" },
-			{ keys: [[mod, ","]], action: "設定" },
+			{ keys: [[MOD_KEY_LABEL, "/"]], action: "サイドバーの切り替え" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "S"]], action: "スライドビュー" },
+			{ keys: [[MOD_KEY_LABEL, "J"]], action: "スクラッチパッド" },
+			{ keys: [[MOD_KEY_LABEL, "E"]], action: "ファイルエクスプローラー" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "E"]], action: "エクスポート" },
+			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "U"]], action: "未解決リンク" },
+			{ keys: [[MOD_KEY_LABEL, ","]], action: "設定" },
 			{ keys: [["F1"]], action: "ヘルプ" },
 		],
 	},
