@@ -2,6 +2,7 @@
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { IpcMainInvokeEvent } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -9,10 +10,11 @@ vi.mock("electron", () => ({
 	BrowserWindow: { getAllWindows: () => [] },
 }));
 
+import { ipcMain } from "electron";
 import { isNetworkError } from "../../../src/lib/errors";
 import { createGit } from "../utils/git-env";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
-import { __testing } from "./git";
+import { __testing, registerGitIpc } from "./git";
 
 const TEST_WIN = 1;
 const OTHER_WIN = 2;
@@ -547,5 +549,24 @@ describe("emitConflictResolvedImpl", () => {
 		const dir = await newWorkspace();
 		// OTHER_WIN は何も登録されていない window → 自 workspace でも弾かれる
 		await expect(emitConflictResolvedImpl(OTHER_WIN, dir)).rejects.toThrow(/Permission denied/);
+	});
+});
+
+describe("git:emit-conflict-resolved IPC ハンドラ配線", () => {
+	it("ハンドラが impl の Promise を返し、認可エラーが呼び出し元へ伝播する", async () => {
+		vi.mocked(ipcMain.handle).mockReset();
+		registerGitIpc();
+
+		const calls = vi.mocked(ipcMain.handle).mock.calls;
+		const entry = calls.find(([ch]) => ch === "git:emit-conflict-resolved");
+		if (!entry) throw new Error("git:emit-conflict-resolved was not registered");
+		const listener = entry[1];
+
+		// 修正前はハンドラが Promise を捨てて undefined を返し、認可エラーを隠蔽していた（その回帰防止）。
+		// 未登録 window からの emit は path のみで reject するため、git repo は不要（mkdtemp のみ）。
+		const event = { sender: { id: OTHER_WIN } } as unknown as IpcMainInvokeEvent;
+		const dir = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-wiring-")));
+		dirsToCleanup.push(dir);
+		await expect(listener(event, dir)).rejects.toThrow(/Permission denied/);
 	});
 });

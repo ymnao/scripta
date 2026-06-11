@@ -31,7 +31,7 @@ export function useUpdateCheck(enabled: boolean) {
 		if (!enabled) return;
 		let cancelled = false;
 
-		(async () => {
+		void (async () => {
 			try {
 				const lastCheck = await loadLastUpdateCheck();
 				if (cancelled || Date.now() - lastCheck < CHECK_INTERVAL_MS) return;

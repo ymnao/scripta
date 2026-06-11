@@ -194,7 +194,7 @@ export function AppLayout() {
 	useEffect(() => {
 		let cancelled = false;
 
-		(async () => {
+		void (async () => {
 			const settings = await loadSettings();
 			if (cancelled) return;
 
@@ -303,7 +303,15 @@ export function AppLayout() {
 	// Open (or re-focus) the conflict resolution window
 	const openConflictResolver = useCallback(async () => {
 		if (!workspacePath) return;
-		await openConflictWindow(workspacePath);
+		try {
+			await openConflictWindow(workspacePath);
+		} catch (err) {
+			// 呼び出し元は fire-and-forget（auto-open の useEffect / StatusBar の onClick）
+			// のため、ここで握って通知しないと失敗がユーザーに見えない
+			useToastStore
+				.getState()
+				.addToast("error", `コンフリクト解決ウィンドウを開けませんでした: ${translateError(err)}`);
+		}
 	}, [workspacePath]);
 
 	// Auto-open conflict resolution window only on 0 → >0 transition
@@ -312,7 +320,7 @@ export function AppLayout() {
 		const prev = prevConflictCountRef.current;
 		prevConflictCountRef.current = conflictFiles.length;
 		if (prev === 0 && conflictFiles.length > 0 && workspacePath) {
-			openConflictResolver();
+			void openConflictResolver();
 		}
 	}, [conflictFiles, workspacePath, openConflictResolver]);
 
@@ -1024,22 +1032,22 @@ export function AppLayout() {
 			// Navigation: Cmd+[ / Alt+Left = back, Cmd+] / Alt+Right = forward
 			if ((e.metaKey || e.ctrlKey) && e.key === "[") {
 				e.preventDefault();
-				handleGoBack();
+				void handleGoBack();
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.key === "]") {
 				e.preventDefault();
-				handleGoForward();
+				void handleGoForward();
 				return;
 			}
 			if (e.altKey && e.key === "ArrowLeft") {
 				e.preventDefault();
-				handleGoBack();
+				void handleGoBack();
 				return;
 			}
 			if (e.altKey && e.key === "ArrowRight") {
 				e.preventDefault();
-				handleGoForward();
+				void handleGoForward();
 				return;
 			}
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") {
