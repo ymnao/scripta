@@ -94,4 +94,28 @@ test.describe("icon button tooltip", () => {
 		await expect(tooltip).toBeVisible();
 		await expect(tooltip).toContainText("新しいタブ");
 	});
+
+	test("右端のボタンでも tooltip が縦折れせず viewport 内に収まる", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs, dialogResult: "/workspace" });
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await expect(page.getByLabel("test.md file")).toBeVisible();
+
+		// ステータスバー最右端のヘルプボタン。fixed + left の shrink-to-fit で利用可能幅が
+		// 極小になり 1〜2 文字ずつ縦折れしていた回帰を検証する（w-max で内容幅基準にした）。
+		await page.getByLabel("キーボードショートカット").hover();
+		const tooltip = page.getByRole("tooltip");
+		await expect(tooltip).toBeVisible();
+
+		const box = await tooltip.boundingBox();
+		const viewport = page.viewportSize();
+		if (!box || !viewport) throw new Error("boundingBox / viewportSize が取得できない");
+		// 縦折れしていない（1 行 = 横長）
+		expect(box.width).toBeGreaterThan(box.height);
+		// 横方向の clamp が効いて viewport 内に収まっている
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+	});
 });

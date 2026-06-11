@@ -1,11 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetTooltipWarmupForTest, TOOLTIP_SHOW_DELAY_MS, Tooltip } from "./Tooltip";
+import { TOOLTIP_SHOW_DELAY_MS, Tooltip } from "./Tooltip";
 
-// 表示遅延（warm-up）はモジュール状態を共有するため、テスト毎にリセットする。
 beforeEach(() => {
 	vi.useFakeTimers();
-	resetTooltipWarmupForTest();
 });
 
 afterEach(() => {
@@ -113,35 +111,7 @@ describe("Tooltip", () => {
 		expect(trigger).not.toHaveAttribute("aria-describedby");
 	});
 
-	it("skip delay: 直前に消えた tooltip がある場合、別 trigger の hover はタイマーを進めずに即表示", () => {
-		render(
-			<>
-				<Tooltip label="ボタン A">
-					<button type="button">A</button>
-				</Tooltip>
-				<Tooltip label="ボタン B">
-					<button type="button">B</button>
-				</Tooltip>
-			</>,
-		);
-		const a = screen.getByRole("button", { name: "A" });
-		const b = screen.getByRole("button", { name: "B" });
-
-		// まず A を 500ms 待って表示
-		fireEvent.mouseEnter(a);
-		advanceShowDelay();
-		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン A");
-
-		// A を unhover（消えると lastHiddenAt が更新される）して B へ移る
-		fireEvent.mouseLeave(a);
-		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-
-		// skip delay 窓内（advance せず）なので B はタイマーを進めずに即表示される
-		fireEvent.mouseEnter(b);
-		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン B");
-	});
-
-	it("消滅から 300ms を超えた後の hover は再び 500ms 遅延する", () => {
+	it("表示中の tooltip から別 trigger へすぐ移っても、次の tooltip は改めて 500ms 待つ", () => {
 		render(
 			<>
 				<Tooltip label="ボタン A">
@@ -159,15 +129,11 @@ describe("Tooltip", () => {
 		advanceShowDelay();
 		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン A");
 
+		// A 表示中にすぐ B へ移る — 即時表示はされない
 		fireEvent.mouseLeave(a);
-		// skip delay 窓（300ms）を超えて時間を進める
-		act(() => {
-			vi.advanceTimersByTime(301);
-		});
-
-		// B の hover は即時表示されず、500ms 遅延を要する
 		fireEvent.mouseEnter(b);
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
 		advanceShowDelay();
 		expect(screen.getByRole("tooltip")).toHaveTextContent("ボタン B");
 	});
