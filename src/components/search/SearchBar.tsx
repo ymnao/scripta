@@ -12,12 +12,13 @@ import { EditorView } from "@codemirror/view";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { isIMEComposing } from "../../lib/ime";
-import { IS_MAC } from "../../lib/platform";
+import { IS_MAC, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { Tooltip } from "../common/Tooltip";
 
 // keys は IS_MAC がモジュールロード時に確定するため、モジュールトップで定数化する。
-const PREV_MATCH_KEYS = IS_MAC ? ["⇧", "↩"] : ["Shift", "Enter"];
-const NEXT_MATCH_KEYS = IS_MAC ? ["↩"] : ["Enter"];
+const RETURN_KEY_LABEL = IS_MAC ? "↩" : "Enter";
+const PREV_MATCH_KEYS = [SHIFT_KEY_LABEL, RETURN_KEY_LABEL];
+const NEXT_MATCH_KEYS = [RETURN_KEY_LABEL];
 
 export interface SearchBarHandle {
 	focusInput: () => void;

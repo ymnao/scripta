@@ -20,7 +20,7 @@ interface TooltipProps {
 	label: string;
 	/** ショートカットのキー表示列（platform 反映済み。例: ["⌘", "/"]）。省略時は label のみ表示 */
 	keys?: string[];
-	/** tooltip を出す側。既定 "top"（StatusBar 用）。画面上部のボタンは "bottom" */
+	/** tooltip を出す側。既定は "top"。アンカーが画面上部にあるボタンでは "bottom" を指定する */
 	side?: "top" | "bottom";
 	/** トリガー要素（button 1 個） */
 	children: ReactElement<HTMLAttributes<HTMLElement>>;
@@ -38,6 +38,14 @@ const GAP = 6;
 
 /** hover から表示までの遅延（ms）。マウス通過時の誤表示を防ぐ。 */
 export const TOOLTIP_SHOW_DELAY_MS = 500;
+
+/** 注入ハンドラと children 既存ハンドラを合成して両方呼ぶ。 */
+function mergeHandlers<E>(injected: (e: E) => void, existing?: (e: E) => void): (e: E) => void {
+	return (e: E) => {
+		injected(e);
+		existing?.(e);
+	};
+}
 
 /**
  * アイコンボタンのホバー / フォーカス時に機能名 + ショートカットを表示するカスタム tooltip。
@@ -66,6 +74,8 @@ export function Tooltip({ label, keys, side = "top", children }: TooltipProps) {
 	}, []);
 
 	const show = useCallback(() => {
+		// hover の表示遅延中に keyboard focus で即表示された場合、保留タイマーを破棄する
+		// （残すと満了時に show が二重に走る）。
 		clearShowTimer();
 		const trigger = triggerRef.current;
 		if (!trigger) return;
@@ -126,16 +136,6 @@ export function Tooltip({ label, keys, side = "top", children }: TooltipProps) {
 		if (next > max) next = max;
 		setLeft(next);
 	}, [anchor, centerX]);
-
-	const mergeHandlers = <E,>(
-		injected: (e: E) => void,
-		existing?: (e: E) => void,
-	): ((e: E) => void) => {
-		return (e: E) => {
-			injected(e);
-			existing?.(e);
-		};
-	};
 
 	const childProps = children.props;
 
