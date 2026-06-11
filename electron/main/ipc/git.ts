@@ -343,9 +343,9 @@ export function registerGitIpc(): void {
 	handle("git:get-last-commit-time", (event, path: string) =>
 		getLastCommitTimeImpl(event.sender.id, path),
 	);
-	handle("git:emit-conflict-resolved", (event, workspacePath: string) => {
-		emitConflictResolvedImpl(event.sender.id, workspacePath);
-	});
+	handle("git:emit-conflict-resolved", (event, workspacePath: string) =>
+		emitConflictResolvedImpl(event.sender.id, workspacePath),
+	);
 }
 
 export const __testing = {
