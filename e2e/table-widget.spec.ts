@@ -106,6 +106,30 @@ test.describe("table widget", () => {
 		await expect(page.locator(".cm-line").first()).toHaveText("hello");
 	});
 
+	test("BOF gap への貼り付けで本文とカーソルが正しく入る (#167)", async ({ page, context }) => {
+		await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+		await openTableFile(page, bofTableContent);
+
+		// クリップボードに貼り付け対象を仕込む
+		await page.evaluate(() => navigator.clipboard.writeText("pasted"));
+
+		// 本文にカーソルを置いてから文書先頭（BOF gap）へ移動
+		await page.getByText("after text").click();
+		await page.keyboard.press(`${modKey}+Home`);
+		await expect(page.locator(".cm-table-gap-cursor")).toBeVisible();
+
+		// Cmd+V（CM native paste）で貼り付ける。native paste は userEvent: "input.paste" を
+		// 付けて selection 付き dispatch を発行するため tableGapMaterialize の selection
+		// マップ経路に乗り、`pasted\n` が入りカーソルは `pasted` 直後へ進む。
+		// （右クリック経路は handleEditorContextMenu が clickPos へカーソルを移動させ BOF
+		//  gap を外すため、gap での貼り付け検証は Cmd+V 経路で行う。）
+		await page.keyboard.press(`${modKey}+v`);
+
+		// 続けて入力した X が貼り付けテキストと同じ行に続く（カーソルが直後に進んだ証拠）
+		await page.keyboard.type("X");
+		await expect(page.locator(".cm-line").first()).toHaveText("pastedX");
+	});
+
 	test("セル編集中は gap cursor が消える (#167)", async ({ page }) => {
 		// 文書先頭がテーブルのとき、セル編集中も anchorEditorToTable が CM selection を
 		// BOF gap に置くため、以前はセル編集中ずっと gap cursor バーが出ていた。

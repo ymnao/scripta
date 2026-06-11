@@ -1694,6 +1694,10 @@ const gapMaterialized = Annotation.define<boolean>();
  * ここで変形する。IME は composition 開始後の文書変更が Chromium で composition を
  * 壊すため tableGapImeKeydown の先行 materialize が担い、その tr は gapMaterialized
  * annotation で本 filter をスキップする。
+ *
+ * `tr.selection` の無い changes-only dispatch ではカーソルは CM デフォルト（挿入位置の
+ * 前に留まる）に従う。貼り付け等の UI 経路は dispatch 側で selection を明示すること
+ * （MarkdownEditor の右クリック貼り付け参照）。
  */
 const tableGapMaterialize = EditorState.transactionFilter.of((tr) => {
 	if (!tr.docChanged) return tr;
