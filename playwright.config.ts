@@ -4,6 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
 // モック注入する。実 IPC / main プロセスは Vitest 側でカバー。
 
 const PORT = 5174;
+// Vite 側（vite.config.e2e.ts）の `host: "127.0.0.1"` と揃える（#171）
+const HOST = "127.0.0.1";
 
 export default defineConfig({
 	testDir: "./e2e",
@@ -20,7 +22,7 @@ export default defineConfig({
 	// reporter から外すと artifact が空になり、失敗時の解析パスが切れる。
 	reporter: process.env.CI ? [["dot"], ["github"], ["html", { open: "never" }]] : "html",
 	use: {
-		baseURL: `http://localhost:${PORT}`,
+		baseURL: `http://${HOST}:${PORT}`,
 		trace: "on-first-retry",
 	},
 	projects: [
@@ -37,7 +39,7 @@ export default defineConfig({
 	],
 	webServer: {
 		command: "pnpm dev:e2e",
-		url: `http://localhost:${PORT}`,
+		url: `http://${HOST}:${PORT}`,
 		reuseExistingServer: !process.env.CI,
 		stdout: "ignore",
 		stderr: "pipe",
