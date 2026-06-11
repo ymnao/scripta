@@ -3,6 +3,7 @@ import katex from "katex";
 import {
 	Marked,
 	type RendererExtensionFunction,
+	type Token,
 	type TokenizerAndRendererExtension,
 	type Tokens,
 } from "marked";
@@ -11,6 +12,9 @@ import { escapeHtml, isEscaped } from "./content";
 interface MathPlaceholder {
 	placeholder: string;
 	html: string;
+	/** placeholder 化前の原文全体（例: `$x$` / `$$x$$` / 複数行 `$$...\n...$$` のマッチ全体）。
+	 * image alt など属性値文脈で placeholder を原文に戻す際に使用する。 */
+	raw: string;
 }
 
 /** Merge and sort an array of [start, end) ranges. */
@@ -286,11 +290,12 @@ function preprocessDisplayMath(
 				displayMode: true,
 				throwOnError: false,
 			});
-			placeholders.push({ placeholder, html });
+			placeholders.push({ placeholder, html, raw: match });
 		} catch {
 			placeholders.push({
 				placeholder,
 				html: `<span class="math-error">${escapeHtml(tex)}</span>`,
+				raw: match,
 			});
 		}
 		// The opening-line prefix is now outside the match, so it stays in the
@@ -316,12 +321,14 @@ const INLINE_MATH_RE = /^\$((?:[^\n$\\]|\\.)+)\$/;
  * KaTeX で tex を描画し、placeholder を発行して返す共通処理。
  * tex 中の EDOLLAR placeholder（\$ のエスケープ退避）を `\$` に復元してから描画する。
  * katex throw 時は replaceMath 時代と同形の `<span class="math-error">` を発行する。
+ * raw には placeholder 化前の原文全体を渡す（image alt 等、属性値文脈での原文復元に使用）。
  */
 function renderMathPlaceholder(
 	tex: string,
 	displayMode: boolean,
 	placeholders: MathPlaceholder[],
 	nonce: string,
+	raw: string,
 ): string {
 	const dollarPh = `%%EDOLLAR_${nonce}%%`;
 	const texForKatex = tex.replaceAll(dollarPh, "\\$");
@@ -332,11 +339,12 @@ function renderMathPlaceholder(
 			displayMode,
 			throwOnError: false,
 		});
-		placeholders.push({ placeholder, html });
+		placeholders.push({ placeholder, html, raw });
 	} catch {
 		placeholders.push({
 			placeholder,
 			html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
+			raw,
 		});
 	}
 	return placeholder;
@@ -367,9 +375,10 @@ function createMathExtensions(
 ): TokenizerAndRendererExtension[] {
 	// renderer は marked の RendererExtensionFunction 互換シグネチャ。引数は
 	// この tokenizer が生成した token のみが渡るので MathToken への絞り込みは安全。
+	// t.raw を渡すことで image alt 等の属性値文脈で原文復元に使えるようにする。
 	const renderer: RendererExtensionFunction = (token) => {
 		const t = token as MathToken;
-		return renderMathPlaceholder(t.tex, t.type === "mathDisplay", placeholders, nonce);
+		return renderMathPlaceholder(t.tex, t.type === "mathDisplay", placeholders, nonce, t.raw);
 	};
 
 	// display / inline は開始 marker と正規表現以外同形なので共通生成する。
@@ -437,15 +446,48 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	marked.use({ extensions: createMathExtensions(placeholders, nonce) });
 	const tokens = marked.lexer(preprocessed);
 
+	// 画像 alt（label）内の math はプレーン TeX に戻す。alt は属性値であり、
+	// placeholder のまま残すと sanitize 後の文字列復元で KaTeX HTML が属性内に
+	// 展開されて HTML が壊れる（テキスト文脈でない場所に math placeholder を
+	// 残してはならない）。
+	marked.walkTokens(tokens, (token) => {
+		if (token.type !== "image") return;
+		const img = token as Tokens.Image;
+		img.tokens = img.tokens.map((t: Token) => {
+			if (t.type === "mathDisplay" || t.type === "mathInline") {
+				// inline extension が生成した math token → 原文の text token に差し戻す
+				return { type: "text", raw: t.raw, text: t.raw } satisfies Tokens.Text;
+			}
+			return t;
+		});
+		// 複数行 display math は preprocess（raw 段階）で placeholder 化されるため、
+		// text token の中に placeholder 文字列として残っている可能性がある。原文に戻す。
+		// 置換は関数形式必須: raw は `$$...$$` を含み、文字列 replacement では
+		// `$$` が「リテラル $ 1 個」の特殊パターンとして解釈され $ が欠ける。
+		for (const t of img.tokens) {
+			if (t.type === "text") {
+				const textToken = t as Tokens.Text;
+				for (const ph of placeholders) {
+					if (textToken.text.includes(ph.placeholder)) {
+						textToken.text = textToken.text.replaceAll(ph.placeholder, () => ph.raw);
+						textToken.raw = textToken.raw.replaceAll(ph.placeholder, () => ph.raw);
+					}
+				}
+			}
+		}
+	});
+
 	// Render tokens to HTML
 	let html = marked.parser(tokens);
 
 	// Sanitize before restoring math placeholders so KaTeX output is not affected.
 	html = DOMPurify.sanitize(html);
 
-	// Restore math placeholders
+	// Restore math placeholders. 関数形式必須: KaTeX HTML の annotation には TeX 原文が
+	// 入るため、文字列 replacement だと `$` + 後続文字（$` $' $& 等）が特殊パターン
+	// として解釈され、文書の一部が複製される事故が起こりうる。
 	for (const { placeholder, html: mathHtml } of placeholders) {
-		html = html.replace(placeholder, mathHtml);
+		html = html.replace(placeholder, () => mathHtml);
 	}
 
 	// Restore escaped dollar placeholders to literal $

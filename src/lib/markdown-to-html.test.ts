@@ -367,4 +367,72 @@ describe("markdownToHtml", () => {
 		const html = markdownToHtml("line1\nline2", { breaks: true });
 		expect(html).toContain("<br");
 	});
+
+	// image alt 内の math は属性値文脈なので KaTeX HTML ではなくプレーン TeX を保持する (#170)。
+	it("keeps inline math as plain TeX in image alt (not KaTeX HTML)", () => {
+		const html = markdownToHtml("![alt $x$](img.png)", { breaks: true });
+		expect(html).toContain('alt="alt $x$"');
+		expect(html).not.toContain('alt="alt <span');
+		// img タグの中に katex クラスが入らない
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("keeps single-line display math as plain TeX in image alt", () => {
+		// alt 属性値に $$ が残るのが正しい（KaTeX HTML に展開してはならない）
+		const html = markdownToHtml("![v $$x$$](i.png)", { breaks: true });
+		expect(html).toContain('alt="v $$x$$"');
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("keeps inline math as plain TeX in image alt inside a GFM table cell", () => {
+		// ヘッダ行 + 区切り行 + ボディ行でテーブルを構成し、<td> を含む出力を確認する
+		const md = "| img |\n| --- |\n| ![alt $x$](img.png) |";
+		const html = markdownToHtml(md, { breaks: true });
+		// td の中に img が存在し、その alt がプレーンのまま
+		expect(html).toContain("<td>");
+		expect(html).toContain('alt="alt $x$"');
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("still renders KaTeX in link label (text context) after image alt fix", () => {
+		// リンクテキストはテキスト文脈なので KaTeX 化が正しい（回帰確認）
+		const html = markdownToHtml("[$x$](http://example.com)", { breaks: true });
+		expect(html).toContain("katex");
+	});
+
+	it("renders surrounding math as KaTeX while keeping image alt plain", () => {
+		// 画像の周囲の math は KaTeX 化され、alt はプレーンのまま
+		const html = markdownToHtml("$y$ ![alt $x$](img.png) $z$", { breaks: true });
+		// 周囲の $y$ と $z$ が KaTeX 化されて 2 回以上 katex が現れる
+		const katexCount = (html.match(/katex/g) ?? []).length;
+		expect(katexCount).toBeGreaterThanOrEqual(2);
+		expect(html).toContain('alt="alt $x$"');
+	});
+
+	it("keeps multi-line display math as plain TeX in image alt without losing $", () => {
+		// 複数行 display math は preprocess の placeholder として alt に入る経路。
+		// 原文復元の replacement に `$$` が含まれるため、文字列 replacement の
+		// 特殊パターン解釈（$$ → $）で $ が欠ける回帰を防ぐ（関数形式で回避）。
+		const html = markdownToHtml("![alt $$x\n+y$$](u.png)", { breaks: true });
+		expect(html).toContain('alt="alt $$x\n+y$$"');
+		const imgMatch = html.match(/<img[^>]*>/);
+		expect(imgMatch).not.toBeNull();
+		expect(imgMatch?.[0]).not.toContain("katex");
+	});
+
+	it("does not duplicate document content when TeX contains a $` sequence", () => {
+		// KaTeX annotation には TeX 原文が入るため、placeholder 復元が文字列
+		// replacement だと「$`」が『マッチ前の全文』として展開され文書が複製される。
+		// 関数形式での復元によりリテラルのまま挿入されることを固定する。
+		const html = markdownToHtml("before $a\\$`b$ after", { breaks: true });
+		expect(html).toContain("katex");
+		expect((html.match(/before/g) ?? []).length).toBe(1);
+		expect((html.match(/after/g) ?? []).length).toBe(1);
+	});
 });
