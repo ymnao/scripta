@@ -305,10 +305,12 @@ export function AppLayout() {
 		if (!workspacePath) return;
 		try {
 			await openConflictWindow(workspacePath);
-		} catch {
+		} catch (err) {
 			// 呼び出し元は fire-and-forget（auto-open の useEffect / StatusBar の onClick）
 			// のため、ここで握って通知しないと失敗がユーザーに見えない
-			useToastStore.getState().addToast("error", "コンフリクト解決ウィンドウを開けませんでした");
+			useToastStore
+				.getState()
+				.addToast("error", `コンフリクト解決ウィンドウを開けませんでした: ${translateError(err)}`);
 		}
 	}, [workspacePath]);
 

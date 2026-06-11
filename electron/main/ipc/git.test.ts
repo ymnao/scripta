@@ -553,24 +553,20 @@ describe("emitConflictResolvedImpl", () => {
 });
 
 describe("git:emit-conflict-resolved IPC ハンドラ配線", () => {
-	const fakeEvent = (id: number): IpcMainInvokeEvent =>
-		({ sender: { id } }) as unknown as IpcMainInvokeEvent;
-
 	it("ハンドラが impl の Promise を返し、認可エラーが呼び出し元へ伝播する", async () => {
-		// ipcMain.handle の呼び出し履歴をリセットしてからハンドラを登録する
 		vi.mocked(ipcMain.handle).mockReset();
 		registerGitIpc();
 
-		// "git:emit-conflict-resolved" のリスナーを取得
 		const calls = vi.mocked(ipcMain.handle).mock.calls;
 		const entry = calls.find(([ch]) => ch === "git:emit-conflict-resolved");
 		if (!entry) throw new Error("git:emit-conflict-resolved was not registered");
 		const listener = entry[1];
 
-		// OTHER_WIN は workspace 未登録のため、impl は Permission denied で reject する。
-		// 修正前は Promise を捨てていたため listener は undefined を返しエラーを隠蔽していた。
-		// 修正後は impl の Promise がそのまま伝播するため reject が見える。
-		const dir = await newWorkspace();
-		await expect(listener(fakeEvent(OTHER_WIN), dir)).rejects.toThrow(/Permission denied/);
+		// 修正前はハンドラが Promise を捨てて undefined を返し、認可エラーを隠蔽していた（その回帰防止）。
+		// 未登録 window からの emit は path のみで reject するため、git repo は不要（mkdtemp のみ）。
+		const event = { sender: { id: OTHER_WIN } } as unknown as IpcMainInvokeEvent;
+		const dir = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-wiring-")));
+		dirsToCleanup.push(dir);
+		await expect(listener(event, dir)).rejects.toThrow(/Permission denied/);
 	});
 });
