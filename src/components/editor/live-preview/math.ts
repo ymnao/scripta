@@ -25,6 +25,9 @@ export { isEscaped };
 // Lenient $$...$$ match (position-independent). markdown-to-html.ts の
 // preprocessDisplayMath と寛容さを揃えており、Live Preview と PDF のパリティを
 // 保証している (#169)。マッチ規則を変更する際は両方を同期すること。
+// markdown-to-html.ts 側では、複数行 display を preprocessDisplayMath が、単一行
+// display と inline を marked の inline tokenizer extension（INLINE_DISPLAY_MATH_RE /
+// INLINE_MATH_RE — 下記と同形 regex の先頭アンカー版）が担当する。
 const DISPLAY_MATH_RE = /\$\$([\s\S]+?)\$\$/g;
 const INLINE_MATH_RE = /\$((?:[^\n$\\]|\\.)+)\$/g;
 

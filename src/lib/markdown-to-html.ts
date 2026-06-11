@@ -1,6 +1,11 @@
 import DOMPurify from "dompurify";
 import katex from "katex";
-import { Marked, type Token, type Tokens } from "marked";
+import {
+	Marked,
+	type RendererExtensionFunction,
+	type TokenizerAndRendererExtension,
+	type Tokens,
+} from "marked";
 import { escapeHtml, isEscaped } from "./content";
 
 interface MathPlaceholder {
@@ -219,7 +224,7 @@ const OPENING_LINE_PREFIX_RE = /^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*$/;
  * Replace multi-line display math ($$...\n...\n$$) in raw markdown
  * before lexing. With `breaks: true`, newlines inside display math
  * would be converted to <br>, breaking KaTeX rendering.
- * Single-line $$...$$ is handled later by walkTokens.
+ * Single-line $$...$$ is handled later by the `mathDisplay` inline extension.
  *
  * Matching uses the same lenient `$$...$$` pattern as the editor
  * (`DISPLAY_MATH_RE` in live-preview/math.ts) so Live Preview and PDF stay in
@@ -227,7 +232,7 @@ const OPENING_LINE_PREFIX_RE = /^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*$/;
  * followed by trailing text is now captured here too, instead of leaking out
  * as raw `$$` (and being mis-parsed into lists/paragraphs). The line/end
  * anchors were dropped; only multi-line matches are placeholdered (single-line
- * ones stay with walkTokens, which is why preprocess exists — to stop
+ * ones stay with the inline extension, which is why preprocess exists — to stop
  * `breaks: true` from inserting <br> inside a math block).
  */
 function preprocessDisplayMath(
@@ -246,9 +251,9 @@ function preprocessDisplayMath(
 	// match never spans across an intervening $$ pair. `String.replace` visits
 	// every match.
 	return markdown.replace(/\$\$((?:(?!\$\$)[\s\S])+?)\$\$/g, (match, rawTex: string, offset) => {
-		// Single-line $$...$$ → leave for walkTokens (Pass 1). preprocess only
-		// owns multi-line math (its sole job is preventing `breaks: true` from
-		// turning the inner newlines into <br>).
+		// Single-line $$...$$ → leave for the `mathDisplay` inline extension.
+		// preprocess only owns multi-line math (its sole job is preventing
+		// `breaks: true` from turning the inner newlines into <br>).
 		if (!rawTex.includes("\n")) return match;
 		// Skip math inside code (fenced / indented / raw <pre>/<code> / inline).
 		if (isInsideRanges(offset, codeRanges)) return match;
@@ -294,98 +299,111 @@ function preprocessDisplayMath(
 	});
 }
 
-function replaceMath(text: string, placeholders: MathPlaceholder[], nonce: string): string {
-	let processed = text;
-	const dollarPh = `%%EDOLLAR_${nonce}%%`;
-
-	// Pass 1: Display math ($$...$$) — handles remaining $$...$$ after
-	// preprocessDisplayMath has replaced multi-line instances.
-	processed = processed.replace(
-		/\$\$((?:(?!\$\$)[^\n])+)\$\$/g,
-		(match, tex: string, offset: number) => {
-			if (isEscaped(processed, offset)) return match;
-			const closingDisplayPos = offset + match.length - 2;
-			if (isEscaped(processed, closingDisplayPos)) return match;
-
-			const texForKatex = tex.replaceAll(dollarPh, "\\$");
-			const placeholder = `%%MATH_D_${nonce}_${placeholders.length}%%`;
-			try {
-				const html = katex.renderToString(texForKatex.trim(), {
-					displayMode: true,
-					throwOnError: false,
-				});
-				placeholders.push({ placeholder, html });
-			} catch {
-				placeholders.push({
-					placeholder,
-					html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
-				});
-			}
-			return placeholder;
-		},
-	);
-
-	// Pass 2: Inline math ($...$)
-	processed = processed.replace(
-		/\$((?:[^\n$\\]|\\.)+)\$/g,
-		(match, tex: string, offset: number) => {
-			if (isEscaped(processed, offset)) return match;
-			const closingInlinePos = offset + match.length - 1;
-			if (isEscaped(processed, closingInlinePos)) return match;
-
-			const texForKatex = tex.replaceAll(dollarPh, "\\$");
-			const placeholder = `%%MATH_I_${nonce}_${placeholders.length}%%`;
-			try {
-				const html = katex.renderToString(texForKatex.trim(), {
-					displayMode: false,
-					throwOnError: false,
-				});
-				placeholders.push({ placeholder, html });
-			} catch {
-				placeholders.push({
-					placeholder,
-					html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
-				});
-			}
-			return placeholder;
-		},
-	);
-
-	return processed;
+// marked の inline tokenizer extension が生成する math トークン。
+// Tokens.Generic を拡張し、tokenizer の戻り値と renderer 引数の絞り込みに使う。
+interface MathToken extends Tokens.Generic {
+	type: "mathDisplay" | "mathInline";
+	tex: string;
 }
 
-function walkTokens(tokens: Token[], placeholders: MathPlaceholder[], nonce: string): void {
-	for (const token of tokens) {
-		// Only replace math in text tokens (not in code, link URLs, etc.)
-		if (token.type === "text") {
-			const t = token as Tokens.Text;
-			t.text = replaceMath(t.text, placeholders, nonce);
-			if (t.raw) t.raw = t.text;
-		}
+// 単一行 display math: /^\$\$...\$\$/。インライン tokenizer なので preprocessDisplayMath
+// が複数行 ($$\n...\n$$) を placeholder 化した後の単一行だけが残る。
+const INLINE_DISPLAY_MATH_RE = /^\$\$((?:(?!\$\$)[^\n])+)\$\$/;
+// インライン math: /^\$...\$/。エディタ live-preview/math.ts の INLINE_MATH_RE と同形。
+const INLINE_MATH_RE = /^\$((?:[^\n$\\]|\\.)+)\$/;
 
-		// Paragraphs contain inline math in their raw text; re-lex after replacement
-		if (token.type === "paragraph") {
-			const p = token as Tokens.Paragraph;
-			p.text = replaceMath(p.text, placeholders, nonce);
-			// Paragraph raw also needs updating so Marked doesn't re-parse the original
-			if (p.raw) p.raw = replaceMath(p.raw, placeholders, nonce);
-		}
-
-		// Recurse into child tokens
-		if ("tokens" in token && Array.isArray(token.tokens)) {
-			walkTokens(token.tokens, placeholders, nonce);
-		}
-
-		// List items have nested tokens
-		if (token.type === "list") {
-			const list = token as Tokens.List;
-			for (const item of list.items) {
-				if (Array.isArray(item.tokens)) {
-					walkTokens(item.tokens, placeholders, nonce);
-				}
-			}
-		}
+/**
+ * KaTeX で tex を描画し、placeholder を発行して返す共通処理。
+ * tex 中の EDOLLAR placeholder（\$ のエスケープ退避）を `\$` に復元してから描画する。
+ * katex throw 時は replaceMath 時代と同形の `<span class="math-error">` を発行する。
+ */
+function renderMathPlaceholder(
+	tex: string,
+	displayMode: boolean,
+	placeholders: MathPlaceholder[],
+	nonce: string,
+): string {
+	const dollarPh = `%%EDOLLAR_${nonce}%%`;
+	const texForKatex = tex.replaceAll(dollarPh, "\\$");
+	const kind = displayMode ? "D" : "I";
+	const placeholder = `%%MATH_${kind}_${nonce}_${placeholders.length}%%`;
+	try {
+		const html = katex.renderToString(texForKatex.trim(), {
+			displayMode,
+			throwOnError: false,
+		});
+		placeholders.push({ placeholder, html });
+	} catch {
+		placeholders.push({
+			placeholder,
+			html: `<span class="math-error">${escapeHtml(texForKatex)}</span>`,
+		});
 	}
+	return placeholder;
+}
+
+/**
+ * marked の inline tokenizer extension を生成するファクトリ。
+ * placeholders / nonce をクロージャに閉じ込めるため markdownToHtml 呼び出し毎に
+ * `new Marked` + `use` する。
+ *
+ * walkTokens 方式（text/paragraph の text/raw だけ書き換えて子トークンは触らない）は
+ * math 内の `\,`（escape）や `_`（emphasis）で text トークンが分断され、正規表現が
+ * `$$...$$` 全体にマッチせず生 `$$` 出力・`<em>` 混入・inline `$` のペアずれを起こす。
+ * inline tokenizer で `$`/`$$` を最優先に消費することで、emphasis/escape より先に
+ * math 範囲が確定し、これらの分断を構造的に防ぐ。
+ *
+ * display / inline の優先関係: marked の `use()` は tokenizer を unshift で登録する
+ * ため実際の試行順は配列と逆（inline → display）だが、INLINE_MATH_RE は中身 1 文字
+ * 以上を要求し先頭が `$`（= `$$` の 2 文字目）だと必ず失敗するので、`$$...$$` は
+ * 試行順に依らず display 側が拾う（エディタの Pass 1 → Pass 2 と同じ結果になる）。
+ *
+ * escape ガードについて: `\$` は preprocessEscapedDollars で EDOLLAR placeholder 化
+ * 済みなので、tokenizer に到達する `$` は未エスケープのみ。よって isEscaped ガードは不要。
+ */
+function createMathExtensions(
+	placeholders: MathPlaceholder[],
+	nonce: string,
+): TokenizerAndRendererExtension[] {
+	// renderer は marked の RendererExtensionFunction 互換シグネチャ。引数は
+	// この tokenizer が生成した token のみが渡るので MathToken への絞り込みは安全。
+	const renderer: RendererExtensionFunction = (token) => {
+		const t = token as MathToken;
+		return renderMathPlaceholder(t.tex, t.type === "mathDisplay", placeholders, nonce);
+	};
+
+	const displayExtension: TokenizerAndRendererExtension = {
+		name: "mathDisplay",
+		level: "inline",
+		start(src) {
+			return src.indexOf("$$");
+		},
+		tokenizer(src) {
+			const m = INLINE_DISPLAY_MATH_RE.exec(src);
+			if (!m) return undefined;
+			const token: MathToken = { type: "mathDisplay", raw: m[0], tex: m[1] };
+			return token;
+		},
+		renderer,
+	};
+
+	const inlineExtension: TokenizerAndRendererExtension = {
+		name: "mathInline",
+		level: "inline",
+		start(src) {
+			return src.indexOf("$");
+		},
+		tokenizer(src) {
+			const m = INLINE_MATH_RE.exec(src);
+			if (!m) return undefined;
+			const token: MathToken = { type: "mathInline", raw: m[0], tex: m[1] };
+			return token;
+		},
+		renderer,
+	};
+
+	// 優先関係は順序非依存（JSDoc 参照）。可読性のため display を先に並べる。
+	return [displayExtension, inlineExtension];
 }
 
 /**
@@ -420,11 +438,11 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 
 	const breaks = options?.breaks ?? false;
 	const marked = new Marked({ gfm: true, breaks });
+	// inline tokenizer extension で単一行 display ($$...$$) / inline ($...$) math を
+	// 処理する。emphasis/escape より先に math 範囲を確定させるため、text/paragraph の
+	// text を後段で書き換える walkTokens 方式から置き換えた（子トークン分断対策）。
+	marked.use({ extensions: createMathExtensions(placeholders, nonce) });
 	const tokens = marked.lexer(preprocessed);
-
-	// Walk token tree and replace math only in text nodes,
-	// leaving link URLs, image paths, code spans etc. untouched.
-	walkTokens(tokens, placeholders, nonce);
 
 	// Render tokens to HTML
 	let html = marked.parser(tokens);

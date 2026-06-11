@@ -307,6 +307,57 @@ describe("markdownToHtml", () => {
 		expect(html).toContain("trailing");
 	});
 
+	// 単一行 display / inline math の inline tokenizer extension 化 (#170)。
+	// walkTokens 方式は math 内の escape (`\,`) / emphasis (`_`) で text トークンが
+	// 分断され、`$$` 生出力・`<em>` 混入・inline `$` のペアずれを起こしていた。
+	// PDF 経路は { breaks: true } なので主要ケースは breaks: true で検証する。
+	it("renders single-line display math with escape and emphasis chars (#170)", () => {
+		// ベイズ式: `\,` (escape) と `_` (emphasis 成立) と `|` を含む。
+		const html = markdownToHtml(
+			"$$p(C_k|\\mathbf{x}) = \\frac{p(\\mathbf{x}|C_k) \\, p(C_k)}{p(\\mathbf{x})}$$",
+			{ breaks: true },
+		);
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).not.toContain("<em>");
+	});
+
+	it("renders single-line display math with underscore subscripts (#170)", () => {
+		const html = markdownToHtml("$$\\int_{\\mathcal{R}_j} L_{kj}$$", { breaks: true });
+		expect(html).toContain("katex-display");
+		expect(html).not.toContain("$$");
+		expect(html).not.toContain("<em>");
+	});
+
+	it("does not mis-pair inline $ across Japanese text between two math spans (#170)", () => {
+		const html = markdownToHtml(
+			"積の規則 $p(\\mathbf{x}, C_k) = p(C_k|\\mathbf{x}) \\, p(\\mathbf{x})$ を使うと、共通因子の $p(\\mathbf{x})$ を消す",
+			{ breaks: true },
+		);
+		expect(html).toContain("katex");
+		expect(html).not.toContain("<em>");
+		// 「を使うと、共通因子の」は数式の外（KaTeX annotation の外）にプレーンテキストで残る。
+		const annotations = [...html.matchAll(/<annotation[^>]*>([\s\S]*?)<\/annotation>/g)].map(
+			(m) => m[1],
+		);
+		expect(annotations.some((a) => a.includes("を使うと、共通因子の"))).toBe(false);
+		expect(html).toContain("を使うと、共通因子の");
+	});
+
+	it("renders inline math inside a heading (#170)", () => {
+		const html = markdownToHtml("# 式 $x_i$ の説明", { breaks: true });
+		expect(html).toContain("katex");
+		expect(html).toContain("<h1");
+	});
+
+	it("renders inline math inside a GFM table cell (#170)", () => {
+		// walkTokens はテーブルの header/rows を再帰しないため壊れていた。
+		const md = "| 変数 | 説明 |\n| --- | --- |\n| $x_i$ | 入力 |";
+		const html = markdownToHtml(md, { breaks: true });
+		expect(html).toContain("<table>");
+		expect(html).toContain("katex");
+	});
+
 	it("does not convert single newlines to <br> by default", () => {
 		const html = markdownToHtml("line1\nline2");
 		expect(html).not.toContain("<br");
