@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ElectronApiMock } from "./helpers/electron-api-mock";
+import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 const fs = {
 	files: {
@@ -117,5 +117,27 @@ test.describe("icon button tooltip", () => {
 		// 横方向の clamp が効いて viewport 内に収まっている
 		expect(box.x).toBeGreaterThanOrEqual(0);
 		expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+	});
+
+	test("無効状態の検索ナビボタンにも tooltip が表示される", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs, dialogResult: "/workspace" });
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("test.md file").click();
+		await expect(page.locator(".cm-content")).toContainText("Test");
+
+		// 検索未入力（マッチ 0 件）では「前の一致」は無効状態。disabled 属性だと
+		// hover イベントごと抑制されて tooltip が出ない回帰を実ブラウザで検証する
+		// （jsdom は disabled のイベント抑制を再現しないため e2e でのみ検証可能）。
+		await page.keyboard.press(`${modKey}+f`);
+		const prevButton = page.getByLabel("前の一致");
+		await expect(prevButton).toHaveAttribute("aria-disabled", "true");
+
+		await prevButton.hover();
+		const tooltip = page.getByRole("tooltip");
+		await expect(tooltip).toBeVisible();
+		await expect(tooltip).toContainText("前の一致");
 	});
 });

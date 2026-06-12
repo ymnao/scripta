@@ -241,13 +241,15 @@ export function SearchBar({
 					</span>
 				</div>
 
+				{/* disabled 属性は hover / focus イベントごと抑制して tooltip が出なくなるため、
+				    aria-disabled + onClick ガードで無効状態を表現する（以下の置換系も同様） */}
 				<Tooltip label="前の一致" keys={PREV_MATCH_KEYS} side="bottom">
 					<button
 						type="button"
 						className="search-bar-icon-btn"
-						onClick={handleFindPrevious}
+						onClick={matchInfo.total === 0 ? undefined : handleFindPrevious}
 						aria-label="前の一致"
-						disabled={matchInfo.total === 0}
+						aria-disabled={matchInfo.total === 0 || undefined}
 					>
 						<ArrowUp size={14} />
 					</button>
@@ -256,9 +258,9 @@ export function SearchBar({
 					<button
 						type="button"
 						className="search-bar-icon-btn"
-						onClick={handleFindNext}
+						onClick={matchInfo.total === 0 ? undefined : handleFindNext}
 						aria-label="次の一致"
-						disabled={matchInfo.total === 0}
+						aria-disabled={matchInfo.total === 0 || undefined}
 					>
 						<ArrowDown size={14} />
 					</button>
@@ -294,9 +296,9 @@ export function SearchBar({
 						<button
 							type="button"
 							className="search-bar-icon-btn"
-							onClick={handleReplaceNext}
+							onClick={matchInfo.total === 0 ? undefined : handleReplaceNext}
 							aria-label="置換"
-							disabled={matchInfo.total === 0}
+							aria-disabled={matchInfo.total === 0 || undefined}
 						>
 							<ReplaceIcon />
 						</button>
@@ -305,9 +307,9 @@ export function SearchBar({
 						<button
 							type="button"
 							className="search-bar-icon-btn"
-							onClick={handleReplaceAll}
+							onClick={matchInfo.total === 0 ? undefined : handleReplaceAll}
 							aria-label="すべて置換"
-							disabled={matchInfo.total === 0}
+							aria-disabled={matchInfo.total === 0 || undefined}
 						>
 							<ReplaceAllIcon />
 						</button>

@@ -160,7 +160,13 @@ export function Tooltip({ label, keys, side = "top", children }: TooltipProps) {
 			}
 			childProps.onFocus?.(e);
 		},
-		onBlur: mergeHandlers<FocusEvent<HTMLElement>>(hide, childProps.onBlur),
+		onBlur: (e: FocusEvent<HTMLElement>) => {
+			// focus 済みボタンを再クリックすると focus イベントが発生せず pointer 由来フラグが
+			// 消費されないまま残るため、blur で清算して次の keyboard focus の表示を妨げない。
+			pointerDownRef.current = false;
+			hide();
+			childProps.onBlur?.(e);
+		},
 	};
 
 	// tooltip 表示中のみ aria-describedby を注入（非表示中に付けると空参照で invalid）。

@@ -34,12 +34,14 @@ function TabBarIconButton({
 }) {
 	return (
 		<Tooltip label={label} keys={keys} side="bottom">
+			{/* disabled 属性は hover / focus イベントごと抑制して tooltip が出なくなるため、
+			    aria-disabled + onClick ガードで「説明は見えるが押せない」状態を表現する */}
 			<button
 				type="button"
-				onClick={onClick}
-				disabled={disabled}
+				onClick={disabled ? undefined : onClick}
+				aria-disabled={disabled || undefined}
 				aria-label={label}
-				className={`${ICON_BUTTON_CLASS} ${disabled ? "opacity-30" : ""}`}
+				className={`${ICON_BUTTON_CLASS} ${disabled ? "cursor-default opacity-30" : ""}`}
 			>
 				<Icon size={14} />
 			</button>

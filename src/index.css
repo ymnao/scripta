@@ -278,12 +278,14 @@
 		color 0.1s ease-out;
 }
 
-.search-bar-icon-btn:hover:not(:disabled) {
+/* 無効状態は disabled 属性ではなく aria-disabled で表現する
+   （disabled だと hover イベントが抑制され tooltip が出なくなるため） */
+.search-bar-icon-btn:hover:not([aria-disabled="true"]) {
 	color: var(--color-text-primary);
 	background-color: color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
 }
 
-.search-bar-icon-btn:disabled {
+.search-bar-icon-btn[aria-disabled="true"] {
 	opacity: 0.35;
 	cursor: default;
 }

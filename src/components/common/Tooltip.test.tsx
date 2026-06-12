@@ -172,6 +172,29 @@ describe("Tooltip", () => {
 		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 	});
 
+	it("focus 済みのまま再クリックしても、blur 後の次のキーボードフォーカスで表示される", () => {
+		render(
+			<Tooltip label="サイドバー">
+				<button type="button">トグル</button>
+			</Tooltip>,
+		);
+		const trigger = screen.getByRole("button", { name: "トグル" });
+
+		// keyboard focus で表示
+		fireEvent.focus(trigger);
+		expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+		// focus 済みボタンの再クリック: pointerdown は発火するが focus イベントは発生しない
+		// （pointer 由来フラグが消費されず残るシナリオ）
+		fireEvent.pointerDown(trigger);
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		// blur でフラグが清算され、次の keyboard focus は抑制されず表示される
+		fireEvent.blur(trigger);
+		fireEvent.focus(trigger);
+		expect(screen.getByRole("tooltip")).toBeInTheDocument();
+	});
+
 	it("Escape で消える", () => {
 		render(
 			<Tooltip label="サイドバー" keys={["⌘", "/"]}>
