@@ -28,6 +28,7 @@
 	--animate-dialog-in: dialog-in 0.15s ease-out;
 	--animate-backdrop-in: backdrop-in 0.15s ease-out;
 	--animate-menu-in: menu-in 0.12s ease-out;
+	--animate-tooltip-in: tooltip-in 0.1s ease-out;
 }
 
 @keyframes toast-in {
@@ -80,6 +81,15 @@
 	to {
 		opacity: 1;
 		transform: scale(1) translateY(0);
+	}
+}
+
+@keyframes tooltip-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
 	}
 }
 
@@ -268,12 +278,14 @@
 		color 0.1s ease-out;
 }
 
-.search-bar-icon-btn:hover:not(:disabled) {
+/* 無効状態は disabled 属性ではなく aria-disabled で表現する
+   （disabled だと hover イベントが抑制され tooltip が出なくなるため） */
+.search-bar-icon-btn:hover:not([aria-disabled="true"]) {
 	color: var(--color-text-primary);
 	background-color: color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
 }
 
-.search-bar-icon-btn:disabled {
+.search-bar-icon-btn[aria-disabled="true"] {
 	opacity: 0.35;
 	cursor: default;
 }

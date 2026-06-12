@@ -12,6 +12,13 @@ import { EditorView } from "@codemirror/view";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { isIMEComposing } from "../../lib/ime";
+import { IS_MAC, SHIFT_KEY_LABEL } from "../../lib/platform";
+import { Tooltip } from "../common/Tooltip";
+
+// keys は IS_MAC がモジュールロード時に確定するため、モジュールトップで定数化する。
+const RETURN_KEY_LABEL = IS_MAC ? "↩" : "Enter";
+const PREV_MATCH_KEYS = [SHIFT_KEY_LABEL, RETURN_KEY_LABEL];
+const NEXT_MATCH_KEYS = [RETURN_KEY_LABEL];
 
 export interface SearchBarHandle {
 	focusInput: () => void;
@@ -234,32 +241,40 @@ export function SearchBar({
 					</span>
 				</div>
 
-				<button
-					type="button"
-					className="search-bar-icon-btn"
-					onClick={handleFindPrevious}
-					aria-label="前の一致"
-					disabled={matchInfo.total === 0}
-				>
-					<ArrowUp size={14} />
-				</button>
-				<button
-					type="button"
-					className="search-bar-icon-btn"
-					onClick={handleFindNext}
-					aria-label="次の一致"
-					disabled={matchInfo.total === 0}
-				>
-					<ArrowDown size={14} />
-				</button>
-				<button
-					type="button"
-					className="search-bar-icon-btn"
-					onClick={handleClose}
-					aria-label="検索を閉じる"
-				>
-					<X size={14} />
-				</button>
+				{/* disabled 属性は hover / focus イベントごと抑制して tooltip が出なくなるため、
+				    aria-disabled + onClick ガードで無効状態を表現する（以下の置換系も同様） */}
+				<Tooltip label="前の一致" keys={PREV_MATCH_KEYS} side="bottom">
+					<button
+						type="button"
+						className="search-bar-icon-btn"
+						onClick={matchInfo.total === 0 ? undefined : handleFindPrevious}
+						aria-label="前の一致"
+						aria-disabled={matchInfo.total === 0 || undefined}
+					>
+						<ArrowUp size={14} />
+					</button>
+				</Tooltip>
+				<Tooltip label="次の一致" keys={NEXT_MATCH_KEYS} side="bottom">
+					<button
+						type="button"
+						className="search-bar-icon-btn"
+						onClick={matchInfo.total === 0 ? undefined : handleFindNext}
+						aria-label="次の一致"
+						aria-disabled={matchInfo.total === 0 || undefined}
+					>
+						<ArrowDown size={14} />
+					</button>
+				</Tooltip>
+				<Tooltip label="検索を閉じる" keys={["Esc"]} side="bottom">
+					<button
+						type="button"
+						className="search-bar-icon-btn"
+						onClick={handleClose}
+						aria-label="検索を閉じる"
+					>
+						<X size={14} />
+					</button>
+				</Tooltip>
 			</div>
 
 			{expanded && (
@@ -277,26 +292,28 @@ export function SearchBar({
 							onKeyDown={handleReplaceKeyDown}
 						/>
 					</div>
-					<button
-						type="button"
-						className="search-bar-icon-btn"
-						onClick={handleReplaceNext}
-						aria-label="置換"
-						disabled={matchInfo.total === 0}
-						title="置換"
-					>
-						<ReplaceIcon />
-					</button>
-					<button
-						type="button"
-						className="search-bar-icon-btn"
-						onClick={handleReplaceAll}
-						aria-label="すべて置換"
-						disabled={matchInfo.total === 0}
-						title="すべて置換"
-					>
-						<ReplaceAllIcon />
-					</button>
+					<Tooltip label="置換" side="bottom">
+						<button
+							type="button"
+							className="search-bar-icon-btn"
+							onClick={matchInfo.total === 0 ? undefined : handleReplaceNext}
+							aria-label="置換"
+							aria-disabled={matchInfo.total === 0 || undefined}
+						>
+							<ReplaceIcon />
+						</button>
+					</Tooltip>
+					<Tooltip label="すべて置換" side="bottom">
+						<button
+							type="button"
+							className="search-bar-icon-btn"
+							onClick={matchInfo.total === 0 ? undefined : handleReplaceAll}
+							aria-label="すべて置換"
+							aria-disabled={matchInfo.total === 0 || undefined}
+						>
+							<ReplaceAllIcon />
+						</button>
+					</Tooltip>
 					<div className="search-bar-spacer" />
 				</div>
 			)}

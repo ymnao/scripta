@@ -234,16 +234,17 @@ describe("TabBar", () => {
 			expect(screen.getByLabelText("進む")).toBeInTheDocument();
 		});
 
+		// 無効状態は disabled 属性ではなく aria-disabled で表現する（tooltip を出すため）
 		it("disables back button when canGoBack is false", () => {
 			render(<TabBar {...defaultProps} canGoBack={false} canGoForward={true} />);
-			expect(screen.getByLabelText("戻る")).toBeDisabled();
-			expect(screen.getByLabelText("進む")).not.toBeDisabled();
+			expect(screen.getByLabelText("戻る")).toHaveAttribute("aria-disabled", "true");
+			expect(screen.getByLabelText("進む")).not.toHaveAttribute("aria-disabled");
 		});
 
 		it("disables forward button when canGoForward is false", () => {
 			render(<TabBar {...defaultProps} canGoBack={true} canGoForward={false} />);
-			expect(screen.getByLabelText("戻る")).not.toBeDisabled();
-			expect(screen.getByLabelText("進む")).toBeDisabled();
+			expect(screen.getByLabelText("戻る")).not.toHaveAttribute("aria-disabled");
+			expect(screen.getByLabelText("進む")).toHaveAttribute("aria-disabled", "true");
 		});
 
 		it("calls onGoBack when back button is clicked", () => {
@@ -256,6 +257,14 @@ describe("TabBar", () => {
 			render(<TabBar {...defaultProps} canGoForward={true} />);
 			fireEvent.click(screen.getByLabelText("進む"));
 			expect(onGoForward).toHaveBeenCalledTimes(1);
+		});
+
+		it("aria-disabled な戻る/進むボタンはクリックしてもハンドラを呼ばない", () => {
+			render(<TabBar {...defaultProps} canGoBack={false} canGoForward={false} />);
+			fireEvent.click(screen.getByLabelText("戻る"));
+			fireEvent.click(screen.getByLabelText("進む"));
+			expect(onGoBack).not.toHaveBeenCalled();
+			expect(onGoForward).not.toHaveBeenCalled();
 		});
 	});
 

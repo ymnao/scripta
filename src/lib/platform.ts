@@ -13,5 +13,14 @@
 export const IS_MAC =
 	typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 
-/** UI ラベル用の primary modifier 表記。Mac は ⌘、それ以外は Ctrl+。 */
+/**
+ * 後続キーと連結する文字列用の primary modifier 表記
+ * （例: `${PRIMARY_MOD_SYMBOL}V` → "⌘V" / "Ctrl+V"）。
+ * `<Kbd>` で 1 キーずつ表示する場合は MOD_KEY_LABEL の方を使う。
+ */
 export const PRIMARY_MOD_SYMBOL = IS_MAC ? "⌘" : "Ctrl+";
+
+/** `<Kbd>` で 1 キーずつ表示する用の modifier ラベル（連結用は PRIMARY_MOD_SYMBOL）。 */
+export const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
+/** `<Kbd>` で 1 キーずつ表示する用の Shift ラベル。 */
+export const SHIFT_KEY_LABEL = IS_MAC ? "⇧" : "Shift";
