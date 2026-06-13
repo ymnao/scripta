@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { promises as fsp } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IpcMainInvokeEvent } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
@@ -38,8 +38,7 @@ const {
 // すべての test fixture を集約。temp dir を mkdtemp + realpath で正規化したうえで
 // `git init` し、credential / sign 系を OFF にして teardown コストを下げる。
 async function initRepo(): Promise<string> {
-	const dir = await fsp.mkdtemp(join(tmpdir(), "scripta-git-test-"));
-	const real = await fsp.realpath(dir);
+	const real = await makeCanonicalTempDir("scripta-git-test-");
 	const git = createGit(real);
 	// `-b main` は git 2.28+ 必須。CI runners は十分新しい。
 	await git.raw(["init", "-b", "main"]);
@@ -108,7 +107,7 @@ async function makeRebaseConflict(dir: string): Promise<string> {
 
 // ローカル bare remote を作って upstream のあるリポジトリを構成。
 async function setupRepoWithRemote(): Promise<{ work: string; remote: string }> {
-	const remote = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-remote-")));
+	const remote = await makeCanonicalTempDir("scripta-git-remote-");
 	await createGit(remote).raw(["init", "--bare", "-b", "main"]);
 	const work = await initRepo();
 	const wgit = createGit(work);
@@ -155,7 +154,7 @@ describe("checkRepoImpl", () => {
 	});
 
 	it("returns false for a non-repo directory (no throw)", async () => {
-		const dir = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-test-")));
+		const dir = await makeCanonicalTempDir("scripta-git-test-");
 		dirsToCleanup.push(dir);
 		await registerWorkspaceRoot(TEST_WIN, dir);
 		expect(await checkRepoImpl(TEST_WIN, dir)).toBe(false);
@@ -163,7 +162,7 @@ describe("checkRepoImpl", () => {
 
 	it("returns false for path outside workspace (no throw)", async () => {
 		await newWorkspace();
-		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-other-")));
+		const outside = await makeCanonicalTempDir("scripta-git-other-");
 		dirsToCleanup.push(outside);
 		await createGit(outside).raw(["init", "-b", "main"]);
 		// outside は TEST_WIN の allowedRoots に登録されていない → false
@@ -233,7 +232,7 @@ describe("addAllImpl / commitImpl", () => {
 
 	it("rejects path outside workspace", async () => {
 		await newWorkspace();
-		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-out-")));
+		const outside = await makeCanonicalTempDir("scripta-git-out-");
 		dirsToCleanup.push(outside);
 		await expect(addAllImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
 	});
@@ -260,7 +259,7 @@ describe("pullImpl", () => {
 		const wgit = createGit(work);
 		await wgit.raw(["push", "-u", "origin", "main"]);
 		// 別 working clone から remote に commit を追加
-		const other = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-other-")));
+		const other = await makeCanonicalTempDir("scripta-git-other-");
 		dirsToCleanup.push(other);
 		await createGit(other).raw(["clone", remote, other]);
 		await createGit(other).raw(["config", "user.email", "test2@test.com"]);
@@ -495,7 +494,7 @@ describe("getLastCommitTimeImpl", () => {
 
 	it("returns null instead of throwing for path outside workspace", async () => {
 		await newWorkspace();
-		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-out-")));
+		const outside = await makeCanonicalTempDir("scripta-git-out-");
 		dirsToCleanup.push(outside);
 		expect(await getLastCommitTimeImpl(TEST_WIN, outside)).toBeNull();
 	});
@@ -504,7 +503,7 @@ describe("getLastCommitTimeImpl", () => {
 describe("path-guard cross-cutting", () => {
 	it("rejects each command for path outside parent's allowedRoots", async () => {
 		await newWorkspace();
-		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-other-")));
+		const outside = await makeCanonicalTempDir("scripta-git-other-");
 		dirsToCleanup.push(outside);
 		await createGit(outside).raw(["init", "-b", "main"]);
 
@@ -539,7 +538,7 @@ describe("emitConflictResolvedImpl", () => {
 
 	it("rejects emit for a workspace not in sender's allowedRoots", async () => {
 		await newWorkspace();
-		const outside = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-evict-")));
+		const outside = await makeCanonicalTempDir("scripta-git-evict-");
 		dirsToCleanup.push(outside);
 		// 別 window が偽装で他 workspace の path を流しても弾かれる
 		await expect(emitConflictResolvedImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
@@ -565,7 +564,7 @@ describe("git:emit-conflict-resolved IPC ハンドラ配線", () => {
 		// 修正前はハンドラが Promise を捨てて undefined を返し、認可エラーを隠蔽していた（その回帰防止）。
 		// 未登録 window からの emit は path のみで reject するため、git repo は不要（mkdtemp のみ）。
 		const event = { sender: { id: OTHER_WIN } } as unknown as IpcMainInvokeEvent;
-		const dir = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), "scripta-git-wiring-")));
+		const dir = await makeCanonicalTempDir("scripta-git-wiring-");
 		dirsToCleanup.push(dir);
 		await expect(listener(event, dir)).rejects.toThrow(/Permission denied/);
 	});

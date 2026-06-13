@@ -1,8 +1,6 @@
 // @vitest-environment node
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 // BrowserWindow / ipcMain / app / session を最小限にスタブ化する。
 // `createConflictWindow` は new BrowserWindow → loadURL を呼ぶので、
@@ -104,13 +102,15 @@ const { createConflictWindow, conflictWindows } = windowTesting;
 const PARENT_WIN = 1;
 
 let workspaceDir = "";
+let ws: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	workspaceTesting.reset();
 	conflictWindows.clear();
 	createdWindows.length = 0;
-	workspaceDir = await realpath(await mkdtemp(join(tmpdir(), "scripta-window-test-")));
+	ws = await createCanonicalTempWorkspace("scripta-window-test-");
+	workspaceDir = ws.dir;
 	// parent window の allowedRoots に workspace を登録
 	await registerWorkspaceRoot(PARENT_WIN, workspaceDir);
 });
@@ -119,17 +119,17 @@ afterEach(async () => {
 	clearWorkspaceRoots();
 	workspaceTesting.reset();
 	conflictWindows.clear();
-	await rm(workspaceDir, { recursive: true, force: true });
+	await ws.cleanup();
 });
 
 describe("createConflictWindow", () => {
 	it("rejects when workspace is not in parent allowedRoots", async () => {
 		// parent に登録されていない別 path
-		const stranger = await realpath(await mkdtemp(join(tmpdir(), "scripta-window-other-")));
+		const { dir: stranger, cleanup } = await createCanonicalTempWorkspace("scripta-window-other-");
 		try {
 			await expect(createConflictWindow(PARENT_WIN, stranger)).rejects.toThrow(/Permission denied/);
 		} finally {
-			await rm(stranger, { recursive: true, force: true });
+			await cleanup();
 		}
 	});
 

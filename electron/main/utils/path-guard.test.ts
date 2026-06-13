@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
@@ -27,17 +27,21 @@ const WIN_B = 2;
 
 let workspaceDir = "";
 let outsideDir = "";
+let wsWorkspace: TempWorkspace;
+let wsOutside: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
-	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-pg-ws-"));
-	outsideDir = await mkdtemp(join(tmpdir(), "scripta-pg-out-"));
+	wsWorkspace = await createTempWorkspace("scripta-pg-ws-");
+	wsOutside = await createTempWorkspace("scripta-pg-out-");
+	workspaceDir = wsWorkspace.dir;
+	outsideDir = wsOutside.dir;
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
-	await rm(workspaceDir, { recursive: true, force: true });
-	await rm(outsideDir, { recursive: true, force: true });
+	await wsWorkspace.cleanup();
+	await wsOutside.cleanup();
 });
 
 // POSIX 固定パス（/tmp/foo など）を扱う describe。Windows では path.resolve の結果が
@@ -197,7 +201,7 @@ describe("isPathAllowed (window-scoped)", () => {
 	);
 
 	it("allows paths inside any of multiple roots registered to the same window", async () => {
-		const second = await mkdtemp(join(tmpdir(), "scripta-pg-ws2-"));
+		const { dir: second, cleanup } = await createTempWorkspace("scripta-pg-ws2-");
 		try {
 			await registerWorkspaceRoot(WIN_A, workspaceDir);
 			await registerWorkspaceRoot(WIN_A, second);
@@ -205,17 +209,17 @@ describe("isPathAllowed (window-scoped)", () => {
 			expect(await isPathAllowed(WIN_A, join(second, "b.md"))).toBe(true);
 			expect(await isPathAllowed(WIN_A, join(outsideDir, "c.md"))).toBe(false);
 		} finally {
-			await rm(second, { recursive: true, force: true });
+			await cleanup();
 		}
 	});
 
 	it("does not falsely match sibling directories sharing a name prefix", async () => {
-		const sibling = await mkdtemp(join(tmpdir(), "scripta-pg-ws-"));
+		const { dir: sibling, cleanup } = await createTempWorkspace("scripta-pg-ws-");
 		try {
 			await registerWorkspaceRoot(WIN_A, workspaceDir);
 			expect(await isPathAllowed(WIN_A, join(sibling, "f.md"))).toBe(false);
 		} finally {
-			await rm(sibling, { recursive: true, force: true });
+			await cleanup();
 		}
 	});
 

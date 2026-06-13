@@ -5,11 +5,14 @@
 // 偽装して「stop 後に late event が来てもイベントが renderer に届かない」
 // 「再 start 後の旧 session からの late event がリークしない」を確認する。
 import { EventEmitter } from "node:events";
-import { realpathSync, symlinkSync, unlinkSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	createSymlinkedWorkspace,
+	createTempWorkspace,
+	type SymlinkedWorkspace,
+	type TempWorkspace,
+} from "../test-utils/temp-workspace";
 
 // chokidar.watch() が返す本物の代わりに使う EventEmitter ベースの偽 watcher。
 // テストから add/change/unlink を任意タイミングで emit できる。
@@ -91,16 +94,18 @@ afterEach(() => {
 // 副作用を足したり一部を実 watcher 寄りにした際に失敗原因の切り分けが鈍るのを避ける。
 describe("watcher.ts: start/stop race", () => {
 	let workspaceDir: string;
+	let ws: TempWorkspace;
 
 	beforeEach(async () => {
-		workspaceDir = await mkdtemp(join(tmpdir(), "scripta-watcher-int-"));
+		ws = await createTempWorkspace("scripta-watcher-int-");
+		workspaceDir = ws.dir;
 		await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	});
 
 	afterEach(async () => {
 		stopWatcherForWindow(TEST_WIN);
 		clearWorkspaceRoots();
-		await rm(workspaceDir, { recursive: true, force: true });
+		await ws.cleanup();
 	});
 
 	it("delivers fs-change on the happy path (before stop)", async () => {
@@ -186,12 +191,12 @@ describe("watcher.ts: start/stop race", () => {
 
 	it("rejects watcher:start for unauthorized path (path-guard)", async () => {
 		const start = getHandler("watcher:start");
-		const otherDir = await mkdtemp(join(tmpdir(), "scripta-other-"));
+		const { dir: otherDir, cleanup } = await createTempWorkspace("scripta-other-");
 		try {
 			await expect(start({ sender: webContents }, otherDir)).rejects.toThrow(/Permission denied/);
 			expect(createdWatchers).toHaveLength(0);
 		} finally {
-			await rm(otherDir, { recursive: true, force: true });
+			await cleanup();
 		}
 	});
 });
@@ -202,28 +207,21 @@ describe("watcher.ts: start/stop race", () => {
 // ケースで顕在化する。fs.ts/listDirectoryImpl, search.ts と同じく canonical I/O →
 // input emit に統一する必要がある。
 describe("watcher.ts: symlinked workspace", () => {
-	let realDir: string;
 	let canonicalRealDir: string;
 	let symlinkDir: string;
+	let ws: SymlinkedWorkspace;
 
 	beforeEach(async () => {
-		realDir = await mkdtemp(join(tmpdir(), "scripta-real-"));
-		canonicalRealDir = realpathSync(realDir);
-		symlinkDir = join(tmpdir(), `scripta-symlink-${process.pid}-${Date.now()}`);
-		symlinkSync(realDir, symlinkDir);
+		ws = await createSymlinkedWorkspace();
+		canonicalRealDir = ws.canonicalRealDir;
+		symlinkDir = ws.symlinkDir;
 		await registerWorkspaceRoot(TEST_WIN, symlinkDir);
 	});
 
 	afterEach(async () => {
 		stopWatcherForWindow(TEST_WIN);
 		clearWorkspaceRoots();
-		// symlink 削除は best-effort: 何らかの理由で先に消えていても realDir の rm まで必ず進む
-		try {
-			unlinkSync(symlinkDir);
-		} catch {
-			// ignore
-		}
-		await rm(realDir, { recursive: true, force: true });
+		await ws.cleanup();
 	});
 
 	// Windows は symlink に Developer Mode が必要で CI が EPERM になるためスキップ。

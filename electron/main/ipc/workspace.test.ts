@@ -1,8 +1,9 @@
 // @vitest-environment node
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
@@ -37,19 +38,23 @@ const WIN_B = 2;
 
 let dirA = "";
 let dirB = "";
+let wsA: TempWorkspace;
+let wsB: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	reset();
-	dirA = await mkdtemp(join(tmpdir(), "scripta-ws-A-"));
-	dirB = await mkdtemp(join(tmpdir(), "scripta-ws-B-"));
+	wsA = await createTempWorkspace("scripta-ws-A-");
+	wsB = await createTempWorkspace("scripta-ws-B-");
+	dirA = wsA.dir;
+	dirB = wsB.dir;
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
 	reset();
-	await rm(dirA, { recursive: true, force: true });
-	await rm(dirB, { recursive: true, force: true });
+	await wsA.cleanup();
+	await wsB.cleanup();
 });
 
 describe("setActiveWorkspaceForWindow", () => {

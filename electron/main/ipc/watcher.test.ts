@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
+import { createTempWorkspace } from "../test-utils/temp-workspace";
 import {
 	type FsKind,
 	isWatcherIgnored,
@@ -127,7 +127,7 @@ describe("reclassifyDeleted", () => {
 	});
 
 	it("uses real fs.existsSync as default", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "scripta-watcher-test-"));
+		const { dir, cleanup } = await createTempWorkspace("scripta-watcher-test-");
 		try {
 			const real = join(dir, "exists.md");
 			const ghost = join(dir, "ghost.md");
@@ -140,7 +140,7 @@ describe("reclassifyDeleted", () => {
 			expect(pending.get(real)).toBe("modify");
 			expect(pending.get(ghost)).toBe("delete");
 		} finally {
-			await rm(dir, { recursive: true, force: true });
+			await cleanup();
 		}
 	});
 });
