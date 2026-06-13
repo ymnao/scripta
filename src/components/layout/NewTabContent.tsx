@@ -1,8 +1,5 @@
+import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { Kbd } from "../common/Kbd";
-
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-const mod = isMac ? "\u2318" : "Ctrl";
-const shift = isMac ? "\u21E7" : "Shift";
 
 const ASCII_ART = [
 	"███████╗ ██████╗ ██████╗ ██╗██████╗ ████████╗ █████╗ ",
@@ -14,9 +11,14 @@ const ASCII_ART = [
 ].join("\n");
 
 const quickActions = [
-	{ keys: [mod, "P"], label: "ファイルを開く", action: "commandPalette", needsWorkspace: true },
 	{
-		keys: [mod, shift, "F"],
+		keys: [MOD_KEY_LABEL, "P"],
+		label: "ファイルを開く",
+		action: "commandPalette",
+		needsWorkspace: true,
+	},
+	{
+		keys: [MOD_KEY_LABEL, SHIFT_KEY_LABEL, "F"],
 		label: "ワークスペース検索",
 		action: "workspaceSearch",
 		needsWorkspace: true,
@@ -25,10 +27,10 @@ const quickActions = [
 ] as const;
 
 const shortcuts = [
-	{ keys: [mod, "T"], label: "新しいタブ" },
-	{ keys: [mod, "S"], label: "保存" },
-	{ keys: [mod, "/"], label: "サイドバー" },
-	{ keys: [mod, "L"], label: "リスト切り替え" },
+	{ keys: [MOD_KEY_LABEL, "T"], label: "新しいタブ" },
+	{ keys: [MOD_KEY_LABEL, "S"], label: "保存" },
+	{ keys: [MOD_KEY_LABEL, "/"], label: "サイドバー" },
+	{ keys: [MOD_KEY_LABEL, "L"], label: "リスト切り替え" },
 ] as const;
 
 interface NewTabContentProps {
