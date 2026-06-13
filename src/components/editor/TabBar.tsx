@@ -3,11 +3,9 @@ import { type CSSProperties, useCallback, useEffect, useRef, useState } from "re
 import { useShallow } from "zustand/react/shallow";
 import { getFileIcon } from "../../lib/file-icon";
 import { isNewTabPath } from "../../lib/path";
-import { MOD_KEY_LABEL } from "../../lib/platform";
+import { IS_MAC, MOD_KEY_LABEL } from "../../lib/platform";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { Tooltip } from "../common/Tooltip";
-
-const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent);
 
 const DRAG_THRESHOLD = 5;
 
@@ -193,7 +191,7 @@ export function TabBar({
 
 	return (
 		<div
-			className={`flex h-9 shrink-0 border-b border-border bg-bg-primary ${isMac ? "pl-20" : ""}`}
+			className={`flex h-9 shrink-0 border-b border-border bg-bg-primary ${IS_MAC ? "pl-20" : ""}`}
 			style={DRAG_REGION_STYLE}
 		>
 			<div className="flex shrink-0 items-center gap-0.5 px-1" style={NO_DRAG_REGION_STYLE}>
