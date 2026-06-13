@@ -2,7 +2,7 @@
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTempWorkspace } from "../test-utils/temp-workspace";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	app: { getPath: vi.fn(() => "/should-not-be-used") },
@@ -28,15 +28,16 @@ const {
 
 let dir = "";
 let storePath = "";
-let cleanupWorkspace = () => Promise.resolve();
+let ws: TempWorkspace;
 
 beforeEach(async () => {
-	({ dir, cleanup: cleanupWorkspace } = await createTempWorkspace("scripta-settings-test-"));
+	ws = await createTempWorkspace("scripta-settings-test-");
+	dir = ws.dir;
 	storePath = join(dir, "settings.json");
 });
 
 afterEach(async () => {
-	await cleanupWorkspace();
+	await ws.cleanup();
 });
 
 describe("createStore + load", () => {

@@ -14,20 +14,12 @@ import { join } from "node:path";
 const DEFAULT_PREFIX = "scripta-test-";
 
 /**
- * tmpdir 配下に一時ディレクトリを作って path だけ返す low-level helper。
- * cleanup を呼び出し側で集約管理したいケース（git.test.ts の `dirsToCleanup` 配列に
- * 全 dir を push して `maxRetries` 付き rm でまとめて消す等）で使う。
- */
-export function makeTempDir(prefix: string = DEFAULT_PREFIX): Promise<string> {
-	return mkdtemp(join(tmpdir(), prefix));
-}
-
-/**
- * `makeTempDir` の realpath 正規化版。
- * path-guard が canonical で比較するテストで使う。
+ * tmpdir 配下に mkdtemp で作った dir を realpath で正規化して返す low-level helper。
+ * git.test.ts のように cleanup を独自集約（`dirsToCleanup` 配列 + `maxRetries` 付き rm）
+ * しているケース向け。
  */
 export async function makeCanonicalTempDir(prefix: string = DEFAULT_PREFIX): Promise<string> {
-	return realpath(await makeTempDir(prefix));
+	return realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
 export interface TempWorkspace {
@@ -36,7 +28,7 @@ export interface TempWorkspace {
 }
 
 export async function createTempWorkspace(prefix: string = DEFAULT_PREFIX): Promise<TempWorkspace> {
-	const dir = await makeTempDir(prefix);
+	const dir = await mkdtemp(join(tmpdir(), prefix));
 	return {
 		dir,
 		cleanup: () => rm(dir, { recursive: true, force: true }),
@@ -46,11 +38,10 @@ export async function createTempWorkspace(prefix: string = DEFAULT_PREFIX): Prom
 export async function createCanonicalTempWorkspace(
 	prefix: string = DEFAULT_PREFIX,
 ): Promise<TempWorkspace> {
-	const raw = await makeTempDir(prefix);
-	const dir = await realpath(raw);
+	const dir = await makeCanonicalTempDir(prefix);
 	return {
 		dir,
-		cleanup: () => rm(raw, { recursive: true, force: true }),
+		cleanup: () => rm(dir, { recursive: true, force: true }),
 	};
 }
 
@@ -76,7 +67,7 @@ export async function createSymlinkedWorkspace(
 	realPrefix = "scripta-real-",
 	symlinkPrefix = "scripta-symlink",
 ): Promise<SymlinkedWorkspace> {
-	const realDir = await makeTempDir(realPrefix);
+	const realDir = await mkdtemp(join(tmpdir(), realPrefix));
 	const canonicalRealDir = realpathSync(realDir);
 	const symlinkDir = join(tmpdir(), `${symlinkPrefix}-${process.pid}-${Date.now()}`);
 	symlinkSync(realDir, symlinkDir);

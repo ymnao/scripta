@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCanonicalTempWorkspace } from "../test-utils/temp-workspace";
+import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 // BrowserWindow / ipcMain / app / session を最小限にスタブ化する。
 // `createConflictWindow` は new BrowserWindow → loadURL を呼ぶので、
@@ -102,15 +102,15 @@ const { createConflictWindow, conflictWindows } = windowTesting;
 const PARENT_WIN = 1;
 
 let workspaceDir = "";
-let cleanupWorkspace = () => Promise.resolve();
+let ws: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	workspaceTesting.reset();
 	conflictWindows.clear();
 	createdWindows.length = 0;
-	({ dir: workspaceDir, cleanup: cleanupWorkspace } =
-		await createCanonicalTempWorkspace("scripta-window-test-"));
+	ws = await createCanonicalTempWorkspace("scripta-window-test-");
+	workspaceDir = ws.dir;
 	// parent window の allowedRoots に workspace を登録
 	await registerWorkspaceRoot(PARENT_WIN, workspaceDir);
 });
@@ -119,7 +119,7 @@ afterEach(async () => {
 	clearWorkspaceRoots();
 	workspaceTesting.reset();
 	conflictWindows.clear();
-	await cleanupWorkspace();
+	await ws.cleanup();
 });
 
 describe("createConflictWindow", () => {

@@ -2,7 +2,7 @@
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTempWorkspace } from "../test-utils/temp-workspace";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
@@ -27,19 +27,21 @@ const WIN_B = 2;
 
 let workspaceDir = "";
 let outsideDir = "";
-let cleanupWorkspace = () => Promise.resolve();
-let cleanupOutside = () => Promise.resolve();
+let wsWorkspace: TempWorkspace;
+let wsOutside: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
-	({ dir: workspaceDir, cleanup: cleanupWorkspace } = await createTempWorkspace("scripta-pg-ws-"));
-	({ dir: outsideDir, cleanup: cleanupOutside } = await createTempWorkspace("scripta-pg-out-"));
+	wsWorkspace = await createTempWorkspace("scripta-pg-ws-");
+	wsOutside = await createTempWorkspace("scripta-pg-out-");
+	workspaceDir = wsWorkspace.dir;
+	outsideDir = wsOutside.dir;
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
-	await cleanupWorkspace();
-	await cleanupOutside();
+	await wsWorkspace.cleanup();
+	await wsOutside.cleanup();
 });
 
 // POSIX 固定パス（/tmp/foo など）を扱う describe。Windows では path.resolve の結果が

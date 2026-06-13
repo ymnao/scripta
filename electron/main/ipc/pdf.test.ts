@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCanonicalTempWorkspace } from "../test-utils/temp-workspace";
+import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 // `new BrowserWindow(opts)` の捕捉と printToPDF / loadFile / executeJavaScript の
 // 振る舞いを差し替え可能にする mock。window.test.ts と同じ Proxy + vi.hoisted の
@@ -89,22 +89,21 @@ const SENDER_ID = 42;
 
 describe("exportPdfImpl", () => {
 	let workspace: string;
-	let cleanupWorkspace = () => Promise.resolve();
+	let ws: TempWorkspace;
 
 	beforeEach(async () => {
 		clearWorkspaceRoots();
 		createdWindows.length = 0;
 		simulateState.printToPdfImpl = undefined;
 		simulateState.loadFileShouldHang = false;
-		({ dir: workspace, cleanup: cleanupWorkspace } =
-			await createCanonicalTempWorkspace("scripta-pdf-test-"));
+		ws = await createCanonicalTempWorkspace("scripta-pdf-test-");
+		workspace = ws.dir;
 		await registerWorkspaceRoot(SENDER_ID, workspace);
 	});
 
 	afterEach(async () => {
 		clearWorkspaceRoots();
-		// printToPDF が抱えたままの fd と削除のレースを吸収するため失敗は無視する
-		await cleanupWorkspace().catch(() => {});
+		await ws.cleanup().catch(() => {});
 	});
 
 	it("rejects outputPath outside workspace and without transient", async () => {

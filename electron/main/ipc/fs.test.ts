@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTempWorkspace } from "../test-utils/temp-workspace";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
@@ -39,19 +39,19 @@ const {
 } = __testing;
 
 let workspaceDir = "";
-let cleanupWorkspace = () => Promise.resolve();
+let ws: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
-	({ dir: workspaceDir, cleanup: cleanupWorkspace } =
-		await createTempWorkspace("scripta-fs-test-"));
+	ws = await createTempWorkspace("scripta-fs-test-");
+	workspaceDir = ws.dir;
 	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	vi.mocked(shell.trashItem).mockClear();
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
-	await cleanupWorkspace();
+	await ws.cleanup();
 });
 
 describe("readFileImpl", () => {

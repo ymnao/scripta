@@ -7,7 +7,6 @@ import {
 	createSymlinkedWorkspace,
 	createTempWorkspace,
 	makeCanonicalTempDir,
-	makeTempDir,
 } from "./temp-workspace";
 
 describe("createTempWorkspace", () => {
@@ -57,7 +56,7 @@ describe("createCanonicalTempWorkspace", () => {
 	});
 });
 
-describe("makeTempDir / makeCanonicalTempDir", () => {
+describe("makeCanonicalTempDir", () => {
 	const created: string[] = [];
 
 	afterEach(async () => {
@@ -66,13 +65,7 @@ describe("makeTempDir / makeCanonicalTempDir", () => {
 		);
 	});
 
-	it("makeTempDir creates a directory and returns its path", async () => {
-		const dir = await makeTempDir("scripta-make-helper-test-");
-		created.push(dir);
-		expect((await stat(dir)).isDirectory()).toBe(true);
-	});
-
-	it("makeCanonicalTempDir returns a realpath-resolved path", async () => {
+	it("returns a realpath-resolved path", async () => {
 		const dir = await makeCanonicalTempDir("scripta-make-canon-helper-test-");
 		created.push(dir);
 		expect(await realpath(dir)).toBe(dir);

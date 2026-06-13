@@ -7,7 +7,7 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
-import { createTempWorkspace } from "../test-utils/temp-workspace";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import {
 	__testing,
@@ -22,18 +22,18 @@ const TEST_WIN = 1;
 const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
 
 let workspaceDir = "";
-let cleanupWorkspace = () => Promise.resolve();
+let ws: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
-	({ dir: workspaceDir, cleanup: cleanupWorkspace } =
-		await createTempWorkspace("scripta-search-test-"));
+	ws = await createTempWorkspace("scripta-search-test-");
+	workspaceDir = ws.dir;
 	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
-	await cleanupWorkspace();
+	await ws.cleanup();
 });
 
 describe("fuzzyMatch", () => {

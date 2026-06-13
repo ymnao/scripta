@@ -3,7 +3,7 @@ import { rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTempWorkspace } from "../test-utils/temp-workspace";
+import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
@@ -38,21 +38,23 @@ const WIN_B = 2;
 
 let dirA = "";
 let dirB = "";
-let cleanupA = () => Promise.resolve();
-let cleanupB = () => Promise.resolve();
+let wsA: TempWorkspace;
+let wsB: TempWorkspace;
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	reset();
-	({ dir: dirA, cleanup: cleanupA } = await createTempWorkspace("scripta-ws-A-"));
-	({ dir: dirB, cleanup: cleanupB } = await createTempWorkspace("scripta-ws-B-"));
+	wsA = await createTempWorkspace("scripta-ws-A-");
+	wsB = await createTempWorkspace("scripta-ws-B-");
+	dirA = wsA.dir;
+	dirB = wsB.dir;
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
 	reset();
-	await cleanupA();
-	await cleanupB();
+	await wsA.cleanup();
+	await wsB.cleanup();
 });
 
 describe("setActiveWorkspaceForWindow", () => {
