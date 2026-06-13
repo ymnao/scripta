@@ -1,6 +1,5 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +7,7 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
+import { createTempWorkspace } from "../test-utils/temp-workspace";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import {
 	__testing,
@@ -22,16 +22,18 @@ const TEST_WIN = 1;
 const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
 
 let workspaceDir = "";
+let cleanupWorkspace = () => Promise.resolve();
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
-	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-search-test-"));
+	({ dir: workspaceDir, cleanup: cleanupWorkspace } =
+		await createTempWorkspace("scripta-search-test-"));
 	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
-	await rm(workspaceDir, { recursive: true, force: true });
+	await cleanupWorkspace();
 });
 
 describe("fuzzyMatch", () => {
@@ -453,9 +455,11 @@ describe("searchFilesImpl", () => {
 	it("returns input-base path even when workspace is reached via symlink", async () => {
 		// Stage 2 で確立した canonical / input 分離が searchFilesImpl にも効いていることを確認。
 		// symlink 経由のワークスペースでも、戻り値の filePath は input-base（symlink 側のパス）。
-		const realDir = await mkdtemp(join(tmpdir(), "scripta-search-real-"));
-		const linkDir = await mkdtemp(join(tmpdir(), "scripta-search-link-"));
-		// linkDir 自体は mkdtemp で作られた実ディレクトリなので、その中に link を張る。
+		const { dir: realDir, cleanup: cleanupReal } =
+			await createTempWorkspace("scripta-search-real-");
+		const { dir: linkDir, cleanup: cleanupLink } =
+			await createTempWorkspace("scripta-search-link-");
+		// linkDir 自体は実ディレクトリなので、その中に link を張る。
 		const symlinkPath = join(linkDir, "ws-link");
 		try {
 			await writeFile(join(realDir, "note.md"), "hello world");
@@ -468,8 +472,8 @@ describe("searchFilesImpl", () => {
 			expect(out[0].filePath.startsWith(symlinkPath)).toBe(true);
 			expect(out[0].filePath.startsWith(realDir)).toBe(false);
 		} finally {
-			await rm(realDir, { recursive: true, force: true });
-			await rm(linkDir, { recursive: true, force: true });
+			await cleanupReal();
+			await cleanupLink();
 		}
 	});
 

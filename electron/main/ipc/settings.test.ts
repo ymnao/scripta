@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTempWorkspace } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	app: { getPath: vi.fn(() => "/should-not-be-used") },
@@ -28,14 +28,15 @@ const {
 
 let dir = "";
 let storePath = "";
+let cleanupWorkspace = () => Promise.resolve();
 
 beforeEach(async () => {
-	dir = await mkdtemp(join(tmpdir(), "scripta-settings-test-"));
+	({ dir, cleanup: cleanupWorkspace } = await createTempWorkspace("scripta-settings-test-"));
 	storePath = join(dir, "settings.json");
 });
 
 afterEach(async () => {
-	await rm(dir, { recursive: true, force: true });
+	await cleanupWorkspace();
 });
 
 describe("createStore + load", () => {

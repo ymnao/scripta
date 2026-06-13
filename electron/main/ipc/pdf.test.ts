@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCanonicalTempWorkspace } from "../test-utils/temp-workspace";
 
 // `new BrowserWindow(opts)` の捕捉と printToPDF / loadFile / executeJavaScript の
 // 振る舞いを差し替え可能にする mock。window.test.ts と同じ Proxy + vi.hoisted の
@@ -86,26 +87,24 @@ const { exportPdfImpl, shouldAllowPdfRequest } = __testing;
 
 const SENDER_ID = 42;
 
-async function makeWorkspaceTmp(): Promise<string> {
-	const dir = await fsp.mkdtemp(join(tmpdir(), "scripta-pdf-test-"));
-	return await fsp.realpath(dir);
-}
-
 describe("exportPdfImpl", () => {
 	let workspace: string;
+	let cleanupWorkspace = () => Promise.resolve();
 
 	beforeEach(async () => {
 		clearWorkspaceRoots();
 		createdWindows.length = 0;
 		simulateState.printToPdfImpl = undefined;
 		simulateState.loadFileShouldHang = false;
-		workspace = await makeWorkspaceTmp();
+		({ dir: workspace, cleanup: cleanupWorkspace } =
+			await createCanonicalTempWorkspace("scripta-pdf-test-"));
 		await registerWorkspaceRoot(SENDER_ID, workspace);
 	});
 
 	afterEach(async () => {
 		clearWorkspaceRoots();
-		await fsp.rm(workspace, { recursive: true, force: true }).catch(() => {});
+		// printToPDF が抱えたままの fd と削除のレースを吸収するため失敗は無視する
+		await cleanupWorkspace().catch(() => {});
 	});
 
 	it("rejects outputPath outside workspace and without transient", async () => {
@@ -127,13 +126,13 @@ describe("exportPdfImpl", () => {
 	});
 
 	it("writes PDF for transient (saveDialog) path outside workspace", async () => {
-		const transientDir = await makeWorkspaceTmp();
+		const { dir: transientDir, cleanup } = await createCanonicalTempWorkspace("scripta-pdf-test-");
 		const transientPath = join(transientDir, "save.pdf");
 		await registerTransientWritePath(SENDER_ID, transientPath);
 		await exportPdfImpl(SENDER_ID, "<html><body>hi</body></html>", transientPath);
 		const written = await fsp.readFile(transientPath);
 		expect(written.toString("utf8")).toContain("%PDF-1.4");
-		await fsp.rm(transientDir, { recursive: true, force: true });
+		await cleanup();
 	});
 
 	it("uses dedicated partition (avoids main session CSP injection)", async () => {

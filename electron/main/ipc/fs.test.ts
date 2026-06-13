@@ -1,8 +1,9 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTempWorkspace } from "../test-utils/temp-workspace";
 
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
@@ -38,17 +39,19 @@ const {
 } = __testing;
 
 let workspaceDir = "";
+let cleanupWorkspace = () => Promise.resolve();
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
-	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-fs-test-"));
+	({ dir: workspaceDir, cleanup: cleanupWorkspace } =
+		await createTempWorkspace("scripta-fs-test-"));
 	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	vi.mocked(shell.trashItem).mockClear();
 });
 
 afterEach(async () => {
 	clearWorkspaceRoots();
-	await rm(workspaceDir, { recursive: true, force: true });
+	await cleanupWorkspace();
 });
 
 describe("readFileImpl", () => {
@@ -118,14 +121,14 @@ describe("writeFileImpl", () => {
 	it("does NOT consume the transient when the write fails (retry-friendly)", async () => {
 		// 親ディレクトリ書き込み失敗を擬似的に作る代わりに、failure path として
 		// 「対象自体がディレクトリ」のケースを使う（writeFile が EISDIR を返す）。
-		const outsideDir = await mkdtemp(join(tmpdir(), "scripta-outside-dir-"));
+		const { dir: outsideDir, cleanup } = await createTempWorkspace("scripta-outside-dir-");
 		try {
 			await registerTransientWritePath(TEST_WIN, outsideDir);
 			await expect(writeFileImpl(TEST_WIN, outsideDir, "x")).rejects.toThrow();
 			// 失敗したので transient はまだ残っており、withRetry で再試行可能
 			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
 		} finally {
-			await rm(outsideDir, { recursive: true, force: true });
+			await cleanup();
 		}
 	});
 
