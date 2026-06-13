@@ -169,6 +169,31 @@ test.describe("Tab / Shift+Tab で順序付きリストを再採番 (#118)", () 
 		expect(await lastWrite(mock)).toBe("1. a\n2. b\n3. c\n");
 	});
 
+	test("タスク項目で Tab → bullet と同じ 2 スペースネストでチェックボックスが維持される", async ({
+		page,
+	}) => {
+		// 回帰: 旧実装はタスクの content offset を 6 と誤計算し（"[ ] " を
+		// マーカー扱い）、ネスト行が親段落の continuation に吸収されて
+		// チェックボックス描画が消えていた。
+		const mock = await openWithContent(page, "- [ ] a\n- [ ] b");
+		await expect(page.locator(".cm-task-checkbox")).toHaveCount(2);
+
+		// 2 行目の行末へ移動して Tab
+		await page.keyboard.press(`${modKey}+Home`);
+		await page.keyboard.press("ArrowDown");
+		await page.keyboard.press("End");
+		await page.keyboard.press("Tab");
+		await waitForUnsaved(page);
+
+		// ネスト後も 2 つともチェックボックスとして描画される
+		await expect(page.locator(".cm-task-checkbox")).toHaveCount(2);
+
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page);
+
+		expect(await lastWrite(mock)).toBe("- [ ] a\n  - [ ] b\n");
+	});
+
 	test("ユーザ報告シナリオ: 連続した Enter で親の番号が破綻しない (#118)", async ({ page }) => {
 		// 1. の行末で Enter → Tab (子の 1. を作成) → さらに改行を続けても
 		// 親レベルの後続番号が壊れず保たれることを確認するリグレッション。

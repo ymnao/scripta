@@ -354,7 +354,17 @@ export interface ListLineInfo {
 	indent: string;
 	ordered: { number: number; delim: "." | ")" } | null;
 	task: boolean;
-	/** Width of `[marker][trailing space]` (excludes indent). */
+	/**
+	 * Width of `[marker][trailing space]` (excludes indent), i.e. the
+	 * CommonMark content offset a child line must be indented to. The GFM
+	 * task marker `[ ] ` is paragraph content, not part of the list marker,
+	 * so it never counts: for `- [ ] x` this is 2, same as a plain bullet.
+	 * (Counting it would push children past content offset + 3, where they
+	 * stop being a nested list and degrade to paragraph continuation text.)
+	 *
+	 * Structural concept only — for the visual/interaction extent of the
+	 * marker area (which DOES include `[ ] `), see `findMarkerRange`.
+	 */
 	markerWidth: number;
 }
 
@@ -375,7 +385,7 @@ export function parseListLine(text: string): ListLineInfo | null {
 			indent: b[1],
 			ordered: null,
 			task: b[3] != null,
-			markerWidth: b[0].length - b[1].length,
+			markerWidth: b[2].length + 1,
 		};
 	}
 	return null;
@@ -819,6 +829,10 @@ export const indentListLess: Command = (view) => {
  * Find the marker range (ListMark + optional TaskMarker + trailing space)
  * for a bullet/task list item on the given line. Returns `null` if the
  * line has no bullet/task marker or if it sits inside a code or HTML block.
+ *
+ * This is the visual/interaction extent (Backspace deletes it as a unit,
+ * arrow keys skip it), so unlike `ListLineInfo.markerWidth` — the CommonMark
+ * structural content offset used for nesting math — it includes `[ ] `.
  */
 export function findMarkerRange(
 	state: EditorState,

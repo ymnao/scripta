@@ -712,15 +712,16 @@ describe("parseListLine", () => {
 		expect(info?.task).toBe(false);
 	});
 
-	it("parses task list", () => {
+	it("parses task list with bullet-only markerWidth (task marker is content)", () => {
 		const info = parseListLine("- [ ] todo");
-		expect(info).toEqual({ indent: "", ordered: null, task: true, markerWidth: 6 });
+		expect(info).toEqual({ indent: "", ordered: null, task: true, markerWidth: 2 });
 	});
 
 	it("parses checked task list", () => {
 		const info = parseListLine("  - [x] done");
 		expect(info?.task).toBe(true);
 		expect(info?.indent).toBe("  ");
+		expect(info?.markerWidth).toBe(2);
 	});
 
 	it("returns null for plain text", () => {
@@ -750,7 +751,9 @@ describe("computeListIndentChanges", () => {
 	// --- The exact case from issue #118 -----------------------------------
 	// Note: nested indent matches the parent's content offset so the markdown
 	// parser sees a true CommonMark sub-list. For "1. a" the content offset is
-	// 3 columns; for bullets "- " it is 2; for tasks "- [ ] " it is 6.
+	// 3 columns; for bullets "- " it is 2. Tasks also use 2: the GFM task
+	// marker "[ ] " is paragraph content, so nesting deeper (6 columns) would
+	// degrade the child to continuation text and lose the checkbox.
 
 	it("Tab after Enter-continued ordered marker renumbers child to 1", () => {
 		// User typed "1. a", Enter (→ "2. "), Tab.
@@ -795,11 +798,36 @@ describe("computeListIndentChanges", () => {
 		expect(applyChanges(doc, cursor, 1)).toBe("- a\n  - b\n- c");
 	});
 
-	it("Tab on a task list line indents it under task parent", () => {
-		// Task marker "- [ ] " has content offset 6.
+	it("Tab on a task list line nests it like a bullet (2 columns)", () => {
+		// Content offset of "- [ ] a" is 2 ("[ ] " is content, not marker).
 		const doc = "- [ ] a\n- [ ] b";
 		const cursor = doc.lastIndexOf("- [ ]");
-		expect(applyChanges(doc, cursor, 1)).toBe("- [ ] a\n      - [ ] b");
+		expect(applyChanges(doc, cursor, 1)).toBe("- [ ] a\n  - [ ] b");
+	});
+
+	it("Tab on a bullet line under a task sibling nests at 2 columns", () => {
+		const doc = "- [ ] a\n- b";
+		const cursor = doc.indexOf("- b");
+		expect(applyChanges(doc, cursor, 1)).toBe("- [ ] a\n  - b");
+	});
+
+	it("Tab on a nested task aligns to its nested task sibling", () => {
+		const doc = "- [ ] a\n  - [ ] b\n  - [ ] c";
+		const cursor = doc.indexOf("- [ ] c");
+		expect(applyChanges(doc, cursor, 1)).toBe("- [ ] a\n  - [ ] b\n    - [ ] c");
+	});
+
+	it("Tab result on a task line still renders both checkboxes", () => {
+		// Regression for over-indented tasks: at 6 columns the second line is
+		// no longer a Task for the parser, so its checkbox vanished.
+		const doc = "- [ ] a\n- [ ] b";
+		const indented = applyChanges(doc, doc.lastIndexOf("- [ ]"), 1);
+		const view = createViewForTest(indented);
+		const widgets = widgetDecorations(collectDecorations(buildDecorations(view).decorations));
+		expect(widgets).toHaveLength(2);
+		for (const w of widgets) {
+			expect(w.value.spec.widget).toBeInstanceOf(CheckboxWidget);
+		}
 	});
 
 	it("Tab on a plain text line falls through (returns null)", () => {
