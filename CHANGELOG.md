@@ -5,6 +5,66 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
+## [0.3.0] — 2026-06-13
+
+v0.2.0 の Electron 移行直後リリース。テーブル UX とエクスポート品質の改善、KaTeX の完全オフライン化、v0.2.0 で「既知の制限」として挙げていた approve リスト / realpath の構造課題の解消が主軸。
+
+### Added
+
+- **テーブル UX**: セルをまたぐ範囲選択 + TSV コピー/ペースト (#119 → #148)、表外への TSV ペーストで Markdown テーブルを自動生成 (#159)
+- **アイコンボタンの tooltip**: 機能名 + ショートカットキーをカスタム tooltip で表示。`disabled` 属性ではなく `aria-disabled` + onClick ガードで「無効時も hover で説明が出る」設計 (#161 → #178)
+- **KaTeX オフライン化**: CSS / フォントを完全にローカル同梱、外部 CDN への fetch なし (#145)
+
+### Changed
+
+- **approve リストの window-scoped 化**: プロセス全体スコープから per-window スコープへ。同一プロセス内の別ウィンドウから approve が漏れない設計に (#32 → #150, #151)
+- **path-guard の realpath を async 化**: 同期版 `realpathSync` から `fs.promises.realpath` へ。メインプロセスのイベントループを塞がない (#31 → #149)
+- **UI 全体のブラッシュアップ**: タブバー / アイコン / 余白の整理 (#162)
+
+### Fixed
+
+- **エディタ**: テーブル境界の巨大キャレットを修正、テーブル外への移動に gap cursor を導入 (#146, #167 → #168)
+- **エディタ**: リスト / タスクリストのマーカー隙間クリックで構文が破壊されるバグを修正 (#164)
+- **エディタ**: 複数行選択時にハイライトがエディタ左右 padding 領域にはみ出すバグを修正 (#166)
+- **エディタ**: 未セーブインジケータでタブ幅が変動するバグを修正 (#165)
+- **エディタ**: タスクリストの Tab ネスト幅を bullet と揃えて 2 スペースに統一 (#179)
+- **ファイル I/O**: オートセーブが停止しうる 2 経路を防御的に塞ぐ (#163)
+- **PDF エクスポート**: エディタ上で display math 扱いになる寛容パターンを export にも適用 (#169 → #170)
+- **e2e**: Vite dev server の bind 先を `127.0.0.1` に明示して `::1` の listen EPERM を解消 (#171 → #173)
+- **テスト**: watcher integration テストで `registerWorkspaceRoot` の await 漏れを修正 (#172 → #174)
+
+### Security
+
+- **KaTeX オフライン化に伴う `tmp` 脆弱性解消**: 中間生成物の取り扱いを見直し、`tmp` 経由の脆弱性を遮断 (#145)
+- **path-guard async 化**: realpath の正規化を async 経路へ移行し、symlink 解決中のレース窓を縮小 (#149)
+
+### Internal
+
+- **テストフィクスチャ集約**: `electron/main/test-utils/temp-workspace.ts` に `createTempWorkspace` / `createCanonicalTempWorkspace` / `createSymlinkedWorkspace` / `makeCanonicalTempDir` を集約、10 ファイルを移行 (#184)
+- **watcher テスト構造整理**: `watcher.integration.test.ts` を start/stop race と symlinked workspace の 2 describe に分離 (#175 → #183)
+- **platform 判定統一**: 残存していたローカル `process.platform === "darwin"` 等を `platform.ts` に集約 (#177 → #182)
+- **Biome `noFloatingPromises` 有効化**: floating promise 違反 10 件を解消 (#176)
+
+### Dependencies
+
+v0.2.0 → v0.3.0 で更新された主要パッケージ:
+
+- react / react-dom 19.2.6 → 19.2.7
+- @codemirror/autocomplete 6.20.2 → 6.20.3
+- marked 18.0.4 → 18.0.5
+- vite 8.0.14 → 8.0.16
+- vitest 4.1.7 → 4.1.8
+- @biomejs/biome 2.4.15 → 2.4.16
+
+electron / mermaid / zustand / tailwindcss / dompurify 等の主要版は v0.2.0 と同等。Dependabot 7 件 (#152–#158 → #160) を一括取り込み。
+
+### v0.2.0 の「既知の制限」進捗
+
+- **approve リストはプロセス全体スコープ (#32)** → ✅ 解消（v0.3.0）
+- **`realpath` は同期版 (#31)** → ✅ 解消（v0.3.0）
+- パッケージは未署名 → 据え置き（v1.0.0 で対処予定）
+- e2e テストは renderer-only モード → ✅ 解消（実 Electron e2e job を CI に追加、ローカルでも `pnpm test:e2e:electron` で実行可能）
+
 ## [0.2.0] — 2026-06-05
 
 旧 Tauri 版 `ymnao/scripta-tauri`（現在は private）の **Electron への完全書き直し版**。Electron + React 19 + CodeMirror 6 + zustand v5 + Tailwind CSS v4 + Vite 8 + Biome を採用し、旧版とのパリティ + 新機能を提供する。
@@ -97,4 +157,5 @@
 - approve リストはプロセス全体スコープ（#32 で window-scoped 化予定）
 - `realpath` は同期版（#31 で async 化予定）
 
+[0.3.0]: https://github.com/ymnao/scripta/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ymnao/scripta/releases/tag/v0.2.0
