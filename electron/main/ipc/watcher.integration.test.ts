@@ -5,11 +5,11 @@
 // 偽装して「stop 後に late event が来てもイベントが renderer に届かない」
 // 「再 start 後の旧 session からの late event がリークしない」を確認する。
 import { EventEmitter } from "node:events";
-import { realpathSync, symlinkSync, unlinkSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createSymlinkedWorkspace } from "../test-utils/temp-workspace";
 
 // chokidar.watch() が返す本物の代わりに使う EventEmitter ベースの偽 watcher。
 // テストから add/change/unlink を任意タイミングで emit できる。
@@ -202,28 +202,23 @@ describe("watcher.ts: start/stop race", () => {
 // ケースで顕在化する。fs.ts/listDirectoryImpl, search.ts と同じく canonical I/O →
 // input emit に統一する必要がある。
 describe("watcher.ts: symlinked workspace", () => {
-	let realDir: string;
 	let canonicalRealDir: string;
 	let symlinkDir: string;
+	let cleanupWorkspace = () => Promise.resolve();
 
 	beforeEach(async () => {
-		realDir = await mkdtemp(join(tmpdir(), "scripta-real-"));
-		canonicalRealDir = realpathSync(realDir);
-		symlinkDir = join(tmpdir(), `scripta-symlink-${process.pid}-${Date.now()}`);
-		symlinkSync(realDir, symlinkDir);
+		({
+			canonicalRealDir,
+			symlinkDir,
+			cleanup: cleanupWorkspace,
+		} = await createSymlinkedWorkspace());
 		await registerWorkspaceRoot(TEST_WIN, symlinkDir);
 	});
 
 	afterEach(async () => {
 		stopWatcherForWindow(TEST_WIN);
 		clearWorkspaceRoots();
-		// symlink 削除は best-effort: 何らかの理由で先に消えていても realDir の rm まで必ず進む
-		try {
-			unlinkSync(symlinkDir);
-		} catch {
-			// ignore
-		}
-		await rm(realDir, { recursive: true, force: true });
+		await cleanupWorkspace();
 	});
 
 	// Windows は symlink に Developer Mode が必要で CI が EPERM になるためスキップ。
