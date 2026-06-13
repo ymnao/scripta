@@ -84,10 +84,11 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-	stopWatcherForWindow(TEST_WIN);
-	clearWorkspaceRoots();
 });
 
+// cleanup 順序は「watcher 停止 → workspace 解除 → 物理 dir 削除」で固定する。
+// 現状の FakeWatcher では順序逆転しても観測できないが、将来 fake watcher の close に
+// 副作用を足したり一部を実 watcher 寄りにした際に失敗原因の切り分けが鈍るのを避ける。
 describe("watcher.ts: start/stop race", () => {
 	let workspaceDir: string;
 
@@ -97,6 +98,8 @@ describe("watcher.ts: start/stop race", () => {
 	});
 
 	afterEach(async () => {
+		stopWatcherForWindow(TEST_WIN);
+		clearWorkspaceRoots();
 		await rm(workspaceDir, { recursive: true, force: true });
 	});
 
@@ -212,7 +215,14 @@ describe("watcher.ts: symlinked workspace", () => {
 	});
 
 	afterEach(async () => {
-		unlinkSync(symlinkDir);
+		stopWatcherForWindow(TEST_WIN);
+		clearWorkspaceRoots();
+		// symlink 削除は best-effort: 何らかの理由で先に消えていても realDir の rm まで必ず進む
+		try {
+			unlinkSync(symlinkDir);
+		} catch {
+			// ignore
+		}
 		await rm(realDir, { recursive: true, force: true });
 	});
 
