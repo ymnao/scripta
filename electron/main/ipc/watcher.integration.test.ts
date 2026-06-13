@@ -65,16 +65,15 @@ function getHandler(channel: string): LooseHandler {
 }
 
 const TEST_WIN = 1;
-let workspaceDir = "";
 let webContents: FakeWebContents;
 
-beforeEach(async () => {
+// 共通セットアップ: fake timers / ipcMain mock / webContents / registerWatcherIpc。
+// workspace root の登録は各 describe の beforeEach で行う（テストごとに必要な root が異なるため）。
+beforeEach(() => {
 	vi.useFakeTimers();
 	vi.mocked(ipcMain.handle).mockClear();
 	createdWatchers.length = 0;
 	clearWorkspaceRoots();
-	workspaceDir = await mkdtemp(join(tmpdir(), "scripta-watcher-int-"));
-	await registerWorkspaceRoot(TEST_WIN, workspaceDir);
 	webContents = {
 		id: TEST_WIN,
 		send: vi.fn(),
@@ -83,15 +82,27 @@ beforeEach(async () => {
 	registerWatcherIpc();
 });
 
-afterEach(async () => {
+afterEach(() => {
 	vi.useRealTimers();
-	// テストが explicit stop しないケースに備えた cleanup
-	stopWatcherForWindow(TEST_WIN);
-	clearWorkspaceRoots();
-	await rm(workspaceDir, { recursive: true, force: true });
 });
 
+// cleanup 順序は「watcher 停止 → workspace 解除 → 物理 dir 削除」で固定する。
+// 現状の FakeWatcher では順序逆転しても観測できないが、将来 fake watcher の close に
+// 副作用を足したり一部を実 watcher 寄りにした際に失敗原因の切り分けが鈍るのを避ける。
 describe("watcher.ts: start/stop race", () => {
+	let workspaceDir: string;
+
+	beforeEach(async () => {
+		workspaceDir = await mkdtemp(join(tmpdir(), "scripta-watcher-int-"));
+		await registerWorkspaceRoot(TEST_WIN, workspaceDir);
+	});
+
+	afterEach(async () => {
+		stopWatcherForWindow(TEST_WIN);
+		clearWorkspaceRoots();
+		await rm(workspaceDir, { recursive: true, force: true });
+	});
+
 	it("delivers fs-change on the happy path (before stop)", async () => {
 		const start = getHandler("watcher:start");
 		await start({ sender: webContents }, workspaceDir);
@@ -183,48 +194,58 @@ describe("watcher.ts: start/stop race", () => {
 			await rm(otherDir, { recursive: true, force: true });
 		}
 	});
+});
 
-	// 回帰テスト：renderer 側はタブ/FileTree で input 表記の path を保持しているため、
-	// canonical（realpath 済み）の path をそのまま emit すると比較が一致せず外部変更検知が
-	// 壊れる。macOS の /var → /private/var alias や、symlink 経由で workspace を開いた
-	// ケースで顕在化する。fs.ts/listDirectoryImpl, search.ts と同じく canonical I/O →
-	// input emit に統一する必要がある。
-	//
+// 回帰テスト：renderer 側はタブ/FileTree で input 表記の path を保持しているため、
+// canonical（realpath 済み）の path をそのまま emit すると比較が一致せず外部変更検知が
+// 壊れる。macOS の /var → /private/var alias や、symlink 経由で workspace を開いた
+// ケースで顕在化する。fs.ts/listDirectoryImpl, search.ts と同じく canonical I/O →
+// input emit に統一する必要がある。
+describe("watcher.ts: symlinked workspace", () => {
+	let realDir: string;
+	let canonicalRealDir: string;
+	let symlinkDir: string;
+
+	beforeEach(async () => {
+		realDir = await mkdtemp(join(tmpdir(), "scripta-real-"));
+		canonicalRealDir = realpathSync(realDir);
+		symlinkDir = join(tmpdir(), `scripta-symlink-${process.pid}-${Date.now()}`);
+		symlinkSync(realDir, symlinkDir);
+		await registerWorkspaceRoot(TEST_WIN, symlinkDir);
+	});
+
+	afterEach(async () => {
+		stopWatcherForWindow(TEST_WIN);
+		clearWorkspaceRoots();
+		// symlink 削除は best-effort: 何らかの理由で先に消えていても realDir の rm まで必ず進む
+		try {
+			unlinkSync(symlinkDir);
+		} catch {
+			// ignore
+		}
+		await rm(realDir, { recursive: true, force: true });
+	});
+
 	// Windows は symlink に Developer Mode が必要で CI が EPERM になるためスキップ。
 	it.skipIf(process.platform === "win32")(
-		"emits input-form paths even when chokidar reports canonical (symlinked workspace)",
+		"emits input-form paths even when chokidar reports canonical",
 		async () => {
-			const realDir = await mkdtemp(join(tmpdir(), "scripta-real-"));
-			const canonicalRealDir = realpathSync(realDir);
-			const symlinkDir = join(tmpdir(), `scripta-symlink-${process.pid}-${Date.now()}`);
-			symlinkSync(realDir, symlinkDir);
-			try {
-				clearWorkspaceRoots();
-				await registerWorkspaceRoot(TEST_WIN, symlinkDir);
-				const start = getHandler("watcher:start");
-				await start({ sender: webContents }, symlinkDir);
-				expect(createdWatchers).toHaveLength(1);
+			const start = getHandler("watcher:start");
+			await start({ sender: webContents }, symlinkDir);
+			expect(createdWatchers).toHaveLength(1);
 
-				// 実 chokidar は canonical 配下の path を emit する。
-				// reclassifyDeleted の挙動を避けるため kind は create/delete のみ使う
-				// （modify は disk 実体を見て delete 化される可能性があり、本テストの焦点外）。
-				createdWatchers[0].emit("add", join(canonicalRealDir, "note.md"));
-				createdWatchers[0].emit("unlink", join(canonicalRealDir, "sub", "deep.md"));
-				await vi.advanceTimersByTimeAsync(600);
+			// 実 chokidar は canonical 配下の path を emit する。
+			// reclassifyDeleted の挙動を避けるため kind は create/delete のみ使う
+			// （modify は disk 実体を見て delete 化される可能性があり、本テストの焦点外）。
+			createdWatchers[0].emit("add", join(canonicalRealDir, "note.md"));
+			createdWatchers[0].emit("unlink", join(canonicalRealDir, "sub", "deep.md"));
+			await vi.advanceTimersByTimeAsync(600);
 
-				expect(webContents.send).toHaveBeenCalledTimes(1);
-				expect(webContents.send).toHaveBeenCalledWith("watcher:fs-change", [
-					{ kind: "create", path: join(symlinkDir, "note.md") },
-					{ kind: "delete", path: join(symlinkDir, "sub", "deep.md") },
-				]);
-			} finally {
-				try {
-					unlinkSync(symlinkDir);
-				} catch {
-					// ignore
-				}
-				await rm(realDir, { recursive: true, force: true });
-			}
+			expect(webContents.send).toHaveBeenCalledTimes(1);
+			expect(webContents.send).toHaveBeenCalledWith("watcher:fs-change", [
+				{ kind: "create", path: join(symlinkDir, "note.md") },
+				{ kind: "delete", path: join(symlinkDir, "sub", "deep.md") },
+			]);
 		},
 	);
 });
