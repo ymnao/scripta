@@ -84,13 +84,12 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-	// テストが explicit stop しないケースに備えた cleanup
 	stopWatcherForWindow(TEST_WIN);
 	clearWorkspaceRoots();
 });
 
 describe("watcher.ts: start/stop race", () => {
-	let workspaceDir = "";
+	let workspaceDir: string;
 
 	beforeEach(async () => {
 		workspaceDir = await mkdtemp(join(tmpdir(), "scripta-watcher-int-"));
@@ -200,9 +199,9 @@ describe("watcher.ts: start/stop race", () => {
 // ケースで顕在化する。fs.ts/listDirectoryImpl, search.ts と同じく canonical I/O →
 // input emit に統一する必要がある。
 describe("watcher.ts: symlinked workspace", () => {
-	let realDir = "";
-	let canonicalRealDir = "";
-	let symlinkDir = "";
+	let realDir: string;
+	let canonicalRealDir: string;
+	let symlinkDir: string;
 
 	beforeEach(async () => {
 		realDir = await mkdtemp(join(tmpdir(), "scripta-real-"));
@@ -213,11 +212,7 @@ describe("watcher.ts: symlinked workspace", () => {
 	});
 
 	afterEach(async () => {
-		try {
-			unlinkSync(symlinkDir);
-		} catch {
-			// ignore: テスト本体で削除済み or symlink 作成失敗時の二重 cleanup
-		}
+		unlinkSync(symlinkDir);
 		await rm(realDir, { recursive: true, force: true });
 	});
 
