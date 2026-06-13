@@ -354,7 +354,14 @@ export interface ListLineInfo {
 	indent: string;
 	ordered: { number: number; delim: "." | ")" } | null;
 	task: boolean;
-	/** Width of `[marker][trailing space]` (excludes indent). */
+	/**
+	 * Width of `[marker][trailing space]` (excludes indent), i.e. the
+	 * CommonMark content offset a child line must be indented to. The GFM
+	 * task marker `[ ] ` is paragraph content, not part of the list marker,
+	 * so it never counts: for `- [ ] x` this is 2, same as a plain bullet.
+	 * (Counting it would push children past content offset + 3, where they
+	 * stop being a nested list and degrade to paragraph continuation text.)
+	 */
 	markerWidth: number;
 }
 
@@ -375,7 +382,7 @@ export function parseListLine(text: string): ListLineInfo | null {
 			indent: b[1],
 			ordered: null,
 			task: b[3] != null,
-			markerWidth: b[0].length - b[1].length,
+			markerWidth: b[2].length + 1,
 		};
 	}
 	return null;
