@@ -4,16 +4,13 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // isPdfSupported はモジュールレベルで IS_MAC（= navigator.platform 由来）を
 // 参照するため、ExportDialog の import より前に navigator.platform を Mac 相当に
-// 差し替える。同一 worker 内の他テストへ状態を漏らさないよう、元の値を退避して
-// afterAll で必ず復元する。退避は `Reflect.get` 経由（plugin の `navigator.platform`
-// 直接参照禁止ルールを満たすため。実体は navigator.platform を読むのと等価）。
-const originalPlatform = vi.hoisted(() => {
-	const orig = Reflect.get(navigator, "platform");
+// 差し替える。同一 worker 内の他テストへ状態を漏らさないよう afterAll で復元する
+// （復元先は jsdom 既定の `""` — platform.ts ヘッダ参照: 「jsdom 環境では `""` を返す」）。
+vi.hoisted(() => {
 	Object.defineProperty(navigator, "platform", {
 		value: "MacIntel",
 		configurable: true,
 	});
-	return orig;
 });
 
 import { useToastStore } from "../../stores/toast";
@@ -21,7 +18,7 @@ import { ExportDialog } from "./ExportDialog";
 
 afterAll(() => {
 	Object.defineProperty(navigator, "platform", {
-		value: originalPlatform,
+		value: "",
 		configurable: true,
 	});
 });
