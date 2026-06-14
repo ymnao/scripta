@@ -13,10 +13,10 @@ import { expect, test } from "./helpers/launch";
 // 越しに「PDF が実ファイルとしてディスクに生成される」ことを safety net 化する
 // （issue #86 シナリオ 5）。
 //
-// 注: ExportDialog の UI は `isPdfSupported`（navigator.userAgent が mac/win）で PDF
-// ボタンを無効化する **product レベル**の制約で、capability（printToPDF 自体）は全 OS で
-// 動く。UI ゲートは renderer-only `export.spec.ts` がカバー済みなので、本 spec は IPC を
-// 直接呼んで capability 境界（Linux CI 含む全 OS で実行可能）を検証する。
+// 注: ExportDialog の UI は `isPdfSupported`（src/lib/platform.ts の IS_MAC || IS_WINDOWS）
+// で PDF ボタンを無効化する **product レベル**の制約で、capability（printToPDF 自体）は
+// 全 OS で動く。UI ゲートは renderer-only `export.spec.ts` がカバー済みなので、本 spec は
+// IPC を直接呼んで capability 境界（Linux CI 含む全 OS で実行可能）を検証する。
 test.describe("pdf export (electron)", () => {
 	// printToPDF（隠し window load + font ready + 描画）は重いので timeout 緩和。
 	test.slow();

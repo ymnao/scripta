@@ -1,0 +1,19 @@
+// OS 判定の集約ポリシーを Biome plugin で機械的に強制する。
+//
+// `navigator.userAgent` / `navigator.platform` への参照は src/lib/platform.ts に
+// 集約し、各箇所では `IS_MAC` / `IS_WINDOWS` 等の名前付き定数を import する。
+//
+// allowlist (= src/lib/platform.ts 自身) は GritQL の $filename メタ変数で
+// rule 内除外している。biome.json の plugins[] は Biome 2.4.16 時点で string 配列
+// しか受け付けず includes/excludes 指定はできないため、pattern 側で表現する。
+//
+// 関連: #161, #177, #180
+
+`navigator.$prop` where {
+	$prop <: or {
+		`userAgent`,
+		`platform`
+	},
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$prop, message="navigator.userAgent / navigator.platform の直接参照は禁止です。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください (必要なら platform.ts に新しい定数を追加)。")
+}

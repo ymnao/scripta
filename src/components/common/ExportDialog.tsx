@@ -11,6 +11,7 @@ import {
 	type PageBreakCriterion,
 	type PageBreakLevel,
 } from "../../lib/export";
+import { IS_MAC, IS_WINDOWS } from "../../lib/platform";
 import {
 	getScriptaPromptTemplatePath,
 	loadPromptTemplate,
@@ -21,8 +22,7 @@ import { DialogBase } from "./DialogBase";
 import { RangeInput, SelectInput, Toggle } from "./FormInputs";
 import { SidebarDialogLayout } from "./SidebarDialogLayout";
 
-const isPdfSupported =
-	typeof navigator !== "undefined" && /mac|win/i.test(navigator.userAgent ?? "");
+const isPdfSupported = IS_MAC || IS_WINDOWS;
 
 interface ExportDialogProps {
 	open: boolean;

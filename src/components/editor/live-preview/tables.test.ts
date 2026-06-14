@@ -3,6 +3,7 @@ import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
+import { IS_MAC } from "../../../lib/platform";
 import { buildTableDecorations, tableDecoration } from "./table-decoration";
 import { createEmptyTable } from "./table-utils";
 import {
@@ -26,8 +27,6 @@ describe("tableKeymap", () => {
 //
 // insertTable は dispatch を伴うため real EditorView を jsdom 上で起動して検証する
 // （horizontal-rules.test.ts の runtime テストと同じ方針）。
-
-const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
 
 describe("insertTable (runtime)", () => {
 	const mounted: EditorView[] = [];
@@ -119,8 +118,8 @@ describe("insertTable (runtime)", () => {
 			key: "t",
 			code: "KeyT",
 			shiftKey: true,
-			ctrlKey: !isMac,
-			metaKey: isMac,
+			ctrlKey: !IS_MAC,
+			metaKey: IS_MAC,
 		});
 		const handled = runScopeHandlers(view, event, "editor");
 		expect(handled).toBe(true);
