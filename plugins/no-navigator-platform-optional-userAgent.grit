@@ -1,0 +1,7 @@
+// navigator?.userAgent (optional chain) を弾く。
+// 詳細: `no-navigator-platform-optional.grit` 冒頭コメント参照。
+
+`navigator?.userAgent` as $hit where {
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$hit, message="navigator?.userAgent の参照は禁止です。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください。")
+}

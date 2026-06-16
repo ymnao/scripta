@@ -1,0 +1,18 @@
+// navigator から `userAgent` / `platform` を destructuring で取り出すパターンを弾く。
+//
+// `const { platform } = navigator` のような書き方は dot access と同じだが
+// 別の AST ノード (VariableDeclaration + ObjectPattern) として扱われるため
+// `no-navigator-platform.grit` の or ブロックでは検出されない。
+// `let` / `var` destructuring は本プロジェクトの慣習で出現しないため対象外
+// (将来的に検出が必要になったら別 plugin file を追加)。
+//
+// 関連: #161, #177, #180
+
+`const { $prop } = navigator` where {
+	$prop <: or {
+		`userAgent`,
+		`platform`
+	},
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$prop, message="navigator から userAgent / platform を destructuring で取り出すのは禁止です。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください (必要なら platform.ts に新しい定数を追加)。")
+}

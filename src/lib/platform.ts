@@ -6,9 +6,10 @@
  * `.toLowerCase().includes("mac")` だったり `userAgent` 経由だったりとバラついて
  * いた。検出ロジックを散らさず、ここからだけ import する。
  *
- * このポリシーは `plugins/no-navigator-platform.grit` の Biome plugin で機械的に
- * 強制されている（このファイル以外で `navigator.userAgent` / `navigator.platform`
- * を参照すると lint エラー）。
+ * このポリシーは `plugins/no-navigator-platform*.grit` の Biome plugin 群で機械的
+ * に強制されている。このファイル以外で `navigator.userAgent` / `navigator.platform`
+ * を **dot access / optional chain / bracket access / `const` destructuring** の
+ * いずれで参照しても lint エラーになる。
  *
  * `navigator.platform` は deprecated 寄りだが Electron 環境では安定して使える
  * （ipc/main から userAgent を流すより軽い）。jsdom 環境では `""` を返すので
@@ -19,10 +20,10 @@ export const IS_MAC =
 
 /**
  * Windows 判定。`IS_MAC` と同じく `navigator.platform` 経由で評価する。
- * `navigator.platform` は "Win32" / "Win64" / "Windows" 等の表記揺れがあるため
- * `/win/i` でゆるくマッチする（"Darwin" 等の他 OS と衝突しない）。
+ * `navigator.platform` は "Win32" / "Win64" / "Windows" / "WinCE" 等の表記揺れが
+ * あるため `/^Win/i` で先頭一致する（`/win/i` だと "Darwin" にもマッチしてしまう）。
  */
-export const IS_WINDOWS = typeof navigator !== "undefined" && /win/i.test(navigator.platform);
+export const IS_WINDOWS = typeof navigator !== "undefined" && /^Win/i.test(navigator.platform);
 
 /**
  * 後続キーと連結する文字列用の primary modifier 表記

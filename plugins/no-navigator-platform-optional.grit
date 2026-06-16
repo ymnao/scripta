@@ -1,0 +1,15 @@
+// navigator?.platform / navigator?.userAgent (optional chain) を弾く。
+//
+// Biome 2.4.16 + marzano の `or` / `any` ブロックは optional chain ノードを
+// top-level branch に置くと無視される挙動があるため、各形を「単体 top-level
+// pattern」として 1 plugin file = 1 pattern の制約に合わせて書き分ける必要が
+// ある。
+//
+// 「optional chain の userAgent 側」は別 plugin
+// (`no-navigator-platform-optional-userAgent.grit`) でカバーする。dot access /
+// bracket access は `no-navigator-platform.grit` を参照。
+
+`navigator?.platform` as $hit where {
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$hit, message="navigator?.platform の参照は禁止です。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください。")
+}
