@@ -2,24 +2,23 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// isPdfSupported はモジュールレベルで navigator.userAgent を参照するため、
-// インポート前に userAgent を設定する。同一 worker 内の他テストへ状態を
-// 漏らさないよう、元の値を退避して afterAll で必ず復元する。
-const originalUserAgent = vi.hoisted(() => {
-	const orig = navigator.userAgent;
-	Object.defineProperty(navigator, "userAgent", {
-		value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+// isPdfSupported はモジュールレベルで IS_MAC（= navigator.platform 由来）を
+// 参照するため、ExportDialog の import より前に navigator.platform を Mac 相当に
+// 差し替える。同一 worker 内の他テストへ状態を漏らさないよう afterAll で復元する
+// （復元先は jsdom 既定の `""` — platform.ts ヘッダ参照: 「jsdom 環境では `""` を返す」）。
+vi.hoisted(() => {
+	Object.defineProperty(navigator, "platform", {
+		value: "MacIntel",
 		configurable: true,
 	});
-	return orig;
 });
 
 import { useToastStore } from "../../stores/toast";
 import { ExportDialog } from "./ExportDialog";
 
 afterAll(() => {
-	Object.defineProperty(navigator, "userAgent", {
-		value: originalUserAgent,
+	Object.defineProperty(navigator, "platform", {
+		value: "",
 		configurable: true,
 	});
 });

@@ -1,0 +1,36 @@
+// const/let/var で navigator を destructuring する全パターンを弾く。
+//
+// `const $obj = navigator` 系の代入を捕まえ、左辺 $obj が `userAgent` /
+// `platform` を **subtree のいずれかに含む** ことを `contains` で検査する。
+// これによって以下の destructuring 全種をまとめて catch する:
+//
+//   const { platform } = navigator
+//   const { platform: alias } = navigator
+//   const { platform, userAgent } = navigator
+//   const { userAgent: ua, platform: pf } = navigator
+//   const { language, userAgent, clipboard } = navigator   // 任意順序・任意 prop 数
+//
+// `contains` はマッチ箇所が複数あっても最初の 1 件だけ診断を出すが、ユーザーは
+// 違反 destructuring 全体を修正する必要があるためこれで十分。
+// 単純代入 `const x = navigator` は `$obj = x` で `contains` の検査に hit せず素通り。
+//
+// 関連: #161, #177, #180
+
+// 注: `let` キーワードは marzano-Biome 2.4.16 の GritQL template literal で
+// 認識されず、`let $obj = navigator` パターンが compile を通っても match しない
+// (known limitation)。`let { ... } = navigator` の書き方は Biome 内蔵の
+// `useConst` rule で warning が出るため PR レビュー時に間接的に気付ける。
+// `const` と `var` は本 plugin で機械的に弾く。
+or {
+	`const $obj = navigator`,
+	`var $obj = navigator`
+} where {
+	$obj <: contains $hit where {
+		$hit <: or {
+			`userAgent`,
+			`platform`
+		}
+	},
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$hit, message="navigator から userAgent / platform を destructuring で取り出すのは禁止です (const / var, shorthand / alias / multi-prop 全て対象)。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください (必要なら platform.ts に新しい定数を追加)。")
+}

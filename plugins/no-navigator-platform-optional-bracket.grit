@@ -1,0 +1,17 @@
+// navigator?.["userAgent"] / navigator?.["platform"] を弾く (optional + bracket)。
+// 詳細: `no-navigator-platform-optional.grit` 冒頭コメント参照。
+//
+// 診断メッセージで `\"` のエスケープが marzano-Biome 2.4.16 によって `\r` 等の
+// 制御文字に誤解釈され表示が壊れたため、メッセージ内では引用符を使わずに
+// 括弧で属性名を囲む表記 ([userAgent] / [platform]) で統一している。
+
+`navigator?.[$key]` as $hit where {
+	$key <: or {
+		`"userAgent"`,
+		`"platform"`,
+		`'userAgent'`,
+		`'platform'`
+	},
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$hit, message="navigator?.[userAgent] / navigator?.[platform] (optional + bracket access) の参照は禁止です。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください。")
+}
