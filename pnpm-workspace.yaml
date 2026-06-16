@@ -45,6 +45,10 @@ overrides:
   "@lezer/common": ^1.5.2
   "brace-expansion@^5.0.0": ^5.0.6
   "tmp@<0.2.6": ">=0.2.6"          # GHSA: Path Traversal (Dep #7)。tmp-promise → tmp@0.2.5 を修正版へ強制
+  "esbuild@<0.28.1": ^0.28.1       # GHSA-gv7w-rqvm-qjhr (high, Dep #8)。electron-vite@5.0.0 が ^0.25.11 で固定する esbuild を patched 版へ強制。
+                                   # 実害評価: 脆弱性は esbuild の Deno module (lib/deno/mod.ts) 限定で本リポは Node.js 経由のみ使用、Node path は binaryIntegrityCheck() で SHA-256 検証済 → 実害なし。
+                                   # ただし alert を closed にするため transitive 入口の electron-vite が ^0.28 を許容するまでの過渡期 override。
+                                   # electron-vite 上流が dep 範囲を更新したらこの override は削除可。
 
 # 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
 #
