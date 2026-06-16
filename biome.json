@@ -5,6 +5,7 @@
 		"./plugins/no-navigator-platform.grit",
 		"./plugins/no-navigator-platform-optional.grit",
 		"./plugins/no-navigator-platform-optional-userAgent.grit",
+		"./plugins/no-navigator-platform-optional-bracket.grit",
 		"./plugins/no-navigator-platform-destruct.grit"
 	],
 	"linter": {

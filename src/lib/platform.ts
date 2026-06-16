@@ -8,8 +8,23 @@
  *
  * このポリシーは `plugins/no-navigator-platform*.grit` の Biome plugin 群で機械的
  * に強制されている。このファイル以外で `navigator.userAgent` / `navigator.platform`
- * を **dot access / optional chain / bracket access / `const` destructuring** の
- * いずれで参照しても lint エラーになる。
+ * を以下のいずれの形で参照しても lint エラーになる:
+ *
+ *   - dot access:        navigator.platform   / navigator.userAgent
+ *   - optional chain:    navigator?.platform  / navigator?.userAgent
+ *   - bracket access:    navigator["platform"] (' / " いずれも)
+ *   - optional bracket:  navigator?.["platform"]
+ *   - namespace prefix:  window.navigator.platform / globalThis.navigator.* / self.navigator.*
+ *   - const destruct:    const { platform } = navigator  (shorthand / alias / multi-prop すべて)
+ *   - var destruct:      var { platform } = navigator    (同上)
+ *
+ * marzano-Biome 2.4.16 の制約で **検出できない既知の穴** (= known limitation):
+ *   - `let { ... } = navigator` の destructuring
+ *     → 多くの場合 Biome 内蔵の `useConst` rule で warning が出る
+ *   - `window.navigator?.platform` のような optional + 名前空間プレフィックスの合成
+ *   - `const x = navigator; x.platform` のような中間変数経由のエイリアス
+ *
+ * 上記の限界は PR レビューでも明示的に確認すること。
  *
  * `navigator.platform` は deprecated 寄りだが Electron 環境では安定して使える
  * （ipc/main から userAgent を流すより軽い）。jsdom 環境では `""` を返すので

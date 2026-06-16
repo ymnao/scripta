@@ -1,0 +1,13 @@
+// navigator?.["userAgent"] / navigator?.["platform"] を弾く (optional + bracket)。
+// 詳細: `no-navigator-platform-optional.grit` 冒頭コメント参照。
+
+`navigator?.[$key]` as $hit where {
+	$key <: or {
+		`"userAgent"`,
+		`"platform"`,
+		`'userAgent'`,
+		`'platform'`
+	},
+	$filename <: not includes "src/lib/platform.ts",
+	register_diagnostic(span=$hit, message="navigator?.[\"userAgent\"] / navigator?.[\"platform\"] の参照は禁止です。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください。")
+}

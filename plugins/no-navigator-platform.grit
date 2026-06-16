@@ -1,25 +1,32 @@
-// OS 判定の集約ポリシーを Biome plugin で機械的に強制する (1/2)。
+// OS 判定の集約ポリシーを Biome plugin で機械的に強制する (1/5)。
 //
 // `navigator.userAgent` / `navigator.platform` への参照は src/lib/platform.ts に
 // 集約し、各箇所では `IS_MAC` / `IS_WINDOWS` 等の名前付き定数を import する。
 //
-// このファイルは dot access と bracket access を弾く。optional chain
-// (`navigator?.platform` 等) は GritQL の `or` ブロック内に混在させると無視される
-// 挙動があるため `no-navigator-platform-optional.grit` に分離。
-//
-// 検出対象:
+// このファイルは以下のパターンを `or` で 1 つの top-level pattern に統合する:
 //   - navigator.userAgent / navigator.platform        (dot access)
 //   - navigator["userAgent"] / navigator["platform"]  (bracket access, "..." / '...')
+//   - window.navigator.userAgent       / .platform    (namespace prefix)
+//   - globalThis.navigator.userAgent   / .platform
+//   - self.navigator.userAgent         / .platform
+//
+// `or` 内に optional chain (`navigator?.platform` 等) を入れるとその枝だけ無視
+// される marzano-Biome 制約があるため optional 系は別 plugin file
+// (`no-navigator-platform-optional*.grit`) に分離している。
+// const/let/var destructuring も別 file (`-destruct.grit`)。
 //
 // allowlist (= src/lib/platform.ts 自身) は GritQL の $filename メタ変数で
 // rule 内除外している。biome.json の plugins[] は Biome 2.4.16 時点で string 配列
-// しか受け付けず includes/excludes 指定はできないため、pattern 側で表現する。
+// しか受け付けず includes/excludes 指定はできないため pattern 側で表現する。
 //
 // 関連: #161, #177, #180
 
 or {
 	`navigator.$prop`,
-	`navigator[$prop]`
+	`navigator[$prop]`,
+	`window.navigator.$prop`,
+	`globalThis.navigator.$prop`,
+	`self.navigator.$prop`
 } as $hit where {
 	$prop <: or {
 		`userAgent`,
@@ -30,5 +37,5 @@ or {
 		`'platform'`
 	},
 	$filename <: not includes "src/lib/platform.ts",
-	register_diagnostic(span=$hit, message="navigator.userAgent / navigator.platform の直接参照は禁止です (dot / bracket access 共に対象)。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください (必要なら platform.ts に新しい定数を追加)。")
+	register_diagnostic(span=$hit, message="navigator.userAgent / navigator.platform の直接参照は禁止です (dot / bracket / window-prefix / globalThis-prefix / self-prefix いずれも対象)。src/lib/platform.ts の IS_MAC / IS_WINDOWS を import してください (必要なら platform.ts に新しい定数を追加)。")
 }
