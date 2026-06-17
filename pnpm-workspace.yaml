@@ -49,6 +49,15 @@ overrides:
                                    # 実害評価: 脆弱性は esbuild の Deno module (lib/deno/mod.ts) 限定で本リポは Node.js 経由のみ使用、Node path は binaryIntegrityCheck() で SHA-256 検証済 → 実害なし。
                                    # ただし alert を closed にするため transitive 入口の electron-vite が ^0.28 を許容するまでの過渡期 override。
                                    # electron-vite 上流が dep 範囲を更新したらこの override は削除可。
+  "form-data@<4.0.6": ^4.0.6       # GHSA-hmw2-7cc7-3qxx (high)。electron-builder 経由の 4.0.5 を CRLF injection patched 版へ強制。
+                                   # 実害評価: 攻撃前提が「append() に attacker-controlled な field/filename を渡す」で本リポは build-time の自前入力のみ → 実害なし (alert closed 化目的)。
+  "tar@<7.5.16": ^7.5.16           # GHSA-vmf3-w455-68vh (moderate)。electron-builder 経由の node-tar 7.5.13 を PAX header desync patched 版へ強制。
+                                   # 実害評価: 攻撃前提が「攻撃者作成 tar archive を parse」で本リポは自前 build 成果物の archive のみ → 実害なし (alert closed 化目的)。
+  "@babel/core@<7.29.6": ^7.29.6   # GHSA-4x5r-pxfx-6jf8 (low)。electron-vite 経由の 7.29.0 を source map disclosure patched 版へ強制。
+                                   # 実害評価: 攻撃前提が「malicious code を compile + source map を attacker が読む」で本リポは self-contained build → 実害なし (alert closed 化目的)。
+  "dompurify@<3.4.9": ^3.4.9       # GHSA-vxr8-fq34-vvx9 (low)。mermaid@11.15.0 が direct dep として持つ 3.4.8 を Trusted Types reset patched 版へ強制。
+                                   # 実害評価: 攻撃前提が「instance を trust boundary 越し reuse + 状態順序条件」で mermaid 内部使用は scoped → 実害なし。
+                                   # direct dep の dompurify ^3.4.10 と同 minor なので mermaid 描画への互換影響は低い見込み、CI の mermaid e2e で回帰検出する。
 
 # 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
 #
