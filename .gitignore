@@ -49,3 +49,7 @@ src/generated/
 
 # Electron
 .electron-builder-cache/
+
+# AI agent / MCP local cache (project ごとにユーザー側で生成されるメタ、commit しない)
+.serena/
+AGENTS.md
