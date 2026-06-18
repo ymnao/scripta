@@ -47,6 +47,16 @@ export const IS_WINDOWS = typeof navigator !== "undefined" && /^Win/i.test(navig
  */
 export const PRIMARY_MOD_SYMBOL = IS_MAC ? "⌘" : "Ctrl+";
 
+/**
+ * 後続キーと連結する Shift + primary modifier 表記
+ * （例: `${SHIFT_MOD_SYMBOL}X` → "⇧⌘X" / "Ctrl+Shift+X"）。
+ * `SHIFT_KEY_LABEL` + `PRIMARY_MOD_SYMBOL` を直接連結すると Win で
+ * `ShiftCtrl+X` のように区切り `+` が欠落するため、専用 prefix を用意する。
+ * 順序は Mac の慣習 `⇧⌘`、Win の慣習 `Ctrl+Shift+` を採用し、
+ * `<Kbd>` 配列 `[MOD, SHIFT, key]` の表示順とも一致させる。
+ */
+export const SHIFT_MOD_SYMBOL = IS_MAC ? "⇧⌘" : "Ctrl+Shift+";
+
 /** `<Kbd>` で 1 キーずつ表示する用の modifier ラベル（連結用は PRIMARY_MOD_SYMBOL）。 */
 export const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
 /** `<Kbd>` で 1 キーずつ表示する用の Shift ラベル。 */
