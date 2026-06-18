@@ -23,7 +23,7 @@ import {
 } from "react";
 import { buildFence } from "../../lib/code-fence";
 import { openExternal } from "../../lib/commands";
-import { IS_MAC, PRIMARY_MOD_SYMBOL } from "../../lib/platform";
+import { IS_MAC, PRIMARY_MOD_SYMBOL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { useSettingsStore } from "../../stores/settings";
 import { Dialog } from "../common/Dialog";
 import type { ContextMenuItem } from "../filetree/ContextMenu";
@@ -516,6 +516,9 @@ export function MarkdownEditor({
 			{
 				id: "redo",
 				label: "やり直す",
+				// Win の Redo は慣習表記 Ctrl+Y を表示する（CodeMirror の history keymap は
+				// Mod-y / Mod-Shift-z の両方を受け付けるため、Win 慣習に合わせた Ctrl+Y を採用）。
+				// 定数合成だと Shift+Ctrl+Z になり Win ユーザーの期待と異なるので OS 別文字列を保持する。
 				shortcut: IS_MAC ? "⇧⌘Z" : "Ctrl+Y",
 				onClick: withFocus(redo),
 			},
@@ -573,7 +576,7 @@ export function MarkdownEditor({
 				{
 					id: "strikethrough",
 					label: "取り消し線",
-					shortcut: IS_MAC ? "⇧⌘X" : "Ctrl+Shift+X",
+					shortcut: `${SHIFT_KEY_LABEL}${PRIMARY_MOD_SYMBOL}X`,
 					onClick: withFocus(toggleStrikethrough),
 				},
 			];
@@ -587,7 +590,7 @@ export function MarkdownEditor({
 			{
 				id: "insert-table",
 				label: "テーブルを挿入",
-				shortcut: IS_MAC ? "⇧⌘T" : "Ctrl+Shift+T",
+				shortcut: `${SHIFT_KEY_LABEL}${PRIMARY_MOD_SYMBOL}T`,
 				onClick: withFocus(insertTable),
 			},
 			{ id: "insert-hr", label: "水平線を挿入", onClick: withFocus(insertHorizontalRule) },
