@@ -14,12 +14,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  */
 
 /**
- * jsdom 既定の `navigator.platform` は空文字（`platform.ts` ヘッダ参照: 「jsdom
- * 環境では `""` を返す」）。`afterEach` で復元する値はこれに固定する。直接
- * `navigator.platform` を読むと `no-navigator-platform` biome plugin で禁止される
- * ため、jsdom 既定値を定数として持つ。
+ * `Object.defineProperty(navigator, "platform", ...)` で値を上書きした後、
+ * 元の property descriptor を復元することで他テストへの leak を防ぐ。
+ *
+ * jsdom 環境では `navigator.platform` は通常 `Navigator.prototype` 上の getter として
+ * 定義されており、navigator instance 自身には own property が無い (= `undefined`)。
+ * その場合は `Reflect.deleteProperty` で instance 上の上書き定義を削除し、
+ * prototype 経由の元の getter を再露出させる。
+ *
+ * instance に own property があった場合 (将来 jsdom 仕様が変わった場合) はその
+ * descriptor を `Object.defineProperty` で書き戻す。`navigator.platform` の直接
+ * 参照は `no-navigator-platform` biome plugin で禁止されているため、descriptor 経由で
+ * 読む。
  */
-const JSDOM_DEFAULT_PLATFORM = "";
+const ORIGINAL_PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 async function importPlatformWith(platformValue: string) {
 	Object.defineProperty(navigator, "platform", {
@@ -31,11 +39,12 @@ async function importPlatformWith(platformValue: string) {
 }
 
 afterEach(() => {
-	Object.defineProperty(navigator, "platform", {
-		value: JSDOM_DEFAULT_PLATFORM,
-		configurable: true,
-	});
 	vi.resetModules();
+	if (ORIGINAL_PLATFORM_DESCRIPTOR) {
+		Object.defineProperty(navigator, "platform", ORIGINAL_PLATFORM_DESCRIPTOR);
+	} else {
+		Reflect.deleteProperty(navigator, "platform");
+	}
 });
 
 describe("OS 判定フラグ", () => {
