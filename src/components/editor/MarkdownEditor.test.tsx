@@ -41,6 +41,18 @@ function getMenuLabels() {
 		.map((el) => el.querySelector("span")?.textContent?.trim() ?? "");
 }
 
+/**
+ * メニュー項目の shortcut テキスト（label 直後の 2 つ目の `<span>`）を返す。
+ * `ContextMenu` の DOM: `<button><span>{label}</span><span>{shortcut}</span></button>`
+ */
+function getShortcutForLabel(label: string): string | undefined {
+	const items = screen.getAllByRole("menuitem");
+	const target = items.find((el) => el.querySelector("span")?.textContent?.trim().includes(label));
+	if (!target) return undefined;
+	const spans = target.querySelectorAll("span");
+	return spans.length >= 2 ? (spans[1].textContent?.trim() ?? undefined) : undefined;
+}
+
 function clickMenuItem(label: string) {
 	const items = screen.getAllByRole("menuitem");
 	const target = items.find((el) => el.textContent?.includes(label));
@@ -139,6 +151,38 @@ describe("MarkdownEditor context menu", () => {
 		expect(items).toContain("取り消し線");
 		expect(items).not.toContain("テーブルを挿入");
 		expect(items).not.toContain("水平線を挿入");
+	});
+
+	// ── Shortcut 表示文字列の回帰テスト (#181) ──────────
+	// jsdom 既定の `navigator.platform = ""` は非 Mac 扱い (Win 相当) のため、
+	// ここでは `PRIMARY_MOD_SYMBOL=Ctrl+` / `SHIFT_MOD_SYMBOL=Ctrl+Shift+` の
+	// 連結結果が期待通りであることを確認する（`ShiftCtrl+X` のような
+	// `+` 欠落・順序逆転バグの再発防止）。
+
+	it("選択あり時の shortcut 表示が platform 定数経由で正しく組み立てられている", async () => {
+		const { container, getView } = renderEditor("hello world");
+		selectRange(getView(), 0, 5);
+		await openContextMenu(container);
+
+		// PRIMARY_MOD_SYMBOL 系
+		expect(getShortcutForLabel("元に戻す")).toBe("Ctrl+Z");
+		expect(getShortcutForLabel("切り取り")).toBe("Ctrl+X");
+		expect(getShortcutForLabel("コピー")).toBe("Ctrl+C");
+		expect(getShortcutForLabel("太字")).toBe("Ctrl+B");
+		expect(getShortcutForLabel("斜体")).toBe("Ctrl+I");
+		// やり直す は OS 別ハードコード (Win は慣習表記 Ctrl+Y)
+		expect(getShortcutForLabel("やり直す")).toBe("Ctrl+Y");
+		// SHIFT_MOD_SYMBOL 系 — Win の `Ctrl+Shift+X` 順序と `+` 区切りが両方保たれているか
+		expect(getShortcutForLabel("取り消し線")).toBe("Ctrl+Shift+X");
+	});
+
+	it("選択なし時の shortcut 表示が platform 定数経由で正しく組み立てられている", async () => {
+		const { container } = renderEditor("hello world");
+		await openContextMenu(container);
+
+		expect(getShortcutForLabel("元に戻す")).toBe("Ctrl+Z");
+		expect(getShortcutForLabel("やり直す")).toBe("Ctrl+Y");
+		expect(getShortcutForLabel("テーブルを挿入")).toBe("Ctrl+Shift+T");
 	});
 
 	// ── Clipboard unavailable ──────────────────────────
