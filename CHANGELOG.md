@@ -5,7 +5,7 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
-## [0.4.0] — 2026-06-19
+## [0.4.0] — 2026-06-20
 
 v0.3.0 リリース後の patch / 内部品質改善ラウンド。OS 判定 (`navigator.platform` / `userAgent`) の集約ポリシーを Biome plugin で機械的に強制し、ショートカット表示文字列の構築も `platform.ts` 定数経由へ統一。あわせて Dependabot 9 件と security advisory 5 件をまとめて解消。
 
