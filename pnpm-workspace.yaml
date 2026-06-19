@@ -55,6 +55,9 @@ overrides:
   "app-builder-lib>tar": ^7.5.16          # GHSA-vmf3-w455-68vh (moderate)。app-builder-lib 経由の node-tar 7.5.13 を PAX header desync patched 版へ。自前 build 成果物 archive のみで攻撃者作成 tar の parse は無し。
   "node-gyp>tar": ^7.5.16                 # 同 GHSA-vmf3-w455-68vh。node-gyp も独立して node-tar 7.5.13 を direct dep として持つため別行で対応。
   "mermaid>dompurify": ^3.4.9             # GHSA-vxr8-fq34-vvx9 (low)。mermaid@11.15.0 が direct dep として持つ 3.4.8 を Trusted Types reset patched 版へ。direct dep の ^3.4.10 と同 minor なので mermaid 描画互換性は CI e2e で担保。
+  "@electron/get>undici": ^7.28.0         # GHSA-pr7r-676h-xcf6 (medium, #10), GHSA-vmh5-mc38-953g (high, #11), GHSA-35p6-xmwp-9g52 (low, #13), GHSA-hm92-r4w5-c3mj (high, #14), GHSA-p88m-4jfj-68fv (medium, #18), GHSA-g8m3-5g58-fq7m (low, #20)。@electron/get@5.0.0 の optionalDependencies 7.25.0 を patched 版へ。SOCKS5/TLS bypass・Set-Cookie injection 等を含むが、本リポは electron バイナリ取得目的での透過利用のみで攻撃前提なし。
+  "jsdom>undici": ^7.28.0                 # 同 7.x 系 6 件 (#10/#11/#13/#14/#18/#20)。jsdom@29.1.1 の 7.25.0 を patched 版へ。jsdom は Vitest の DOM 環境用 (devDep only) なので runtime 影響なし。
+  "node-gyp>undici": ^6.27.0              # GHSA-35p6-xmwp-9g52 (low, #12), GHSA-p88m-4jfj-68fv (medium, #17), GHSA-g8m3-5g58-fq7m (low, #19)。node-gyp@12.3.0 (@electron/rebuild → electron-builder 経由) の 6.25.0 を patched 版へ。build time の native module rebuild のみで attacker-controlled HTTP fetch なし。
 
 # 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
 #
