@@ -5,6 +5,36 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
+## [0.4.0] — 2026-06-19
+
+v0.3.0 リリース後の patch / 内部品質改善ラウンド。OS 判定 (`navigator.platform` / `userAgent`) の集約ポリシーを Biome plugin で機械的に強制し、ショートカット表示文字列の構築も `platform.ts` 定数経由へ統一。あわせて Dependabot 9 件と security advisory 5 件をまとめて解消。
+
+### Internal
+
+- **platform 判定集約の機械的強制**: `src/lib/platform.ts` ヘッダで宣言済みの集約ポリシー (「ここからだけ import する」) を GritQL plugin (`plugins/no-navigator-platform.grit`) で lint レベルに引き上げ。dot / optional chain / bracket / destructuring / namespace prefix の各形式を弾き、PR レビューでの見落としを防ぐ。本体側に残っていた違反 2 箇所 (`ExportDialog.tsx` の `navigator.userAgent`、`tables.test.ts` の `navigator.platform`) も解消。あわせて `IS_WINDOWS` を `IS_MAC` と同抽象度で追加 (#180 → #186)
+- **MarkdownEditor のショートカット表示を platform 定数で組み立てる**: 取り消し線 / テーブル挿入の `IS_MAC ? "⇧⌘X" : "Ctrl+Shift+X"` 形式の hardcode を `${SHIFT_MOD_SYMBOL}X` 形式に置換。`SHIFT_MOD_SYMBOL` 定数を新設し、`SHIFT_KEY_LABEL` + `PRIMARY_MOD_SYMBOL` を直接連結したときの `+` 欠落 (`ShiftCtrl+X`) を構造的に防ぐ。回帰テストも定数レベル / call site レベルの 2 層で追加 (#181 → #197)
+- **.gitignore に MCP / AI agent 関連の local cache を追加**: `.serena/` と `AGENTS.md` を ignore 化 (#196)
+
+### Security
+
+- **5 件の security advisory を parent>child override で解消**: esbuild (high) / form-data (high) / tar (moderate) / @babel/core (low) / dompurify (low)。`pnpm-workspace.yaml` の `overrides` を global syntax ではなく parent>child syntax (`electron-vite>esbuild` 等) で表現し、alert 入口に限定して別 transitive への過剰干渉を回避 (#195)
+
+### Dependencies
+
+v0.3.0 → v0.4.0 で更新された主要パッケージ (Dependabot 7 PR + 9 bump を集約) (#194):
+
+- **dependencies**:
+  - `@codemirror/view` `^6.43.0` → `^6.43.1`
+  - `dompurify` `^3.4.7` → `^3.4.10`
+  - `lucide-react` `^1.17.0` → `^1.18.0`
+- **devDependencies**:
+  - `@biomejs/biome` `^2.4.16` → `^2.5.0`
+  - `@tailwindcss/vite` `^4.3.0` → `^4.3.1`
+  - `@types/node` `^25.9.2` → `^25.9.3`
+  - `electron` `^42.3.0` → `^42.4.0`
+  - `electron-builder` `^26.8.1` → `^26.15.3`
+  - `tailwindcss` `^4.3.0` → `^4.3.1`
+
 ## [0.3.0] — 2026-06-13
 
 v0.2.0 の Electron 移行直後リリース。テーブル UX とエクスポート品質の改善、KaTeX の完全オフライン化、v0.2.0 で「既知の制限」として挙げていた approve リスト / realpath の構造課題の解消が主軸。
@@ -157,5 +187,6 @@ electron / mermaid / zustand / tailwindcss / dompurify 等の主要版は v0.2.0
 - approve リストはプロセス全体スコープ（#32 で window-scoped 化予定）
 - `realpath` は同期版（#31 で async 化予定）
 
+[0.4.0]: https://github.com/ymnao/scripta/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ymnao/scripta/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ymnao/scripta/releases/tag/v0.2.0
