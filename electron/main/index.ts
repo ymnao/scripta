@@ -8,7 +8,7 @@ import { getWindowState, persistWindowState } from "./ipc/settings";
 import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
 import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
-import { installPermissionDenyHandlers } from "./utils/permission-handler";
+import { installMainSessionPermissionHandlers } from "./utils/permission-handler";
 import { isSafeExternalUrl } from "./utils/url";
 import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
@@ -223,10 +223,11 @@ app.whenReady().then(async () => {
 	electronApp.setAppUserModelId("com.scripta.app");
 	registerIpcHandlers();
 	registerScriptaAssetProtocol();
-	// Electron Security Checklist Item #5: 全 web permission を明示 deny する。
-	// scripta は notifications / media / geolocation 等を使わないため、handler
-	// 未登録時のデフォルトに依存せず常に false を返す（permission-handler.ts 参照）。
-	installPermissionDenyHandlers(session.defaultSession);
+	// Electron Security Checklist Item #5: main renderer に対する permission を
+	// 明示的に管理する。scripta は基本「全 deny」で、エディタの「貼り付け」
+	// （navigator.clipboard.readText）と「コピー / 切り取り」（writeText）のみ
+	// 信頼 renderer origin に限り許可する（permission-handler.ts 参照）。
+	installMainSessionPermissionHandlers(session.defaultSession);
 	setApplicationMenu({ newWindow: () => void createWindow({ newWindow: true }) });
 	const cspTargetUrls = process.env.ELECTRON_RENDERER_URL
 		? [`${process.env.ELECTRON_RENDERER_URL.replace(/\/$/, "")}/*`]

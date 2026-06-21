@@ -21,42 +21,57 @@ type FakeWindow = {
 	__opts: unknown;
 };
 
-const { createdWindows, createFakeWindow, simulateState, mockIs } = vi.hoisted(() => {
-	const list: FakeWindow[] = [];
-	let nextId = 5000;
-	const state = {
-		printToPdfImpl: undefined as ((opts: unknown) => Promise<Buffer>) | undefined,
-		loadFileShouldHang: false,
-	};
-	// is.dev は packaged 本番では false / dev ビルドでは true になる。
-	// SCRIPTA_PDF_DEBUG_HTML_PATH の本番 disable を test するため可変にしておく。
-	// 既存テストはどちらでも挙動が変わらないので default false で安全。
-	const is = { dev: false };
-	const create = (opts: unknown): FakeWindow => {
-		const id = nextId++;
-		const win: FakeWindow = {
-			webContents: {
-				id,
-				printToPDF: vi.fn(async (o) => {
-					if (state.printToPdfImpl) return state.printToPdfImpl(o);
-					return Buffer.from("%PDF-1.4 fake pdf body\n");
-				}),
-				executeJavaScript: vi.fn(async () => true),
-			},
-			loadFile: vi.fn(async () => {
-				if (state.loadFileShouldHang) {
-					await new Promise(() => {}); // never resolve
-				}
-			}),
-			isDestroyed: vi.fn(() => false),
-			destroy: vi.fn(),
-			__opts: opts,
+const { createdWindows, createFakeWindow, simulateState, mockIs, pdfFakeSession } = vi.hoisted(
+	() => {
+		const list: FakeWindow[] = [];
+		let nextId = 5000;
+		const state = {
+			printToPdfImpl: undefined as ((opts: unknown) => Promise<Buffer>) | undefined,
+			loadFileShouldHang: false,
 		};
-		list.push(win);
-		return win;
-	};
-	return { createdWindows: list, createFakeWindow: create, simulateState: state, mockIs: is };
-});
+		// is.dev は packaged 本番では false / dev ビルドでは true になる。
+		// SCRIPTA_PDF_DEBUG_HTML_PATH の本番 disable を test するため可変にしておく。
+		// 既存テストはどちらでも挙動が変わらないので default false で安全。
+		const is = { dev: false };
+		// PDF 用 partition の隔離 session スタブ。webRequest / setPermission* の
+		// install が呼ばれたかをテストから verify できるよう vi.fn() で観測する。
+		const pdfSession = {
+			webRequest: { onBeforeRequest: vi.fn() },
+			setPermissionRequestHandler: vi.fn(),
+			setPermissionCheckHandler: vi.fn(),
+		};
+		const create = (opts: unknown): FakeWindow => {
+			const id = nextId++;
+			const win: FakeWindow = {
+				webContents: {
+					id,
+					printToPDF: vi.fn(async (o) => {
+						if (state.printToPdfImpl) return state.printToPdfImpl(o);
+						return Buffer.from("%PDF-1.4 fake pdf body\n");
+					}),
+					executeJavaScript: vi.fn(async () => true),
+				},
+				loadFile: vi.fn(async () => {
+					if (state.loadFileShouldHang) {
+						await new Promise(() => {}); // never resolve
+					}
+				}),
+				isDestroyed: vi.fn(() => false),
+				destroy: vi.fn(),
+				__opts: opts,
+			};
+			list.push(win);
+			return win;
+		};
+		return {
+			createdWindows: list,
+			createFakeWindow: create,
+			simulateState: state,
+			mockIs: is,
+			pdfFakeSession: pdfSession,
+		};
+	},
+);
 
 vi.mock("@electron-toolkit/utils", () => ({ is: mockIs }));
 
@@ -70,15 +85,10 @@ vi.mock("electron", () => {
 			return undefined;
 		},
 	});
-	const fakeSession = {
-		webRequest: {
-			onBeforeRequest: vi.fn(),
-		},
-	};
 	return {
 		BrowserWindow: MockBrowserWindow,
 		ipcMain: { handle: vi.fn() },
-		session: { fromPartition: vi.fn(() => fakeSession) },
+		session: { fromPartition: vi.fn(() => pdfFakeSession) },
 	};
 });
 
@@ -217,6 +227,16 @@ describe("exportPdfImpl", () => {
 				await cleanup();
 			}
 		});
+	});
+
+	it("installs permission deny handlers on the dedicated PDF session", async () => {
+		// installPdfWebRequestFilter は module-level flag で 1 度しか install しない。
+		// 他テストでも累積するため、ここでは「少なくとも 1 度は install されている」
+		// 事実だけを verify。中身（all-deny）の挙動は permission-handler.test.ts 側でテスト済み。
+		const outputPath = join(workspace, "perm.pdf");
+		await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+		expect(pdfFakeSession.setPermissionRequestHandler).toHaveBeenCalled();
+		expect(pdfFakeSession.setPermissionCheckHandler).toHaveBeenCalled();
 	});
 
 	it("registers a 300s overall export timeout", async () => {

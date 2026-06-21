@@ -8,6 +8,7 @@ import writeFileAtomic from "write-file-atomic";
 import { handle } from "../utils/ipc-handle";
 import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
+import { installPermissionDenyHandlers } from "../utils/permission-handler";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
 // Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
@@ -106,6 +107,10 @@ function installPdfWebRequestFilter(): void {
 	pdfSession.webRequest.onBeforeRequest((details, callback) => {
 		callback({ cancel: !shouldAllowPdfRequest(details.url) });
 	});
+	// PDF export 用の隔離 session は任意 HTML をロードしうるため、defaultSession の
+	// permission policy（clipboard 許可）を共有させない。clipboard 等の web permission
+	// は PDF 描画に不要なので全 deny にする。
+	installPermissionDenyHandlers(pdfSession);
 	pdfWebRequestFilterInstalled = true;
 }
 

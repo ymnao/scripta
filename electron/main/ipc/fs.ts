@@ -40,18 +40,35 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 
 async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	// 1 回の open で size 判定と read を済ませる。`fsp.stat` + `fsp.readFile` の素朴な
-	// 実装だと open/stat/close + open/read/close で open が 2 回走るが、`fs:read` は
-	// エディタ起動・タブ切替で多用される hot path なので FD を共有して syscall を半減
-	// させる。size 判定と実 read で同一 FD を使うので stat → read の TOCTOU race も
-	// 構造的に消える（同 FD が指す inode の size はその時点で確定）。
+	// 二段防御で size 上限を強制する:
+	//   1. stat 申告サイズで先に弾く（典型 case は small file で、無駄に巨大な buffer
+	//      を allocate しないため）
+	//   2. bounded read（cap = stat.size+1 byte、ただし MAX+1 を上限）で実際に読み込む。
+	//      stat と read は同一 FD で同じ inode を参照するが、inode の size は POSIX 上
+	//      メタデータで append/truncate により動くため stat の値だけは信用しない。実
+	//      read で stat 申告を超えるバイトが読めた時点で「stat 後の追記または stat が
+	//      嘘」を検知し、安全側で上限超として reject する
+	// 1 回の open で stat と read を済ませて syscall を半減（fs:read は editor の hot path）。
 	const fh = await fsp.open(canonical, "r");
 	try {
 		const stat = await fh.stat();
 		if (stat.size > MAX_READ_FILE_BYTES) {
 			throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
 		}
-		return await fh.readFile("utf8");
+		const cap = Math.min(stat.size + 1, MAX_READ_FILE_BYTES + 1);
+		const buf = Buffer.alloc(cap);
+		let total = 0;
+		while (total < cap) {
+			const { bytesRead } = await fh.read(buf, total, cap - total);
+			if (bytesRead === 0) break;
+			total += bytesRead;
+		}
+		// 実 read が stat 申告超 = stat 後の追記が走った（または stat が嘘）。実 size は
+		// cap で頭打ちなので正確には分からないが、安全側に倒して上限超扱いで reject する。
+		if (total > stat.size) {
+			throw FsError.tooLarge(canonical, total, MAX_READ_FILE_BYTES);
+		}
+		return buf.subarray(0, total).toString("utf8");
 	} finally {
 		await fh.close();
 	}
