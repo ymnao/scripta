@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // renderer の URL（pathname まで含む）が、scripta の renderer dir 配下かを判定する。
 // will-navigate / window-open / permission の信頼判定で共通利用する。
@@ -10,8 +11,49 @@ import { join } from "node:path";
 // → navigator.clipboard.readText が成功）。
 //
 // dev: ELECTRON_RENDERER_URL の origin と一致 + pathname が allowed の prefix 配下
-// prod: file: スキーム + pathname が RENDERER_FILE_DIR 配下
+// prod: file: スキーム + osPath が RENDERER_FILE_DIR 配下（OS ネイティブで relative 判定）
 const RENDERER_FILE_DIR = join(__dirname, "../renderer");
+
+// file: URL を OS ネイティブパスへ変換し、base dir 配下かを判定する。
+//
+// URL.pathname を直接ネイティブパスとして比較すると、Windows で
+//   URL pathname  : /C:/app/out/renderer/index.html
+//   base dir      : C:\app\out\renderer
+// のように形式と区切り文字が両方違って正規 URL も reject される。`fileURLToPath` で
+// 必ずネイティブ表現へ変換してから `path.relative` + `path.isAbsolute` で判定する。
+// 副次効果として encoded separator (%2F) や `..` segment も URL parser / fileURLToPath
+// で正規化されるので、`relative` が `..` 始まりや絶対 path を返す経路で reject できる。
+//
+// `pathOps` を差し替え可能にしているのは host OS（macOS / Linux）上から Windows 形式の
+// 入力を verify するため。production code は default の host OS ops を使う。
+export interface PathOps {
+	fileURLToPath: (u: URL) => string;
+	relative: (from: string, to: string) => string;
+	isAbsolute: (p: string) => boolean;
+}
+
+const DEFAULT_PATH_OPS: PathOps = { fileURLToPath, relative, isAbsolute };
+
+export function isFileUrlInsideDir(
+	url: string,
+	baseDir: string,
+	pathOps: PathOps = DEFAULT_PATH_OPS,
+): boolean {
+	try {
+		const parsed = new URL(url);
+		if (parsed.protocol !== "file:") return false;
+		const osPath = pathOps.fileURLToPath(parsed);
+		const rel = pathOps.relative(baseDir, osPath);
+		// "": base そのものを指す URL（許可）
+		// "..": 上位 / 兄弟 dir（拒否）
+		// 絶対 path: Windows の drive 跨ぎ / UNC（拒否）
+		if (rel === "") return true;
+		if (rel.startsWith("..")) return false;
+		return !pathOps.isAbsolute(rel);
+	} catch {
+		return false;
+	}
+}
 
 export function isAllowedRendererUrl(url: string): boolean {
 	const devUrl = process.env.ELECTRON_RENDERER_URL;
@@ -28,12 +70,5 @@ export function isAllowedRendererUrl(url: string): boolean {
 			return false;
 		}
 	}
-	try {
-		const parsed = new URL(url);
-		if (parsed.protocol !== "file:") return false;
-		const path = decodeURIComponent(parsed.pathname);
-		return path === RENDERER_FILE_DIR || path.startsWith(`${RENDERER_FILE_DIR}/`);
-	} catch {
-		return false;
-	}
+	return isFileUrlInsideDir(url, RENDERER_FILE_DIR);
 }
