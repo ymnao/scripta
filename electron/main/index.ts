@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, net, protocol, session, shell } from "electron";
+import { app, BrowserWindow, net, protocol, session } from "electron";
 import { urlPathnameToFsPath } from "../preload/scripta-asset-url";
 import { registerIpcHandlers } from "./ipc";
 import { getWindowState, persistWindowState } from "./ipc/settings";
@@ -9,8 +9,8 @@ import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from
 import { setApplicationMenu } from "./menu";
 import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { installMainSessionPermissionHandlers } from "./utils/permission-handler";
-import { isSafeExternalUrl } from "./utils/url";
 import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
+import { attachNavigationGuards } from "./utils/window-guards";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
 import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window-state";
 
@@ -63,33 +63,7 @@ const CSP_DEV = [
 	"base-uri 'self'",
 ].join("; ");
 
-const RENDERER_FILE_DIR = join(__dirname, "../renderer");
 const openWindows = new Set<BrowserWindow>();
-
-function isAllowedRendererUrl(url: string): boolean {
-	const devUrl = process.env.ELECTRON_RENDERER_URL;
-	if (devUrl) {
-		try {
-			const parsed = new URL(url);
-			const allowed = new URL(devUrl);
-			if (parsed.origin !== allowed.origin) return false;
-			const basePath = allowed.pathname.endsWith("/")
-				? allowed.pathname.slice(0, -1)
-				: allowed.pathname;
-			return parsed.pathname === basePath || parsed.pathname.startsWith(`${basePath}/`);
-		} catch {
-			return false;
-		}
-	}
-	try {
-		const parsed = new URL(url);
-		if (parsed.protocol !== "file:") return false;
-		const path = decodeURIComponent(parsed.pathname);
-		return path === RENDERER_FILE_DIR || path.startsWith(`${RENDERER_FILE_DIR}/`);
-	} catch {
-		return false;
-	}
-}
 
 interface CreateWindowOptions {
 	// メニューの "New Window" から呼ばれる場合は state 復元せずデフォルト bounds で開き、
@@ -146,24 +120,10 @@ async function createWindow(opts: CreateWindowOptions = {}): Promise<void> {
 		mainWindow.show();
 	});
 
-	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-		if (isSafeExternalUrl(url)) {
-			void shell.openExternal(url).catch((error) => {
-				console.error("Failed to open external URL:", url, error);
-			});
-		}
-		return { action: "deny" };
-	});
-
-	mainWindow.webContents.on("will-navigate", (event, url) => {
-		if (isAllowedRendererUrl(url)) return;
-		event.preventDefault();
-		if (isSafeExternalUrl(url)) {
-			void shell.openExternal(url).catch((error) => {
-				console.error("Failed to open external URL:", url, error);
-			});
-		}
-	});
+	// 外部 URL / 任意ローカル HTML への遷移は全て deny し、安全な外部 URL は OS の
+	// デフォルトブラウザに委譲する。conflict window 等の他 BrowserWindow にも同じ
+	// guard を必ず install すること（window-guards.ts 参照）。
+	attachNavigationGuards(mainWindow.webContents);
 
 	const search = isNew ? "?newWindow=true" : undefined;
 	if (process.env.ELECTRON_RENDERER_URL) {

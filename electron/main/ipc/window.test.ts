@@ -6,7 +6,11 @@ import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/
 // `createConflictWindow` は new BrowserWindow → loadURL を呼ぶので、
 // インスタンスを記録する factory を mock として組む。
 type FakeWindow = {
-	webContents: { id: number };
+	webContents: {
+		id: number;
+		setWindowOpenHandler: ReturnType<typeof vi.fn>;
+		on: ReturnType<typeof vi.fn>;
+	};
 	loadURL: ReturnType<typeof vi.fn>;
 	loadFile: ReturnType<typeof vi.fn>;
 	focus: ReturnType<typeof vi.fn>;
@@ -29,7 +33,11 @@ const { createdWindows, createFakeWindow, simulateLoadFailure } = vi.hoisted(() 
 	const create = (opts: unknown): FakeWindow => {
 		const id = nextId++;
 		const win: FakeWindow = {
-			webContents: { id },
+			webContents: {
+				id,
+				setWindowOpenHandler: vi.fn(),
+				on: vi.fn(),
+			},
 			loadURL: vi.fn(async () => {
 				if (nextLoadShouldFail) {
 					const e = nextLoadShouldFail;
@@ -90,6 +98,8 @@ vi.mock("electron", () => {
 		ipcMain: { handle: vi.fn() },
 		app: { getVersion: () => "0.0.0" },
 		session: { defaultSession: { clearStorageData: vi.fn(async () => {}) } },
+		// attachNavigationGuards が import するので空 stub を提供
+		shell: { openExternal: vi.fn(async () => {}) },
 	};
 });
 
@@ -139,6 +149,17 @@ describe("createConflictWindow", () => {
 		const childId = createdWindows[0].webContents.id;
 		// 子 window 向けに workspace が登録されていること
 		expect(workspaceTesting.getWindowWorkspaces().get(childId)).toBe(workspaceDir);
+	});
+
+	it("attaches navigation guards (setWindowOpenHandler + will-navigate) on the conflict window", async () => {
+		// レビュー指摘の本旨: conflict window にも main window と同じ navigation guard が
+		// 設定されている事を保証する。これが欠落すると defaultSession を共有しているため
+		// 外部ローカル HTML が clipboard 等の permission を引き継ぐ。
+		await createConflictWindow(PARENT_WIN, workspaceDir);
+		const w = createdWindows[0];
+		expect(w.webContents.setWindowOpenHandler).toHaveBeenCalledTimes(1);
+		const onCalls = w.webContents.on.mock.calls as Array<[string, unknown]>;
+		expect(onCalls.some(([event]) => event === "will-navigate")).toBe(true);
 	});
 
 	it("loads URL with conflict=true and encoded workspacePath", async () => {

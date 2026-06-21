@@ -1,33 +1,38 @@
-// permission handler が受け取る requestingOrigin / requestingUrl が「信頼できる
-// renderer 由来」かを判定するための utility。
-//
-// `index.ts` の `isAllowedRendererUrl` と論理が似ているが、目的と精度が異なる:
-// - `isAllowedRendererUrl`: will-navigate / windowOpen の遷移先 URL 全体（pathname 含む）
-//   を限定する。renderer のページ範囲内かまで厳密に判定する。
-// - `isTrustedRendererOrigin`: permission の requestingOrigin（origin だけ）/
-//   requestingUrl（full URL）を受けて、その origin が信頼 renderer のものかを判定する。
-//   pathname は判定対象外（permission の Origin は origin level）。
-//
-// 用途を分ける理由は、permission handler の `requestingOrigin` は origin 文字列のみで
-// pathname を持たないため、pathname まで含む厳密チェックを共有しても無意味 + 偽陰性に
-// なるから。Origin が信頼 renderer のものなら permission を許可してよい、という別の
-// セキュリティ境界として実装する。
+import { join } from "node:path";
 
-// dev: ELECTRON_RENDERER_URL の origin と一致するかを判定。
-// prod: renderer は packaged file:// から load されるので `file:` プロトコルのみ許可。
-//   ※ `file://` は origin 不在の特殊スキーマで Electron の `requestingOrigin` には
-//     `file://` がそのまま現れる（host なし）。
-export function isTrustedRendererOrigin(originOrUrl: string): boolean {
+// renderer の URL（pathname まで含む）が、scripta の renderer dir 配下かを判定する。
+// will-navigate / window-open / permission の信頼判定で共通利用する。
+//
+// **pathname まで含めて厳密に判定する**のが本関数の本質的契約。origin だけだと
+// 「file: スキームのローカル HTML 一般」「dev origin の任意 path」全部を trust に含めて
+// しまい、子 window で renderer dir 外のローカル HTML に遷移されると clipboard 等の
+// permission が漏れる（実 PoC で確認済み: conflict window から任意 local HTML へ遷移
+// → navigator.clipboard.readText が成功）。
+//
+// dev: ELECTRON_RENDERER_URL の origin と一致 + pathname が allowed の prefix 配下
+// prod: file: スキーム + pathname が RENDERER_FILE_DIR 配下
+const RENDERER_FILE_DIR = join(__dirname, "../renderer");
+
+export function isAllowedRendererUrl(url: string): boolean {
 	const devUrl = process.env.ELECTRON_RENDERER_URL;
 	if (devUrl) {
 		try {
-			return new URL(originOrUrl).origin === new URL(devUrl).origin;
+			const parsed = new URL(url);
+			const allowed = new URL(devUrl);
+			if (parsed.origin !== allowed.origin) return false;
+			const basePath = allowed.pathname.endsWith("/")
+				? allowed.pathname.slice(0, -1)
+				: allowed.pathname;
+			return parsed.pathname === basePath || parsed.pathname.startsWith(`${basePath}/`);
 		} catch {
 			return false;
 		}
 	}
 	try {
-		return new URL(originOrUrl).protocol === "file:";
+		const parsed = new URL(url);
+		if (parsed.protocol !== "file:") return false;
+		const path = decodeURIComponent(parsed.pathname);
+		return path === RENDERER_FILE_DIR || path.startsWith(`${RENDERER_FILE_DIR}/`);
 	} catch {
 		return false;
 	}

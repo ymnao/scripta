@@ -1,5 +1,5 @@
 import type { Session } from "electron";
-import { isTrustedRendererOrigin } from "./renderer-url";
+import { isAllowedRendererUrl } from "./renderer-url";
 
 // Electron Security Checklist Item #5: renderer から要求される permission を
 // 明示的に管理する。scripta は基本「全 deny」が方針で、clipboard 系のみ
@@ -31,21 +31,24 @@ export function installPermissionDenyHandlers(ses: Session): void {
 	ses.setPermissionCheckHandler(() => false);
 }
 
-// main renderer 用の permission handler。clipboard 系を「信頼 renderer origin」に
-// 限り許可し、それ以外は全 deny する。requesting URL / Origin が dev URL の origin
-// と一致しない / packaged 本番で file: スキームでない場合は許可しない
-// （renderer-url.ts の isTrustedRendererOrigin 参照）。
+// main renderer 用の permission handler。clipboard 系を「renderer dir 配下の URL」に
+// 限り許可し、それ以外は全 deny する。**判定は requestingOrigin（origin level）では
+// なく requestingUrl（pathname 含む）を `isAllowedRendererUrl` で評価する**: origin だけ
+// だと file: スキーム全体 / dev origin 全体に対する trust になり、子 window で renderer
+// dir 外のローカル HTML に遷移された場合に permission がリークする。
 export function installMainSessionPermissionHandlers(ses: Session): void {
 	ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
 		if (!MAIN_RENDERER_ALLOWED_PERMISSIONS.has(permission)) {
 			callback(false);
 			return;
 		}
-		const url = details?.requestingUrl ?? "";
-		callback(isTrustedRendererOrigin(url));
+		callback(isAllowedRendererUrl(details?.requestingUrl ?? ""));
 	});
-	ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+	ses.setPermissionCheckHandler((_webContents, permission, _requestingOrigin, details) => {
 		if (!MAIN_RENDERER_ALLOWED_PERMISSIONS.has(permission)) return false;
-		return isTrustedRendererOrigin(requestingOrigin);
+		// requestingOrigin は origin のみ（pathname を持たない）ため details.requestingUrl
+		// を使う。details.requestingUrl は Electron が必ず埋める前提だが、防衛的に
+		// 欠落時は deny へ倒す。
+		return isAllowedRendererUrl(details?.requestingUrl ?? "");
 	});
 }
