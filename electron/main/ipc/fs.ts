@@ -13,6 +13,12 @@ import {
 } from "../utils/path-guard";
 import { getFileTreeFilterOptions } from "./settings";
 
+// fs:read のサイズ上限。`.md` は通常 1MB 未満なので 64MB は十分なマージン。
+// 巨大ファイル（動画 / バイナリ等）をワークスペースに置かれた場合の OOM を防ぐ。
+// 他 handler の上限（OGP body 100KB / git conflict 10MB / GitHub release 100KB）と
+// 同じ「明示的な上限を持つ」思想で揃える。
+export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
+
 async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
 		await fsp.access(absolute);
@@ -34,6 +40,13 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 
 async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
+	// 読み込み前に size を確認し、上限超は読み込みごと拒否する。stat → read の間で
+	// ファイルが膨らむ TOCTOU は単一ユーザーアプリでは許容（race のために二重 read
+	// するほうがコスト過大）。実害は OOM 回避なので「申告サイズで足切り」で十分。
+	const stat = await fsp.stat(canonical);
+	if (stat.size > MAX_READ_FILE_BYTES) {
+		throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
+	}
 	return await fsp.readFile(canonical, "utf8");
 }
 

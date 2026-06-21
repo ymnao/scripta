@@ -2,6 +2,7 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { is } from "@electron-toolkit/utils";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { handle } from "../utils/ipc-handle";
@@ -146,12 +147,15 @@ export async function exportPdfImpl(
 	// 診断用: 環境変数 `SCRIPTA_PDF_DEBUG_HTML_PATH` がセットされていれば、
 	// printToPDF に渡される最終 HTML を指定 path にコピーする。#106 のような
 	// PDF 内描画問題で「実際に何が WebView に届いているか」を取り出すための
-	// debug hook。本番では env を設定しないので no-op。
-	const debugHtmlPath = process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
-	if (debugHtmlPath) {
-		await fsp.writeFile(debugHtmlPath, html, "utf8").catch((err) => {
-			console.error("[scripta:pdf-debug] HTML write failed:", err);
-		});
+	// debug hook。**dev ビルド限定**: packaged 本番では env が仕込まれても無視し、
+	// path-guard を経由しない任意 path への HTML 書き込み裏口を塞ぐ。
+	if (is.dev) {
+		const debugHtmlPath = process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
+		if (debugHtmlPath) {
+			await fsp.writeFile(debugHtmlPath, html, "utf8").catch((err) => {
+				console.error("[scripta:pdf-debug] HTML write failed:", err);
+			});
+		}
 	}
 
 	let win: BrowserWindow | null = null;

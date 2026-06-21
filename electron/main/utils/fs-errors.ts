@@ -14,6 +14,12 @@ export const FsError = {
 		new StructuredError("TARGET_ALREADY_EXISTS", `Target already exists: ${p}`, { path: p }),
 	notFound: (p: string): StructuredError =>
 		new StructuredError("NOT_FOUND", `Not found: ${p}`, { path: p }),
+	tooLarge: (p: string, bytes: number, limit: number): StructuredError =>
+		new StructuredError(
+			"FILE_TOO_LARGE",
+			`File too large: ${p} (${bytes} bytes exceeds ${limit} byte limit)`,
+			{ path: p },
+		),
 };
 
 export function isErrnoCode(e: unknown, code: string): boolean {

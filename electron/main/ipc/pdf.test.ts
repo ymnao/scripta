@@ -21,13 +21,17 @@ type FakeWindow = {
 	__opts: unknown;
 };
 
-const { createdWindows, createFakeWindow, simulateState } = vi.hoisted(() => {
+const { createdWindows, createFakeWindow, simulateState, mockIs } = vi.hoisted(() => {
 	const list: FakeWindow[] = [];
 	let nextId = 5000;
 	const state = {
 		printToPdfImpl: undefined as ((opts: unknown) => Promise<Buffer>) | undefined,
 		loadFileShouldHang: false,
 	};
+	// is.dev は packaged 本番では false / dev ビルドでは true になる。
+	// SCRIPTA_PDF_DEBUG_HTML_PATH の本番 disable を test するため可変にしておく。
+	// 既存テストはどちらでも挙動が変わらないので default false で安全。
+	const is = { dev: false };
 	const create = (opts: unknown): FakeWindow => {
 		const id = nextId++;
 		const win: FakeWindow = {
@@ -51,8 +55,10 @@ const { createdWindows, createFakeWindow, simulateState } = vi.hoisted(() => {
 		list.push(win);
 		return win;
 	};
-	return { createdWindows: list, createFakeWindow: create, simulateState: state };
+	return { createdWindows: list, createFakeWindow: create, simulateState: state, mockIs: is };
 });
+
+vi.mock("@electron-toolkit/utils", () => ({ is: mockIs }));
 
 vi.mock("electron", () => {
 	const ProxyTarget = class {};
@@ -96,6 +102,7 @@ describe("exportPdfImpl", () => {
 		createdWindows.length = 0;
 		simulateState.printToPdfImpl = undefined;
 		simulateState.loadFileShouldHang = false;
+		mockIs.dev = false;
 		ws = await createCanonicalTempWorkspace("scripta-pdf-test-");
 		workspace = ws.dir;
 		await registerWorkspaceRoot(SENDER_ID, workspace);
@@ -103,6 +110,8 @@ describe("exportPdfImpl", () => {
 
 	afterEach(async () => {
 		clearWorkspaceRoots();
+		mockIs.dev = false;
+		delete process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
 		await ws.cleanup().catch(() => {});
 	});
 
@@ -176,6 +185,38 @@ describe("exportPdfImpl", () => {
 		expect(opts.pageSize).toBe("A4");
 		expect(opts.margins.top).toBeCloseTo(0.787, 3);
 		expect(opts.printBackground).toBe(true);
+	});
+
+	describe("SCRIPTA_PDF_DEBUG_HTML_PATH (dev-only debug hook)", () => {
+		it("writes debug HTML when is.dev=true and env is set", async () => {
+			mockIs.dev = true;
+			const { dir: debugDir, cleanup } = await createCanonicalTempWorkspace("scripta-pdf-debug-");
+			const debugHtmlPath = join(debugDir, "debug.html");
+			process.env.SCRIPTA_PDF_DEBUG_HTML_PATH = debugHtmlPath;
+			try {
+				const outputPath = join(workspace, "with-debug.pdf");
+				await exportPdfImpl(SENDER_ID, "<html><body>debug me</body></html>", outputPath);
+				const written = await fsp.readFile(debugHtmlPath, "utf8");
+				expect(written).toContain("debug me");
+			} finally {
+				await cleanup();
+			}
+		});
+
+		it("ignores the env in production (is.dev=false) — no write to debug path", async () => {
+			mockIs.dev = false;
+			const { dir: debugDir, cleanup } = await createCanonicalTempWorkspace("scripta-pdf-debug-");
+			const debugHtmlPath = join(debugDir, "debug.html");
+			process.env.SCRIPTA_PDF_DEBUG_HTML_PATH = debugHtmlPath;
+			try {
+				const outputPath = join(workspace, "no-debug.pdf");
+				await exportPdfImpl(SENDER_ID, "<html><body>no debug</body></html>", outputPath);
+				// path-guard を経由しない任意 path への裏口書き込みが発生しないことを担保
+				await expect(fsp.readFile(debugHtmlPath, "utf8")).rejects.toThrow(/ENOENT/);
+			} finally {
+				await cleanup();
+			}
+		});
 	});
 
 	it("registers a 300s overall export timeout", async () => {

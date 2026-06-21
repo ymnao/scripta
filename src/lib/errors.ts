@@ -31,6 +31,7 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 	NOT_FOUND: "ファイルが見つかりません",
 	INVALID_PATH: "不正なパスです",
 	PATH_OUTSIDE_WORKSPACE: "アクセス権限がありません",
+	FILE_TOO_LARGE: "ファイルサイズが大きすぎます",
 	// git / network
 	GIT_AUTH: "Git 認証に失敗しました",
 	GIT_CONFLICT: "マージコンフリクトが発生しました",
@@ -73,6 +74,8 @@ const NON_TRANSIENT_KINDS: ReadonlySet<ErrorKind> = new Set<ErrorKind>([
 	"EMFILE",
 	"INVALID_PATH",
 	"PATH_OUTSIDE_WORKSPACE",
+	// サイズ上限超は再試行しても同じく失敗するため transient ではない
+	"FILE_TOO_LARGE",
 ]);
 
 export function isTransientError(error: unknown): boolean {

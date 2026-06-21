@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +20,7 @@ import {
 	registerTransientWritePath,
 	registerWorkspaceRoot,
 } from "../utils/path-guard";
-import { __testing } from "./fs";
+import { MAX_READ_FILE_BYTES, __testing } from "./fs";
 
 const TEST_WIN = 1;
 const OTHER_WIN = 2;
@@ -77,6 +77,35 @@ describe("readFileImpl", () => {
 		const path = join(workspaceDir, "shared.md");
 		await writeFile(path, "secret", "utf8");
 		await expect(readFileImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
+	});
+
+	it("rejects files exceeding MAX_READ_FILE_BYTES with FILE_TOO_LARGE", async () => {
+		// sparse file（truncate のみ）で stat.size を上限超に膨らませる。
+		// 実 I/O は発生しないのでディスク占有はゼロ。
+		const huge = join(workspaceDir, "huge.bin");
+		const fh = await open(huge, "w");
+		try {
+			await fh.truncate(MAX_READ_FILE_BYTES + 1);
+		} finally {
+			await fh.close();
+		}
+		await expect(readFileImpl(TEST_WIN, huge)).rejects.toThrow(/File too large/);
+		await expect(readFileImpl(TEST_WIN, huge)).rejects.toMatchObject({ kind: "FILE_TOO_LARGE" });
+	});
+
+	it("allows files at exactly MAX_READ_FILE_BYTES (boundary)", async () => {
+		// 境界条件: 上限「ちょうど」は許可される（> での比較なので == はパス）。
+		// 64MB ファイルを実 read すると test が重くなるので、size を上限ぴったりに
+		// pin したうえで内容は空（sparse 領域は read で 0x00 が返る）にする。
+		const boundary = join(workspaceDir, "boundary.bin");
+		const fh = await open(boundary, "w");
+		try {
+			await fh.truncate(MAX_READ_FILE_BYTES);
+		} finally {
+			await fh.close();
+		}
+		// 実 read は throw しない。UTF-8 として `\x00` 連続を decode するだけなので OK。
+		await expect(readFileImpl(TEST_WIN, boundary)).resolves.toBeTypeOf("string");
 	});
 });
 

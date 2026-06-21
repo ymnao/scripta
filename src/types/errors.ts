@@ -36,6 +36,7 @@ export type ErrorKind =
 	| "NOT_FOUND"
 	| "INVALID_PATH"
 	| "PATH_OUTSIDE_WORKSPACE"
+	| "FILE_TOO_LARGE"
 	// git / network エラー（git stderr を main 側で分類）
 	| "GIT_AUTH"
 	| "GIT_CONFLICT"

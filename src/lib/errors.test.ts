@@ -33,6 +33,7 @@ describe("translateError", () => {
 		["NOT_FOUND", "ファイルが見つかりません"],
 		["INVALID_PATH", "不正なパスです"],
 		["PATH_OUTSIDE_WORKSPACE", "アクセス権限がありません"],
+		["FILE_TOO_LARGE", "ファイルサイズが大きすぎます"],
 		["GIT_AUTH", "Git 認証に失敗しました"],
 		["GIT_CONFLICT", "マージコンフリクトが発生しました"],
 		["GIT_NOTHING_TO_COMMIT", "コミットする変更がありません"],
@@ -116,6 +117,7 @@ describe("isTransientError", () => {
 		"EMFILE",
 		"INVALID_PATH",
 		"PATH_OUTSIDE_WORKSPACE",
+		"FILE_TOO_LARGE",
 	];
 	const transient: ReadonlyArray<ErrorKind> = [
 		"EAGAIN",
