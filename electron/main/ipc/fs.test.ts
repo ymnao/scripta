@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,13 +20,14 @@ import {
 	registerTransientWritePath,
 	registerWorkspaceRoot,
 } from "../utils/path-guard";
-import { __testing } from "./fs";
+import { __testing, MAX_READ_FILE_BYTES } from "./fs";
 
 const TEST_WIN = 1;
 const OTHER_WIN = 2;
 
 const {
 	readFileImpl,
+	readFileBoundedFromHandle,
 	writeFileImpl,
 	writeNewFileImpl,
 	listDirectoryImpl,
@@ -40,6 +41,17 @@ const {
 
 let workspaceDir = "";
 let ws: TempWorkspace;
+
+// 実 I/O を発生させずに stat.size だけを膨らませた sparse file を作る test 用 helper。
+// `truncate` は logical size のみ設定し物理ブロックを割り当てない（disk 占有ゼロ）。
+async function createSparseFile(path: string, size: number): Promise<void> {
+	const fh = await open(path, "w");
+	try {
+		await fh.truncate(size);
+	} finally {
+		await fh.close();
+	}
+}
 
 beforeEach(async () => {
 	clearWorkspaceRoots();
@@ -77,6 +89,84 @@ describe("readFileImpl", () => {
 		const path = join(workspaceDir, "shared.md");
 		await writeFile(path, "secret", "utf8");
 		await expect(readFileImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
+	});
+
+	it("rejects files exceeding MAX_READ_FILE_BYTES with FILE_TOO_LARGE", async () => {
+		const huge = join(workspaceDir, "huge.bin");
+		await createSparseFile(huge, MAX_READ_FILE_BYTES + 1);
+		await expect(readFileImpl(TEST_WIN, huge)).rejects.toThrow(/File too large/);
+		await expect(readFileImpl(TEST_WIN, huge)).rejects.toMatchObject({ kind: "FILE_TOO_LARGE" });
+	});
+
+	it("allows files at exactly MAX_READ_FILE_BYTES (boundary)", async () => {
+		// 境界条件: 上限「ちょうど」は許可される（> での比較なので == はパス）。
+		// 64MB 実 read は重いが、内容は空（sparse 領域 → read で 0x00 連続）なので
+		// 物理 I/O は発生しない。長さが size ぴったりであることまで verify する。
+		const boundary = join(workspaceDir, "boundary.bin");
+		await createSparseFile(boundary, MAX_READ_FILE_BYTES);
+		await expect(readFileImpl(TEST_WIN, boundary)).resolves.toHaveLength(MAX_READ_FILE_BYTES);
+	});
+});
+
+describe("readFileBoundedFromHandle (stat の信頼性に依存しない bounded read)", () => {
+	// stat 申告と実 read を独立に制御する fake FileHandle。
+	// stat.size と read の data を別個に指定できるので、外部書込（file watcher 経路）
+	// で stat → read 間に追記される race の振る舞いを単体テストできる。
+	function makeFakeHandle(
+		data: Buffer,
+		opts: { spoofStatSize?: number } = {},
+	): import("node:fs/promises").FileHandle {
+		let pos = 0;
+		return {
+			stat: async () => ({ size: opts.spoofStatSize ?? data.length }),
+			read: async (buf: Buffer, off: number, len: number) => {
+				const slice = data.subarray(pos, pos + len);
+				slice.copy(buf, off);
+				pos += slice.length;
+				return { bytesRead: slice.length, buffer: buf };
+			},
+		} as unknown as import("node:fs/promises").FileHandle;
+	}
+
+	const LIMIT = 1024;
+
+	it("reads the full content when stat is accurate", async () => {
+		const fh = makeFakeHandle(Buffer.from("hello"));
+		expect(await readFileBoundedFromHandle(fh, "/fake", LIMIT)).toBe("hello");
+	});
+
+	it("returns empty string for empty file", async () => {
+		const fh = makeFakeHandle(Buffer.alloc(0));
+		expect(await readFileBoundedFromHandle(fh, "/fake", LIMIT)).toBe("");
+	});
+
+	it("accepts files that grow between stat and read while staying under the limit", async () => {
+		// stat 後に外部書込で実 size が膨らんだ場合（file watcher 経路の典型）でも、
+		// 実 size が limit 以下なら正常に受け入れる。前回実装は申告超で誤検知していた。
+		const data = Buffer.from("x".repeat(900));
+		const fh = makeFakeHandle(data, { spoofStatSize: 50 });
+		expect(await readFileBoundedFromHandle(fh, "/fake", LIMIT)).toBe("x".repeat(900));
+	});
+
+	it("rejects when actual content exceeds the limit even if stat under-reports", async () => {
+		// stat が嘘 / append で limit を超えた場合は確実に reject する。bounded buffer
+		// は limit+1 byte（hardCap）まで段階拡張するため、limit+1 byte 読めた時点で
+		// 上限超が確定する。
+		const data = Buffer.from("x".repeat(LIMIT + 1));
+		await expect(
+			readFileBoundedFromHandle(makeFakeHandle(data, { spoofStatSize: 50 }), "/fake", LIMIT),
+		).rejects.toThrow(/File too large/);
+		await expect(
+			readFileBoundedFromHandle(makeFakeHandle(data, { spoofStatSize: 50 }), "/fake", LIMIT),
+		).rejects.toMatchObject({ kind: "FILE_TOO_LARGE" });
+	});
+
+	it("rejects early when stat already reports above the limit (no read syscall needed)", async () => {
+		// 早期 reject: stat 申告で limit を超えていれば、無駄に buffer を allocate せず
+		// 即 throw。read は呼ばれないので消費 0。
+		const data = Buffer.from("y".repeat(2 * LIMIT));
+		const fh = makeFakeHandle(data, { spoofStatSize: 2 * LIMIT });
+		await expect(readFileBoundedFromHandle(fh, "/fake", LIMIT)).rejects.toThrow(/File too large/);
 	});
 });
 

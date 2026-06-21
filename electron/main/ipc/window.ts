@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, session } from "electron";
 import { handle } from "../utils/ipc-handle";
 import { canonicalize, isPathAllowed } from "../utils/path-guard";
+import { attachNavigationGuards } from "../utils/window-guards";
 import { attachWindowLifecycle } from "../utils/window-lifecycle";
 import { setActiveWorkspaceForWindow } from "./workspace";
 
@@ -55,6 +56,10 @@ async function createConflictWindow(parentSenderId: number, workspacePath: strin
 		},
 	});
 	attachWindowLifecycle(win);
+	// conflict window も renderer dir 外への遷移 / 任意 window.open を遮断する。
+	// これがないと defaultSession を main window と共有しているため、外部ローカル
+	// HTML から clipboard 等の permission を引き継いでしまう（実 PoC で確認済み）。
+	attachNavigationGuards(win.webContents);
 	win.on("ready-to-show", () => win.show());
 	win.on("closed", () => {
 		conflictWindows.delete(canonical);

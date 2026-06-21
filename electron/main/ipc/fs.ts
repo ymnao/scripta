@@ -13,6 +13,12 @@ import {
 } from "../utils/path-guard";
 import { getFileTreeFilterOptions } from "./settings";
 
+// fs:read のサイズ上限。`.md` は通常 1MB 未満なので 64MB は十分なマージン。
+// 巨大ファイル（動画 / バイナリ等）をワークスペースに置かれた場合の OOM を防ぐ。
+// 他 handler の上限（OGP body 100KB / git conflict 10MB / GitHub release 100KB）と
+// 同じ「明示的な上限を持つ」思想で揃える。
+export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
+
 async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
 		await fsp.access(absolute);
@@ -32,9 +38,53 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //      workspace 外アクセスが成立しない
 //   2. validate + realpath が impl 内で 1 回だけになり、二重正規化のオーバーヘッドが消える
 
+// bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
+// 二段防御で size 上限を強制する:
+//   1. stat 申告サイズが limit 超なら即 reject（典型 case の OOM 回避 + 早期失敗）
+//   2. 実 read は limit+1 byte まで「段階拡張する buffer」で読み続ける。stat 申告と
+//      実 size が異なっても、実 size が limit 以下なら通常通り完了し、limit+1 byte
+//      まで実際に読めた場合のみ「上限超」として reject する
+// 段階拡張で stat 申告 + 1 を初期容量にし、不足したら 2 倍ずつ拡張する。typical case
+// の memory overhead は最小（stat 申告 ≈ 実 size のため拡張は走らない）、外部書込で
+// 実 size が膨らんでも誤検知せず正しく実 size で受け入れる / 拒否する。
+async function readFileBoundedFromHandle(
+	fh: fsp.FileHandle,
+	canonical: string,
+	limit: number,
+): Promise<string> {
+	const stat = await fh.stat();
+	if (stat.size > limit) {
+		throw FsError.tooLarge(canonical, stat.size, limit);
+	}
+	const hardCap = limit + 1;
+	let buf = Buffer.alloc(Math.min(stat.size + 1, hardCap));
+	let total = 0;
+	while (total < hardCap) {
+		if (total === buf.length) {
+			// 段階拡張: 容量を 2 倍に（hardCap で頭打ち）。初回拡張前の buf は stat 申告 + 1。
+			const grown = Buffer.alloc(Math.min(buf.length * 2, hardCap));
+			buf.copy(grown);
+			buf = grown;
+		}
+		const { bytesRead } = await fh.read(buf, total, buf.length - total);
+		if (bytesRead === 0) break;
+		total += bytesRead;
+	}
+	if (total > limit) {
+		throw FsError.tooLarge(canonical, total, limit);
+	}
+	return buf.subarray(0, total).toString("utf8");
+}
+
 async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	return await fsp.readFile(canonical, "utf8");
+	// 1 回の open で stat と read を済ませて syscall を半減（fs:read は editor の hot path）。
+	const fh = await fsp.open(canonical, "r");
+	try {
+		return await readFileBoundedFromHandle(fh, canonical, MAX_READ_FILE_BYTES);
+	} finally {
+		await fh.close();
+	}
 }
 
 async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
@@ -185,6 +235,7 @@ export function registerFsIpc(): void {
 
 export const __testing = {
 	readFileImpl,
+	readFileBoundedFromHandle,
 	writeFileImpl,
 	writeNewFileImpl,
 	listDirectoryImpl,

@@ -21,38 +21,59 @@ type FakeWindow = {
 	__opts: unknown;
 };
 
-const { createdWindows, createFakeWindow, simulateState } = vi.hoisted(() => {
-	const list: FakeWindow[] = [];
-	let nextId = 5000;
-	const state = {
-		printToPdfImpl: undefined as ((opts: unknown) => Promise<Buffer>) | undefined,
-		loadFileShouldHang: false,
-	};
-	const create = (opts: unknown): FakeWindow => {
-		const id = nextId++;
-		const win: FakeWindow = {
-			webContents: {
-				id,
-				printToPDF: vi.fn(async (o) => {
-					if (state.printToPdfImpl) return state.printToPdfImpl(o);
-					return Buffer.from("%PDF-1.4 fake pdf body\n");
-				}),
-				executeJavaScript: vi.fn(async () => true),
-			},
-			loadFile: vi.fn(async () => {
-				if (state.loadFileShouldHang) {
-					await new Promise(() => {}); // never resolve
-				}
-			}),
-			isDestroyed: vi.fn(() => false),
-			destroy: vi.fn(),
-			__opts: opts,
+const { createdWindows, createFakeWindow, simulateState, mockIs, pdfFakeSession } = vi.hoisted(
+	() => {
+		const list: FakeWindow[] = [];
+		let nextId = 5000;
+		const state = {
+			printToPdfImpl: undefined as ((opts: unknown) => Promise<Buffer>) | undefined,
+			loadFileShouldHang: false,
 		};
-		list.push(win);
-		return win;
-	};
-	return { createdWindows: list, createFakeWindow: create, simulateState: state };
-});
+		// is.dev は packaged 本番では false / dev ビルドでは true になる。
+		// SCRIPTA_PDF_DEBUG_HTML_PATH の本番 disable を test するため可変にしておく。
+		// 既存テストはどちらでも挙動が変わらないので default false で安全。
+		const is = { dev: false };
+		// PDF 用 partition の隔離 session スタブ。webRequest / setPermission* の
+		// install が呼ばれたかをテストから verify できるよう vi.fn() で観測する。
+		const pdfSession = {
+			webRequest: { onBeforeRequest: vi.fn() },
+			setPermissionRequestHandler: vi.fn(),
+			setPermissionCheckHandler: vi.fn(),
+		};
+		const create = (opts: unknown): FakeWindow => {
+			const id = nextId++;
+			const win: FakeWindow = {
+				webContents: {
+					id,
+					printToPDF: vi.fn(async (o) => {
+						if (state.printToPdfImpl) return state.printToPdfImpl(o);
+						return Buffer.from("%PDF-1.4 fake pdf body\n");
+					}),
+					executeJavaScript: vi.fn(async () => true),
+				},
+				loadFile: vi.fn(async () => {
+					if (state.loadFileShouldHang) {
+						await new Promise(() => {}); // never resolve
+					}
+				}),
+				isDestroyed: vi.fn(() => false),
+				destroy: vi.fn(),
+				__opts: opts,
+			};
+			list.push(win);
+			return win;
+		};
+		return {
+			createdWindows: list,
+			createFakeWindow: create,
+			simulateState: state,
+			mockIs: is,
+			pdfFakeSession: pdfSession,
+		};
+	},
+);
+
+vi.mock("@electron-toolkit/utils", () => ({ is: mockIs }));
 
 vi.mock("electron", () => {
 	const ProxyTarget = class {};
@@ -64,15 +85,10 @@ vi.mock("electron", () => {
 			return undefined;
 		},
 	});
-	const fakeSession = {
-		webRequest: {
-			onBeforeRequest: vi.fn(),
-		},
-	};
 	return {
 		BrowserWindow: MockBrowserWindow,
 		ipcMain: { handle: vi.fn() },
-		session: { fromPartition: vi.fn(() => fakeSession) },
+		session: { fromPartition: vi.fn(() => pdfFakeSession) },
 	};
 });
 
@@ -96,6 +112,7 @@ describe("exportPdfImpl", () => {
 		createdWindows.length = 0;
 		simulateState.printToPdfImpl = undefined;
 		simulateState.loadFileShouldHang = false;
+		mockIs.dev = false;
 		ws = await createCanonicalTempWorkspace("scripta-pdf-test-");
 		workspace = ws.dir;
 		await registerWorkspaceRoot(SENDER_ID, workspace);
@@ -103,6 +120,8 @@ describe("exportPdfImpl", () => {
 
 	afterEach(async () => {
 		clearWorkspaceRoots();
+		// mockIs.dev は beforeEach で false へ戻すので afterEach 側では触らない。
+		delete process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
 		await ws.cleanup().catch(() => {});
 	});
 
@@ -176,6 +195,48 @@ describe("exportPdfImpl", () => {
 		expect(opts.pageSize).toBe("A4");
 		expect(opts.margins.top).toBeCloseTo(0.787, 3);
 		expect(opts.printBackground).toBe(true);
+	});
+
+	describe("SCRIPTA_PDF_DEBUG_HTML_PATH (dev-only debug hook)", () => {
+		it("writes debug HTML when is.dev=true and env is set", async () => {
+			mockIs.dev = true;
+			const { dir: debugDir, cleanup } = await createCanonicalTempWorkspace("scripta-pdf-debug-");
+			const debugHtmlPath = join(debugDir, "debug.html");
+			process.env.SCRIPTA_PDF_DEBUG_HTML_PATH = debugHtmlPath;
+			try {
+				const outputPath = join(workspace, "with-debug.pdf");
+				await exportPdfImpl(SENDER_ID, "<html><body>debug me</body></html>", outputPath);
+				const written = await fsp.readFile(debugHtmlPath, "utf8");
+				expect(written).toContain("debug me");
+			} finally {
+				await cleanup();
+			}
+		});
+
+		it("ignores the env in production (is.dev=false) — no write to debug path", async () => {
+			// is.dev は beforeEach で false に初期化済み（明示再 set なし）
+			const { dir: debugDir, cleanup } = await createCanonicalTempWorkspace("scripta-pdf-debug-");
+			const debugHtmlPath = join(debugDir, "debug.html");
+			process.env.SCRIPTA_PDF_DEBUG_HTML_PATH = debugHtmlPath;
+			try {
+				const outputPath = join(workspace, "no-debug.pdf");
+				await exportPdfImpl(SENDER_ID, "<html><body>no debug</body></html>", outputPath);
+				// path-guard を経由しない任意 path への裏口書き込みが発生しないことを担保
+				await expect(fsp.readFile(debugHtmlPath, "utf8")).rejects.toThrow(/ENOENT/);
+			} finally {
+				await cleanup();
+			}
+		});
+	});
+
+	it("installs permission deny handlers on the dedicated PDF session", async () => {
+		// installPdfWebRequestFilter は module-level flag で 1 度しか install しない。
+		// 他テストでも累積するため、ここでは「少なくとも 1 度は install されている」
+		// 事実だけを verify。中身（all-deny）の挙動は permission-handler.test.ts 側でテスト済み。
+		const outputPath = join(workspace, "perm.pdf");
+		await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+		expect(pdfFakeSession.setPermissionRequestHandler).toHaveBeenCalled();
+		expect(pdfFakeSession.setPermissionCheckHandler).toHaveBeenCalled();
 	});
 
 	it("registers a 300s overall export timeout", async () => {

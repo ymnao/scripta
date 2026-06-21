@@ -2,11 +2,13 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { is } from "@electron-toolkit/utils";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
 import { handle } from "../utils/ipc-handle";
 import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
+import { installPermissionDenyHandlers } from "../utils/permission-handler";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
 // Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
@@ -105,6 +107,10 @@ function installPdfWebRequestFilter(): void {
 	pdfSession.webRequest.onBeforeRequest((details, callback) => {
 		callback({ cancel: !shouldAllowPdfRequest(details.url) });
 	});
+	// PDF export 用の隔離 session は任意 HTML をロードしうるため、defaultSession の
+	// permission policy（clipboard 許可）を共有させない。clipboard 等の web permission
+	// は PDF 描画に不要なので全 deny にする。
+	installPermissionDenyHandlers(pdfSession);
 	pdfWebRequestFilterInstalled = true;
 }
 
@@ -146,8 +152,9 @@ export async function exportPdfImpl(
 	// 診断用: 環境変数 `SCRIPTA_PDF_DEBUG_HTML_PATH` がセットされていれば、
 	// printToPDF に渡される最終 HTML を指定 path にコピーする。#106 のような
 	// PDF 内描画問題で「実際に何が WebView に届いているか」を取り出すための
-	// debug hook。本番では env を設定しないので no-op。
-	const debugHtmlPath = process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
+	// debug hook。**dev ビルド限定**: packaged 本番では env が仕込まれても無視し、
+	// path-guard を経由しない任意 path への HTML 書き込み裏口を塞ぐ。
+	const debugHtmlPath = is.dev ? process.env.SCRIPTA_PDF_DEBUG_HTML_PATH : undefined;
 	if (debugHtmlPath) {
 		await fsp.writeFile(debugHtmlPath, html, "utf8").catch((err) => {
 			console.error("[scripta:pdf-debug] HTML write failed:", err);
@@ -192,12 +199,14 @@ export async function exportPdfImpl(
 			// 方式 (#93)。wrapper への `break-inside: avoid` は Chromium で overcaution
 			// を起こす quirk (#601033) があり、inline forced break の方が確実。
 			// 診断ログは `SCRIPTA_PDF_DEBUG` 環境変数を立てた時だけ出力する。
+			// SCRIPTA_PDF_DEBUG_HTML_PATH と同様 dev ビルド限定とし、本番に env を
+			// 仕込まれても診断ログが stderr に漏れない（プライバシ含み）ことを担保。
 			try {
 				const diag = (await w.webContents.executeJavaScript(
 					buildSectionBreakScript(),
 					true,
 				)) as string;
-				if (process.env.SCRIPTA_PDF_DEBUG) {
+				if (is.dev && process.env.SCRIPTA_PDF_DEBUG) {
 					process.stderr.write(
 						`[scripta:#93] break-before script: ${diag} (html ${html.length} bytes)\n`,
 					);
