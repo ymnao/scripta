@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // renderer の URL（pathname まで含む）が、scripta の renderer dir 配下かを判定する。
@@ -30,9 +30,12 @@ export interface PathOps {
 	fileURLToPath: (u: URL) => string;
 	relative: (from: string, to: string) => string;
 	isAbsolute: (p: string) => boolean;
+	// platform 別の path separator（POSIX: "/", Windows: "\\"）。`..foo` のような
+	// 正当な名前を「parent 参照」と取り違えないよう、`..${sep}` 始まりかで厳密判定する。
+	sep: string;
 }
 
-const DEFAULT_PATH_OPS: PathOps = { fileURLToPath, relative, isAbsolute };
+const DEFAULT_PATH_OPS: PathOps = { fileURLToPath, relative, isAbsolute, sep };
 
 export function isFileUrlInsideDir(
 	url: string,
@@ -44,11 +47,13 @@ export function isFileUrlInsideDir(
 		if (parsed.protocol !== "file:") return false;
 		const osPath = pathOps.fileURLToPath(parsed);
 		const rel = pathOps.relative(baseDir, osPath);
-		// "": base そのものを指す URL（許可）
-		// "..": 上位 / 兄弟 dir（拒否）
+		// "": base そのもの（許可）
+		// "..": 親 dir、または `..${sep}...`: より上位 / 兄弟（拒否）
+		//   ※ `rel.startsWith("..")` だけだと `..cache/file.js` のような正当名も
+		//   parent 参照と誤判定するため、separator まで含めた厳密判定にする
 		// 絶対 path: Windows の drive 跨ぎ / UNC（拒否）
 		if (rel === "") return true;
-		if (rel.startsWith("..")) return false;
+		if (rel === ".." || rel.startsWith(`..${pathOps.sep}`)) return false;
 		return !pathOps.isAbsolute(rel);
 	} catch {
 		return false;

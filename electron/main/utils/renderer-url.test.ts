@@ -17,11 +17,13 @@ const posixOps: PathOps = {
 	fileURLToPath: (u: URL) => fileURLToPath(u, { windows: false }),
 	relative: posix.relative,
 	isAbsolute: posix.isAbsolute,
+	sep: posix.sep,
 };
 const win32Ops: PathOps = {
 	fileURLToPath: (u: URL) => fileURLToPath(u, { windows: true }),
 	relative: win32.relative,
 	isAbsolute: win32.isAbsolute,
+	sep: win32.sep,
 };
 
 describe("isFileUrlInsideDir (cross-OS regression)", () => {
@@ -55,6 +57,15 @@ describe("isFileUrlInsideDir (cross-OS regression)", () => {
 			expect(isFileUrlInsideDir("file:///app/out/renderer/../evil.html", base, posixOps)).toBe(
 				false,
 			);
+		});
+
+		it("accepts file names that start with `..` but are inside base (e.g. `..cache/x.js`)", () => {
+			// `rel.startsWith("..")` 単独判定だと `..cache/x.js` のような正当な名前を
+			// parent 参照と誤判定して reject していた回帰。`..${sep}` 始まりで厳密判定する。
+			expect(isFileUrlInsideDir("file:///app/out/renderer/..cache/x.js", base, posixOps)).toBe(
+				true,
+			);
+			expect(isFileUrlInsideDir("file:///app/out/renderer/...config", base, posixOps)).toBe(true);
 		});
 	});
 
@@ -94,6 +105,17 @@ describe("isFileUrlInsideDir (cross-OS regression)", () => {
 		it("rejects URLs that escape via `..` segments on Windows", () => {
 			expect(isFileUrlInsideDir("file:///C:/app/out/renderer/../evil.html", base, win32Ops)).toBe(
 				false,
+			);
+		});
+
+		it("accepts file names that start with `..` but are inside base on Windows", () => {
+			// Windows でも `..\\` 始まりだけを parent 参照と判定し、`..cache` のような
+			// 正当な名前は許可する。
+			expect(isFileUrlInsideDir("file:///C:/app/out/renderer/..cache/x.js", base, win32Ops)).toBe(
+				true,
+			);
+			expect(isFileUrlInsideDir("file:///C:/app/out/renderer/...config", base, win32Ops)).toBe(
+				true,
 			);
 		});
 	});
