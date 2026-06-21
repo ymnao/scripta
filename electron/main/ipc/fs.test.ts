@@ -20,7 +20,7 @@ import {
 	registerTransientWritePath,
 	registerWorkspaceRoot,
 } from "../utils/path-guard";
-import { MAX_READ_FILE_BYTES, __testing } from "./fs";
+import { __testing, MAX_READ_FILE_BYTES } from "./fs";
 
 const TEST_WIN = 1;
 const OTHER_WIN = 2;
