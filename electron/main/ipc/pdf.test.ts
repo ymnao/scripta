@@ -110,7 +110,7 @@ describe("exportPdfImpl", () => {
 
 	afterEach(async () => {
 		clearWorkspaceRoots();
-		mockIs.dev = false;
+		// mockIs.dev は beforeEach で false へ戻すので afterEach 側では触らない。
 		delete process.env.SCRIPTA_PDF_DEBUG_HTML_PATH;
 		await ws.cleanup().catch(() => {});
 	});
@@ -204,7 +204,7 @@ describe("exportPdfImpl", () => {
 		});
 
 		it("ignores the env in production (is.dev=false) — no write to debug path", async () => {
-			mockIs.dev = false;
+			// is.dev は beforeEach で false に初期化済み（明示再 set なし）
 			const { dir: debugDir, cleanup } = await createCanonicalTempWorkspace("scripta-pdf-debug-");
 			const debugHtmlPath = join(debugDir, "debug.html");
 			process.env.SCRIPTA_PDF_DEBUG_HTML_PATH = debugHtmlPath;

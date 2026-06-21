@@ -41,6 +41,17 @@ const {
 let workspaceDir = "";
 let ws: TempWorkspace;
 
+// 実 I/O を発生させずに stat.size だけを膨らませた sparse file を作る test 用 helper。
+// `truncate` は logical size のみ設定し物理ブロックを割り当てない（disk 占有ゼロ）。
+async function createSparseFile(path: string, size: number): Promise<void> {
+	const fh = await open(path, "w");
+	try {
+		await fh.truncate(size);
+	} finally {
+		await fh.close();
+	}
+}
+
 beforeEach(async () => {
 	clearWorkspaceRoots();
 	ws = await createTempWorkspace("scripta-fs-test-");
@@ -80,32 +91,19 @@ describe("readFileImpl", () => {
 	});
 
 	it("rejects files exceeding MAX_READ_FILE_BYTES with FILE_TOO_LARGE", async () => {
-		// sparse file（truncate のみ）で stat.size を上限超に膨らませる。
-		// 実 I/O は発生しないのでディスク占有はゼロ。
 		const huge = join(workspaceDir, "huge.bin");
-		const fh = await open(huge, "w");
-		try {
-			await fh.truncate(MAX_READ_FILE_BYTES + 1);
-		} finally {
-			await fh.close();
-		}
+		await createSparseFile(huge, MAX_READ_FILE_BYTES + 1);
 		await expect(readFileImpl(TEST_WIN, huge)).rejects.toThrow(/File too large/);
 		await expect(readFileImpl(TEST_WIN, huge)).rejects.toMatchObject({ kind: "FILE_TOO_LARGE" });
 	});
 
 	it("allows files at exactly MAX_READ_FILE_BYTES (boundary)", async () => {
 		// 境界条件: 上限「ちょうど」は許可される（> での比較なので == はパス）。
-		// 64MB ファイルを実 read すると test が重くなるので、size を上限ぴったりに
-		// pin したうえで内容は空（sparse 領域は read で 0x00 が返る）にする。
+		// 64MB 実 read は重いが、内容は空（sparse 領域 → read で 0x00 連続）なので
+		// 物理 I/O は発生しない。長さが size ぴったりであることまで verify する。
 		const boundary = join(workspaceDir, "boundary.bin");
-		const fh = await open(boundary, "w");
-		try {
-			await fh.truncate(MAX_READ_FILE_BYTES);
-		} finally {
-			await fh.close();
-		}
-		// 実 read は throw しない。UTF-8 として `\x00` 連続を decode するだけなので OK。
-		await expect(readFileImpl(TEST_WIN, boundary)).resolves.toBeTypeOf("string");
+		await createSparseFile(boundary, MAX_READ_FILE_BYTES);
+		await expect(readFileImpl(TEST_WIN, boundary)).resolves.toHaveLength(MAX_READ_FILE_BYTES);
 	});
 });
 

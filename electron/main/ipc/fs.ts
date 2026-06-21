@@ -40,14 +40,21 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 
 async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	// 読み込み前に size を確認し、上限超は読み込みごと拒否する。stat → read の間で
-	// ファイルが膨らむ TOCTOU は単一ユーザーアプリでは許容（race のために二重 read
-	// するほうがコスト過大）。実害は OOM 回避なので「申告サイズで足切り」で十分。
-	const stat = await fsp.stat(canonical);
-	if (stat.size > MAX_READ_FILE_BYTES) {
-		throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
+	// 1 回の open で size 判定と read を済ませる。`fsp.stat` + `fsp.readFile` の素朴な
+	// 実装だと open/stat/close + open/read/close で open が 2 回走るが、`fs:read` は
+	// エディタ起動・タブ切替で多用される hot path なので FD を共有して syscall を半減
+	// させる。size 判定と実 read で同一 FD を使うので stat → read の TOCTOU race も
+	// 構造的に消える（同 FD が指す inode の size はその時点で確定）。
+	const fh = await fsp.open(canonical, "r");
+	try {
+		const stat = await fh.stat();
+		if (stat.size > MAX_READ_FILE_BYTES) {
+			throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
+		}
+		return await fh.readFile("utf8");
+	} finally {
+		await fh.close();
 	}
-	return await fsp.readFile(canonical, "utf8");
 }
 
 async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
