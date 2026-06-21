@@ -27,6 +27,7 @@ const OTHER_WIN = 2;
 
 const {
 	readFileImpl,
+	readFileBoundedFromHandle,
 	writeFileImpl,
 	writeNewFileImpl,
 	listDirectoryImpl,
@@ -104,6 +105,68 @@ describe("readFileImpl", () => {
 		const boundary = join(workspaceDir, "boundary.bin");
 		await createSparseFile(boundary, MAX_READ_FILE_BYTES);
 		await expect(readFileImpl(TEST_WIN, boundary)).resolves.toHaveLength(MAX_READ_FILE_BYTES);
+	});
+});
+
+describe("readFileBoundedFromHandle (stat の信頼性に依存しない bounded read)", () => {
+	// stat 申告と実 read を独立に制御する fake FileHandle。
+	// stat.size と read の data を別個に指定できるので、外部書込（file watcher 経路）
+	// で stat → read 間に追記される race の振る舞いを単体テストできる。
+	function makeFakeHandle(
+		data: Buffer,
+		opts: { spoofStatSize?: number } = {},
+	): import("node:fs/promises").FileHandle {
+		let pos = 0;
+		return {
+			stat: async () => ({ size: opts.spoofStatSize ?? data.length }),
+			read: async (buf: Buffer, off: number, len: number) => {
+				const slice = data.subarray(pos, pos + len);
+				slice.copy(buf, off);
+				pos += slice.length;
+				return { bytesRead: slice.length, buffer: buf };
+			},
+		} as unknown as import("node:fs/promises").FileHandle;
+	}
+
+	const LIMIT = 1024;
+
+	it("reads the full content when stat is accurate", async () => {
+		const fh = makeFakeHandle(Buffer.from("hello"));
+		expect(await readFileBoundedFromHandle(fh, "/fake", LIMIT)).toBe("hello");
+	});
+
+	it("returns empty string for empty file", async () => {
+		const fh = makeFakeHandle(Buffer.alloc(0));
+		expect(await readFileBoundedFromHandle(fh, "/fake", LIMIT)).toBe("");
+	});
+
+	it("accepts files that grow between stat and read while staying under the limit", async () => {
+		// stat 後に外部書込で実 size が膨らんだ場合（file watcher 経路の典型）でも、
+		// 実 size が limit 以下なら正常に受け入れる。前回実装は申告超で誤検知していた。
+		const data = Buffer.from("x".repeat(900));
+		const fh = makeFakeHandle(data, { spoofStatSize: 50 });
+		expect(await readFileBoundedFromHandle(fh, "/fake", LIMIT)).toBe("x".repeat(900));
+	});
+
+	it("rejects when actual content exceeds the limit even if stat under-reports", async () => {
+		// stat が嘘 / append で limit を超えた場合は確実に reject する。bounded buffer
+		// は limit+1 byte（hardCap）まで段階拡張するため、limit+1 byte 読めた時点で
+		// 上限超が確定する。
+		const data = Buffer.from("x".repeat(LIMIT + 1));
+		await expect(
+			readFileBoundedFromHandle(makeFakeHandle(data, { spoofStatSize: 50 }), "/fake", LIMIT),
+		).rejects.toThrow(/File too large/);
+		await expect(
+			readFileBoundedFromHandle(makeFakeHandle(data, { spoofStatSize: 50 }), "/fake", LIMIT),
+		).rejects.toMatchObject({ kind: "FILE_TOO_LARGE" });
+	});
+
+	it("rejects early when stat already reports above the limit (no read syscall needed)", async () => {
+		// 早期 reject: stat 申告で limit を超えていれば、無駄に buffer を allocate せず
+		// 即 throw。read は呼ばれないので消費 0。
+		const data = Buffer.from("y".repeat(2 * LIMIT));
+		const fh = makeFakeHandle(data, { spoofStatSize: 2 * LIMIT });
+		await expect(readFileBoundedFromHandle(fh, "/fake", LIMIT)).rejects.toThrow(/File too large/);
 	});
 });
 

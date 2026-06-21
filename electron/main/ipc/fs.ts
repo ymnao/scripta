@@ -38,37 +38,50 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //      workspace 外アクセスが成立しない
 //   2. validate + realpath が impl 内で 1 回だけになり、二重正規化のオーバーヘッドが消える
 
+// bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
+// 二段防御で size 上限を強制する:
+//   1. stat 申告サイズが limit 超なら即 reject（典型 case の OOM 回避 + 早期失敗）
+//   2. 実 read は limit+1 byte まで「段階拡張する buffer」で読み続ける。stat 申告と
+//      実 size が異なっても、実 size が limit 以下なら通常通り完了し、limit+1 byte
+//      まで実際に読めた場合のみ「上限超」として reject する
+// 段階拡張で stat 申告 + 1 を初期容量にし、不足したら 2 倍ずつ拡張する。typical case
+// の memory overhead は最小（stat 申告 ≈ 実 size のため拡張は走らない）、外部書込で
+// 実 size が膨らんでも誤検知せず正しく実 size で受け入れる / 拒否する。
+async function readFileBoundedFromHandle(
+	fh: fsp.FileHandle,
+	canonical: string,
+	limit: number,
+): Promise<string> {
+	const stat = await fh.stat();
+	if (stat.size > limit) {
+		throw FsError.tooLarge(canonical, stat.size, limit);
+	}
+	const hardCap = limit + 1;
+	let buf = Buffer.alloc(Math.min(stat.size + 1, hardCap));
+	let total = 0;
+	while (total < hardCap) {
+		if (total === buf.length) {
+			// 段階拡張: 容量を 2 倍に（hardCap で頭打ち）。初回拡張前の buf は stat 申告 + 1。
+			const grown = Buffer.alloc(Math.min(buf.length * 2, hardCap));
+			buf.copy(grown);
+			buf = grown;
+		}
+		const { bytesRead } = await fh.read(buf, total, buf.length - total);
+		if (bytesRead === 0) break;
+		total += bytesRead;
+	}
+	if (total > limit) {
+		throw FsError.tooLarge(canonical, total, limit);
+	}
+	return buf.subarray(0, total).toString("utf8");
+}
+
 async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	// 二段防御で size 上限を強制する:
-	//   1. stat 申告サイズで先に弾く（典型 case は small file で、無駄に巨大な buffer
-	//      を allocate しないため）
-	//   2. bounded read（cap = stat.size+1 byte、ただし MAX+1 を上限）で実際に読み込む。
-	//      stat と read は同一 FD で同じ inode を参照するが、inode の size は POSIX 上
-	//      メタデータで append/truncate により動くため stat の値だけは信用しない。実
-	//      read で stat 申告を超えるバイトが読めた時点で「stat 後の追記または stat が
-	//      嘘」を検知し、安全側で上限超として reject する
 	// 1 回の open で stat と read を済ませて syscall を半減（fs:read は editor の hot path）。
 	const fh = await fsp.open(canonical, "r");
 	try {
-		const stat = await fh.stat();
-		if (stat.size > MAX_READ_FILE_BYTES) {
-			throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
-		}
-		const cap = Math.min(stat.size + 1, MAX_READ_FILE_BYTES + 1);
-		const buf = Buffer.alloc(cap);
-		let total = 0;
-		while (total < cap) {
-			const { bytesRead } = await fh.read(buf, total, cap - total);
-			if (bytesRead === 0) break;
-			total += bytesRead;
-		}
-		// 実 read が stat 申告超 = stat 後の追記が走った（または stat が嘘）。実 size は
-		// cap で頭打ちなので正確には分からないが、安全側に倒して上限超扱いで reject する。
-		if (total > stat.size) {
-			throw FsError.tooLarge(canonical, total, MAX_READ_FILE_BYTES);
-		}
-		return buf.subarray(0, total).toString("utf8");
+		return await readFileBoundedFromHandle(fh, canonical, MAX_READ_FILE_BYTES);
 	} finally {
 		await fh.close();
 	}
@@ -222,6 +235,7 @@ export function registerFsIpc(): void {
 
 export const __testing = {
 	readFileImpl,
+	readFileBoundedFromHandle,
 	writeFileImpl,
 	writeNewFileImpl,
 	listDirectoryImpl,

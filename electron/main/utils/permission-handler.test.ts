@@ -6,8 +6,13 @@ import {
 	installPermissionDenyHandlers,
 } from "./permission-handler";
 
-type RequestHandler = Parameters<Session["setPermissionRequestHandler"]>[0];
-type CheckHandler = Parameters<Session["setPermissionCheckHandler"]>[0];
+// Session.setPermission*Handler の第 1 引数は `Handler | null`（unset 用に null を許す）。
+// テストでは handler 本体だけ扱いたいので NonNullable で null を剥がす。
+type RequestHandler = NonNullable<Parameters<Session["setPermissionRequestHandler"]>[0]>;
+type CheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
+// permission 文字列リテラル union を Electron 型から取り出して、test 入力を type-safe に。
+type RequestPermission = Parameters<RequestHandler>[1];
+type CheckPermission = Parameters<CheckHandler>[1];
 
 // 最小限の Session スタブ。setPermission*Handler で渡された callback を捕捉し、
 // テストから直接呼び出して deny / allow の挙動を verify する。
@@ -19,10 +24,10 @@ function makeFakeSession(): {
 	let requestHandler: RequestHandler | null = null;
 	let checkHandler: CheckHandler | null = null;
 	const session = {
-		setPermissionRequestHandler: vi.fn((h: RequestHandler) => {
+		setPermissionRequestHandler: vi.fn((h: RequestHandler | null) => {
 			requestHandler = h;
 		}),
-		setPermissionCheckHandler: vi.fn((h: CheckHandler) => {
+		setPermissionCheckHandler: vi.fn((h: CheckHandler | null) => {
 			checkHandler = h;
 		}),
 	} as unknown as Session;
@@ -52,9 +57,18 @@ describe("installPermissionDenyHandlers (all deny)", () => {
 		installPermissionDenyHandlers(session);
 		const handler = getRequestHandler();
 		const callback = vi.fn();
-		for (const p of ["notifications", "media", "geolocation", "clipboard-read"]) {
+		const permissions = [
+			"notifications",
+			"media",
+			"geolocation",
+			"clipboard-read",
+		] satisfies RequestPermission[];
+		for (const p of permissions) {
 			callback.mockClear();
-			handler(null as never, p as never, callback, {} as never);
+			handler(null as never, p, callback, {
+				requestingUrl: "http://localhost:5173/",
+				isMainFrame: true,
+			});
 			expect(callback).toHaveBeenCalledWith(false);
 		}
 	});
@@ -63,8 +77,20 @@ describe("installPermissionDenyHandlers (all deny)", () => {
 		const { session, getCheckHandler } = makeFakeSession();
 		installPermissionDenyHandlers(session);
 		const handler = getCheckHandler();
-		expect(handler(null, "media", "https://example.com", {} as never)).toBe(false);
-		expect(handler(null, "clipboard-read", "http://localhost:5173", {} as never)).toBe(false);
+		expect(
+			handler(null, "media" satisfies CheckPermission, "https://example.com", {
+				mediaType: "unknown",
+				requestingUrl: "https://example.com/",
+				isMainFrame: true,
+			}),
+		).toBe(false);
+		expect(
+			handler(null, "clipboard-read" satisfies CheckPermission, "http://localhost:5173", {
+				mediaType: "unknown",
+				requestingUrl: "http://localhost:5173/",
+				isMainFrame: true,
+			}),
+		).toBe(false);
 	});
 });
 
@@ -85,12 +111,12 @@ describe("installMainSessionPermissionHandlers (clipboard allowlist)", () => {
 	});
 
 	describe("request handler", () => {
-		const callRequest = (permission: string, requestingUrl: string): boolean => {
+		const callRequest = (permission: RequestPermission, requestingUrl: string): boolean => {
 			const { session, getRequestHandler } = makeFakeSession();
 			installMainSessionPermissionHandlers(session);
 			const handler = getRequestHandler();
 			const callback = vi.fn();
-			handler(null as never, permission as never, callback, { requestingUrl } as never);
+			handler(null as never, permission, callback, { requestingUrl, isMainFrame: true });
 			return callback.mock.calls[0]?.[0] === true;
 		};
 
@@ -116,16 +142,25 @@ describe("installMainSessionPermissionHandlers (clipboard allowlist)", () => {
 			const { session, getRequestHandler } = makeFakeSession();
 			installMainSessionPermissionHandlers(session);
 			const callback = vi.fn();
-			getRequestHandler()(null as never, "clipboard-read" as never, callback, {} as never);
+			// Electron 実体は requestingUrl を常に渡してくるが、防衛的に空 URL でも
+			// deny に倒れることを verify する。型上 requestingUrl は必須なので空文字で代用。
+			getRequestHandler()(null as never, "clipboard-read", callback, {
+				requestingUrl: "",
+				isMainFrame: true,
+			});
 			expect(callback).toHaveBeenCalledWith(false);
 		});
 	});
 
 	describe("check handler", () => {
-		const call = (permission: string, requestingOrigin: string): boolean => {
+		const call = (permission: CheckPermission, requestingOrigin: string): boolean => {
 			const { session, getCheckHandler } = makeFakeSession();
 			installMainSessionPermissionHandlers(session);
-			return getCheckHandler()(null, permission, requestingOrigin, {} as never);
+			return getCheckHandler()(null, permission, requestingOrigin, {
+				mediaType: "unknown",
+				requestingUrl: `${requestingOrigin}/`,
+				isMainFrame: true,
+			});
 		};
 
 		it("returns true for clipboard-read from a trusted origin", () => {
