@@ -1,0 +1,71 @@
+name: CodeQL
+
+# JS/TS 静的解析 (#205)。Source code 上の脆弱パターン (injection / 安全でない API 利用 等)
+# を PR レビュー時に検出する。public repo なので無料、Dependabot とは別レイヤー
+# (Dependabot=依存 advisory 追従、CodeQL=自前コード解析)。
+#
+# Schedule cron は毎週日曜 05:30 UTC。GitHub の cron は ±15min ジッタがあるので、
+# 毎時 :00/:30 はキューが詰まりがち。:30 を選んで avoid している。
+
+on:
+  push:
+    branches: [main]
+    # ソースに無関係な変更で scan を回す意味がないため除外。schedule trigger には
+    # paths-ignore は適用されないので main baseline の weekly scan は保持される。
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  schedule:
+    - cron: "30 5 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  # schedule run は別 group に隔離する。同 group だと後発の push/PR (cancel-in-progress:
+  # true) が進行中の schedule を停止させてしまい、main baseline の SARIF upload が
+  # 古いまま固定される。cancel-in-progress は後発側の設定が effective なので、
+  # group 自体を分けないと隔離できない (cancel-in-progress を schedule のみ false に
+  # しても、後発 push 側の true で先発 schedule がキャンセルされる)。
+  group: codeql-${{ github.event_name == 'schedule' && 'scheduled' || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    # CodeQL は Code Scanning alerts を書き込むため security-events: write 必須。
+    # actions: read は private repo の workflow log 参照用 (public でも害なし、
+    # GitHub 公式テンプレと parity を保つため明示)。
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          languages: ${{ matrix.language }}
+          # JS/TS は build 不要 (autobuild も走らせない)。Vite/electron-vite の build を
+          # CodeQL に再現させる意味は無く、ソース解析だけで十分。
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          category: "/language:${{ matrix.language }}"

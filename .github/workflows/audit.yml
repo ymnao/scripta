@@ -1,0 +1,141 @@
+name: Security Audit
+
+# pnpm audit の定期実行 (#205)。Dependabot より高頻度・open-pull-requests-limit (10) に
+# 縛られず、検出時のみ issue を自動作成する。Dependabot の自動 PR とは棲み分け
+# (Dependabot=patch 提案、こちら=advisory 通知のみ)。
+#
+# Schedule cron は毎週月曜 06:30 UTC (CodeQL の日曜 05:30 とは別曜日で分散)。
+# GitHub の cron は ±15min ジッタがあるので :30 を選んでキュー衝突を回避。
+
+on:
+  schedule:
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # issue 作成 / 既存 issue へのコメント追加で必要。
+      issues: write
+    steps:
+      # 本 job は issues: write を持つため、checkout が .git/config に token を残すと
+      # 直後の pnpm install (postinstall scripts) で侵害パッケージから token を盗まれ、
+      # issue 操作 (spam・改ざん) に悪用され得る。persist-credentials: false で token を
+      # checkout 後に削除する。gh CLI を使う step は env.GH_TOKEN で明示的に渡している。
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      # pnpm audit の exit code:
+      #   0 = ok / 1 = advisory found / それ以外 = registry / network エラー等
+      # 旧実装は「非 0 → advisory あり」と単純化していたため、registry エラーでも
+      # has_advisories=true になり空 or 不正な内容で issue が作成されていた。
+      # JSON 妥当性 + exit code を厳密に判定し、判別不能時は job 自体を fail させる。
+      - name: Run pnpm audit
+        id: audit
+        run: |
+          set +e
+          pnpm audit --audit-level=high --json > audit-report.json 2>audit-stderr.log
+          exit_code=$?
+          set -e
+
+          if ! jq -e . audit-report.json >/dev/null 2>&1; then
+            echo "::error::pnpm audit produced invalid or empty JSON (exit=${exit_code})"
+            echo "--- stderr ---"
+            cat audit-stderr.log
+            echo "--- stdout (head 2KB) ---"
+            head -c 2000 audit-report.json
+            exit 1
+          fi
+
+          case "${exit_code}" in
+            0)
+              echo "has_advisories=false" >> "$GITHUB_OUTPUT"
+              ;;
+            1)
+              echo "has_advisories=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::pnpm audit failed with unexpected exit code ${exit_code} (likely registry/network error)"
+              cat audit-stderr.log
+              exit 1
+              ;;
+          esac
+
+      - name: Generate report markdown
+        if: steps.audit.outputs.has_advisories == 'true'
+        # Unquoted heredoc で GHA テンプレ (${{ ... }}) と shell expansion (`$(...)`) を
+        # 両方展開する。markdown 内の backtick は heredoc 内では escape (\`) が必要。
+        run: |
+          cat > audit-issue-body.md <<MD
+          # pnpm audit advisory 検出
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Triggered: ${{ github.event_name }}
+          Generated at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          ## pnpm audit --audit-level=high --json
+
+          \`\`\`json
+          $(cat audit-report.json)
+          \`\`\`
+
+          ## 対応
+
+          - \`pnpm-workspace.yaml\` の \`overrides\` で \`parent>child\` 形式の pin
+          - GHSA 番号と実害評価をコメントに残す (v0.4.0 / v0.5.0 で確立した parent>child override 規約)
+          MD
+
+      # peter-evans/create-issue-from-file は「issue create → addLabels」の順で API を
+      # 叩くが、未存在ラベルへの addLabels は GitHub REST API 仕様で 422 を返し action
+      # 全体が fail する。issue は作成済みなのに label が付かず、次回 run の find_issue
+      # が見落として重複 issue が量産される。workflow 内で label を冪等に作成しておく。
+      # gh label create --force は既存なら update、無ければ create。
+      - name: Ensure security-audit label exists
+        if: steps.audit.outputs.has_advisories == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create security-audit \
+            --color "B60205" \
+            --description "pnpm audit advisory 検出時に自動付与 (audit.yml workflow)" \
+            --force
+
+      # 重複 issue を避けるため、同 label の open issue があるかチェックする。
+      # peter-evans/create-issue-from-file の issue-number は body を「上書き」する
+      # (octokit.issues.update を呼ぶ) ため、過去の検出履歴・対応記録が消える。
+      # 既存があれば gh issue comment で append、無ければ新規作成。
+      - name: Find existing open audit issue
+        if: steps.audit.outputs.has_advisories == 'true'
+        id: find_issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --label security-audit --state open --json number --jq '.[0].number // ""')
+          echo "issue_number=${existing}" >> "$GITHUB_OUTPUT"
+
+      - name: Create new audit issue
+        if: steps.audit.outputs.has_advisories == 'true' && steps.find_issue.outputs.issue_number == ''
+        uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6.0.0
+        with:
+          title: "Security: pnpm audit advisory 検出"
+          content-filepath: audit-issue-body.md
+          labels: security-audit
+
+      - name: Append comment to existing audit issue
+        if: steps.audit.outputs.has_advisories == 'true' && steps.find_issue.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ steps.find_issue.outputs.issue_number }}" --body-file audit-issue-body.md
