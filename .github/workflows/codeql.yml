@@ -29,10 +29,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: codeql-${{ github.ref }}
-  # schedule run は main baseline の SARIF upload を担うので、PR push に巻き込まれて
-  # 中断されると baseline が古いまま固定される。schedule のみ cancel しない。
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  # schedule run は別 group に隔離する。同 group だと後発の push/PR (cancel-in-progress:
+  # true) が進行中の schedule を停止させてしまい、main baseline の SARIF upload が
+  # 古いまま固定される。cancel-in-progress は後発側の設定が effective なので、
+  # group 自体を分けないと隔離できない (cancel-in-progress を schedule のみ false に
+  # しても、後発 push 側の true で先発 schedule がキャンセルされる)。
+  group: codeql-${{ github.event_name == 'schedule' && 'scheduled' || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
