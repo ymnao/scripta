@@ -10,8 +10,18 @@ name: CodeQL
 on:
   push:
     branches: [main]
+    # ソースに無関係な変更で scan を回す意味がないため除外。schedule trigger には
+    # paths-ignore は適用されないので main baseline の weekly scan は保持される。
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
   schedule:
     - cron: "30 5 * * 0"
 
@@ -20,7 +30,9 @@ permissions:
 
 concurrency:
   group: codeql-${{ github.ref }}
-  cancel-in-progress: true
+  # schedule run は main baseline の SARIF upload を担うので、PR push に巻き込まれて
+  # 中断されると baseline が古いまま固定される。schedule のみ cancel しない。
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
   analyze:
