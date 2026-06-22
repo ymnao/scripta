@@ -27,7 +27,13 @@ jobs:
       # issue 作成 / 既存 issue へのコメント追加で必要。
       issues: write
     steps:
+      # 本 job は issues: write を持つため、checkout が .git/config に token を残すと
+      # 直後の pnpm install (postinstall scripts) で侵害パッケージから token を盗まれ、
+      # issue 操作 (spam・改ざん) に悪用され得る。persist-credentials: false で token を
+      # checkout 後に削除する。gh CLI を使う step は env.GH_TOKEN で明示的に渡している。
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-node-pnpm
 
@@ -90,6 +96,21 @@ jobs:
           - \`pnpm-workspace.yaml\` の \`overrides\` で \`parent>child\` 形式の pin
           - GHSA 番号と実害評価をコメントに残す (v0.4.0 / v0.5.0 で確立した parent>child override 規約)
           MD
+
+      # peter-evans/create-issue-from-file は「issue create → addLabels」の順で API を
+      # 叩くが、未存在ラベルへの addLabels は GitHub REST API 仕様で 422 を返し action
+      # 全体が fail する。issue は作成済みなのに label が付かず、次回 run の find_issue
+      # が見落として重複 issue が量産される。workflow 内で label を冪等に作成しておく。
+      # gh label create --force は既存なら update、無ければ create。
+      - name: Ensure security-audit label exists
+        if: steps.audit.outputs.has_advisories == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create security-audit \
+            --color "B60205" \
+            --description "pnpm audit advisory 検出時に自動付与 (audit.yml workflow)" \
+            --force
 
       # 重複 issue を避けるため、同 label の open issue があるかチェックする。
       # peter-evans/create-issue-from-file の issue-number は body を「上書き」する
