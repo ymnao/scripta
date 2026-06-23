@@ -184,11 +184,13 @@ test.describe("backlink panel", () => {
 
 		await page.goto("/");
 		await page.getByLabel("フォルダを開く").click();
+
+		// backlink panel を開くと FileTree が隠れるため、ファイル選択 → panel 表示
+		// → file panel に戻って次のファイル選択 → panel 再表示、の順で切り替える。
+		await page.getByLabel("x.md file").click();
 		await page.getByLabel("バックリンクを表示").click();
 
 		const panel = page.locator('section[aria-label="バックリンク"]');
-
-		await page.getByLabel("x.md file").click();
 		await expect(
 			panel.locator(".search-panel-file-name").filter({ hasText: "ref-x.md" }),
 		).toBeVisible({ timeout: 5000 });
@@ -196,7 +198,9 @@ test.describe("backlink panel", () => {
 			panel.locator(".search-panel-file-name").filter({ hasText: "ref-y.md" }),
 		).toHaveCount(0);
 
+		await page.getByLabel("ファイルエクスプローラーを表示").click();
 		await page.getByLabel("y.md file").click();
+		await page.getByLabel("バックリンクを表示").click();
 		await expect(
 			panel.locator(".search-panel-file-name").filter({ hasText: "ref-y.md" }),
 		).toBeVisible({ timeout: 5000 });
