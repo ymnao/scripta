@@ -317,8 +317,15 @@ async function scanBacklinksImpl(
 ): Promise<BacklinkSource[]> {
 	const isStale = makeStaleChecker(backlinkGeneration, senderId);
 
+	// path-guard 契約: renderer 由来のファイルパスは main 側で認可してから処理する。
+	// workspace は後段の collectMdFilesForWorkspace で検証されるが、targetFilePath は
+	// 別途明示的に通す (searchFilesImpl と同じく拡張子フィルタ・pageName 正規化より前)。
+	await assertPathAllowed(senderId, targetFilePath);
+
 	const targetBase = basename(targetFilePath);
-	if (!targetBase.toLowerCase().endsWith(".md")) return [];
+	// walkMdFiles (line 28) と同じ小文字 `.md` のみを対象にする。大文字拡張子の
+	// ファイルは scan 対象に含まれず backlink 結果が常に空になるため、ここで早期 return。
+	if (!targetBase.endsWith(".md")) return [];
 	const targetPage = targetBase.slice(0, -3).normalize("NFC");
 	if (targetPage === "") return [];
 	// inFiles は collectMdFilesForWorkspace で `resolve(workspacePath)` ベースに揃って

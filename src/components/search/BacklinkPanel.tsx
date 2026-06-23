@@ -22,12 +22,13 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
 	// .md ファイル以外 (新規タブページなど) はバックリンク対象外。
-	// 拡張子チェックは UnresolvedLinksPanel が main 側の `existing` 判定で
-	// `*.md` のみ basename にしているのと同じ条件で揃える。
+	// main 側 walkMdFiles (electron/main/ipc/search.ts:28) が小文字 `.md` のみを
+	// 収集対象にしているため、UI もそれに揃える (大文字拡張子は scan 対象外で
+	// 結果が常に空になる)。
 	const targetFilePath = useMemo(() => {
 		if (!activeTabPath) return null;
 		if (isNewTabPath(activeTabPath)) return null;
-		if (!activeTabPath.toLowerCase().endsWith(".md")) return null;
+		if (!activeTabPath.endsWith(".md")) return null;
 		return activeTabPath;
 	}, [activeTabPath]);
 

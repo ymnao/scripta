@@ -374,6 +374,13 @@ describe("scanBacklinksImpl", () => {
 		expect(out).toEqual([]);
 	});
 
+	it("returns empty when target file extension is uppercase .MD (walkMdFiles と同じ小文字限定方針)", async () => {
+		await writeFile(join(workspaceDir, "other.md"), "[[Target]]");
+		await writeFile(join(workspaceDir, "Target.MD"), "");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "Target.MD"));
+		expect(out).toEqual([]);
+	});
+
 	it("alias form [[target|display]] matches by target name", async () => {
 		await writeFile(join(workspaceDir, "target.md"), "");
 		await writeFile(join(workspaceDir, "a.md"), "[[target|My Display]]");
@@ -402,6 +409,14 @@ describe("scanBacklinksImpl", () => {
 	it("rejects unauthorized workspace path", async () => {
 		await expect(
 			scanBacklinksImpl(999 /* not registered */, workspaceDir, join(workspaceDir, "target.md")),
+		).rejects.toThrow(/Permission denied/);
+	});
+
+	it("rejects unauthorized target file path (workspace 外の target を弾く)", async () => {
+		// workspace は registered だが target が登録されていない別 root にある場合、
+		// path-guard が `.md` 拡張子フィルタの前で reject することを確認する。
+		await expect(
+			scanBacklinksImpl(TEST_WIN, workspaceDir, "/some/unauthorized/target.md"),
 		).rejects.toThrow(/Permission denied/);
 	});
 
