@@ -325,11 +325,19 @@ function installApiMock(opts: {
 	const collectInlineCodeRanges = (s: string): Array<{ from: number; to: number }> => {
 		// 本番 search.ts:collectInlineCodeRanges と同形。close 側は escape を見ない
 		// (CommonMark の backtick string 認識に escape を含めない仕様、live-preview と整合)。
+		// open 側は escape された backtick run 全体を skip する (i++ だけだと run の
+		// 2 文字目以降を open として誤開始するため)。
 		const ranges: Array<{ from: number; to: number }> = [];
 		let i = 0;
 		while (i < s.length) {
-			if (s[i] !== "`" || isEscaped(s, i)) {
+			if (s[i] !== "`") {
 				i++;
+				continue;
+			}
+			if (isEscaped(s, i)) {
+				let runEnd = i;
+				while (runEnd < s.length && s[runEnd] === "`") runEnd++;
+				i = runEnd;
 				continue;
 			}
 			const openStart = i;

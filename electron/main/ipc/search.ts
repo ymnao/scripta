@@ -256,8 +256,18 @@ function collectInlineCodeRanges(s: string): Array<{ from: number; to: number }>
 	const ranges: Array<{ from: number; to: number }> = [];
 	let i = 0;
 	while (i < s.length) {
-		if (s[i] !== "`" || isEscaped(s, i)) {
+		if (s[i] !== "`") {
 			i++;
+			continue;
+		}
+		// run の先頭が escape されていれば、その backtick run 全体を skip する。
+		// `i++` だけだと同じ run の 2 文字目以降を open delimiter として誤開始してしまう
+		// (例: `\\\`\\\` [[t]] \\\`` で 2 文字目から code span を開いてしまう)。
+		// Lezer / live-preview の InlineCode 判定もこの run 全体を delimiter としない。
+		if (isEscaped(s, i)) {
+			let runEnd = i;
+			while (runEnd < s.length && s[runEnd] === "`") runEnd++;
+			i = runEnd;
 			continue;
 		}
 		const openStart = i;

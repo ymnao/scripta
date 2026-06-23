@@ -504,6 +504,19 @@ describe("scanBacklinksImpl", () => {
 		expect(out[0].references[0].lineNumber).toBe(1);
 	});
 
+	it("does not open a code span from the 2nd backtick of an escaped run (\\``)", async () => {
+		// `\\\`\\\`` のように escape された backtick の直後に別の backtick が続く場合、
+		// run 全体が delimiter にならない (Lezer / live-preview も同様)。
+		// i++ だけだと 2 文字目を open として誤開始し、後続の [[target]] を code span 内に
+		// 巻き込む regression があった。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "\\`` [[target]] `");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(1);
+	});
+
 	it("does not let tilde-fenced backticks pair with outside backticks", async () => {
 		// ~~~ fenced code block 内の `` ` `` が、外側の単独 `` ` `` と peer になって
 		// 外側 [[target]] を inline code 内と誤判定するのを防ぐ (fenced 範囲 mask が効くこと)。
