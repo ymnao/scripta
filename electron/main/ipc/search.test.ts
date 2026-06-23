@@ -293,6 +293,20 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		expect(out[0].references[0].lineNumber).toBe(3);
 	});
 
+	it("excludes wikilinks inside multi-line inline code span (unresolved 側にも同 effect)", async () => {
+		// 複数行 inline code span (CommonMark で valid) も unresolved 側で除外される
+		// ことを確認する (本番 iterateWikilinkOccurrences の text 全体走査が効くこと)。
+		await writeFile(
+			join(workspaceDir, "note.md"),
+			"in span `start\n[[missing]]\nend` not link\nreal [[missing]] link",
+		);
+		const out = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		expect(out).toHaveLength(1);
+		expect(out[0].pageName).toBe("missing");
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
 	it("rejects unauthorized workspace path", async () => {
 		await expect(
 			scanUnresolvedWikilinksImpl(999 /* not registered */, workspaceDir),
@@ -461,6 +475,21 @@ describe("scanBacklinksImpl", () => {
 		expect(out).toHaveLength(1);
 		expect(out[0].references).toHaveLength(1);
 		expect(out[0].references[0].lineNumber).toBe(1);
+	});
+
+	it("excludes wikilinks inside multi-line inline code span (CommonMark allows backticks across lines)", async () => {
+		// CommonMark の inline code span は改行を跨げる。live-preview の lezer InlineCode も
+		// 同様に複数行 1 ノードで扱うので、main / mock もそれに合わせる。
+		// line scope の判定だと、開きと閉じが別行にあるケースで false positive になる。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"in span `start\n[[target]]\nend` not link\nreal [[target]] link",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
 	});
 
 	it("returns empty when target is not the canonical (lex-smallest) of duplicate basenames", async () => {

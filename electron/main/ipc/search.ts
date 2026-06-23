@@ -239,34 +239,35 @@ function isEscaped(line: string, pos: number): boolean {
 	return count % 2 === 1;
 }
 
-// CommonMark 準拠で 1 行内の inline code span 範囲を列挙する。
+// CommonMark 準拠で inline code span 範囲を列挙する。
 // 仕様: N 連続のバックティックを開き delimiter、同じ N 連続を閉じ delimiter とする。
 //       escape (\`) は delimiter にならない。閉じが見つからなければ単なるリテラルで
 //       code span ではない (open delimiter 自体もリテラル扱い)。
-// 制限: 複数行に跨る code span (CommonMark は許容) は本実装の対象外。scripta では
-//       長い code は fenced code block で書く慣習なので、ここでは行内のみ判定する。
-function collectInlineCodeRanges(line: string): Array<{ from: number; to: number }> {
+// 引数 s は 1 行でも本文全体でもよい。CommonMark は code span が改行を跨ぐことを
+// 許容するため、live-preview の lezer InlineCode と整合させるには本文全体で走らせる
+// 必要がある (例: ``` `start\n[[t]]\nend` ``` 形の複数行 span)。
+function collectInlineCodeRanges(s: string): Array<{ from: number; to: number }> {
 	const ranges: Array<{ from: number; to: number }> = [];
 	let i = 0;
-	while (i < line.length) {
-		if (line[i] !== "`" || isEscaped(line, i)) {
+	while (i < s.length) {
+		if (s[i] !== "`" || isEscaped(s, i)) {
 			i++;
 			continue;
 		}
 		const openStart = i;
 		let openEnd = i;
-		while (openEnd < line.length && line[openEnd] === "`") openEnd++;
+		while (openEnd < s.length && s[openEnd] === "`") openEnd++;
 		const openLen = openEnd - openStart;
 		// 同じ長さの backtick 連続を探す (escape されていないこと)。
 		let k = openEnd;
 		let foundCloseEnd = -1;
-		while (k < line.length) {
-			if (line[k] !== "`" || isEscaped(line, k)) {
+		while (k < s.length) {
+			if (s[k] !== "`" || isEscaped(s, k)) {
 				k++;
 				continue;
 			}
 			let closeEnd = k;
-			while (closeEnd < line.length && line[closeEnd] === "`") closeEnd++;
+			while (closeEnd < s.length && s[closeEnd] === "`") closeEnd++;
 			if (closeEnd - k === openLen) {
 				foundCloseEnd = closeEnd;
 				break;
@@ -285,14 +286,6 @@ function collectInlineCodeRanges(line: string): Array<{ from: number; to: number
 	return ranges;
 }
 
-function isInsideInlineCode(line: string, pos: number): boolean {
-	const ranges = collectInlineCodeRanges(line);
-	for (const r of ranges) {
-		if (r.from <= pos && pos < r.to) return true;
-	}
-	return false;
-}
-
 // 1 ファイルの本文から「正規化済み pageName + WikilinkReference」を順に取り出す共通走査。
 // scanUnresolvedWikilinksImpl（未解決リンク）と scanBacklinksImpl（バックリンク）の両方が
 // 同じ前処理を必要とし — 改行分割、code-fence の toggle で code block 内は無視、
@@ -306,7 +299,22 @@ function iterateWikilinkOccurrences(
 	text: string,
 	onMatch: (pageName: string, ref: WikilinkReference) => void,
 ): void {
+	// 本文全体の inline code span 範囲を 1 回計算する。複数行に跨る code span
+	// (CommonMark で valid。live-preview の lezer InlineCode も同様に複数行を 1 ノードで扱う)
+	// もカバーするため、line scope ではなく text 全体で走らせる。
+	const inlineCodeRanges = collectInlineCodeRanges(text);
 	const lines = text.split(/\r?\n/);
+	// 各行が本文全体の中で始まる char index。`\r\n` / `\n` どちらの行区切りでも揃える。
+	const lineStarts: number[] = new Array(lines.length);
+	{
+		let pos = 0;
+		for (let i = 0; i < lines.length; i++) {
+			lineStarts[i] = pos;
+			pos += lines[i].length;
+			if (pos < text.length && text[pos] === "\r") pos++;
+			if (pos < text.length && text[pos] === "\n") pos++;
+		}
+	}
 	let inCodeBlock = false;
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -321,10 +329,17 @@ function iterateWikilinkOccurrences(
 			// リンク扱いされない (src/components/editor/live-preview/wikilinks.ts:78)
 			// ので backlink 集計からも除外する。
 			if (isEscaped(line, openOffset)) continue;
-			// inline code (`` ` ... ` ``) の中の wikilink も同様に除外。
-			// live-preview は lezer tree の InlineCode ノードで判定するが、main では
-			// 同一行 backtick の奇偶で簡易判定する (上の isInsideInlineCode 参照)。
-			if (isInsideInlineCode(line, openOffset)) continue;
+			// inline code (`` ` ... ` ``) の中の wikilink も除外する。本文全体に対する
+			// inlineCodeRanges (CommonMark 準拠の N 連続 backtick scanner) で判定する。
+			const textPos = lineStarts[i] + openOffset;
+			let inInlineCode = false;
+			for (const r of inlineCodeRanges) {
+				if (r.from <= textPos && textPos < r.to) {
+					inInlineCode = true;
+					break;
+				}
+			}
+			if (inInlineCode) continue;
 			const pipe = inner.indexOf("|");
 			const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
 			if (page === "" || isPathTraversal(page)) continue;

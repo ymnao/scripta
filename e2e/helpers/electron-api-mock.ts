@@ -309,39 +309,40 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
-	// 本番 electron/main/ipc/search.ts の isEscaped / collectInlineCodeRanges /
-	// isInsideInlineCode と同形ロジック。`addInitScript` 制約で import 不可なので
-	// この scope に複製する。
-	const isEscaped = (line: string, pos: number): boolean => {
+	// 本番 electron/main/ipc/search.ts の isEscaped / collectInlineCodeRanges と同形ロジック。
+	// `addInitScript` 制約で import 不可なのでこの scope に複製する。
+	// collectInlineCodeRanges は引数が 1 行でも本文全体でも動く (CommonMark の複数行 span
+	// 対応のため、scan 側では本文全体に対して 1 回計算する)。
+	const isEscaped = (s: string, pos: number): boolean => {
 		let count = 0;
 		let i = pos - 1;
-		while (i >= 0 && line[i] === "\\") {
+		while (i >= 0 && s[i] === "\\") {
 			count++;
 			i--;
 		}
 		return count % 2 === 1;
 	};
-	const collectInlineCodeRanges = (line: string): Array<{ from: number; to: number }> => {
+	const collectInlineCodeRanges = (s: string): Array<{ from: number; to: number }> => {
 		const ranges: Array<{ from: number; to: number }> = [];
 		let i = 0;
-		while (i < line.length) {
-			if (line[i] !== "`" || isEscaped(line, i)) {
+		while (i < s.length) {
+			if (s[i] !== "`" || isEscaped(s, i)) {
 				i++;
 				continue;
 			}
 			const openStart = i;
 			let openEnd = i;
-			while (openEnd < line.length && line[openEnd] === "`") openEnd++;
+			while (openEnd < s.length && s[openEnd] === "`") openEnd++;
 			const openLen = openEnd - openStart;
 			let k = openEnd;
 			let foundCloseEnd = -1;
-			while (k < line.length) {
-				if (line[k] !== "`" || isEscaped(line, k)) {
+			while (k < s.length) {
+				if (s[k] !== "`" || isEscaped(s, k)) {
 					k++;
 					continue;
 				}
 				let closeEnd = k;
-				while (closeEnd < line.length && line[closeEnd] === "`") closeEnd++;
+				while (closeEnd < s.length && s[closeEnd] === "`") closeEnd++;
 				if (closeEnd - k === openLen) {
 					foundCloseEnd = closeEnd;
 					break;
@@ -357,8 +358,20 @@ function installApiMock(opts: {
 		}
 		return ranges;
 	};
-	const isInsideInlineCode = (line: string, pos: number): boolean => {
-		const ranges = collectInlineCodeRanges(line);
+	// 本文全体の inline code ranges と各行の text 内 start position を計算する小 helper。
+	// 両 scan mock で同じ前処理を使うために集約する。
+	const buildLineStarts = (text: string, lines: string[]): number[] => {
+		const lineStarts = new Array<number>(lines.length);
+		let pos = 0;
+		for (let i = 0; i < lines.length; i++) {
+			lineStarts[i] = pos;
+			pos += lines[i].length;
+			if (pos < text.length && text[pos] === "\r") pos++;
+			if (pos < text.length && text[pos] === "\n") pos++;
+		}
+		return lineStarts;
+	};
+	const isInRanges = (ranges: Array<{ from: number; to: number }>, pos: number): boolean => {
 		for (const r of ranges) {
 			if (r.from <= pos && pos < r.to) return true;
 		}
@@ -632,6 +645,10 @@ function installApiMock(opts: {
 				// 本番 search.ts:210 と同じく \r\n / \n 両対応。CRLF Markdown で
 				// `\r` が lineContent / contextBefore / contextAfter に残る差異を防ぐ。
 				const lines = content.split(/\r?\n/);
+				// 本文全体の inline code ranges + 各行の text 内 start を 1 度計算する
+				// (CommonMark の複数行 span 対応、本番 iterateWikilinkOccurrences と同形)。
+				const inlineCodeRanges = collectInlineCodeRanges(content);
+				const lineStarts = buildLineStarts(content, lines);
 				let inCodeBlock = false;
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
@@ -649,7 +666,7 @@ function installApiMock(opts: {
 						if (!m) break;
 						// 本番 iterateWikilinkOccurrences と同じく escape / inline code 内は除外。
 						if (isEscaped(line, m.index)) continue;
-						if (isInsideInlineCode(line, m.index)) continue;
+						if (isInRanges(inlineCodeRanges, lineStarts[i] + m.index)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
@@ -715,7 +732,7 @@ function installApiMock(opts: {
 				}
 			}
 			if (fileMap[targetPage] !== targetFilePath) return [];
-			// isEscaped / isInsideInlineCode は installApiMock 冒頭の共通 helper を使用。
+			// isEscaped / collectInlineCodeRanges / isInRanges は installApiMock 冒頭の共通 helper。
 			const map: Record<string, BacklinkSource["references"]> = {};
 			for (const filePath of mdFiles) {
 				// 本番 search.ts:scanBacklinksImpl と同じく self-reference は除外。
@@ -724,6 +741,9 @@ function installApiMock(opts: {
 				const content = store.files[filePath];
 				if (!content) continue;
 				const lines = content.split(/\r?\n/);
+				// 複数行 inline code span 対応 (CommonMark で valid)。本番と同形。
+				const inlineCodeRanges = collectInlineCodeRanges(content);
+				const lineStarts = buildLineStarts(content, lines);
 				let inCodeBlock = false;
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
@@ -740,7 +760,7 @@ function installApiMock(opts: {
 						m = re.exec(line);
 						if (!m) break;
 						if (isEscaped(line, m.index)) continue;
-						if (isInsideInlineCode(line, m.index)) continue;
+						if (isInRanges(inlineCodeRanges, lineStarts[i] + m.index)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
