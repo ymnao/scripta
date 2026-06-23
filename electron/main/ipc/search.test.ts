@@ -555,6 +555,20 @@ describe("scanBacklinksImpl", () => {
 		expect(out).toEqual([]);
 	});
 
+	it("backtick fence opener with backtick in info string is not a fence (CommonMark: info string has no backtick)", async () => {
+		// CommonMark / Lezer: ``` opener の info string に backtick は禁止。
+		// この行は fence opener ではなく paragraph として扱われ、続く `[[target]]` も
+		// 同じ paragraph 内のテキストとして wikilink 判定される。
+		// 旧実装は info string を常に許容して fence opener 化 → `[[target]]` を
+		// 誤って fenced 内に巻き込み除外していた。tilde fence (~~~) には適用されない。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "``` info `x`\n[[target]] still real");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
 	it("4-space-indented ``` in paragraph continuation is not a fence marker", async () => {
 		// CommonMark: paragraph 継続中の 4 spaces indent は indented code block にならず、
 		// `` ``` `` も fence marker として認識されない。後続の `[[target]]` も同じ

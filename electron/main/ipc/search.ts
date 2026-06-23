@@ -419,6 +419,13 @@ function findFencedLines(lines: string[]): boolean[] {
 		if (markerLen >= 3) {
 			if (opener === null) {
 				// opener: info string (markerLen 以降のテキスト) は許容。
+				// ただし backtick fence (```) の info string に backtick は含められない
+				// (CommonMark / Lezer)。例えば ``` info `x` は fence opener ではなく
+				// paragraph として扱われる。
+				const afterMarker = line.slice(indent + markerLen);
+				if (ch === "`" && afterMarker.includes("`")) {
+					continue;
+				}
 				opener = { ch, length: markerLen };
 				flags[i] = true;
 				continue;

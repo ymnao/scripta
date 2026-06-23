@@ -409,6 +409,12 @@ function installApiMock(opts: {
 			}
 			if (markerLen >= 3) {
 				if (opener === null) {
+					// backtick fence の info string に backtick は許容されない
+					// (CommonMark / Lezer)。tilde fence では制約なし。本番 search.ts と同形。
+					const afterOpener = line.slice(indent + markerLen);
+					if (ch === "`" && afterOpener.includes("`")) {
+						continue;
+					}
 					opener = { ch, length: markerLen };
 					flags[i] = true;
 					continue;
