@@ -387,19 +387,42 @@ function installApiMock(opts: {
 		}
 		return false;
 	};
-	// fenced code 範囲を line index で識別。fence marker 行も fenced 扱いにすることで
-	// marker 自体の backtick が外側と peer になるのを防ぐ。
+	// CommonMark / Lezer 準拠の fenced code block 判定。本番 search.ts:findFencedLines と同形。
+	// - opener: 行頭 0-3 spaces の後に ``` または ~~~ (3 個以上の連続)。info string は OK
+	// - closer: opener と同じ文字種、opener 以上の長さ、後ろは空白のみ
+	// - 4 spaces 以上 indent の行は fence marker と認識しない
 	const findFencedLines = (lines: string[]): boolean[] => {
 		const flags = new Array<boolean>(lines.length).fill(false);
-		let inCodeBlock = false;
+		let opener: { ch: string; length: number } | null = null;
 		for (let i = 0; i < lines.length; i++) {
-			const trimmed = lines[i].replace(/^\s+/, "");
-			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-				inCodeBlock = !inCodeBlock;
+			const line = lines[i];
+			let indent = 0;
+			while (indent < line.length && line[indent] === " ") indent++;
+			if (indent >= 4) {
+				if (opener !== null) flags[i] = true;
+				continue;
+			}
+			const ch = line[indent];
+			let markerLen = 0;
+			if (ch === "`" || ch === "~") {
+				while (indent + markerLen < line.length && line[indent + markerLen] === ch) markerLen++;
+			}
+			if (markerLen >= 3) {
+				if (opener === null) {
+					opener = { ch, length: markerLen };
+					flags[i] = true;
+					continue;
+				}
+				const afterMarker = line.slice(indent + markerLen);
+				if (ch === opener.ch && markerLen >= opener.length && /^[ \t]*$/.test(afterMarker)) {
+					opener = null;
+					flags[i] = true;
+					continue;
+				}
 				flags[i] = true;
 				continue;
 			}
-			if (inCodeBlock) flags[i] = true;
+			if (opener !== null) flags[i] = true;
 		}
 		return flags;
 	};

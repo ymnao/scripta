@@ -331,19 +331,7 @@ function iterateWikilinkOccurrences(
 	// fenced code 範囲を line index で識別する。fence marker 行 (``` / ~~~) 自体も
 	// fenced 扱いにすることで、後段の mask が marker 行の backtick (``` 等) を
 	// 隠し、外側 inline code delimiter と peer になるのを防ぐ。
-	const isFenced: boolean[] = new Array(lines.length).fill(false);
-	{
-		let inCodeBlock = false;
-		for (let i = 0; i < lines.length; i++) {
-			const trimmed = lines[i].replace(/^\s+/, "");
-			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-				inCodeBlock = !inCodeBlock;
-				isFenced[i] = true;
-				continue;
-			}
-			if (inCodeBlock) isFenced[i] = true;
-		}
-	}
+	const isFenced = findFencedLines(lines);
 	// fenced 範囲を space で mask した text を作る (length 保持)。
 	// inline code scanner に「fence 内の backtick が見えない」状態を作り、tilde fence
 	// 内の `` ` `` が外側の `` ` `` と peer になることを防ぐ。
@@ -400,6 +388,55 @@ function maskRanges(text: string, lines: string[], lineStarts: number[], mask: b
 		for (let j = start; j < end; j++) buf[j] = " ";
 	}
 	return buf.join("");
+}
+
+// CommonMark / Lezer 準拠の fenced code block 判定。
+// - opener: 行頭 0-3 spaces の後に ``` または ~~~ (3 個以上の連続)。info string は OK
+// - closer: opener と同じ文字種、opener 以上の長さ、後ろは空白 (space/tab) のみ
+// - 4 spaces 以上 indent の行は fence marker として認識しない (CommonMark の
+//   indented code block と区別)
+// 旧実装は `trimmed.startsWith("```") || trimmed.startsWith("~~~")` で単純 toggle
+// していたため、異なる文字種の closer / 長さ違い closer / 過剰 indent ですべて
+// close と誤判定し live-preview と乖離していた。
+function findFencedLines(lines: string[]): boolean[] {
+	const flags: boolean[] = new Array(lines.length).fill(false);
+	let opener: { ch: string; length: number } | null = null;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		let indent = 0;
+		while (indent < line.length && line[indent] === " ") indent++;
+		// 4 spaces 以上 indent の行は fence marker として認識しない。fenced 中なら
+		// その行は fenced 範囲のテキストとして扱う。
+		if (indent >= 4) {
+			if (opener !== null) flags[i] = true;
+			continue;
+		}
+		const ch = line[indent];
+		let markerLen = 0;
+		if (ch === "`" || ch === "~") {
+			while (indent + markerLen < line.length && line[indent + markerLen] === ch) markerLen++;
+		}
+		if (markerLen >= 3) {
+			if (opener === null) {
+				// opener: info string (markerLen 以降のテキスト) は許容。
+				opener = { ch, length: markerLen };
+				flags[i] = true;
+				continue;
+			}
+			// closer 候補: 同じ文字種・長さ ≥ opener・後ろは空白のみ。
+			const afterMarker = line.slice(indent + markerLen);
+			if (ch === opener.ch && markerLen >= opener.length && /^[ \t]*$/.test(afterMarker)) {
+				opener = null;
+				flags[i] = true;
+				continue;
+			}
+			// closer 条件を満たさない marker 行は fenced 内のテキスト扱い。
+			flags[i] = true;
+			continue;
+		}
+		if (opener !== null) flags[i] = true;
+	}
+	return flags;
 }
 
 async function scanUnresolvedWikilinksImpl(

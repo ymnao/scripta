@@ -528,6 +528,50 @@ describe("scanBacklinksImpl", () => {
 		expect(out[0].references[0].lineNumber).toBe(4);
 	});
 
+	it("fenced opener of ~~~ is not closed by ``` (CommonMark: same fence char required)", async () => {
+		// ~~~ で開いた fence は ``` では閉じない。旧実装は単純 toggle で
+		// closing を誤判定 → 3 行目以降が fenced 外扱いになり [[target]] が含まれていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "~~~\n```\n[[target]]\n~~~");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("fenced opener of length 4 is not closed by length-3 marker (CommonMark: closer length >= opener)", async () => {
+		// 4 連続 backtick の opener は 3 連続では閉じない。旧実装は startsWith("```") で
+		// 同一視 → 中間の ``` を close と誤判定し後続 [[target]] を fenced 外扱いしていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "````\ncode\n```\n[[target]]\n````");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("closer with trailing info text does not close the fence (CommonMark: closer must be whitespace-only after marker)", async () => {
+		// closer の後ろにテキストがあると close ではない。旧実装は startsWith でも閉じ扱い
+		// → [[target]] が fenced 外扱いされていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "```\ncode\n``` not-a-closer\n[[target]]\n```");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("4-space-indented ``` in paragraph continuation is not a fence marker", async () => {
+		// CommonMark: paragraph 継続中の 4 spaces indent は indented code block にならず、
+		// `` ``` `` も fence marker として認識されない。後続の `[[target]]` も同じ
+		// paragraph 内のテキストとして wikilink 判定される。
+		// 旧実装は trimmed.startsWith("```") で indent を無視して fence opener 扱い
+		// → 続く `[[target]]` が誤って fenced 内と判定され除外されていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"paragraph text\n    ```\n[[target]] still a wikilink",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(3);
+	});
+
 	it("returns empty when target is not the canonical (lex-smallest) of duplicate basenames", async () => {
 		// live-preview の buildFileMap (src/components/editor/live-preview/wikilinks.ts:45)
 		// が `[[note]]` を a/note.md に解決する状況で、b/note.md の backlink パネルを
