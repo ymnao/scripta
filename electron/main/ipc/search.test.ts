@@ -492,6 +492,29 @@ describe("scanBacklinksImpl", () => {
 		expect(out[0].references[0].lineNumber).toBe(4);
 	});
 
+	it("treats backslash-prefixed backtick as a valid closing delimiter (CommonMark literal backslash)", async () => {
+		// CommonMark: code span 内の `\` は literal、閉じ backtick の前に `\` があっても
+		// 閉じとして valid。`foo \` で code span が閉じ、後続の [[target]] は code span 外
+		// (live-preview の lezer InlineCode と一致)。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "`foo \\` [[target]] bar`");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(1);
+	});
+
+	it("does not let tilde-fenced backticks pair with outside backticks", async () => {
+		// ~~~ fenced code block 内の `` ` `` が、外側の単独 `` ` `` と peer になって
+		// 外側 [[target]] を inline code 内と誤判定するのを防ぐ (fenced 範囲 mask が効くこと)。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "~~~\n`\n~~~\n[[target]]\n`");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
 	it("returns empty when target is not the canonical (lex-smallest) of duplicate basenames", async () => {
 		// live-preview の buildFileMap (src/components/editor/live-preview/wikilinks.ts:45)
 		// が `[[note]]` を a/note.md に解決する状況で、b/note.md の backlink パネルを

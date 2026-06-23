@@ -323,6 +323,8 @@ function installApiMock(opts: {
 		return count % 2 === 1;
 	};
 	const collectInlineCodeRanges = (s: string): Array<{ from: number; to: number }> => {
+		// 本番 search.ts:collectInlineCodeRanges と同形。close 側は escape を見ない
+		// (CommonMark の backtick string 認識に escape を含めない仕様、live-preview と整合)。
 		const ranges: Array<{ from: number; to: number }> = [];
 		let i = 0;
 		while (i < s.length) {
@@ -337,7 +339,7 @@ function installApiMock(opts: {
 			let k = openEnd;
 			let foundCloseEnd = -1;
 			while (k < s.length) {
-				if (s[k] !== "`" || isEscaped(s, k)) {
+				if (s[k] !== "`") {
 					k++;
 					continue;
 				}
@@ -376,6 +378,39 @@ function installApiMock(opts: {
 			if (r.from <= pos && pos < r.to) return true;
 		}
 		return false;
+	};
+	// fenced code 範囲を line index で識別。fence marker 行も fenced 扱いにすることで
+	// marker 自体の backtick が外側と peer になるのを防ぐ。
+	const findFencedLines = (lines: string[]): boolean[] => {
+		const flags = new Array<boolean>(lines.length).fill(false);
+		let inCodeBlock = false;
+		for (let i = 0; i < lines.length; i++) {
+			const trimmed = lines[i].replace(/^\s+/, "");
+			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+				inCodeBlock = !inCodeBlock;
+				flags[i] = true;
+				continue;
+			}
+			if (inCodeBlock) flags[i] = true;
+		}
+		return flags;
+	};
+	// 指定 line index の文字を space に置換した text を返す。length は元と一致するため
+	// lineStarts / m.index の換算がそのまま使える。
+	const maskRanges = (
+		text: string,
+		lines: string[],
+		lineStarts: number[],
+		mask: boolean[],
+	): string => {
+		const buf = text.split("");
+		for (let i = 0; i < lines.length; i++) {
+			if (!mask[i]) continue;
+			const start = lineStarts[i];
+			const end = start + lines[i].length;
+			for (let j = start; j < end; j++) buf[j] = " ";
+		}
+		return buf.join("");
 	};
 
 	// `Api` 型に固定することで preload 契約と乖離した瞬間に typecheck が落ちる。
@@ -645,20 +680,17 @@ function installApiMock(opts: {
 				// 本番 search.ts:210 と同じく \r\n / \n 両対応。CRLF Markdown で
 				// `\r` が lineContent / contextBefore / contextAfter に残る差異を防ぐ。
 				const lines = content.split(/\r?\n/);
-				// 本文全体の inline code ranges + 各行の text 内 start を 1 度計算する
-				// (CommonMark の複数行 span 対応、本番 iterateWikilinkOccurrences と同形)。
-				const inlineCodeRanges = collectInlineCodeRanges(content);
 				const lineStarts = buildLineStarts(content, lines);
-				let inCodeBlock = false;
+				const isFenced = findFencedLines(lines);
+				// fenced 範囲を space mask した text で inline code ranges を計算する。
+				// fence 内の backtick が外側 inline code delimiter と peer になるのを防ぐ。
+				const inlineCodeRanges = collectInlineCodeRanges(
+					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+				);
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
+					if (isFenced[i]) continue;
 					const line = lines[i];
-					const trimmed = line.trimStart();
-					if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-						inCodeBlock = !inCodeBlock;
-						continue;
-					}
-					if (inCodeBlock) continue;
 					re.lastIndex = 0;
 					let m: RegExpExecArray | null = null;
 					while (true) {
@@ -732,7 +764,8 @@ function installApiMock(opts: {
 				}
 			}
 			if (fileMap[targetPage] !== targetFilePath) return [];
-			// isEscaped / collectInlineCodeRanges / isInRanges は installApiMock 冒頭の共通 helper。
+			// isEscaped / collectInlineCodeRanges / isInRanges / findFencedLines / maskRanges は
+			// installApiMock 冒頭の共通 helper。
 			const map: Record<string, BacklinkSource["references"]> = {};
 			for (const filePath of mdFiles) {
 				// 本番 search.ts:scanBacklinksImpl と同じく self-reference は除外。
@@ -741,19 +774,15 @@ function installApiMock(opts: {
 				const content = store.files[filePath];
 				if (!content) continue;
 				const lines = content.split(/\r?\n/);
-				// 複数行 inline code span 対応 (CommonMark で valid)。本番と同形。
-				const inlineCodeRanges = collectInlineCodeRanges(content);
 				const lineStarts = buildLineStarts(content, lines);
-				let inCodeBlock = false;
+				const isFenced = findFencedLines(lines);
+				const inlineCodeRanges = collectInlineCodeRanges(
+					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+				);
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
+					if (isFenced[i]) continue;
 					const line = lines[i];
-					const trimmed = line.trimStart();
-					if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-						inCodeBlock = !inCodeBlock;
-						continue;
-					}
-					if (inCodeBlock) continue;
 					re.lastIndex = 0;
 					let m: RegExpExecArray | null = null;
 					while (true) {

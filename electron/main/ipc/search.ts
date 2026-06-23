@@ -241,8 +241,14 @@ function isEscaped(line: string, pos: number): boolean {
 
 // CommonMark 準拠で inline code span 範囲を列挙する。
 // 仕様: N 連続のバックティックを開き delimiter、同じ N 連続を閉じ delimiter とする。
-//       escape (\`) は delimiter にならない。閉じが見つからなければ単なるリテラルで
-//       code span ではない (open delimiter 自体もリテラル扱い)。
+//       open 側だけは前置 escape (`\\\``) を除外する (scripta の用途上、escape された
+//       backtick で code span を開始させたくないため。CommonMark 上は `\\\`code\\\``
+//       は code span として扱われ得るが、現状の wikilink 判定との整合性を優先する)。
+//       閉じ側では escape を判定しない。CommonMark 上、close の `` ` `` は backtick
+//       string として認識され、直前の `\\` は中身の literal backslash に過ぎないため。
+//       例: `` `foo \\\` [[t]] bar` `` は open=pos 0 / close=pos 5 で code span = `foo \\`
+//       となり、後続の `[[t]]` は code span 外。live-preview の lezer InlineCode と
+//       一致させるためにこの判定にする。
 // 引数 s は 1 行でも本文全体でもよい。CommonMark は code span が改行を跨ぐことを
 // 許容するため、live-preview の lezer InlineCode と整合させるには本文全体で走らせる
 // 必要がある (例: ``` `start\n[[t]]\nend` ``` 形の複数行 span)。
@@ -258,11 +264,12 @@ function collectInlineCodeRanges(s: string): Array<{ from: number; to: number }>
 		let openEnd = i;
 		while (openEnd < s.length && s[openEnd] === "`") openEnd++;
 		const openLen = openEnd - openStart;
-		// 同じ長さの backtick 連続を探す (escape されていないこと)。
+		// 同じ長さの backtick 連続を閉じとして探す。close 側は escape を見ない
+		// (上のコメント参照)。
 		let k = openEnd;
 		let foundCloseEnd = -1;
 		while (k < s.length) {
-			if (s[k] !== "`" || isEscaped(s, k)) {
+			if (s[k] !== "`") {
 				k++;
 				continue;
 			}
@@ -299,10 +306,6 @@ function iterateWikilinkOccurrences(
 	text: string,
 	onMatch: (pageName: string, ref: WikilinkReference) => void,
 ): void {
-	// 本文全体の inline code span 範囲を 1 回計算する。複数行に跨る code span
-	// (CommonMark で valid。live-preview の lezer InlineCode も同様に複数行を 1 ノードで扱う)
-	// もカバーするため、line scope ではなく text 全体で走らせる。
-	const inlineCodeRanges = collectInlineCodeRanges(text);
 	const lines = text.split(/\r?\n/);
 	// 各行が本文全体の中で始まる char index。`\r\n` / `\n` どちらの行区切りでも揃える。
 	const lineStarts: number[] = new Array(lines.length);
@@ -315,22 +318,39 @@ function iterateWikilinkOccurrences(
 			if (pos < text.length && text[pos] === "\n") pos++;
 		}
 	}
-	let inCodeBlock = false;
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
-		const trimmed = line.replace(/^\s+/, "");
-		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-			inCodeBlock = !inCodeBlock;
-			continue;
+	// fenced code 範囲を line index で識別する。fence marker 行 (``` / ~~~) 自体も
+	// fenced 扱いにすることで、後段の mask が marker 行の backtick (``` 等) を
+	// 隠し、外側 inline code delimiter と peer になるのを防ぐ。
+	const isFenced: boolean[] = new Array(lines.length).fill(false);
+	{
+		let inCodeBlock = false;
+		for (let i = 0; i < lines.length; i++) {
+			const trimmed = lines[i].replace(/^\s+/, "");
+			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+				inCodeBlock = !inCodeBlock;
+				isFenced[i] = true;
+				continue;
+			}
+			if (inCodeBlock) isFenced[i] = true;
 		}
-		if (inCodeBlock) continue;
+	}
+	// fenced 範囲を space で mask した text を作る (length 保持)。
+	// inline code scanner に「fence 内の backtick が見えない」状態を作り、tilde fence
+	// 内の `` ` `` が外側の `` ` `` と peer になることを防ぐ。
+	const inlineCodeRanges = collectInlineCodeRanges(
+		isFenced.some((b) => b) ? maskRanges(text, lines, lineStarts, isFenced) : text,
+	);
+	for (let i = 0; i < lines.length; i++) {
+		if (isFenced[i]) continue;
+		const line = lines[i];
 		for (const { inner, byteOffset, openOffset } of extractWikilinks(line)) {
 			// `\[[...]]` のようにエスケープされた wikilink は live-preview でも
 			// リンク扱いされない (src/components/editor/live-preview/wikilinks.ts:78)
 			// ので backlink 集計からも除外する。
 			if (isEscaped(line, openOffset)) continue;
 			// inline code (`` ` ... ` ``) の中の wikilink も除外する。本文全体に対する
-			// inlineCodeRanges (CommonMark 準拠の N 連続 backtick scanner) で判定する。
+			// inlineCodeRanges (CommonMark 準拠の N 連続 backtick scanner、fenced 範囲を
+			// mask 済み) で判定する。
 			const textPos = lineStarts[i] + openOffset;
 			let inInlineCode = false;
 			for (const r of inlineCodeRanges) {
@@ -356,6 +376,20 @@ function iterateWikilinkOccurrences(
 			});
 		}
 	}
+}
+
+// 指定 line index 集合の範囲を space に置換した text を返す。length は元と一致する。
+// inline code scanner に「対象範囲の文字を空白として見せる」用途で、char index は
+// 元の text と互換 (lineStarts / openOffset の換算がそのまま使える)。
+function maskRanges(text: string, lines: string[], lineStarts: number[], mask: boolean[]): string {
+	const buf = text.split("");
+	for (let i = 0; i < lines.length; i++) {
+		if (!mask[i]) continue;
+		const start = lineStarts[i];
+		const end = start + lines[i].length;
+		for (let j = start; j < end; j++) buf[j] = " ";
+	}
+	return buf.join("");
 }
 
 async function scanUnresolvedWikilinksImpl(
