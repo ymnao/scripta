@@ -203,7 +203,10 @@ export function isPathTraversal(name: string): boolean {
 
 // 1 行から `[[inner]]` を順次抽出する。empty inner（`[[]]`）はスキップ。
 // byteOffset は `[[` 開始位置の **1-based UTF-8 byte 位置**（unique key 用）。
-export function* extractWikilinks(line: string): Generator<{ inner: string; byteOffset: number }> {
+// openOffset は同じ行内の char index（escape / inline code 判定で利用）。
+export function* extractWikilinks(
+	line: string,
+): Generator<{ inner: string; byteOffset: number; openOffset: number }> {
 	let i = 0;
 	while (true) {
 		const open = line.indexOf("[[", i);
@@ -214,10 +217,39 @@ export function* extractWikilinks(line: string): Generator<{ inner: string; byte
 		if (close < 0) return;
 		const inner = line.slice(innerStart, close);
 		if (inner.length > 0) {
-			yield { inner, byteOffset: Buffer.byteLength(line.slice(0, open), "utf8") + 1 };
+			yield {
+				inner,
+				byteOffset: Buffer.byteLength(line.slice(0, open), "utf8") + 1,
+				openOffset: open,
+			};
 		}
 		i = close + 2;
 	}
+}
+
+// `pos` の直前に連続する `\` が奇数個あるなら escape されている。
+// `src/lib/content.ts:isEscaped` と同形ロジック（main / renderer で同一判定を保証するため）。
+function isEscaped(line: string, pos: number): boolean {
+	let count = 0;
+	let i = pos - 1;
+	while (i >= 0 && line[i] === "\\") {
+		count++;
+		i--;
+	}
+	return count % 2 === 1;
+}
+
+// 同一行内で `pos` までに現れるバックティックの数が奇数 → inline code 内。
+// live-preview は lezer tree の InlineCode ノードで判定するが、main では markdown
+// parser を持たないので簡易判定。`` ``code`` `` のような 2 連続バックティックや
+// 複数行に跨る code は対応しない（live-preview と一部乖離する余地は残るが、
+// 単純な `` `[[...]]` `` パターンは確実に弾ける）。
+function isInsideInlineCode(line: string, pos: number): boolean {
+	let count = 0;
+	for (let i = 0; i < pos; i++) {
+		if (line[i] === "`") count++;
+	}
+	return count % 2 === 1;
 }
 
 // 1 ファイルの本文から「正規化済み pageName + WikilinkReference」を順に取り出す共通走査。
@@ -243,7 +275,15 @@ function iterateWikilinkOccurrences(
 			continue;
 		}
 		if (inCodeBlock) continue;
-		for (const { inner, byteOffset } of extractWikilinks(line)) {
+		for (const { inner, byteOffset, openOffset } of extractWikilinks(line)) {
+			// `\[[...]]` のようにエスケープされた wikilink は live-preview でも
+			// リンク扱いされない (src/components/editor/live-preview/wikilinks.ts:78)
+			// ので backlink 集計からも除外する。
+			if (isEscaped(line, openOffset)) continue;
+			// inline code (`` ` ... ` ``) の中の wikilink も同様に除外。
+			// live-preview は lezer tree の InlineCode ノードで判定するが、main では
+			// 同一行 backtick の奇偶で簡易判定する (上の isInsideInlineCode 参照)。
+			if (isInsideInlineCode(line, openOffset)) continue;
 			const pipe = inner.indexOf("|");
 			const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
 			if (page === "" || isPathTraversal(page)) continue;
@@ -337,6 +377,22 @@ async function scanBacklinksImpl(
 
 	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];
+
+	// 同名 basename がワークスペース内に複数ある場合、live-preview の buildFileMap
+	// (src/components/editor/live-preview/wikilinks.ts:45) と同じく
+	// lexicographically smallest path を canonical とする。targetInput がその
+	// canonical でないなら、`[[target]]` の解決先は別ノートになり、本ファイルへの
+	// backlink を表示すると live-preview の動作と食い違う。空配列で早期 return。
+	const fileMap = new Map<string, string>();
+	for (const filePath of inFiles) {
+		const name = basename(filePath).replace(/\.md$/i, "").normalize("NFC");
+		if (!name) continue;
+		const existing = fileMap.get(name);
+		if (!existing || filePath < existing) {
+			fileMap.set(name, filePath);
+		}
+	}
+	if (fileMap.get(targetPage) !== targetInput) return [];
 
 	const map = new Map<string, WikilinkReference[]>();
 	for (let idx = 0; idx < ioFiles.length; idx++) {

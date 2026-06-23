@@ -86,13 +86,13 @@ describe("extractWikilinks", () => {
 	it("extracts a single wikilink with 1-based UTF-8 byteOffset", () => {
 		// "See " は 4 byte → `[[` の byteOffset = 5
 		const out = [...extractWikilinks("See [[target]] here")];
-		expect(out).toEqual([{ inner: "target", byteOffset: 5 }]);
+		expect(out).toEqual([{ inner: "target", byteOffset: 5, openOffset: 4 }]);
 	});
 
 	it("computes UTF-8 byteOffset across multibyte chars", () => {
 		// "あ" は UTF-8 で 3 byte → `[[` の byteOffset = 4
 		const out = [...extractWikilinks("あ[[x]]")];
-		expect(out).toEqual([{ inner: "x", byteOffset: 4 }]);
+		expect(out).toEqual([{ inner: "x", byteOffset: 4, openOffset: 1 }]);
 	});
 
 	it("extracts multiple wikilinks on the same line", () => {
@@ -396,6 +396,57 @@ describe("scanBacklinksImpl", () => {
 		expect(out).toHaveLength(1);
 		expect(out[0].references).toHaveLength(1);
 		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
+	it("excludes escaped wikilinks (\\[[target]] is not a real link)", async () => {
+		// live-preview (src/components/editor/live-preview/wikilinks.ts:78) は
+		// `\[[target]]` をリンク扱いしないので、backlink もそれに合わせる。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "escaped \\[[target]] here\n[[target]] real");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("excludes wikilinks inside inline code", async () => {
+		// live-preview の InlineCode 範囲 (math.ts:collectCodeRanges 経由) と同じく
+		// `` `[[target]]` `` はリンク扱いされないので backlink からも除外。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"in code `[[target]]` not a link\n[[target]] real link",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("returns empty when target is not the canonical (lex-smallest) of duplicate basenames", async () => {
+		// live-preview の buildFileMap (src/components/editor/live-preview/wikilinks.ts:45)
+		// が `[[note]]` を a/note.md に解決する状況で、b/note.md の backlink パネルを
+		// 開いても references は出ないことを保証する (表示と実リンクの食い違い防止)。
+		await mkdir(join(workspaceDir, "a"), { recursive: true });
+		await mkdir(join(workspaceDir, "b"), { recursive: true });
+		await writeFile(join(workspaceDir, "a", "note.md"), "# A");
+		await writeFile(join(workspaceDir, "b", "note.md"), "# B");
+		await writeFile(join(workspaceDir, "other.md"), "[[note]]");
+
+		const outB = await scanBacklinksImpl(
+			TEST_WIN,
+			workspaceDir,
+			join(workspaceDir, "b", "note.md"),
+		);
+		expect(outB).toEqual([]);
+
+		const outA = await scanBacklinksImpl(
+			TEST_WIN,
+			workspaceDir,
+			join(workspaceDir, "a", "note.md"),
+		);
+		expect(outA).toHaveLength(1);
+		expect(outA[0].sourceFile).toBe(join(workspaceDir, "other.md"));
 	});
 
 	it("results are sorted by sourceFile byte order", async () => {

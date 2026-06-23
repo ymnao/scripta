@@ -642,6 +642,38 @@ function installApiMock(opts: {
 			const targetPage = targetBase.slice(0, -3).normalize("NFC");
 			if (!targetPage) return [];
 			const mdFiles = collectMdFiles(workspacePath);
+			// basename 衝突対応: live-preview の buildFileMap (src/components/editor/
+			// live-preview/wikilinks.ts:45) と本番 scanBacklinksImpl と同じく、basename →
+			// lexicographically smallest path を canonical とする。target がその canonical でない
+			// なら、live-preview 上では `[[target]]` は別ノートに解決されるため空配列を返す。
+			const fileMap: Record<string, string> = {};
+			for (const filePath of mdFiles) {
+				const name = baseName(filePath).replace(/\.md$/i, "").normalize("NFC");
+				if (!name) continue;
+				const existing = fileMap[name];
+				if (!existing || filePath < existing) {
+					fileMap[name] = filePath;
+				}
+			}
+			if (fileMap[targetPage] !== targetFilePath) return [];
+			// 本番 isEscaped / isInsideInlineCode と同形の簡易判定。
+			// `\[[...]]` (escape) と `` `[[...]]` `` (inline code) を弾く。
+			const isEscaped = (line: string, pos: number): boolean => {
+				let count = 0;
+				let i = pos - 1;
+				while (i >= 0 && line[i] === "\\") {
+					count++;
+					i--;
+				}
+				return count % 2 === 1;
+			};
+			const isInsideInlineCode = (line: string, pos: number): boolean => {
+				let count = 0;
+				for (let i = 0; i < pos; i++) {
+					if (line[i] === "`") count++;
+				}
+				return count % 2 === 1;
+			};
 			const map: Record<string, BacklinkSource["references"]> = {};
 			for (const filePath of mdFiles) {
 				// 本番 search.ts:scanBacklinksImpl と同じく self-reference は除外。
@@ -665,6 +697,8 @@ function installApiMock(opts: {
 					while (true) {
 						m = re.exec(line);
 						if (!m) break;
+						if (isEscaped(line, m.index)) continue;
+						if (isInsideInlineCode(line, m.index)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
