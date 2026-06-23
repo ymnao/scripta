@@ -33,19 +33,28 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 
 	// ターゲット変更 / ファイルツリー変更時は即座に再スキャン。
 	// targetFilePath が null になったら store を reset して古い結果を残さない。
+	// UnresolvedLinksPanel と同じく `scanVersion` を経由する形で fileTreeVersion を依存に積む。
+	const scanVersion = fileTreeVersion;
 	useEffect(() => {
 		if (!targetFilePath) {
 			reset();
 			return;
 		}
-		// fileTreeVersion を依存に含めるが eslint が unused と判断するので明示参照。
-		void fileTreeVersion;
+		void scanVersion;
 		void scan(workspacePath, targetFilePath);
 		return () => {
 			// workspace 切替 / panel unmount で in-flight scan を main 側でも止める。
 			cancelBacklinkScan().catch(() => {});
 		};
-	}, [workspacePath, targetFilePath, fileTreeVersion, scan, reset]);
+	}, [workspacePath, targetFilePath, scanVersion, scan, reset]);
+
+	// ターゲットノートが切り替わったら、前の対象で残っていた折り畳み状態を捨てる。
+	// sourceFile path が偶然同名で衝突した場合に古い open/closed 状態を引き継いで
+	// ユーザーが混乱するのを防ぐ。targetFilePath は trigger 用なので明示参照する。
+	useEffect(() => {
+		void targetFilePath;
+		setCollapsed(new Set());
+	}, [targetFilePath]);
 
 	// ファイル保存時はデバウンスして再スキャン（編集内容の追従）。
 	// UnresolvedLinksPanel と同じ 2000ms 待機で過剰スキャンを抑える。
