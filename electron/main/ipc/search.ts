@@ -220,6 +220,48 @@ export function* extractWikilinks(line: string): Generator<{ inner: string; byte
 	}
 }
 
+// 1 ファイルの本文から「正規化済み pageName + WikilinkReference」を順に取り出す共通走査。
+// scanUnresolvedWikilinksImpl（未解決リンク）と scanBacklinksImpl（バックリンク）の両方が
+// 同じ前処理を必要とし — 改行分割、code-fence の toggle で code block 内は無視、
+// `[[inner]]` 抽出、`pipe` 分離、`.md` 拡張子除去、NFC 正規化、path-traversal 弾き —
+// 違いは「集めた `pageName` をどう篩い分けるか」と「結果をどう集計するか」だけ。
+// onMatch が走査の主体で、`continue` 相当の skip は早期 return で行う。
+// ここに集約しておくことで、code-fence 周りの edge case や正規化のバグ修正が
+// 一箇所で済み、unresolved とバックリンクのカウントが乖離するのを防げる。
+function iterateWikilinkOccurrences(
+	sourceFile: string,
+	text: string,
+	onMatch: (pageName: string, ref: WikilinkReference) => void,
+): void {
+	const lines = text.split(/\r?\n/);
+	let inCodeBlock = false;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const trimmed = line.replace(/^\s+/, "");
+		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+			inCodeBlock = !inCodeBlock;
+			continue;
+		}
+		if (inCodeBlock) continue;
+		for (const { inner, byteOffset } of extractWikilinks(line)) {
+			const pipe = inner.indexOf("|");
+			const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
+			if (page === "" || isPathTraversal(page)) continue;
+			const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
+			const normalized = stripped.normalize("NFC");
+			if (normalized === "") continue;
+			onMatch(normalized, {
+				filePath: sourceFile,
+				lineNumber: i + 1,
+				byteOffset,
+				lineContent: line,
+				contextBefore: lines.slice(Math.max(0, i - 3), i),
+				contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
+			});
+		}
+	}
+}
+
 async function scanUnresolvedWikilinksImpl(
 	senderId: number,
 	workspacePath: string,
@@ -248,36 +290,12 @@ async function scanUnresolvedWikilinksImpl(
 		} catch {
 			continue;
 		}
-		const lines = text.split(/\r?\n/);
-		let inCodeBlock = false;
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			const trimmed = line.replace(/^\s+/, "");
-			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-				inCodeBlock = !inCodeBlock;
-				continue;
-			}
-			if (inCodeBlock) continue;
-			for (const { inner, byteOffset } of extractWikilinks(line)) {
-				const pipe = inner.indexOf("|");
-				const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
-				if (page === "" || isPathTraversal(page)) continue;
-				const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
-				const normalized = stripped.normalize("NFC");
-				if (normalized === "" || existing.has(normalized)) continue;
-				const ref: WikilinkReference = {
-					filePath: inFiles[idx],
-					lineNumber: i + 1,
-					byteOffset,
-					lineContent: line,
-					contextBefore: lines.slice(Math.max(0, i - 3), i),
-					contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
-				};
-				const arr = map.get(normalized);
-				if (arr === undefined) map.set(normalized, [ref]);
-				else arr.push(ref);
-			}
-		}
+		iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
+			if (existing.has(pageName)) return;
+			const arr = map.get(pageName);
+			if (arr === undefined) map.set(pageName, [ref]);
+			else arr.push(ref);
+		});
 	}
 
 	const result: UnresolvedWikilink[] = [];
@@ -326,37 +344,13 @@ async function scanBacklinksImpl(
 		} catch {
 			continue;
 		}
-		const lines = text.split(/\r?\n/);
-		let inCodeBlock = false;
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			const trimmed = line.replace(/^\s+/, "");
-			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-				inCodeBlock = !inCodeBlock;
-				continue;
-			}
-			if (inCodeBlock) continue;
-			for (const { inner, byteOffset } of extractWikilinks(line)) {
-				const pipe = inner.indexOf("|");
-				const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
-				if (page === "" || isPathTraversal(page)) continue;
-				const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
-				const normalized = stripped.normalize("NFC");
-				if (normalized !== targetPage) continue;
-				const ref: WikilinkReference = {
-					filePath: inFiles[idx],
-					lineNumber: i + 1,
-					byteOffset,
-					lineContent: line,
-					contextBefore: lines.slice(Math.max(0, i - 3), i),
-					contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
-				};
-				const sourceFile = inFiles[idx];
-				const arr = map.get(sourceFile);
-				if (arr === undefined) map.set(sourceFile, [ref]);
-				else arr.push(ref);
-			}
-		}
+		iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
+			if (pageName !== targetPage) return;
+			const sourceFile = ref.filePath;
+			const arr = map.get(sourceFile);
+			if (arr === undefined) map.set(sourceFile, [ref]);
+			else arr.push(ref);
+		});
 	}
 
 	const result: BacklinkSource[] = [];
