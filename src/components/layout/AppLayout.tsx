@@ -1,3 +1,4 @@
+import type { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAutoSave } from "../../hooks/useAutoSave";
@@ -54,6 +55,10 @@ type GoToLine = GoToLineRequest | null;
 interface TabCache {
 	content: string;
 	savedContent: string;
+	// CodeMirror EditorState (history extension の undo/redo stack を含む) を
+	// タブごとにキャッシュする。タブ切替で view.setState() で復元することで、
+	// remount による undo 履歴消失 (#220) を回避する。
+	editorState?: EditorState;
 }
 
 export function AppLayout() {
@@ -495,9 +500,13 @@ export function AppLayout() {
 				.tabs.some((t) => t.path === prevPath || t.history.includes(prevPath));
 			if (tabStillExists) {
 				const currentCache = tabCacheRef.current.get(prevPath);
+				// view が prev タブの内容を保持している間に state を採取し、undo/redo
+				// 履歴を含む CodeMirror state ごと cache に格納する (#220)。
+				const prevEditorState = editorViewRef.current?.state;
 				tabCacheRef.current.set(prevPath, {
 					content: contentRef.current,
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
+					editorState: prevEditorState ?? currentCache?.editorState,
 				});
 			} else {
 				tabCacheRef.current.delete(prevPath);
@@ -530,7 +539,15 @@ export function AppLayout() {
 			savedContentRef.current = cached.savedContent;
 			markSaved(cached.savedContent);
 			setContent(cached.content);
-			setEditorKey((k) => k + 1);
+			// EditorState が保存されていれば view.setState() で undo/redo 履歴ごと
+			// 復元する (#220)。失敗時 (view 未取得、SlideView 表示中など) は
+			// 従来通り remount で初期化する fallback。
+			const view = editorViewRef.current;
+			if (cached.editorState && view) {
+				view.setState(cached.editorState);
+			} else {
+				setEditorKey((k) => k + 1);
+			}
 			if (pendingGoToLineRef.current !== null) {
 				setGoToLine(pendingGoToLineRef.current);
 				pendingGoToLineRef.current = null;
