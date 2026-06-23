@@ -1,7 +1,11 @@
 import { promises as fsp } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import type { SearchResult } from "../../../src/types/search";
-import type { UnresolvedWikilink, WikilinkReference } from "../../../src/types/wikilink";
+import type {
+	BacklinkSource,
+	UnresolvedWikilink,
+	WikilinkReference,
+} from "../../../src/types/wikilink";
 import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
 import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
@@ -65,6 +69,7 @@ export function fuzzyMatch(query: string, target: string): boolean {
 // クロスキャンセル regression が起きるため、cancel IPC も用途別に分ける。
 const searchGeneration = new Map<number, number>();
 const wikilinkGeneration = new Map<number, number>();
+const backlinkGeneration = new Map<number, number>();
 
 function bumpGeneration(map: Map<number, number>, windowId: number): void {
 	const cur = map.get(windowId);
@@ -84,6 +89,7 @@ function makeStaleChecker(map: Map<number, number>, windowId: number): () => boo
 export function clearSearchForWindow(windowId: number): void {
 	searchGeneration.delete(windowId);
 	wikilinkGeneration.delete(windowId);
+	backlinkGeneration.delete(windowId);
 }
 
 // 明示的な cancel: gen を bump して in-flight searchFilesImpl を bail させる。
@@ -98,6 +104,13 @@ export function cancelSearchForWindow(windowId: number): void {
 // SearchPanel の searchFilesImpl は巻き込まない（クロスキャンセル防止）。
 export function cancelWikilinkScanForWindow(windowId: number): void {
 	bumpGeneration(wikilinkGeneration, windowId);
+}
+
+// 明示的な cancel: gen を bump して in-flight scanBacklinksImpl を bail させる。
+// BacklinkPanel の cleanup / target file 切替時に呼ばれる。
+// 全文検索 / 未解決リンクスキャンとは独立して管理（クロスキャンセル防止）。
+export function cancelBacklinkScanForWindow(windowId: number): void {
+	bumpGeneration(backlinkGeneration, windowId);
 }
 
 // 全文検索の実装。
@@ -276,6 +289,85 @@ async function scanUnresolvedWikilinksImpl(
 	return result;
 }
 
+// 指定ノートを `[[ファイル名]]` で参照しているノートを収集する（順引きと逆方向）。
+// 解決ロジックは scanUnresolvedWikilinksImpl と同じ正規化（拡張子除去 + NFC + path-traversal 弾き）を
+// 通すため、ホバーで参照件数を出す機能と件数が一致する。self-reference は canonical path 一致で除外。
+async function scanBacklinksImpl(
+	senderId: number,
+	workspacePath: string,
+	targetFilePath: string,
+): Promise<BacklinkSource[]> {
+	const isStale = makeStaleChecker(backlinkGeneration, senderId);
+
+	const targetBase = basename(targetFilePath);
+	if (!targetBase.toLowerCase().endsWith(".md")) return [];
+	const targetPage = targetBase.slice(0, -3).normalize("NFC");
+	if (targetPage === "") return [];
+	// inFiles は collectMdFilesForWorkspace で `resolve(workspacePath)` ベースに揃って
+	// 構築されており、renderer が渡す targetFilePath も同じワークスペース基底に基づく
+	// (listDirectory が返した input 形式)。symlink を解決した canonical 比較を使うと
+	// `/tmp` → `/private/tmp` のような環境差で self-reference を見落とすので、
+	// 同じ input ベースで `resolve()` 正規化したものどうしを比較する。
+	const targetInput = resolve(targetFilePath);
+
+	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	if (isStale()) return [];
+
+	const map = new Map<string, WikilinkReference[]>();
+	for (let idx = 0; idx < ioFiles.length; idx++) {
+		// ファイル間のチェックポイント（scanUnresolvedWikilinksImpl と同方針）。
+		if (isStale()) return [];
+		// 自分自身からのリンクは backlink としては表示しない。
+		if (inFiles[idx] === targetInput) continue;
+
+		let text: string;
+		try {
+			text = await fsp.readFile(ioFiles[idx], "utf8");
+		} catch {
+			continue;
+		}
+		const lines = text.split(/\r?\n/);
+		let inCodeBlock = false;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const trimmed = line.replace(/^\s+/, "");
+			if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+				inCodeBlock = !inCodeBlock;
+				continue;
+			}
+			if (inCodeBlock) continue;
+			for (const { inner, byteOffset } of extractWikilinks(line)) {
+				const pipe = inner.indexOf("|");
+				const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
+				if (page === "" || isPathTraversal(page)) continue;
+				const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
+				const normalized = stripped.normalize("NFC");
+				if (normalized !== targetPage) continue;
+				const ref: WikilinkReference = {
+					filePath: inFiles[idx],
+					lineNumber: i + 1,
+					byteOffset,
+					lineContent: line,
+					contextBefore: lines.slice(Math.max(0, i - 3), i),
+					contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
+				};
+				const sourceFile = inFiles[idx];
+				const arr = map.get(sourceFile);
+				if (arr === undefined) map.set(sourceFile, [ref]);
+				else arr.push(ref);
+			}
+		}
+	}
+
+	const result: BacklinkSource[] = [];
+	for (const [sourceFile, references] of map) {
+		result.push({ sourceFile, references });
+	}
+	// sourceFile の byte 比較で昇順（scanUnresolvedWikilinksImpl と同方針）。
+	result.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));
+	return result;
+}
+
 export function registerSearchIpc(): void {
 	handle(
 		"search:files",
@@ -303,10 +395,19 @@ export function registerSearchIpc(): void {
 	handle("wikilink:cancel", (event): void => {
 		cancelWikilinkScanForWindow(event.sender.id);
 	});
+	handle(
+		"search:backlinks",
+		(event, workspacePath: string, targetFilePath: string): Promise<BacklinkSource[]> =>
+			scanBacklinksImpl(event.sender.id, workspacePath, targetFilePath),
+	);
+	handle("backlink:cancel", (event): void => {
+		cancelBacklinkScanForWindow(event.sender.id);
+	});
 }
 
 export const __testing = {
 	searchFilesImpl,
 	searchFilenamesImpl,
 	scanUnresolvedWikilinksImpl,
+	scanBacklinksImpl,
 };

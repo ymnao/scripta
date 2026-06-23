@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { mkdir, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -11,6 +11,7 @@ import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-work
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import {
 	__testing,
+	cancelBacklinkScanForWindow,
 	cancelSearchForWindow,
 	cancelWikilinkScanForWindow,
 	extractWikilinks,
@@ -19,7 +20,8 @@ import {
 } from "./search";
 
 const TEST_WIN = 1;
-const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
+const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl, scanBacklinksImpl } =
+	__testing;
 
 let workspaceDir = "";
 let ws: TempWorkspace;
@@ -335,6 +337,119 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		cancelWikilinkScanForWindow(TEST_WIN);
 		const result = await promise;
 		expect(result).toHaveLength(10);
+	});
+});
+
+describe("scanBacklinksImpl", () => {
+	it("returns empty array when no other file references target", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "# Target");
+		await writeFile(join(workspaceDir, "other.md"), "no link here");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("groups references by sourceFile and counts each occurrence", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "# Target");
+		await writeFile(join(workspaceDir, "a.md"), "See [[target]]\nand [[target]] again");
+		await writeFile(join(workspaceDir, "b.md"), "Refers to [[target|display]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(2);
+		expect(out[0].sourceFile).toBe(join(workspaceDir, "a.md"));
+		expect(out[0].references).toHaveLength(2);
+		expect(out[1].sourceFile).toBe(join(workspaceDir, "b.md"));
+		expect(out[1].references).toHaveLength(1);
+	});
+
+	it("excludes self-reference (target file linking to itself)", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "[[target]] is a self-reference");
+		await writeFile(join(workspaceDir, "other.md"), "[[target]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].sourceFile).toBe(join(workspaceDir, "other.md"));
+	});
+
+	it("returns empty when target file is not .md", async () => {
+		await writeFile(join(workspaceDir, "other.md"), "[[target]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.txt"));
+		expect(out).toEqual([]);
+	});
+
+	it("alias form [[target|display]] matches by target name", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "a.md"), "[[target|My Display]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references[0].lineContent).toBe("[[target|My Display]]");
+	});
+
+	it("ignores wikilinks inside fenced code blocks", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "a.md"), "```\n[[target]]\n```\nbut [[target]] here counts");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
+	it("results are sorted by sourceFile byte order", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "z.md"), "[[target]]");
+		await writeFile(join(workspaceDir, "a.md"), "[[target]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out.map((s) => basename(s.sourceFile))).toEqual(["a.md", "z.md"]);
+	});
+
+	it("rejects unauthorized workspace path", async () => {
+		await expect(
+			scanBacklinksImpl(999 /* not registered */, workspaceDir, join(workspaceDir, "target.md")),
+		).rejects.toThrow(/Permission denied/);
+	});
+
+	it("cancelBacklinkScanForWindow stops in-flight backlink scan", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[target]]");
+		}
+		const promise = scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		cancelBacklinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow does NOT cancel in-flight backlink scan", async () => {
+		// regression guard: 全文検索 cancel が backlink scan を巻き込まないこと。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[target]]");
+		}
+		const promise = scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("cancelWikilinkScanForWindow does NOT cancel in-flight backlink scan", async () => {
+		// regression guard: 未解決リンク cancel が backlink scan を巻き込まないこと。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[target]]");
+		}
+		const promise = scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("cancelBacklinkScanForWindow does NOT cancel in-flight wikilink scan", async () => {
+		// regression guard: 逆方向のクロスキャンセル防止。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelBacklinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(1);
+		expect(result[0].pageName).toBe("missing");
 	});
 });
 

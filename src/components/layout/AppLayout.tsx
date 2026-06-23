@@ -20,6 +20,7 @@ import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
 import { loadSettings, saveSidebarVisible } from "../../lib/store";
+import { useBacklinkStore } from "../../stores/backlink";
 import { useGitSyncStore } from "../../stores/git-sync";
 import { useScratchpadStore } from "../../stores/scratchpad";
 import { useSettingsStore } from "../../stores/settings";
@@ -298,6 +299,15 @@ export function AppLayout() {
 		} else {
 			useWikilinkStore.getState().reset();
 		}
+	}, [workspacePath]);
+
+	// Reset backlink store on workspace change (initial scan は BacklinkPanel の
+	// mount 時に target = activeTabPath が確定してから走る)。
+	useEffect(() => {
+		// workspacePath を依存に含めるが effect 本体で使わないため明示参照する
+		// (useWikilinkStore 側の effect と同じパターン)。
+		void workspacePath;
+		useBacklinkStore.getState().reset();
 	}, [workspacePath]);
 
 	// Open (or re-focus) the conflict resolution window
@@ -966,6 +976,10 @@ export function AppLayout() {
 		setSidebarPanel("unresolved");
 	}, []);
 
+	const handleShowBacklink = useCallback(() => {
+		setSidebarPanel("backlink");
+	}, []);
+
 	const handleSearchNavigate = useCallback(
 		(
 			filePath: string,
@@ -1102,6 +1116,11 @@ export function AppLayout() {
 				setSidebarPanel((prev) => (prev === "unresolved" ? "files" : "unresolved"));
 				return;
 			}
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "b") {
+				e.preventDefault();
+				setSidebarPanel((prev) => (prev === "backlink" ? "files" : "backlink"));
+				return;
+			}
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "f" || e.key === "h")) {
 				const view = editorViewRef.current;
 				if (view) {
@@ -1204,6 +1223,7 @@ export function AppLayout() {
 						onShowFiles={handleShowFiles}
 						onShowSearch={handleShowSearch}
 						onShowUnresolved={handleShowUnresolved}
+						onShowBacklink={handleShowBacklink}
 						onSearchNavigate={handleSearchNavigate}
 						onFileSelect={handleFileSelect}
 						onFileOpenNewTab={handleFileOpenNewTab}

@@ -1,4 +1,4 @@
-import { Files, FolderOpen, Link2Off, Search } from "lucide-react";
+import { Files, FolderOpen, Link2, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
 import { openDirectoryPicker, workspaceSet } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
@@ -7,16 +7,18 @@ import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { Tooltip } from "../common/Tooltip";
 import { FileTree } from "../filetree/FileTree";
+import { BacklinkPanel } from "../search/BacklinkPanel";
 import { SearchPanel } from "../search/SearchPanel";
 import { UnresolvedLinksPanel } from "../search/UnresolvedLinksPanel";
 
-export type SidebarPanel = "files" | "search" | "unresolved";
+export type SidebarPanel = "files" | "search" | "unresolved" | "backlink";
 
 interface SidebarProps {
 	activePanel: SidebarPanel;
 	onShowFiles: () => void;
 	onShowSearch: () => void;
 	onShowUnresolved: () => void;
+	onShowBacklink: () => void;
 	onSearchNavigate: (
 		filePath: string,
 		lineNumber: number,
@@ -36,6 +38,7 @@ const panelLabels: Record<SidebarPanel, string> = {
 	files: "Files",
 	search: "Search",
 	unresolved: "未解決リンク",
+	backlink: "バックリンク",
 };
 
 export function Sidebar({
@@ -43,6 +46,7 @@ export function Sidebar({
 	onShowFiles,
 	onShowSearch,
 	onShowUnresolved,
+	onShowBacklink,
 	onSearchNavigate,
 	onFileSelect,
 	onFileOpenNewTab,
@@ -122,6 +126,17 @@ export function Sidebar({
 							<Link2Off size={14} />
 						</button>
 					</Tooltip>
+					<Tooltip label="バックリンク" keys={[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "B"]} side="bottom">
+						<button
+							type="button"
+							onClick={onShowBacklink}
+							aria-label="バックリンクを表示"
+							aria-pressed={activePanel === "backlink"}
+							className={iconBtnClass(activePanel === "backlink")}
+						>
+							<Link2 size={14} />
+						</button>
+					</Tooltip>
 				</div>
 			</div>
 			<div className="flex-1 overflow-y-auto">
@@ -133,6 +148,8 @@ export function Sidebar({
 					/>
 				) : activePanel === "unresolved" && workspacePath ? (
 					<UnresolvedLinksPanel workspacePath={workspacePath} onNavigate={onSearchNavigate} />
+				) : activePanel === "backlink" && workspacePath ? (
+					<BacklinkPanel workspacePath={workspacePath} onNavigate={onSearchNavigate} />
 				) : workspacePath ? (
 					<FileTree
 						workspacePath={workspacePath}

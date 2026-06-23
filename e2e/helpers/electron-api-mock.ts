@@ -5,7 +5,7 @@ import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git
 import type { OgpData } from "../../src/types/ogp";
 import type { SearchResult } from "../../src/types/search";
 import type { UpdateInfo } from "../../src/types/update";
-import type { UnresolvedWikilink } from "../../src/types/wikilink";
+import type { BacklinkSource, UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
 // renderer-only Playwright で `window.api` を addInitScript 注入するモック。
@@ -627,6 +627,75 @@ function installApiMock(opts: {
 		},
 		cancelWikilinkScan: async (): Promise<void> => {
 			track("cancelWikilinkScan", []);
+		},
+		scanBacklinks: async (
+			workspacePath: string,
+			targetFilePath: string,
+		): Promise<BacklinkSource[]> => {
+			track("scanBacklinks", [workspacePath, targetFilePath]);
+			const encoder = new TextEncoder();
+			const targetBase = baseName(targetFilePath);
+			if (!targetBase.toLowerCase().endsWith(".md")) return [];
+			const targetPage = targetBase.slice(0, -3).normalize("NFC");
+			if (!targetPage) return [];
+			const mdFiles = collectMdFiles(workspacePath);
+			const map: Record<string, BacklinkSource["references"]> = {};
+			for (const filePath of mdFiles) {
+				// 本番 search.ts:scanBacklinksImpl と同じく self-reference は除外。
+				// e2e mock の filePath は正規化済み posix 形なので canonical 化は不要。
+				if (filePath === targetFilePath) continue;
+				const content = store.files[filePath];
+				if (!content) continue;
+				const lines = content.split(/\r?\n/);
+				let inCodeBlock = false;
+				const re = /\[\[([^[\]\n\r]+)\]\]/g;
+				for (let i = 0; i < lines.length; i++) {
+					const line = lines[i];
+					const trimmed = line.trimStart();
+					if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+						inCodeBlock = !inCodeBlock;
+						continue;
+					}
+					if (inCodeBlock) continue;
+					re.lastIndex = 0;
+					let m: RegExpExecArray | null = null;
+					while (true) {
+						m = re.exec(line);
+						if (!m) break;
+						const inner = m[1];
+						const pipeIdx = inner.indexOf("|");
+						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
+						if (
+							!page ||
+							page.includes("/") ||
+							page.includes("\\") ||
+							page === "." ||
+							page === ".." ||
+							page.includes("..")
+						)
+							continue;
+						const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
+						const normalized = stripped.normalize("NFC");
+						if (!normalized || normalized !== targetPage) continue;
+						const refs = map[filePath] ?? [];
+						refs.push({
+							filePath,
+							lineNumber: i + 1,
+							byteOffset: encoder.encode(line.slice(0, m.index)).length + 1,
+							lineContent: line,
+							contextBefore: lines.slice(Math.max(0, i - 3), i),
+							contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
+						});
+						map[filePath] = refs;
+					}
+				}
+			}
+			return Object.entries(map)
+				.map(([sourceFile, references]) => ({ sourceFile, references }))
+				.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));
+		},
+		cancelBacklinkScan: async (): Promise<void> => {
+			track("cancelBacklinkScan", []);
 		},
 
 		fetchOgp: async (requestId: string, url: string): Promise<OgpData> => {

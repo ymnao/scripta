@@ -2,7 +2,7 @@ import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git
 import type { OgpData } from "../../src/types/ogp";
 import type { SearchResult } from "../../src/types/search";
 import type { UpdateInfo } from "../../src/types/update";
-import type { UnresolvedWikilink } from "../../src/types/wikilink";
+import type { BacklinkSource, UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
 export type SaveDialogOptions = {
@@ -61,6 +61,8 @@ export type Api = Readonly<{
 	searchFilenames: (workspacePath: string, query: string) => Promise<string[]>;
 	scanUnresolvedWikilinks: (workspacePath: string) => Promise<UnresolvedWikilink[]>;
 	cancelWikilinkScan: () => Promise<void>;
+	scanBacklinks: (workspacePath: string, targetFilePath: string) => Promise<BacklinkSource[]>;
+	cancelBacklinkScan: () => Promise<void>;
 
 	fetchOgp: (requestId: string, url: string) => Promise<OgpData>;
 	ogpCancel: (requestId: string) => Promise<void>;
