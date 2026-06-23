@@ -239,17 +239,58 @@ function isEscaped(line: string, pos: number): boolean {
 	return count % 2 === 1;
 }
 
-// 同一行内で `pos` までに現れるバックティックの数が奇数 → inline code 内。
-// live-preview は lezer tree の InlineCode ノードで判定するが、main では markdown
-// parser を持たないので簡易判定。`` ``code`` `` のような 2 連続バックティックや
-// 複数行に跨る code は対応しない（live-preview と一部乖離する余地は残るが、
-// 単純な `` `[[...]]` `` パターンは確実に弾ける）。
-function isInsideInlineCode(line: string, pos: number): boolean {
-	let count = 0;
-	for (let i = 0; i < pos; i++) {
-		if (line[i] === "`") count++;
+// CommonMark 準拠で 1 行内の inline code span 範囲を列挙する。
+// 仕様: N 連続のバックティックを開き delimiter、同じ N 連続を閉じ delimiter とする。
+//       escape (\`) は delimiter にならない。閉じが見つからなければ単なるリテラルで
+//       code span ではない (open delimiter 自体もリテラル扱い)。
+// 制限: 複数行に跨る code span (CommonMark は許容) は本実装の対象外。scripta では
+//       長い code は fenced code block で書く慣習なので、ここでは行内のみ判定する。
+function collectInlineCodeRanges(line: string): Array<{ from: number; to: number }> {
+	const ranges: Array<{ from: number; to: number }> = [];
+	let i = 0;
+	while (i < line.length) {
+		if (line[i] !== "`" || isEscaped(line, i)) {
+			i++;
+			continue;
+		}
+		const openStart = i;
+		let openEnd = i;
+		while (openEnd < line.length && line[openEnd] === "`") openEnd++;
+		const openLen = openEnd - openStart;
+		// 同じ長さの backtick 連続を探す (escape されていないこと)。
+		let k = openEnd;
+		let foundCloseEnd = -1;
+		while (k < line.length) {
+			if (line[k] !== "`" || isEscaped(line, k)) {
+				k++;
+				continue;
+			}
+			let closeEnd = k;
+			while (closeEnd < line.length && line[closeEnd] === "`") closeEnd++;
+			if (closeEnd - k === openLen) {
+				foundCloseEnd = closeEnd;
+				break;
+			}
+			// 長さが違うバックティック列はスキップ (同じ run の途中で長さが違う閉じは無効)。
+			k = closeEnd;
+		}
+		if (foundCloseEnd !== -1) {
+			ranges.push({ from: openStart, to: foundCloseEnd });
+			i = foundCloseEnd;
+		} else {
+			// 閉じが無ければ open delimiter はリテラル。次の文字から再開して探索を続ける。
+			i = openEnd;
+		}
 	}
-	return count % 2 === 1;
+	return ranges;
+}
+
+function isInsideInlineCode(line: string, pos: number): boolean {
+	const ranges = collectInlineCodeRanges(line);
+	for (const r of ranges) {
+		if (r.from <= pos && pos < r.to) return true;
+	}
+	return false;
 }
 
 // 1 ファイルの本文から「正規化済み pageName + WikilinkReference」を順に取り出す共通走査。

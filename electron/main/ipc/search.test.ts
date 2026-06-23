@@ -279,6 +279,20 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		expect(out[0].references[0].byteOffset).toBe(4);
 	});
 
+	it("excludes escaped and inline-code wikilinks (iterateWikilinkOccurrences の effects も unresolved 側で確認)", async () => {
+		// 本番リファクタで scanUnresolvedWikilinksImpl も iterateWikilinkOccurrences 経由になり、
+		// escape / inline code 除外が unresolved 側にも作用することを ピン留め。
+		await writeFile(
+			join(workspaceDir, "note.md"),
+			"escape \\[[missing]] here\ninline `[[missing]]` code\nreal [[missing]] link",
+		);
+		const out = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		expect(out).toHaveLength(1);
+		expect(out[0].pageName).toBe("missing");
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(3);
+	});
+
 	it("rejects unauthorized workspace path", async () => {
 		await expect(
 			scanUnresolvedWikilinksImpl(999 /* not registered */, workspaceDir),
@@ -421,6 +435,32 @@ describe("scanBacklinksImpl", () => {
 		expect(out).toHaveLength(1);
 		expect(out[0].references).toHaveLength(1);
 		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("excludes wikilinks inside double-backtick inline code (``code``)", async () => {
+		// CommonMark の N 連続 backtick code span: ``code`` も inline code として除外する。
+		// 旧簡易判定 (odd count) では openOffset 前の backtick が 2 個で偶数になり漏れていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"see ``[[target]]`` not link\nreal [[target]] link",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("includes wikilinks when an opening backtick has no matching close (CommonMark: literal)", async () => {
+		// CommonMark 仕様: 開きバックティックに対応する閉じが見つからない場合、
+		// バックティックは単なるリテラル → 後続の `[[target]]` はリンク扱い。
+		// 旧簡易判定 (odd count) では false negative になっていたケース。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "lone ` then [[target]] still real");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(1);
 	});
 
 	it("returns empty when target is not the canonical (lex-smallest) of duplicate basenames", async () => {

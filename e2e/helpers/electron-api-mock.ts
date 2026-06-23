@@ -309,6 +309,62 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
+	// 本番 electron/main/ipc/search.ts の isEscaped / collectInlineCodeRanges /
+	// isInsideInlineCode と同形ロジック。`addInitScript` 制約で import 不可なので
+	// この scope に複製する。
+	const isEscaped = (line: string, pos: number): boolean => {
+		let count = 0;
+		let i = pos - 1;
+		while (i >= 0 && line[i] === "\\") {
+			count++;
+			i--;
+		}
+		return count % 2 === 1;
+	};
+	const collectInlineCodeRanges = (line: string): Array<{ from: number; to: number }> => {
+		const ranges: Array<{ from: number; to: number }> = [];
+		let i = 0;
+		while (i < line.length) {
+			if (line[i] !== "`" || isEscaped(line, i)) {
+				i++;
+				continue;
+			}
+			const openStart = i;
+			let openEnd = i;
+			while (openEnd < line.length && line[openEnd] === "`") openEnd++;
+			const openLen = openEnd - openStart;
+			let k = openEnd;
+			let foundCloseEnd = -1;
+			while (k < line.length) {
+				if (line[k] !== "`" || isEscaped(line, k)) {
+					k++;
+					continue;
+				}
+				let closeEnd = k;
+				while (closeEnd < line.length && line[closeEnd] === "`") closeEnd++;
+				if (closeEnd - k === openLen) {
+					foundCloseEnd = closeEnd;
+					break;
+				}
+				k = closeEnd;
+			}
+			if (foundCloseEnd !== -1) {
+				ranges.push({ from: openStart, to: foundCloseEnd });
+				i = foundCloseEnd;
+			} else {
+				i = openEnd;
+			}
+		}
+		return ranges;
+	};
+	const isInsideInlineCode = (line: string, pos: number): boolean => {
+		const ranges = collectInlineCodeRanges(line);
+		for (const r of ranges) {
+			if (r.from <= pos && pos < r.to) return true;
+		}
+		return false;
+	};
+
 	// `Api` 型に固定することで preload 契約と乖離した瞬間に typecheck が落ちる。
 	// 緩い `unknown` / `string` のままだと preload 側のシグネチャが変わっても
 	// この helper は静かに古いまま放置されるため、foundation として固定する。
@@ -591,6 +647,9 @@ function installApiMock(opts: {
 					while (true) {
 						m = re.exec(line);
 						if (!m) break;
+						// 本番 iterateWikilinkOccurrences と同じく escape / inline code 内は除外。
+						if (isEscaped(line, m.index)) continue;
+						if (isInsideInlineCode(line, m.index)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
@@ -656,24 +715,7 @@ function installApiMock(opts: {
 				}
 			}
 			if (fileMap[targetPage] !== targetFilePath) return [];
-			// 本番 isEscaped / isInsideInlineCode と同形の簡易判定。
-			// `\[[...]]` (escape) と `` `[[...]]` `` (inline code) を弾く。
-			const isEscaped = (line: string, pos: number): boolean => {
-				let count = 0;
-				let i = pos - 1;
-				while (i >= 0 && line[i] === "\\") {
-					count++;
-					i--;
-				}
-				return count % 2 === 1;
-			};
-			const isInsideInlineCode = (line: string, pos: number): boolean => {
-				let count = 0;
-				for (let i = 0; i < pos; i++) {
-					if (line[i] === "`") count++;
-				}
-				return count % 2 === 1;
-			};
+			// isEscaped / isInsideInlineCode は installApiMock 冒頭の共通 helper を使用。
 			const map: Record<string, BacklinkSource["references"]> = {};
 			for (const filePath of mdFiles) {
 				// 本番 search.ts:scanBacklinksImpl と同じく self-reference は除外。
