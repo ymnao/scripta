@@ -1,4 +1,4 @@
-import yaml from "js-yaml";
+import { load } from "js-yaml";
 import type { SlideSection } from "../types/slide";
 import { CodeFenceTracker } from "./code-fence";
 
@@ -21,7 +21,7 @@ function detectFrontmatter(lines: string[]): number {
 
 	const block = lines.slice(1, closingIndex).join("\n");
 	try {
-		const parsed = yaml.load(block);
+		const parsed = load(block);
 		// YAML としてパースできても、プレーンな文字列やnullではなく
 		// オブジェクト（key-value マッピング）の場合のみ frontmatter とみなす
 		if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
