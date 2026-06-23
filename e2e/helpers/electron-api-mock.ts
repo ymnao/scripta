@@ -635,7 +635,10 @@ function installApiMock(opts: {
 			track("scanBacklinks", [workspacePath, targetFilePath]);
 			const encoder = new TextEncoder();
 			const targetBase = baseName(targetFilePath);
-			if (!targetBase.toLowerCase().endsWith(".md")) return [];
+			// 本番 scanBacklinksImpl と同じく小文字 `.md` のみ対象。
+			// `Target.MD` を target にした場合に本番は [] を返すが mock がバックリンクを
+			// 返してしまうと、将来 `.MD` ケースの e2e を足したときに false positive になる。
+			if (!targetBase.endsWith(".md")) return [];
 			const targetPage = targetBase.slice(0, -3).normalize("NFC");
 			if (!targetPage) return [];
 			const mdFiles = collectMdFiles(workspacePath);
