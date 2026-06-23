@@ -29,7 +29,7 @@ import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
 import type { SearchResult } from "../types/search";
 import type { UpdateInfo } from "../types/update";
-import type { UnresolvedWikilink } from "../types/wikilink";
+import type { BacklinkSource, UnresolvedWikilink } from "../types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../types/workspace";
 import { isTransientError } from "./errors";
 
@@ -121,6 +121,20 @@ export function scanUnresolvedWikilinks(workspacePath: string): Promise<Unresolv
 // SearchPanel の検索を巻き込まないために cancelSearch とは別 IPC。
 export function cancelWikilinkScan(): Promise<void> {
 	return window.api.cancelWikilinkScan();
+}
+
+export function scanBacklinks(
+	workspacePath: string,
+	targetFilePath: string,
+): Promise<BacklinkSource[]> {
+	return withRetry(() => window.api.scanBacklinks(workspacePath, targetFilePath));
+}
+
+// in-flight scanBacklinks を main 側でキャンセルする。
+// BacklinkPanel の cleanup / target file 切替時に呼ばれる。
+// scanUnresolvedWikilinks / searchFiles を巻き込まない（クロスキャンセル防止）。
+export function cancelBacklinkScan(): Promise<void> {
+	return window.api.cancelBacklinkScan();
 }
 
 export function showInFolder(path: string): Promise<void> {

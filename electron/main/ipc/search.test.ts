@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { mkdir, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -11,6 +11,7 @@ import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-work
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import {
 	__testing,
+	cancelBacklinkScanForWindow,
 	cancelSearchForWindow,
 	cancelWikilinkScanForWindow,
 	extractWikilinks,
@@ -19,7 +20,8 @@ import {
 } from "./search";
 
 const TEST_WIN = 1;
-const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl } = __testing;
+const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl, scanBacklinksImpl } =
+	__testing;
 
 let workspaceDir = "";
 let ws: TempWorkspace;
@@ -84,13 +86,13 @@ describe("extractWikilinks", () => {
 	it("extracts a single wikilink with 1-based UTF-8 byteOffset", () => {
 		// "See " は 4 byte → `[[` の byteOffset = 5
 		const out = [...extractWikilinks("See [[target]] here")];
-		expect(out).toEqual([{ inner: "target", byteOffset: 5 }]);
+		expect(out).toEqual([{ inner: "target", byteOffset: 5, openOffset: 4 }]);
 	});
 
 	it("computes UTF-8 byteOffset across multibyte chars", () => {
 		// "あ" は UTF-8 で 3 byte → `[[` の byteOffset = 4
 		const out = [...extractWikilinks("あ[[x]]")];
-		expect(out).toEqual([{ inner: "x", byteOffset: 4 }]);
+		expect(out).toEqual([{ inner: "x", byteOffset: 4, openOffset: 1 }]);
 	});
 
 	it("extracts multiple wikilinks on the same line", () => {
@@ -277,6 +279,34 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		expect(out[0].references[0].byteOffset).toBe(4);
 	});
 
+	it("excludes escaped and inline-code wikilinks (iterateWikilinkOccurrences の effects も unresolved 側で確認)", async () => {
+		// 本番リファクタで scanUnresolvedWikilinksImpl も iterateWikilinkOccurrences 経由になり、
+		// escape / inline code 除外が unresolved 側にも作用することを ピン留め。
+		await writeFile(
+			join(workspaceDir, "note.md"),
+			"escape \\[[missing]] here\ninline `[[missing]]` code\nreal [[missing]] link",
+		);
+		const out = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		expect(out).toHaveLength(1);
+		expect(out[0].pageName).toBe("missing");
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(3);
+	});
+
+	it("excludes wikilinks inside multi-line inline code span (unresolved 側にも同 effect)", async () => {
+		// 複数行 inline code span (CommonMark で valid) も unresolved 側で除外される
+		// ことを確認する (本番 iterateWikilinkOccurrences の text 全体走査が効くこと)。
+		await writeFile(
+			join(workspaceDir, "note.md"),
+			"in span `start\n[[missing]]\nend` not link\nreal [[missing]] link",
+		);
+		const out = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		expect(out).toHaveLength(1);
+		expect(out[0].pageName).toBe("missing");
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
 	it("rejects unauthorized workspace path", async () => {
 		await expect(
 			scanUnresolvedWikilinksImpl(999 /* not registered */, workspaceDir),
@@ -335,6 +365,320 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		cancelWikilinkScanForWindow(TEST_WIN);
 		const result = await promise;
 		expect(result).toHaveLength(10);
+	});
+});
+
+describe("scanBacklinksImpl", () => {
+	it("returns empty array when no other file references target", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "# Target");
+		await writeFile(join(workspaceDir, "other.md"), "no link here");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("groups references by sourceFile and counts each occurrence", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "# Target");
+		await writeFile(join(workspaceDir, "a.md"), "See [[target]]\nand [[target]] again");
+		await writeFile(join(workspaceDir, "b.md"), "Refers to [[target|display]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(2);
+		expect(out[0].sourceFile).toBe(join(workspaceDir, "a.md"));
+		expect(out[0].references).toHaveLength(2);
+		expect(out[1].sourceFile).toBe(join(workspaceDir, "b.md"));
+		expect(out[1].references).toHaveLength(1);
+	});
+
+	it("excludes self-reference (target file linking to itself)", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "[[target]] is a self-reference");
+		await writeFile(join(workspaceDir, "other.md"), "[[target]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].sourceFile).toBe(join(workspaceDir, "other.md"));
+	});
+
+	it("returns empty when target file is not .md", async () => {
+		await writeFile(join(workspaceDir, "other.md"), "[[target]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.txt"));
+		expect(out).toEqual([]);
+	});
+
+	it("returns empty when target file extension is uppercase .MD (walkMdFiles と同じ小文字限定方針)", async () => {
+		await writeFile(join(workspaceDir, "other.md"), "[[Target]]");
+		await writeFile(join(workspaceDir, "Target.MD"), "");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "Target.MD"));
+		expect(out).toEqual([]);
+	});
+
+	it("alias form [[target|display]] matches by target name", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "a.md"), "[[target|My Display]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references[0].lineContent).toBe("[[target|My Display]]");
+	});
+
+	it("ignores wikilinks inside fenced code blocks", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "a.md"), "```\n[[target]]\n```\nbut [[target]] here counts");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
+	it("excludes escaped wikilinks (\\[[target]] is not a real link)", async () => {
+		// live-preview (src/components/editor/live-preview/wikilinks.ts:78) は
+		// `\[[target]]` をリンク扱いしないので、backlink もそれに合わせる。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "escaped \\[[target]] here\n[[target]] real");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("excludes wikilinks inside inline code", async () => {
+		// live-preview の InlineCode 範囲 (math.ts:collectCodeRanges 経由) と同じく
+		// `` `[[target]]` `` はリンク扱いされないので backlink からも除外。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"in code `[[target]]` not a link\n[[target]] real link",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("excludes wikilinks inside double-backtick inline code (``code``)", async () => {
+		// CommonMark の N 連続 backtick code span: ``code`` も inline code として除外する。
+		// 旧簡易判定 (odd count) では openOffset 前の backtick が 2 個で偶数になり漏れていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"see ``[[target]]`` not link\nreal [[target]] link",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("includes wikilinks when an opening backtick has no matching close (CommonMark: literal)", async () => {
+		// CommonMark 仕様: 開きバックティックに対応する閉じが見つからない場合、
+		// バックティックは単なるリテラル → 後続の `[[target]]` はリンク扱い。
+		// 旧簡易判定 (odd count) では false negative になっていたケース。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "lone ` then [[target]] still real");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(1);
+	});
+
+	it("excludes wikilinks inside multi-line inline code span (CommonMark allows backticks across lines)", async () => {
+		// CommonMark の inline code span は改行を跨げる。live-preview の lezer InlineCode も
+		// 同様に複数行 1 ノードで扱うので、main / mock もそれに合わせる。
+		// line scope の判定だと、開きと閉じが別行にあるケースで false positive になる。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"in span `start\n[[target]]\nend` not link\nreal [[target]] link",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
+	it("treats backslash-prefixed backtick as a valid closing delimiter (CommonMark literal backslash)", async () => {
+		// CommonMark: code span 内の `\` は literal、閉じ backtick の前に `\` があっても
+		// 閉じとして valid。`foo \` で code span が閉じ、後続の [[target]] は code span 外
+		// (live-preview の lezer InlineCode と一致)。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "`foo \\` [[target]] bar`");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(1);
+	});
+
+	it("does not open a code span from the 2nd backtick of an escaped run (\\``)", async () => {
+		// `\\\`\\\`` のように escape された backtick の直後に別の backtick が続く場合、
+		// run 全体が delimiter にならない (Lezer / live-preview も同様)。
+		// i++ だけだと 2 文字目を open として誤開始し、後続の [[target]] を code span 内に
+		// 巻き込む regression があった。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "\\`` [[target]] `");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(1);
+	});
+
+	it("does not let tilde-fenced backticks pair with outside backticks", async () => {
+		// ~~~ fenced code block 内の `` ` `` が、外側の単独 `` ` `` と peer になって
+		// 外側 [[target]] を inline code 内と誤判定するのを防ぐ (fenced 範囲 mask が効くこと)。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "~~~\n`\n~~~\n[[target]]\n`");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(4);
+	});
+
+	it("fenced opener of ~~~ is not closed by ``` (CommonMark: same fence char required)", async () => {
+		// ~~~ で開いた fence は ``` では閉じない。旧実装は単純 toggle で
+		// closing を誤判定 → 3 行目以降が fenced 外扱いになり [[target]] が含まれていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "~~~\n```\n[[target]]\n~~~");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("fenced opener of length 4 is not closed by length-3 marker (CommonMark: closer length >= opener)", async () => {
+		// 4 連続 backtick の opener は 3 連続では閉じない。旧実装は startsWith("```") で
+		// 同一視 → 中間の ``` を close と誤判定し後続 [[target]] を fenced 外扱いしていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "````\ncode\n```\n[[target]]\n````");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("closer with trailing info text does not close the fence (CommonMark: closer must be whitespace-only after marker)", async () => {
+		// closer の後ろにテキストがあると close ではない。旧実装は startsWith でも閉じ扱い
+		// → [[target]] が fenced 外扱いされていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "```\ncode\n``` not-a-closer\n[[target]]\n```");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toEqual([]);
+	});
+
+	it("backtick fence opener with backtick in info string is not a fence (CommonMark: info string has no backtick)", async () => {
+		// CommonMark / Lezer: ``` opener の info string に backtick は禁止。
+		// この行は fence opener ではなく paragraph として扱われ、続く `[[target]]` も
+		// 同じ paragraph 内のテキストとして wikilink 判定される。
+		// 旧実装は info string を常に許容して fence opener 化 → `[[target]]` を
+		// 誤って fenced 内に巻き込み除外していた。tilde fence (~~~) には適用されない。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "src.md"), "``` info `x`\n[[target]] still real");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(2);
+	});
+
+	it("4-space-indented ``` in paragraph continuation is not a fence marker", async () => {
+		// CommonMark: paragraph 継続中の 4 spaces indent は indented code block にならず、
+		// `` ``` `` も fence marker として認識されない。後続の `[[target]]` も同じ
+		// paragraph 内のテキストとして wikilink 判定される。
+		// 旧実装は trimmed.startsWith("```") で indent を無視して fence opener 扱い
+		// → 続く `[[target]]` が誤って fenced 内と判定され除外されていた。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"paragraph text\n    ```\n[[target]] still a wikilink",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(1);
+		expect(out[0].references[0].lineNumber).toBe(3);
+	});
+
+	it("returns empty when target is not the canonical (lex-smallest) of duplicate basenames", async () => {
+		// live-preview の buildFileMap (src/components/editor/live-preview/wikilinks.ts:45)
+		// が `[[note]]` を a/note.md に解決する状況で、b/note.md の backlink パネルを
+		// 開いても references は出ないことを保証する (表示と実リンクの食い違い防止)。
+		await mkdir(join(workspaceDir, "a"), { recursive: true });
+		await mkdir(join(workspaceDir, "b"), { recursive: true });
+		await writeFile(join(workspaceDir, "a", "note.md"), "# A");
+		await writeFile(join(workspaceDir, "b", "note.md"), "# B");
+		await writeFile(join(workspaceDir, "other.md"), "[[note]]");
+
+		const outB = await scanBacklinksImpl(
+			TEST_WIN,
+			workspaceDir,
+			join(workspaceDir, "b", "note.md"),
+		);
+		expect(outB).toEqual([]);
+
+		const outA = await scanBacklinksImpl(
+			TEST_WIN,
+			workspaceDir,
+			join(workspaceDir, "a", "note.md"),
+		);
+		expect(outA).toHaveLength(1);
+		expect(outA[0].sourceFile).toBe(join(workspaceDir, "other.md"));
+	});
+
+	it("results are sorted by sourceFile byte order", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(join(workspaceDir, "z.md"), "[[target]]");
+		await writeFile(join(workspaceDir, "a.md"), "[[target]]");
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out.map((s) => basename(s.sourceFile))).toEqual(["a.md", "z.md"]);
+	});
+
+	it("rejects unauthorized workspace path", async () => {
+		await expect(
+			scanBacklinksImpl(999 /* not registered */, workspaceDir, join(workspaceDir, "target.md")),
+		).rejects.toThrow(/Permission denied/);
+	});
+
+	it("rejects unauthorized target file path (workspace 外の target を弾く)", async () => {
+		// workspace は registered だが target が登録されていない別 root にある場合、
+		// path-guard が `.md` 拡張子フィルタの前で reject することを確認する。
+		await expect(
+			scanBacklinksImpl(TEST_WIN, workspaceDir, "/some/unauthorized/target.md"),
+		).rejects.toThrow(/Permission denied/);
+	});
+
+	it("cancelBacklinkScanForWindow stops in-flight backlink scan", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[target]]");
+		}
+		const promise = scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		cancelBacklinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow does NOT cancel in-flight backlink scan", async () => {
+		// regression guard: 全文検索 cancel が backlink scan を巻き込まないこと。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[target]]");
+		}
+		const promise = scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("cancelWikilinkScanForWindow does NOT cancel in-flight backlink scan", async () => {
+		// regression guard: 未解決リンク cancel が backlink scan を巻き込まないこと。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[target]]");
+		}
+		const promise = scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("cancelBacklinkScanForWindow does NOT cancel in-flight wikilink scan", async () => {
+		// regression guard: 逆方向のクロスキャンセル防止。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelBacklinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(1);
+		expect(result[0].pageName).toBe("missing");
 	});
 });
 

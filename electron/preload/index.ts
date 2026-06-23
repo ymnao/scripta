@@ -76,6 +76,9 @@ const api: Api = Object.freeze({
 	scanUnresolvedWikilinks: (workspacePath) =>
 		invoke(ipcRenderer.invoke("search:unresolved-wikilinks", workspacePath)),
 	cancelWikilinkScan: () => invoke(ipcRenderer.invoke("wikilink:cancel")),
+	scanBacklinks: (workspacePath, targetFilePath) =>
+		invoke(ipcRenderer.invoke("search:backlinks", workspacePath, targetFilePath)),
+	cancelBacklinkScan: () => invoke(ipcRenderer.invoke("backlink:cancel")),
 
 	fetchOgp: (requestId, url) => invoke(ipcRenderer.invoke("ogp:fetch", requestId, url)),
 	ogpCancel: (requestId) => invoke(ipcRenderer.invoke("ogp:cancel", requestId)),

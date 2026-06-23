@@ -5,7 +5,7 @@ import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git
 import type { OgpData } from "../../src/types/ogp";
 import type { SearchResult } from "../../src/types/search";
 import type { UpdateInfo } from "../../src/types/update";
-import type { UnresolvedWikilink } from "../../src/types/wikilink";
+import type { BacklinkSource, UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
 // renderer-only Playwright で `window.api` を addInitScript 注入するモック。
@@ -309,6 +309,147 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
+	// 本番 electron/main/ipc/search.ts の isEscaped / collectInlineCodeRanges と同形ロジック。
+	// `addInitScript` 制約で import 不可なのでこの scope に複製する。
+	// collectInlineCodeRanges は引数が 1 行でも本文全体でも動く (CommonMark の複数行 span
+	// 対応のため、scan 側では本文全体に対して 1 回計算する)。
+	const isEscaped = (s: string, pos: number): boolean => {
+		let count = 0;
+		let i = pos - 1;
+		while (i >= 0 && s[i] === "\\") {
+			count++;
+			i--;
+		}
+		return count % 2 === 1;
+	};
+	const collectInlineCodeRanges = (s: string): Array<{ from: number; to: number }> => {
+		// 本番 search.ts:collectInlineCodeRanges と同形。close 側は escape を見ない
+		// (CommonMark の backtick string 認識に escape を含めない仕様、live-preview と整合)。
+		// open 側は escape された backtick run 全体を skip する (i++ だけだと run の
+		// 2 文字目以降を open として誤開始するため)。
+		const ranges: Array<{ from: number; to: number }> = [];
+		let i = 0;
+		while (i < s.length) {
+			if (s[i] !== "`") {
+				i++;
+				continue;
+			}
+			if (isEscaped(s, i)) {
+				let runEnd = i;
+				while (runEnd < s.length && s[runEnd] === "`") runEnd++;
+				i = runEnd;
+				continue;
+			}
+			const openStart = i;
+			let openEnd = i;
+			while (openEnd < s.length && s[openEnd] === "`") openEnd++;
+			const openLen = openEnd - openStart;
+			let k = openEnd;
+			let foundCloseEnd = -1;
+			while (k < s.length) {
+				if (s[k] !== "`") {
+					k++;
+					continue;
+				}
+				let closeEnd = k;
+				while (closeEnd < s.length && s[closeEnd] === "`") closeEnd++;
+				if (closeEnd - k === openLen) {
+					foundCloseEnd = closeEnd;
+					break;
+				}
+				k = closeEnd;
+			}
+			if (foundCloseEnd !== -1) {
+				ranges.push({ from: openStart, to: foundCloseEnd });
+				i = foundCloseEnd;
+			} else {
+				i = openEnd;
+			}
+		}
+		return ranges;
+	};
+	// 本文全体の inline code ranges と各行の text 内 start position を計算する小 helper。
+	// 両 scan mock で同じ前処理を使うために集約する。
+	const buildLineStarts = (text: string, lines: string[]): number[] => {
+		const lineStarts = new Array<number>(lines.length);
+		let pos = 0;
+		for (let i = 0; i < lines.length; i++) {
+			lineStarts[i] = pos;
+			pos += lines[i].length;
+			if (pos < text.length && text[pos] === "\r") pos++;
+			if (pos < text.length && text[pos] === "\n") pos++;
+		}
+		return lineStarts;
+	};
+	const isInRanges = (ranges: Array<{ from: number; to: number }>, pos: number): boolean => {
+		for (const r of ranges) {
+			if (r.from <= pos && pos < r.to) return true;
+		}
+		return false;
+	};
+	// CommonMark / Lezer 準拠の fenced code block 判定。本番 search.ts:findFencedLines と同形。
+	// - opener: 行頭 0-3 spaces の後に ``` または ~~~ (3 個以上の連続)。info string は OK
+	// - closer: opener と同じ文字種、opener 以上の長さ、後ろは空白のみ
+	// - 4 spaces 以上 indent の行は fence marker と認識しない
+	const findFencedLines = (lines: string[]): boolean[] => {
+		const flags = new Array<boolean>(lines.length).fill(false);
+		let opener: { ch: string; length: number } | null = null;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			let indent = 0;
+			while (indent < line.length && line[indent] === " ") indent++;
+			if (indent >= 4) {
+				if (opener !== null) flags[i] = true;
+				continue;
+			}
+			const ch = line[indent];
+			let markerLen = 0;
+			if (ch === "`" || ch === "~") {
+				while (indent + markerLen < line.length && line[indent + markerLen] === ch) markerLen++;
+			}
+			if (markerLen >= 3) {
+				if (opener === null) {
+					// backtick fence の info string に backtick は許容されない
+					// (CommonMark / Lezer)。tilde fence では制約なし。本番 search.ts と同形。
+					const afterOpener = line.slice(indent + markerLen);
+					if (ch === "`" && afterOpener.includes("`")) {
+						continue;
+					}
+					opener = { ch, length: markerLen };
+					flags[i] = true;
+					continue;
+				}
+				const afterMarker = line.slice(indent + markerLen);
+				if (ch === opener.ch && markerLen >= opener.length && /^[ \t]*$/.test(afterMarker)) {
+					opener = null;
+					flags[i] = true;
+					continue;
+				}
+				flags[i] = true;
+				continue;
+			}
+			if (opener !== null) flags[i] = true;
+		}
+		return flags;
+	};
+	// 指定 line index の文字を space に置換した text を返す。length は元と一致するため
+	// lineStarts / m.index の換算がそのまま使える。
+	const maskRanges = (
+		text: string,
+		lines: string[],
+		lineStarts: number[],
+		mask: boolean[],
+	): string => {
+		const buf = text.split("");
+		for (let i = 0; i < lines.length; i++) {
+			if (!mask[i]) continue;
+			const start = lineStarts[i];
+			const end = start + lines[i].length;
+			for (let j = start; j < end; j++) buf[j] = " ";
+		}
+		return buf.join("");
+	};
+
 	// `Api` 型に固定することで preload 契約と乖離した瞬間に typecheck が落ちる。
 	// 緩い `unknown` / `string` のままだと preload 側のシグネチャが変わっても
 	// この helper は静かに古いまま放置されるため、foundation として固定する。
@@ -576,21 +717,25 @@ function installApiMock(opts: {
 				// 本番 search.ts:210 と同じく \r\n / \n 両対応。CRLF Markdown で
 				// `\r` が lineContent / contextBefore / contextAfter に残る差異を防ぐ。
 				const lines = content.split(/\r?\n/);
-				let inCodeBlock = false;
+				const lineStarts = buildLineStarts(content, lines);
+				const isFenced = findFencedLines(lines);
+				// fenced 範囲を space mask した text で inline code ranges を計算する。
+				// fence 内の backtick が外側 inline code delimiter と peer になるのを防ぐ。
+				const inlineCodeRanges = collectInlineCodeRanges(
+					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+				);
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
+					if (isFenced[i]) continue;
 					const line = lines[i];
-					const trimmed = line.trimStart();
-					if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-						inCodeBlock = !inCodeBlock;
-						continue;
-					}
-					if (inCodeBlock) continue;
 					re.lastIndex = 0;
 					let m: RegExpExecArray | null = null;
 					while (true) {
 						m = re.exec(line);
 						if (!m) break;
+						// 本番 iterateWikilinkOccurrences と同じく escape / inline code 内は除外。
+						if (isEscaped(line, m.index)) continue;
+						if (isInRanges(inlineCodeRanges, lineStarts[i] + m.index)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
@@ -627,6 +772,95 @@ function installApiMock(opts: {
 		},
 		cancelWikilinkScan: async (): Promise<void> => {
 			track("cancelWikilinkScan", []);
+		},
+		scanBacklinks: async (
+			workspacePath: string,
+			targetFilePath: string,
+		): Promise<BacklinkSource[]> => {
+			track("scanBacklinks", [workspacePath, targetFilePath]);
+			const encoder = new TextEncoder();
+			const targetBase = baseName(targetFilePath);
+			// 本番 scanBacklinksImpl と同じく小文字 `.md` のみ対象。
+			// `Target.MD` を target にした場合に本番は [] を返すが mock がバックリンクを
+			// 返してしまうと、将来 `.MD` ケースの e2e を足したときに false positive になる。
+			if (!targetBase.endsWith(".md")) return [];
+			const targetPage = targetBase.slice(0, -3).normalize("NFC");
+			if (!targetPage) return [];
+			const mdFiles = collectMdFiles(workspacePath);
+			// basename 衝突対応: live-preview の buildFileMap (src/components/editor/
+			// live-preview/wikilinks.ts:45) と本番 scanBacklinksImpl と同じく、basename →
+			// lexicographically smallest path を canonical とする。target がその canonical でない
+			// なら、live-preview 上では `[[target]]` は別ノートに解決されるため空配列を返す。
+			const fileMap: Record<string, string> = {};
+			for (const filePath of mdFiles) {
+				const name = baseName(filePath).replace(/\.md$/i, "").normalize("NFC");
+				if (!name) continue;
+				const existing = fileMap[name];
+				if (!existing || filePath < existing) {
+					fileMap[name] = filePath;
+				}
+			}
+			if (fileMap[targetPage] !== targetFilePath) return [];
+			// isEscaped / collectInlineCodeRanges / isInRanges / findFencedLines / maskRanges は
+			// installApiMock 冒頭の共通 helper。
+			const map: Record<string, BacklinkSource["references"]> = {};
+			for (const filePath of mdFiles) {
+				// 本番 search.ts:scanBacklinksImpl と同じく self-reference は除外。
+				// e2e mock の filePath は正規化済み posix 形なので canonical 化は不要。
+				if (filePath === targetFilePath) continue;
+				const content = store.files[filePath];
+				if (!content) continue;
+				const lines = content.split(/\r?\n/);
+				const lineStarts = buildLineStarts(content, lines);
+				const isFenced = findFencedLines(lines);
+				const inlineCodeRanges = collectInlineCodeRanges(
+					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+				);
+				const re = /\[\[([^[\]\n\r]+)\]\]/g;
+				for (let i = 0; i < lines.length; i++) {
+					if (isFenced[i]) continue;
+					const line = lines[i];
+					re.lastIndex = 0;
+					let m: RegExpExecArray | null = null;
+					while (true) {
+						m = re.exec(line);
+						if (!m) break;
+						if (isEscaped(line, m.index)) continue;
+						if (isInRanges(inlineCodeRanges, lineStarts[i] + m.index)) continue;
+						const inner = m[1];
+						const pipeIdx = inner.indexOf("|");
+						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
+						if (
+							!page ||
+							page.includes("/") ||
+							page.includes("\\") ||
+							page === "." ||
+							page === ".." ||
+							page.includes("..")
+						)
+							continue;
+						const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
+						const normalized = stripped.normalize("NFC");
+						if (!normalized || normalized !== targetPage) continue;
+						const refs = map[filePath] ?? [];
+						refs.push({
+							filePath,
+							lineNumber: i + 1,
+							byteOffset: encoder.encode(line.slice(0, m.index)).length + 1,
+							lineContent: line,
+							contextBefore: lines.slice(Math.max(0, i - 3), i),
+							contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
+						});
+						map[filePath] = refs;
+					}
+				}
+			}
+			return Object.entries(map)
+				.map(([sourceFile, references]) => ({ sourceFile, references }))
+				.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));
+		},
+		cancelBacklinkScan: async (): Promise<void> => {
+			track("cancelBacklinkScan", []);
 		},
 
 		fetchOgp: async (requestId: string, url: string): Promise<OgpData> => {
