@@ -164,6 +164,26 @@ export function AppLayout() {
 	const isNewTab = activeTabPath ? isNewTabPath(activeTabPath) : false;
 	const isEditorComposing = useCallback(() => editorViewRef.current?.composing ?? false, []);
 	const tabCacheRef = useRef(new Map<string, TabCache>());
+
+	// file watcher イベントで cache を disk loaded 内容に更新するときの共通処理。
+	// loaded が processContent 適用後の existing.content と一致 = 自分の write
+	// (タブ切替時 flush save 等) なら undo 履歴含む editorState を保持。
+	// 一致しない = 外部書き換え → editorState 破棄 (history と doc がズレるため、#220)。
+	// 比較は processContent 適用後で行う (writeFile 時に末尾改行 / trim が適用されるため)。
+	const setCacheFromReload = useCallback((path: string, loaded: string) => {
+		const existing = tabCacheRef.current.get(path);
+		const trim = useSettingsStore.getState().trimTrailingWhitespace;
+		const editorState =
+			existing?.editorState && loaded === processContent(existing.content, trim)
+				? existing.editorState
+				: undefined;
+		tabCacheRef.current.set(path, {
+			content: loaded,
+			savedContent: loaded,
+			editorState,
+		});
+	}, []);
+
 	const handleFlushComplete = useCallback(
 		(path: string, rawContent: string) => {
 			const cached = tabCacheRef.current.get(path);
@@ -687,22 +707,7 @@ export function AppLayout() {
 				} else {
 					readFile(path)
 						.then((loaded) => {
-							// loaded が processContent(existing.content) と一致 = 自分の write
-							// (タブ切替時 flush save 等) → undo 履歴含む editorState を保持
-							// 一致しない = 外部書き換え → editorState 破棄 (history を持っても doc とズレるため)
-							// processContent は writeFile 前に常に適用される (末尾改行 / trim) ため、
-							// 生 content と直接 === では一致しない点に注意。
-							const existing = tabCacheRef.current.get(path);
-							const trim = useSettingsStore.getState().trimTrailingWhitespace;
-							const preservedEditorState =
-								existing?.editorState && loaded === processContent(existing.content, trim)
-									? existing.editorState
-									: undefined;
-							tabCacheRef.current.set(path, {
-								content: loaded,
-								savedContent: loaded,
-								editorState: preservedEditorState,
-							});
+							setCacheFromReload(path, loaded);
 							// Only update editor state if this file is still the active tab
 							if (useWorkspaceStore.getState().activeTabPath !== path) return;
 							// Compare with last written content (processed) to detect our own saves
@@ -725,22 +730,7 @@ export function AppLayout() {
 				if (cached && cached.content === cached.savedContent) {
 					readFile(path)
 						.then((loaded) => {
-							// 上と同じく自分の write なら editorState を保持して undo 履歴を維持 (#220)。
-							// タブ切替時の flush save → file watcher が file change を検知して
-							// ここに到達するケースで editorState が破棄されると、タブに戻った時に
-							// view.setState() による履歴復元ができなくなる。
-							// 比較は processContent 適用後で行う (writeFile 時に末尾改行等が追加されるため)。
-							const existing = tabCacheRef.current.get(path);
-							const trim = useSettingsStore.getState().trimTrailingWhitespace;
-							const preservedEditorState =
-								existing?.editorState && loaded === processContent(existing.content, trim)
-									? existing.editorState
-									: undefined;
-							tabCacheRef.current.set(path, {
-								content: loaded,
-								savedContent: loaded,
-								editorState: preservedEditorState,
-							});
+							setCacheFromReload(path, loaded);
 						})
 						.catch((err) => {
 							console.error("Failed to reload cached file:", err);
@@ -748,7 +738,7 @@ export function AppLayout() {
 				}
 			}
 		},
-		[markSaved],
+		[markSaved, setCacheFromReload],
 	);
 
 	useFileWatcher({
