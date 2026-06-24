@@ -445,3 +445,16 @@ new BrowserWindow({
 - 外部 URL は必ず `shell.openExternal` 経由（`<a href>` で直接遷移させない）
 - CSP は本番ビルドでも `default-src 'self'` を基本に、画像のみ `https:` 許可
 - リモートコンテンツの読み込みは行わない（OGP 画像は main 側で fetch して data URL 化するか、画像専用 fetch エンドポイントを介する）
+
+### Settings の追加・移行フロー
+
+`AppSettings`（`src/lib/store.ts`）に新フィールドを追加する手順は以下 4 ステップ。
+
+**migration が要るか要らないかの判断ルール**: 既にユーザーの disk 上に書かれている既存データの**変換（rename / 型変更 / key 削除）が必要な場合のみ** `MIGRATIONS` に entry を追加して `_schemaVersion` を bump する。純粋な新フィールド追加（既存ユーザーは値を持たない）なら migration 不要で、`DEFAULTS` の値が fallback として効く。
+
+1. **型の更新** — `src/lib/store.ts` の `AppSettings` interface に新フィールドを追加し、必要に応じて union 型 alias も export
+2. **DEFAULTS の更新** — `DEFAULTS` オブジェクトに既定値を追加
+3. **migration の追加（必要な場合のみ）** — `src/lib/store-migration.ts` の `MIGRATIONS` に 1 entry を追加し `version` を +1。`run(ctx)` 内で `ctx.get` / `ctx.set` / `ctx.delete` を使い旧キーを新キーへ変換する
+4. **テストの追加** — `loadSettings()` の defaults / stored value テスト（`src/lib/store.test.ts`）に新フィールドを追加。migration を入れた場合は `src/lib/store-migration.test.ts` に変換ケースを追加し、`e2e/electron/settings-migration.electron.spec.ts` で実 IPC 越しのシナリオを 1 件 verify
+
+`_schemaVersion` は migration の連鎖を成立させるための**内部フィールド**で、`settings.json` 上のみに書かれ、`AppSettings` には surface しない。`MIGRATIONS` 配列に `version: N` の entry が追加されるたびに `LATEST_SCHEMA_VERSION` が +1 され、起動時の `applyMigrations()` が「現在の `_schemaVersion` 〜 LATEST」の pending 分のみ順次適用する。

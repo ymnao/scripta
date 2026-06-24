@@ -2,12 +2,16 @@ import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
 import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
+import { applyMigrations } from "./store-migration";
 
 export { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS };
 
 export type ThemePreference = "system" | "light" | "dark";
 export type FontFamily = "monospace" | "sans-serif" | "serif";
 
+// AppSettings は UI / store 層が消費する settings の shape。`_schemaVersion` は
+// storage layer 内部の concern（migration 連鎖を成立させるため settings.json には
+// 書かれるが、AppSettings には surface しない）。store-migration.ts 参照。
 interface AppSettings {
 	workspacePath: string | null;
 	themePreference: ThemePreference;
@@ -60,30 +64,28 @@ const DEFAULTS: AppSettings = {
 
 export async function loadSettings(): Promise<AppSettings> {
 	try {
+		// 旧 → 新 schema の段階的変換。store-migration.ts の MIGRATIONS に entry を
+		// 追加するだけで新規 migration を組み込める。何か適用された時のみ disk write を kick。
+		const migrated = await applyMigrations({
+			get: settingsGet,
+			set: settingsSet,
+			delete: settingsDelete,
+		});
+		if (migrated) {
+			await settingsSave();
+		}
+
 		const rawWorkspacePath = await settingsGet("workspacePath");
 		const workspacePath: string | null =
 			typeof rawWorkspacePath === "string" ? rawWorkspacePath : DEFAULTS.workspacePath;
 
-		// Migration: convert legacy "theme" key to "themePreference"
-		let themePreference: ThemePreference = DEFAULTS.themePreference;
 		const rawThemePreference = await settingsGet("themePreference");
-		if (
+		const themePreference: ThemePreference =
 			rawThemePreference === "system" ||
 			rawThemePreference === "light" ||
 			rawThemePreference === "dark"
-		) {
-			themePreference = rawThemePreference;
-		} else {
-			// Migrate from legacy "theme" key
-			const rawTheme = await settingsGet("theme");
-			if (rawTheme === "light" || rawTheme === "dark") {
-				themePreference = rawTheme;
-			}
-			// Persist migrated value and remove legacy key
-			await settingsSet("themePreference", themePreference);
-			await settingsDelete("theme");
-			await settingsSave();
-		}
+				? rawThemePreference
+				: DEFAULTS.themePreference;
 
 		const rawSidebarVisible = await settingsGet("sidebarVisible");
 		const sidebarVisible: boolean =
