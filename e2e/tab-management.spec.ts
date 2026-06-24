@@ -186,6 +186,46 @@ test.describe("tab management", () => {
 		await expect(page.locator(".cm-content")).toContainText("Hello World updated");
 	});
 
+	test("検索バー open 中に編集 → タブ切替 → 戻って undo が効く (#220)", async ({ page }) => {
+		// snapshot 経由 (historyField のみ JSON 化) で保存することで、検索 compartment 等の
+		// 一時 extension を含めずに undo 履歴だけを維持できる。
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs: workspace, dialogResult: "/workspace" });
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("hello.md file").click();
+
+		// notes.md を新規タブで開いて編集する
+		await page.getByLabel("notes.md file").click({ modifiers: [modKey] });
+		await expect(page.locator(".cm-content")).toContainText("Some notes here");
+
+		// Cmd+F で SearchBar を開く → input にフォーカスが行く
+		await page.locator(".cm-content").click();
+		await page.keyboard.press(`${modKey}+f`);
+		await page.keyboard.type("notes");
+
+		// SearchBar 開いたまま .cm-content にフォーカスを戻して編集
+		await page.locator(".cm-content").click();
+		await page.keyboard.press(`${modKey}+End`);
+		await page.keyboard.type(" inside search");
+		await expect(page.locator(".cm-content")).toContainText("Some notes here inside search");
+
+		// hello.md タブに切替
+		await page.getByRole("tab").filter({ hasText: "hello.md" }).click();
+		await expect(page.locator(".cm-content")).toContainText("Hello World");
+
+		// notes.md に戻る → snapshot から history ごと復元される
+		await page.getByRole("tab").filter({ hasText: "notes.md" }).click();
+		await expect(page.locator(".cm-content")).toContainText("Some notes here inside search");
+
+		// Cmd+Z で undo → " inside search" が取り消される
+		await page.locator(".cm-content").click();
+		await page.keyboard.press(`${modKey}+z`);
+		await expect(page.locator(".cm-content")).toContainText("Some notes here");
+		await expect(page.locator(".cm-content")).not.toContainText("inside search");
+	});
+
 	test("dirty タブ切替で flush save → file watcher 通知が来ても undo 履歴が残る (#220)", async ({
 		page,
 	}) => {

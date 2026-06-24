@@ -1,5 +1,5 @@
 import "katex/dist/katex.min.css";
-import { redo, undo } from "@codemirror/commands";
+import { historyField, redo, undo } from "@codemirror/commands";
 import { insertNewlineContinueMarkup, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
 	defaultHighlightStyle,
@@ -17,6 +17,7 @@ import {
 	type MouseEvent as ReactMouseEvent,
 	useCallback,
 	useEffect,
+	useImperativeHandle,
 	useMemo,
 	useRef,
 	useState,
@@ -141,6 +142,15 @@ export interface CursorInfo {
 	selectedLines?: number;
 }
 
+// タブ切替で undo 履歴を維持するための snapshot 取得/復元 handle (#220)。
+// historyField を JSON 化して保存し、復元時には最新 extensions で
+// EditorState を組み立て直すため、検索 compartment 等の一時 extension が
+// snapshot に混入しない。
+export interface MarkdownEditorHandle {
+	captureSnapshot(): unknown;
+	restoreSnapshot(snapshot: unknown): boolean;
+}
+
 interface MarkdownEditorProps {
 	value: string;
 	onChange: (value: string) => void;
@@ -149,6 +159,7 @@ interface MarkdownEditorProps {
 	goToLine?: GoToLineRequest | null;
 	onGoToLineDone?: () => void;
 	onStatistics?: (info: CursorInfo) => void;
+	snapshotHandleRef?: React.RefObject<MarkdownEditorHandle | null>;
 }
 
 export function MarkdownEditor({
@@ -159,6 +170,7 @@ export function MarkdownEditor({
 	goToLine,
 	onGoToLineDone,
 	onStatistics,
+	snapshotHandleRef,
 }: MarkdownEditorProps) {
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
 	const fontSize = useSettingsStore((s) => s.fontSize);
@@ -409,6 +421,58 @@ export function MarkdownEditor({
 			}),
 		],
 		[fontSize, showLinkCards],
+	);
+
+	// タブ切替で undo 履歴を維持する snapshot handle (#220)。
+	// historyField を JSON 化して保存・復元することで、検索バーが open 中に
+	// view.state に append された compartment 等の一時 extension を snapshot に
+	// 含めない。復元時は最新の extensions で EditorState を組み立て直すため、
+	// 設定変更による extensions reconfigure 後も古い構成が戻る心配がない。
+	useImperativeHandle(
+		snapshotHandleRef,
+		() => ({
+			captureSnapshot() {
+				const view = editorRef.current?.view;
+				if (!view) return null;
+				return view.state.toJSON({ history: historyField });
+			},
+			restoreSnapshot(snapshot) {
+				const view = editorRef.current?.view;
+				if (!view || !snapshot || typeof snapshot !== "object") return false;
+				try {
+					const newState = EditorState.fromJSON(
+						snapshot as Parameters<typeof EditorState.fromJSON>[0],
+						{ extensions },
+						{ history: historyField },
+					);
+					view.setState(newState);
+					// view.setState() は updateListener を発火しないため、StatusBar の
+					// cursor info を手動で通知する (#220)。
+					const callback = onStatisticsRef.current;
+					if (callback) {
+						const sel = newState.selection.main;
+						const lineInfo = newState.doc.lineAt(sel.head);
+						const info: CursorInfo = {
+							line: lineInfo.number,
+							col: sel.head - lineInfo.from + 1,
+							chars: newState.doc.length,
+						};
+						if (!sel.empty) {
+							info.selectedChars = sel.to - sel.from;
+							const fromLine = newState.doc.lineAt(sel.from).number;
+							const toLine = newState.doc.lineAt(sel.to).number;
+							info.selectedLines = toLine - fromLine + 1;
+						}
+						callback(info);
+					}
+					return true;
+				} catch (err) {
+					console.error("Failed to restore editor snapshot:", err);
+					return false;
+				}
+			},
+		}),
+		[extensions],
 	);
 
 	const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
