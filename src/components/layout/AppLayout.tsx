@@ -37,7 +37,7 @@ import { SettingsDialog } from "../common/SettingsDialog";
 import { SetupWizardDialog } from "../common/SetupWizardDialog";
 import { ToastContainer } from "../common/Toast";
 import { FONT_FAMILY_MAP } from "../editor/editor-theme";
-import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
+import type { CursorInfo, GoToLineRequest, MarkdownEditorHandle } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import { ScratchpadPanel, type ScratchpadSaveHandle } from "../editor/ScratchpadPanel";
 import { TabBar } from "../editor/TabBar";
@@ -54,6 +54,11 @@ type GoToLine = GoToLineRequest | null;
 interface TabCache {
 	content: string;
 	savedContent: string;
+	// MarkdownEditorHandle.captureSnapshot() で取得した EditorState の JSON 表現 (#220)。
+	// historyField のみを抽出するため、SearchBar 等が view に append した一時 extension
+	// (検索ハイライト・listener) は含まれない。タブ切替で復元しても汚染なし。
+	// 復元時は最新の extensions で EditorState を組み立て直すので、設定変更後も古い構成が戻らない。
+	editorStateSnapshot?: unknown;
 }
 
 export function AppLayout() {
@@ -147,6 +152,10 @@ export function AppLayout() {
 	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
 	const [editorView, setEditorView] = useState<EditorView | null>(null);
+	// view.setState() で内部 state が完全置換されると view identity は変わらないため、
+	// view を直接 deps に持つ SearchBar などの effect が再実行されない。epoch を increment
+	// して prop 経由で伝えることで、view 同一でも下流の effect を強制的に再走させる (#220)。
+	const [editorViewEpoch, setEditorViewEpoch] = useState(0);
 	const scratchpadSaveRef = useRef<ScratchpadSaveHandle | null>(null);
 	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
 	const searchBarOpenRef = useRef(false);
@@ -159,6 +168,29 @@ export function AppLayout() {
 	const isNewTab = activeTabPath ? isNewTabPath(activeTabPath) : false;
 	const isEditorComposing = useCallback(() => editorViewRef.current?.composing ?? false, []);
 	const tabCacheRef = useRef(new Map<string, TabCache>());
+	// MarkdownEditor の snapshot handle (captureSnapshot / restoreSnapshot) への参照 (#220)。
+	const markdownEditorHandleRef = useRef<MarkdownEditorHandle | null>(null);
+
+	// file watcher イベントで cache を disk loaded 内容に更新するときの共通処理 (#220)。
+	// loaded が processContent 適用後の existing.content と一致 = 自分の write
+	// (タブ切替時 flush save 等) なら cache は既に正しいので **何もしない**。
+	// cache.content/savedContent を loaded (整形後) に上書きすると、保持している
+	// snapshot 内 doc (生のまま) とズレてしまい、復元時に表示・dirty 判定・undo が壊れる。
+	// 一致しない = 外部書き換え → cache を全置換 + editorStateSnapshot 破棄
+	// (history を保持しても doc とズレるため)。
+	const setCacheFromReload = useCallback((path: string, loaded: string) => {
+		const existing = tabCacheRef.current.get(path);
+		const trim = useSettingsStore.getState().trimTrailingWhitespace;
+		if (existing && loaded === processContent(existing.content, trim)) {
+			return;
+		}
+		tabCacheRef.current.set(path, {
+			content: loaded,
+			savedContent: loaded,
+			editorStateSnapshot: undefined,
+		});
+	}, []);
+
 	const handleFlushComplete = useCallback(
 		(path: string, rawContent: string) => {
 			const cached = tabCacheRef.current.get(path);
@@ -495,9 +527,15 @@ export function AppLayout() {
 				.tabs.some((t) => t.path === prevPath || t.history.includes(prevPath));
 			if (tabStillExists) {
 				const currentCache = tabCacheRef.current.get(prevPath);
+				// MarkdownEditorHandle.captureSnapshot() で historyField を含む JSON snapshot を
+				// 取得する (#220)。snapshot は historyField のみを抽出するため、SearchBar が
+				// view に append した検索 compartment や、検索 query 等の一時 extension は
+				// 含まれない (= 別タブから戻っても汚染なし、検索バー開放中の編集でも履歴維持)。
+				const prevSnapshot = markdownEditorHandleRef.current?.captureSnapshot();
 				tabCacheRef.current.set(prevPath, {
 					content: contentRef.current,
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
+					editorStateSnapshot: prevSnapshot ?? currentCache?.editorStateSnapshot,
 				});
 			} else {
 				tabCacheRef.current.delete(prevPath);
@@ -530,7 +568,25 @@ export function AppLayout() {
 			savedContentRef.current = cached.savedContent;
 			markSaved(cached.savedContent);
 			setContent(cached.content);
-			setEditorKey((k) => k + 1);
+			// editorStateSnapshot が保存されていれば最新の extensions で組み立て直して
+			// undo/redo 履歴ごと復元する (#220)。失敗条件 (どれかでも該当):
+			// - handle 未取得 (SlideView 表示中など MarkdownEditor が mount されていない)
+			// - editorStateSnapshot なし (初回 / 外部書き換え後)
+			// - restoreSnapshot が false を返した (JSON 構造が不正など)
+			// 失敗時は remount で view を作り直して新 content で初期化する fallback。
+			const handle = markdownEditorHandleRef.current;
+			const restored =
+				cached.editorStateSnapshot != null && handle
+					? handle.restoreSnapshot(cached.editorStateSnapshot)
+					: false;
+			if (restored) {
+				// view identity は同じだが内部 state は完全置換されたので、view を deps に
+				// 持つ下流の effect (SearchBar 等) を強制的に再走させるために epoch を bump (#220)。
+				// cursor info は restoreSnapshot 内で onStatistics 経由で通知済み。
+				setEditorViewEpoch((e) => e + 1);
+			} else {
+				setEditorKey((k) => k + 1);
+			}
 			if (pendingGoToLineRef.current !== null) {
 				setGoToLine(pendingGoToLineRef.current);
 				pendingGoToLineRef.current = null;
@@ -670,7 +726,7 @@ export function AppLayout() {
 				} else {
 					readFile(path)
 						.then((loaded) => {
-							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+							setCacheFromReload(path, loaded);
 							// Only update editor state if this file is still the active tab
 							if (useWorkspaceStore.getState().activeTabPath !== path) return;
 							// Compare with last written content (processed) to detect our own saves
@@ -693,7 +749,7 @@ export function AppLayout() {
 				if (cached && cached.content === cached.savedContent) {
 					readFile(path)
 						.then((loaded) => {
-							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+							setCacheFromReload(path, loaded);
 						})
 						.catch((err) => {
 							console.error("Failed to reload cached file:", err);
@@ -701,7 +757,7 @@ export function AppLayout() {
 				}
 			}
 		},
-		[markSaved],
+		[markSaved, setCacheFromReload],
 	);
 
 	useFileWatcher({
@@ -1242,7 +1298,11 @@ export function AppLayout() {
 						) : slideViewActive ? (
 							<SlideView key={editorKey} {...editorProps} />
 						) : (
-							<MarkdownEditor key={editorKey} {...editorProps} />
+							<MarkdownEditor
+								key={editorKey}
+								{...editorProps}
+								snapshotHandleRef={markdownEditorHandleRef}
+							/>
 						)
 					) : (
 						<NewTabContent
@@ -1267,6 +1327,7 @@ export function AppLayout() {
 					{searchBarOpen && editorView && (
 						<SearchBar
 							view={editorView}
+							viewEpoch={editorViewEpoch}
 							onClose={() => setSearchBarOpen(false)}
 							initialExpanded={searchBarExpanded}
 							initialSearchText={searchBarInitialText}
