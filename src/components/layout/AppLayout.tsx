@@ -687,12 +687,17 @@ export function AppLayout() {
 				} else {
 					readFile(path)
 						.then((loaded) => {
-							// loaded が既存 cache.content と一致 = 自分の write
+							// loaded が processContent(existing.content) と一致 = 自分の write
 							// (タブ切替時 flush save 等) → undo 履歴含む editorState を保持
 							// 一致しない = 外部書き換え → editorState 破棄 (history を持っても doc とズレるため)
+							// processContent は writeFile 前に常に適用される (末尾改行 / trim) ため、
+							// 生 content と直接 === では一致しない点に注意。
 							const existing = tabCacheRef.current.get(path);
+							const trim = useSettingsStore.getState().trimTrailingWhitespace;
 							const preservedEditorState =
-								existing && loaded === existing.content ? existing.editorState : undefined;
+								existing?.editorState && loaded === processContent(existing.content, trim)
+									? existing.editorState
+									: undefined;
 							tabCacheRef.current.set(path, {
 								content: loaded,
 								savedContent: loaded,
@@ -720,13 +725,17 @@ export function AppLayout() {
 				if (cached && cached.content === cached.savedContent) {
 					readFile(path)
 						.then((loaded) => {
-							// 上と同じく自分の write なら editorState を保持して undo 履歴を維持。
+							// 上と同じく自分の write なら editorState を保持して undo 履歴を維持 (#220)。
 							// タブ切替時の flush save → file watcher が file change を検知して
 							// ここに到達するケースで editorState が破棄されると、タブに戻った時に
-							// view.setState() による履歴復元ができなくなる (#220)。
+							// view.setState() による履歴復元ができなくなる。
+							// 比較は processContent 適用後で行う (writeFile 時に末尾改行等が追加されるため)。
 							const existing = tabCacheRef.current.get(path);
+							const trim = useSettingsStore.getState().trimTrailingWhitespace;
 							const preservedEditorState =
-								existing && loaded === existing.content ? existing.editorState : undefined;
+								existing?.editorState && loaded === processContent(existing.content, trim)
+									? existing.editorState
+									: undefined;
 							tabCacheRef.current.set(path, {
 								content: loaded,
 								savedContent: loaded,
