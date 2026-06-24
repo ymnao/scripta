@@ -157,6 +157,10 @@ export function AppLayout() {
 	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
 	const [editorView, setEditorView] = useState<EditorView | null>(null);
+	// view.setState() で内部 state が完全置換されると view identity は変わらないため、
+	// view を直接 deps に持つ SearchBar などの effect が再実行されない。epoch を increment
+	// して prop 経由で伝えることで、view 同一でも下流の effect を強制的に再走させる (#220)。
+	const [editorViewEpoch, setEditorViewEpoch] = useState(0);
 	const scratchpadSaveRef = useRef<ScratchpadSaveHandle | null>(null);
 	const searchBarHandleRef = useRef<SearchBarHandle | null>(null);
 	const searchBarOpenRef = useRef(false);
@@ -598,6 +602,9 @@ export function AppLayout() {
 				cached.editorStateVersion === editorExtensionsVersionRef.current
 			) {
 				view.setState(cached.editorState);
+				// view identity は同じだが内部 state は完全置換されたので、view を deps に
+				// 持つ下流の effect (SearchBar 等) を強制的に再走させるために epoch を bump (#220)。
+				setEditorViewEpoch((e) => e + 1);
 				// view.setState() は updateListener を発火しないため、ステータスバーの
 				// cursor info を手動で計算して反映する (#220)。
 				// MarkdownEditor.tsx:300 の handleCreateEditor / updateListener と同等ロジック。
@@ -1355,6 +1362,7 @@ export function AppLayout() {
 					{searchBarOpen && editorView && (
 						<SearchBar
 							view={editorView}
+							viewEpoch={editorViewEpoch}
 							onClose={() => setSearchBarOpen(false)}
 							initialExpanded={searchBarExpanded}
 							initialSearchText={searchBarInitialText}

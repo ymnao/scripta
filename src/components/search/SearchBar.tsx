@@ -27,6 +27,10 @@ export interface SearchBarHandle {
 
 interface SearchBarProps {
 	view: EditorView;
+	// view.setState() で内部 state が完全置換されると view identity は同じでも
+	// 検索クエリや listener compartment が消えるため、AppLayout 側で増分する
+	// epoch を渡して effect を再実行させる (#220)。
+	viewEpoch?: number;
 	onClose: () => void;
 	initialExpanded?: boolean;
 	initialSearchText?: string;
@@ -55,6 +59,7 @@ function countMatches(view: EditorView): { current: number; total: number } {
 
 export function SearchBar({
 	view,
+	viewEpoch,
 	onClose,
 	initialExpanded = false,
 	initialSearchText = "",
@@ -98,36 +103,36 @@ export function SearchBar({
 		prevExpandedRef.current = expanded;
 	}, [expanded]);
 
-	// Sync search query to CodeMirror and update match count
+	// Sync search query to CodeMirror and update match count.
+	// viewEpoch を deps に入れることで、view.setState() で内部 state が置換され
+	// 検索クエリが消えた場合にも再 dispatch できる (#220)。effect body では参照
+	// しないが意図的に再走 trigger として deps に含める。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: viewEpoch is intentional re-run trigger for view.setState() restore
 	useEffect(() => {
 		const query = new SearchQuery({ search: searchText, replace: replaceText });
 		view.dispatch({ effects: setSearchQuery.of(query) });
 		setMatchInfo(countMatches(view));
-	}, [searchText, replaceText, view]);
+	}, [searchText, replaceText, view, viewEpoch]);
 
 	// Listen to CM selection changes to update current match index.
-	// Use a ref-based Compartment so that re-runs reconfigure instead of appending.
-	const compartmentRef = useRef(new Compartment());
-	const appendedRef = useRef(false);
+	// view.setState() で compartment ごと state が消える可能性があるため、
+	// effect ごとに新しい Compartment を作って毎回 appendConfig し直す。
+	// cleanup は closure で同一 Compartment instance を参照するので確実に効く (#220)。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: viewEpoch is intentional re-run trigger for view.setState() restore
 	useEffect(() => {
-		const compartment = compartmentRef.current;
+		const compartment = new Compartment();
 		const ext = EditorView.updateListener.of((update) => {
 			if (update.selectionSet) {
 				setMatchInfo(countMatches(view));
 			}
 		});
-		if (appendedRef.current) {
-			view.dispatch({ effects: compartment.reconfigure(ext) });
-		} else {
-			view.dispatch({
-				effects: StateEffect.appendConfig.of(compartment.of(ext)),
-			});
-			appendedRef.current = true;
-		}
+		view.dispatch({
+			effects: StateEffect.appendConfig.of(compartment.of(ext)),
+		});
 		return () => {
 			view.dispatch({ effects: compartment.reconfigure([]) });
 		};
-	}, [view]);
+	}, [view, viewEpoch]);
 
 	const handleFindNext = useCallback(() => {
 		if (!searchText) return;
