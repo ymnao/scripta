@@ -105,10 +105,10 @@ export function SearchBar({
 
 	// Sync search query to CodeMirror and update match count.
 	// viewEpoch を deps に入れることで、view.setState() で内部 state が置換され
-	// 検索クエリが消えた場合にも再 dispatch できる (#220)。effect body では参照
-	// しないが意図的に再走 trigger として deps に含める。
-	// biome-ignore lint/correctness/useExhaustiveDependencies: viewEpoch is intentional re-run trigger for view.setState() restore
+	// 検索クエリが消えた場合にも再 dispatch できる (#220)。effect body 内では
+	// `void viewEpoch` で明示参照して biome に意図を伝える (再走 trigger 専用)。
 	useEffect(() => {
+		void viewEpoch;
 		const query = new SearchQuery({ search: searchText, replace: replaceText });
 		view.dispatch({ effects: setSearchQuery.of(query) });
 		setMatchInfo(countMatches(view));
@@ -118,8 +118,9 @@ export function SearchBar({
 	// view.setState() で compartment ごと state が消える可能性があるため、
 	// effect ごとに新しい Compartment を作って毎回 appendConfig し直す。
 	// cleanup は closure で同一 Compartment instance を参照するので確実に効く (#220)。
-	// biome-ignore lint/correctness/useExhaustiveDependencies: viewEpoch is intentional re-run trigger for view.setState() restore
+	// viewEpoch は effect body 内で `void viewEpoch` で明示参照して再走 trigger 専用と示す。
 	useEffect(() => {
+		void viewEpoch;
 		const compartment = new Compartment();
 		const ext = EditorView.updateListener.of((update) => {
 			if (update.selectionSet) {
