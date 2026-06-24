@@ -549,7 +549,12 @@ export function AppLayout() {
 				// view が prev タブの内容を保持している間に state を採取し、undo/redo
 				// 履歴を含む CodeMirror state ごと cache に格納する (#220)。
 				// editorStateVersion は採取時点の extensions version をスナップショット。
-				const prevEditorState = editorViewRef.current?.state;
+				// SearchBar が開いている時は、view.state に検索 query / append された
+				// listener compartment 等の一時 extension が含まれるため、これを
+				// cache に保存してしまうと別タブから戻った時に検索ハイライト/listener が
+				// 復活してしまう (#220 review)。その場合は新規採取せず、開く前の
+				// currentCache?.editorState を維持する (検索バー閉じてた時の clean な state)。
+				const prevEditorState = searchBarOpenRef.current ? undefined : editorViewRef.current?.state;
 				tabCacheRef.current.set(prevPath, {
 					content: contentRef.current,
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
