@@ -59,6 +59,11 @@ interface TabCache {
 	// タブごとにキャッシュする。タブ切替で view.setState() で復元することで、
 	// remount による undo 履歴消失 (#220) を回避する。
 	editorState?: EditorState;
+	// editorState を保存した時の editorExtensionsVersionRef.current の値。
+	// 設定変更で extensions が reconfigure された後は古い state を view.setState() で
+	// 復元すると古い構成が戻ってしまうため、復元時に version が一致しない場合は
+	// remount で fallback する (#220)。
+	editorStateVersion?: number;
 }
 
 export function AppLayout() {
@@ -165,22 +170,39 @@ export function AppLayout() {
 	const isEditorComposing = useCallback(() => editorViewRef.current?.composing ?? false, []);
 	const tabCacheRef = useRef(new Map<string, TabCache>());
 
-	// file watcher イベントで cache を disk loaded 内容に更新するときの共通処理。
+	// MarkdownEditor の extensions / basicSetup が依存する設定を監視。これらが変わると
+	// 内部で reconfigure されるため、過去の EditorState を view.setState() で復元すると
+	// 古い構成 (古い fontSize など) が戻ってしまう (#220)。
+	// 値の組み合わせが変わった瞬間に version を bump し、復元時に cache.editorStateVersion と
+	// 比較して不一致なら remount で fallback する。
+	// MarkdownEditor.tsx の useMemo deps / basicSetup props と一致させること。
+	const editorExtensionsKey = useSettingsStore(
+		(s) => `${s.fontSize}|${s.showLinkCards}|${s.showLineNumbers}|${s.highlightActiveLine}`,
+	);
+	const editorExtensionsVersionRef = useRef(0);
+	const editorExtensionsPrevKeyRef = useRef(editorExtensionsKey);
+	if (editorExtensionsPrevKeyRef.current !== editorExtensionsKey) {
+		editorExtensionsPrevKeyRef.current = editorExtensionsKey;
+		editorExtensionsVersionRef.current += 1;
+	}
+
+	// file watcher イベントで cache を disk loaded 内容に更新するときの共通処理 (#220)。
 	// loaded が processContent 適用後の existing.content と一致 = 自分の write
-	// (タブ切替時 flush save 等) なら undo 履歴含む editorState を保持。
-	// 一致しない = 外部書き換え → editorState 破棄 (history と doc がズレるため、#220)。
-	// 比較は processContent 適用後で行う (writeFile 時に末尾改行 / trim が適用されるため)。
+	// (タブ切替時 flush save 等) なら cache は既に正しいので **何もしない**。
+	// cache.content/savedContent を loaded (整形後) に上書きすると、保持している
+	// editorState.doc (生のまま) とズレてしまい、復元時に表示・dirty 判定・undo が壊れる。
+	// 一致しない = 外部書き換え → cache を全置換 + editorState 破棄
+	// (history を保持しても doc とズレるため)。
 	const setCacheFromReload = useCallback((path: string, loaded: string) => {
 		const existing = tabCacheRef.current.get(path);
 		const trim = useSettingsStore.getState().trimTrailingWhitespace;
-		const editorState =
-			existing?.editorState && loaded === processContent(existing.content, trim)
-				? existing.editorState
-				: undefined;
+		if (existing && loaded === processContent(existing.content, trim)) {
+			return;
+		}
 		tabCacheRef.current.set(path, {
 			content: loaded,
 			savedContent: loaded,
-			editorState,
+			editorState: undefined,
 		});
 	}, []);
 
@@ -522,11 +544,15 @@ export function AppLayout() {
 				const currentCache = tabCacheRef.current.get(prevPath);
 				// view が prev タブの内容を保持している間に state を採取し、undo/redo
 				// 履歴を含む CodeMirror state ごと cache に格納する (#220)。
+				// editorStateVersion は採取時点の extensions version をスナップショット。
 				const prevEditorState = editorViewRef.current?.state;
 				tabCacheRef.current.set(prevPath, {
 					content: contentRef.current,
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
 					editorState: prevEditorState ?? currentCache?.editorState,
+					editorStateVersion: prevEditorState
+						? editorExtensionsVersionRef.current
+						: currentCache?.editorStateVersion,
 				});
 			} else {
 				tabCacheRef.current.delete(prevPath);
@@ -560,10 +586,17 @@ export function AppLayout() {
 			markSaved(cached.savedContent);
 			setContent(cached.content);
 			// EditorState が保存されていれば view.setState() で undo/redo 履歴ごと
-			// 復元する (#220)。失敗時 (view 未取得、SlideView 表示中など) は
-			// 従来通り remount で初期化する fallback。
+			// 復元する (#220)。失敗条件 (どれかでも該当):
+			// - view 未取得 (SlideView 表示中など)
+			// - editorState なし (初回 / 外部書き換え後)
+			// - editorStateVersion が現在と不一致 (extensions 構成変更で reconfigure 済み)
+			// 失敗時は従来通り remount で最新 extensions の view を作り直す。
 			const view = editorViewRef.current;
-			if (cached.editorState && view) {
+			if (
+				cached.editorState &&
+				view &&
+				cached.editorStateVersion === editorExtensionsVersionRef.current
+			) {
 				view.setState(cached.editorState);
 			} else {
 				setEditorKey((k) => k + 1);
