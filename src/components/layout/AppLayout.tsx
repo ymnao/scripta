@@ -598,6 +598,24 @@ export function AppLayout() {
 				cached.editorStateVersion === editorExtensionsVersionRef.current
 			) {
 				view.setState(cached.editorState);
+				// view.setState() は updateListener を発火しないため、ステータスバーの
+				// cursor info を手動で計算して反映する (#220)。
+				// MarkdownEditor.tsx:300 の handleCreateEditor / updateListener と同等ロジック。
+				const restoredState = cached.editorState;
+				const sel = restoredState.selection.main;
+				const lineInfo = restoredState.doc.lineAt(sel.head);
+				const info: CursorInfo = {
+					line: lineInfo.number,
+					col: sel.head - lineInfo.from + 1,
+					chars: restoredState.doc.length,
+				};
+				if (!sel.empty) {
+					info.selectedChars = sel.to - sel.from;
+					const fromLine = restoredState.doc.lineAt(sel.from).number;
+					const toLine = restoredState.doc.lineAt(sel.to).number;
+					info.selectedLines = toLine - fromLine + 1;
+				}
+				setCursorInfo(info);
 			} else {
 				setEditorKey((k) => k + 1);
 			}
