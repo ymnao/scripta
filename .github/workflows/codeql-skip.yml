@@ -1,0 +1,44 @@
+# CodeQL workflow (codeql.yml) が paths-ignore で skip される PR (docs-only など) のための stub。
+# branch protection で "Analyze (javascript-typescript)" を必須 check に指定している関係上、
+# 実 CodeQL workflow が trigger されないと永遠に pending → BLOCKED になる
+# (paths-ignore で skip された必須 check は GitHub 仕様上 "neutral" ではなく未生成扱い)。
+#
+# 本 workflow は codeql.yml の paths-ignore と完全に補完する paths filter で trigger され、
+# 同名の check (Analyze (javascript-typescript)) を success として作成する。
+#
+# 参考: GitHub 公式トラブルシュート
+# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/troubleshooting-required-status-checks#handling-skipped-but-required-checks
+#
+# code + docs 混在 PR では codeql.yml と本 workflow が両方 trigger される
+# (paths-ignore は「全ファイルが ignore patterns に該当」のみ skip、paths は「1 つでも該当」で trigger)。
+# その場合は両方の Analyze (javascript-typescript) check が success である必要があるが、
+# 本 stub は数秒で完了するため実害なし。
+name: CodeQL (paths-skip stub)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # codeql.yml の paths-ignore と完全一致させる (補完関係を維持)
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    # check 名は codeql.yml の analyze job と完全一致させる (必須 check の名前は
+    # 'Analyze (javascript-typescript)' なので、matrix から組み立てる形も揃える)。
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+
+    steps:
+      - run: |
+          echo "PR contains only paths ignored by codeql.yml's paths-ignore filter."
+          echo "Marking 'Analyze (javascript-typescript)' check as success to satisfy branch protection."
