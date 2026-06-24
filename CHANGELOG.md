@@ -5,6 +5,60 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
+## [0.5.0] — 2026-06-24
+
+v0.4.0 リリース後の機能追加 + セキュリティ補強ラウンド。バックリンクパネル (#202) とタブ切替 undo 履歴消失修正 (#220) を主軸に、Electron security checklist Tier 1 補完 (#204)、CI セキュリティスキャン 3 件追加 (#205)、undici / dompurify advisory 解消、全文検索エンジン MiniSearch 採用検討 (#203) を ADR-0010 で Rejected として記録。あわせて CI 必須 check と paths-ignore の罠 (docs-only PR が永遠に BLOCKED になる GitHub 仕様) を codeql-skip stub workflow で恒久対策。
+
+### Added
+
+- **バックリンクパネル** (#202 → #221): 現在開いているノートを `[[ファイル名]]` で参照している他ノートをサイドパネルに一覧表示。**Cmd+Shift+B** でトグル。CommonMark / Lezer 準拠の inline code span / fenced code 範囲判定で、fenced code 内・inline code 内・escape された wikilink は除外。basename 衝突解決は lexicographically smallest path を canonical 扱い。`iterateWikilinkOccurrences` を共通 helper として抽出し `scanUnresolvedWikilinks` との 70 行重複を解消。専用 `backlinkGeneration` map で search / wikilink scan とは独立にキャンセル管理
+
+### Fixed
+
+- **タブ切替で undo 履歴が失われる問題を修正** (#220 → #222): CodeMirror EditorState を `<MarkdownEditor key={editorKey}>` の remount で破棄していたため、タブ間で Cmd+Z 履歴が失われていた。`historyField` を含む JSON snapshot (`view.state.toJSON({ history: historyField })`) をタブごとに cache に保存し、戻った時に最新 extensions で `EditorState.fromJSON()` → `view.setState()` で組み立て直す設計に変更。あわせて file watcher 経由 cache 更新で editorState フィールドが drop されていた問題を `setCacheFromReload` ヘルパーに集約して解決、SearchBar の listener 注入 effect を `viewEpoch` で再走させ `view.setState()` 後の compartment 消失に対応
+
+### Security
+
+- **Electron security checklist Tier 1 補完 3 件** (#204 → #210):
+  - `session.defaultSession` に `setPermissionRequestHandler` / `setPermissionCheckHandler` を install、notifications / media / geolocation 等 web permission を常に明示 deny (Electron Security Checklist Item #5。`electron/main/utils/permission-handler.ts`)
+  - `fs:read` に **64MB** サイズ上限 (`MAX_READ_FILE_BYTES`) を導入。読み込み前に `fs.stat` で確認し上限超は `StructuredError("FILE_TOO_LARGE")` を throw。他 handler (OGP 100KB / git conflict 10MB) と上限思想を揃え、`ErrorKind` / renderer 側 `translateError` / `NON_TRANSIENT_KINDS` にも追従
+  - `SCRIPTA_PDF_DEBUG_HTML_PATH` debug 出力経路を `is.dev` ガードで本番 disable
+- **CI セキュリティスキャン 3 件追加** (#205 → #218):
+  - **CodeQL** (`.github/workflows/codeql.yml` 新規): JS/TS 静的解析を push to main / PR / weekly schedule (日曜 05:30 UTC) で実行
+  - **dependency-review** (ci.yml に job 追加): PR diff で新規追加される依存に既知 advisory が無いか gate (`fail-on-severity: high`)
+  - **pnpm audit 定期実行** (`.github/workflows/audit.yml` 新規): weekly schedule (月曜 06:30 UTC) で advisory 検出時に issue 自動作成、既存 open issue があれば `gh issue comment` で append
+  - action SHA pin、cron 時間分散 (±15min ジッタ考慮の :30 選定)、`actions/checkout` に `persist-credentials: false`、`security-audit` label 冪等作成、CodeQL concurrency group の schedule/push 分離など防御層を多段で整備
+  - **branch protection 必須 checks を `[lint, typecheck, test, build, e2e, electron-e2e, dependency-review, "Analyze (javascript-typescript)"]` の 8 件に拡張**
+- **CI 必須 check と paths-ignore の罠を codeql-skip stub workflow で恒久対策** (PR #223): 必須 check 化された CodeQL workflow が `paths-ignore: ["**/*.md", "docs/**", ".github/ISSUE_TEMPLATE/**"]` で trigger されない場合、その PR は永遠に BLOCKED になる GitHub 仕様。同名 check (`Analyze (javascript-typescript)`) を補完的な paths filter で trigger する stub workflow (`.github/workflows/codeql-skip.yml`) を追加し、docs-only PR でも必須 check が成立するように
+- **undici security advisory 9 件を parent>child override で解消** (#201): `@electron/get` / `jsdom` 経由の `undici 7.25.0` を `^7.28.0`、`node-gyp` 経由の `6.25.0` を `^6.27.0` に固定。Dependabot alert #10-14 / #17-20 を closed 化
+
+### Internal
+
+- **ADR-0010: 全文検索エンジン MiniSearch 採用を Rejected として記録** (#203 → #223):
+  - 公式 `SearchResult` API には char offset / line number を返す手段が無く、SearchPanel の grep UX (matchStart/matchEnd 付き位置 highlight) を直接置換できない
+  - 既存 e2e (`e2e/search.spec.ts:182-230`) で emoji / サロゲートペア位置精度がピン留めされ、UX 変更は機能 regression リスク
+  - 数百〜数千 .md 想定で brute-force walk は十分高速、index 永続化 / worker thread 等の運用コストが UX 向上に見合わない
+  - 代替案 3 件比較 (完全置換 / hybrid / 維持) で「自前 line-level scan 維持」を採用。将来検討枠 (workspace 万単位ユーザー出現時の再評価) として Orama / FlexSearch / ripgrep sidecar / napi-rs / MiniSearch tokenize 拡張を明示
+
+### Dependencies
+
+v0.4.0 → v0.5.0 で更新された主要パッケージ (Dependabot 8 件を集約、#199 + #211-#217 → #219):
+
+- **dependencies**:
+  - `@codemirror/search` `^6.7.0` → `^6.7.1`
+  - `dompurify` `^3.4.10` → `^3.4.11` (#199)
+  - `js-yaml` `^4.2.0` → `^5.0.0` (major; default import 廃止 → `import { load }` 形式へ、本体型同梱で `@types/js-yaml` 削除)
+  - `lucide-react` `^1.18.0` → `^1.21.0`
+- **devDependencies**:
+  - `@playwright/test` `^1.60.0` → `^1.61.0`
+  - `@types/node` `^25.9.3` → `^26.0.0` (major; 型のみ)
+  - `electron` `^42.4.0` → `^42.4.1`
+  - `vitest` `^4.1.8` → `^4.1.9`
+- **CI actions**:
+  - `actions/checkout` v6.0.3 → v7.0.0 (major; SHA pin 更新、`pull_request_target` / `workflow_run` の fork PR ブロックは本リポ未使用で実害なし)
+- **削除**:
+  - `@types/js-yaml` (js-yaml v5 本体に型同梱)
+
 ## [0.4.0] — 2026-06-20
 
 v0.3.0 リリース後の patch / 内部品質改善ラウンド。OS 判定 (`navigator.platform` / `userAgent`) の集約ポリシーを Biome plugin で機械的に強制し、ショートカット表示文字列の構築も `platform.ts` 定数経由へ統一。あわせて Dependabot 9 件と security advisory 5 件をまとめて解消。
@@ -187,6 +241,7 @@ electron / mermaid / zustand / tailwindcss / dompurify 等の主要版は v0.2.0
 - approve リストはプロセス全体スコープ（#32 で window-scoped 化予定）
 - `realpath` は同期版（#31 で async 化予定）
 
+[0.5.0]: https://github.com/ymnao/scripta/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ymnao/scripta/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ymnao/scripta/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ymnao/scripta/releases/tag/v0.2.0
