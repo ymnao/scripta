@@ -48,8 +48,11 @@ describe("store", () => {
 		});
 
 		it("returns stored values when available", async () => {
+			// _schemaVersion=1 を seed して migration をスキップし、各 key の読み出し結果のみ検証する。
+			// AppSettings には _schemaVersion を surface しないので expectations にも含めない。
 			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
 				const values: Record<string, unknown> = {
+					_schemaVersion: 1,
 					workspacePath: "/test/path",
 					themePreference: "dark",
 					sidebarVisible: false,
@@ -91,19 +94,46 @@ describe("store", () => {
 			});
 		});
 
-		it("migrates legacy theme key to themePreference", async () => {
-			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
-				const values: Record<string, unknown> = {
-					theme: "dark",
-				};
-				return values[key];
+		it("migrates legacy theme key to themePreference and bumps _schemaVersion on disk", async () => {
+			// migration の効果 (settingsSet) が直後の settingsGet に反映されるよう
+			// stateful な store を mock する。default mock は stateless で、
+			// migration が書き込んだ themePreference="dark" を次の get が拾えない。
+			const store: Record<string, unknown> = { theme: "dark" };
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) =>
+				Object.hasOwn(store, key) ? store[key] : undefined,
+			);
+			(window.api.settingsSet as Mock).mockImplementation(async (key: string, value: unknown) => {
+				store[key] = value;
+			});
+			(window.api.settingsDelete as Mock).mockImplementation(async (key: string) => {
+				delete store[key];
 			});
 
 			const settings = await loadSettings();
 			expect(settings.themePreference).toBe("dark");
 			expect(window.api.settingsSet).toHaveBeenCalledWith("themePreference", "dark");
+			expect(window.api.settingsSet).toHaveBeenCalledWith("_schemaVersion", 1);
 			expect(window.api.settingsDelete).toHaveBeenCalledWith("theme");
 			expect(window.api.settingsSave).toHaveBeenCalled();
+			// settings.json 上で legacy key は削除され、_schemaVersion=1 が刻まれている。
+			expect(store).not.toHaveProperty("theme");
+			expect(store._schemaVersion).toBe(1);
+		});
+
+		it("skips migration when _schemaVersion is already latest", async () => {
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = {
+					_schemaVersion: 1,
+					themePreference: "dark",
+				};
+				return values[key];
+			});
+
+			await loadSettings();
+			// migration スキップ → settingsSet / settingsDelete / settingsSave は呼ばれない
+			expect(window.api.settingsSet).not.toHaveBeenCalled();
+			expect(window.api.settingsDelete).not.toHaveBeenCalled();
+			expect(window.api.settingsSave).not.toHaveBeenCalled();
 		});
 
 		it("defaults to system when no theme keys exist", async () => {
