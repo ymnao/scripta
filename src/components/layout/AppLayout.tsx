@@ -550,18 +550,30 @@ export function AppLayout() {
 				// 履歴を含む CodeMirror state ごと cache に格納する (#220)。
 				// editorStateVersion は採取時点の extensions version をスナップショット。
 				// SearchBar が開いている時は、view.state に検索 query / append された
-				// listener compartment 等の一時 extension が含まれるため、これを
-				// cache に保存してしまうと別タブから戻った時に検索ハイライト/listener が
-				// 復活してしまう (#220 review)。その場合は新規採取せず、開く前の
-				// currentCache?.editorState を維持する (検索バー閉じてた時の clean な state)。
-				const prevEditorState = searchBarOpenRef.current ? undefined : editorViewRef.current?.state;
+				// listener compartment 等の一時 extension が含まれるため、新規採取しない
+				// (cache に保存すると別タブから戻った時に検索ハイライト/listener が復活する)。
+				// fallback として currentCache?.editorState を維持できるのは「現 content と
+				// 一致する doc を持つ」場合のみ。検索バー開放中に編集された場合は doc がズレるので
+				// 破棄する (cache の content と editorState.doc がズレた状態を残すと、復元時に
+				// react-codemirror が dispatch で書き換えて余分な history entry が積まれてしまう)。
+				const searchBarOpen = searchBarOpenRef.current;
+				const prevEditorState = searchBarOpen ? undefined : editorViewRef.current?.state;
+				const cachedStateMatchesContent =
+					currentCache?.editorState?.doc.length === contentRef.current.length &&
+					currentCache?.editorState?.doc.toString() === contentRef.current;
+				const fallbackEditorState =
+					!searchBarOpen || cachedStateMatchesContent ? currentCache?.editorState : undefined;
+				const fallbackVersion =
+					!searchBarOpen || cachedStateMatchesContent
+						? currentCache?.editorStateVersion
+						: undefined;
 				tabCacheRef.current.set(prevPath, {
 					content: contentRef.current,
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
-					editorState: prevEditorState ?? currentCache?.editorState,
+					editorState: prevEditorState ?? fallbackEditorState,
 					editorStateVersion: prevEditorState
 						? editorExtensionsVersionRef.current
-						: currentCache?.editorStateVersion,
+						: fallbackVersion,
 				});
 			} else {
 				tabCacheRef.current.delete(prevPath);
