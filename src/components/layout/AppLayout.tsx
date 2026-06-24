@@ -687,7 +687,17 @@ export function AppLayout() {
 				} else {
 					readFile(path)
 						.then((loaded) => {
-							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+							// loaded が既存 cache.content と一致 = 自分の write
+							// (タブ切替時 flush save 等) → undo 履歴含む editorState を保持
+							// 一致しない = 外部書き換え → editorState 破棄 (history を持っても doc とズレるため)
+							const existing = tabCacheRef.current.get(path);
+							const preservedEditorState =
+								existing && loaded === existing.content ? existing.editorState : undefined;
+							tabCacheRef.current.set(path, {
+								content: loaded,
+								savedContent: loaded,
+								editorState: preservedEditorState,
+							});
 							// Only update editor state if this file is still the active tab
 							if (useWorkspaceStore.getState().activeTabPath !== path) return;
 							// Compare with last written content (processed) to detect our own saves
@@ -710,7 +720,18 @@ export function AppLayout() {
 				if (cached && cached.content === cached.savedContent) {
 					readFile(path)
 						.then((loaded) => {
-							tabCacheRef.current.set(path, { content: loaded, savedContent: loaded });
+							// 上と同じく自分の write なら editorState を保持して undo 履歴を維持。
+							// タブ切替時の flush save → file watcher が file change を検知して
+							// ここに到達するケースで editorState が破棄されると、タブに戻った時に
+							// view.setState() による履歴復元ができなくなる (#220)。
+							const existing = tabCacheRef.current.get(path);
+							const preservedEditorState =
+								existing && loaded === existing.content ? existing.editorState : undefined;
+							tabCacheRef.current.set(path, {
+								content: loaded,
+								savedContent: loaded,
+								editorState: preservedEditorState,
+							});
 						})
 						.catch((err) => {
 							console.error("Failed to reload cached file:", err);
