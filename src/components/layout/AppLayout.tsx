@@ -1,5 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { useGitSync } from "../../hooks/useGitSync";
@@ -27,7 +28,7 @@ import { useSettingsStore } from "../../stores/settings";
 import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
 import { useWikilinkStore } from "../../stores/wikilink";
-import { useWorkspaceStore } from "../../stores/workspace";
+import { selectNavigation, useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import { Dialog } from "../common/Dialog";
 import { DirectoryPickerDialog } from "../common/DirectoryPickerDialog";
@@ -62,55 +63,107 @@ interface TabCache {
 }
 
 export function AppLayout() {
-	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
-	const activeTabId = useWorkspaceStore((s) => s.activeTabId);
-	const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-	const setWorkspacePath = useWorkspaceStore((s) => s.setWorkspacePath);
-	const closeTab = useWorkspaceStore((s) => s.closeTab);
-	const closeTabById = useWorkspaceStore((s) => s.closeTabById);
-	const setActiveTabById = useWorkspaceStore((s) => s.setActiveTabById);
-	const setTabDirty = useWorkspaceStore((s) => s.setTabDirty);
-	const renameTab = useWorkspaceStore((s) => s.renameTab);
-	const openTab = useWorkspaceStore((s) => s.openTab);
-	const navigateInTab = useWorkspaceStore((s) => s.navigateInTab);
-	const goBackInTab = useWorkspaceStore((s) => s.goBackInTab);
-	const goForwardInTab = useWorkspaceStore((s) => s.goForwardInTab);
-	const closeTabsByPrefix = useWorkspaceStore((s) => s.closeTabsByPrefix);
-	const renameTabsByPrefix = useWorkspaceStore((s) => s.renameTabsByPrefix);
-	const reorderTab = useWorkspaceStore((s) => s.reorderTab);
-	const openNewTab = useWorkspaceStore((s) => s.openNewTab);
-	const activateNextTab = useWorkspaceStore((s) => s.activateNextTab);
-	const activatePrevTab = useWorkspaceStore((s) => s.activatePrevTab);
-	const bumpFileTreeVersion = useWorkspaceStore((s) => s.bumpFileTreeVersion);
-	const bumpContentVersion = useWorkspaceStore((s) => s.bumpContentVersion);
+	const {
+		activeTabPath,
+		activeTabId,
+		workspacePath,
+		setWorkspacePath,
+		closeTab,
+		closeTabById,
+		setActiveTabById,
+		setTabDirty,
+		renameTab,
+		openTab,
+		navigateInTab,
+		goBackInTab,
+		goForwardInTab,
+		closeTabsByPrefix,
+		renameTabsByPrefix,
+		reorderTab,
+		openNewTab,
+		activateNextTab,
+		activatePrevTab,
+		bumpFileTreeVersion,
+		bumpContentVersion,
+	} = useWorkspaceStore(
+		useShallow((s) => ({
+			activeTabPath: s.activeTabPath,
+			activeTabId: s.activeTabId,
+			workspacePath: s.workspacePath,
+			setWorkspacePath: s.setWorkspacePath,
+			closeTab: s.closeTab,
+			closeTabById: s.closeTabById,
+			setActiveTabById: s.setActiveTabById,
+			setTabDirty: s.setTabDirty,
+			renameTab: s.renameTab,
+			openTab: s.openTab,
+			navigateInTab: s.navigateInTab,
+			goBackInTab: s.goBackInTab,
+			goForwardInTab: s.goForwardInTab,
+			closeTabsByPrefix: s.closeTabsByPrefix,
+			renameTabsByPrefix: s.renameTabsByPrefix,
+			reorderTab: s.reorderTab,
+			openNewTab: s.openNewTab,
+			activateNextTab: s.activateNextTab,
+			activatePrevTab: s.activatePrevTab,
+			bumpFileTreeVersion: s.bumpFileTreeVersion,
+			bumpContentVersion: s.bumpContentVersion,
+		})),
+	);
+	const { canGoBack, canGoForward } = useWorkspaceStore(useShallow(selectNavigation));
+
+	const {
+		loadIcons,
+		resetWorkspaceConfig,
+		scriptaDirReady,
+		setScriptaDirReady,
+		workspaceInitialized,
+		configLoaded,
+		setWorkspaceInitialized,
+	} = useWorkspaceConfigStore(
+		useShallow((s) => ({
+			loadIcons: s.loadIcons,
+			resetWorkspaceConfig: s.reset,
+			scriptaDirReady: s.scriptaDirReady,
+			setScriptaDirReady: s.setScriptaDirReady,
+			workspaceInitialized: s.workspaceInitialized,
+			configLoaded: s.configLoaded,
+			setWorkspaceInitialized: s.setWorkspaceInitialized,
+		})),
+	);
+
+	const { hydrateGitSync, gitAction, lastCommitTime, conflictFiles, offlineMode, gitReady } =
+		useGitSyncStore(
+			useShallow((s) => ({
+				hydrateGitSync: s.hydrate,
+				gitAction: s.gitAction,
+				lastCommitTime: s.lastCommitTime,
+				conflictFiles: s.conflictFiles,
+				offlineMode: s.offlineMode,
+				gitReady: s.gitReady,
+			})),
+		);
+
+	const { scratchpadOpen, toggleScratchpad, setScratchpadOpen } = useScratchpadStore(
+		useShallow((s) => ({
+			scratchpadOpen: s.open,
+			toggleScratchpad: s.toggle,
+			setScratchpadOpen: s.setOpen,
+		})),
+	);
+
 	const hydratePreference = useThemeStore((s) => s.hydratePreference);
-	const hydrateSettings = useSettingsStore((s) => s.hydrate);
-	const loadIcons = useWorkspaceConfigStore((s) => s.loadIcons);
-	const resetWorkspaceConfig = useWorkspaceConfigStore((s) => s.reset);
-	const scriptaDirReady = useWorkspaceConfigStore((s) => s.scriptaDirReady);
-	const setScriptaDirReady = useWorkspaceConfigStore((s) => s.setScriptaDirReady);
-	const workspaceInitialized = useWorkspaceConfigStore((s) => s.workspaceInitialized);
-	const configLoaded = useWorkspaceConfigStore((s) => s.configLoaded);
-	const setWorkspaceInitialized = useWorkspaceConfigStore((s) => s.setWorkspaceInitialized);
-
-	const hydrateGitSync = useGitSyncStore((s) => s.hydrate);
-	const gitAction = useGitSyncStore((s) => s.gitAction);
-	const lastCommitTime = useGitSyncStore((s) => s.lastCommitTime);
-	const conflictFiles = useGitSyncStore((s) => s.conflictFiles);
-	const offlineMode = useGitSyncStore((s) => s.offlineMode);
-	const gitReady = useGitSyncStore((s) => s.gitReady);
-
-	const scratchpadOpen = useScratchpadStore((s) => s.open);
-	const toggleScratchpad = useScratchpadStore((s) => s.toggle);
-	const setScratchpadOpen = useScratchpadStore((s) => s.setOpen);
+	const { hydrateSettings, autoUpdateCheck, fontFamily } = useSettingsStore(
+		useShallow((s) => ({
+			hydrateSettings: s.hydrate,
+			autoUpdateCheck: s.autoUpdateCheck,
+			fontFamily: s.fontFamily,
+		})),
+	);
 
 	const { manualSync } = useGitSync({ workspacePath });
 
 	useScratchpadVolatile(workspacePath);
-
-	const activeTab = useWorkspaceStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
-	const canGoBack = (activeTab?.historyIndex ?? 0) > 0;
-	const canGoForward = activeTab ? activeTab.historyIndex < activeTab.history.length - 1 : false;
 
 	const [loading, setLoading] = useState(true);
 
@@ -119,9 +172,6 @@ export function AppLayout() {
 	const [isNewWindow] = useState(() =>
 		new URLSearchParams(window.location.search).has("newWindow"),
 	);
-
-	const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
-	const fontFamily = useSettingsStore((s) => s.fontFamily);
 	const {
 		dialogOpen: updateDialogOpen,
 		description: updateDescription,

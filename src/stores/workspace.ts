@@ -80,6 +80,16 @@ function activateTabByOffset(state: WorkspaceState, offset: number): Partial<Wor
 	return { activeTabPath: next.path, activeTabId: next.id };
 }
 
+export const selectNavigation = (
+	s: WorkspaceState,
+): { canGoBack: boolean; canGoForward: boolean } => {
+	const t = s.tabs.find((tab) => tab.id === s.activeTabId);
+	return {
+		canGoBack: (t?.historyIndex ?? 0) > 0,
+		canGoForward: t ? t.historyIndex < t.history.length - 1 : false,
+	};
+};
+
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 	workspacePath: null,
 	tabs: [],
