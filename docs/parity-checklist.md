@@ -258,12 +258,12 @@
 
 | 旧 e2e（Tauri、`~/development/tools/scripta/e2e/*.spec.ts`） | 新 e2e（Electron、`e2e/*.spec.ts`） | 状態 |
 |---|---|---|
-| 23 spec（slide-view, file-watcher, settings-persistence, ...） | 同 23 spec + `smoke.spec.ts`（Stage 6-2 新規） | ✅ |
+| 23 spec（slide-view, file-watcher, settings-persistence, ...） | 同 23 spec + `smoke.spec.ts`（Stage 6-2 新規）。`settings-persistence.spec.ts` は #207 で `workspace-restoration.spec.ts` にリネーム + persist round-trip を電子側へ移行 | ✅ |
 | 旧 `playwright-tauri` 経由で実 Tauri バイナリ起動 | **2 モード並行**: renderer-only（mock 注入）+ 実 Electron 起動（`_electron.launch`, Phase 1 PR-3 で追加） | ✅ |
 
 ### 既知差分
 
-- ✅ **実 Electron 起動モード（Phase 1 PR-3, #33 / #82 C → Phase 4 #86 で拡充）**: `e2e/electron/*.electron.spec.ts`（`playwright.electron.config.ts`, `pnpm test:e2e:electron`）が `electron-vite build` 成果物を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。**smoke + 8 領域**を safety net 化: 設定永続化 / Settings migration / asset protocol / 画像描画 / マルチウィンドウ（Phase 1 PR-3）+ **ファイルライフサイクル（実 fs CRUD + 再起動永続化）/ Mermaid 描画 / PDF エクスポート（printToPDF）**（Phase 4）。CI は `electron-e2e` job（xvfb-run, full blocking）。1 spec = 1 領域の分類方針と CI ポリシーは [ADR-0009](adr/0009-renderer-only-e2e-strategy.md)。
+- ✅ **実 Electron 起動モード（Phase 1 PR-3, #33 / #82 C → Phase 4 #86 で拡充）**: `e2e/electron/*.electron.spec.ts`（`playwright.electron.config.ts`, `pnpm test:e2e:electron`）が `electron-vite build` 成果物を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。CI は `electron-e2e` job（xvfb-run, full blocking）。**領域一覧 / 対応 spec / 1 spec = 1 領域の分類方針 / CI ポリシー** は [ADR-0009](adr/0009-renderer-only-e2e-strategy.md) §「各モードの役割分担（テスト分類方針）」を canonical として参照する。
 - ⚠️ **renderer-only モードが検出できない領域**（実 Electron 起動モードと Vitest unit test `electron/main/ipc/*.test.ts` 群が補完する）:
   - IPC payload の serialization 不一致（contextBridge 越しの構造化クローン制約）
   - contextBridge 経由の API 漏れ / 命名ズレ（`window.api.*` 表面）
