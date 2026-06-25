@@ -7,7 +7,8 @@ import {
 	Link2Off,
 	Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelWikilinkScan } from "../../lib/commands";
 import { toRelativePath } from "../../lib/path";
 import { useWikilinkStore } from "../../stores/wikilink";
@@ -29,7 +30,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 	const fileTreeVersion = useWorkspaceStore((s) => s.fileTreeVersion);
 	const contentVersion = useWorkspaceStore((s) => s.contentVersion);
 
-	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+	const { isCollapsed, toggle: toggleCollapse } = useCollapseToggle();
 
 	// ファイルツリー変更時は即座に再スキャン
 	const scanVersion = fileTreeVersion;
@@ -64,18 +65,6 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 		}
 		return links;
 	}, [unresolvedLinks, sortBy]);
-
-	const toggleCollapse = useCallback((pageName: string) => {
-		setCollapsed((prev) => {
-			const next = new Set(prev);
-			if (next.has(pageName)) {
-				next.delete(pageName);
-			} else {
-				next.add(pageName);
-			}
-			return next;
-		});
-	}, []);
 
 	const handleCreate = useCallback(
 		(link: UnresolvedWikilink) => {
@@ -121,10 +110,10 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 								type="button"
 								className="search-panel-file-header min-w-0 flex-1"
 								onClick={() => toggleCollapse(link.pageName)}
-								aria-expanded={!collapsed.has(link.pageName)}
+								aria-expanded={!isCollapsed(link.pageName)}
 							>
 								<span className="search-panel-file-chevron">
-									{collapsed.has(link.pageName) ? (
+									{isCollapsed(link.pageName) ? (
 										<ChevronRight size={12} />
 									) : (
 										<ChevronDown size={12} />
@@ -146,7 +135,7 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 								<FilePlus2 size={12} />
 							</button>
 						</div>
-						{!collapsed.has(link.pageName) && (
+						{!isCollapsed(link.pageName) && (
 							<div>
 								{link.references.map((reference) => {
 									const relativePath = toRelativePath(workspacePath, reference.filePath);

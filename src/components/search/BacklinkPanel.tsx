@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, FileText, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelBacklinkScan } from "../../lib/commands";
 import { basename, isNewTabPath, toRelativePath } from "../../lib/path";
 import { useBacklinkStore } from "../../stores/backlink";
@@ -19,7 +20,7 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 	const fileTreeVersion = useWorkspaceStore((s) => s.fileTreeVersion);
 	const contentVersion = useWorkspaceStore((s) => s.contentVersion);
 
-	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+	const { isCollapsed, toggle: toggleCollapse, reset: resetCollapsed } = useCollapseToggle();
 
 	// .md ファイル以外 (新規タブページなど) はバックリンク対象外。
 	// main 側 walkMdFiles (electron/main/ipc/search.ts:28) が小文字 `.md` のみを
@@ -51,11 +52,17 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 
 	// ターゲットノートが切り替わったら、前の対象で残っていた折り畳み状態を捨てる。
 	// sourceFile path が偶然同名で衝突した場合に古い open/closed 状態を引き継いで
-	// ユーザーが混乱するのを防ぐ。targetFilePath は trigger 用なので明示参照する。
+	// ユーザーが混乱するのを防ぐ。
+	//
+	// deps: `targetFilePath` は本 effect の trigger (値は body 内で参照しないため
+	// `void` で読み込みを明示)、`resetCollapsed` は useCollapseToggle が
+	// useCallback([]) で安定参照を保証するため body 内で呼び出すだけ。後者を消して
+	// しまうと将来 hook の memoize が外れた際 stale closure になるため、両方とも deps
+	// に積む。
 	useEffect(() => {
 		void targetFilePath;
-		setCollapsed(new Set());
-	}, [targetFilePath]);
+		resetCollapsed();
+	}, [targetFilePath, resetCollapsed]);
 
 	// ファイル保存時はデバウンスして再スキャン（編集内容の追従）。
 	// UnresolvedLinksPanel と同じ 2000ms 待機で過剰スキャンを抑える。
@@ -70,18 +77,6 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 			cancelBacklinkScan().catch(() => {});
 		};
 	}, [contentVersion, workspacePath, targetFilePath, scan]);
-
-	const toggleCollapse = useCallback((sourceFile: string) => {
-		setCollapsed((prev) => {
-			const next = new Set(prev);
-			if (next.has(sourceFile)) {
-				next.delete(sourceFile);
-			} else {
-				next.add(sourceFile);
-			}
-			return next;
-		});
-	}, []);
 
 	if (!targetFilePath) {
 		return (
@@ -127,10 +122,10 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 									type="button"
 									className="search-panel-file-header min-w-0 flex-1"
 									onClick={() => toggleCollapse(src.sourceFile)}
-									aria-expanded={!collapsed.has(src.sourceFile)}
+									aria-expanded={!isCollapsed(src.sourceFile)}
 								>
 									<span className="search-panel-file-chevron">
-										{collapsed.has(src.sourceFile) ? (
+										{isCollapsed(src.sourceFile) ? (
 											<ChevronRight size={12} />
 										) : (
 											<ChevronDown size={12} />
@@ -143,7 +138,7 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 									<span className="search-panel-file-count">{src.references.length}</span>
 								</button>
 							</div>
-							{!collapsed.has(src.sourceFile) && (
+							{!isCollapsed(src.sourceFile) && (
 								<div>
 									{src.references.map((reference) => (
 										<button

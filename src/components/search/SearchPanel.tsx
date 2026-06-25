@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelSearch, searchFiles } from "../../lib/commands";
 import { addTrailingSep } from "../../lib/path";
 import type { SearchResult } from "../../types/search";
@@ -42,7 +43,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	const [caseSensitive, setCaseSensitive] = useState(false);
 	const [results, setResults] = useState<GroupedResults[]>([]);
 	const [searched, setSearched] = useState(false);
-	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+	const { isCollapsed, toggle: toggleCollapse } = useCollapseToggle();
 	const localInputRef = useRef<HTMLInputElement>(null);
 	const ref = inputRef ?? localInputRef;
 	const requestIdRef = useRef(0);
@@ -81,18 +82,6 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 			cancelSearch().catch(() => {});
 		};
 	}, [query, workspacePath, caseSensitive]);
-
-	const toggleCollapse = useCallback((filePath: string) => {
-		setCollapsed((prev) => {
-			const next = new Set(prev);
-			if (next.has(filePath)) {
-				next.delete(filePath);
-			} else {
-				next.add(filePath);
-			}
-			return next;
-		});
-	}, []);
 
 	const totalMatches = results.reduce((sum, g) => sum + g.matches.length, 0);
 
@@ -139,17 +128,17 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 							type="button"
 							className="search-panel-file-header"
 							onClick={() => toggleCollapse(group.filePath)}
-							aria-expanded={!collapsed.has(group.filePath)}
+							aria-expanded={!isCollapsed(group.filePath)}
 						>
 							<span className="search-panel-file-chevron">
-								{collapsed.has(group.filePath) ? "›" : "⌄"}
+								{isCollapsed(group.filePath) ? "›" : "⌄"}
 							</span>
 							<span className="search-panel-file-name" title={group.relativePath}>
 								{group.relativePath}
 							</span>
 							<span className="search-panel-file-count">{group.matches.length}</span>
 						</button>
-						{!collapsed.has(group.filePath) && (
+						{!isCollapsed(group.filePath) && (
 							<div>
 								{group.matches.map((match) => (
 									<button
