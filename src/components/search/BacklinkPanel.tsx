@@ -93,6 +93,11 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 		);
 	}
 
+	// onNavigate に渡す query。飛び先 source の `[[targetPage]]` を highlightQueryExtension の
+	// case-insensitive substring で塗るため、scanBacklinksImpl と同じ正規化 (拡張子剥がし + NFC)
+	// で算出する (electron/main/ipc/search.ts:509-513 と同方針)。
+	const targetPageName = basename(targetFilePath).slice(0, -3).normalize("NFC");
+
 	return (
 		<div className="flex h-full flex-col">
 			<div className="flex items-center justify-between px-3 py-1.5">
@@ -145,7 +150,9 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 											type="button"
 											key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
 											className="search-panel-match"
-											onClick={() => onNavigate(reference.filePath, reference.lineNumber, "")}
+											onClick={() =>
+												onNavigate(reference.filePath, reference.lineNumber, targetPageName)
+											}
 										>
 											<span className="search-panel-line-number">{reference.lineNumber}</span>
 											<span
