@@ -206,6 +206,7 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
   - **renderer-only モード**（`e2e/*.spec.ts`, `playwright.config.ts`, `pnpm test:e2e`）— Vite dev server を起動し `e2e/helpers/electron-api-mock.ts` で `window.api` を注入。高速だが実 Electron / 実 main は起動せず、実 IPC payload のシリアライズ / contextBridge / preload の実装ミスは検出しない。UI ロジックの大半はこちらでカバー
   - **実 Electron 起動モード**（`e2e/electron/*.electron.spec.ts`, `playwright.electron.config.ts`, `pnpm test:e2e:electron`）— `electron-vite build` の成果物 (`out/main/index.js`) を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。起動毎に temp userData を切り (`--user-data-dir`)、設定永続化 / Settings migration / asset protocol / マルチウィンドウ等、mock では踏めない main 境界を safety net 化する。Tauri purge (Phase 2-5) の前後で現挙動を固定する目的（ヘルパーは `e2e/electron/helpers/`、CI は `electron-e2e` job で xvfb-run 実行）
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**（実 Electron モードは `pnpm test:e2e:electron` を別途実行）
+- **新規 e2e のモード振り分け**: [ADR-0009](docs/adr/0009-renderer-only-e2e-strategy.md) §「各モードの役割分担（テスト分類方針）」を参照。
 
 ```bash
 # コミット前の検証
