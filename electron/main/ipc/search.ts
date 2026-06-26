@@ -368,7 +368,13 @@ function iterateWikilinkOccurrences(
 				filePath: sourceFile,
 				lineNumber: i + 1,
 				byteOffset,
-				lineContent: line,
+				// 表示用 preview。BacklinkPanel / UnresolvedLinksPanel (buildInitialContent)
+				// は match offset を持たず、leading/trailing whitespace は読みづらいだけ
+				// なので producer 側で 1 度 trim する (#227)。byteOffset は raw line に
+				// 対する 1-based UTF-8 位置のままで unique key 用途に留めるため、trim
+				// との offset 整合は要求しない (BacklinkPanel.tsx:146 / UnresolvedLinksPanel.tsx:145
+				// で `${filePath}-${lineNumber}-${byteOffset}` という key token としてのみ使用)。
+				lineContent: line.trim(),
 				contextBefore: lines.slice(Math.max(0, i - 3), i),
 				contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
 			});

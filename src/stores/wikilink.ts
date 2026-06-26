@@ -18,7 +18,7 @@ export function buildInitialContent(
 		for (const ref of references) {
 			const fileName = basename(ref.filePath);
 			content += `> _${fileName} (行 ${ref.lineNumber}):_\n`;
-			content += `> ${ref.lineContent.trim()}\n>\n`;
+			content += `> ${ref.lineContent}\n>\n`;
 		}
 	}
 	return content;

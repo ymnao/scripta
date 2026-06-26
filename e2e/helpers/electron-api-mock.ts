@@ -756,7 +756,9 @@ function installApiMock(opts: {
 							filePath,
 							lineNumber: i + 1,
 							byteOffset: encoder.encode(line.slice(0, m.index)).length + 1,
-							lineContent: line,
+							// 本番 iterateWikilinkOccurrences (search.ts:371) と同じく
+							// 表示用 preview として trim 済を返す (#227)。
+							lineContent: line.trim(),
 							contextBefore: lines.slice(Math.max(0, i - 3), i),
 							contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
 						});
@@ -847,7 +849,9 @@ function installApiMock(opts: {
 							filePath,
 							lineNumber: i + 1,
 							byteOffset: encoder.encode(line.slice(0, m.index)).length + 1,
-							lineContent: line,
+							// 本番 iterateWikilinkOccurrences (search.ts:371) と同じく
+							// 表示用 preview として trim 済を返す (#227)。
+							lineContent: line.trim(),
 							contextBefore: lines.slice(Math.max(0, i - 3), i),
 							contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 4)),
 						});
