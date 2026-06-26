@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { scanBacklinks } from "../lib/commands";
 import type { BacklinkSource } from "../types/wikilink";
+import { createScanAction } from "./createScanAction";
 
 interface BacklinkState {
 	backlinks: BacklinkSource[];
@@ -18,28 +19,17 @@ export const useBacklinkStore = create<BacklinkState>()((set, get) => ({
 	currentTargetPath: null,
 	_scanId: 0,
 
-	scan: async (workspacePath: string, targetFilePath: string) => {
-		const scanId = get()._scanId + 1;
+	scan: createScanAction<BacklinkState, [string, string], BacklinkSource[]>({
+		api: () => scanBacklinks,
+		applyResult: (links) => ({ backlinks: links }),
+		errorMessage: "Failed to scan backlinks:",
 		// 別ターゲットへ切り替わった瞬間に古い結果を消し、UI で混同を防ぐ。
 		// 同一ターゲットの再スキャン中は前回結果を残し、loading インジケータだけ出す。
-		const targetChanged = get().currentTargetPath !== targetFilePath;
-		set({
-			loading: true,
-			_scanId: scanId,
+		beforeScan: (state, [_workspacePath, targetFilePath]) => ({
 			currentTargetPath: targetFilePath,
-			...(targetChanged ? { backlinks: [] } : {}),
-		});
-		try {
-			const links = await scanBacklinks(workspacePath, targetFilePath);
-			// 古いリクエストの結果は破棄する
-			if (get()._scanId !== scanId) return;
-			set({ backlinks: links, loading: false });
-		} catch (error) {
-			if (get()._scanId !== scanId) return;
-			console.error("Failed to scan backlinks:", error);
-			set({ loading: false });
-		}
-	},
+			...(state.currentTargetPath !== targetFilePath ? { backlinks: [] } : {}),
+		}),
+	})(set, get),
 
 	reset: () => {
 		set({

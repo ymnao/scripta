@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { scanUnresolvedWikilinks } from "../lib/commands";
 import { basename } from "../lib/path";
 import type { UnresolvedWikilink, WikilinkReference } from "../types/wikilink";
+import { createScanAction } from "./createScanAction";
 
 export function buildInitialContent(
 	pageName: string,
@@ -54,20 +55,11 @@ export const useWikilinkStore = create<WikilinkState>()((set, get) => ({
 	createTarget: null,
 	_scanId: 0,
 
-	scan: async (workspacePath: string) => {
-		const scanId = get()._scanId + 1;
-		set({ loading: true, _scanId: scanId });
-		try {
-			const links = await scanUnresolvedWikilinks(workspacePath);
-			// 古いリクエストの結果は破棄する
-			if (get()._scanId !== scanId) return;
-			set({ unresolvedLinks: links, loading: false });
-		} catch (error) {
-			if (get()._scanId !== scanId) return;
-			console.error("Failed to scan unresolved wikilinks:", error);
-			set({ loading: false });
-		}
-	},
+	scan: createScanAction<WikilinkState, [string], UnresolvedWikilink[]>({
+		api: () => scanUnresolvedWikilinks,
+		applyResult: (links) => ({ unresolvedLinks: links }),
+		errorMessage: "Failed to scan unresolved wikilinks:",
+	})(set, get),
 
 	setDraft: (pageName: string, content: string) => {
 		set((state) => ({
