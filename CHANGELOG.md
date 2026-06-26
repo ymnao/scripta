@@ -5,6 +5,20 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
+## [0.6.0] — 2026-06-27
+
+v0.5.0 リリース後の内部品質改善ラウンド。ユーザー向け振る舞い変更はなく、refactor 7 件を集約。zustand selector の useShallow 適用 (#206)、settings migration の versioned array 化 (#208)、2 モード e2e の振り分け基準明文化 (#207)、wikilink target query 経由の in-editor highlight (#225)、3 panel 共通 collapse hook の抽出 (#226)、scan store の race-prevention pattern factory 化 (#228)、backlink scan の producer-side trim による render-time allocation 削減 (#227) を実施。
+
+### Internal
+
+- **AppLayout の workspace selector に `useShallow` を適用** (#206 → #229): zustand store selector が tabs 配列の参照同一性に依存して不要な再 render を起こしていた問題を、`useShallow` で構造比較に切り替えて解消
+- **settings に `_schemaVersion` を導入し migration を versioned array 化** (#208 → #230): `loadSettings()` が ad-hoc な `delete s.theme` 等の inline migration を持っていた構造を、`MIGRATIONS: ReadonlyArray<{ from: number; to: number; run(ctx): void }>` 形式の versioned array に置換。将来の non-idempotent migration や `_schemaVersion` field 自体の write 順序を一元化できるように整備
+- **2 モード e2e の重複 spec を整理 + 振り分け基準を ADR-0009 に集約** (#207 → #231): renderer-only モード (Vite + window.api mock) と実 Electron 起動モード (`_electron.launch`) の 2 モード e2e で発生していた重複 spec を整理し、各モードでカバーすべき範囲の振り分け基準を ADR-0009 §「各モードの役割分担」に canonical 化
+- **BacklinkPanel / UnresolvedLinksPanel の onNavigate に wikilink target を query として渡す** (#225 → #232): backlink / unresolved wikilink から navigate した先のエディタで、ジャンプ元の wikilink target を query string として渡すことで in-editor highlight が走るようにし、SearchPanel と同等の UX に統一
+- **3 panel 共通の `useCollapseToggle` hook を抽出** (#226 → #233): SearchPanel / BacklinkPanel / UnresolvedLinksPanel で重複していた collapse toggle ロジック (`useState(() => new Set())` + lazy init + `reset` の re-render skip 含む) を `useCollapseToggle` として抽出
+- **backlink / wikilink store の `_scanId` race-prevention pattern を `createScanAction` factory に共通化** (#228 → #234): backlink store / wikilink store の scan action が同一構造で重複保持していた `_scanId` increment + race check + `Omit<Partial<TState>, "_scanId" | "loading">` 型による不変条件防御パターンを `createScanAction` factory として共通化。3 件目の scanner store 追加時の同パターン再実装コストを削減
+- **backlink / unresolved wikilink scan で `lineContent` を producer 側で 1 度 trim する** (#227 → #235): `iterateWikilinkOccurrences` helper が yield する `WikilinkReference` の `lineContent` を producer 側で 1 度 `line.trim()` し、consumer (BacklinkPanel render-time / `buildInitialContent`) の冗長な `.trim()` 呼び出しを排除。e2e mock も対称に trim 化 (ADR-0009 parity)
+
 ## [0.5.0] — 2026-06-24
 
 v0.4.0 リリース後の機能追加 + セキュリティ補強ラウンド。バックリンクパネル (#202) とタブ切替 undo 履歴消失修正 (#220) を主軸に、Electron security checklist Tier 1 補完 (#204)、CI セキュリティスキャン 3 件追加 (#205)、undici / dompurify advisory 解消、全文検索エンジン MiniSearch 採用検討 (#203) を ADR-0010 で Rejected として記録。あわせて CI 必須 check と paths-ignore の罠 (docs-only PR が永遠に BLOCKED になる GitHub 仕様) を codeql-skip stub workflow で恒久対策。
@@ -241,6 +255,7 @@ electron / mermaid / zustand / tailwindcss / dompurify 等の主要版は v0.2.0
 - approve リストはプロセス全体スコープ（#32 で window-scoped 化予定）
 - `realpath` は同期版（#31 で async 化予定）
 
+[0.6.0]: https://github.com/ymnao/scripta/releases/tag/v0.6.0
 [0.5.0]: https://github.com/ymnao/scripta/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ymnao/scripta/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ymnao/scripta/releases/tag/v0.3.0
