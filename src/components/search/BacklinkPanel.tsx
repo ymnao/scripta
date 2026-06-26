@@ -33,6 +33,16 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 		return activeTabPath;
 	}, [activeTabPath]);
 
+	// onNavigate に渡す query。飛び先 source の `[[targetPage]]` を highlightQueryExtension の
+	// case-insensitive substring で塗るため、scanBacklinksImpl と同じ正規化 (拡張子剥がし + NFC)
+	// で算出する (electron/main/ipc/search.ts:509-513 と同方針)。
+	// 早期 return より前で hook を呼ぶ必要があるため、targetFilePath が null の場合は
+	// "" を返す (その場合 panel は早期 return され、targetPageName は読まれない)。
+	const targetPageName = useMemo(
+		() => (targetFilePath ? basename(targetFilePath).slice(0, -3).normalize("NFC") : ""),
+		[targetFilePath],
+	);
+
 	// ターゲット変更 / ファイルツリー変更時は即座に再スキャン。
 	// targetFilePath が null になったら store を reset して古い結果を残さない。
 	// UnresolvedLinksPanel と同じく `scanVersion` を経由する形で fileTreeVersion を依存に積む。
@@ -87,11 +97,6 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 			</div>
 		);
 	}
-
-	// onNavigate に渡す query。飛び先 source の `[[targetPage]]` を highlightQueryExtension の
-	// case-insensitive substring で塗るため、scanBacklinksImpl と同じ正規化 (拡張子剥がし + NFC)
-	// で算出する (electron/main/ipc/search.ts:509-513 と同方針)。
-	const targetPageName = basename(targetFilePath).slice(0, -3).normalize("NFC");
 
 	return (
 		<div className="flex h-full flex-col">
