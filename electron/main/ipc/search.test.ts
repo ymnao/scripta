@@ -180,6 +180,18 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		expect(out[0].references[0].lineNumber).toBe(1);
 	});
 
+	it("trims leading/trailing whitespace from each reference lineContent (#227)", async () => {
+		await writeFile(
+			join(workspaceDir, "note.md"),
+			"  - list with [[missing]]  \n\t[[missing]] indented\t\n",
+		);
+		const out = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(2);
+		expect(out[0].references[0].lineContent).toBe("- list with [[missing]]");
+		expect(out[0].references[1].lineContent).toBe("[[missing]] indented");
+	});
+
 	it("filters out existing files", async () => {
 		await writeFile(join(workspaceDir, "existing.md"), "# Existing");
 		await writeFile(join(workspaceDir, "note.md"), "Link to [[existing]] and [[missing]]");
@@ -415,6 +427,19 @@ describe("scanBacklinksImpl", () => {
 		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
 		expect(out).toHaveLength(1);
 		expect(out[0].references[0].lineContent).toBe("[[target|My Display]]");
+	});
+
+	it("trims leading/trailing whitespace from each reference lineContent (#227)", async () => {
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"  - list with [[target]]  \n\t[[target]] indented\t\n",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(2);
+		expect(out[0].references[0].lineContent).toBe("- list with [[target]]");
+		expect(out[0].references[1].lineContent).toBe("[[target]] indented");
 	});
 
 	it("ignores wikilinks inside fenced code blocks", async () => {

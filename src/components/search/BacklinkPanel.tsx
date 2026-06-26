@@ -154,7 +154,7 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 												className="search-panel-line-content truncate"
 												title={reference.lineContent}
 											>
-												{reference.lineContent.trim()}
+												{reference.lineContent}
 											</span>
 										</button>
 									))}
