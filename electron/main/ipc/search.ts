@@ -535,7 +535,7 @@ async function scanBacklinksImpl(
 	// backlink を表示すると live-preview の動作と食い違う。空配列で早期 return。
 	const fileMap = new Map<string, string>();
 	for (const filePath of inFiles) {
-		const name = basename(filePath).replace(/\.md$/i, "").normalize("NFC");
+		const name = basename(filePath).slice(0, -3).normalize("NFC");
 		if (!name) continue;
 		const existing = fileMap.get(name);
 		if (!existing || filePath < existing) {
