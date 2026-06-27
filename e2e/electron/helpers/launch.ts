@@ -66,18 +66,26 @@ export const test = base.extend<ScriptaFixtures>({
 		await use(dir);
 		rmSync(dir, { recursive: true, force: true });
 	},
-	launch: async ({ userDataDir }, use) => {
-		const launched: ElectronApplication[] = [];
-		const launch = async (dir: string = userDataDir): Promise<LaunchResult> => {
-			const result = await launchScripta(dir);
-			launched.push(result.app);
-			return result;
-		};
-		await use(launch);
-		for (const app of launched) {
-			await app.close();
-		}
-	},
+	// `app.close()` は通常 1〜2s で完了するが、xvfb 上では稀に 30s を超え、
+	// fixture timeout (= test timeout と共有、default 30s) を超過して
+	// "Tearing down launch exceeded test timeout" で fail することがある。
+	// teardown 単独に 60s の余裕を与えて低頻度 flaky を救済する (test 本体の
+	// timeout は default 30s のままにし、本体 hang の検出は従来通り維持)。
+	launch: [
+		async ({ userDataDir }, use) => {
+			const launched: ElectronApplication[] = [];
+			const launch = async (dir: string = userDataDir): Promise<LaunchResult> => {
+				const result = await launchScripta(dir);
+				launched.push(result.app);
+				return result;
+			};
+			await use(launch);
+			for (const app of launched) {
+				await app.close();
+			}
+		},
+		{ timeout: 60_000 },
+	],
 });
 
 // 実 Electron はホスト OS をそのまま使うため、修飾キーは host platform で決まる
