@@ -1,5 +1,6 @@
 import { promises as fsp } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import pLimit from "p-limit";
 import type { SearchResult } from "../../../src/types/search";
 import type {
 	BacklinkSource,
@@ -9,6 +10,10 @@ import type {
 import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
 import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
+
+// scan 系 IPC が共有する readFile 並列上限。複数の scan IPC が同時並行しても
+// 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
+const ioLimit = pLimit(16);
 
 // ワークスペース配下の `.md` ファイルを再帰的に収集する。
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
@@ -135,50 +140,59 @@ async function searchFilesImpl(
 
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];
-	// input-base で byte 比較 sort（lexicographic byte compare）。io はインデックス連動。
-	const order = io
-		.map((_, i) => i)
-		.sort((a, b) => (input[a] < input[b] ? -1 : input[a] > input[b] ? 1 : 0));
 
 	const querySearch = caseSensitive ? query : query.toLowerCase();
 	const results: SearchResult[] = [];
 
-	for (const idx of order) {
-		// ファイル間のチェックポイント。1 ファイルの per-line ループは fast なので
-		// その内側ではチェックしない（コストの方が大きい）。
-		if (isStale()) return [];
-		const ioPath = io[idx];
-		const inputPath = input[idx];
-		let content: string;
-		try {
-			content = await fsp.readFile(ioPath, "utf8");
-		} catch {
-			continue; // 読み取り失敗ファイルは skip
-		}
-		// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
-		const lines = content.split(/\r?\n/);
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			const lineSearch = caseSensitive ? line : line.toLowerCase();
-			const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
-			let pos = 0;
-			while (true) {
-				const found = lineSearch.indexOf(querySearch, pos);
-				if (found === -1) break;
-				const lowerEnd = found + querySearch.length;
-				const matchStart = lowerToOrig ? lowerToOrig[found] : found;
-				const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
-				results.push({
-					filePath: inputPath,
-					lineNumber: i + 1,
-					lineContent: line,
-					matchStart,
-					matchEnd,
-				});
-				pos = lowerEnd; // 次の検索開始位置を match 末尾へ進める
-			}
-		}
-	}
+	// isStale は task 開始時に 1 回 check（旧 sequential の per-iter check と等価方針）。
+	await Promise.all(
+		io.map((ioPath, idx) =>
+			ioLimit(async () => {
+				if (isStale()) return;
+				const inputPath = input[idx];
+				let content: string;
+				try {
+					content = await fsp.readFile(ioPath, "utf8");
+				} catch {
+					return; // 読み取り失敗ファイルは skip
+				}
+				// readFile の await 中に stale 化していたら per-line scan は skip して
+				// cancel 反応性を上げる（大きな file ほど効く）。
+				if (isStale()) return;
+				// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
+				const lines = content.split(/\r?\n/);
+				for (let i = 0; i < lines.length; i++) {
+					const line = lines[i];
+					const lineSearch = caseSensitive ? line : line.toLowerCase();
+					const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+					let pos = 0;
+					while (true) {
+						const found = lineSearch.indexOf(querySearch, pos);
+						if (found === -1) break;
+						const lowerEnd = found + querySearch.length;
+						const matchStart = lowerToOrig ? lowerToOrig[found] : found;
+						const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
+						results.push({
+							filePath: inputPath,
+							lineNumber: i + 1,
+							lineContent: line,
+							matchStart,
+							matchEnd,
+						});
+						pos = lowerEnd; // 次の検索開始位置を match 末尾へ進める
+					}
+				}
+			}),
+		),
+	);
+	if (isStale()) return [];
+	// 並列実行で push 順序が乱れるので最終 sort で output 順序を安定化する。
+	results.sort((a, b) => {
+		if (a.filePath < b.filePath) return -1;
+		if (a.filePath > b.filePath) return 1;
+		if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
+		return a.matchStart - b.matchStart;
+	});
 	return results;
 }
 
@@ -470,23 +484,31 @@ async function scanUnresolvedWikilinksImpl(
 	}
 
 	const map = new Map<string, WikilinkReference[]>();
-	for (let idx = 0; idx < ioFiles.length; idx++) {
-		// ファイル間のチェックポイント。1 ファイルの per-line ループは sync なので
-		// その内側ではチェックしない（cost vs. 反応速度のバランス、searchFilesImpl と同方針）。
-		if (isStale()) return [];
-		let text: string;
-		try {
-			text = await fsp.readFile(ioFiles[idx], "utf8");
-		} catch {
-			continue;
-		}
-		iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
-			if (existing.has(pageName)) return;
-			const arr = map.get(pageName);
-			if (arr === undefined) map.set(pageName, [ref]);
-			else arr.push(ref);
-		});
-	}
+	// iterateWikilinkOccurrences の callback は sync block 内で完結するので、
+	// 並列 task 間で map への push は race しない（await の境界でのみ task が切り替わる）。
+	await Promise.all(
+		ioFiles.map((ioPath, idx) =>
+			ioLimit(async () => {
+				if (isStale()) return;
+				let text: string;
+				try {
+					text = await fsp.readFile(ioPath, "utf8");
+				} catch {
+					return;
+				}
+				// readFile の await 中に stale 化していたら iterateWikilinkOccurrences の
+				// parse work は skip して cancel 反応性を上げる。
+				if (isStale()) return;
+				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
+					if (existing.has(pageName)) return;
+					const arr = map.get(pageName);
+					if (arr === undefined) map.set(pageName, [ref]);
+					else arr.push(ref);
+				});
+			}),
+		),
+	);
+	if (isStale()) return [];
 
 	const result: UnresolvedWikilink[] = [];
 	for (const [pageName, references] of map) {
@@ -545,26 +567,34 @@ async function scanBacklinksImpl(
 	if (fileMap.get(targetPage) !== targetInput) return [];
 
 	const map = new Map<string, WikilinkReference[]>();
-	for (let idx = 0; idx < ioFiles.length; idx++) {
-		// ファイル間のチェックポイント（scanUnresolvedWikilinksImpl と同方針）。
-		if (isStale()) return [];
-		// 自分自身からのリンクは backlink としては表示しない。
-		if (inFiles[idx] === targetInput) continue;
+	// ioLimit で並列化（scanUnresolvedWikilinksImpl と同方針）。
+	await Promise.all(
+		ioFiles.map((ioPath, idx) =>
+			ioLimit(async () => {
+				if (isStale()) return;
+				// 自分自身からのリンクは backlink としては表示しない。
+				if (inFiles[idx] === targetInput) return;
 
-		let text: string;
-		try {
-			text = await fsp.readFile(ioFiles[idx], "utf8");
-		} catch {
-			continue;
-		}
-		iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
-			if (pageName !== targetPage) return;
-			const sourceFile = ref.filePath;
-			const arr = map.get(sourceFile);
-			if (arr === undefined) map.set(sourceFile, [ref]);
-			else arr.push(ref);
-		});
-	}
+				let text: string;
+				try {
+					text = await fsp.readFile(ioPath, "utf8");
+				} catch {
+					return;
+				}
+				// scanUnresolvedWikilinksImpl と同方針: readFile 後の parse work を
+				// stale 時に skip して cancel 反応性を上げる。
+				if (isStale()) return;
+				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
+					if (pageName !== targetPage) return;
+					const sourceFile = ref.filePath;
+					const arr = map.get(sourceFile);
+					if (arr === undefined) map.set(sourceFile, [ref]);
+					else arr.push(ref);
+				});
+			}),
+		),
+	);
+	if (isStale()) return [];
 
 	const result: BacklinkSource[] = [];
 	for (const [sourceFile, references] of map) {
