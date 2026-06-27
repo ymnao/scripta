@@ -30,7 +30,7 @@ describe("createScanAction", () => {
 
 	it("success: apply result and clear loading", async () => {
 		const { set, get } = createTestStore();
-		const api = vi.fn().mockResolvedValue(["a", "b"]);
+		const api = vi.fn<(label: string) => Promise<string[]>>().mockResolvedValue(["a", "b"]);
 		const scan = createScanAction<TestState, [string], string[]>({
 			api: () => api,
 			applyResult: (result) => ({ items: result }),
@@ -48,7 +48,7 @@ describe("createScanAction", () => {
 	it("error: log and clear loading without applying result", async () => {
 		const { set, get } = createTestStore({ items: ["existing"] });
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-		const api = vi.fn().mockRejectedValue(new Error("boom"));
+		const api = vi.fn<() => Promise<string[]>>().mockRejectedValue(new Error("boom"));
 		const scan = createScanAction<TestState, [], string[]>({
 			api: () => api,
 			applyResult: (result) => ({ items: result }),
@@ -145,7 +145,7 @@ describe("createScanAction", () => {
 		const apiPromise = new Promise<string[]>((r) => {
 			resolveApi = r;
 		});
-		const api = vi.fn().mockReturnValueOnce(apiPromise);
+		const api = vi.fn<(label: string) => Promise<string[]>>().mockReturnValueOnce(apiPromise);
 
 		const scan = createScanAction<TestState, [string], string[]>({
 			api: () => api,
@@ -178,7 +178,7 @@ describe("createScanAction", () => {
 		const apiPromise = new Promise<string[]>((r) => {
 			resolveApi = r;
 		});
-		const api = vi.fn().mockReturnValueOnce(apiPromise);
+		const api = vi.fn<(label: string) => Promise<string[]>>().mockReturnValueOnce(apiPromise);
 
 		const scan = createScanAction<TestState, [string], string[]>({
 			api: () => api,
@@ -199,7 +199,7 @@ describe("createScanAction", () => {
 
 	it("_scanId monotonically increases per call", async () => {
 		const { set, get } = createTestStore();
-		const api = vi.fn().mockResolvedValue([]);
+		const api = vi.fn<() => Promise<string[]>>().mockResolvedValue([]);
 		const scan = createScanAction<TestState, [], string[]>({
 			api: () => api,
 			applyResult: (result) => ({ items: result }),
@@ -216,7 +216,7 @@ describe("createScanAction", () => {
 
 	it("respects manually bumped _scanId between calls (e.g. reset)", async () => {
 		const { set, get } = createTestStore({ _scanId: 5 });
-		const api = vi.fn().mockResolvedValue([]);
+		const api = vi.fn<() => Promise<string[]>>().mockResolvedValue([]);
 		const scan = createScanAction<TestState, [], string[]>({
 			api: () => api,
 			applyResult: (result) => ({ items: result }),
