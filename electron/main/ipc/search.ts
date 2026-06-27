@@ -156,6 +156,9 @@ async function searchFilesImpl(
 				} catch {
 					return; // 読み取り失敗ファイルは skip
 				}
+				// readFile の await 中に stale 化していたら per-line scan は skip して
+				// cancel 反応性を上げる（大きな file ほど効く）。
+				if (isStale()) return;
 				// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 				const lines = content.split(/\r?\n/);
 				for (let i = 0; i < lines.length; i++) {
@@ -493,6 +496,9 @@ async function scanUnresolvedWikilinksImpl(
 				} catch {
 					return;
 				}
+				// readFile の await 中に stale 化していたら iterateWikilinkOccurrences の
+				// parse work は skip して cancel 反応性を上げる。
+				if (isStale()) return;
 				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
 					if (existing.has(pageName)) return;
 					const arr = map.get(pageName);
@@ -575,6 +581,9 @@ async function scanBacklinksImpl(
 				} catch {
 					return;
 				}
+				// scanUnresolvedWikilinksImpl と同方針: readFile 後の parse work を
+				// stale 時に skip して cancel 反応性を上げる。
+				if (isStale()) return;
 				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
 					if (pageName !== targetPage) return;
 					const sourceFile = ref.filePath;
