@@ -795,7 +795,7 @@ function installApiMock(opts: {
 			// なら、live-preview 上では `[[target]]` は別ノートに解決されるため空配列を返す。
 			const fileMap: Record<string, string> = {};
 			for (const filePath of mdFiles) {
-				const name = baseName(filePath).replace(/\.md$/i, "").normalize("NFC");
+				const name = baseName(filePath).slice(0, -3).normalize("NFC");
 				if (!name) continue;
 				const existing = fileMap[name];
 				if (!existing || filePath < existing) {
