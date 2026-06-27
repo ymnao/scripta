@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, FileText, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelBacklinkScan } from "../../lib/commands";
-import { basename, isNewTabPath, toRelativePath } from "../../lib/path";
+import { basename, isNewTabPath } from "../../lib/path";
 import { useBacklinkStore } from "../../stores/backlink";
 import { useWorkspaceStore } from "../../stores/workspace";
 
@@ -117,57 +117,53 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 				{!loading && backlinks.length === 0 && (
 					<p className="px-3 py-2 text-xs text-text-secondary">バックリンクはありません</p>
 				)}
-				{backlinks.map((src) => {
-					const fileName = basename(src.sourceFile);
-					const relativePath = toRelativePath(workspacePath, src.sourceFile);
-					return (
-						<div key={src.sourceFile} className="group">
-							<div className="flex items-center">
-								<button
-									type="button"
-									className="search-panel-file-header min-w-0 flex-1"
-									onClick={() => toggleCollapse(src.sourceFile)}
-									aria-expanded={!isCollapsed(src.sourceFile)}
-								>
-									<span className="search-panel-file-chevron">
-										{isCollapsed(src.sourceFile) ? (
-											<ChevronRight size={12} />
-										) : (
-											<ChevronDown size={12} />
-										)}
-									</span>
-									<FileText size={12} className="mr-1 shrink-0 text-text-secondary" />
-									<span className="search-panel-file-name truncate" title={relativePath}>
-										{fileName}
-									</span>
-									<span className="search-panel-file-count">{src.references.length}</span>
-								</button>
-							</div>
-							{!isCollapsed(src.sourceFile) && (
-								<div>
-									{src.references.map((reference) => (
-										<button
-											type="button"
-											key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
-											className="search-panel-match"
-											onClick={() =>
-												onNavigate(reference.filePath, reference.lineNumber, targetPageName)
-											}
-										>
-											<span className="search-panel-line-number">{reference.lineNumber}</span>
-											<span
-												className="search-panel-line-content truncate"
-												title={reference.lineContent}
-											>
-												{reference.lineContent}
-											</span>
-										</button>
-									))}
-								</div>
-							)}
+				{backlinks.map((src) => (
+					<div key={src.sourceFile} className="group">
+						<div className="flex items-center">
+							<button
+								type="button"
+								className="search-panel-file-header min-w-0 flex-1"
+								onClick={() => toggleCollapse(src.sourceFile)}
+								aria-expanded={!isCollapsed(src.sourceFile)}
+							>
+								<span className="search-panel-file-chevron">
+									{isCollapsed(src.sourceFile) ? (
+										<ChevronRight size={12} />
+									) : (
+										<ChevronDown size={12} />
+									)}
+								</span>
+								<FileText size={12} className="mr-1 shrink-0 text-text-secondary" />
+								<span className="search-panel-file-name truncate" title={src.displayPath}>
+									{src.displayName}
+								</span>
+								<span className="search-panel-file-count">{src.references.length}</span>
+							</button>
 						</div>
-					);
-				})}
+						{!isCollapsed(src.sourceFile) && (
+							<div>
+								{src.references.map((reference) => (
+									<button
+										type="button"
+										key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
+										className="search-panel-match"
+										onClick={() =>
+											onNavigate(reference.filePath, reference.lineNumber, targetPageName)
+										}
+									>
+										<span className="search-panel-line-number">{reference.lineNumber}</span>
+										<span
+											className="search-panel-line-content truncate"
+											title={reference.lineContent}
+										>
+											{reference.lineContent}
+										</span>
+									</button>
+								))}
+							</div>
+						)}
+					</div>
+				))}
 			</section>
 		</div>
 	);

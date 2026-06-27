@@ -6,6 +6,16 @@ vi.mock("../lib/commands", () => ({
 	scanBacklinks: vi.fn(),
 }));
 
+// test sourceFile はすべて `/workspace/xxx.md` の形なので displayName / displayPath は同じ basename。
+// 本 helper で BacklinkSource 拡張時の touch point を 1 箇所に集約する。
+const mkSource = (
+	sourceFile: string,
+	references: BacklinkSource["references"] = [],
+): BacklinkSource => {
+	const name = sourceFile.split("/").pop() ?? sourceFile;
+	return { sourceFile, displayName: name, displayPath: name, references };
+};
+
 describe("useBacklinkStore", () => {
 	afterEach(() => {
 		useBacklinkStore.setState({
@@ -24,19 +34,16 @@ describe("useBacklinkStore", () => {
 
 	it("scan fetches backlinks and records currentTargetPath", async () => {
 		const mockLinks: BacklinkSource[] = [
-			{
-				sourceFile: "/workspace/source.md",
-				references: [
-					{
-						filePath: "/workspace/source.md",
-						lineNumber: 1,
-						byteOffset: 5,
-						lineContent: "See [[target]]",
-						contextBefore: [],
-						contextAfter: [],
-					},
-				],
-			},
+			mkSource("/workspace/source.md", [
+				{
+					filePath: "/workspace/source.md",
+					lineNumber: 1,
+					byteOffset: 5,
+					lineContent: "See [[target]]",
+					contextBefore: [],
+					contextAfter: [],
+				},
+			]),
 		];
 		const { scanBacklinks } = await import("../lib/commands");
 		vi.mocked(scanBacklinks).mockResolvedValue(mockLinks);
@@ -51,7 +58,7 @@ describe("useBacklinkStore", () => {
 
 	it("changing target clears prior backlinks immediately to avoid stale display", async () => {
 		useBacklinkStore.setState({
-			backlinks: [{ sourceFile: "/workspace/old.md", references: [] }],
+			backlinks: [mkSource("/workspace/old.md")],
 			currentTargetPath: "/workspace/foo.md",
 		});
 
@@ -74,7 +81,7 @@ describe("useBacklinkStore", () => {
 	});
 
 	it("same target re-scan keeps prior backlinks until new result arrives", async () => {
-		const existing: BacklinkSource[] = [{ sourceFile: "/workspace/old.md", references: [] }];
+		const existing: BacklinkSource[] = [mkSource("/workspace/old.md")];
 		useBacklinkStore.setState({
 			backlinks: existing,
 			currentTargetPath: "/workspace/foo.md",
@@ -94,7 +101,7 @@ describe("useBacklinkStore", () => {
 		expect(useBacklinkStore.getState().backlinks).toEqual(existing);
 		expect(useBacklinkStore.getState().loading).toBe(true);
 
-		const fresh: BacklinkSource[] = [{ sourceFile: "/workspace/new.md", references: [] }];
+		const fresh: BacklinkSource[] = [mkSource("/workspace/new.md")];
 		resolveScan?.(fresh);
 		await scanPromise;
 		expect(useBacklinkStore.getState().backlinks).toEqual(fresh);
@@ -111,8 +118,8 @@ describe("useBacklinkStore", () => {
 
 	it("stale scan result is discarded when newer scan is in flight", async () => {
 		const { scanBacklinks } = await import("../lib/commands");
-		const staleResult: BacklinkSource[] = [{ sourceFile: "/workspace/stale.md", references: [] }];
-		const freshResult: BacklinkSource[] = [{ sourceFile: "/workspace/fresh.md", references: [] }];
+		const staleResult: BacklinkSource[] = [mkSource("/workspace/stale.md")];
+		const freshResult: BacklinkSource[] = [mkSource("/workspace/fresh.md")];
 
 		let resolveFirst: ((v: BacklinkSource[]) => void) | undefined;
 		const firstPromise = new Promise<BacklinkSource[]>((r) => {
@@ -135,7 +142,7 @@ describe("useBacklinkStore", () => {
 	it("reset clears all state and invalidates in-flight scans", async () => {
 		const { scanBacklinks } = await import("../lib/commands");
 
-		const oldResult: BacklinkSource[] = [{ sourceFile: "/workspace/old.md", references: [] }];
+		const oldResult: BacklinkSource[] = [mkSource("/workspace/old.md")];
 
 		let resolveOld: ((v: BacklinkSource[]) => void) | undefined;
 		const oldPromise = new Promise<BacklinkSource[]>((r) => {
