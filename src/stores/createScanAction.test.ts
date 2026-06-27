@@ -131,7 +131,7 @@ describe("createScanAction", () => {
 		expect(get().items).toEqual(["ok"]);
 	});
 
-	it("beforeScan: pre-state mutations are applied before loading flips", async () => {
+	it("beforeScan: pre-state mutations are reflected in the final state", async () => {
 		const { set, get } = createTestStore({ items: ["stale"], currentKey: "old" });
 
 		const beforeScan = vi.fn<(state: TestState, args: [string]) => Partial<TestState>>(
