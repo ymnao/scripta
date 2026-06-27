@@ -66,18 +66,22 @@ export const test = base.extend<ScriptaFixtures>({
 		await use(dir);
 		rmSync(dir, { recursive: true, force: true });
 	},
-	launch: async ({ userDataDir }, use) => {
-		const launched: ElectronApplication[] = [];
-		const launch = async (dir: string = userDataDir): Promise<LaunchResult> => {
-			const result = await launchScripta(dir);
-			launched.push(result.app);
-			return result;
-		};
-		await use(launch);
-		for (const app of launched) {
-			await app.close();
-		}
-	},
+	// xvfb 上で稀に `app.close()` が 30s を超え fixture timeout (= test timeout
+	// と共有、default 30s) に引っかかるため、teardown 単独に 60s の余裕を与える
+	// (test 本体の timeout は default 30s 据え置きで本体 hang 検出は維持)。
+	launch: [
+		async ({ userDataDir }, use) => {
+			const launched: ElectronApplication[] = [];
+			const launch = async (dir: string = userDataDir): Promise<LaunchResult> => {
+				const result = await launchScripta(dir);
+				launched.push(result.app);
+				return result;
+			};
+			await use(launch);
+			await Promise.all(launched.map((app) => app.close()));
+		},
+		{ timeout: 60_000 },
+	],
 });
 
 // 実 Electron はホスト OS をそのまま使うため、修飾キーは host platform で決まる
