@@ -192,6 +192,25 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		expect(out[0].references[1].lineContent).toBe("[[missing]] indented");
 	});
 
+	it("trims each occurrence independently when [[missing]] appears multiple times on the same line (#241)", async () => {
+		// scanBacklinksImpl 側 #241 test と対称: iterateWikilinkOccurrences の
+		// per-yield 新規 alloc contract を unresolved consumer 側からも lock する。
+		await writeFile(
+			join(workspaceDir, "note.md"),
+			"  see [[missing]] and [[missing]] in the same line  \n",
+		);
+		const out = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(2);
+		expect(out[0].references[0].lineContent).toBe(
+			"see [[missing]] and [[missing]] in the same line",
+		);
+		expect(out[0].references[1].lineContent).toBe(
+			"see [[missing]] and [[missing]] in the same line",
+		);
+		expect(out[0].references[0].byteOffset).not.toBe(out[0].references[1].byteOffset);
+	});
+
 	it("filters out existing files", async () => {
 		await writeFile(join(workspaceDir, "existing.md"), "# Existing");
 		await writeFile(join(workspaceDir, "note.md"), "Link to [[existing]] and [[missing]]");
@@ -440,6 +459,25 @@ describe("scanBacklinksImpl", () => {
 		expect(out[0].references).toHaveLength(2);
 		expect(out[0].references[0].lineContent).toBe("- list with [[target]]");
 		expect(out[0].references[1].lineContent).toBe("[[target]] indented");
+	});
+
+	it("trims each occurrence independently when [[target]] appears multiple times on the same line (#241)", async () => {
+		// iterateWikilinkOccurrences (search.ts) は yield 毎に新規 ref オブジェクトを
+		// alloc する設計で、producer-side `line.trim()` (#227) はその「per-yield 新規
+		// alloc」前提に依存している。将来 helper が ref を pool/reuse する refactor を
+		// 入れると trim 効果が壊れるため、同一行 multi-occurrence の独立性を defensive
+		// に lock する (byteOffset が異なる = 別 ref であることも併せて確認)。
+		await writeFile(join(workspaceDir, "target.md"), "");
+		await writeFile(
+			join(workspaceDir, "src.md"),
+			"  see [[target]] and [[target]] in the same line  \n",
+		);
+		const out = await scanBacklinksImpl(TEST_WIN, workspaceDir, join(workspaceDir, "target.md"));
+		expect(out).toHaveLength(1);
+		expect(out[0].references).toHaveLength(2);
+		expect(out[0].references[0].lineContent).toBe("see [[target]] and [[target]] in the same line");
+		expect(out[0].references[1].lineContent).toBe("see [[target]] and [[target]] in the same line");
+		expect(out[0].references[0].byteOffset).not.toBe(out[0].references[1].byteOffset);
 	});
 
 	it("ignores wikilinks inside fenced code blocks", async () => {
