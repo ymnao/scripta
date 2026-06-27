@@ -66,11 +66,9 @@ export const test = base.extend<ScriptaFixtures>({
 		await use(dir);
 		rmSync(dir, { recursive: true, force: true });
 	},
-	// `app.close()` は通常 1〜2s で完了するが、xvfb 上では稀に 30s を超え、
-	// fixture timeout (= test timeout と共有、default 30s) を超過して
-	// "Tearing down launch exceeded test timeout" で fail することがある。
-	// teardown 単独に 60s の余裕を与えて低頻度 flaky を救済する (test 本体の
-	// timeout は default 30s のままにし、本体 hang の検出は従来通り維持)。
+	// xvfb 上で稀に `app.close()` が 30s を超え fixture timeout (= test timeout
+	// と共有、default 30s) に引っかかるため、teardown 単独に 60s の余裕を与える
+	// (test 本体の timeout は default 30s 据え置きで本体 hang 検出は維持)。
 	launch: [
 		async ({ userDataDir }, use) => {
 			const launched: ElectronApplication[] = [];
@@ -80,9 +78,7 @@ export const test = base.extend<ScriptaFixtures>({
 				return result;
 			};
 			await use(launch);
-			for (const app of launched) {
-				await app.close();
-			}
+			await Promise.all(launched.map((app) => app.close()));
 		},
 		{ timeout: 60_000 },
 	],
