@@ -1,5 +1,5 @@
 import { promises as fsp } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import pLimit from "p-limit";
 import type { SearchResult } from "../../../src/types/search";
 import type {
@@ -519,6 +519,13 @@ async function scanUnresolvedWikilinksImpl(
 	return result;
 }
 
+// main 側 entry-filter.ts:toRel と同じ pattern。Node 標準 relative + posix 正規化で
+// workspacePath からの表示用相対 path にする（Windows でも表示は posix 形に統一）。
+function toDisplayPath(workspacePath: string, absolutePath: string): string {
+	const rel = relative(workspacePath, absolutePath);
+	return sep === "/" ? rel : rel.split(sep).join("/");
+}
+
 // 指定ノートを `[[ファイル名]]` で参照しているノートを収集する（順引きと逆方向）。
 // 解決ロジックは scanUnresolvedWikilinksImpl と同じ正規化（拡張子除去 + NFC + path-traversal 弾き）を
 // 通すため、ホバーで参照件数を出す機能と件数が一致する。self-reference は canonical path 一致で除外。
@@ -598,7 +605,12 @@ async function scanBacklinksImpl(
 
 	const result: BacklinkSource[] = [];
 	for (const [sourceFile, references] of map) {
-		result.push({ sourceFile, references });
+		result.push({
+			sourceFile,
+			displayName: basename(sourceFile),
+			displayPath: toDisplayPath(workspacePath, sourceFile),
+			references,
+		});
 	}
 	// sourceFile の byte 比較で昇順（scanUnresolvedWikilinksImpl と同方針）。
 	result.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));

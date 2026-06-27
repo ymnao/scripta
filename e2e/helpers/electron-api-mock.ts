@@ -859,8 +859,18 @@ function installApiMock(opts: {
 					}
 				}
 			}
+			// 本番 search.ts:toDisplayPath と同等を mock 内 inline で再現。e2e mock の filePath は
+			// 正規化済み posix 形なので `/` 区切り前提で OK。
+			const wsPrefix = workspacePath.endsWith("/") ? workspacePath : `${workspacePath}/`;
 			return Object.entries(map)
-				.map(([sourceFile, references]) => ({ sourceFile, references }))
+				.map(([sourceFile, references]) => ({
+					sourceFile,
+					displayName: baseName(sourceFile),
+					displayPath: sourceFile.startsWith(wsPrefix)
+						? sourceFile.slice(wsPrefix.length)
+						: sourceFile,
+					references,
+				}))
 				.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));
 		},
 		cancelBacklinkScan: async (): Promise<void> => {
