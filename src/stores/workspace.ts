@@ -58,8 +58,12 @@ function closeTabAt(state: WorkspaceState, index: number): Partial<WorkspaceStat
 	};
 }
 
+function getActiveTab(state: WorkspaceState): Tab | undefined {
+	return state.tabs.find((t) => t.id === state.activeTabId);
+}
+
 function navigateHistory(state: WorkspaceState, direction: -1 | 1): Partial<WorkspaceState> {
-	const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+	const activeTab = getActiveTab(state);
 	if (!activeTab) return state;
 	const newIndex = activeTab.historyIndex + direction;
 	if (newIndex < 0 || newIndex >= activeTab.history.length) return state;
@@ -83,7 +87,7 @@ function activateTabByOffset(state: WorkspaceState, offset: number): Partial<Wor
 export const selectNavigation = (
 	s: WorkspaceState,
 ): { canGoBack: boolean; canGoForward: boolean } => {
-	const t = s.tabs.find((tab) => tab.id === s.activeTabId);
+	const t = getActiveTab(s);
 	return {
 		canGoBack: (t?.historyIndex ?? 0) > 0,
 		canGoForward: t ? t.historyIndex < t.history.length - 1 : false,
@@ -197,7 +201,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 
 	navigateInTab: (path) =>
 		set((state) => {
-			const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+			const activeTab = getActiveTab(state);
 
 			// Same path as current → no-op
 			if (activeTab?.path === path) return state;
