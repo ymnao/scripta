@@ -10,7 +10,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelWikilinkScan } from "../../lib/commands";
-import { toRelativePath } from "../../lib/path";
 import { useWikilinkStore } from "../../stores/wikilink";
 import { useWorkspaceStore } from "../../stores/workspace";
 import type { UnresolvedWikilink } from "../../types/wikilink";
@@ -137,24 +136,24 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 						</div>
 						{!isCollapsed(link.pageName) && (
 							<div>
-								{link.references.map((reference) => {
-									const relativePath = toRelativePath(workspacePath, reference.filePath);
-									return (
-										<button
-											type="button"
-											key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
-											className="search-panel-match"
-											onClick={() =>
-												onNavigate(reference.filePath, reference.lineNumber, link.pageName)
-											}
+								{link.references.map((reference) => (
+									<button
+										type="button"
+										key={`${reference.filePath}-${reference.lineNumber}-${reference.byteOffset}`}
+										className="search-panel-match"
+										onClick={() =>
+											onNavigate(reference.filePath, reference.lineNumber, link.pageName)
+										}
+									>
+										<span className="search-panel-line-number">{reference.lineNumber}</span>
+										<span
+											className="search-panel-line-content truncate"
+											title={reference.displayPath}
 										>
-											<span className="search-panel-line-number">{reference.lineNumber}</span>
-											<span className="search-panel-line-content truncate" title={relativePath}>
-												{relativePath}
-											</span>
-										</button>
-									);
-								})}
+											{reference.displayPath}
+										</span>
+									</button>
+								))}
 							</div>
 						)}
 					</div>

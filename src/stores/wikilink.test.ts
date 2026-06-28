@@ -32,6 +32,7 @@ describe("useWikilinkStore", () => {
 				references: [
 					{
 						filePath: "/workspace/note.md",
+						displayPath: "note.md",
 						lineNumber: 1,
 						byteOffset: 5,
 						lineContent: "See [[missing-page]]",
