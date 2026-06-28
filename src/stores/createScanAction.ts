@@ -3,16 +3,18 @@ interface ScanStateBase {
 	loading: boolean;
 }
 
+/**
+ * scan 実行時に毎回呼ばれる thunk。中で実 API 関数を返す。
+ *
+ * thunk にしているのは store 評価時に `commands` からシンボルを直接読み出すと、
+ * 関係ない hooks/components のテストが `vi.mock("../lib/commands", () => ({ ... }))` で
+ * 一部の export しか mock していない場合に strict-mock エラーが出るのを避けるため。
+ * thunk 内の `commands` への参照は ES module の live binding で scan 呼び出し時に解決される。
+ */
+export type ScanApi<TArgs extends unknown[], TResult> = () => (...args: TArgs) => Promise<TResult>;
+
 interface CreateScanActionOptions<TState extends ScanStateBase, TArgs extends unknown[], TResult> {
-	/**
-	 * scan 実行時に毎回呼ばれる thunk。中で実 API 関数を返す。
-	 *
-	 * thunk にしているのは store 評価時に `commands` からシンボルを直接読み出すと、
-	 * 関係ない hooks/components のテストが `vi.mock("../lib/commands", () => ({ ... }))` で
-	 * 一部の export しか mock していない場合に strict-mock エラーが出るのを避けるため。
-	 * thunk 内の `commands` への参照は ES module の live binding で scan 呼び出し時に解決される。
-	 */
-	api: () => (...args: TArgs) => Promise<TResult>;
+	api: ScanApi<TArgs, TResult>;
 	// `_scanId` / `loading` は factory が排他的に管理する。consumer が誤って戻り値に含めても
 	// silently 上書きされて気付けないので、戻り型から除外して compile error にする。
 	applyResult: (result: TResult) => Omit<Partial<TState>, "_scanId" | "loading">;
