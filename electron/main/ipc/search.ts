@@ -16,6 +16,44 @@ import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
 // 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
 const ioLimit = pLimit(16);
 
+// 全 .md を ioLimit 下で並列に読み込んで per-file callback を呼ぶ scan 系 helper。
+// searchFilesImpl / scanUnresolvedWikilinksImpl / scanBacklinksImpl が共有する
+// boilerplate (Promise.all + ioLimit + isStale 2 重 check + try/catch readFile) を集約する。
+// - `isStale` は task 開始時と readFile 後の 2 回 check（旧 sequential の per-iter check と等価方針）。
+// - `skipFile` は readFile 前に評価され、true を返した file は IO せずに skip する
+//   (scanBacklinksImpl の self-reference skip 用)。
+// - `process` は readFile 成功 + isStale 通過後に sync で呼ばれる。await 境界を持たないので
+//   複数 task 間で共有 state (Map / 配列) への push は race しない。
+async function processMdFilesParallel(
+	ioFiles: readonly string[],
+	inFiles: readonly string[],
+	isStale: () => boolean,
+	options: {
+		skipFile?: (inFile: string) => boolean;
+		process: (inFile: string, text: string) => void;
+	},
+): Promise<void> {
+	await Promise.all(
+		ioFiles.map((ioPath, idx) =>
+			ioLimit(async () => {
+				if (isStale()) return;
+				const inFile = inFiles[idx];
+				if (options.skipFile?.(inFile)) return;
+				let text: string;
+				try {
+					text = await fsp.readFile(ioPath, "utf8");
+				} catch {
+					return; // 読み取り失敗ファイルは skip
+				}
+				// readFile の await 中に stale 化していたら per-file 処理は skip して
+				// cancel 反応性を上げる（大きな file ほど効く）。
+				if (isStale()) return;
+				options.process(inFile, text);
+			}),
+		),
+	);
+}
+
 // ワークスペース配下の `.md` ファイルを再帰的に収集する。
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
 // 2 つの基底パスを並走させる（fs.ts/listDirectoryImpl と同じ方針）。
@@ -145,47 +183,33 @@ async function searchFilesImpl(
 	const querySearch = caseSensitive ? query : query.toLowerCase();
 	const results: SearchResult[] = [];
 
-	// isStale は task 開始時に 1 回 check（旧 sequential の per-iter check と等価方針）。
-	await Promise.all(
-		io.map((ioPath, idx) =>
-			ioLimit(async () => {
-				if (isStale()) return;
-				const inputPath = input[idx];
-				let content: string;
-				try {
-					content = await fsp.readFile(ioPath, "utf8");
-				} catch {
-					return; // 読み取り失敗ファイルは skip
+	await processMdFilesParallel(io, input, isStale, {
+		process: (inputPath, content) => {
+			// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
+			const lines = content.split(/\r?\n/);
+			for (let i = 0; i < lines.length; i++) {
+				const line = lines[i];
+				const lineSearch = caseSensitive ? line : line.toLowerCase();
+				const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+				let pos = 0;
+				while (true) {
+					const found = lineSearch.indexOf(querySearch, pos);
+					if (found === -1) break;
+					const lowerEnd = found + querySearch.length;
+					const matchStart = lowerToOrig ? lowerToOrig[found] : found;
+					const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
+					results.push({
+						filePath: inputPath,
+						lineNumber: i + 1,
+						lineContent: line,
+						matchStart,
+						matchEnd,
+					});
+					pos = lowerEnd; // 次の検索開始位置を match 末尾へ進める
 				}
-				// readFile の await 中に stale 化していたら per-line scan は skip して
-				// cancel 反応性を上げる（大きな file ほど効く）。
-				if (isStale()) return;
-				// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
-				const lines = content.split(/\r?\n/);
-				for (let i = 0; i < lines.length; i++) {
-					const line = lines[i];
-					const lineSearch = caseSensitive ? line : line.toLowerCase();
-					const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
-					let pos = 0;
-					while (true) {
-						const found = lineSearch.indexOf(querySearch, pos);
-						if (found === -1) break;
-						const lowerEnd = found + querySearch.length;
-						const matchStart = lowerToOrig ? lowerToOrig[found] : found;
-						const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
-						results.push({
-							filePath: inputPath,
-							lineNumber: i + 1,
-							lineContent: line,
-							matchStart,
-							matchEnd,
-						});
-						pos = lowerEnd; // 次の検索開始位置を match 末尾へ進める
-					}
-				}
-			}),
-		),
-	);
+			}
+		},
+	});
 	if (isStale()) return [];
 	// 並列実行で push 順序が乱れるので最終 sort で output 順序を安定化する。
 	results.sort((a, b) => {
@@ -487,33 +511,21 @@ async function scanUnresolvedWikilinksImpl(
 	const map = new Map<string, UnresolvedWikilinkReference[]>();
 	// iterateWikilinkOccurrences の callback は sync block 内で完結するので、
 	// 並列 task 間で map への push は race しない（await の境界でのみ task が切り替わる）。
-	await Promise.all(
-		ioFiles.map((ioPath, idx) =>
-			ioLimit(async () => {
-				if (isStale()) return;
-				let text: string;
-				try {
-					text = await fsp.readFile(ioPath, "utf8");
-				} catch {
-					return;
-				}
-				// readFile の await 中に stale 化していたら iterateWikilinkOccurrences の
-				// parse work は skip して cancel 反応性を上げる。
-				if (isStale()) return;
-				// inFiles[idx] は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
-				// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
-				// toRelativePath 呼び出しを scan-time に hoist)。
-				const displayPath = toDisplayPath(workspacePath, inFiles[idx]);
-				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
-					if (existing.has(pageName)) return;
-					const refWithDisplay: UnresolvedWikilinkReference = { ...ref, displayPath };
-					const arr = map.get(pageName);
-					if (arr === undefined) map.set(pageName, [refWithDisplay]);
-					else arr.push(refWithDisplay);
-				});
-			}),
-		),
-	);
+	await processMdFilesParallel(ioFiles, inFiles, isStale, {
+		process: (inFile, text) => {
+			// inFile は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
+			// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
+			// toRelativePath 呼び出しを scan-time に hoist)。
+			const displayPath = toDisplayPath(workspacePath, inFile);
+			iterateWikilinkOccurrences(inFile, text, (pageName, ref) => {
+				if (existing.has(pageName)) return;
+				const refWithDisplay: UnresolvedWikilinkReference = { ...ref, displayPath };
+				const arr = map.get(pageName);
+				if (arr === undefined) map.set(pageName, [refWithDisplay]);
+				else arr.push(refWithDisplay);
+			});
+		},
+	});
 	if (isStale()) return [];
 
 	const result: UnresolvedWikilink[] = [];
@@ -580,33 +592,20 @@ async function scanBacklinksImpl(
 	if (fileMap.get(targetPage) !== targetInput) return [];
 
 	const map = new Map<string, WikilinkReference[]>();
-	// ioLimit で並列化（scanUnresolvedWikilinksImpl と同方針）。
-	await Promise.all(
-		ioFiles.map((ioPath, idx) =>
-			ioLimit(async () => {
-				if (isStale()) return;
-				// 自分自身からのリンクは backlink としては表示しない。
-				if (inFiles[idx] === targetInput) return;
-
-				let text: string;
-				try {
-					text = await fsp.readFile(ioPath, "utf8");
-				} catch {
-					return;
-				}
-				// scanUnresolvedWikilinksImpl と同方針: readFile 後の parse work を
-				// stale 時に skip して cancel 反応性を上げる。
-				if (isStale()) return;
-				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
-					if (pageName !== targetPage) return;
-					const sourceFile = ref.filePath;
-					const arr = map.get(sourceFile);
-					if (arr === undefined) map.set(sourceFile, [ref]);
-					else arr.push(ref);
-				});
-			}),
-		),
-	);
+	await processMdFilesParallel(ioFiles, inFiles, isStale, {
+		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
+		// 不要な fd 消費を避ける。
+		skipFile: (inFile) => inFile === targetInput,
+		process: (inFile, text) => {
+			iterateWikilinkOccurrences(inFile, text, (pageName, ref) => {
+				if (pageName !== targetPage) return;
+				const sourceFile = ref.filePath;
+				const arr = map.get(sourceFile);
+				if (arr === undefined) map.set(sourceFile, [ref]);
+				else arr.push(ref);
+			});
+		},
+	});
 	if (isStale()) return [];
 
 	const result: BacklinkSource[] = [];
