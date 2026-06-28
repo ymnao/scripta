@@ -309,6 +309,15 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
+	// 本番 electron/main/ipc/search.ts:toDisplayPath と同等を mock 内で再現。
+	// e2e mock の filePath は正規化済み posix 形なので `/` 区切り前提で OK
+	// (本番は node:path.relative + sep ベース、addInitScript 制約で import 不可)。
+	// scanUnresolvedWikilinks / scanBacklinks の両 handler から共有する。
+	const mockDisplayPath = (workspacePath: string, absolutePath: string): string => {
+		const wsPrefix = workspacePath.endsWith("/") ? workspacePath : `${workspacePath}/`;
+		return absolutePath.startsWith(wsPrefix) ? absolutePath.slice(wsPrefix.length) : absolutePath;
+	};
+
 	// 本番 electron/main/ipc/search.ts の isEscaped / collectInlineCodeRanges と同形ロジック。
 	// `addInitScript` 制約で import 不可なのでこの scope に複製する。
 	// collectInlineCodeRanges は引数が 1 行でも本文全体でも動く (CommonMark の複数行 span
@@ -724,6 +733,9 @@ function installApiMock(opts: {
 				const inlineCodeRanges = collectInlineCodeRanges(
 					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
 				);
+				// 本番 scanUnresolvedWikilinksImpl (search.ts) と同じく filePath 単位で
+				// displayPath を 1 度だけ算出して push 時に使い回す (file 単位 hoist)。
+				const displayPath = mockDisplayPath(workspacePath, filePath);
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
 					if (isFenced[i]) continue;
@@ -754,6 +766,7 @@ function installApiMock(opts: {
 						const refs = unresolvedMap[normalized] ?? [];
 						refs.push({
 							filePath,
+							displayPath,
 							lineNumber: i + 1,
 							byteOffset: encoder.encode(line.slice(0, m.index)).length + 1,
 							// 本番 iterateWikilinkOccurrences (search.ts:371) と同じく
@@ -859,16 +872,11 @@ function installApiMock(opts: {
 					}
 				}
 			}
-			// 本番 search.ts:toDisplayPath と同等を mock 内 inline で再現。e2e mock の filePath は
-			// 正規化済み posix 形なので `/` 区切り前提で OK。
-			const wsPrefix = workspacePath.endsWith("/") ? workspacePath : `${workspacePath}/`;
 			return Object.entries(map)
 				.map(([sourceFile, references]) => ({
 					sourceFile,
 					displayName: baseName(sourceFile),
-					displayPath: sourceFile.startsWith(wsPrefix)
-						? sourceFile.slice(wsPrefix.length)
-						: sourceFile,
+					displayPath: mockDisplayPath(workspacePath, sourceFile),
 					references,
 				}))
 				.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));

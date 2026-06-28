@@ -5,6 +5,7 @@ import type { SearchResult } from "../../../src/types/search";
 import type {
 	BacklinkSource,
 	UnresolvedWikilink,
+	UnresolvedWikilinkReference,
 	WikilinkReference,
 } from "../../../src/types/wikilink";
 import { handle } from "../utils/ipc-handle";
@@ -483,7 +484,7 @@ async function scanUnresolvedWikilinksImpl(
 		existing.add(name.slice(0, -3).normalize("NFC"));
 	}
 
-	const map = new Map<string, WikilinkReference[]>();
+	const map = new Map<string, UnresolvedWikilinkReference[]>();
 	// iterateWikilinkOccurrences の callback は sync block 内で完結するので、
 	// 並列 task 間で map への push は race しない（await の境界でのみ task が切り替わる）。
 	await Promise.all(
@@ -499,11 +500,16 @@ async function scanUnresolvedWikilinksImpl(
 				// readFile の await 中に stale 化していたら iterateWikilinkOccurrences の
 				// parse work は skip して cancel 反応性を上げる。
 				if (isStale()) return;
+				// inFiles[idx] は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
+				// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
+				// toRelativePath 呼び出しを scan-time に hoist)。
+				const displayPath = toDisplayPath(workspacePath, inFiles[idx]);
 				iterateWikilinkOccurrences(inFiles[idx], text, (pageName, ref) => {
 					if (existing.has(pageName)) return;
+					const refWithDisplay: UnresolvedWikilinkReference = { ...ref, displayPath };
 					const arr = map.get(pageName);
-					if (arr === undefined) map.set(pageName, [ref]);
-					else arr.push(ref);
+					if (arr === undefined) map.set(pageName, [refWithDisplay]);
+					else arr.push(refWithDisplay);
 				});
 			}),
 		),
