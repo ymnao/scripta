@@ -45,63 +45,39 @@ interface SettingsState extends SettingsValues {
 	hydrate: (values: Partial<SettingsValues>) => void;
 }
 
-export const useSettingsStore = create<SettingsState>()((set) => ({
-	showLineNumbers: true,
-	fontSize: 14,
-	autoSaveDelay: 2000,
-	highlightActiveLine: false,
-	fontFamily: "monospace",
-	trimTrailingWhitespace: true,
-	showLinkCards: true,
-	scratchpadVolatile: true,
-	autoUpdateCheck: true,
-	fileTreeShowHidden: false,
-	fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
-	setShowLineNumbers: (show: boolean) => {
-		void saveShowLineNumbers(show);
-		set({ showLineNumbers: show });
-	},
-	setFontSize: (size: number) => {
-		void saveFontSize(size);
-		set({ fontSize: size });
-	},
-	setAutoSaveDelay: (delay: number) => {
-		void saveAutoSaveDelay(delay);
-		set({ autoSaveDelay: delay });
-	},
-	setHighlightActiveLine: (highlight: boolean) => {
-		void saveHighlightActiveLine(highlight);
-		set({ highlightActiveLine: highlight });
-	},
-	setFontFamily: (family: FontFamily) => {
-		void saveFontFamily(family);
-		set({ fontFamily: family });
-	},
-	setTrimTrailingWhitespace: (trim: boolean) => {
-		void saveTrimTrailingWhitespace(trim);
-		set({ trimTrailingWhitespace: trim });
-	},
-	setShowLinkCards: (show: boolean) => {
-		void saveShowLinkCards(show);
-		set({ showLinkCards: show });
-	},
-	setScratchpadVolatile: (volatile: boolean) => {
-		void saveScratchpadVolatile(volatile);
-		set({ scratchpadVolatile: volatile });
-	},
-	setAutoUpdateCheck: (enabled: boolean) => {
-		void saveAutoUpdateCheck(enabled);
-		set({ autoUpdateCheck: enabled });
-	},
-	setFileTreeShowHidden: (show: boolean) => {
-		void saveFileTreeShowHidden(show);
-		set({ fileTreeShowHidden: show });
-	},
-	setFileTreeExcludePatterns: (patterns: string) => {
-		void saveFileTreeExcludePatterns(patterns);
-		set({ fileTreeExcludePatterns: patterns });
-	},
-	hydrate: (values: Partial<SettingsValues>) => {
-		set(values);
-	},
-}));
+export const useSettingsStore = create<SettingsState>()((set) => {
+	const makeSetter =
+		<K extends keyof SettingsValues>(key: K, save: (value: SettingsValues[K]) => Promise<void>) =>
+		(value: SettingsValues[K]) => {
+			void save(value);
+			set({ [key]: value } as Partial<SettingsState>);
+		};
+
+	return {
+		showLineNumbers: true,
+		fontSize: 14,
+		autoSaveDelay: 2000,
+		highlightActiveLine: false,
+		fontFamily: "monospace",
+		trimTrailingWhitespace: true,
+		showLinkCards: true,
+		scratchpadVolatile: true,
+		autoUpdateCheck: true,
+		fileTreeShowHidden: false,
+		fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+		setShowLineNumbers: makeSetter("showLineNumbers", saveShowLineNumbers),
+		setFontSize: makeSetter("fontSize", saveFontSize),
+		setAutoSaveDelay: makeSetter("autoSaveDelay", saveAutoSaveDelay),
+		setHighlightActiveLine: makeSetter("highlightActiveLine", saveHighlightActiveLine),
+		setFontFamily: makeSetter("fontFamily", saveFontFamily),
+		setTrimTrailingWhitespace: makeSetter("trimTrailingWhitespace", saveTrimTrailingWhitespace),
+		setShowLinkCards: makeSetter("showLinkCards", saveShowLinkCards),
+		setScratchpadVolatile: makeSetter("scratchpadVolatile", saveScratchpadVolatile),
+		setAutoUpdateCheck: makeSetter("autoUpdateCheck", saveAutoUpdateCheck),
+		setFileTreeShowHidden: makeSetter("fileTreeShowHidden", saveFileTreeShowHidden),
+		setFileTreeExcludePatterns: makeSetter("fileTreeExcludePatterns", saveFileTreeExcludePatterns),
+		hydrate: (values: Partial<SettingsValues>) => {
+			set(values);
+		},
+	};
+});
