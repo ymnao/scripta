@@ -30,16 +30,27 @@ allowBuilds:
   electron: true
   electron-winstaller: true
 
-# `$@codemirror/state` / `$@codemirror/view` は「direct dep の version を全 transitive にも
-# 強制」の self-ref 記法。CodeMirror の state / view が複数バージョン共存すると runtime で
-# 破綻し、TypeScript の private property declaration 衝突 (例: `EditorView.dispatchTransactions`)
-# でビルドも壊れるため強制統一する。
+# `$@codemirror/...` は「direct dep の version を全 transitive にも強制」の self-ref 記法。
+# CodeMirror package は module-level singleton (StateField / Facet / NodeProp) を含むため、
+# 同一 package の複数バージョンが lockfile に共存すると copy 間で field identity が一致せず
+# runtime で破綻する。state / view は複数共存で TypeScript の private property declaration
+# 衝突 (例: `EditorView.dispatchTransactions`) によりビルドも壊れる。
+# language / commands は PR #274 の bump で dual copy (6.12.3+6.12.4 / 6.10.3+6.10.4) が発生し、
+# lang-markdown 側 copy の `Language.state` field をアプリ側 copy の `syntaxTree()` が引けず
+# 空 tree になって live-preview 系 224 assertion + electron-e2e (image / mermaid widget) が
+# 全滅した。以後 root direct dep の @codemirror 全 package を self-ref で単一化する。
 #
 # `brace-expansion` は GHSA-jxxr-4gwj-5jf2（DoS、>=5.0.0 <5.0.6）対応。transitive dep として
 # minimatch 等から間接的に入るため、direct でない pin を override で強制する。selector を
 # `brace-expansion@^5.0.0` に絞り、advisory 対象外の v1/v2 など旧 major が将来 transitive と
 # して入る余地を残す（semver 互換性を破壊しない）。
 overrides:
+  "@codemirror/autocomplete": $@codemirror/autocomplete
+  "@codemirror/commands": $@codemirror/commands
+  "@codemirror/lang-markdown": $@codemirror/lang-markdown
+  "@codemirror/language": $@codemirror/language
+  "@codemirror/language-data": $@codemirror/language-data
+  "@codemirror/search": $@codemirror/search
   "@codemirror/state": $@codemirror/state
   "@codemirror/view": $@codemirror/view
   "@lezer/common": ^1.5.2
