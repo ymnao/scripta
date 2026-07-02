@@ -83,6 +83,18 @@ overrides:
 #   ~280KB (gzip 後 ~80KB) 程度、Phase 6 packaged build スモークで実機確認。
 #   解消条件: mermaid が `katex@^0.17` 以上を peer/dep として宣言した時点でこの
 #   コメントごと削除し、`pnpm dedupe` で 0.17.0 へ統合する。
+#
+# - **`marked`** (dual-resolution allow、katex と同構造): 本リポは direct で `^18.0.5`
+#   を pin するが、`mermaid@11.16.0` が dependencies として `marked@^16.3.0` を持つ
+#   （peerDependency ではなく direct dep）ため 18.0.5 には合流不可。major 2 つ跨ぎの
+#   override 強制は mermaid の markdown ラベル parse (flowchart / mindmap の
+#   markdown strings 機能) を breaks し得るし、描画劣化は CI e2e の smoke では検出
+#   できないため dual-resolution を許容する。
+#   実害評価: 本体 markdown parse (markdown-to-html) は 18.0.5 のみ呼ばれ、mermaid
+#   経由の 16.x は mermaid graph 内ラベルにのみ使用。bundle 増は ~40KB (min) 程度で
+#   mermaid の lazy chunk 側に閉じる。
+#   解消条件: mermaid が `marked@^18` 以上を宣言した時点でこのコメントごと削除し、
+#   `pnpm dedupe` で 18.x へ統合する。
 
 patchedDependencies:
   style-mod@4.1.3: patches/style-mod@4.1.3.patch

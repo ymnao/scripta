@@ -13,23 +13,23 @@ const root = import.meta.dirname;
 // ロジックが入ったため、bundle された __dirname が path.txt を見失って
 // `Electron failed to install correctly` エラーで起動失敗する。
 // 上流の慣例どおり electron は runtime に CLI が hijack するモジュールなので external 必須。
-const externalElectron = ["electron", /^electron\/.+/] as const;
+const externalElectron = ["electron", /^electron\/.+/];
 
-// Chromium 固定（Electron 42 = Chromium 148 / 同梱 Node.js 24 系）に伴い、
+// Chromium 固定（Electron 43 = Chromium 150 / 同梱 Node.js 24 系）に伴い、
 // 多 WebView 互換のための保守的 transpile を解除して build target を実態へ揃える。
-//   - renderer は固定 Chromium 実行なので chrome148 を明示。esnext ではなく実 Chromium 版を
-//     指すことで、依存や自前コードに将来構文が混入しても Electron 42 が parse できる範囲へ
+//   - renderer は固定 Chromium 実行なので chrome150 を明示。esnext ではなく実 Chromium 版を
+//     指すことで、依存や自前コードに将来構文が混入しても Electron 43 が parse できる範囲へ
 //     down-level される（esnext は「変換しない」指定で素通りし、起動時 parse error になり得る）。
 //   - main / preload は Node.js 実行のため node 系ターゲットが必須
 //     （electron-vite が main/preload の build.target を "node?" に制約しており esnext は拒否される）。
-//     Electron 42 同梱 Node は v24.15 系のため node24 を明示。これは同梱 runtime の Node 版で
+//     Electron 43 同梱 Node は v24.17 系のため node24 を明示。これは同梱 runtime の Node 版で
 //     あり、各 package.json の engines.node（npm script を回すホスト Node 条件）とは別物。
 // なお electron-vite v5 の getElectronNodeTarget() は Electron 39 までしかマップを持たず、
-// 42 では stale fallback で node16.17 に解決される。ここで明示することでその過度な
+// 43 では stale fallback で node16.17 に解決される。ここで明示することでその過度な
 // down-level 化も同時に矯正する。
-// Chromium 版は electron-to-chromium の Electron 42.0 → 148 マッピングに基づく。
-const RENDERER_TARGET = "chrome148" as const;
-const NODE_TARGET = "node24" as const;
+// Chromium 版は electron-to-chromium の Electron 43.0 → 150 マッピングに基づく。
+const RENDERER_TARGET = "chrome150";
+const NODE_TARGET = "node24";
 
 export default defineConfig({
 	main: {
@@ -38,7 +38,7 @@ export default defineConfig({
 			target: NODE_TARGET,
 			rollupOptions: {
 				input: join(root, "electron/main/index.ts"),
-				external: [...externalElectron],
+				external: externalElectron,
 				output: {
 					format: "cjs",
 					entryFileNames: "[name].js",
@@ -52,7 +52,7 @@ export default defineConfig({
 			target: NODE_TARGET,
 			rollupOptions: {
 				input: join(root, "electron/preload/index.ts"),
-				external: [...externalElectron],
+				external: externalElectron,
 				output: {
 					format: "cjs",
 					entryFileNames: "[name].js",
