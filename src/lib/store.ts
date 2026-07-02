@@ -1,6 +1,6 @@
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
-import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
+import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
 import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
 import { applyMigrations } from "./store-migration";
 
@@ -165,11 +165,7 @@ export async function loadSettings(): Promise<AppSettings> {
 		const syncMethod: SyncMethod =
 			rawSyncMethod === "merge" || rawSyncMethod === "rebase" ? rawSyncMethod : DEFAULTS.syncMethod;
 
-		const rawCommitMessage = await settingsGet("commitMessage");
-		const trimmedCommitMessage =
-			typeof rawCommitMessage === "string" ? rawCommitMessage.trim() : "";
-		const commitMessage: string =
-			trimmedCommitMessage.length > 0 ? trimmedCommitMessage : DEFAULTS.commitMessage;
+		const commitMessage: string = normalizeCommitMessage(await settingsGet("commitMessage"));
 
 		const rawAutoPullOnStartup = await settingsGet("autoPullOnStartup");
 		const autoPullOnStartup: boolean =
@@ -226,7 +222,13 @@ export async function loadSettings(): Promise<AppSettings> {
 	}
 }
 
-async function saveSetting(key: string, value: unknown): Promise<void> {
+// 特定 key の永続化 (save-side)。以前は 22 個の save* wrapper (saveFontSize / saveCommitMessage
+// 等) が全て `saveSetting("literal-key", value)` を呼ぶだけの薄膜だったため、まとめて撤去し
+// saveSetting を単一 SOT にした。settings store / git-sync store は createPersistedSetter に
+// これを渡し、その他 caller (theme / AppLayout / useUpdateCheck) は直接呼ぶ。
+// workspacePath の永続化だけは main 側 workspace:set ハンドラが担う (renderer からの
+// settings:set は reserved key として拒否される)。
+export async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
 		await settingsSet(key, value);
 		await settingsSave();
@@ -234,37 +236,6 @@ async function saveSetting(key: string, value: unknown): Promise<void> {
 		// Ignore save errors — app should continue working
 	}
 }
-
-// saveWorkspacePath は廃止。workspacePath の永続化は main 側 workspace:set ハンドラが
-// 行う（settings:set の reserved key として renderer からの書き込みは拒否される）。
-export const saveThemePreference = (preference: ThemePreference) =>
-	saveSetting("themePreference", preference);
-export const saveSidebarVisible = (visible: boolean) => saveSetting("sidebarVisible", visible);
-export const saveShowLineNumbers = (show: boolean) => saveSetting("showLineNumbers", show);
-export const saveFontSize = (size: number) => saveSetting("fontSize", size);
-export const saveAutoSaveDelay = (delay: number) => saveSetting("autoSaveDelay", delay);
-export const saveHighlightActiveLine = (highlight: boolean) =>
-	saveSetting("highlightActiveLine", highlight);
-export const saveFontFamily = (family: FontFamily) => saveSetting("fontFamily", family);
-export const saveTrimTrailingWhitespace = (trim: boolean) =>
-	saveSetting("trimTrailingWhitespace", trim);
-export const saveShowLinkCards = (show: boolean) => saveSetting("showLinkCards", show);
-export const saveGitSyncEnabled = (enabled: boolean) => saveSetting("gitSyncEnabled", enabled);
-export const saveAutoCommitInterval = (interval: number) =>
-	saveSetting("autoCommitInterval", interval);
-export const saveAutoPullInterval = (interval: number) => saveSetting("autoPullInterval", interval);
-export const saveAutoPushInterval = (interval: number) => saveSetting("autoPushInterval", interval);
-export const savePullBeforePush = (pull: boolean) => saveSetting("pullBeforePush", pull);
-export const saveSyncMethod = (method: SyncMethod) => saveSetting("syncMethod", method);
-export const saveCommitMessage = (message: string) => saveSetting("commitMessage", message);
-export const saveAutoPullOnStartup = (pull: boolean) => saveSetting("autoPullOnStartup", pull);
-export const saveScratchpadVolatile = (volatile: boolean) =>
-	saveSetting("scratchpadVolatile", volatile);
-export const saveAutoUpdateCheck = (enabled: boolean) => saveSetting("autoUpdateCheck", enabled);
-export const saveLastUpdateCheck = (timestamp: number) => saveSetting("lastUpdateCheck", timestamp);
-export const saveFileTreeShowHidden = (show: boolean) => saveSetting("fileTreeShowHidden", show);
-export const saveFileTreeExcludePatterns = (patterns: string) =>
-	saveSetting("fileTreeExcludePatterns", patterns);
 
 export async function loadLastUpdateCheck(): Promise<number> {
 	try {

@@ -20,7 +20,7 @@ import {
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
-import { loadSettings, saveSidebarVisible } from "../../lib/store";
+import { loadSettings, saveSetting } from "../../lib/store";
 import { useBacklinkStore } from "../../stores/backlink";
 import { useGitSyncStore } from "../../stores/git-sync";
 import { useScratchpadStore } from "../../stores/scratchpad";
@@ -353,7 +353,7 @@ export function AppLayout() {
 	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
 	useEffect(() => {
 		if (loading) return;
-		void saveSidebarVisible(sidebarVisible);
+		void saveSetting("sidebarVisible", sidebarVisible);
 	}, [sidebarVisible, loading]);
 
 	// Open new tab when workspace has no tabs (startup and workspace switch)

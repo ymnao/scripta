@@ -2,20 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/store", () => ({
 	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS: "",
-	saveShowLineNumbers: vi.fn(),
-	saveFontSize: vi.fn(),
-	saveAutoSaveDelay: vi.fn(),
-	saveHighlightActiveLine: vi.fn(),
-	saveFontFamily: vi.fn(),
-	saveTrimTrailingWhitespace: vi.fn(),
-	saveScratchpadVolatile: vi.fn(),
-	saveShowLinkCards: vi.fn(),
-	saveAutoUpdateCheck: vi.fn(),
-	saveFileTreeShowHidden: vi.fn(),
-	saveFileTreeExcludePatterns: vi.fn(),
+	saveSetting: vi.fn(),
 }));
 
-import { saveAutoSaveDelay, saveFontSize } from "../lib/store";
+import { saveSetting } from "../lib/store";
 import { useSettingsStore } from "./settings";
 
 describe("useSettingsStore", () => {
@@ -29,6 +19,7 @@ describe("useSettingsStore", () => {
 			trimTrailingWhitespace: true,
 			scratchpadVolatile: true,
 		});
+		vi.mocked(saveSetting).mockClear();
 	});
 
 	it("has showLineNumbers true by default", () => {
@@ -38,6 +29,7 @@ describe("useSettingsStore", () => {
 	it("sets showLineNumbers to false", () => {
 		useSettingsStore.getState().setShowLineNumbers(false);
 		expect(useSettingsStore.getState().showLineNumbers).toBe(false);
+		expect(saveSetting).toHaveBeenCalledWith("showLineNumbers", false);
 	});
 
 	it("sets showLineNumbers back to true", () => {
@@ -53,6 +45,7 @@ describe("useSettingsStore", () => {
 	it("sets fontSize", () => {
 		useSettingsStore.getState().setFontSize(20);
 		expect(useSettingsStore.getState().fontSize).toBe(20);
+		expect(saveSetting).toHaveBeenCalledWith("fontSize", 20);
 	});
 
 	it("has autoSaveDelay 2000 by default", () => {
@@ -62,6 +55,7 @@ describe("useSettingsStore", () => {
 	it("sets autoSaveDelay", () => {
 		useSettingsStore.getState().setAutoSaveDelay(5000);
 		expect(useSettingsStore.getState().autoSaveDelay).toBe(5000);
+		expect(saveSetting).toHaveBeenCalledWith("autoSaveDelay", 5000);
 	});
 
 	it("has highlightActiveLine false by default", () => {
@@ -92,8 +86,7 @@ describe("useSettingsStore", () => {
 	});
 
 	it("hydrate sets state without calling save functions", () => {
-		vi.mocked(saveFontSize).mockClear();
-		vi.mocked(saveAutoSaveDelay).mockClear();
+		vi.mocked(saveSetting).mockClear();
 
 		useSettingsStore.getState().hydrate({
 			fontSize: 20,
@@ -104,8 +97,7 @@ describe("useSettingsStore", () => {
 		expect(useSettingsStore.getState().fontSize).toBe(20);
 		expect(useSettingsStore.getState().autoSaveDelay).toBe(5000);
 		expect(useSettingsStore.getState().highlightActiveLine).toBe(true);
-		// save functions should NOT have been called
-		expect(saveFontSize).not.toHaveBeenCalled();
-		expect(saveAutoSaveDelay).not.toHaveBeenCalled();
+		// saveSetting should NOT have been called during hydrate
+		expect(saveSetting).not.toHaveBeenCalled();
 	});
 });

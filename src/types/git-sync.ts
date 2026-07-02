@@ -34,3 +34,11 @@ export const GIT_SYNC_DEFAULTS: GitSyncSettings = {
 	commitMessage: "vault backup: {{date}}",
 	autoPullOnStartup: false,
 };
+
+// commitMessage の正規化: trim して空文字なら DEFAULTS に fallback。
+// load 側 (lib/store.ts) と save 側 (stores/git-sync.ts setCommitMessage) の
+// 両方から呼び、ルール drift を防ぐ (単一 SOT)。
+export function normalizeCommitMessage(v: unknown): string {
+	const trimmed = typeof v === "string" ? v.trim() : "";
+	return trimmed.length > 0 ? trimmed : GIT_SYNC_DEFAULTS.commitMessage;
+}

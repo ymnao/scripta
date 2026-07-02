@@ -1,17 +1,5 @@
 import { describe, expect, it, type Mock } from "vitest";
-import {
-	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
-	loadSettings,
-	saveAutoSaveDelay,
-	saveFontFamily,
-	saveFontSize,
-	saveHighlightActiveLine,
-	saveShowLineNumbers,
-	saveShowLinkCards,
-	saveSidebarVisible,
-	saveThemePreference,
-	saveTrimTrailingWhitespace,
-} from "./store";
+import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, loadSettings, saveSetting } from "./store";
 
 // test-setup.ts の beforeEach が `window.api` を毎回新しい `createApiMock()` で置き換えるので、
 // settingsGet のデフォルトは `undefined` を返す。各テストでは
@@ -194,89 +182,44 @@ describe("store", () => {
 			const settings = await loadSettings();
 			expect(settings.trimTrailingWhitespace).toBe(true);
 		});
+
+		it("normalizes whitespace-only commitMessage to default on load", async () => {
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = { commitMessage: "   \n  " };
+				return values[key];
+			});
+			const settings = await loadSettings();
+			expect(settings.commitMessage).toBe("vault backup: {{date}}");
+		});
+
+		it("trims commitMessage on load", async () => {
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = { commitMessage: "  backup: {{date}}  " };
+				return values[key];
+			});
+			const settings = await loadSettings();
+			expect(settings.commitMessage).toBe("backup: {{date}}");
+		});
 	});
 
-	describe("saveThemePreference", () => {
-		it("saves theme preference to store", async () => {
-			await saveThemePreference("dark");
+	describe("saveSetting", () => {
+		it("persists key/value to settings store", async () => {
+			await saveSetting("themePreference", "dark");
 			expect(window.api.settingsSet).toHaveBeenCalledWith("themePreference", "dark");
 			expect(window.api.settingsSave).toHaveBeenCalled();
 		});
 
-		it("saves system preference", async () => {
-			await saveThemePreference("system");
-			expect(window.api.settingsSet).toHaveBeenCalledWith("themePreference", "system");
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveSidebarVisible", () => {
-		it("saves sidebar visibility to store", async () => {
-			await saveSidebarVisible(false);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("sidebarVisible", false);
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveShowLineNumbers", () => {
-		it("saves showLineNumbers to store", async () => {
-			await saveShowLineNumbers(false);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("showLineNumbers", false);
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-
-		it("saves showLineNumbers true to store", async () => {
-			await saveShowLineNumbers(true);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("showLineNumbers", true);
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveFontSize", () => {
-		it("saves fontSize to store", async () => {
-			await saveFontSize(20);
+		it("accepts arbitrary key/value pairs", async () => {
+			await saveSetting("fontSize", 20);
 			expect(window.api.settingsSet).toHaveBeenCalledWith("fontSize", 20);
-			expect(window.api.settingsSave).toHaveBeenCalled();
+			await saveSetting("sidebarVisible", false);
+			expect(window.api.settingsSet).toHaveBeenCalledWith("sidebarVisible", false);
 		});
-	});
 
-	describe("saveAutoSaveDelay", () => {
-		it("saves autoSaveDelay to store", async () => {
-			await saveAutoSaveDelay(5000);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("autoSaveDelay", 5000);
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveHighlightActiveLine", () => {
-		it("saves highlightActiveLine to store", async () => {
-			await saveHighlightActiveLine(true);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("highlightActiveLine", true);
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveFontFamily", () => {
-		it("saves fontFamily to store", async () => {
-			await saveFontFamily("serif");
-			expect(window.api.settingsSet).toHaveBeenCalledWith("fontFamily", "serif");
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveTrimTrailingWhitespace", () => {
-		it("saves trimTrailingWhitespace to store", async () => {
-			await saveTrimTrailingWhitespace(false);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("trimTrailingWhitespace", false);
-			expect(window.api.settingsSave).toHaveBeenCalled();
-		});
-	});
-
-	describe("saveShowLinkCards", () => {
-		it("saves showLinkCards to store", async () => {
-			await saveShowLinkCards(false);
-			expect(window.api.settingsSet).toHaveBeenCalledWith("showLinkCards", false);
-			expect(window.api.settingsSave).toHaveBeenCalled();
+		it("silently ignores errors from underlying settingsSet", async () => {
+			(window.api.settingsSet as Mock).mockRejectedValueOnce(new Error("EIO"));
+			// 例外が伝播しないことだけ確認 (アプリの継続動作を担保)
+			await expect(saveSetting("fontSize", 20)).resolves.toBeUndefined();
 		});
 	});
 });
