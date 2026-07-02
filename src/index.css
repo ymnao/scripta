@@ -154,8 +154,11 @@
 
 /* Sidebar width + visibility transition.
    Opening: visibility becomes visible instantly, width animates.
-   Closing: width animates first, visibility becomes hidden after the transition. */
+   Closing: width animates first, visibility becomes hidden after the transition.
+   display: flex は子 <aside> を wrapper の高さいっぱいに stretch させ、内側の
+   overflow-y-auto が bounded height でスクロールできるようにするため (#162 regression 対策)。 */
 .sidebar-wrapper {
+	display: flex;
 	transition:
 		width 200ms ease-out,
 		visibility 0s;
