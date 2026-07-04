@@ -1,4 +1,7 @@
 import type { Page } from "@playwright/test";
+import * as searchPure from "../../electron/main/utils/search-pure";
+// installApiMock 内で bare 参照する識別子だけ named import する
+// (mock 内で直接呼ばない isAsciiOnly は inject 経由でのみ利用されるので named import から外す)。
 import {
 	buildLineStarts,
 	buildLowerToOrigUtf16Map,
@@ -6,7 +9,6 @@ import {
 	collectInlineCodeRanges,
 	findFencedLines,
 	fuzzyMatch,
-	isAsciiOnly,
 	isEscaped,
 	isInRanges,
 	maskRanges,
@@ -81,22 +83,22 @@ declare global {
 	}
 }
 
-// setup() で addInitScript の script content 先頭に .toString() を並べて注入する
-// pure helper 群。installApiMock は browser scope の bare identifier としてこれらを参照する。
-// 順序は依存関係順 (isAsciiOnly → buildLowerToOrigUtf16Map, isEscaped → collectInlineCodeRanges 等)
-// を尊重する — 関数宣言は hoist されるので実質どの順でも動くが、可読性のため呼び側から順に並べる。
-const PURE_HELPERS = [
-	isAsciiOnly,
-	buildLowerToOrigUtf16Map,
-	byteCmp,
-	fuzzyMatch,
-	isEscaped,
-	buildLineStarts,
-	isInRanges,
-	collectInlineCodeRanges,
-	maskRanges,
-	findFencedLines,
-];
+// addInitScript の script content 先頭に .toString() を並べて注入する pure helper 群。
+// search-pure.ts の function export を全部 inject する — 追加の export はここに手動で
+// 登録する必要なく自動で通る (import 忘れによる bare 参照の ReferenceError も同時に消える)。
+// named import 側 (上の block) は installApiMock 内側の tsc-view 解決 (bare identifier を
+// named import に link) のため別途必要。順序は依存関係を意識しない — 関数宣言は hoist
+// されるので実質どの順でも動く。
+// filter だけでは narrow できないので型は unknown → cast する (map で呼ぶのは .toString() だけ)。
+const PURE_HELPERS = Object.values(searchPure).filter((v) => typeof v === "function") as Array<{
+	toString(): string;
+}>;
+
+// setup() で毎回 recompute せず、payload 非依存の部分は module load 時に 1 度だけ
+// `.toString()` シリアライズする。~750 行のソース serialize を e2e spec ごとに繰り返さない。
+// `installApiMock` は function declaration なので hoist され module top で参照可能。
+const SCRIPT_PREFIX = `${PURE_HELPERS.map((fn) => fn.toString()).join("\n")}\n(${installApiMock.toString()})(`;
+const SCRIPT_SUFFIX = ");";
 
 export class ElectronApiMock {
 	private page: Page;
@@ -118,13 +120,12 @@ export class ElectronApiMock {
 			// 派生値なので公開 option (ElectronApiMockOptions) には含めない。
 			initializedMarkerSuffix: getInitializedMarkerPath(""),
 		};
-		// search-pure.ts の named function を .toString() で並べて browser scope に置く。
-		// installApiMock 内側からは bare identifier (byteCmp / fuzzyMatch / …) で参照される。
+		// SCRIPT_PREFIX/SUFFIX は module scope で一度だけ組み立てた静的部分。
 		// 各関数は `function name(...) { ... }` 形の宣言に transpile されるので、hoisting
-		// で installApiMock の中からも見える (esbuild は関数名を preserve する)。
-		const pureInjection = PURE_HELPERS.map((fn) => fn.toString()).join("\n");
-		const script = `${pureInjection}\n(${installApiMock.toString()})(${JSON.stringify(payload)});`;
-		await this.page.addInitScript({ content: script });
+		// で installApiMock の中からも bare identifier で見える (esbuild は関数名を preserve する)。
+		await this.page.addInitScript({
+			content: `${SCRIPT_PREFIX}${JSON.stringify(payload)}${SCRIPT_SUFFIX}`,
+		});
 	}
 
 	async getCalls(method: string): Promise<unknown[][]> {
@@ -301,10 +302,6 @@ function installApiMock(opts: {
 		return out;
 	};
 
-	// byteCmp / fuzzyMatch / isAsciiOnly / buildLowerToOrigUtf16Map は search-pure.ts の
-	// named function を setup() 側 addInitScript で browser scope に inject する
-	// (file top-level `PURE_HELPERS` を参照)。ここでは bare identifier で参照する。
-
 	const parentDir = (path: string): string => {
 		const i = path.lastIndexOf("/");
 		return i < 0 ? "" : path.slice(0, i);
@@ -314,19 +311,14 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
-	// 本番 electron/main/ipc/search.ts:toDisplayPath と同等を mock 内で再現。
-	// e2e mock の filePath は正規化済み posix 形なので `/` 区切り前提で OK
-	// (本番は node:path.relative + sep ベース、addInitScript 制約で import 不可)。
+	// 本番 electron/main/ipc/search.ts:toDisplayPath の mock 版。
+	// e2e mock の filePath は正規化済み posix 形なので `/` 区切り前提で計算する
+	// (本番は node:path.relative + sep ベースだが、mock は browser scope で走るため node:path は不使用)。
 	// scanUnresolvedWikilinks / scanBacklinks の両 handler から共有する。
 	const mockDisplayPath = (workspacePath: string, absolutePath: string): string => {
 		const wsPrefix = workspacePath.endsWith("/") ? workspacePath : `${workspacePath}/`;
 		return absolutePath.startsWith(wsPrefix) ? absolutePath.slice(wsPrefix.length) : absolutePath;
 	};
-
-	// isEscaped / collectInlineCodeRanges / buildLineStarts / isInRanges / findFencedLines /
-	// maskRanges も setup() の PURE_HELPERS 経由で browser scope に inject されるため、
-	// ここでは bare identifier で参照する。mock 内側で inline copy を持たないため drift
-	// 検出が物理的に不要になった (#209 項目 ③)。
 
 	// `Api` 型に固定することで preload 契約と乖離した瞬間に typecheck が落ちる。
 	// 緩い `unknown` / `string` のままだと preload 側のシグネチャが変わっても

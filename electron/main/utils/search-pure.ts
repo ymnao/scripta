@@ -6,12 +6,10 @@
 // 避けてコードを duplicate する。仕様変更時は両側を同時に更新し、テストベクトルも
 // 一致させる（本ファイルのテストは electron/main/utils/search-pure.test.ts）。
 //
-// 加えて e2e/helpers/electron-api-mock.ts (renderer-only Playwright モック) からも
-// 本モジュールの関数を browser scope に inject して同一実装を回す (PR #279)。
-// mock は addInitScript の script content 文字列に本モジュールの `.toString()` を差し込む
-// 経路を通るため、ここに宣言する関数はすべて **named function** で書く（arrow に
-// すると `.toString()` 結果に関数名が現れず inject 側で `const ${fn.name} = ${fn.toString()}`
-// が破綻する）。
+// 契約: ここに宣言する関数はすべて **named function** で書く（arrow 化しない）。
+// `.toString()` シリアライズ経由で別スコープに function declaration として並べる
+// 用途 (実例: e2e/helpers/electron-api-mock.ts の browser scope injection、#279) を
+// サポートするための shape 固定で、search-pure-mock-parity.test.ts が gate している。
 
 /** ASCII 文字のみで構成されるかを判定する。 */
 export function isAsciiOnly(text: string): boolean {
@@ -180,6 +178,10 @@ export function collectInlineCodeRanges(s: string): Array<{ from: number; to: nu
  * 指定 line index 集合の範囲を space に置換した text を返す。length は元と一致する。
  * inline code scanner に「対象範囲の文字を空白として見せる」用途で、char index は
  * 元の text と互換 (lineStarts / openOffset の換算がそのまま使える)。
+ * 実装: 素朴に `text.split("")` すると 1 文字 1 array entry を allocate する
+ * (大きな md file で GC 圧)。ここでは masked 範囲だけを space パディングに置き換え、
+ * 未変更範囲は `text.slice()` の view を並べて join する — allocation は
+ * O(mask lines) の slice/pad で済み char 単位の array を作らない。
  */
 export function maskRanges(
 	text: string,
@@ -187,14 +189,18 @@ export function maskRanges(
 	lineStarts: readonly number[],
 	mask: readonly boolean[],
 ): string {
-	const buf = text.split("");
+	const parts: string[] = [];
+	let cursor = 0;
 	for (let i = 0; i < lines.length; i++) {
 		if (!mask[i]) continue;
 		const start = lineStarts[i];
-		const end = start + lines[i].length;
-		for (let j = start; j < end; j++) buf[j] = " ";
+		const len = lines[i].length;
+		if (start > cursor) parts.push(text.slice(cursor, start));
+		if (len > 0) parts.push(" ".repeat(len));
+		cursor = start + len;
 	}
-	return buf.join("");
+	if (cursor < text.length) parts.push(text.slice(cursor));
+	return parts.length === 0 ? text : parts.join("");
 }
 
 /**
