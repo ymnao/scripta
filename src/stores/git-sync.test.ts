@@ -1,17 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/store", () => ({
-	saveGitSyncEnabled: vi.fn(),
-	saveAutoCommitInterval: vi.fn(),
-	saveAutoPullInterval: vi.fn(),
-	saveAutoPushInterval: vi.fn(),
-	savePullBeforePush: vi.fn(),
-	saveSyncMethod: vi.fn(),
-	saveCommitMessage: vi.fn(),
-	saveAutoPullOnStartup: vi.fn(),
+	saveSetting: vi.fn(),
 }));
 
-import { saveAutoCommitInterval, saveCommitMessage, saveGitSyncEnabled } from "../lib/store";
+import { saveSetting } from "../lib/store";
 import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
 import { useGitSyncStore } from "./git-sync";
 
@@ -39,25 +32,31 @@ describe("useGitSyncStore", () => {
 		expect(state.conflictFiles).toEqual([]);
 	});
 
-	it("setGitSyncEnabled persists via save function", () => {
+	it("setGitSyncEnabled persists via saveSetting", () => {
 		useGitSyncStore.getState().setGitSyncEnabled(true);
 		expect(useGitSyncStore.getState().gitSyncEnabled).toBe(true);
-		expect(saveGitSyncEnabled).toHaveBeenCalledWith(true);
+		expect(saveSetting).toHaveBeenCalledWith("gitSyncEnabled", true);
 	});
 
-	it("setAutoCommitInterval persists via save function", () => {
+	it("setAutoCommitInterval persists via saveSetting", () => {
 		useGitSyncStore.getState().setAutoCommitInterval(30);
 		expect(useGitSyncStore.getState().autoCommitInterval).toBe(30);
-		expect(saveAutoCommitInterval).toHaveBeenCalledWith(30);
+		expect(saveSetting).toHaveBeenCalledWith("autoCommitInterval", 30);
 	});
 
-	it("setCommitMessage persists via save function", () => {
+	it("setCommitMessage persists via saveSetting", () => {
 		useGitSyncStore.getState().setCommitMessage("backup: {{date}}");
 		expect(useGitSyncStore.getState().commitMessage).toBe("backup: {{date}}");
-		expect(saveCommitMessage).toHaveBeenCalledWith("backup: {{date}}");
+		expect(saveSetting).toHaveBeenCalledWith("commitMessage", "backup: {{date}}");
 	});
 
-	it("hydrate sets state without calling save functions", () => {
+	it("setCommitMessage normalizes whitespace-only input to default", () => {
+		useGitSyncStore.getState().setCommitMessage("   ");
+		expect(useGitSyncStore.getState().commitMessage).toBe(GIT_SYNC_DEFAULTS.commitMessage);
+		expect(saveSetting).toHaveBeenCalledWith("commitMessage", GIT_SYNC_DEFAULTS.commitMessage);
+	});
+
+	it("hydrate sets state without calling saveSetting", () => {
 		useGitSyncStore.getState().hydrate({
 			gitSyncEnabled: true,
 			autoCommitInterval: 30,
@@ -67,9 +66,7 @@ describe("useGitSyncStore", () => {
 		expect(useGitSyncStore.getState().gitSyncEnabled).toBe(true);
 		expect(useGitSyncStore.getState().autoCommitInterval).toBe(30);
 		expect(useGitSyncStore.getState().commitMessage).toBe("custom");
-		expect(saveGitSyncEnabled).not.toHaveBeenCalled();
-		expect(saveAutoCommitInterval).not.toHaveBeenCalled();
-		expect(saveCommitMessage).not.toHaveBeenCalled();
+		expect(saveSetting).not.toHaveBeenCalled();
 	});
 
 	it("resetRuntime resets runtime state but preserves settings", () => {

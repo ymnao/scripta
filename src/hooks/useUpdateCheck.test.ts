@@ -10,18 +10,18 @@ vi.mock("../lib/commands", () => ({
 
 vi.mock("../lib/store", () => ({
 	loadLastUpdateCheck: vi.fn(),
-	saveLastUpdateCheck: vi.fn().mockResolvedValue(undefined),
+	saveSetting: vi.fn().mockResolvedValue(undefined),
 }));
 
 const { checkForUpdate, openExternal, getAppVersion } = await import("../lib/commands");
-const { loadLastUpdateCheck, saveLastUpdateCheck } = await import("../lib/store");
+const { loadLastUpdateCheck, saveSetting } = await import("../lib/store");
 const { useToastStore } = await import("../stores/toast");
 const { useUpdateCheck } = await import("./useUpdateCheck");
 
 const mockedGetVersion = getAppVersion as Mock;
 const mockedCheckForUpdate = checkForUpdate as Mock;
 const mockedLoadLastUpdateCheck = loadLastUpdateCheck as Mock;
-const mockedSaveLastUpdateCheck = saveLastUpdateCheck as Mock;
+const mockedSaveSetting = saveSetting as Mock;
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -49,7 +49,7 @@ describe("useUpdateCheck", () => {
 		// Promise に差し替えるため、後続テストへ leak しないよう default 実装に戻す。
 		// vi.clearAllMocks() は call history しか clear しない (実装は残る) ので
 		// 明示的に default の mockResolvedValue を再適用する。
-		mockedSaveLastUpdateCheck.mockReset().mockResolvedValue(undefined);
+		mockedSaveSetting.mockReset().mockResolvedValue(undefined);
 		useToastStore.setState({ toasts: [] });
 	});
 
@@ -74,7 +74,7 @@ describe("useUpdateCheck", () => {
 			expect(mockedLoadLastUpdateCheck).toHaveBeenCalled();
 		});
 		expect(mockedCheckForUpdate).not.toHaveBeenCalled();
-		expect(mockedSaveLastUpdateCheck).not.toHaveBeenCalled();
+		expect(mockedSaveSetting).not.toHaveBeenCalled();
 	});
 
 	it("24時間経過後にチェックを実行する", async () => {
@@ -86,7 +86,7 @@ describe("useUpdateCheck", () => {
 		await vi.waitFor(() => {
 			expect(mockedCheckForUpdate).toHaveBeenCalledWith("0.1.0");
 		});
-		expect(mockedSaveLastUpdateCheck).toHaveBeenCalled();
+		expect(mockedSaveSetting).toHaveBeenCalled();
 	});
 
 	it("更新ありのときダイアログを開く", async () => {
@@ -107,7 +107,7 @@ describe("useUpdateCheck", () => {
 		const { result } = renderHook(() => useUpdateCheck(true));
 
 		await vi.waitFor(() => {
-			expect(mockedSaveLastUpdateCheck).toHaveBeenCalled();
+			expect(mockedSaveSetting).toHaveBeenCalled();
 		});
 		expect(result.current.dialogOpen).toBe(false);
 		expect(result.current.description).toBe("");
@@ -123,7 +123,7 @@ describe("useUpdateCheck", () => {
 			expect(mockedCheckForUpdate).toHaveBeenCalled();
 		});
 		expect(result.current.dialogOpen).toBe(false);
-		expect(mockedSaveLastUpdateCheck).not.toHaveBeenCalled();
+		expect(mockedSaveSetting).not.toHaveBeenCalled();
 	});
 
 	it("dismissDialog でダイアログを閉じる", async () => {
@@ -177,7 +177,7 @@ describe("useUpdateCheck", () => {
 	it("saveLastUpdateCheck 待ち中にクリーンアップされたらダイアログを開かない", async () => {
 		// saveLastUpdateCheck を遅延させてクリーンアップのタイミングを作る
 		let resolveSave!: () => void;
-		mockedSaveLastUpdateCheck.mockReturnValue(
+		mockedSaveSetting.mockReturnValue(
 			new Promise<void>((resolve) => {
 				resolveSave = resolve;
 			}),
@@ -190,7 +190,7 @@ describe("useUpdateCheck", () => {
 
 		// checkForUpdate が呼ばれるまで待つ (saveLastUpdateCheck で止まる)
 		await vi.waitFor(() => {
-			expect(mockedSaveLastUpdateCheck).toHaveBeenCalled();
+			expect(mockedSaveSetting).toHaveBeenCalled();
 		});
 
 		// クリーンアップを発火 (enabled を false に)

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/store", () => ({
-	saveThemePreference: vi.fn(),
+	saveSetting: vi.fn(),
 }));
 
 import { useThemeStore } from "./theme";

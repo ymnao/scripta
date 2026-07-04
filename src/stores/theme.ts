@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { saveThemePreference, type ThemePreference } from "../lib/store";
+import { saveSetting, type ThemePreference } from "../lib/store";
 
 type Theme = "light" | "dark";
 
@@ -93,7 +93,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
 		const theme = resolveTheme(pref);
 		applyTheme(theme);
 		persistPreferenceToLocalStorage(pref);
-		void saveThemePreference(pref);
+		void saveSetting("themePreference", pref);
 		set({ preference: pref, theme });
 	},
 	cyclePreference: () => {

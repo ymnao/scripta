@@ -8,17 +8,7 @@ vi.mock("../lib/commands", () => ({
 
 vi.mock("../lib/store", () => ({
 	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS: "",
-	saveScratchpadVolatile: vi.fn(),
-	saveShowLineNumbers: vi.fn(),
-	saveFontSize: vi.fn(),
-	saveAutoSaveDelay: vi.fn(),
-	saveHighlightActiveLine: vi.fn(),
-	saveFontFamily: vi.fn(),
-	saveTrimTrailingWhitespace: vi.fn(),
-	saveShowLinkCards: vi.fn(),
-	saveAutoUpdateCheck: vi.fn(),
-	saveFileTreeShowHidden: vi.fn(),
-	saveFileTreeExcludePatterns: vi.fn(),
+	saveSetting: vi.fn(),
 }));
 
 const { readFile, writeFile } = await import("../lib/commands");

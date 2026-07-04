@@ -1,16 +1,8 @@
 import { create } from "zustand";
-import {
-	saveAutoCommitInterval,
-	saveAutoPullInterval,
-	saveAutoPullOnStartup,
-	saveAutoPushInterval,
-	saveCommitMessage,
-	saveGitSyncEnabled,
-	savePullBeforePush,
-	saveSyncMethod,
-} from "../lib/store";
+import { saveSetting } from "../lib/store";
 import type { GitAction, GitSyncSettings, SyncMethod } from "../types/git-sync";
-import { GIT_SYNC_DEFAULTS } from "../types/git-sync";
+import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
+import { createPersistedSetter } from "./store-helpers";
 
 interface GitSyncRuntimeState {
 	gitAvailable: boolean;
@@ -60,63 +52,42 @@ const RUNTIME_DEFAULTS: GitSyncRuntimeState = {
 	branch: "",
 };
 
-export const useGitSyncStore = create<GitSyncState>()((set) => ({
-	...RUNTIME_DEFAULTS,
-	...GIT_SYNC_DEFAULTS,
+export const useGitSyncStore = create<GitSyncState>()((set) => {
+	const persist = createPersistedSetter<GitSyncSettings>(set, saveSetting);
+	return {
+		...RUNTIME_DEFAULTS,
+		...GIT_SYNC_DEFAULTS,
 
-	setGitAvailable: (available: boolean) =>
-		set((s) => (s.gitAvailable === available ? s : { gitAvailable: available })),
-	setGitReady: (ready: boolean) => set((s) => (s.gitReady === ready ? s : { gitReady: ready })),
-	setGitAction: (action: GitAction) =>
-		set((s) => (s.gitAction === action ? s : { gitAction: action })),
-	setLastCommitTime: (time: string | null) =>
-		set((s) => (s.lastCommitTime === time ? s : { lastCommitTime: time })),
-	setConflictFiles: (files: string[]) => set({ conflictFiles: files }),
-	setOfflineMode: (offline: boolean) =>
-		set((s) => (s.offlineMode === offline ? s : { offlineMode: offline })),
-	setErrorMessage: (message: string | null) =>
-		set((s) => (s.errorMessage === message ? s : { errorMessage: message })),
-	setHasRemote: (hasRemote: boolean) => set((s) => (s.hasRemote === hasRemote ? s : { hasRemote })),
-	setBranch: (branch: string) => set((s) => (s.branch === branch ? s : { branch })),
+		setGitAvailable: (available: boolean) =>
+			set((s) => (s.gitAvailable === available ? s : { gitAvailable: available })),
+		setGitReady: (ready: boolean) => set((s) => (s.gitReady === ready ? s : { gitReady: ready })),
+		setGitAction: (action: GitAction) =>
+			set((s) => (s.gitAction === action ? s : { gitAction: action })),
+		setLastCommitTime: (time: string | null) =>
+			set((s) => (s.lastCommitTime === time ? s : { lastCommitTime: time })),
+		setConflictFiles: (files: string[]) => set({ conflictFiles: files }),
+		setOfflineMode: (offline: boolean) =>
+			set((s) => (s.offlineMode === offline ? s : { offlineMode: offline })),
+		setErrorMessage: (message: string | null) =>
+			set((s) => (s.errorMessage === message ? s : { errorMessage: message })),
+		setHasRemote: (hasRemote: boolean) =>
+			set((s) => (s.hasRemote === hasRemote ? s : { hasRemote })),
+		setBranch: (branch: string) => set((s) => (s.branch === branch ? s : { branch })),
 
-	setGitSyncEnabled: (enabled: boolean) => {
-		void saveGitSyncEnabled(enabled);
-		set({ gitSyncEnabled: enabled });
-	},
-	setAutoCommitInterval: (interval: number) => {
-		void saveAutoCommitInterval(interval);
-		set({ autoCommitInterval: interval });
-	},
-	setAutoPullInterval: (interval: number) => {
-		void saveAutoPullInterval(interval);
-		set({ autoPullInterval: interval });
-	},
-	setAutoPushInterval: (interval: number) => {
-		void saveAutoPushInterval(interval);
-		set({ autoPushInterval: interval });
-	},
-	setPullBeforePush: (pull: boolean) => {
-		void savePullBeforePush(pull);
-		set({ pullBeforePush: pull });
-	},
-	setSyncMethod: (method: SyncMethod) => {
-		void saveSyncMethod(method);
-		set({ syncMethod: method });
-	},
-	setCommitMessage: (message: string) => {
-		const normalized = message.trim() || GIT_SYNC_DEFAULTS.commitMessage;
-		void saveCommitMessage(normalized);
-		set({ commitMessage: normalized });
-	},
-	setAutoPullOnStartup: (pull: boolean) => {
-		void saveAutoPullOnStartup(pull);
-		set({ autoPullOnStartup: pull });
-	},
+		setGitSyncEnabled: persist("gitSyncEnabled"),
+		setAutoCommitInterval: persist("autoCommitInterval"),
+		setAutoPullInterval: persist("autoPullInterval"),
+		setAutoPushInterval: persist("autoPushInterval"),
+		setPullBeforePush: persist("pullBeforePush"),
+		setSyncMethod: persist("syncMethod"),
+		setCommitMessage: persist("commitMessage", normalizeCommitMessage),
+		setAutoPullOnStartup: persist("autoPullOnStartup"),
 
-	hydrate: (values: Partial<GitSyncSettings>) => {
-		set(values);
-	},
-	resetRuntime: () => {
-		set(RUNTIME_DEFAULTS);
-	},
-}));
+		hydrate: (values: Partial<GitSyncSettings>) => {
+			set(values);
+		},
+		resetRuntime: () => {
+			set(RUNTIME_DEFAULTS);
+		},
+	};
+});

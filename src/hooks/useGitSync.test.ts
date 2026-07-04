@@ -23,14 +23,7 @@ vi.mock("../lib/commands", () => ({
 let lastConflictHandler: ((workspacePath: string) => void) | undefined;
 
 vi.mock("../lib/store", () => ({
-	saveGitSyncEnabled: vi.fn(),
-	saveAutoCommitInterval: vi.fn(),
-	saveAutoPullInterval: vi.fn(),
-	saveAutoPushInterval: vi.fn(),
-	savePullBeforePush: vi.fn(),
-	saveSyncMethod: vi.fn(),
-	saveCommitMessage: vi.fn(),
-	saveAutoPullOnStartup: vi.fn(),
+	saveSetting: vi.fn(),
 }));
 
 const {

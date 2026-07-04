@@ -1,19 +1,6 @@
 import { create } from "zustand";
-import {
-	DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
-	type FontFamily,
-	saveAutoSaveDelay,
-	saveAutoUpdateCheck,
-	saveFileTreeExcludePatterns,
-	saveFileTreeShowHidden,
-	saveFontFamily,
-	saveFontSize,
-	saveHighlightActiveLine,
-	saveScratchpadVolatile,
-	saveShowLineNumbers,
-	saveShowLinkCards,
-	saveTrimTrailingWhitespace,
-} from "../lib/store";
+import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, type FontFamily, saveSetting } from "../lib/store";
+import { createPersistedSetter } from "./store-helpers";
 
 interface SettingsValues {
 	showLineNumbers: boolean;
@@ -46,13 +33,7 @@ interface SettingsState extends SettingsValues {
 }
 
 export const useSettingsStore = create<SettingsState>()((set) => {
-	const makeSetter =
-		<K extends keyof SettingsValues>(key: K, save: (value: SettingsValues[K]) => Promise<void>) =>
-		(value: SettingsValues[K]) => {
-			void save(value);
-			set({ [key]: value } as Partial<SettingsState>);
-		};
-
+	const persist = createPersistedSetter<SettingsValues>(set, saveSetting);
 	return {
 		showLineNumbers: true,
 		fontSize: 14,
@@ -65,17 +46,17 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		autoUpdateCheck: true,
 		fileTreeShowHidden: false,
 		fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
-		setShowLineNumbers: makeSetter("showLineNumbers", saveShowLineNumbers),
-		setFontSize: makeSetter("fontSize", saveFontSize),
-		setAutoSaveDelay: makeSetter("autoSaveDelay", saveAutoSaveDelay),
-		setHighlightActiveLine: makeSetter("highlightActiveLine", saveHighlightActiveLine),
-		setFontFamily: makeSetter("fontFamily", saveFontFamily),
-		setTrimTrailingWhitespace: makeSetter("trimTrailingWhitespace", saveTrimTrailingWhitespace),
-		setShowLinkCards: makeSetter("showLinkCards", saveShowLinkCards),
-		setScratchpadVolatile: makeSetter("scratchpadVolatile", saveScratchpadVolatile),
-		setAutoUpdateCheck: makeSetter("autoUpdateCheck", saveAutoUpdateCheck),
-		setFileTreeShowHidden: makeSetter("fileTreeShowHidden", saveFileTreeShowHidden),
-		setFileTreeExcludePatterns: makeSetter("fileTreeExcludePatterns", saveFileTreeExcludePatterns),
+		setShowLineNumbers: persist("showLineNumbers"),
+		setFontSize: persist("fontSize"),
+		setAutoSaveDelay: persist("autoSaveDelay"),
+		setHighlightActiveLine: persist("highlightActiveLine"),
+		setFontFamily: persist("fontFamily"),
+		setTrimTrailingWhitespace: persist("trimTrailingWhitespace"),
+		setShowLinkCards: persist("showLinkCards"),
+		setScratchpadVolatile: persist("scratchpadVolatile"),
+		setAutoUpdateCheck: persist("autoUpdateCheck"),
+		setFileTreeShowHidden: persist("fileTreeShowHidden"),
+		setFileTreeExcludePatterns: persist("fileTreeExcludePatterns"),
 		hydrate: (values: Partial<SettingsValues>) => {
 			set(values);
 		},
