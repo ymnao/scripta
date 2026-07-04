@@ -8,6 +8,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 const blockquoteLineDecoration = Decoration.line({
 	attributes: { class: "cm-blockquote-line" },
@@ -18,48 +19,40 @@ const blockquoteMarkPattern = /^((?:> ?)+)/;
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const ranges: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
+	iterateVisibleSyntax(view, (node, { tree }) => {
+		if (node.name !== "Blockquote") return;
+
+		const startLine = state.doc.lineAt(node.from);
+		const endLine = state.doc.lineAt(node.to);
+
+		// Add line decorations
+		for (let l = startLine.number; l <= endLine.number; l++) {
+			const line = state.doc.line(l);
+			ranges.push(blockquoteLineDecoration.range(line.from, line.from));
+		}
+
+		// Single pass: find all QuoteMarks in the blockquote
 		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name !== "Blockquote") return;
-
-				const startLine = state.doc.lineAt(node.from);
-				const endLine = state.doc.lineAt(node.to);
-
-				// Add line decorations
-				for (let l = startLine.number; l <= endLine.number; l++) {
-					const line = state.doc.line(l);
-					ranges.push(blockquoteLineDecoration.range(line.from, line.from));
+			from: node.from,
+			to: node.to,
+			enter(child) {
+				if (child.name !== "QuoteMark") return;
+				let replaceEnd = child.to;
+				if (
+					replaceEnd < state.doc.length &&
+					state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
+				) {
+					replaceEnd += 1;
 				}
-
-				// Single pass: find all QuoteMarks in the blockquote
-				tree.iterate({
-					from: node.from,
-					to: node.to,
-					enter(child) {
-						if (child.name !== "QuoteMark") return;
-						let replaceEnd = child.to;
-						if (
-							replaceEnd < state.doc.length &&
-							state.doc.sliceString(replaceEnd, replaceEnd + 1) === " "
-						) {
-							replaceEnd += 1;
-						}
-						ranges.push(replaceDecoration.range(child.from, replaceEnd));
-					},
-				});
-
-				// Prevent processing nested Blockquote nodes again
-				return false;
+				ranges.push(replaceDecoration.range(child.from, replaceEnd));
 			},
 		});
-	}
+
+		// Prevent processing nested Blockquote nodes again
+		return false;
+	});
 
 	return Decoration.set(ranges, true);
 }
@@ -72,10 +65,7 @@ class BlockquoteDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		if (
 			update.docChanged ||
 			update.viewportChanged ||

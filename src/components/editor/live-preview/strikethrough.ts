@@ -9,51 +9,43 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 const replaceDecoration = Decoration.replace({});
 const strikethroughMark = Decoration.mark({ class: "cm-strikethrough" });
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const cursorLines = collectCursorLines(view);
-
 	const ranges: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name !== "Strikethrough") return;
+	iterateVisibleSyntax(view, (node) => {
+		if (node.name !== "Strikethrough") return;
 
-				const startLine = state.doc.lineAt(node.from).number;
-				const endLine = state.doc.lineAt(node.to).number;
-				if (cursorInRange(cursorLines, startLine, endLine)) return;
+		const startLine = state.doc.lineAt(node.from).number;
+		const endLine = state.doc.lineAt(node.to).number;
+		if (cursorInRange(cursorLines, startLine, endLine)) return;
 
-				const cursor = node.node.cursor();
-				if (!cursor.firstChild()) return;
+		const cursor = node.node.cursor();
+		if (!cursor.firstChild()) return;
 
-				let contentFrom = -1;
-				let contentTo = -1;
+		let contentFrom = -1;
+		let contentTo = -1;
 
-				do {
-					if (cursor.name === "StrikethroughMark") {
-						ranges.push(replaceDecoration.range(cursor.from, cursor.to));
-						if (contentFrom === -1) {
-							contentFrom = cursor.to;
-						}
-						contentTo = cursor.from;
-					}
-				} while (cursor.nextSibling());
-
-				if (contentFrom !== -1 && contentTo > contentFrom) {
-					ranges.push(strikethroughMark.range(contentFrom, contentTo));
+		do {
+			if (cursor.name === "StrikethroughMark") {
+				ranges.push(replaceDecoration.range(cursor.from, cursor.to));
+				if (contentFrom === -1) {
+					contentFrom = cursor.to;
 				}
-			},
-		});
-	}
+				contentTo = cursor.from;
+			}
+		} while (cursor.nextSibling());
+
+		if (contentFrom !== -1 && contentTo > contentFrom) {
+			ranges.push(strikethroughMark.range(contentFrom, contentTo));
+		}
+	});
 
 	return Decoration.set(ranges, true);
 }
@@ -68,10 +60,7 @@ class StrikethroughDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||

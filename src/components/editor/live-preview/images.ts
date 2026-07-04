@@ -12,6 +12,7 @@ import {
 import { buildAssetUrl } from "../../../lib/commands";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 /** dirname/getSep (path.ts) は最初のセパレータを基準にするが、
  *  mixed separator ("C:/Users\\docs\\note.md") では最後のセパレータを
@@ -96,56 +97,47 @@ class ImageWidget extends WidgetType {
 
 function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const cursorLines = collectCursorLines(view);
-
 	const ranges: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name !== "Image") return;
+	iterateVisibleSyntax(view, (node) => {
+		if (node.name !== "Image") return;
 
-				const startLine = state.doc.lineAt(node.from).number;
-				const endLine = state.doc.lineAt(node.to).number;
-				if (cursorInRange(cursorLines, startLine, endLine)) return;
+		const startLine = state.doc.lineAt(node.from).number;
+		const endLine = state.doc.lineAt(node.to).number;
+		if (cursorInRange(cursorLines, startLine, endLine)) return;
 
-				const cursor = node.node.cursor();
-				let url = "";
-				let altFrom = -1;
-				let altTo = -1;
-				let foundOpenBracket = false;
+		const cursor = node.node.cursor();
+		let url = "";
+		let altFrom = -1;
+		let altTo = -1;
+		let foundOpenBracket = false;
 
-				if (cursor.firstChild()) {
-					do {
-						if (cursor.name === "LinkMark") {
-							const markText = state.doc.sliceString(cursor.from, cursor.to);
-							if ((markText === "[" || markText === "![") && !foundOpenBracket) {
-								altFrom = cursor.to;
-								foundOpenBracket = true;
-							} else if (markText === "]" && altTo === -1) {
-								altTo = cursor.from;
-							}
-						} else if (cursor.name === "URL") {
-							url = state.doc.sliceString(cursor.from, cursor.to);
-						}
-					} while (cursor.nextSibling());
+		if (cursor.firstChild()) {
+			do {
+				if (cursor.name === "LinkMark") {
+					const markText = state.doc.sliceString(cursor.from, cursor.to);
+					if ((markText === "[" || markText === "![") && !foundOpenBracket) {
+						altFrom = cursor.to;
+						foundOpenBracket = true;
+					} else if (markText === "]" && altTo === -1) {
+						altTo = cursor.from;
+					}
+				} else if (cursor.name === "URL") {
+					url = state.doc.sliceString(cursor.from, cursor.to);
 				}
+			} while (cursor.nextSibling());
+		}
 
-				if (!url || altFrom === -1 || altTo === -1) return;
+		if (!url || altFrom === -1 || altTo === -1) return;
 
-				const alt = state.doc.sliceString(altFrom, altTo);
-				ranges.push(
-					Decoration.replace({
-						widget: new ImageWidget(url, alt),
-					}).range(node.from, node.to),
-				);
-			},
-		});
-	}
+		const alt = state.doc.sliceString(altFrom, altTo);
+		ranges.push(
+			Decoration.replace({
+				widget: new ImageWidget(url, alt),
+			}).range(node.from, node.to),
+		);
+	});
 
 	return Decoration.set(ranges, true);
 }
@@ -160,10 +152,7 @@ class ImageDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||

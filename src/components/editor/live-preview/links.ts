@@ -12,6 +12,7 @@ import {
 import { openExternal } from "../../../lib/commands";
 import { IS_MAC, PRIMARY_MOD_SYMBOL } from "../../../lib/platform";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 // http/https のみ、whitespace 不可。
 // `isSafeUrl` / `urlPasteHandler` / `link-cards.ts isStandaloneUrlLine` の
@@ -229,52 +230,43 @@ function parseLinkNode(
 
 function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const cursorLines = collectCursorLines(view);
-
 	const ranges: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name !== "Link") return;
+	iterateVisibleSyntax(view, (node) => {
+		if (node.name !== "Link") return;
 
-				// Skip Link nodes that are part of a [[wikilink]] pattern
-				if (node.from >= 2 && state.doc.sliceString(node.from - 2, node.from) === "[[") {
-					// Count consecutive backslashes before "[["
-					let bsCount = 0;
-					for (let i = node.from - 3; i >= 0; i--) {
-						if (state.doc.sliceString(i, i + 1) === "\\") bsCount++;
-						else break;
-					}
-					// Odd backslashes = escaped, so treat as normal link; even = real wikilink
-					if (bsCount % 2 === 0) {
-						// Also verify closing ]] exists after the Link node
-						const suffix = state.doc.sliceString(node.to, node.to + 2);
-						if (suffix === "]]") return;
-					}
-				}
+		// Skip Link nodes that are part of a [[wikilink]] pattern
+		if (node.from >= 2 && state.doc.sliceString(node.from - 2, node.from) === "[[") {
+			// Count consecutive backslashes before "[["
+			let bsCount = 0;
+			for (let i = node.from - 3; i >= 0; i--) {
+				if (state.doc.sliceString(i, i + 1) === "\\") bsCount++;
+				else break;
+			}
+			// Odd backslashes = escaped, so treat as normal link; even = real wikilink
+			if (bsCount % 2 === 0) {
+				// Also verify closing ]] exists after the Link node
+				const suffix = state.doc.sliceString(node.to, node.to + 2);
+				if (suffix === "]]") return;
+			}
+		}
 
-				const startLine = state.doc.lineAt(node.from).number;
-				const endLine = state.doc.lineAt(node.to).number;
-				if (cursorInRange(cursorLines, startLine, endLine)) return;
+		const startLine = state.doc.lineAt(node.from).number;
+		const endLine = state.doc.lineAt(node.to).number;
+		if (cursorInRange(cursorLines, startLine, endLine)) return;
 
-				// SyntaxNodeRef (iterate callback) → SyntaxNode via `.node`
-				const parts = parseLinkNode(state, node.node);
-				if (!parts) return;
+		// SyntaxNodeRef (iterate callback) → SyntaxNode via `.node`
+		const parts = parseLinkNode(state, node.node);
+		if (!parts) return;
 
-				const displayText = parts.label.trim().length > 0 ? parts.label : parts.url;
-				ranges.push(
-					Decoration.replace({
-						widget: new LinkWidget(displayText, parts.url),
-					}).range(node.from, node.to),
-				);
-			},
-		});
-	}
+		const displayText = parts.label.trim().length > 0 ? parts.label : parts.url;
+		ranges.push(
+			Decoration.replace({
+				widget: new LinkWidget(displayText, parts.url),
+			}).range(node.from, node.to),
+		);
+	});
 
 	return Decoration.set(ranges, true);
 }
@@ -289,10 +281,7 @@ class LinkDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||

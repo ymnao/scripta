@@ -18,6 +18,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 export class BulletWidget extends WidgetType {
 	eq(_other: BulletWidget): boolean {
@@ -99,125 +100,112 @@ export interface ListDecorations {
 
 export function buildDecorations(view: EditorView): ListDecorations {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const ranges: Range<Decoration>[] = [];
 	const atomicRangesList: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name === "Task") {
-					const line = state.doc.lineAt(node.from);
+	iterateVisibleSyntax(view, (node) => {
+		if (node.name === "Task") {
+			const line = state.doc.lineAt(node.from);
 
-					// Find TaskMarker inside Task node
-					const taskNode = node.node;
-					let taskMarkerFrom = -1;
-					let taskMarkerTo = -1;
-					let checked = false;
+			// Find TaskMarker inside Task node
+			const taskNode = node.node;
+			let taskMarkerFrom = -1;
+			let taskMarkerTo = -1;
+			let checked = false;
 
-					const taskCursor = taskNode.cursor();
-					if (taskCursor.firstChild()) {
-						do {
-							if (taskCursor.name === "TaskMarker") {
-								taskMarkerFrom = taskCursor.from;
-								taskMarkerTo = taskCursor.to;
-								const markerText = state.doc.sliceString(taskCursor.from, taskCursor.to);
-								checked = markerText === "[x]" || markerText === "[X]";
-								break;
-							}
-						} while (taskCursor.nextSibling());
+			const taskCursor = taskNode.cursor();
+			if (taskCursor.firstChild()) {
+				do {
+					if (taskCursor.name === "TaskMarker") {
+						taskMarkerFrom = taskCursor.from;
+						taskMarkerTo = taskCursor.to;
+						const markerText = state.doc.sliceString(taskCursor.from, taskCursor.to);
+						checked = markerText === "[x]" || markerText === "[X]";
+						break;
 					}
+				} while (taskCursor.nextSibling());
+			}
 
-					if (taskMarkerFrom === -1) return;
+			if (taskMarkerFrom === -1) return;
 
-					// Find ListMark in parent ListItem
-					const parent = taskNode.parent;
-					if (parent?.name !== "ListItem") return;
+			// Find ListMark in parent ListItem
+			const parent = taskNode.parent;
+			if (parent?.name !== "ListItem") return;
 
-					let listMarkFrom = -1;
-					const parentCursor = parent.cursor();
-					if (parentCursor.firstChild()) {
-						do {
-							if (parentCursor.name === "ListMark") {
-								listMarkFrom = parentCursor.from;
-								break;
-							}
-						} while (parentCursor.nextSibling());
+			let listMarkFrom = -1;
+			const parentCursor = parent.cursor();
+			if (parentCursor.firstChild()) {
+				do {
+					if (parentCursor.name === "ListMark") {
+						listMarkFrom = parentCursor.from;
+						break;
 					}
+				} while (parentCursor.nextSibling());
+			}
 
-					if (listMarkFrom === -1) return;
+			if (listMarkFrom === -1) return;
 
-					// Consume TaskMarker trailing space
-					let replaceEnd = taskMarkerTo;
-					if (replaceEnd < line.to && state.doc.sliceString(replaceEnd, replaceEnd + 1) === " ") {
-						replaceEnd += 1;
-					}
+			// Consume TaskMarker trailing space
+			let replaceEnd = taskMarkerTo;
+			if (replaceEnd < line.to && state.doc.sliceString(replaceEnd, replaceEnd + 1) === " ") {
+				replaceEnd += 1;
+			}
 
-					// Single replace covers ListMark + TaskMarker + trailing space so
-					// no decoration boundary sits between widget and content text.
-					const taskReplace = Decoration.replace({
-						widget: new CheckboxWidget(checked, taskMarkerFrom),
-					}).range(listMarkFrom, replaceEnd);
-					ranges.push(taskReplace);
-					atomicRangesList.push(taskReplace);
+			// Single replace covers ListMark + TaskMarker + trailing space so
+			// no decoration boundary sits between widget and content text.
+			const taskReplace = Decoration.replace({
+				widget: new CheckboxWidget(checked, taskMarkerFrom),
+			}).range(listMarkFrom, replaceEnd);
+			ranges.push(taskReplace);
+			atomicRangesList.push(taskReplace);
 
-					// Apply strikethrough for checked tasks
-					if (checked) {
-						const contentFrom = replaceEnd;
-						const lineEnd = line.to;
-						if (contentFrom < lineEnd) {
-							ranges.push(
-								Decoration.mark({ class: "cm-task-checked" }).range(contentFrom, lineEnd),
-							);
+			// Apply strikethrough for checked tasks
+			if (checked) {
+				const contentFrom = replaceEnd;
+				const lineEnd = line.to;
+				if (contentFrom < lineEnd) {
+					ranges.push(Decoration.mark({ class: "cm-task-checked" }).range(contentFrom, lineEnd));
+				}
+			}
+			return;
+		}
+
+		if (node.name === "ListItem") {
+			const listItemNode = node.node;
+			const parent = listItemNode.parent;
+			if (parent?.name !== "BulletList") return;
+
+			// Skip if this ListItem contains a Task child
+			const itemCursor = listItemNode.cursor();
+			if (itemCursor.firstChild()) {
+				do {
+					if (itemCursor.name === "Task") return;
+				} while (itemCursor.nextSibling());
+			}
+
+			// Find ListMark and replace marker + trailing space with bullet widget
+			const markCursor = listItemNode.cursor();
+			if (markCursor.firstChild()) {
+				do {
+					if (markCursor.name === "ListMark") {
+						const line = state.doc.lineAt(node.from);
+						const afterMark = markCursor.to;
+						// Only decorate when followed by a space (e.g. "- ")
+						if (afterMark >= line.to || state.doc.sliceString(afterMark, afterMark + 1) !== " ") {
+							break;
 						}
+						const replaceEnd = afterMark + 1;
+						const bulletReplace = Decoration.replace({
+							widget: new BulletWidget(),
+						}).range(markCursor.from, replaceEnd);
+						ranges.push(bulletReplace);
+						atomicRangesList.push(bulletReplace);
+						break;
 					}
-					return;
-				}
-
-				if (node.name === "ListItem") {
-					const listItemNode = node.node;
-					const parent = listItemNode.parent;
-					if (parent?.name !== "BulletList") return;
-
-					// Skip if this ListItem contains a Task child
-					const itemCursor = listItemNode.cursor();
-					if (itemCursor.firstChild()) {
-						do {
-							if (itemCursor.name === "Task") return;
-						} while (itemCursor.nextSibling());
-					}
-
-					// Find ListMark and replace marker + trailing space with bullet widget
-					const markCursor = listItemNode.cursor();
-					if (markCursor.firstChild()) {
-						do {
-							if (markCursor.name === "ListMark") {
-								const line = state.doc.lineAt(node.from);
-								const afterMark = markCursor.to;
-								// Only decorate when followed by a space (e.g. "- ")
-								if (
-									afterMark >= line.to ||
-									state.doc.sliceString(afterMark, afterMark + 1) !== " "
-								) {
-									break;
-								}
-								const replaceEnd = afterMark + 1;
-								const bulletReplace = Decoration.replace({
-									widget: new BulletWidget(),
-								}).range(markCursor.from, replaceEnd);
-								ranges.push(bulletReplace);
-								atomicRangesList.push(bulletReplace);
-								break;
-							}
-						} while (markCursor.nextSibling());
-					}
-				}
-			},
-		});
-	}
+				} while (markCursor.nextSibling());
+			}
+		}
+	});
 
 	return {
 		decorations: Decoration.set(ranges, true),
@@ -236,13 +224,7 @@ class ListDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) {
-				this.decorations = this.decorations.map(update.changes);
-				this.atomicRanges = this.atomicRanges.map(update.changes);
-			}
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		if (
 			update.docChanged ||
 			update.viewportChanged ||

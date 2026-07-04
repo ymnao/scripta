@@ -10,6 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 export class HRWidget extends WidgetType {
 	eq(_other: WidgetType): boolean {
@@ -29,35 +30,26 @@ export class HRWidget extends WidgetType {
 
 export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const cursorLines = collectCursorLines(view);
-
 	const ranges: Range<Decoration>[] = [];
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name !== "HorizontalRule") return;
+	iterateVisibleSyntax(view, (node) => {
+		if (node.name !== "HorizontalRule") return;
 
-				// カーソルがフォーカスされた行に HR がある場合は raw `---` のままにする。
-				// widget で replace するとカーソル進入時に表示が崩れる（左端の白い点滅）。
-				// フォーカス外し時は cursorLines が空なので lineAt 呼び出しごと省略。
-				if (cursorLines.size > 0) {
-					const lineNumber = state.doc.lineAt(node.from).number;
-					if (cursorLines.has(lineNumber)) return;
-				}
+		// カーソルがフォーカスされた行に HR がある場合は raw `---` のままにする。
+		// widget で replace するとカーソル進入時に表示が崩れる（左端の白い点滅）。
+		// フォーカス外し時は cursorLines が空なので lineAt 呼び出しごと省略。
+		if (cursorLines.size > 0) {
+			const lineNumber = state.doc.lineAt(node.from).number;
+			if (cursorLines.has(lineNumber)) return;
+		}
 
-				ranges.push(
-					Decoration.replace({
-						widget: new HRWidget(),
-					}).range(node.from, node.to),
-				);
-			},
-		});
-	}
+		ranges.push(
+			Decoration.replace({
+				widget: new HRWidget(),
+			}).range(node.from, node.to),
+		);
+	});
 
 	return Decoration.set(ranges, true);
 }
@@ -72,10 +64,7 @@ class HorizontalRuleDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		const forceRebuild =
 			update.docChanged ||
 			update.viewportChanged ||

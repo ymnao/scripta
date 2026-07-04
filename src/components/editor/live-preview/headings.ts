@@ -8,6 +8,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 const headingLineDecorations = {
 	1: Decoration.line({ attributes: { class: "cm-heading-1" } }),
@@ -37,48 +38,38 @@ const hashOnlyPattern = /^#{1,6}$/;
 export function buildDecorations(view: EditorView): DecorationSet {
 	const builder = new RangeSetBuilder<Decoration>();
 	const { state } = view;
-	const tree = syntaxTree(state);
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				const level = headingNodeNames.get(node.name);
-				if (level === undefined) return;
-				const line = state.doc.lineAt(node.from);
+	iterateVisibleSyntax(view, (node) => {
+		const level = headingNodeNames.get(node.name);
+		if (level === undefined) return;
+		const line = state.doc.lineAt(node.from);
 
-				const cursor = node.node.cursor();
-				if (!cursor.firstChild()) return;
+		const cursor = node.node.cursor();
+		if (!cursor.firstChild()) return;
 
-				let headerMarkFrom = -1;
-				let headerMarkTo = -1;
-				do {
-					if (cursor.name === "HeaderMark") {
-						headerMarkFrom = cursor.from;
-						headerMarkTo = cursor.to;
-						break;
-					}
-				} while (cursor.nextSibling());
+		let headerMarkFrom = -1;
+		let headerMarkTo = -1;
+		do {
+			if (cursor.name === "HeaderMark") {
+				headerMarkFrom = cursor.from;
+				headerMarkTo = cursor.to;
+				break;
+			}
+		} while (cursor.nextSibling());
 
-				if (headerMarkFrom === -1) return;
+		if (headerMarkFrom === -1) return;
 
-				// Skip decoration when HeaderMark is not followed by a space.
-				// lezer/markdown recognizes "#" or "##" at end of line as valid
-				// ATX headings, but decoration should only apply after a space
-				// is typed (e.g. "## " or "## text").
-				if (
-					headerMarkTo >= line.to ||
-					state.doc.sliceString(headerMarkTo, headerMarkTo + 1) !== " "
-				) {
-					return;
-				}
+		// Skip decoration when HeaderMark is not followed by a space.
+		// lezer/markdown recognizes "#" or "##" at end of line as valid
+		// ATX headings, but decoration should only apply after a space
+		// is typed (e.g. "## " or "## text").
+		if (headerMarkTo >= line.to || state.doc.sliceString(headerMarkTo, headerMarkTo + 1) !== " ") {
+			return;
+		}
 
-				builder.add(line.from, line.from, headingLineDecorations[level]);
-				builder.add(headerMarkFrom, headerMarkTo + 1, replaceDecoration);
-			},
-		});
-	}
+		builder.add(line.from, line.from, headingLineDecorations[level]);
+		builder.add(headerMarkFrom, headerMarkTo + 1, replaceDecoration);
+	});
 
 	return builder.finish();
 }
@@ -91,10 +82,7 @@ class HeadingDecorationPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		if (
 			update.docChanged ||
 			update.viewportChanged ||

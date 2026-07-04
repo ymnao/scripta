@@ -13,7 +13,8 @@ import { basename, joinPath, SEP_RE } from "../../../lib/path";
 import { useWikilinkStore } from "../../../stores/wikilink";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
-import { collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
+import { codeRangesField, getCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
+import { handleComposingUpdate } from "./plugin-utils";
 
 const WIKILINK_RE = /\[\[([^[\]\n\r]+)\]\]/g;
 
@@ -61,15 +62,13 @@ export function buildDecorations(
 	fileMap: Map<string, string> | null,
 ): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
-
 	const cursorLines = collectCursorLines(view);
+	const codeRanges = getCodeRanges(state);
 
 	const ranges: Range<Decoration>[] = [];
 
 	for (const { from, to } of view.visibleRanges) {
 		const text = state.doc.sliceString(from, to);
-		const codeRanges = collectCodeRanges(tree, from, to);
 
 		for (const match of text.matchAll(WIKILINK_RE)) {
 			const matchFrom = from + match.index;
@@ -262,10 +261,7 @@ class WikilinkDecorationPlugin implements PluginValue {
 			return;
 		}
 
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 
 		const currentVersion = useWorkspaceStore.getState().fileTreeVersion;
 		if (currentVersion !== this.lastFileTreeVersion) {
@@ -297,4 +293,8 @@ const wikilinkPlugin = ViewPlugin.fromClass(WikilinkDecorationPlugin, {
 	decorations: (v) => v.decorations,
 });
 
-export const wikilinkDecoration: Extension = [wikilinkPlugin, createWikilinkClickHandler()];
+export const wikilinkDecoration: Extension = [
+	codeRangesField,
+	wikilinkPlugin,
+	createWikilinkClickHandler(),
+];
