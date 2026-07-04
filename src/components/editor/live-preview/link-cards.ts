@@ -14,7 +14,7 @@ import { getErrorKind } from "../../../types/errors";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
-import { codeRangesField, collectCodeRanges, overlapsCodeBlock } from "./math";
+import { codeRangesField, getCodeRanges, overlapsCodeBlock } from "./math";
 import { handleComposingUpdate } from "./plugin-utils";
 
 export function isStandaloneUrlLine(lineText: string): string | null {
@@ -255,10 +255,7 @@ interface StandaloneUrlInfo {
 function forEachStandaloneUrl(view: EditorView, cb: (info: StandaloneUrlInfo) => void): void {
 	const { state } = view;
 	const cursorLines = collectCursorLines(view);
-	// codeRangesField が include されていないテストでは fallback で計算する
-	const codeRanges =
-		state.field(codeRangesField, false) ??
-		collectCodeRanges(syntaxTree(state), 0, state.doc.length);
+	const codeRanges = getCodeRanges(state);
 
 	for (const { from, to } of view.visibleRanges) {
 		const startLine = state.doc.lineAt(from).number;

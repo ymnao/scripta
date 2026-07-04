@@ -13,7 +13,7 @@ import { basename, joinPath, SEP_RE } from "../../../lib/path";
 import { useWikilinkStore } from "../../../stores/wikilink";
 import { useWorkspaceStore } from "../../../stores/workspace";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
-import { codeRangesField, collectCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
+import { codeRangesField, getCodeRanges, isEscaped, overlapsCodeBlock } from "./math";
 import { handleComposingUpdate } from "./plugin-utils";
 
 const WIKILINK_RE = /\[\[([^[\]\n\r]+)\]\]/g;
@@ -63,10 +63,7 @@ export function buildDecorations(
 ): DecorationSet {
 	const { state } = view;
 	const cursorLines = collectCursorLines(view);
-	// codeRangesField が include されていないテストでは fallback で計算する
-	const codeRanges =
-		state.field(codeRangesField, false) ??
-		collectCodeRanges(syntaxTree(state), 0, state.doc.length);
+	const codeRanges = getCodeRanges(state);
 
 	const ranges: Range<Decoration>[] = [];
 

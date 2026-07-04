@@ -17,17 +17,21 @@ export type VisibleSyntaxContext = {
  * live-preview のパターン A 9 デコレーションで共通の
  * `for-of (visibleRanges) → tree.iterate({from, to, enter})` を集約する。
  *
- * enter callback には第 2 引数として visible range 情報を渡す。tree/from/to のいずれかを
- * 内部で使わない呼び出しは第 2 引数を無視すればよい (JS の可変長引数)。enter が false を
- * 返せば tree.iterate 側で子ノード走査を抑制する仕様は維持される。
+ * enter が false を返せば tree.iterate 側で子ノード走査を抑制する仕様は維持される。
+ * 第 2 引数 `ctx` は visible range 情報を持つが、**enter 呼び出し中のみ有効** — helper
+ * 側で 1 個の object を hoist して from/to を per-range に書き換えているため、caller が
+ * 保持して後で読むと壊れる。
  */
 export function iterateVisibleSyntax(
 	view: EditorView,
 	enter: (node: SyntaxNodeRefLike, ctx: VisibleSyntaxContext) => boolean | undefined,
 ): void {
 	const tree = syntaxTree(view.state);
+	const ctx: VisibleSyntaxContext = { tree, from: 0, to: 0 };
 	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({ from, to, enter: (node) => enter(node, { tree, from, to }) });
+		ctx.from = from;
+		ctx.to = to;
+		tree.iterate({ from, to, enter: (node) => enter(node, ctx) });
 	}
 }
 

@@ -11,7 +11,7 @@ import {
 } from "@codemirror/view";
 
 import { MERMAID_FENCE_RE } from "./code-blocks";
-import { handleComposingUpdate } from "./plugin-utils";
+import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 const copyAnchorDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-copy-anchor" },
@@ -189,55 +189,48 @@ function findCopyButtonForBlock(
 
 export function buildCopyDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
-	const tree = syntaxTree(state);
 	const ranges: Range<Decoration>[] = [];
 	const processed = new Set<number>();
 
-	for (const { from, to } of view.visibleRanges) {
-		tree.iterate({
-			from,
-			to,
-			enter(node) {
-				if (node.name !== "FencedCode") return;
-				if (processed.has(node.from)) return;
-				processed.add(node.from);
+	iterateVisibleSyntax(view, (node, { from, to }) => {
+		if (node.name !== "FencedCode") return;
+		if (processed.has(node.from)) return;
+		processed.add(node.from);
 
-				const startLine = state.doc.lineAt(node.from);
-				const endLine = state.doc.lineAt(node.to);
+		const startLine = state.doc.lineAt(node.from);
+		const endLine = state.doc.lineAt(node.to);
 
-				if (MERMAID_FENCE_RE.test(startLine.text.trim())) return;
-				if (endLine.number - startLine.number < 2) return;
+		if (MERMAID_FENCE_RE.test(startLine.text.trim())) return;
+		if (endLine.number - startLine.number < 2) return;
 
-				if (startLine.to + 1 >= endLine.from - 1) return;
+		if (startLine.to + 1 >= endLine.from - 1) return;
 
-				const firstContentLineNum = startLine.number + 1;
-				const lastContentLineNum = endLine.number - 1;
-				const firstContentLine = state.doc.line(firstContentLineNum);
+		const firstContentLineNum = startLine.number + 1;
+		const lastContentLineNum = endLine.number - 1;
+		const firstContentLine = state.doc.line(firstContentLineNum);
 
-				let targetLine: Line;
-				if (firstContentLine.from >= from) {
-					targetLine = firstContentLine;
-				} else {
-					const lineAtFrom = state.doc.lineAt(from);
-					if (lineAtFrom.number >= firstContentLineNum && lineAtFrom.number <= lastContentLineNum) {
-						targetLine = lineAtFrom;
-					} else {
-						return;
-					}
-				}
+		let targetLine: Line;
+		if (firstContentLine.from >= from) {
+			targetLine = firstContentLine;
+		} else {
+			const lineAtFrom = state.doc.lineAt(from);
+			if (lineAtFrom.number >= firstContentLineNum && lineAtFrom.number <= lastContentLineNum) {
+				targetLine = lineAtFrom;
+			} else {
+				return;
+			}
+		}
 
-				if (targetLine.from > to) return;
+		if (targetLine.from > to) return;
 
-				ranges.push(copyAnchorDecoration.range(targetLine.from, targetLine.from));
-				ranges.push(
-					Decoration.widget({
-						widget: new CodeBlockCopyWidget(),
-						side: 1,
-					}).range(targetLine.to),
-				);
-			},
-		});
-	}
+		ranges.push(copyAnchorDecoration.range(targetLine.from, targetLine.from));
+		ranges.push(
+			Decoration.widget({
+				widget: new CodeBlockCopyWidget(),
+				side: 1,
+			}).range(targetLine.to),
+		);
+	});
 
 	return Decoration.set(ranges, true);
 }

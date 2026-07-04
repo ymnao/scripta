@@ -1,4 +1,4 @@
-import { ChangeSet, EditorState } from "@codemirror/state";
+import { ChangeSet } from "@codemirror/state";
 import { Decoration, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
@@ -103,7 +103,6 @@ function createMockUpdate(opts: {
 
 describe("handleComposingUpdate", () => {
 	const doc = "hello";
-	const state = createTestState(doc);
 	const initialDecorations: DecorationSet = Decoration.set(
 		[Decoration.mark({ class: "cm-test" }).range(0, doc.length)],
 		true,
@@ -156,10 +155,5 @@ describe("handleComposingUpdate", () => {
 
 		const atomicIter = target.atomicRanges.iter();
 		expect(atomicIter.from).toBe(1);
-	});
-
-	// EditorState は helper 使用時に「不要な import 警告」を避けるための dummy 参照
-	it("state is a valid EditorState (sanity)", () => {
-		expect(state).toBeInstanceOf(EditorState);
 	});
 });
