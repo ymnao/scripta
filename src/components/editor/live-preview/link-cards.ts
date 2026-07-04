@@ -14,7 +14,8 @@ import { getErrorKind } from "../../../types/errors";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
 import { isSafeImageUrl, isSafeUrl, URL_PASTE_RE } from "./links";
-import { collectCodeRanges, overlapsCodeBlock } from "./math";
+import { codeRangesField, collectCodeRanges, overlapsCodeBlock } from "./math";
+import { handleComposingUpdate } from "./plugin-utils";
 
 export function isStandaloneUrlLine(lineText: string): string | null {
 	// `URL_PASTE_RE` と同じ shape (`/^https?:\/\/[^\s]+$/i`) — 単一行 URL 検出は
@@ -253,11 +254,13 @@ interface StandaloneUrlInfo {
 
 function forEachStandaloneUrl(view: EditorView, cb: (info: StandaloneUrlInfo) => void): void {
 	const { state } = view;
-	const tree = syntaxTree(state);
 	const cursorLines = collectCursorLines(view);
+	// codeRangesField が include されていないテストでは fallback で計算する
+	const codeRanges =
+		state.field(codeRangesField, false) ??
+		collectCodeRanges(syntaxTree(state), 0, state.doc.length);
 
 	for (const { from, to } of view.visibleRanges) {
-		const codeRanges = collectCodeRanges(tree, from, to);
 		const startLine = state.doc.lineAt(from).number;
 		const endLine = state.doc.lineAt(to).number;
 
@@ -384,10 +387,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 	update(update: ViewUpdate) {
 		this.view = update.view;
 
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 
 		if (this.pendingUpdate) {
 			this.pendingUpdate = false;
@@ -531,4 +531,8 @@ function createLinkCardClickGuard() {
 	});
 }
 
-export const linkCardDecoration: Extension = [linkCardPlugin, createLinkCardClickGuard()];
+export const linkCardDecoration: Extension = [
+	codeRangesField,
+	linkCardPlugin,
+	createLinkCardClickGuard(),
+];

@@ -61,6 +61,21 @@ export function collectCodeRanges(
 	return ranges;
 }
 
+/**
+ * ドキュメント全体の code ranges を tree 変更時のみ再計算してキャッシュする StateField。
+ * math / wikilinks / link-cards からの重複呼び出し (large doc で毎回 tree 全走査していた) を
+ * 単一 pass に集約する。selection / focus 変更では再計算しない。
+ */
+export const codeRangesField = StateField.define<CodeRange[]>({
+	create(state) {
+		return collectCodeRanges(syntaxTree(state), 0, state.doc.length);
+	},
+	update(prev, tr) {
+		if (!tr.docChanged && syntaxTree(tr.state) === syntaxTree(tr.startState)) return prev;
+		return collectCodeRanges(syntaxTree(tr.state), 0, tr.state.doc.length);
+	},
+});
+
 export function overlapsCodeBlock(from: number, to: number, codeRanges: CodeRange[]): boolean {
 	for (const range of codeRanges) {
 		if (from < range.to && to > range.from) return true;
@@ -102,13 +117,14 @@ export class MathWidget extends WidgetType {
 }
 
 export function buildMathDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
-	const tree = syntaxTree(state);
 	const cursorLines = collectCursorLines(state, hasFocus);
 	const ranges: Range<Decoration>[] = [];
 
 	const docLength = state.doc.length;
 	const text = state.doc.sliceString(0, docLength);
-	const codeRanges = collectCodeRanges(tree, 0, docLength);
+	// codeRangesField が include されていないテストでは fallback で計算する
+	const codeRanges =
+		state.field(codeRangesField, false) ?? collectCodeRanges(syntaxTree(state), 0, docLength);
 	const localDisplayRanges: CodeRange[] = [];
 
 	// Pass 1: Display math ($$...$$). Block decoration → must be on a StateField.
@@ -343,6 +359,7 @@ const dollarBackspace = keymap.of([
 ]);
 
 export const mathDecoration: Extension = [
+	codeRangesField,
 	mathHasFocusField,
 	mathDecorationField,
 	mathFocusHandler,

@@ -11,6 +11,7 @@ import {
 } from "@codemirror/view";
 
 import { MERMAID_FENCE_RE } from "./code-blocks";
+import { handleComposingUpdate } from "./plugin-utils";
 
 const copyAnchorDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-copy-anchor" },
@@ -251,10 +252,7 @@ class CodeBlockCopyPlugin implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		if (update.view.composing) {
-			if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-			return;
-		}
+		if (handleComposingUpdate(update, this)) return;
 		if (
 			update.docChanged ||
 			update.viewportChanged ||
