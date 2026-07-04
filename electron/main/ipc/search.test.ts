@@ -15,7 +15,6 @@ import {
 	cancelSearchForWindow,
 	cancelWikilinkScanForWindow,
 	extractWikilinks,
-	fuzzyMatch,
 	isPathTraversal,
 } from "./search";
 
@@ -36,25 +35,6 @@ beforeEach(async () => {
 afterEach(async () => {
 	clearWorkspaceRoots();
 	await ws.cleanup();
-});
-
-describe("fuzzyMatch", () => {
-	it("matches when query chars appear in order", () => {
-		expect(fuzzyMatch("hw", "hello-world.md")).toBe(true);
-	});
-
-	it("returns true for empty query", () => {
-		expect(fuzzyMatch("", "anything")).toBe(true);
-	});
-
-	it("returns false when chars missing", () => {
-		expect(fuzzyMatch("xyz", "hello")).toBe(false);
-	});
-
-	it("is case insensitive", () => {
-		expect(fuzzyMatch("HW", "hello-world.md")).toBe(true);
-		expect(fuzzyMatch("hw", "Hello-World.md")).toBe(true);
-	});
 });
 
 describe("isPathTraversal", () => {
