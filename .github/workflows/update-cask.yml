@@ -1,0 +1,144 @@
+name: Update Homebrew Cask
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.7.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-cask:
+    # prerelease / draft は対象外 (published + non-draft + non-prerelease のみ)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.release.prerelease && !github.event.release.draft)
+    runs-on: ubuntu-latest
+    # 同 tap 宛の複数 run が race して non-fast-forward push で fail するのを防ぐ
+    # (release publish 直後の workflow_dispatch 再実行 / 短時間の連続 publish 等)
+    concurrency:
+      group: update-cask
+      cancel-in-progress: false
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Verify tap secret
+        id: gate
+        env:
+          # Phase 1 (tap repo 作成 + Cask 配置) 完了前は TAP_GITHUB_TOKEN が
+          # 未設定なので、以降の step を skip して workflow を green のままにする。
+          # tap repo が用意できた段階で user が secret を登録すれば自動で有効化。
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::notice::TAP_GITHUB_TOKEN 未設定のため tap 更新 skip (Phase 1 tap repo setup 待ち)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve version / sha256
+        if: steps.gate.outputs.skip != 'true'
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            echo "::error::tag が解決できませんでした"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+
+          # dmg 命名契約 (scripta-<version>[-arm64].dmg) は
+          # scripts/assert-dmg-naming.sh が SoT (docs/parity-checklist.md §11)。
+          # release asset の digest フィールドに sha256 が入っているので、
+          # dmg を download せず GitHub API から直接取得する
+          # (digest 欠落 or 命名 drift = 下の hex validation で fail)。
+          json=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
+                   --jq '[.assets[] | {name, digest}]')
+          get_sha() {
+            printf '%s' "$json" | jq -r --arg n "$1" \
+              '.[] | select(.name==$n) | .digest' \
+              | sed -E 's|^sha256:||'
+          }
+          ARM_SHA=$(get_sha "scripta-${VERSION}-arm64.dmg")
+          INTEL_SHA=$(get_sha "scripta-${VERSION}.dmg")
+
+          if ! [[ $ARM_SHA =~ ^[0-9a-f]{64}$ && $INTEL_SHA =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::asset の sha256 が取得できませんでした (dmg 命名 drift もしくは digest 未計算)"
+            exit 1
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "arm=$ARM_SHA"
+            echo "intel=$INTEL_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ymnao/homebrew-scripta
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Update Casks/scripta.rb
+        if: steps.gate.outputs.skip != 'true'
+        id: update
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          ARM_SHA: ${{ steps.meta.outputs.arm }}
+          INTEL_SHA: ${{ steps.meta.outputs.intel }}
+        run: |
+          set -euo pipefail
+          FILE="Casks/scripta.rb"
+          test -f "$FILE" || { echo "::error::$FILE が見つかりません"; exit 1; }
+
+          CURRENT=$(sed -nE 's/^[[:space:]]*version[[:space:]]+"([^"]+)".*/\1/p' "$FILE" | head -1)
+          echo "current cask version: $CURRENT / target: $VERSION"
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "already at version $VERSION, skipping"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # intel sha256 の pattern は "[0-9a-f]{64}" に narrow。
+          # 将来 `arch arm: "-arm64", intel: "-x64"` が multi-line 化された場合に
+          # arch 側の intel: line を誤って sha256 と認識して書き換えないようにする。
+          sed -i -E \
+            -e "s|^([[:space:]]*version[[:space:]]+)\"[^\"]+\"|\1\"$VERSION\"|" \
+            -e "s|^([[:space:]]*sha256[[:space:]]+arm:[[:space:]]+)\"[^\"]+\"|\1\"$ARM_SHA\"|" \
+            -e "s|^([[:space:]]*intel:[[:space:]]+)\"[0-9a-f]{64}\"|\1\"$INTEL_SHA\"|" \
+            "$FILE"
+
+          grep -qE "^\s*version\s+\"$VERSION\"" "$FILE" \
+            && grep -qE "^\s*sha256\s+arm:\s+\"$ARM_SHA\"" "$FILE" \
+            && grep -qE "^\s*intel:\s+\"$INTEL_SHA\"" "$FILE" \
+            || { echo "::error::Cask 書き換え検証に失敗"; exit 1; }
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "--- updated $FILE ---"
+          cat "$FILE"
+
+      - name: Commit and push
+        if: steps.gate.outputs.skip != 'true' && steps.update.outputs.changed == 'true'
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/scripta.rb
+          git commit -m "chore: scripta を $VERSION に更新"
+          git push
