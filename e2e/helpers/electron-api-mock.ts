@@ -1,4 +1,36 @@
 import type { Page } from "@playwright/test";
+// browser scope に inject する pure helper 群。installApiMock 内側で bare 参照する
+// identifier をここに列挙し、下の PURE_HELPERS が同じ列を projection として持つ。
+// 追加時は destructure と PURE_HELPERS の 2 箇所を同時更新する。scope は
+// installApiMock が実際に使う helper に絞られ、search-pure.ts に将来追加される mock
+// 無関係な helper が addInitScript payload に混入することは無い。
+//
+// **必ず `import * as` + local const destructure の形を保つこと**:
+// Playwright 内蔵 babel は helper file を package.json に `"type": "module"` が無い
+// 環境 (本 repo の状態) で CommonJS transform し、named import の bare 参照を
+// `(0, _searchPure.foo)` や `_searchPure.bar` に rewrite する
+// (@babel/plugin-transform-modules-commonjs)。installApiMock.toString() で body を
+// browser に運ぶ経路では、この rewrite された参照は `_searchPure` が undefined な
+// browser scope で ReferenceError となり全 search / backlink / commandpalette
+// handler が壊れる (2026-07-05 CI 失敗の原因)。destructure で一度 local const に
+// すると babel は identifier を preserve するため、.toString() の中でも bare の
+// identifier 形が残り、SCRIPT_PREFIX で並べた hoisted 関数宣言が browser 側で
+// resolve できる。
+import * as searchPure from "../../electron/main/utils/search-pure";
+
+const {
+	buildLineStarts,
+	buildLowerToOrigUtf16Map,
+	byteCmp,
+	collectInlineCodeRanges,
+	findFencedLines,
+	fuzzyMatch,
+	isAsciiOnly,
+	isEscaped,
+	isInRanges,
+	maskRanges,
+} = searchPure;
+
 import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
 import { getInitializedMarkerPath } from "../../src/lib/scripta-config";
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
@@ -10,6 +42,17 @@ import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 
 // renderer-only Playwright で `window.api` を addInitScript 注入するモック。
 // 旧 Tauri 版 `tauri-mock.ts` の Electron 移植版（参考: ~/development/tools/scripta/e2e/helpers/tauri-mock.ts）。
+//
+// installApiMock 内で使う純関数群は search-pure.ts (本番 electron/main/ipc/search.ts が
+// import する同じモジュール) の関数をそのまま browser scope に inject する経路を通す。
+// addInitScript の callback は 1 個の関数を .toString() して browser 側で実行するため、
+// callback スコープの外にある import された関数は参照できない。そこで setup() で以下の
+// 順に script content を組み立てる:
+//   1. PURE_INJECTION: PURE_HELPERS の各関数を .toString() で並べて先頭に配置
+//      → browser scope の hoisted function declaration になる (bare identifier で参照可能)
+//   2. (installApiMock.toString())(payload): IIFE として installApiMock を実行
+// これにより mock 側 pure helper と本番 search.ts の間で drift が物理的に不可能になる
+// (かつては addInitScript 制約で mock 内に 1:1 コピー inline していた)。
 
 export interface MockFileSystem {
 	files: Record<string, string>;
@@ -58,6 +101,29 @@ declare global {
 	}
 }
 
+// addInitScript の script content 先頭に .toString() を並べて注入する pure helper 群。
+// 上の searchPure destructure と 1:1 対応 (真実源は destructure、この配列はそれを
+// value として projection する)。順序は依存関係を意識しない — 関数宣言は hoist される
+// ので実質どの順でも動く。
+const PURE_HELPERS = [
+	buildLineStarts,
+	buildLowerToOrigUtf16Map,
+	byteCmp,
+	collectInlineCodeRanges,
+	findFencedLines,
+	fuzzyMatch,
+	isAsciiOnly,
+	isEscaped,
+	isInRanges,
+	maskRanges,
+];
+
+// setup() で毎回 recompute せず、payload 非依存の部分は module load 時に 1 度だけ
+// `.toString()` シリアライズする。~750 行のソース serialize を e2e spec ごとに繰り返さない。
+// `installApiMock` は function declaration なので hoist され module top で参照可能。
+const SCRIPT_PREFIX = `${PURE_HELPERS.map((fn) => fn.toString()).join("\n")}\n(${installApiMock.toString()})(`;
+const SCRIPT_SUFFIX = ");";
+
 export class ElectronApiMock {
 	private page: Page;
 
@@ -78,7 +144,12 @@ export class ElectronApiMock {
 			// 派生値なので公開 option (ElectronApiMockOptions) には含めない。
 			initializedMarkerSuffix: getInitializedMarkerPath(""),
 		};
-		await this.page.addInitScript(installApiMock, payload);
+		// SCRIPT_PREFIX/SUFFIX は module scope で一度だけ組み立てた静的部分。
+		// 各関数は `function name(...) { ... }` 形の宣言に transpile されるので、hoisting
+		// で installApiMock の中からも bare identifier で見える (esbuild は関数名を preserve する)。
+		await this.page.addInitScript({
+			content: `${SCRIPT_PREFIX}${JSON.stringify(payload)}${SCRIPT_SUFFIX}`,
+		});
 	}
 
 	async getCalls(method: string): Promise<unknown[][]> {
@@ -255,51 +326,6 @@ function installApiMock(opts: {
 		return out;
 	};
 
-	// pageName / filePath を byte 比較で昇順する（本番 search.ts:106 / 158 / 247 と一致）。
-	// localeCompare はロケール依存で順序がズレる。
-	const byteCmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-	// 本番 fuzzyMatch (search.ts:45-57) と同じ two-pointer 走査。
-	const fuzzyMatch = (query: string, target: string): boolean => {
-		const q = query.toLowerCase();
-		const t = target.toLowerCase();
-		if (q.length === 0) return true;
-		let qi = 0;
-		for (const ch of t) {
-			if (ch === q[qi]) {
-				qi++;
-				if (qi === q.length) return true;
-			}
-		}
-		return qi === q.length;
-	};
-
-	// 本番 electron/main/utils/search-pure.ts の inline コピー。
-	// addInitScript 制約で import 不可、ロジックを 1:1 で複製する。
-	// `İ` (U+0130) → `i̇` のように toLowerCase で長さが変わる文字を含む行で、
-	// lower 側の indexOf 結果を元行の UTF-16 offset に逆引きする必要がある。
-	const isAsciiOnly = (text: string): boolean => {
-		for (let i = 0; i < text.length; i++) {
-			if (text.charCodeAt(i) > 127) return false;
-		}
-		return true;
-	};
-	const buildLowerToOrigUtf16Map = (text: string): number[] | null => {
-		if (isAsciiOnly(text)) return null;
-		const map: number[] = [];
-		let origOffset = 0;
-		for (const ch of text) {
-			const origLen = ch.length;
-			const lowerLen = ch.toLowerCase().length;
-			for (let i = 0; i < lowerLen; i++) {
-				map.push(origOffset);
-			}
-			origOffset += origLen;
-		}
-		map.push(origOffset);
-		return map;
-	};
-
 	const parentDir = (path: string): string => {
 		const i = path.lastIndexOf("/");
 		return i < 0 ? "" : path.slice(0, i);
@@ -309,154 +335,13 @@ function installApiMock(opts: {
 		return i < 0 ? path : path.slice(i + 1);
 	};
 
-	// 本番 electron/main/ipc/search.ts:toDisplayPath と同等を mock 内で再現。
-	// e2e mock の filePath は正規化済み posix 形なので `/` 区切り前提で OK
-	// (本番は node:path.relative + sep ベース、addInitScript 制約で import 不可)。
+	// 本番 electron/main/ipc/search.ts:toDisplayPath の mock 版。
+	// e2e mock の filePath は正規化済み posix 形なので `/` 区切り前提で計算する
+	// (本番は node:path.relative + sep ベースだが、mock は browser scope で走るため node:path は不使用)。
 	// scanUnresolvedWikilinks / scanBacklinks の両 handler から共有する。
 	const mockDisplayPath = (workspacePath: string, absolutePath: string): string => {
 		const wsPrefix = workspacePath.endsWith("/") ? workspacePath : `${workspacePath}/`;
 		return absolutePath.startsWith(wsPrefix) ? absolutePath.slice(wsPrefix.length) : absolutePath;
-	};
-
-	// 本番 electron/main/ipc/search.ts の isEscaped / collectInlineCodeRanges と同形ロジック。
-	// `addInitScript` 制約で import 不可なのでこの scope に複製する。
-	// collectInlineCodeRanges は引数が 1 行でも本文全体でも動く (CommonMark の複数行 span
-	// 対応のため、scan 側では本文全体に対して 1 回計算する)。
-	const isEscaped = (s: string, pos: number): boolean => {
-		let count = 0;
-		let i = pos - 1;
-		while (i >= 0 && s[i] === "\\") {
-			count++;
-			i--;
-		}
-		return count % 2 === 1;
-	};
-	const collectInlineCodeRanges = (s: string): Array<{ from: number; to: number }> => {
-		// 本番 search.ts:collectInlineCodeRanges と同形。close 側は escape を見ない
-		// (CommonMark の backtick string 認識に escape を含めない仕様、live-preview と整合)。
-		// open 側は escape された backtick run 全体を skip する (i++ だけだと run の
-		// 2 文字目以降を open として誤開始するため)。
-		const ranges: Array<{ from: number; to: number }> = [];
-		let i = 0;
-		while (i < s.length) {
-			if (s[i] !== "`") {
-				i++;
-				continue;
-			}
-			if (isEscaped(s, i)) {
-				let runEnd = i;
-				while (runEnd < s.length && s[runEnd] === "`") runEnd++;
-				i = runEnd;
-				continue;
-			}
-			const openStart = i;
-			let openEnd = i;
-			while (openEnd < s.length && s[openEnd] === "`") openEnd++;
-			const openLen = openEnd - openStart;
-			let k = openEnd;
-			let foundCloseEnd = -1;
-			while (k < s.length) {
-				if (s[k] !== "`") {
-					k++;
-					continue;
-				}
-				let closeEnd = k;
-				while (closeEnd < s.length && s[closeEnd] === "`") closeEnd++;
-				if (closeEnd - k === openLen) {
-					foundCloseEnd = closeEnd;
-					break;
-				}
-				k = closeEnd;
-			}
-			if (foundCloseEnd !== -1) {
-				ranges.push({ from: openStart, to: foundCloseEnd });
-				i = foundCloseEnd;
-			} else {
-				i = openEnd;
-			}
-		}
-		return ranges;
-	};
-	// 本文全体の inline code ranges と各行の text 内 start position を計算する小 helper。
-	// 両 scan mock で同じ前処理を使うために集約する。
-	const buildLineStarts = (text: string, lines: string[]): number[] => {
-		const lineStarts = new Array<number>(lines.length);
-		let pos = 0;
-		for (let i = 0; i < lines.length; i++) {
-			lineStarts[i] = pos;
-			pos += lines[i].length;
-			if (pos < text.length && text[pos] === "\r") pos++;
-			if (pos < text.length && text[pos] === "\n") pos++;
-		}
-		return lineStarts;
-	};
-	const isInRanges = (ranges: Array<{ from: number; to: number }>, pos: number): boolean => {
-		for (const r of ranges) {
-			if (r.from <= pos && pos < r.to) return true;
-		}
-		return false;
-	};
-	// CommonMark / Lezer 準拠の fenced code block 判定。本番 search.ts:findFencedLines と同形。
-	// - opener: 行頭 0-3 spaces の後に ``` または ~~~ (3 個以上の連続)。info string は OK
-	// - closer: opener と同じ文字種、opener 以上の長さ、後ろは空白のみ
-	// - 4 spaces 以上 indent の行は fence marker と認識しない
-	const findFencedLines = (lines: string[]): boolean[] => {
-		const flags = new Array<boolean>(lines.length).fill(false);
-		let opener: { ch: string; length: number } | null = null;
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			let indent = 0;
-			while (indent < line.length && line[indent] === " ") indent++;
-			if (indent >= 4) {
-				if (opener !== null) flags[i] = true;
-				continue;
-			}
-			const ch = line[indent];
-			let markerLen = 0;
-			if (ch === "`" || ch === "~") {
-				while (indent + markerLen < line.length && line[indent + markerLen] === ch) markerLen++;
-			}
-			if (markerLen >= 3) {
-				if (opener === null) {
-					// backtick fence の info string に backtick は許容されない
-					// (CommonMark / Lezer)。tilde fence では制約なし。本番 search.ts と同形。
-					const afterOpener = line.slice(indent + markerLen);
-					if (ch === "`" && afterOpener.includes("`")) {
-						continue;
-					}
-					opener = { ch, length: markerLen };
-					flags[i] = true;
-					continue;
-				}
-				const afterMarker = line.slice(indent + markerLen);
-				if (ch === opener.ch && markerLen >= opener.length && /^[ \t]*$/.test(afterMarker)) {
-					opener = null;
-					flags[i] = true;
-					continue;
-				}
-				flags[i] = true;
-				continue;
-			}
-			if (opener !== null) flags[i] = true;
-		}
-		return flags;
-	};
-	// 指定 line index の文字を space に置換した text を返す。length は元と一致するため
-	// lineStarts / m.index の換算がそのまま使える。
-	const maskRanges = (
-		text: string,
-		lines: string[],
-		lineStarts: number[],
-		mask: boolean[],
-	): string => {
-		const buf = text.split("");
-		for (let i = 0; i < lines.length; i++) {
-			if (!mask[i]) continue;
-			const start = lineStarts[i];
-			const end = start + lines[i].length;
-			for (let j = start; j < end; j++) buf[j] = " ";
-		}
-		return buf.join("");
 	};
 
 	// `Api` 型に固定することで preload 契約と乖離した瞬間に typecheck が落ちる。
@@ -731,7 +616,7 @@ function installApiMock(opts: {
 				// fenced 範囲を space mask した text で inline code ranges を計算する。
 				// fence 内の backtick が外側 inline code delimiter と peer になるのを防ぐ。
 				const inlineCodeRanges = collectInlineCodeRanges(
-					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+					maskRanges(content, lines, lineStarts, isFenced),
 				);
 				// 本番 scanUnresolvedWikilinksImpl (search.ts) と同じく filePath 単位で
 				// displayPath を 1 度だけ算出して push 時に使い回す (file 単位 hoist)。
@@ -747,7 +632,7 @@ function installApiMock(opts: {
 						if (!m) break;
 						// 本番 iterateWikilinkOccurrences と同じく escape / inline code 内は除外。
 						if (isEscaped(line, m.index)) continue;
-						if (isInRanges(inlineCodeRanges, lineStarts[i] + m.index)) continue;
+						if (isInRanges(lineStarts[i] + m.index, inlineCodeRanges)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
@@ -829,7 +714,7 @@ function installApiMock(opts: {
 				const lineStarts = buildLineStarts(content, lines);
 				const isFenced = findFencedLines(lines);
 				const inlineCodeRanges = collectInlineCodeRanges(
-					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+					maskRanges(content, lines, lineStarts, isFenced),
 				);
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {
@@ -841,7 +726,7 @@ function installApiMock(opts: {
 						m = re.exec(line);
 						if (!m) break;
 						if (isEscaped(line, m.index)) continue;
-						if (isInRanges(inlineCodeRanges, lineStarts[i] + m.index)) continue;
+						if (isInRanges(lineStarts[i] + m.index, inlineCodeRanges)) continue;
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);

@@ -10,7 +10,17 @@ import type {
 } from "../../../src/types/wikilink";
 import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
-import { buildLowerToOrigUtf16Map } from "../utils/search-pure";
+import {
+	buildLineStarts,
+	buildLowerToOrigUtf16Map,
+	byteCmp,
+	collectInlineCodeRanges,
+	findFencedLines,
+	fuzzyMatch,
+	isEscaped,
+	isInRanges,
+	maskRanges,
+} from "../utils/search-pure";
 
 // scan 系 IPC が共有する readFile 並列上限。複数の scan IPC が同時並行しても
 // 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
@@ -86,21 +96,6 @@ async function collectMdFilesForWorkspace(
 	const out: MdFiles = { io: [], input: [] };
 	await walkMdFiles(canonical, inputBase, out);
 	return out;
-}
-
-// 各 query char が target に **順序どおり** 含まれるかを判定する fuzzy match。
-export function fuzzyMatch(query: string, target: string): boolean {
-	const q = query.toLowerCase();
-	const t = target.toLowerCase();
-	if (q.length === 0) return true;
-	let qi = 0;
-	for (const ch of t) {
-		if (ch === q[qi]) {
-			qi++;
-			if (qi === q.length) return true;
-		}
-	}
-	return qi === q.length;
 }
 
 // 連続入力で古い search / wikilink scan を中断するための per-window 世代カウンタ。
@@ -213,8 +208,7 @@ async function searchFilesImpl(
 	if (isStale()) return [];
 	// 並列実行で push 順序が乱れるので最終 sort で output 順序を安定化する。
 	results.sort((a, b) => {
-		if (a.filePath < b.filePath) return -1;
-		if (a.filePath > b.filePath) return 1;
+		if (a.filePath !== b.filePath) return byteCmp(a.filePath, b.filePath);
 		if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
 		return a.matchStart - b.matchStart;
 	});
@@ -229,7 +223,7 @@ async function searchFilenamesImpl(
 	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	// byte 比較（lexicographic byte compare）。
 	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
-	input.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+	input.sort(byteCmp);
 	if (query === "") return input;
 	return input.filter((p) => fuzzyMatch(query, basename(p)));
 }
@@ -266,82 +260,6 @@ export function* extractWikilinks(
 	}
 }
 
-// `pos` の直前に連続する `\` が奇数個あるなら escape されている。
-// `src/lib/content.ts:isEscaped` と同形ロジック（main / renderer で同一判定を保証するため）。
-function isEscaped(line: string, pos: number): boolean {
-	let count = 0;
-	let i = pos - 1;
-	while (i >= 0 && line[i] === "\\") {
-		count++;
-		i--;
-	}
-	return count % 2 === 1;
-}
-
-// CommonMark 準拠で inline code span 範囲を列挙する。
-// 仕様: N 連続のバックティックを開き delimiter、同じ N 連続を閉じ delimiter とする。
-//       open 側だけは前置 escape (`\\\``) を除外する (scripta の用途上、escape された
-//       backtick で code span を開始させたくないため。CommonMark 上は `\\\`code\\\``
-//       は code span として扱われ得るが、現状の wikilink 判定との整合性を優先する)。
-//       閉じ側では escape を判定しない。CommonMark 上、close の `` ` `` は backtick
-//       string として認識され、直前の `\\` は中身の literal backslash に過ぎないため。
-//       例: `` `foo \\\` [[t]] bar` `` は open=pos 0 / close=pos 5 で code span = `foo \\`
-//       となり、後続の `[[t]]` は code span 外。live-preview の lezer InlineCode と
-//       一致させるためにこの判定にする。
-// 引数 s は 1 行でも本文全体でもよい。CommonMark は code span が改行を跨ぐことを
-// 許容するため、live-preview の lezer InlineCode と整合させるには本文全体で走らせる
-// 必要がある (例: ``` `start\n[[t]]\nend` ``` 形の複数行 span)。
-function collectInlineCodeRanges(s: string): Array<{ from: number; to: number }> {
-	const ranges: Array<{ from: number; to: number }> = [];
-	let i = 0;
-	while (i < s.length) {
-		if (s[i] !== "`") {
-			i++;
-			continue;
-		}
-		// run の先頭が escape されていれば、その backtick run 全体を skip する。
-		// `i++` だけだと同じ run の 2 文字目以降を open delimiter として誤開始してしまう
-		// (例: `\\\`\\\` [[t]] \\\`` で 2 文字目から code span を開いてしまう)。
-		// Lezer / live-preview の InlineCode 判定もこの run 全体を delimiter としない。
-		if (isEscaped(s, i)) {
-			let runEnd = i;
-			while (runEnd < s.length && s[runEnd] === "`") runEnd++;
-			i = runEnd;
-			continue;
-		}
-		const openStart = i;
-		let openEnd = i;
-		while (openEnd < s.length && s[openEnd] === "`") openEnd++;
-		const openLen = openEnd - openStart;
-		// 同じ長さの backtick 連続を閉じとして探す。close 側は escape を見ない
-		// (上のコメント参照)。
-		let k = openEnd;
-		let foundCloseEnd = -1;
-		while (k < s.length) {
-			if (s[k] !== "`") {
-				k++;
-				continue;
-			}
-			let closeEnd = k;
-			while (closeEnd < s.length && s[closeEnd] === "`") closeEnd++;
-			if (closeEnd - k === openLen) {
-				foundCloseEnd = closeEnd;
-				break;
-			}
-			// 長さが違うバックティック列はスキップ (同じ run の途中で長さが違う閉じは無効)。
-			k = closeEnd;
-		}
-		if (foundCloseEnd !== -1) {
-			ranges.push({ from: openStart, to: foundCloseEnd });
-			i = foundCloseEnd;
-		} else {
-			// 閉じが無ければ open delimiter はリテラル。次の文字から再開して探索を続ける。
-			i = openEnd;
-		}
-	}
-	return ranges;
-}
-
 // 1 ファイルの本文から「正規化済み pageName + WikilinkReference」を順に取り出す共通走査。
 // scanUnresolvedWikilinksImpl（未解決リンク）と scanBacklinksImpl（バックリンク）の両方が
 // 同じ前処理を必要とし — 改行分割、code-fence の toggle で code block 内は無視、
@@ -357,26 +275,16 @@ function iterateWikilinkOccurrences(
 ): void {
 	const lines = text.split(/\r?\n/);
 	// 各行が本文全体の中で始まる char index。`\r\n` / `\n` どちらの行区切りでも揃える。
-	const lineStarts: number[] = new Array(lines.length);
-	{
-		let pos = 0;
-		for (let i = 0; i < lines.length; i++) {
-			lineStarts[i] = pos;
-			pos += lines[i].length;
-			if (pos < text.length && text[pos] === "\r") pos++;
-			if (pos < text.length && text[pos] === "\n") pos++;
-		}
-	}
+	const lineStarts = buildLineStarts(text, lines);
 	// fenced code 範囲を line index で識別する。fence marker 行 (``` / ~~~) 自体も
 	// fenced 扱いにすることで、後段の mask が marker 行の backtick (``` 等) を
 	// 隠し、外側 inline code delimiter と peer になるのを防ぐ。
 	const isFenced = findFencedLines(lines);
 	// fenced 範囲を space で mask した text を作る (length 保持)。
 	// inline code scanner に「fence 内の backtick が見えない」状態を作り、tilde fence
-	// 内の `` ` `` が外側の `` ` `` と peer になることを防ぐ。
-	const inlineCodeRanges = collectInlineCodeRanges(
-		isFenced.some((b) => b) ? maskRanges(text, lines, lineStarts, isFenced) : text,
-	);
+	// 内の `` ` `` が外側の `` ` `` と peer になることを防ぐ。maskRanges は mask 全 false
+	// 時に text を identity 返却する契約なので、fence が無い file でも同じ呼び方で通す。
+	const inlineCodeRanges = collectInlineCodeRanges(maskRanges(text, lines, lineStarts, isFenced));
 	for (let i = 0; i < lines.length; i++) {
 		if (isFenced[i]) continue;
 		const line = lines[i];
@@ -389,14 +297,7 @@ function iterateWikilinkOccurrences(
 			// inlineCodeRanges (CommonMark 準拠の N 連続 backtick scanner、fenced 範囲を
 			// mask 済み) で判定する。
 			const textPos = lineStarts[i] + openOffset;
-			let inInlineCode = false;
-			for (const r of inlineCodeRanges) {
-				if (r.from <= textPos && textPos < r.to) {
-					inInlineCode = true;
-					break;
-				}
-			}
-			if (inInlineCode) continue;
+			if (isInRanges(textPos, inlineCodeRanges)) continue;
 			const pipe = inner.indexOf("|");
 			const page = pipe >= 0 ? inner.slice(0, pipe) : inner;
 			if (page === "" || isPathTraversal(page)) continue;
@@ -419,76 +320,6 @@ function iterateWikilinkOccurrences(
 			});
 		}
 	}
-}
-
-// 指定 line index 集合の範囲を space に置換した text を返す。length は元と一致する。
-// inline code scanner に「対象範囲の文字を空白として見せる」用途で、char index は
-// 元の text と互換 (lineStarts / openOffset の換算がそのまま使える)。
-function maskRanges(text: string, lines: string[], lineStarts: number[], mask: boolean[]): string {
-	const buf = text.split("");
-	for (let i = 0; i < lines.length; i++) {
-		if (!mask[i]) continue;
-		const start = lineStarts[i];
-		const end = start + lines[i].length;
-		for (let j = start; j < end; j++) buf[j] = " ";
-	}
-	return buf.join("");
-}
-
-// CommonMark / Lezer 準拠の fenced code block 判定。
-// - opener: 行頭 0-3 spaces の後に ``` または ~~~ (3 個以上の連続)。info string は OK
-// - closer: opener と同じ文字種、opener 以上の長さ、後ろは空白 (space/tab) のみ
-// - 4 spaces 以上 indent の行は fence marker として認識しない (CommonMark の
-//   indented code block と区別)
-// 旧実装は `trimmed.startsWith("```") || trimmed.startsWith("~~~")` で単純 toggle
-// していたため、異なる文字種の closer / 長さ違い closer / 過剰 indent ですべて
-// close と誤判定し live-preview と乖離していた。
-function findFencedLines(lines: string[]): boolean[] {
-	const flags: boolean[] = new Array(lines.length).fill(false);
-	let opener: { ch: string; length: number } | null = null;
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
-		let indent = 0;
-		while (indent < line.length && line[indent] === " ") indent++;
-		// 4 spaces 以上 indent の行は fence marker として認識しない。fenced 中なら
-		// その行は fenced 範囲のテキストとして扱う。
-		if (indent >= 4) {
-			if (opener !== null) flags[i] = true;
-			continue;
-		}
-		const ch = line[indent];
-		let markerLen = 0;
-		if (ch === "`" || ch === "~") {
-			while (indent + markerLen < line.length && line[indent + markerLen] === ch) markerLen++;
-		}
-		if (markerLen >= 3) {
-			if (opener === null) {
-				// opener: info string (markerLen 以降のテキスト) は許容。
-				// ただし backtick fence (```) の info string に backtick は含められない
-				// (CommonMark / Lezer)。例えば ``` info `x` は fence opener ではなく
-				// paragraph として扱われる。
-				const afterMarker = line.slice(indent + markerLen);
-				if (ch === "`" && afterMarker.includes("`")) {
-					continue;
-				}
-				opener = { ch, length: markerLen };
-				flags[i] = true;
-				continue;
-			}
-			// closer 候補: 同じ文字種・長さ ≥ opener・後ろは空白のみ。
-			const afterMarker = line.slice(indent + markerLen);
-			if (ch === opener.ch && markerLen >= opener.length && /^[ \t]*$/.test(afterMarker)) {
-				opener = null;
-				flags[i] = true;
-				continue;
-			}
-			// closer 条件を満たさない marker 行は fenced 内のテキスト扱い。
-			flags[i] = true;
-			continue;
-		}
-		if (opener !== null) flags[i] = true;
-	}
-	return flags;
 }
 
 async function scanUnresolvedWikilinksImpl(
@@ -533,7 +364,7 @@ async function scanUnresolvedWikilinksImpl(
 		result.push({ pageName, references });
 	}
 	// pageName の byte 比較で昇順。
-	result.sort((a, b) => (a.pageName < b.pageName ? -1 : a.pageName > b.pageName ? 1 : 0));
+	result.sort((a, b) => byteCmp(a.pageName, b.pageName));
 	return result;
 }
 
@@ -618,7 +449,7 @@ async function scanBacklinksImpl(
 		});
 	}
 	// sourceFile の byte 比較で昇順（scanUnresolvedWikilinksImpl と同方針）。
-	result.sort((a, b) => (a.sourceFile < b.sourceFile ? -1 : a.sourceFile > b.sourceFile ? 1 : 0));
+	result.sort((a, b) => byteCmp(a.sourceFile, b.sourceFile));
 	return result;
 }
 
