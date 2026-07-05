@@ -1,15 +1,24 @@
 import type { Page } from "@playwright/test";
-// browser scope に inject する pure helper 群。ここに列挙した identifier だけが
-// installApiMock 内側で bare 参照可能 (tsc-view resolution) かつ browser scope に
-// hoisted function declaration として並ぶ (実行時 resolution)。PURE_HELPERS 配列 (下)
-// が同じ列を projection として持つため、追加時は import と PURE_HELPERS の 2 箇所を
-// 同時更新する。scope は installApiMock が実際に使う helper に絞られ、
-// search-pure.ts に将来追加される mock 無関係な helper が addInitScript payload に
-// 混入することも無い。
-// `isAsciiOnly` は installApiMock 内で bare 参照されないが、`buildLowerToOrigUtf16Map`
-// が browser 側で呼び出すため PURE_HELPERS に含める必要がある (named import に載せて
-// PURE_HELPERS の値として consume することで biome の noUnusedImports を pass する)。
-import {
+// browser scope に inject する pure helper 群。installApiMock 内側で bare 参照する
+// identifier をここに列挙し、下の PURE_HELPERS が同じ列を projection として持つ。
+// 追加時は destructure と PURE_HELPERS の 2 箇所を同時更新する。scope は
+// installApiMock が実際に使う helper に絞られ、search-pure.ts に将来追加される mock
+// 無関係な helper が addInitScript payload に混入することは無い。
+//
+// **必ず `import * as` + local const destructure の形を保つこと**:
+// Playwright 内蔵 babel は helper file を package.json に `"type": "module"` が無い
+// 環境 (本 repo の状態) で CommonJS transform し、named import の bare 参照を
+// `(0, _searchPure.foo)` や `_searchPure.bar` に rewrite する
+// (@babel/plugin-transform-modules-commonjs)。installApiMock.toString() で body を
+// browser に運ぶ経路では、この rewrite された参照は `_searchPure` が undefined な
+// browser scope で ReferenceError となり全 search / backlink / commandpalette
+// handler が壊れる (2026-07-05 CI 失敗の原因)。destructure で一度 local const に
+// すると babel は identifier を preserve するため、.toString() の中でも bare の
+// identifier 形が残り、SCRIPT_PREFIX で並べた hoisted 関数宣言が browser 側で
+// resolve できる。
+import * as searchPure from "../../electron/main/utils/search-pure";
+
+const {
 	buildLineStarts,
 	buildLowerToOrigUtf16Map,
 	byteCmp,
@@ -20,7 +29,8 @@ import {
 	isEscaped,
 	isInRanges,
 	maskRanges,
-} from "../../electron/main/utils/search-pure";
+} = searchPure;
+
 import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
 import { getInitializedMarkerPath } from "../../src/lib/scripta-config";
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
@@ -92,8 +102,9 @@ declare global {
 }
 
 // addInitScript の script content 先頭に .toString() を並べて注入する pure helper 群。
-// 上の named import block と 1:1 対応 (真実源は import、この配列はそれを value として
-// projection する)。順序は依存関係を意識しない — 関数宣言は hoist されるので実質どの順でも動く。
+// 上の searchPure destructure と 1:1 対応 (真実源は destructure、この配列はそれを
+// value として projection する)。順序は依存関係を意識しない — 関数宣言は hoist される
+// ので実質どの順でも動く。
 const PURE_HELPERS = [
 	buildLineStarts,
 	buildLowerToOrigUtf16Map,

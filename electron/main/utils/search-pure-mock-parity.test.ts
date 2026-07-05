@@ -26,15 +26,15 @@ const SEARCH_PURE_FUNCTIONS = Object.entries(searchPure).filter(
 ) as Array<[string, { toString(): string }]>;
 
 /**
- * mock ソースから `import { a, b, c } from "../../electron/main/utils/search-pure"`
- * の identifier 列を抽出する。`type` import は除外。
+ * mock ソースから `const { a, b, c } = searchPure;` の destructure identifier 列を抽出する。
+ * 経路: Playwright bundled babel の CommonJS transform が named import の bare 参照を
+ * `_searchPure.foo` に rewrite するため、mock は `import * as searchPure` + destructure で
+ * local const 化して bare 参照を preserve する必要がある (詳細は mock file の comment 参照)。
  */
-function extractSearchPureImports(source: string): string[] {
-	const importMatch = source.match(
-		/import\s*\{([\s\S]*?)\}\s*from\s*["']\.\.\/\.\.\/electron\/main\/utils\/search-pure["']/,
-	);
-	if (!importMatch) return [];
-	return importMatch[1]
+function extractSearchPureDestructure(source: string): string[] {
+	const destructureMatch = source.match(/const\s*\{([\s\S]*?)\}\s*=\s*searchPure\s*;/);
+	if (!destructureMatch) return [];
+	return destructureMatch[1]
 		.split(",")
 		.map((s) => s.trim())
 		.filter((s) => s.length > 0 && !s.startsWith("//"));
@@ -87,15 +87,15 @@ describe("electron-api-mock <-> search-pure integration (PR #209 ③)", () => {
 		}
 	});
 
-	it("mock の named import と PURE_HELPERS 配列が同じ identifier 列を持つ", () => {
+	it("mock の searchPure destructure と PURE_HELPERS 配列が同じ identifier 列を持つ", () => {
 		// 一方に足したがもう一方に足し忘れると:
-		//   - import に有り / PURE_HELPERS に無し → browser 側で inject されず ReferenceError
-		//   - PURE_HELPERS に有り / import に無し → tsc が unresolved identifier で fail (safer)
+		//   - destructure に有り / PURE_HELPERS に無し → browser 側で inject されず ReferenceError
+		//   - PURE_HELPERS に有り / destructure に無し → tsc が unresolved identifier で fail (safer)
 		// 前者は runtime failure なので静的 gate で catch する。
-		const imports = extractSearchPureImports(MOCK_SOURCE).sort();
+		const destructured = extractSearchPureDestructure(MOCK_SOURCE).sort();
 		const pureHelpers = extractPureHelpersArray(MOCK_SOURCE).sort();
-		expect(imports.length).toBeGreaterThan(0);
+		expect(destructured.length).toBeGreaterThan(0);
 		expect(pureHelpers.length).toBeGreaterThan(0);
-		expect(pureHelpers).toEqual(imports);
+		expect(pureHelpers).toEqual(destructured);
 	});
 });
