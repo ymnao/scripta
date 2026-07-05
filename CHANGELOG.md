@@ -5,6 +5,72 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
+## [0.7.0] — 2026-07-05
+
+v0.6.0 リリース後の内部品質改善ラウンド + 依存更新 + 1 件の regression 修正。#209 で計画された editor / preload / e2e-mock の drift-lock 系 refactor 3 項目 (#278 / #279 / #280) を完遂、settings 系 setter を factory に集約 (#273 → #277)、search.ts の scan 系 IPC を bounded-concurrency parallel readFile 化 (#250 → #260)、workspace / backlink / wikilink 系の helper 抽出および型整備 (#243 / #248 / #252 / #254 / #256 / #258) を実施。あわせて electron 43.0.0 / p-limit 7.3.0 major bump (#275) と Dependabot 7 件 combine (#274) を集約。1 件の regression (#276) も修正。
+
+### Fixed
+
+- **サイドバーのファイルツリーが縦にスクロールできない regression を修正** (#276): FileTree コンテナの flex layout 中で `overflow-y: auto` が親側で吸われて子側の scroll が発火しなくなっていた。最小高さと `min-h-0` の伝搬を修正して縦スクロールを復帰
+- **electron e2e の launch fixture teardown timeout を 60s に拡大** (#247): CI で `_electron.launch` の afterEach teardown が既定 30s を超えて timeout する flake を排除、テスト独立性を維持
+
+### Internal
+
+#### #209: editor / preload / e2e-mock の drift-lock 系 refactor 3 項目
+
+- **live-preview の共通 helper 集約 + `collectCodeRanges` cache 化** (#209 ② → #278): 13 デコレーション (blockquotes / code-block-copy / code-blocks / emphasis / headings / horizontal-rules / images / link-cards / links / lists / strikethrough / wikilinks) で重複していた `visibleRanges × tree.iterate` パターンと IME composing 中の early return を `iterateVisibleSyntax` / `handleComposingUpdate` helper に集約。`collectCodeRanges` を `codeRangesField` (StateField) に cache 化し、`math.ts` / `wikilinks` / `link-cards` の 3 重呼び出しを 1 field 参照に統一。selection/focus のみの変化では再計算しない
+- **e2e mock の pure helper を `search-pure.ts` に統一** (#209 ③ → #279): `e2e/helpers/electron-api-mock.ts` で file scan の pure ロジックを `iterateWikilinkOccurrences` / `stripCodeSpans` などの本体 helper と 1 対 1 対応させ、Playwright bundled babel の CJS transform 経路でも壊れないよう名前空間 import に固定。renderer-only e2e と実 Electron e2e の再現性を揃える
+- **preload API type key と実装 key の同期を vitest で lock** (#209 ① → #280): `api.ts` の `Api` type key と `index.ts` の `Object.freeze()` key を `\t\w+\??:` regex で抽出し、`expect(implKeys).toEqual(typeKeys)` で順序込み一致を検証。新規 preload method 追加時に片方の更新漏れがあると CI が fail する drift-lock を導入
+
+#### 設定 / 状態管理の集約
+
+- **settings/git-sync setter を `createPersistedSetter` に集約 + `saveSetting` 単一 SOT 化** (#272 → #277): `settingsStore` / `gitSyncStore` に散在していた「state 更新 → IPC persist」の 2 段 setter を `createPersistedSetter` factory に共通化。IPC 呼び出しの入口を `saveSetting` 1 箇所に集約し、部分更新 payload の diff 化と error surface の統一を実現
+- **settings store の 11 setter を `makeSetter` factory で集約** (#271 → #273): settings store 側で重複していた 11 個の `set<Field>` setter を `makeSetter<TState, TKey>(key)` factory で生成する形に共通化。新設定 field 追加時の boilerplate を削減
+
+#### search / workspace / backlink の helper 抽出
+
+- **search.ts の scan 系 3 関数の boilerplate を `processMdFilesParallel` helper に集約** (#259 → #260): `scanUnresolvedWikilinks` / `scanBacklinks` / `searchInFiles` で重複していた「.md ファイル列挙 → bounded-concurrency parallel read → filter → aggregate」の boilerplate を `processMdFilesParallel<TResult>` helper 1 個に集約
+- **search.ts の scan 系 IPC を bounded-concurrency parallel readFile 化** (#249 → #250): sequential `readFile` を `p-limit` による bounded concurrency の parallel read (I/O 並列度 16) に置換し、1000 ノート級 workspace の scan latency を短縮。あわせて `p-limit` を dependencies に導入
+- **workspace.ts に `getActiveTab` helper を抽出** (#257 → #258): `WorkspaceState.tabs` から `activeTabId` に対応する tab を取得する処理が 4 箇所で重複していたので `getActiveTab(state)` helper に集約
+- **`createScanAction.ts` の api signature を `ScanApi<TArgs, TResult>` 型として export** (#255 → #256): backlink / wikilink scan の action factory が inline object literal で持っていた api 契約を named type として export し、実装差し替え時の型合致を強制
+- **`UnresolvedWikilink.references` に `displayPath` field を追加** (#253 → #254): consumer 側で `path.replace(/\.md$/, "")` していた表示用短縮パスを producer 側で 1 度算出して stash。BacklinkPanel と対称化 (#239)
+- **`BacklinkSource` に `displayName` / `displayPath` field を追加** (#239 → #252): backlink 表示で `basename(path).replace(/\.md$/, "")` を render 時に走らせていた処理を producer 側で 1 度算出する形に移行、render-time allocation を削減
+- **search.ts の fileMap build で regex `.replace` を slice に置換** (#240 → #248): fileMap 構築時の `path.replace(/\.md$/, "")` を `path.slice(0, -3)` に置換し、正規表現 compile / branch を排除
+- **`BacklinkPanel.tsx` の `targetPageName` を `useMemo` 化** (#237 → #243): active tab path の basename 計算が render ごとに走っていたので `useMemo` で memo 化
+
+#### test / e2e infra
+
+- **`createScanAction.test.ts` の `vi.fn()` typing を統一** (#238 → #251): partial-typed / no-type / cast の 3 パターンが混在していた `vi.fn()` typing を `vi.fn<ScanApi<TArgs, TResult>["<method>"]>()` 形式に統一
+- **`createScanAction` の `beforeScan` ordering test 名と assertion を整合** (#236 → #245): テスト名と assertion がずれていた beforeScan の呼び出し順序 (`_scanId` increment より前) test を実装現状に合わせて整合
+- **same-line `[[target]] [[target]]` の trim test を追加** (#241 → #244): 同一行に複数の wikilink を含む case で backlink の `lineContent` が 1 度だけ trim される producer-side invariant を回帰テスト化
+
+### Dependencies
+
+v0.6.0 → v0.7.0 で更新された主要パッケージ:
+
+- **dependencies** (#274 combine + #250 追加 + #275):
+  - `@codemirror/commands` `^6.10.2` → `^6.10.4`
+  - `@codemirror/language` `^6.12.3` → `^6.12.4`
+  - `@codemirror/state` `^6.6.0` → `^6.7.0`
+  - `@codemirror/view` `^6.43.1` → `^6.43.4`
+  - `js-yaml` `^5.0.0` → `^5.2.0`
+  - `mermaid` `^11.15.0` → `^11.16.0`
+  - `p-limit` 新規追加 (`^7.3.0`; #250 で bounded-concurrency parallel readFile に採用、#275 で v7 major bump)
+- **devDependencies** (#274 combine + #275):
+  - `@biomejs/biome` `^2.5.0` → `^2.5.1`
+  - `@playwright/test` `^1.61.0` → `^1.61.1`
+  - `@types/node` `^26.0.0` → `^26.0.1`
+  - `@vitejs/plugin-react` `^6.0.2` → `^6.0.3`
+  - `electron` `^42.4.1` → `^43.0.0` (major; Chromium 150 / Node v24.17。`electron-vite@5` の stale fallback を矯正する `RENDERER_TARGET` を `chrome148` → `chrome150` に追従、CLAUDE.md「electron 42+ への対応」章を version-agnostic 化)
+  - `vite` `^8.0.16` → `^8.1.0`
+- **CI actions** (#274 combine):
+  - `actions/cache` v5.0.5 → v6.1.0 (major; v6 は ESM 化のみで workflow consumer 側 input/output API 不変)
+
+#### 追加変更
+
+- **biome.json を `biome migrate` で 2.5.0 schema へ更新** (#274): `$schema` URL を 2.4.16 → 2.5.0 に、`linter.rules.recommended: true` → `preset: "recommended"` に更新
+- **@codemirror package の dual copy を pnpm-workspace.yaml overrides で恒久防止** (#274): `@codemirror/{autocomplete,commands,lang-markdown,language,language-data,search}` を self-ref pin (`$@codemirror/*` 記法) で単一 version に強制。`StateField` / `Facet` / `NodeProp` を含む module-level singleton が dual copy 化して `syntaxTree()` が空 tree を返す live-preview 破綻 (#274 中間 revert で観測) を lockfile レベルで再発防止
+
 ## [0.6.0] — 2026-06-27
 
 v0.5.0 リリース後の内部品質改善ラウンド。ユーザー向け振る舞い変更はなく、refactor 7 件を集約。zustand selector の useShallow 適用 (#206)、settings migration の versioned array 化 (#208)、2 モード e2e の振り分け基準明文化 (#207)、wikilink target query 経由の in-editor highlight (#225)、3 panel 共通 collapse hook の抽出 (#226)、scan store の race-prevention pattern factory 化 (#228)、backlink scan の producer-side trim による render-time allocation 削減 (#227) を実施。
