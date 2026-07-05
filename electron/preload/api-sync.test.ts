@@ -19,25 +19,13 @@ function readPreloadFile(name: string): string {
 	return readFileSync(join(__dirname, name), "utf8");
 }
 
-function extractApiTypeKeys(source: string): string[] {
-	const start = source.indexOf("export type Api = Readonly<{");
-	if (start === -1) throw new Error("Api type declaration not found in api.ts");
-	const end = source.indexOf("}>;", start);
-	if (end === -1) throw new Error("Api type closing not found in api.ts");
-	return extractLevel1Keys(source.slice(start, end));
-}
-
-function extractApiObjectKeys(source: string): string[] {
-	const start = source.indexOf("const api: Api = Object.freeze({");
-	if (start === -1) throw new Error("api object declaration not found in index.ts");
-	const end = source.indexOf("});", start);
-	if (end === -1) throw new Error("api object closing not found in index.ts");
-	return extractLevel1Keys(source.slice(start, end));
-}
-
-function extractLevel1Keys(block: string): string[] {
+function extractKeys(source: string, openMarker: string, closeMarker: string): string[] {
+	const start = source.indexOf(openMarker);
+	if (start === -1) throw new Error(`marker ${JSON.stringify(openMarker)} not found`);
+	const end = source.indexOf(closeMarker, start);
+	if (end === -1) throw new Error(`marker ${JSON.stringify(closeMarker)} not found`);
 	const keys: string[] = [];
-	for (const line of block.split("\n")) {
+	for (const line of source.slice(start, end).split("\n")) {
 		const m = line.match(/^\t([A-Za-z_$][A-Za-z0-9_$]*)\s*\??:/);
 		if (m) keys.push(m[1]);
 	}
@@ -45,16 +33,16 @@ function extractLevel1Keys(block: string): string[] {
 }
 
 describe("preload API sync (#209 ①)", () => {
-	const typeKeys = extractApiTypeKeys(readPreloadFile("api.ts"));
-	const implKeys = extractApiObjectKeys(readPreloadFile("index.ts"));
+	const typeKeys = extractKeys(readPreloadFile("api.ts"), "export type Api = Readonly<{", "}>;");
+	const implKeys = extractKeys(
+		readPreloadFile("index.ts"),
+		"const api: Api = Object.freeze({",
+		"});",
+	);
 
 	it("extracts a non-empty key list from both files", () => {
 		expect(typeKeys.length).toBeGreaterThan(0);
 		expect(implKeys.length).toBeGreaterThan(0);
-	});
-
-	it("type key count equals impl key count", () => {
-		expect(implKeys.length).toBe(typeKeys.length);
 	});
 
 	it("type keys and impl keys match in order", () => {
