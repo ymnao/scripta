@@ -1,7 +1,14 @@
 import type { Page } from "@playwright/test";
-import * as searchPure from "../../electron/main/utils/search-pure";
-// installApiMock 内で bare 参照する識別子だけ named import する
-// (mock 内で直接呼ばない isAsciiOnly は inject 経由でのみ利用されるので named import から外す)。
+// browser scope に inject する pure helper 群。ここに列挙した identifier だけが
+// installApiMock 内側で bare 参照可能 (tsc-view resolution) かつ browser scope に
+// hoisted function declaration として並ぶ (実行時 resolution)。PURE_HELPERS 配列 (下)
+// が同じ列を projection として持つため、追加時は import と PURE_HELPERS の 2 箇所を
+// 同時更新する。scope は installApiMock が実際に使う helper に絞られ、
+// search-pure.ts に将来追加される mock 無関係な helper が addInitScript payload に
+// 混入することも無い。
+// `isAsciiOnly` は installApiMock 内で bare 参照されないが、`buildLowerToOrigUtf16Map`
+// が browser 側で呼び出すため PURE_HELPERS に含める必要がある (named import に載せて
+// PURE_HELPERS の値として consume することで biome の noUnusedImports を pass する)。
 import {
 	buildLineStarts,
 	buildLowerToOrigUtf16Map,
@@ -9,6 +16,7 @@ import {
 	collectInlineCodeRanges,
 	findFencedLines,
 	fuzzyMatch,
+	isAsciiOnly,
 	isEscaped,
 	isInRanges,
 	maskRanges,
@@ -30,11 +38,11 @@ import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 // addInitScript の callback は 1 個の関数を .toString() して browser 側で実行するため、
 // callback スコープの外にある import された関数は参照できない。そこで setup() で以下の
 // 順に script content を組み立てる:
-//   1. PURE_INJECTION: search-pure.ts の named function を .toString() で並べて先頭に配置
+//   1. PURE_INJECTION: PURE_HELPERS の各関数を .toString() で並べて先頭に配置
 //      → browser scope の hoisted function declaration になる (bare identifier で参照可能)
 //   2. (installApiMock.toString())(payload): IIFE として installApiMock を実行
 // これにより mock 側 pure helper と本番 search.ts の間で drift が物理的に不可能になる
-// (かつては addInitScript 制約で mock 内に 1:1 コピー inline していた)。#209 項目 ③。
+// (かつては addInitScript 制約で mock 内に 1:1 コピー inline していた)。
 
 export interface MockFileSystem {
 	files: Record<string, string>;
@@ -84,15 +92,20 @@ declare global {
 }
 
 // addInitScript の script content 先頭に .toString() を並べて注入する pure helper 群。
-// search-pure.ts の function export を全部 inject する — 追加の export はここに手動で
-// 登録する必要なく自動で通る (import 忘れによる bare 参照の ReferenceError も同時に消える)。
-// named import 側 (上の block) は installApiMock 内側の tsc-view 解決 (bare identifier を
-// named import に link) のため別途必要。順序は依存関係を意識しない — 関数宣言は hoist
-// されるので実質どの順でも動く。
-// filter だけでは narrow できないので型は unknown → cast する (map で呼ぶのは .toString() だけ)。
-const PURE_HELPERS = Object.values(searchPure).filter((v) => typeof v === "function") as Array<{
-	toString(): string;
-}>;
+// 上の named import block と 1:1 対応 (真実源は import、この配列はそれを value として
+// projection する)。順序は依存関係を意識しない — 関数宣言は hoist されるので実質どの順でも動く。
+const PURE_HELPERS = [
+	buildLineStarts,
+	buildLowerToOrigUtf16Map,
+	byteCmp,
+	collectInlineCodeRanges,
+	findFencedLines,
+	fuzzyMatch,
+	isAsciiOnly,
+	isEscaped,
+	isInRanges,
+	maskRanges,
+];
 
 // setup() で毎回 recompute せず、payload 非依存の部分は module load 時に 1 度だけ
 // `.toString()` シリアライズする。~750 行のソース serialize を e2e spec ごとに繰り返さない。
@@ -592,7 +605,7 @@ function installApiMock(opts: {
 				// fenced 範囲を space mask した text で inline code ranges を計算する。
 				// fence 内の backtick が外側 inline code delimiter と peer になるのを防ぐ。
 				const inlineCodeRanges = collectInlineCodeRanges(
-					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+					maskRanges(content, lines, lineStarts, isFenced),
 				);
 				// 本番 scanUnresolvedWikilinksImpl (search.ts) と同じく filePath 単位で
 				// displayPath を 1 度だけ算出して push 時に使い回す (file 単位 hoist)。
@@ -690,7 +703,7 @@ function installApiMock(opts: {
 				const lineStarts = buildLineStarts(content, lines);
 				const isFenced = findFencedLines(lines);
 				const inlineCodeRanges = collectInlineCodeRanges(
-					isFenced.some((b) => b) ? maskRanges(content, lines, lineStarts, isFenced) : content,
+					maskRanges(content, lines, lineStarts, isFenced),
 				);
 				const re = /\[\[([^[\]\n\r]+)\]\]/g;
 				for (let i = 0; i < lines.length; i++) {

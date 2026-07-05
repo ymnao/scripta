@@ -8,7 +8,7 @@
 //
 // 契約: ここに宣言する関数はすべて **named function** で書く（arrow 化しない）。
 // `.toString()` シリアライズ経由で別スコープに function declaration として並べる
-// 用途 (実例: e2e/helpers/electron-api-mock.ts の browser scope injection、#279) を
+// 用途 (実例: e2e/helpers/electron-api-mock.ts の browser scope injection) を
 // サポートするための shape 固定で、search-pure-mock-parity.test.ts が gate している。
 
 /** ASCII 文字のみで構成されるかを判定する。 */
@@ -200,7 +200,7 @@ export function maskRanges(
 		cursor = start + len;
 	}
 	if (cursor < text.length) parts.push(text.slice(cursor));
-	return parts.length === 0 ? text : parts.join("");
+	return parts.join("");
 }
 
 /**

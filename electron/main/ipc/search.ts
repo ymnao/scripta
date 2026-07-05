@@ -282,10 +282,9 @@ function iterateWikilinkOccurrences(
 	const isFenced = findFencedLines(lines);
 	// fenced 範囲を space で mask した text を作る (length 保持)。
 	// inline code scanner に「fence 内の backtick が見えない」状態を作り、tilde fence
-	// 内の `` ` `` が外側の `` ` `` と peer になることを防ぐ。
-	const inlineCodeRanges = collectInlineCodeRanges(
-		isFenced.some((b) => b) ? maskRanges(text, lines, lineStarts, isFenced) : text,
-	);
+	// 内の `` ` `` が外側の `` ` `` と peer になることを防ぐ。maskRanges は mask 全 false
+	// 時に text を identity 返却する契約なので、fence が無い file でも同じ呼び方で通す。
+	const inlineCodeRanges = collectInlineCodeRanges(maskRanges(text, lines, lineStarts, isFenced));
 	for (let i = 0; i < lines.length; i++) {
 		if (isFenced[i]) continue;
 		const line = lines[i];
