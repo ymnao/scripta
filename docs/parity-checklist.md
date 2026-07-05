@@ -176,6 +176,7 @@
 
 - **update 存在確認のみで運用、auto-download / auto-install は scope 外**（旧 Tauri 版もそうだった）。GitHub Releases API ポーリングで latest tag を取得し、新しいバージョンがあれば UI 上で通知してユーザーに手動アップデートを促す形を維持する。
 - `electron-updater` は導入しない。導入すると：(a) コードサイニング必須、(b) `release.yml` の secret 注入、(c) `electron-builder.yml: mac.target: zip` 等の付帯対応、(d) 配信チャンネル設計、までが芋づるで必要になる。本プロジェクトはコードサイニングを採用しない方針（§ 11 / § 12 参照）なので一貫して「存在確認のみ」とする。
+- **Homebrew Cask 配布を追加（issue #282）**: macOS のみ、personal tap `ymnao/scripta` 経由で `brew upgrade --cask scripta` により DL / アプリ終了 / 差し替えを brew に委譲する。**electron-updater 不採用の決定は維持** — Cask はアプリ内 auto-download を伴わず、上記 5 手順のうち 2〜5 だけを brew に肩代わりさせる補助配布チャネルなので、両立する。
 
 ---
 
@@ -302,6 +303,9 @@
 
 - **未署名で出荷**（旧 Tauri 版同等の方針）。コードサイニング / 公証は採用しない。macOS Gatekeeper / Windows SmartScreen の警告は受容し、README とリリースノートで起動手順を案内する。
 - `update.ts:GITHUB_API_URL` は `ymnao/scripta` を指す（リポジトリリネーム完了に伴い更新済み）。
+- **macOS のみ Homebrew Cask (personal tap `ymnao/scripta`) 配布を追加（issue #282）**。asset 命名契約は `scripta-<version>.dmg` (x64) / `scripta-<version>-arm64.dmg` (arm64) で、cask URL テンプレートがこの命名に依存する。命名は electron-builder 26.x の default artifactName pattern に依存しているため以下 2 方向で drift-lock している:
+  - `package.json` の `electron-builder` は patch level まで narrow 固定（`^26.15.3` ではなく `26.15.3`）
+  - `.github/workflows/release.yml` の macOS dist job で `release/*.dmg` のセットが期待値と完全一致することを post-build assert（余分 dmg 出現時も検出）。electron-builder をアップグレードする際はこの assert が green のまま (= default pattern が変わっていない) かを必ず確認する
 
 ---
 
