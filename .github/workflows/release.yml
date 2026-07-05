@@ -70,23 +70,13 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm dist
 
-      # Homebrew Cask (issue #282) の URL テンプレート
-      # `scripta-<version>[-arm64].dmg` は electron-builder 26.x の default
-      # artifactName に依存している (drift-lock 方針は docs/parity-checklist.md §11)。
-      # dmg のセットが期待値と完全一致することを assert して drift を即検出する。
-      # 想定値以外の dmg が余分に出た場合 (e.g. x64 に `-x64` suffix が付いた) も検出
-      # 対象なので、単純な存在確認ではなく set match で判定する。
+      # Homebrew Cask (issue #282) の drift-lock。詳細は scripts/assert-dmg-naming.sh
+      # と docs/parity-checklist.md §11 参照。verify-dmg-naming.yml (PR 時 gate)
+      # と同一の script を使用してドリフト検出を単一 SoT にする。
       - name: Assert dmg naming contract (Homebrew Cask URL, issue #282)
         if: matrix.os == 'macos-latest'
         shell: bash
-        run: |
-          version=$(jq -r .version package.json)
-          expected=$(printf 'scripta-%s-arm64.dmg\nscripta-%s.dmg\n' "$version" "$version" | sort)
-          actual=$(cd release && ls -1 *.dmg 2>/dev/null | sort)
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::dmg naming contract broken (issue #282 Cask URL depends on this). Expected: $(echo "$expected" | tr '\n' ' ') | Actual: $(echo "$actual" | tr '\n' ' ')"
-            exit 1
-          fi
+        run: bash scripts/assert-dmg-naming.sh
 
       # electron-updater 配線時には differential update 用の `*.zip` / `*.blockmap` /
       # `latest*.yml` (mac は `latest-mac.yml`) を以下 glob と Attach step の glob に
@@ -122,3 +112,19 @@ jobs:
           if [ ${#files[@]} -gt 0 ]; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           fi
+
+  # `fail-fast: false` により macOS の assert 失敗 (issue #282 dmg 命名 drift) が
+  # あっても Windows/Linux 側は attach を続ける設計。maintainer が「dmg 抜けの
+  # draft release」を publish してしまう事故を防ぐため、matrix 全 leg の集約結果
+  # を check して 1 leg でも失敗していれば workflow を failed に落とす。draft は
+  # 手動 publish なので、workflow failed が視覚シグナルとして機能する。
+  finalize:
+    needs: [dist]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any dist matrix leg failed
+        if: needs.dist.result != 'success'
+        run: |
+          echo "::error::dist matrix result was '${{ needs.dist.result }}' — do not publish the draft release. Investigate failed leg(s) and re-run."
+          exit 1

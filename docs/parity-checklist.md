@@ -303,9 +303,13 @@
 
 - **未署名で出荷**（旧 Tauri 版同等の方針）。コードサイニング / 公証は採用しない。macOS Gatekeeper / Windows SmartScreen の警告は受容し、README とリリースノートで起動手順を案内する。
 - `update.ts:GITHUB_API_URL` は `ymnao/scripta` を指す（リポジトリリネーム完了に伴い更新済み）。
-- **macOS のみ Homebrew Cask (personal tap `ymnao/scripta`) 配布を追加（issue #282）**。asset 命名契約は `scripta-<version>.dmg` (x64) / `scripta-<version>-arm64.dmg` (arm64) で、cask URL テンプレートがこの命名に依存する。命名は electron-builder 26.x の default artifactName pattern に依存しているため以下 2 方向で drift-lock している:
-  - `package.json` の `electron-builder` は patch level まで narrow 固定（`^26.15.3` ではなく `26.15.3`）
-  - `.github/workflows/release.yml` の macOS dist job で `release/*.dmg` のセットが期待値と完全一致することを post-build assert（余分 dmg 出現時も検出）。electron-builder をアップグレードする際はこの assert が green のまま (= default pattern が変わっていない) かを必ず確認する
+- **macOS のみ Homebrew Cask (personal tap `ymnao/scripta`) 配布を追加（issue #282）**。asset 命名契約は `scripta-<version>.dmg` (x64) / `scripta-<version>-arm64.dmg` (arm64) で、cask URL テンプレートがこの命名に依存する。命名は electron-builder 26.x の default artifactName pattern に依存しているため以下の drift-lock を配線している:
+  - `package.json` の `electron-builder` は patch level まで narrow 固定（`^26.15.3` ではなく `26.15.3`）。**pin 自体は drift guard ではなく決定的解決に必要な安定土台にすぎない** — legitimate な patch security bump (26.15.4 等) は下記 assert が green のままなら歓迎する
+  - drift 検出の SoT は `scripts/assert-dmg-naming.sh`。`release/*.dmg` のセットが期待値と完全一致することを set match で assert (余分 dmg 出現時も検出) する。以下 2 経路から呼ばれる:
+    - `.github/workflows/release.yml` — tag push / workflow_dispatch 時、macOS dist job の post-build (reactive detection)
+    - `.github/workflows/verify-dmg-naming.yml` — PR に関連ファイル (electron-builder / config / assert script) の変更が含まれる場合、macOS runner で `pnpm dist` → assert (preventive detection)
+  - `.github/dependabot.yml` で `electron-builder` を `electron` (runtime) group から分離し独立 group とすることで、grouped PR に build tool bump が piggyback するのを避ける
+  - `release.yml` の `finalize` job が matrix 全 leg の集約結果を check し、macOS leg が assert 失敗した場合に workflow を failed に落とす (draft release に dmg 抜けの状態で publish されないためのシグナル)
 
 ---
 

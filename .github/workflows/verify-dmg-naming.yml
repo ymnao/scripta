@@ -1,0 +1,46 @@
+# Homebrew Cask (issue #282) 用 dmg 命名 drift-lock の PR-time gate。
+# release.yml の assert は tag push 時にしか発火しないため、電子ビルダーの major/
+# minor bump PR が naming default を変えていても merge が通ってしまう。この
+# workflow は関連ファイル (electron-builder / config / assert script) の change
+# を含む PR で macOS runner 上に `pnpm dist` を走らせ、
+# scripts/assert-dmg-naming.sh を release.yml と同じ形で回して drift を preventive
+# に検出する。
+name: Verify dmg naming (issue #282 drift-lock)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+      - electron-builder.yml
+      - scripts/assert-dmg-naming.sh
+      - .github/workflows/verify-dmg-naming.yml
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-dmg-naming-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      # 本番証明書未配線。ローカル開発者証明書を誤って拾わないよう自動署名探索を切る。
+      - name: Build distributables (dry-run for naming assert)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm dist
+
+      - name: Assert dmg naming contract (Homebrew Cask URL, issue #282)
+        shell: bash
+        run: bash scripts/assert-dmg-naming.sh
