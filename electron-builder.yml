@@ -12,6 +12,10 @@ files:
   - out/**/*
   - package.json
 
+# dmg 命名は electron-builder 26.x の default artifactName pattern に依存する。
+# `mac.artifactName` を明示すると isUserForced=true で skipDefaultArch が
+# 無効化され x64 にも `-x64` suffix が付いて Cask URL 契約 (issue #282) が
+# 壊れるため、明示 pin ではなく drift-lock で守る (docs/parity-checklist.md §11)。
 mac:
   category: public.app-category.productivity
   target:

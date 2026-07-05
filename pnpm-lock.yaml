@@ -149,7 +149,7 @@ importers:
         specifier: ^43.0.0
         version: 43.0.0
       electron-builder:
-        specifier: ^26.15.3
+        specifier: 26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
       electron-vite:
         specifier: ^5.0.0

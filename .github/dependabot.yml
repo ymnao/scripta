@@ -14,11 +14,22 @@ updates:
       day: monday
     open-pull-requests-limit: 10
     groups:
+      # electron-builder / electron-builder-squirrel-windows は issue #282 の
+      # dmg 命名契約に効くので runtime bump (electron 本体) の PR に piggyback
+      # させない (grouped で rubber-stamp されると naming drift を見落とす)。
+      # 独立 group にして専用 PR として届ける。
       electron:
         patterns:
           - "electron"
           - "electron-*"
           - "@electron/*"
+        exclude-patterns:
+          - "electron-builder"
+          - "electron-builder-*"
+      electron-builder:
+        patterns:
+          - "electron-builder"
+          - "electron-builder-*"
       react:
         patterns:
           - "react"
