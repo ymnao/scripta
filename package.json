@@ -57,7 +57,7 @@
 		"@electron-toolkit/preload": "^3.0.2",
 		"@electron-toolkit/utils": "^4.0.0",
 		"@playwright/test": "^1.61.1",
-		"@tailwindcss/vite": "^4.3.1",
+		"@tailwindcss/vite": "^4.3.2",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.3.2",
 		"@testing-library/user-event": "^14.6.1",
@@ -71,7 +71,7 @@
 		"electron-builder": "26.15.3",
 		"electron-vite": "^5.0.0",
 		"jsdom": "^29.1.1",
-		"tailwindcss": "^4.3.1",
+		"tailwindcss": "^4.3.2",
 		"typescript": "~6.0.3",
 		"vite": "^8.1.0",
 		"vitest": "^4.1.9"
