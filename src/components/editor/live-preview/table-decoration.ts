@@ -171,9 +171,11 @@ export function focusCell(container: HTMLElement, row: number, col: number): voi
 	if (cell) placeCaretAtEnd(cell);
 }
 
-/** セル内容を正規化する。`|` をエスケープし改行を除去する。 */
+/** セル内容を正規化する。`\` と `|` をエスケープし改行を除去する。 */
 function sanitizeCellText(text: string): string {
-	return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+	// `\` を先に倍化しないと後段の `\|` 挿入で cell separator に化ける
+	// (CodeQL js/incomplete-sanitization #2)。
+	return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 /** セル内の <br> を `<br>` テキストとして読み取る。ゼロ幅スペースは除去する。 */
