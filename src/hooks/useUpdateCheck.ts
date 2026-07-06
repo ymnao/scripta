@@ -7,7 +7,7 @@ import type { UpdateInfo } from "../types/update";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function formatUpdateDescription(info: UpdateInfo): string {
-	return `新しいバージョン v${info.latestVersion} が利用可能です（現在 v${info.currentVersion}）。GitHub Releases からダウンロードできます。`;
+	return `新しいバージョン v${info.latestVersion} が利用可能です（現在 v${info.currentVersion}）。GitHub Releases からダウンロードできます。Homebrew でインストールした場合は \`brew upgrade --cask scripta\` を実行してください。`;
 }
 
 export function useUpdateCheck(enabled: boolean) {
