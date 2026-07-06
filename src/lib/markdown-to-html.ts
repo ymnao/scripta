@@ -62,7 +62,9 @@ export function collectRawCodeRanges(text: string): Array<[number, number]> {
 	const ranges: Array<[number, number]> = [];
 
 	// Container prefix for fenced / indented inside blockquotes / lists.
-	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*/;
+	// Trailing `[ \t]*` は繰り返しの外へ (CodeQL js/redos #1 と同形の ReDoS 回避、
+	// 対応 pattern は OPENING_LINE_PREFIX_RE)。認識言語は等価。
+	const containerPrefix = /(?:[ \t]*(?:>|[-*+]|\d+\.))*[ \t]*/;
 
 	// Fenced code blocks (``` or ~~~). CommonMark spec: closing fence must use the
 	// **same character** and be **at least as long** as the opening fence. Regex can't
@@ -222,7 +224,9 @@ function preprocessEscapedDollars(text: string, nonce: string): string {
 // whitespace. Matches the empty string too (top-level, no container). Used to
 // decide whether the opening-line prefix is structural (strip it from each TeX
 // line) or body text (an in-line `$$`, leave content untouched).
-const OPENING_LINE_PREFIX_RE = /^(?:[ \t]*(?:>|[-*+]|\d+\.)[ \t]*)*$/;
+// Trailing `[ \t]*` は繰り返しの外へ (CodeQL js/redos #1)。認識言語は等価
+// (`(prefix_ws + marker)* + trailing_ws`)。
+const OPENING_LINE_PREFIX_RE = /^(?:[ \t]*(?:>|[-*+]|\d+\.))*[ \t]*$/;
 
 /**
  * Replace multi-line display math ($$...\n...\n$$) in raw markdown
