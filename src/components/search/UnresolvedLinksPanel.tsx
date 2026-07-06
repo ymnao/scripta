@@ -7,11 +7,11 @@ import {
 	Link2Off,
 	Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
+import { useDebouncedVersionRescan } from "../../hooks/useDebouncedVersionRescan";
 import { cancelWikilinkScan } from "../../lib/commands";
 import { useWikilinkStore } from "../../stores/wikilink";
-import { useWorkspaceStore } from "../../stores/workspace";
 import type { UnresolvedWikilink } from "../../types/wikilink";
 
 interface UnresolvedLinksPanelProps {
@@ -26,34 +26,23 @@ export function UnresolvedLinksPanel({ workspacePath, onNavigate }: UnresolvedLi
 	const scan = useWikilinkStore((s) => s.scan);
 	const setSortBy = useWikilinkStore((s) => s.setSortBy);
 	const setCreateTarget = useWikilinkStore((s) => s.setCreateTarget);
-	const fileTreeVersion = useWorkspaceStore((s) => s.fileTreeVersion);
-	const contentVersion = useWorkspaceStore((s) => s.contentVersion);
 
 	const { isCollapsed, toggle: toggleCollapse } = useCollapseToggle();
 
-	// ファイルツリー変更時は即座に再スキャン
-	const scanVersion = fileTreeVersion;
+	// workspace 変更時 (と mount 時) は即座に再スキャン。
+	// fileTreeVersion / contentVersion 起点の再スキャンは useDebouncedVersionRescan が担当 (#298)。
 	useEffect(() => {
-		void scanVersion;
 		void scan(workspacePath);
 		return () => {
 			// workspace 切替 / panel unmount で in-flight scan を main 側でも止める。
 			// store 側 _scanId は renderer の結果を捨てるだけで、main の readFile ループは走り切る。
 			cancelWikilinkScan().catch(() => {});
 		};
-	}, [workspacePath, scanVersion, scan]);
+	}, [workspacePath, scan]);
 
-	// ファイル保存時はデバウンスして再スキャン（編集内容の追従）
-	const prevContentVersionRef = useRef(contentVersion);
-	useEffect(() => {
-		if (prevContentVersionRef.current === contentVersion) return;
-		prevContentVersionRef.current = contentVersion;
-		const timer = setTimeout(() => void scan(workspacePath), 2000);
-		return () => {
-			clearTimeout(timer);
-			cancelWikilinkScan().catch(() => {});
-		};
-	}, [contentVersion, workspacePath, scan]);
+	// ファイルツリー変更 / ファイル保存時はデバウンスして再スキャン（編集内容の追従、#298）。
+	const rescan = useMemo(() => () => void scan(workspacePath), [workspacePath, scan]);
+	useDebouncedVersionRescan(rescan, cancelWikilinkScan);
 
 	const sortedLinks = useMemo(() => {
 		const links = [...unresolvedLinks];

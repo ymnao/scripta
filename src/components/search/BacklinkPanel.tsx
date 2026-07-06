@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, FileText, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
+import { useDebouncedVersionRescan } from "../../hooks/useDebouncedVersionRescan";
 import { cancelBacklinkScan } from "../../lib/commands";
 import { basename, isNewTabPath } from "../../lib/path";
 import { useBacklinkStore } from "../../stores/backlink";
@@ -17,8 +18,6 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 	const scan = useBacklinkStore((s) => s.scan);
 	const reset = useBacklinkStore((s) => s.reset);
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
-	const fileTreeVersion = useWorkspaceStore((s) => s.fileTreeVersion);
-	const contentVersion = useWorkspaceStore((s) => s.contentVersion);
 
 	const { isCollapsed, toggle: toggleCollapse, reset: resetCollapsed } = useCollapseToggle();
 
@@ -43,22 +42,20 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 		[targetFilePath],
 	);
 
-	// ターゲット変更 / ファイルツリー変更時は即座に再スキャン。
+	// ターゲット / workspace 変更時 (と mount 時) は即座に再スキャン。
 	// targetFilePath が null になったら store を reset して古い結果を残さない。
-	// UnresolvedLinksPanel と同じく `scanVersion` を経由する形で fileTreeVersion を依存に積む。
-	const scanVersion = fileTreeVersion;
+	// fileTreeVersion / contentVersion 起点の再スキャンは useDebouncedVersionRescan が担当 (#298)。
 	useEffect(() => {
 		if (!targetFilePath) {
 			reset();
 			return;
 		}
-		void scanVersion;
 		void scan(workspacePath, targetFilePath);
 		return () => {
 			// workspace 切替 / panel unmount で in-flight scan を main 側でも止める。
 			cancelBacklinkScan().catch(() => {});
 		};
-	}, [workspacePath, targetFilePath, scanVersion, scan, reset]);
+	}, [workspacePath, targetFilePath, scan, reset]);
 
 	// ターゲットノートが切り替わったら、前の対象で残っていた折り畳み状態を捨てる。
 	// sourceFile path が偶然同名で衝突した場合に古い open/closed 状態を引き継いで
@@ -74,19 +71,14 @@ export function BacklinkPanel({ workspacePath, onNavigate }: BacklinkPanelProps)
 		resetCollapsed();
 	}, [targetFilePath, resetCollapsed]);
 
-	// ファイル保存時はデバウンスして再スキャン（編集内容の追従）。
-	// UnresolvedLinksPanel と同じ 2000ms 待機で過剰スキャンを抑える。
-	const prevContentVersionRef = useRef(contentVersion);
-	useEffect(() => {
-		if (!targetFilePath) return;
-		if (prevContentVersionRef.current === contentVersion) return;
-		prevContentVersionRef.current = contentVersion;
-		const timer = setTimeout(() => void scan(workspacePath, targetFilePath), 2000);
-		return () => {
-			clearTimeout(timer);
-			cancelBacklinkScan().catch(() => {});
-		};
-	}, [contentVersion, workspacePath, targetFilePath, scan]);
+	// ファイルツリー変更 / ファイル保存時はデバウンスして再スキャン（編集内容の追従、#298）。
+	// inline arrow を渡すと毎レンダリングで effect が再実行され timer が壊れるため、
+	// useMemo で identity を安定させる。
+	const rescan = useMemo(
+		() => (targetFilePath ? () => void scan(workspacePath, targetFilePath) : null),
+		[workspacePath, targetFilePath, scan],
+	);
+	useDebouncedVersionRescan(rescan, cancelBacklinkScan);
 
 	if (!targetFilePath) {
 		return (
