@@ -162,6 +162,26 @@ describe("BacklinkPanel", () => {
 		expect(mockedCancelBacklinkScan).not.toHaveBeenCalled();
 	});
 
+	it("activeTabPath null 中に version が進んだ場合、復帰後は即時 scan に加えて遅延 scan が 1 回走る", () => {
+		setupWorkspace(null);
+		renderPanel();
+		scan.mockClear();
+
+		act(() => {
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+		});
+
+		act(() => {
+			useWorkspaceStore.setState({ activeTabPath: TARGET_A });
+		});
+		expect(scan).toHaveBeenCalledTimes(1);
+
+		act(() => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(scan).toHaveBeenCalledTimes(2);
+	});
+
 	it("debounce 発火後の cleanup では cancelBacklinkScan が送られる", () => {
 		renderPanel();
 		scan.mockClear();
