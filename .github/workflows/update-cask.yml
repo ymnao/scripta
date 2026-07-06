@@ -56,6 +56,9 @@ jobs:
             exit 1
           fi
           VERSION="${TAG#v}"
+          # workflow_dispatch input が "0.7.0" (v なし) でも 404 させないよう正規化。
+          # release event の tag_name は既に "v..." 形式なので冪等。
+          TAG="v${VERSION}"
 
           # dmg 命名契約 (scripta-<version>[-arm64].dmg) は
           # scripts/assert-dmg-naming.sh が SoT (docs/parity-checklist.md §11)。
@@ -105,9 +108,15 @@ jobs:
           test -f "$FILE" || { echo "::error::$FILE が見つかりません"; exit 1; }
 
           CURRENT=$(sed -nE 's/^[[:space:]]*version[[:space:]]+"([^"]+)".*/\1/p' "$FILE" | head -1)
+          # `gh release upload --clobber` の same-tag 再 upload で version 一致でも
+          # sha256 が drift しうるため、version + arm + intel の完全一致時のみ skip し、
+          # drift 時は書き換えを走らせて brew install の SHA256 mismatch を防ぐ。
+          # 抽出 pattern は下の書き換え pattern と対称。
+          CUR_ARM=$(sed -nE 's/^[[:space:]]*sha256[[:space:]]+arm:[[:space:]]+"([0-9a-f]{64})".*/\1/p' "$FILE" | head -1)
+          CUR_INTEL=$(sed -nE 's/^[[:space:]]*intel:[[:space:]]+"([0-9a-f]{64})".*/\1/p' "$FILE" | head -1)
           echo "current cask version: $CURRENT / target: $VERSION"
-          if [ "$CURRENT" = "$VERSION" ]; then
-            echo "already at version $VERSION, skipping"
+          if [ "$CURRENT" = "$VERSION" ] && [ "$CUR_ARM" = "$ARM_SHA" ] && [ "$CUR_INTEL" = "$INTEL_SHA" ]; then
+            echo "already at $VERSION with matching sha256, skipping"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
