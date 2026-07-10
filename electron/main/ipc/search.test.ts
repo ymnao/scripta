@@ -384,7 +384,8 @@ describe("scanUnresolvedWikilinksImpl", () => {
 		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		cancelWikilinkScanForWindow(TEST_WIN);
 		const result = await promise;
-		expect(result).toHaveLength(10);
+		expect(result.results).toHaveLength(10);
+		expect(result.truncated).toBe(false);
 	});
 });
 
@@ -738,7 +739,7 @@ describe("searchFilesImpl", () => {
 	it("finds matches across multiple files", async () => {
 		await writeFile(join(workspaceDir, "a.md"), "Hello World\nfoo bar\nhello again");
 		await writeFile(join(workspaceDir, "b.md"), "no match here");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		const { results: out, truncated } = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		expect(out).toHaveLength(2);
 		expect(out[0].lineNumber).toBe(1);
 		expect(out[0].matchStart).toBe(0);
@@ -746,18 +747,19 @@ describe("searchFilesImpl", () => {
 		expect(out[0].lineContent).toBe("Hello World");
 		expect(out[1].lineNumber).toBe(3);
 		expect(out[1].lineContent).toBe("hello again");
+		expect(truncated).toBe(false);
 	});
 
 	it("is case-insensitive by default", async () => {
 		await writeFile(join(workspaceDir, "a.md"), "Hello HELLO hElLo");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		expect(out).toHaveLength(3);
 		expect(out.map((r) => r.matchStart)).toEqual([0, 6, 12]);
 	});
 
 	it("is case-sensitive when caseSensitive=true", async () => {
 		await writeFile(join(workspaceDir, "a.md"), "Hello HELLO hello");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "Hello", true);
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "Hello", true);
 		expect(out).toHaveLength(1);
 		expect(out[0].matchStart).toBe(0);
 		expect(out[0].matchEnd).toBe(5);
@@ -769,7 +771,7 @@ describe("searchFilesImpl", () => {
 		// lower("İhello") = "i̇hello"、ここで "hello" は offset 2〜7。
 		// lowerToOrig 経由で 1〜6 に戻ることを確認する。
 		await writeFile(join(workspaceDir, "a.md"), "İhello");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		expect(out).toHaveLength(1);
 		expect(out[0].matchStart).toBe(1);
 		expect(out[0].matchEnd).toBe(6);
@@ -779,7 +781,7 @@ describe("searchFilesImpl", () => {
 	it("returns correct UTF-16 offsets across multibyte chars", async () => {
 		// "あいう hello world" → "hello" は UTF-16 offset 4〜9（あ/い/う + space + hello）
 		await writeFile(join(workspaceDir, "a.md"), "あいう hello world");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		expect(out).toHaveLength(1);
 		expect(out[0].matchStart).toBe(4);
 		expect(out[0].matchEnd).toBe(9);
@@ -788,7 +790,7 @@ describe("searchFilesImpl", () => {
 	it("returns correct UTF-16 offsets for surrogate pairs", async () => {
 		// "😀hello world" → 😀 は 2 UTF-16 unit、"hello" は offset 2〜7
 		await writeFile(join(workspaceDir, "a.md"), "😀hello world");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		expect(out).toHaveLength(1);
 		expect(out[0].matchStart).toBe(2);
 		expect(out[0].matchEnd).toBe(7);
@@ -797,7 +799,7 @@ describe("searchFilesImpl", () => {
 	it("accumulates UTF-16 units for multiple surrogate pairs", async () => {
 		// "🎉🎊test" → 🎉🎊 で 4 UTF-16 unit、"test" は offset 4〜8
 		await writeFile(join(workspaceDir, "a.md"), "🎉🎊test");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "test");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "test");
 		expect(out).toHaveLength(1);
 		expect(out[0].matchStart).toBe(4);
 		expect(out[0].matchEnd).toBe(8);
@@ -806,20 +808,21 @@ describe("searchFilesImpl", () => {
 	it("returns [] for empty query", async () => {
 		await writeFile(join(workspaceDir, "a.md"), "hello world");
 		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "");
-		expect(out).toEqual([]);
+		expect(out).toEqual({ results: [], truncated: false });
 	});
 
 	it("returns [] when no match", async () => {
 		await writeFile(join(workspaceDir, "a.md"), "hello world");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "xyz");
+		const { results: out, truncated } = await searchFilesImpl(TEST_WIN, workspaceDir, "xyz");
 		expect(out).toEqual([]);
+		expect(truncated).toBe(false);
 	});
 
 	it("excludes hidden directories", async () => {
 		await mkdir(join(workspaceDir, ".hidden"));
 		await writeFile(join(workspaceDir, ".hidden/secret.md"), "match here");
 		await writeFile(join(workspaceDir, "visible.md"), "match here");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
 		expect(out).toHaveLength(1);
 		expect(out[0].filePath).toContain("visible.md");
 	});
@@ -827,7 +830,7 @@ describe("searchFilesImpl", () => {
 	it("includes only .md files", async () => {
 		await writeFile(join(workspaceDir, "test.md"), "match");
 		await writeFile(join(workspaceDir, "test.txt"), "match");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
 		expect(out).toHaveLength(1);
 		expect(out[0].filePath).toContain("test.md");
 	});
@@ -835,7 +838,7 @@ describe("searchFilesImpl", () => {
 	it("recurses into subdirectories", async () => {
 		await mkdir(join(workspaceDir, "sub"));
 		await writeFile(join(workspaceDir, "sub/nested.md"), "deep match");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "deep");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "deep");
 		expect(out).toHaveLength(1);
 		expect(out[0].filePath).toContain("nested.md");
 	});
@@ -844,7 +847,7 @@ describe("searchFilesImpl", () => {
 		await mkdir(join(workspaceDir, "node_modules", "pkg"), { recursive: true });
 		await writeFile(join(workspaceDir, "node_modules/pkg/README.md"), "match here");
 		await writeFile(join(workspaceDir, "node_modules.md"), "match here");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
 		expect(out).toHaveLength(1);
 		expect(out[0].filePath).toContain("node_modules.md");
 	});
@@ -852,7 +855,7 @@ describe("searchFilesImpl", () => {
 	it("captures all matches per single line (multi-match while-loop)", async () => {
 		// "ababab" 内に "ab" が 3 件、非重複で抽出される（pos = lowerEnd で進める）
 		await writeFile(join(workspaceDir, "a.md"), "ababab");
-		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "ab");
+		const { results: out } = await searchFilesImpl(TEST_WIN, workspaceDir, "ab");
 		expect(out).toHaveLength(3);
 		expect(out.map((r) => r.matchStart)).toEqual([0, 2, 4]);
 	});
@@ -871,7 +874,7 @@ describe("searchFilesImpl", () => {
 			await symlink(realDir, symlinkPath, "dir");
 			clearWorkspaceRoots();
 			await registerWorkspaceRoot(TEST_WIN, symlinkPath);
-			const out = await searchFilesImpl(TEST_WIN, symlinkPath, "hello");
+			const { results: out } = await searchFilesImpl(TEST_WIN, symlinkPath, "hello");
 			expect(out).toHaveLength(1);
 			// filePath は input-base = symlinkPath 配下を指すべき（canonical = realDir 配下では「ない」）
 			expect(out[0].filePath.startsWith(symlinkPath)).toBe(true);
@@ -910,8 +913,8 @@ describe("searchFilesImpl", () => {
 		]);
 		// 後発の searchFilesImpl が sync に gen を bump するので、先発は
 		// collectMdFilesForWorkspace 直後の isStale check で必ず bail する。
-		expect(r1).toEqual([]);
-		expect(r2).toHaveLength(10);
+		expect(r1.results).toEqual([]);
+		expect(r2.results).toHaveLength(10);
 	});
 
 	it("cancelSearchForWindow stops in-flight search even when no newer search starts", async () => {
@@ -928,12 +931,40 @@ describe("searchFilesImpl", () => {
 		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
 		cancelSearchForWindow(TEST_WIN);
 		const result = await promise;
-		expect(result).toEqual([]);
+		expect(result).toEqual({ results: [], truncated: false });
 	});
 
 	it("cancelSearchForWindow is a no-op when no search has run for the window", async () => {
 		// 未登録 window への cancel は静かに no-op になる（Map に entry がない）。
 		// renderer 側 useEffect cleanup が空打ちで送ってきても問題ないこと。
 		expect(() => cancelSearchForWindow(424242)).not.toThrow();
+	});
+
+	it("truncates at MAX_SEARCH_RESULTS and sets truncated=true (#300)", async () => {
+		// 1 ファイルに 10,001 行、各行が 1 マッチを生む内容にして、上限 10,000 件で
+		// 打ち切られることを確認する。上限チェックは「上限を超える match が実在する」と
+		// 分かった時点で行うので、10,001 件目の発見が truncated=true を立てる。
+		const lines = Array.from({ length: 10_001 }, () => "match").join("\n");
+		await writeFile(join(workspaceDir, "big.md"), lines);
+		const { results: out, truncated } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		expect(out).toHaveLength(10_000);
+		expect(truncated).toBe(true);
+	});
+
+	it("does not set truncated when hits are exactly MAX_SEARCH_RESULTS (#300)", async () => {
+		// ちょうど上限件数のヒットは全件返り、打ち切り扱いにならないこと
+		// (push 後の length 判定に退行するとこのケースが truncated=true になる)。
+		const lines = Array.from({ length: 10_000 }, () => "match").join("\n");
+		await writeFile(join(workspaceDir, "big.md"), lines);
+		const { results: out, truncated } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		expect(out).toHaveLength(10_000);
+		expect(truncated).toBe(false);
+	});
+
+	it("does not truncate for a normal query well under the limit", async () => {
+		await writeFile(join(workspaceDir, "small.md"), "match\nmatch\nmatch");
+		const { results: out, truncated } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		expect(out).toHaveLength(3);
+		expect(truncated).toBe(false);
 	});
 });

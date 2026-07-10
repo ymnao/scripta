@@ -1,7 +1,11 @@
 import { promises as fsp } from "node:fs";
 import { basename, join, relative, resolve, sep } from "node:path";
 import pLimit from "p-limit";
-import type { SearchResult } from "../../../src/types/search";
+import {
+	MAX_SEARCH_RESULTS,
+	type SearchFilesResponse,
+	type SearchResult,
+} from "../../../src/types/search";
 import type {
 	BacklinkSource,
 	UnresolvedWikilink,
@@ -40,13 +44,18 @@ async function processMdFilesParallel(
 	isStale: () => boolean,
 	options: {
 		skipFile?: (inFile: string) => boolean;
+		// 「打ち切り」判定。isStale と異なり、bail は「これまで集めた結果は保持したまま
+		// 追加の走査だけ止める」セマンティクス（searchFilesImpl の件数上限用）。
+		// isStale の cancel セマンティクス（結果は `[]` 相当）とは混同しないこと。
+		shouldBail?: () => boolean;
 		process: (inFile: string, text: string) => void;
 	},
 ): Promise<void> {
+	const shouldStop = (): boolean => isStale() || options.shouldBail?.() === true;
 	await Promise.all(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
-				if (isStale()) return;
+				if (shouldStop()) return;
 				const inFile = inFiles[idx];
 				if (options.skipFile?.(inFile)) return;
 				let text: string;
@@ -55,9 +64,9 @@ async function processMdFilesParallel(
 				} catch {
 					return; // 読み取り失敗ファイルは skip
 				}
-				// readFile の await 中に stale 化していたら per-file 処理は skip して
-				// cancel 反応性を上げる（大きな file ほど効く）。
-				if (isStale()) return;
+				// readFile の await 中に stale / bail 化していたら per-file 処理は skip して
+				// cancel / 打ち切り反応性を上げる（大きな file ほど効く）。
+				if (shouldStop()) return;
 				options.process(inFile, text);
 			}),
 		),
@@ -154,6 +163,10 @@ export function cancelBacklinkScanForWindow(windowId: number): void {
 }
 
 // 全文検索の実装。
+// MAX_SEARCH_RESULTS（src/types/search.ts、renderer の notice 文言と共有）を
+// 超えるヒットがあると truncated = true で打ち切り、processMdFilesParallel を
+// bail させる（#300）。ファイル並列処理は非決定的なので「どの 10,000 件か」は
+// 非決定で構わない（sort は従来通り最後に実施し、収まった件数の中での順序のみ安定させる）。
 // JS の String は UTF-16 code unit indexed なので、「byte → UTF-16 変換段」
 // は不要。case-insensitive 時のみ buildLowerToOrigUtf16Map で
 // `lineLower` 上の position を `line` 上の position に逆引きする。
@@ -162,7 +175,7 @@ async function searchFilesImpl(
 	workspacePath: string,
 	query: string,
 	caseSensitive = false,
-): Promise<SearchResult[]> {
+): Promise<SearchFilesResponse> {
 	// stale checker は assert 前に確保する。await assertPathAllowed で microtask に
 	// yield した隙に cancelSearchForWindow が gen を bump するケースをカバーするため。
 	const isStale = makeStaleChecker(searchGeneration, senderId);
@@ -171,26 +184,43 @@ async function searchFilesImpl(
 	// path-guard の前にあると、未認可 renderer が `""` で叩いて空配列を取得し、
 	// IPC 認可挙動が崩れる。
 	await assertPathAllowed(senderId, workspacePath);
-	if (query === "") return [];
+	const emptyResponse: SearchFilesResponse = { results: [], truncated: false };
+	if (query === "") return emptyResponse;
 
 	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
-	if (isStale()) return [];
+	if (isStale()) return emptyResponse;
 
 	const querySearch = caseSensitive ? query : query.toLowerCase();
 	const results: SearchResult[] = [];
+	let truncated = false;
 
 	await processMdFilesParallel(io, input, isStale, {
+		shouldBail: () => truncated,
 		process: (inputPath, content) => {
 			// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 			const lines = content.split(/\r?\n/);
 			for (let i = 0; i < lines.length; i++) {
+				if (truncated) break;
 				const line = lines[i];
 				const lineSearch = caseSensitive ? line : line.toLowerCase();
-				const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+				// undefined = 未構築、null = ASCII 行で逆引き不要、number[] = 構築済み。
+				// buildLowerToOrigUtf16Map は indexOf がヒットするまで呼ぶ必要がないので
+				// 最初のヒット後まで遅延する（#300 ②）。
+				let lowerToOrig: number[] | null | undefined;
 				let pos = 0;
 				while (true) {
 					const found = lineSearch.indexOf(querySearch, pos);
 					if (found === -1) break;
+					// 上限チェックは「上限を超える match が実在する」と分かった時点で行う。
+					// push 後に length で判定すると、ちょうど MAX 件ヒットのワークスペースまで
+					// 打ち切り扱いになってしまう。
+					if (results.length >= MAX_SEARCH_RESULTS) {
+						truncated = true;
+						break;
+					}
+					if (lowerToOrig === undefined) {
+						lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+					}
 					const lowerEnd = found + querySearch.length;
 					const matchStart = lowerToOrig ? lowerToOrig[found] : found;
 					const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
@@ -206,14 +236,14 @@ async function searchFilesImpl(
 			}
 		},
 	});
-	if (isStale()) return [];
+	if (isStale()) return emptyResponse;
 	// 並列実行で push 順序が乱れるので最終 sort で output 順序を安定化する。
 	results.sort((a, b) => {
 		if (a.filePath !== b.filePath) return byteCmp(a.filePath, b.filePath);
 		if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
 		return a.matchStart - b.matchStart;
 	});
-	return results;
+	return { results, truncated };
 }
 
 async function searchFilenamesImpl(
@@ -462,7 +492,7 @@ export function registerSearchIpc(): void {
 			workspacePath: string,
 			query: string,
 			caseSensitive?: boolean,
-		): Promise<SearchResult[]> =>
+		): Promise<SearchFilesResponse> =>
 			searchFilesImpl(event.sender.id, workspacePath, query, caseSensitive ?? false),
 	);
 	handle("search:cancel", (event): void => {

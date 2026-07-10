@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelSearch, searchFiles } from "../../lib/commands";
 import { addTrailingSep } from "../../lib/path";
-import type { SearchResult } from "../../types/search";
+import { MAX_SEARCH_RESULTS, type SearchResult } from "../../types/search";
 
 interface SearchPanelProps {
 	workspacePath: string;
@@ -43,6 +43,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	const [caseSensitive, setCaseSensitive] = useState(false);
 	const [results, setResults] = useState<GroupedResults[]>([]);
 	const [searched, setSearched] = useState(false);
+	const [truncated, setTruncated] = useState(false);
 	const { isCollapsed, toggle: toggleCollapse } = useCollapseToggle();
 	const localInputRef = useRef<HTMLInputElement>(null);
 	const ref = inputRef ?? localInputRef;
@@ -53,6 +54,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 			requestIdRef.current++;
 			setResults([]);
 			setSearched(false);
+			setTruncated(false);
 			// 入力を全部消したときに in-flight の全文検索を main 側でも止める。
 			// requestId だけでは renderer で結果を捨てるだけで、main の I/O は走り切る。
 			cancelSearch().catch(() => {});
@@ -64,13 +66,15 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 			searchFiles(workspacePath, query.trim(), caseSensitive ? true : undefined)
 				.then((res) => {
 					if (id !== requestIdRef.current) return;
-					setResults(groupByFile(res, workspacePath));
+					setResults(groupByFile(res.results, workspacePath));
+					setTruncated(res.truncated);
 					setSearched(true);
 				})
 				.catch((err) => {
 					if (id !== requestIdRef.current) return;
 					console.error("Search failed:", err);
 					setResults([]);
+					setTruncated(false);
 					setSearched(true);
 				});
 		}, 300);
@@ -120,6 +124,11 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 				{searched && results.length > 0 && (
 					<p className="px-3 py-1 text-xs text-text-secondary">
 						{results.length} ファイル中 {totalMatches} 件
+					</p>
+				)}
+				{searched && truncated && (
+					<p className="px-3 py-1 text-xs text-text-secondary">
+						結果が多すぎるため {MAX_SEARCH_RESULTS.toLocaleString("en-US")} 件で打ち切りました
 					</p>
 				)}
 				{results.map((group) => (

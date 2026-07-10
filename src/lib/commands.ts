@@ -27,7 +27,7 @@ import type {
 } from "../../electron/preload/api";
 import type { ConflictContent, GitStatus, SyncMethod } from "../types/git-sync";
 import type { OgpData } from "../types/ogp";
-import type { SearchResult } from "../types/search";
+import type { SearchFilesResponse } from "../types/search";
 import type { UpdateInfo } from "../types/update";
 import type { BacklinkSource, UnresolvedWikilink } from "../types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../types/workspace";
@@ -97,7 +97,7 @@ export function searchFiles(
 	workspacePath: string,
 	query: string,
 	caseSensitive?: boolean,
-): Promise<SearchResult[]> {
+): Promise<SearchFilesResponse> {
 	return withRetry(() => window.api.searchFiles(workspacePath, query, caseSensitive));
 }
 
