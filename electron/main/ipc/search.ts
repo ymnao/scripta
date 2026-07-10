@@ -68,13 +68,14 @@ async function processMdFilesParallel(
 // I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
 // 2 つの基底パスを並走させる（fs.ts/listDirectoryImpl と同じ方針）。
 // `.` で始まるエントリ（ファイル / ディレクトリ）は早期に skip して、隠しディレクトリの
-// 中身を readdir しないようにする。
+// 中身を readdir しないようにする。`node_modules` も同様に早期 skip する（依存パッケージ配下は
+// 検索対象外かつ大量ファイルで性能ノイズになるため）。
 type MdFiles = { io: string[]; input: string[] };
 
 async function walkMdFiles(ioDir: string, inputDir: string, out: MdFiles): Promise<void> {
 	const entries = await fsp.readdir(ioDir, { withFileTypes: true });
 	for (const ent of entries) {
-		if (ent.name.startsWith(".")) continue;
+		if (ent.name.startsWith(".") || ent.name === "node_modules") continue;
 		const ioPath = join(ioDir, ent.name);
 		const inPath = join(inputDir, ent.name);
 		if (ent.isDirectory()) {

@@ -49,6 +49,16 @@ describe("isWatcherIgnored", () => {
 		// 通常ないため、過剰除外は実害なしと判断。
 		expect(isWatcherIgnored("/home/user/workspace/.git", root)).toBe(true);
 	});
+
+	it("ignores `node_modules` directory and its descendants (performance hardcode, #299)", () => {
+		expect(isWatcherIgnored("/home/user/workspace/node_modules/x.md", root)).toBe(true);
+		// nested `node_modules` somewhere down the tree も除外
+		expect(isWatcherIgnored("/home/user/workspace/sub/node_modules/x.md", root)).toBe(true);
+	});
+
+	it("does NOT ignore a file literally named `node_modules.md` (component-exact match only)", () => {
+		expect(isWatcherIgnored("/home/user/workspace/node_modules.md", root)).toBe(false);
+	});
 });
 
 describe("mergeEventKind", () => {

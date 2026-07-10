@@ -143,6 +143,15 @@ describe("searchFilenamesImpl", () => {
 		expect(out[0]).toContain("nested.md");
 	});
 
+	it("excludes node_modules directory (#299)", async () => {
+		await mkdir(join(workspaceDir, "node_modules", "pkg"), { recursive: true });
+		await writeFile(join(workspaceDir, "node_modules/pkg/README.md"), "");
+		await writeFile(join(workspaceDir, "node_modules.md"), "");
+		const out = await searchFilenamesImpl(TEST_WIN, workspaceDir, "");
+		expect(out).toHaveLength(1);
+		expect(out[0]).toContain("node_modules.md");
+	});
+
 	it("rejects unauthorized workspace path", async () => {
 		await expect(searchFilenamesImpl(999 /* not registered */, workspaceDir, "")).rejects.toThrow(
 			/Permission denied/,
@@ -829,6 +838,15 @@ describe("searchFilesImpl", () => {
 		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "deep");
 		expect(out).toHaveLength(1);
 		expect(out[0].filePath).toContain("nested.md");
+	});
+
+	it("excludes node_modules directory (#299)", async () => {
+		await mkdir(join(workspaceDir, "node_modules", "pkg"), { recursive: true });
+		await writeFile(join(workspaceDir, "node_modules/pkg/README.md"), "match here");
+		await writeFile(join(workspaceDir, "node_modules.md"), "match here");
+		const out = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
+		expect(out).toHaveLength(1);
+		expect(out[0].filePath).toContain("node_modules.md");
 	});
 
 	it("captures all matches per single line (multi-match while-loop)", async () => {

@@ -7,6 +7,9 @@ export type { FsKind };
 // 性能対策のためのハードコード除外。watcher の役割は外部変更の検知（タブの reload /
 // conflict 経路）なので、ユーザー設定の FileTree フィルタには紐付けない。`.git/` 配下は
 // git 操作で大量のファイル変更が走るため、tracking してもユーザー価値がなくノイズになる。
+// `node_modules/` 配下も依存パッケージの大量ファイルを監視することになり性能ノイズになる
+// ため同様に除外する。FileTree のデフォルト除外には node_modules がないため「ツリーに見えるが
+// 監視されない」非対称が生じるが、node_modules 内のノート編集は想定外として受容済み（#299）。
 // `.gitignore` や `.scripta/scratchpads/*.md` のような hidden path は通常通り監視する
 // （ユーザーが開いて編集する可能性がある）。
 export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolean {
@@ -14,7 +17,7 @@ export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolea
 	if (rel === "") return false;
 	if (rel === ".." || rel.startsWith(`..${sep}`)) return false;
 	for (const part of rel.split(sep)) {
-		if (part === ".git") return true;
+		if (part === ".git" || part === "node_modules") return true;
 	}
 	return false;
 }
