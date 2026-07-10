@@ -317,9 +317,9 @@ function installApiMock(opts: {
 		const out: string[] = [];
 		const entries = store.directories[dirPath] ?? [];
 		for (const e of entries) {
-			// 本番 (electron/main/ipc/search.ts:19) と同じく `.` 始まりは早期 skip。
-			// `.git` / `.scripta` 等の隠しディレクトリの中身は再帰しない。
-			if (e.name.startsWith(".")) continue;
+			// 本番 (electron/main/ipc/search.ts walkMdFiles) と同じく `.` 始まりと
+			// `node_modules` は早期 skip。隠しディレクトリ・依存パッケージの中身は再帰しない。
+			if (e.name.startsWith(".") || e.name === "node_modules") continue;
 			if (e.isDirectory) out.push(...collectMdFiles(e.path));
 			else if (e.name.endsWith(".md")) out.push(e.path);
 		}
