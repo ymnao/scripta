@@ -1138,19 +1138,9 @@ export function AppLayout() {
 	}, [saveNow]);
 
 	// CodeMirror が docChanged を通知するたびに呼ばれる (#302)。
-	// scheduleAutoSave() は O(1) (debounce タイマーの張り替えのみ)。dirty は
-	// 既に true なら setTabDirty を呼ばない (transition-only, per-keystroke 再レンダー防止)。
-	const handleDocChanged = useCallback(() => {
-		scheduleAutoSave();
-		const path = useWorkspaceStore.getState().activeTabPath;
-		if (path) {
-			const state = useWorkspaceStore.getState();
-			const tab = state.tabs.find((t) => t.path === path);
-			if (tab && !tab.dirty) {
-				setTabDirty(path, true);
-			}
-		}
-	}, [scheduleAutoSave, setTabDirty]);
+	// dirty フラグは下の "Sync dirty flag to store" effect が saveStatus 変化を起点に
+	// set するため、ここでは触らない (同じ意図の実装を 2 箇所に持たないため)。
+	const handleDocChanged = scheduleAutoSave;
 
 	// Close search bar when switching to non-file tab, close go-to-line on any tab switch,
 	// reset slide view on tab switch

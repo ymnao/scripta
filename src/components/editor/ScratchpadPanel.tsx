@@ -74,10 +74,9 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	// useAutoSave の getContent には単にその時点の content を返すだけの関数を渡す。
 	const contentRef = useRef(content);
 	contentRef.current = content;
-	const getContent = useCallback(() => contentRef.current, []);
 	const { saveStatus, saveNow, markSaved, getLastSavedContent, scheduleAutoSave } = useAutoSave(
 		scratchpadPath,
-		getContent,
+		() => contentRef.current,
 		isEditorComposing,
 	);
 

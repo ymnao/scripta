@@ -36,12 +36,11 @@ export function useAutoSave(
 	const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
 	// scheduleAutoSave() は keystroke ごとに呼ばれる（React state の外）ため、
-	// setState 経由で最新 status を取ると 1 tick 遅れる可能性がある。ref で同期して
-	// 「既に unsaved なら setState しない」の判定をこの tick 内で正しく行えるようにする。
+	// ref で同期して「既に unsaved なら full-doc processContent を skip」の判定を
+	// この tick 内で正しく行えるようにする。他の ref と同じレンダー本体で代入
+	// （effect 経由だと saved→unsaved 遷移直後の keystroke で 1 tick 遅れうる）。
 	const saveStatusRef = useRef(saveStatus);
-	useEffect(() => {
-		saveStatusRef.current = saveStatus;
-	}, [saveStatus]);
+	saveStatusRef.current = saveStatus;
 	const getContentRef = useRef(getContent);
 	getContentRef.current = getContent;
 	const isComposingRef = useRef(isComposing);
@@ -219,20 +218,24 @@ export function useAutoSave(
 	const scheduleAutoSave = useCallback((): void => {
 		if (awaitingNewFileRef.current) return;
 		if (!filePath) return;
-		const { trimTrailingWhitespace } = useSettingsStore.getState();
-		if (
-			processContent(getContentRef.current(), trimTrailingWhitespace) ===
-			lastSavedContentRef.current
-		) {
-			return;
-		}
-		// per-keystroke 再レンダー防止: status が既に "unsaved" なら setState しない
-		if (saveStatusRef.current !== "unsaved") {
-			setSaveStatus("unsaved");
-		}
 
-		// Clear retry state on content change (new debounce save will take over)
-		clearRetryState();
+		// Fast path: 既に "unsaved" なら full-doc processContent 比較を skip し、
+		// debounce タイマーの張り替えだけ行う。これが #302 の per-keystroke O(1) 化の要。
+		// 「typed then undo to saved」は save() 側の同じ equality check で最終的に握られる
+		// (write は走らない)。retry / error 状態からの遷移も含めるため、判定は
+		// `!== "unsaved"` (== "saved" ではなく)。
+		if (saveStatusRef.current !== "unsaved") {
+			const { trimTrailingWhitespace } = useSettingsStore.getState();
+			if (
+				processContent(getContentRef.current(), trimTrailingWhitespace) ===
+				lastSavedContentRef.current
+			) {
+				return;
+			}
+			setSaveStatus("unsaved");
+			// Clear retry state on saved→unsaved transition (new debounce save will take over)
+			clearRetryState();
+		}
 
 		if (debounceTimerRef.current) {
 			clearTimeout(debounceTimerRef.current);
