@@ -2,6 +2,7 @@ import { katexInlineCss } from "../generated/katex-inline-css";
 import { buildFence } from "./code-fence";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
+import { getDefaultPromptTemplate } from "./export-templates";
 import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { basename } from "./path";
@@ -527,32 +528,7 @@ export async function exportAsPdf(
 }
 
 export { buildFence } from "./code-fence";
-
-export function getDefaultPromptTemplate(): string {
-	return `# HTML変換プロンプト
-
-以下のMarkdownコンテンツを、美しく整形されたHTMLファイルに変換してください。
-
-## 要件
-
-- 完全なHTMLドキュメント（DOCTYPE、head、body）
-- スタイルは原則インラインCSSで記述
-- レスポンシブデザイン対応
-- @media (prefers-color-scheme: dark) によるダーク/ライト自動切替
-- 数式は KaTeX を用い、CSS と font は外部ネットワーク不要な形式（インライン CSS + data URL font）で埋め込む
-- コードブロックはモノスペースフォント + 背景色付き
-- テーブルは罫線付き
-- @media print ルールを含む
-
-## ドキュメントタイトル
-
-{title}
-
-## Markdownコンテンツ
-
-{content}
-`;
-}
+export { getDefaultPromptTemplate } from "./export-templates";
 
 export function buildPromptFromTemplate(template: string, title: string, content: string): string {
 	const fence = buildFence(content);

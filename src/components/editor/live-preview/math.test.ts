@@ -1,14 +1,30 @@
-import { describe, expect, it, vi } from "vitest";
-import { buildMathDecorations, isEscaped, MathWidget } from "./math";
-import { collectDecorations, createViewForTest, widgetDecorations } from "./test-helper";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { MathWidget as MathWidgetType } from "./math";
+
+const renderToStringMock = vi.fn(
+	(tex: string, options: { displayMode: boolean }) =>
+		`rendered:${options.displayMode ? "display" : "inline"}:${tex}`,
+);
 
 vi.mock("katex", () => ({
 	default: {
-		render: vi.fn((tex: string, element: HTMLElement, options: { displayMode: boolean }) => {
-			element.textContent = `rendered:${options.displayMode ? "display" : "inline"}:${tex}`;
-		}),
+		renderToString: renderToStringMock,
 	},
 }));
+
+// katex.min.css は動的 import 対象。vitest の css transform (no-op) に任せてよいが、
+// 明示的にモックして依存を軽くする。
+vi.mock("katex/dist/katex.min.css", () => ({}));
+
+const { buildMathDecorations, isEscaped, MathWidget, preloadKatexForTest } = await import("./math");
+const { collectDecorations, createViewForTest, widgetDecorations } = await import("./test-helper");
+
+// MathWidget.toDOM は katex の動的 import 完了後にのみ同期 render される
+// (#301: lazy-load 化）。同期 toDOM を前提とする既存テストのために、
+// スイート開始前に katex のロードを済ませておく。
+beforeAll(async () => {
+	await preloadKatexForTest();
+});
 
 describe("isEscaped", () => {
 	it("returns false when there is no preceding backslash", () => {
@@ -63,6 +79,59 @@ describe("MathWidget", () => {
 		const w = new MathWidget("x^2", false);
 		expect(w.ignoreEvent(new MouseEvent("mousedown"))).toBe(false);
 	});
+
+	it("同一 tex + displayMode の2回目の toDOM では renderToString を再実行しない（render cache）", () => {
+		renderToStringMock.mockClear();
+		const tex = `cache-test-${Math.random()}`;
+		const w1 = new MathWidget(tex, false);
+		const w2 = new MathWidget(tex, false);
+		w1.toDOM();
+		w2.toDOM();
+		expect(renderToStringMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("displayMode が異なると別キャッシュエントリとして扱われる", () => {
+		renderToStringMock.mockClear();
+		const tex = `cache-test-display-${Math.random()}`;
+		new MathWidget(tex, false).toDOM();
+		new MathWidget(tex, true).toDOM();
+		expect(renderToStringMock).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("MathWidget katex lazy-load", () => {
+	// beforeAll で preloadKatexForTest 済みの top-level モジュールではロード前状態を
+	// 踏めないため、vi.resetModules() でフレッシュなモジュールインスタンス
+	// （katexMod = null）を取得して検証する。vi.mock の factory はモジュール
+	// registry のリセット後も有効なので、フレッシュ import でも katex はモック。
+	it("ロード前の toDOM は cm-math-loading placeholder を返し、ロード前後の widget は eq=false になる", async () => {
+		vi.resetModules();
+		const fresh = await import("./math");
+
+		// (a) ロード前: placeholder（生 TeX テキスト）
+		const before = new fresh.MathWidget("x^2", false);
+		const placeholderEl = before.toDOM();
+		expect(placeholderEl.classList.contains("cm-math-loading")).toBe(true);
+		expect(placeholderEl.textContent).toBe("x^2");
+
+		// (b) ロード後: 同じ tex + displayMode でも eq=false（toDOM 再実行が保証される）
+		await fresh.preloadKatexForTest();
+		const after = new fresh.MathWidget("x^2", false);
+		expect(before.eq(after)).toBe(false);
+		expect(after.eq(before)).toBe(false);
+
+		// ロード後の widget は同期 render される（placeholder ではない）
+		const renderedEl = after.toDOM();
+		expect(renderedEl.classList.contains("cm-math-loading")).toBe(false);
+		expect(renderedEl.className).toBe("cm-math-inline");
+		expect(renderedEl.innerHTML).toContain("rendered:inline:x^2");
+	});
+
+	it("同一ロード状態の widget 同士は eq=true のまま（既存の DOM 再利用を壊さない）", () => {
+		const w1 = new MathWidget("x^2", false);
+		const w2 = new MathWidget("x^2", false);
+		expect(w1.eq(w2)).toBe(true);
+	});
 });
 
 describe("buildDecorations", () => {
@@ -71,7 +140,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe("x^2");
 		expect(spec.widget.displayMode).toBe(false);
 	});
@@ -81,7 +150,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe("E=mc^2");
 		expect(spec.widget.displayMode).toBe(true);
 	});
@@ -92,7 +161,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe("\nx^2 + y^2\n");
 		expect(spec.widget.displayMode).toBe(true);
 	});
@@ -133,7 +202,7 @@ describe("buildDecorations", () => {
 		const widgets = widgetDecorations(decos);
 		// Should detect only display math, not inline
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.displayMode).toBe(true);
 	});
 
@@ -166,7 +235,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe("x");
 	});
 
@@ -177,7 +246,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe("y");
 	});
 
@@ -207,7 +276,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe("x^2");
 		expect(spec.widget.displayMode).toBe(false);
 	});
@@ -222,7 +291,7 @@ describe("buildDecorations", () => {
 		const widgets = widgetDecorations(decos);
 		// No display math, but inline finds $foo\$
 		const display = widgets.filter(
-			(w) => (w.value.spec as { widget: MathWidget }).widget.displayMode,
+			(w) => (w.value.spec as { widget: MathWidgetType }).widget.displayMode,
 		);
 		expect(display).toHaveLength(0);
 	});
@@ -233,7 +302,7 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(1);
-		const spec = widgets[0].value.spec as { widget: MathWidget };
+		const spec = widgets[0].value.spec as { widget: MathWidgetType };
 		expect(spec.widget.tex).toBe(" 50 \\$ ");
 		expect(spec.widget.displayMode).toBe(false);
 	});
@@ -245,14 +314,14 @@ describe("buildDecorations", () => {
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(2);
 		const display = widgets.find(
-			(w) => (w.value.spec as { widget: MathWidget }).widget.displayMode,
+			(w) => (w.value.spec as { widget: MathWidgetType }).widget.displayMode,
 		);
 		const inline = widgets.find(
-			(w) => !(w.value.spec as { widget: MathWidget }).widget.displayMode,
+			(w) => !(w.value.spec as { widget: MathWidgetType }).widget.displayMode,
 		);
 		expect(display).toBeDefined();
 		expect(inline).toBeDefined();
-		expect((inline?.value.spec as { widget: MathWidget }).widget.tex).toBe("b");
+		expect((inline?.value.spec as { widget: MathWidgetType }).widget.tex).toBe("b");
 	});
 
 	// 同上: viewport 制限撤去により旧仕様テストは意図が成立しない。

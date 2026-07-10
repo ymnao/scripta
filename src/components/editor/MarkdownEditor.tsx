@@ -1,4 +1,3 @@
-import "katex/dist/katex.min.css";
 import { historyField, redo, undo } from "@codemirror/commands";
 import { insertNewlineContinueMarkup, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {

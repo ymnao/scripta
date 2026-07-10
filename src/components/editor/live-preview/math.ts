@@ -16,11 +16,108 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import katex from "katex";
 import { isEscaped } from "../../../lib/content";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
 export { isEscaped };
+
+// ── KaTeX lazy loader ────────────────────────────────
+//
+// katex（本体 + CSS。CSS は 368KB のフォント base64 を含む）を初期チャンクから
+// 分離するため、動的 import で遅延ロードする（#301）。mermaid.ts の
+// `mermaidModule` / `initPromise` と同型のモジュールレベル loader パターンを踏襲。
+
+let katexMod: typeof import("katex").default | null = null;
+let katexLoading: Promise<void> | null = null;
+
+/**
+ * katex 本体 + CSS の動的 import を開始し、ロード完了の Promise を返す
+ * （多重呼び出しでは同じ Promise を共有）。ロード完了で `katexMod` をセットし、
+ * 登録済み view の再構築（notifyKatexReady）を一度だけ発火する。
+ */
+function ensureKatex(): Promise<void> {
+	if (!katexLoading) {
+		katexLoading = Promise.all([import("katex"), import("katex/dist/katex.min.css")])
+			.then(([katexModule]) => {
+				katexMod = katexModule.default;
+				notifyKatexReady();
+			})
+			.catch((e: unknown) => {
+				// rejected promise を抱えたままだと以後リトライ不能 + 呼び出し側
+				// (toDOM の void ensureKatex()) で unhandled rejection になるため、
+				// ここで握りつぶしてリセットし、次の MathWidget.toDOM で再試行させる。
+				katexLoading = null;
+				console.error("Failed to load katex:", e);
+			});
+	}
+	return katexLoading;
+}
+
+/**
+ * テスト用: katex の動的ロード完了を待つ。
+ * lazy-load 化により `MathWidget.toDOM` が非同期になったため、同期 render を前提とした
+ * 既存テストは事前にこれを await してから toDOM を呼ぶ必要がある。
+ */
+export function preloadKatexForTest(): Promise<void> {
+	return ensureKatex();
+}
+
+// ── Render cache ──────────────────────────────────────
+
+const MAX_RENDER_CACHE_SIZE = 500;
+/** key = `${displayMode}:${tex}`、value = katex.renderToString の結果 HTML。
+ *  LRU ではなく単純 clear（上限到達時に全消去）。 */
+const renderCache = new Map<string, string>();
+
+function renderKatexToHtml(tex: string, displayMode: boolean): string {
+	const key = `${displayMode}:${tex}`;
+	const cached = renderCache.get(key);
+	if (cached !== undefined) return cached;
+	if (!katexMod) throw new Error("katex module is not loaded yet");
+	const html = katexMod.renderToString(tex, { displayMode, throwOnError: false });
+	if (renderCache.size >= MAX_RENDER_CACHE_SIZE) renderCache.clear();
+	renderCache.set(key, html);
+	return html;
+}
+
+// ── View registry (katex ロード完了時の再構築先) ─────────
+//
+// 稼働中の EditorView をモジュールレベルの Set に登録しておき、katex ロード完了時に
+// まとめて rebuildMathDecos を dispatch する。mermaid は ViewPlugin 自身が view ごとに
+// render を駆動するので per-instance dispatch で足りるが、katex のロードは「数式
+// widget が最初に描画された時」だけ発火させる必要があり（数式なしノートで katex を
+// ロードしない、#301）、トリガー元の MathWidget.toDOM は view を参照できないため、
+// 通知先をこの registry で共有するのが最小構造。
+
+const activeMathViews = new Set<EditorView>();
+
+/**
+ * katex ロード完了時に呼ばれる。登録済み view の math decoration を再構築する。
+ * ensureKatex の promise 解決経由でのみ呼ばれ、常に CM の update サイクル外で実行される
+ * ため queueMicrotask による遅延は不要（mermaid.ts の同 idiom は ViewPlugin.update 内から
+ * dispatch するための回避策で、ここには当てはまらない）。数式 decoration が 0 件の view は
+ * placeholder が存在せず再構築不要なのでスキップする（buildMathDecorations は全文 regex
+ * 走査を伴うため、数式のないタブでの無駄なフルスキャンを避ける）。
+ */
+function notifyKatexReady(): void {
+	for (const view of activeMathViews) {
+		if (view.state.field(mathDecorationField, false)?.size === 0) continue;
+		view.dispatch({ effects: rebuildMathDecos.of(view.hasFocus) });
+	}
+}
+
+const mathViewRegistryPlugin = ViewPlugin.fromClass(
+	class {
+		private view: EditorView;
+		constructor(view: EditorView) {
+			this.view = view;
+			activeMathViews.add(view);
+		}
+		destroy() {
+			activeMathViews.delete(this.view);
+		}
+	},
+);
 
 // Lenient $$...$$ match (position-independent). markdown-to-html.ts の
 // preprocessDisplayMath と寛容さを揃えており、Live Preview と PDF のパリティを
@@ -99,24 +196,41 @@ export function overlapsCodeBlock(from: number, to: number, codeRanges: CodeRang
 export class MathWidget extends WidgetType {
 	tex: string;
 	displayMode: boolean;
+	/** widget 構築時点で katex がロード済みかどうか。eq に含めることで、ロード前の
+	 *  placeholder widget とロード後の widget が eq=false になり、rebuildMathDecos
+	 *  での再構築時に toDOM が再実行される（MermaidWidget が render 状態 svg/error を
+	 *  eq に含めるのと同型、#301）。 */
+	katexLoaded: boolean;
 	constructor(tex: string, displayMode: boolean) {
 		super();
 		this.tex = tex;
 		this.displayMode = displayMode;
+		this.katexLoaded = katexMod !== null;
 	}
 
 	eq(other: MathWidget): boolean {
-		return this.tex === other.tex && this.displayMode === other.displayMode;
+		return (
+			this.tex === other.tex &&
+			this.displayMode === other.displayMode &&
+			this.katexLoaded === other.katexLoaded
+		);
 	}
 
 	toDOM(): HTMLElement {
 		const wrap = document.createElement("span");
 		wrap.className = this.displayMode ? "cm-math-display" : "cm-math-inline";
+
+		if (!katexMod) {
+			// katex 未ロード: 生 TeX テキストの placeholder を出し、ロード完了を
+			// mathViewRegistryPlugin 経由の rebuildMathDecos dispatch に任せる。
+			wrap.classList.add("cm-math-loading");
+			wrap.textContent = this.tex;
+			void ensureKatex();
+			return wrap;
+		}
+
 		try {
-			katex.render(this.tex, wrap, {
-				displayMode: this.displayMode,
-				throwOnError: false,
-			});
+			wrap.innerHTML = renderKatexToHtml(this.tex, this.displayMode);
 		} catch {
 			wrap.className = "cm-math-error";
 			wrap.textContent = this.tex;
@@ -374,6 +488,7 @@ export const mathDecoration: Extension = [
 	mathHasFocusField,
 	mathDecorationField,
 	mathFocusHandler,
+	mathViewRegistryPlugin,
 	createMathClickHandler(),
 	dollarInputHandler,
 	dollarBackspace,

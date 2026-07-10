@@ -2,15 +2,8 @@ import { X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { translateError } from "../../lib/errors";
-import {
-	type ExportTheme,
-	exportAsHtml,
-	exportAsPdf,
-	exportAsPrompt,
-	getDefaultPromptTemplate,
-	type PageBreakCriterion,
-	type PageBreakLevel,
-} from "../../lib/export";
+import type { ExportTheme, PageBreakCriterion, PageBreakLevel } from "../../lib/export";
+import { getDefaultPromptTemplate } from "../../lib/export-templates";
 import { IS_MAC, IS_WINDOWS } from "../../lib/platform";
 import {
 	getScriptaPromptTemplatePath,
@@ -95,9 +88,15 @@ export function ExportDialog({
 		if (!open) setShowScriptaDirConfirm(false);
 	}, [open]);
 
+	// export.ts は katex-inline-css・mermaid 等の重量級依存を静的 import するため、
+	// 初期チャンクに含めないよう実行時まで遅延 import する（#301）。2 回目以降は
+	// モジュールキャッシュにより即時解決される。
+	const loadExportModule = () => import("../../lib/export");
+
 	const handleExportHtml = async () => {
 		setExporting(true);
 		try {
+			const { exportAsHtml } = await loadExportModule();
 			const result = await exportAsHtml(markdown, filePath, { theme: htmlTheme });
 			if (result) onClose();
 		} catch (err: unknown) {
@@ -112,6 +111,7 @@ export function ExportDialog({
 	const handleExportPdf = async () => {
 		setExporting(true);
 		try {
+			const { exportAsPdf } = await loadExportModule();
 			const result = await exportAsPdf(markdown, filePath, {
 				pageBreakLevel: pageBreakEnabled ? pageBreakLevel : "none",
 				smartPageBreak,
@@ -131,10 +131,11 @@ export function ExportDialog({
 	const handleExportPrompt = async () => {
 		setExporting(true);
 		try {
-			let customTemplate: string | null = null;
-			if (workspacePath) {
-				customTemplate = await loadPromptTemplate(workspacePath);
-			}
+			// テンプレート読み込み (IPC) とモジュールロードは独立なので並列化する
+			const [customTemplate, { exportAsPrompt }] = await Promise.all([
+				workspacePath ? loadPromptTemplate(workspacePath) : Promise.resolve(null),
+				loadExportModule(),
+			]);
 			const result = await exportAsPrompt(markdown, filePath, customTemplate);
 			if (result) onClose();
 		} catch (err: unknown) {

@@ -7,7 +7,7 @@ vi.mock("../../lib/commands", () => ({
 	writeNewFile: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("../../lib/export", () => ({
+vi.mock("../../lib/export-templates", () => ({
 	getDefaultPromptTemplate: vi.fn(() => "default-prompt-template"),
 }));
 

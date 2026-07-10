@@ -1,7 +1,10 @@
+// markdownToHtml が出力する katex HTML 用の CSS。SlidePreview は React.lazy 化済みの
+// ため初期チャンクには入らず、live-preview math 側の動的 import と Vite が dedupe する（#301）。
+import "katex/dist/katex.min.css";
 import { memo, useDeferredValue, useMemo } from "react";
 import { markdownToHtml } from "../../lib/markdown-to-html";
 
-interface SlidePreviewProps {
+export interface SlidePreviewProps {
 	markdown: string;
 	slideIndex: number;
 	totalSlides: number;
