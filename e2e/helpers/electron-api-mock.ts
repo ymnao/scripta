@@ -35,7 +35,7 @@ import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/prelo
 import { getInitializedMarkerPath } from "../../src/lib/scripta-config";
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
 import type { OgpData } from "../../src/types/ogp";
-import type { SearchResult } from "../../src/types/search";
+import type { SearchFilesResponse, SearchResult } from "../../src/types/search";
 import type { UpdateInfo } from "../../src/types/update";
 import type { BacklinkSource, UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
@@ -290,6 +290,10 @@ function installApiMock(opts: {
 	workspaceInitialized: boolean;
 	initializedMarkerSuffix: string;
 }): void {
+	// 本番 src/types/search.ts の MAX_SEARCH_RESULTS と同じ上限値。
+	// installApiMock は .toString() で browser scope に注入されるため、module scope の
+	// import は参照できず、関数内 local const として複製する必要がある。
+	const MAX_SEARCH_RESULTS = 10_000;
 	const store: MockStore = {
 		files: { ...opts.fs.files },
 		directories: { ...opts.fs.directories },
@@ -543,29 +547,43 @@ function installApiMock(opts: {
 			workspacePath: string,
 			rawQuery: string,
 			caseSensitive?: boolean,
-		): Promise<SearchResult[]> => {
+		): Promise<SearchFilesResponse> => {
 			track("searchFiles", [workspacePath, rawQuery, caseSensitive ?? false]);
 			const querySearch = caseSensitive ? rawQuery : rawQuery.toLowerCase();
-			if (!querySearch) return [];
-			// 本番 search.ts:104-106 と同じく path の byte 比較で sort してから走査。
-			// 検索結果の順序が決定的になり、テスト assertion を安定させる。
+			if (!querySearch) return { results: [], truncated: false };
+			// 本番 search.ts:250-252 (searchFilenamesImpl の input.sort(byteCmp)) と同じく
+			// path の byte 比較で sort してから走査。mock は並列処理をしないため、file 単位で
+			// sort 済み順に処理すれば本番の最終 sort (search.ts:236-240) と同じ順序が得られる。
 			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
 			const results: SearchResult[] = [];
-			for (const filePath of mdFiles) {
+			let truncated = false;
+			outer: for (const filePath of mdFiles) {
 				const content = store.files[filePath];
 				if (!content) continue;
 				const lines = content.split(/\r?\n/);
 				for (let i = 0; i < lines.length; i++) {
 					const line = lines[i];
 					const lineSearch = caseSensitive ? line : line.toLowerCase();
-					// case-insensitive 時は lowercased 文字列上の position を元行の
-					// UTF-16 position に逆引きする（本番 search.ts:127-135 と一致）。
+					// undefined = 未構築、null = ASCII 行で逆引き不要、number[] = 構築済み。
+					// 本番 search.ts:204-213 と同じく、最初の indexOf ヒット後まで
+					// buildLowerToOrigUtf16Map の呼び出しを遅延する（#300 ②）。
 					// `İ` 等の長さが変わる文字を含む行で matchStart/matchEnd がズレる問題を防ぐ。
-					const lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+					let lowerToOrig: number[] | null | undefined;
 					let pos = 0;
 					while (true) {
 						const found = lineSearch.indexOf(querySearch, pos);
 						if (found === -1) break;
+						// 本番 search.ts (MAX_SEARCH_RESULTS) と同じ上限 parity。「上限を超える
+						// match が実在する」と分かった時点で打ち切る（push 後の length 判定だと
+						// ちょうど上限件数ヒットのケースまで打ち切り扱いになる）。renderer-only
+						// e2e で truncated notice を検証するために本番と同セマンティクスにする。
+						if (results.length >= MAX_SEARCH_RESULTS) {
+							truncated = true;
+							break outer;
+						}
+						if (lowerToOrig === undefined) {
+							lowerToOrig = caseSensitive ? null : buildLowerToOrigUtf16Map(line);
+						}
 						const lowerEnd = found + querySearch.length;
 						const matchStart = lowerToOrig ? lowerToOrig[found] : found;
 						const matchEnd = lowerToOrig ? lowerToOrig[lowerEnd] : lowerEnd;
@@ -580,7 +598,7 @@ function installApiMock(opts: {
 					}
 				}
 			}
-			return results;
+			return { results, truncated };
 		},
 		cancelSearch: async (): Promise<void> => {
 			track("cancelSearch", []);

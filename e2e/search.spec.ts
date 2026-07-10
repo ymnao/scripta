@@ -229,6 +229,32 @@ test.describe("workspace search", () => {
 		await expect(highlight).toHaveText("test");
 	});
 
+	test("結果が上限件数を超えると打ち切り notice が表示される (#300)", async ({ page }) => {
+		// 1 ファイルに 10,001 行の match を用意し、mock 側の MAX_SEARCH_RESULTS (10,000)
+		// で truncated: true が返ることを確認する。
+		const bigContent = Array.from({ length: 10_001 }, () => "match").join("\n");
+		const bigWorkspace = {
+			files: {
+				"/workspace/big.md": bigContent,
+			},
+			directories: {
+				"/workspace": [{ name: "big.md", path: "/workspace/big.md", isDirectory: false }],
+			},
+		};
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs: bigWorkspace, dialogResult: "/workspace" });
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+
+		await page.keyboard.press(`${modKey}+Shift+f`);
+		await page.getByRole("textbox", { name: "ワークスペース内を検索" }).fill("match");
+
+		await expect(page.getByText("結果が多すぎるため 10,000 件で打ち切りました")).toBeVisible({
+			timeout: 5000,
+		});
+	});
+
 	test("ファイルアイコンクリックで file explorer に戻る", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
 		await mock.setup({ fs: workspace, dialogResult: "/workspace" });

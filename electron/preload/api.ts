@@ -1,6 +1,6 @@
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
 import type { OgpData } from "../../src/types/ogp";
-import type { SearchResult } from "../../src/types/search";
+import type { SearchFilesResponse } from "../../src/types/search";
 import type { UpdateInfo } from "../../src/types/update";
 import type { BacklinkSource, UnresolvedWikilink } from "../../src/types/wikilink";
 import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
@@ -56,7 +56,7 @@ export type Api = Readonly<{
 		workspacePath: string,
 		query: string,
 		caseSensitive?: boolean,
-	) => Promise<SearchResult[]>;
+	) => Promise<SearchFilesResponse>;
 	cancelSearch: () => Promise<void>;
 	searchFilenames: (workspacePath: string, query: string) => Promise<string[]>;
 	scanUnresolvedWikilinks: (workspacePath: string) => Promise<UnresolvedWikilink[]>;

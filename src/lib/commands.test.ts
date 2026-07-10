@@ -220,13 +220,13 @@ describe("searchFiles with retry", () => {
 		const mockedSearchFiles = window.api.searchFiles as Mock;
 		mockedSearchFiles
 			.mockRejectedValueOnce("Resource temporarily unavailable (os error 11)")
-			.mockResolvedValue([]);
+			.mockResolvedValue({ results: [], truncated: false });
 
 		const promise = searchFiles("/workspace", "query");
 		await vi.advanceTimersByTimeAsync(200);
 		const result = await promise;
 
-		expect(result).toEqual([]);
+		expect(result).toEqual({ results: [], truncated: false });
 		expect(mockedSearchFiles).toHaveBeenCalledTimes(2);
 	});
 
