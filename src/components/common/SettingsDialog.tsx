@@ -1,7 +1,7 @@
 import { Coffee, ExternalLink, Plus, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { openExternal, writeNewFile } from "../../lib/commands";
-import { getDefaultPromptTemplate } from "../../lib/export";
+import { getDefaultPromptTemplate } from "../../lib/export-templates";
 import { fileExists, getTemplateDefinitions } from "../../lib/scripta-config";
 import type { FontFamily, ThemePreference } from "../../lib/store";
 import { useGitSyncStore } from "../../stores/git-sync";

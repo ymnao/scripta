@@ -23,23 +23,25 @@ vi.mock("mermaid", () => ({
 import { SlideView } from "./SlideView";
 
 describe("SlideView", () => {
-	it("エディタとプレビューの両方をレンダリングする", () => {
+	// SlidePreview は #301 で React.lazy 化されたため、初回描画は Suspense fallback
+	// (null) になる。動的 import の解決を待つには findByText（非同期）を使う。
+	it("エディタとプレビューの両方をレンダリングする", async () => {
 		render(<SlideView value={"# Slide 1\n---\n# Slide 2"} onChange={vi.fn()} onSave={vi.fn()} />);
 		// エディタが存在する
 		expect(screen.getByRole("textbox")).toBeDefined();
 		// プレビューのスライド番号が表示される
-		expect(screen.getByText("1 / 2")).toBeDefined();
+		expect(await screen.findByText("1 / 2")).toBeDefined();
 	});
 
-	it("スライド番号が正しく表示される", () => {
+	it("スライド番号が正しく表示される", async () => {
 		render(<SlideView value={"A\n---\nB\n---\nC"} onChange={vi.fn()} onSave={vi.fn()} />);
 		// 初期カーソル位置は0なので最初のスライド
-		expect(screen.getByText("1 / 3")).toBeDefined();
+		expect(await screen.findByText("1 / 3")).toBeDefined();
 	});
 
-	it("区切りなしのドキュメントは1枚のスライド", () => {
+	it("区切りなしのドキュメントは1枚のスライド", async () => {
 		render(<SlideView value="# Single Slide" onChange={vi.fn()} onSave={vi.fn()} />);
-		expect(screen.getByText("1 / 1")).toBeDefined();
+		expect(await screen.findByText("1 / 1")).toBeDefined();
 	});
 
 	it("onEditorView コールバックが呼ばれる", () => {

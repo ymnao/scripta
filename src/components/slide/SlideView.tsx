@@ -1,9 +1,30 @@
 import type { EditorView } from "@codemirror/view";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { type ComponentType, lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { findSlideAtCursor, parseSlides } from "../../lib/slide-parser";
 import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
-import { SlidePreview } from "./SlidePreview";
+import type { SlidePreviewProps } from "./SlidePreview";
+
+/** chunk ロード失敗時のフォールバック。このリポジトリは ErrorBoundary を持たない
+ *  （クラスコンポーネント禁止）ため import 側で catch し、プレビューペインのみ
+ *  degrade させてアプリ全体の白画面化を防ぐ。 */
+function SlidePreviewLoadError(_props: SlidePreviewProps) {
+	return (
+		<div className="flex h-full items-center justify-center text-sm text-text-secondary">
+			スライドプレビューの読み込みに失敗しました。アプリを再起動してください。
+		</div>
+	);
+}
+
+// SlidePreview → markdown-to-html → katex の静的 import チェーンを初期チャンクから
+// 切り離すため lazy 化する（#301）。
+const SlidePreview = lazy(
+	(): Promise<{ default: ComponentType<SlidePreviewProps> }> =>
+		import("./SlidePreview").then(
+			(m) => ({ default: m.SlidePreview }),
+			() => ({ default: SlidePreviewLoadError }),
+		),
+);
 
 interface SlideViewProps {
 	value: string;
@@ -72,11 +93,13 @@ export function SlideView({
 				/>
 			</div>
 			<div className="min-h-0 w-[45%] border-l border-border bg-bg-secondary">
-				<SlidePreview
-					markdown={currentSlide?.content ?? ""}
-					slideIndex={currentSlideIndex}
-					totalSlides={slides.length}
-				/>
+				<Suspense fallback={null}>
+					<SlidePreview
+						markdown={currentSlide?.content ?? ""}
+						slideIndex={currentSlideIndex}
+						totalSlides={slides.length}
+					/>
+				</Suspense>
 			</div>
 		</div>
 	);

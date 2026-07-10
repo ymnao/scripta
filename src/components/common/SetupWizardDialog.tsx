@@ -2,7 +2,7 @@ import { FileText, FolderOpen, Settings, X } from "lucide-react";
 import { type ReactNode, useCallback, useId, useRef, useState } from "react";
 import { writeNewFile } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { getDefaultPromptTemplate } from "../../lib/export";
+import { getDefaultPromptTemplate } from "../../lib/export-templates";
 import {
 	fileExists,
 	getTemplateDefinitions,

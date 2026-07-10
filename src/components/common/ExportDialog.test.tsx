@@ -27,6 +27,9 @@ vi.mock("../../lib/export", () => ({
 	exportAsHtml: vi.fn(),
 	exportAsPdf: vi.fn(),
 	exportAsPrompt: vi.fn(),
+}));
+
+vi.mock("../../lib/export-templates", () => ({
 	getDefaultPromptTemplate: vi.fn(() => "default-template"),
 }));
 
