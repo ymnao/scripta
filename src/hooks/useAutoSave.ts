@@ -24,24 +24,32 @@ interface UseAutoSaveReturn {
 	markSaved: (content: string) => void;
 	waitForPending: () => Promise<void>;
 	getLastSavedContent: () => string;
+	scheduleAutoSave: () => void;
 }
 
 export function useAutoSave(
 	filePath: string,
-	content: string,
+	getContent: () => string,
 	isComposing?: () => boolean,
 	onFlushComplete?: (path: string, rawContent: string) => void,
 ): UseAutoSaveReturn {
 	const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
-	const contentRef = useRef(content);
-	contentRef.current = content;
+	// scheduleAutoSave() は keystroke ごとに呼ばれる（React state の外）ため、
+	// setState 経由で最新 status を取ると 1 tick 遅れる可能性がある。ref で同期して
+	// 「既に unsaved なら setState しない」の判定をこの tick 内で正しく行えるようにする。
+	const saveStatusRef = useRef(saveStatus);
+	useEffect(() => {
+		saveStatusRef.current = saveStatus;
+	}, [saveStatus]);
+	const getContentRef = useRef(getContent);
+	getContentRef.current = getContent;
 	const isComposingRef = useRef(isComposing);
 	isComposingRef.current = isComposing;
 	const onFlushCompleteRef = useRef(onFlushComplete);
 	onFlushCompleteRef.current = onFlushComplete;
 	const lastSavedContentRef = useRef(
-		processContent(content, useSettingsStore.getState().trimTrailingWhitespace),
+		processContent(getContent(), useSettingsStore.getState().trimTrailingWhitespace),
 	);
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,7 +95,7 @@ export function useAutoSave(
 					// re-run. Detect the mismatch and schedule a follow-up.
 					const { trimTrailingWhitespace: tw, autoSaveDelay: followUpDelay } =
 						useSettingsStore.getState();
-					const currentProcessed = processContent(contentRef.current, tw);
+					const currentProcessed = processContent(getContentRef.current(), tw);
 					if (currentProcessed !== processed) {
 						setSaveStatus("unsaved");
 						if (debounceTimerRef.current) {
@@ -98,7 +106,7 @@ export function useAutoSave(
 								debounceTimerRef.current = setTimeout(tryFollowUp, IME_COMPOSITION_DEFER_MS);
 								return;
 							}
-							save(contentRef.current).catch(() => {});
+							save(getContentRef.current()).catch(() => {});
 						}, followUpDelay);
 					} else {
 						setSaveStatus("saved");
@@ -120,7 +128,7 @@ export function useAutoSave(
 									retryTimerRef.current = setTimeout(tryRetry, IME_COMPOSITION_DEFER_MS);
 									return;
 								}
-								save(contentRef.current).catch(() => {});
+								save(getContentRef.current()).catch(() => {});
 							}, delay);
 						} else {
 							setSaveStatus("error");
@@ -156,7 +164,7 @@ export function useAutoSave(
 		clearRetryState();
 
 		const prevPath = prevFilePathRef.current;
-		const currentContent = contentRef.current;
+		const currentContent = getContentRef.current();
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
 		const processed = processContent(currentContent, trimTrailingWhitespace);
 		const hadUnsavedChanges = prevPath && processed !== lastSavedContentRef.current;
@@ -208,16 +216,20 @@ export function useAutoSave(
 		}
 	}, [filePath, clearRetryState]);
 
-	useEffect(() => {
-		if (awaitingNewFileRef.current) {
-			return;
-		}
+	const scheduleAutoSave = useCallback((): void => {
+		if (awaitingNewFileRef.current) return;
 		if (!filePath) return;
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
-		if (processContent(content, trimTrailingWhitespace) === lastSavedContentRef.current) {
+		if (
+			processContent(getContentRef.current(), trimTrailingWhitespace) ===
+			lastSavedContentRef.current
+		) {
 			return;
 		}
-		setSaveStatus("unsaved");
+		// per-keystroke 再レンダー防止: status が既に "unsaved" なら setState しない
+		if (saveStatusRef.current !== "unsaved") {
+			setSaveStatus("unsaved");
+		}
 
 		// Clear retry state on content change (new debounce save will take over)
 		clearRetryState();
@@ -230,14 +242,9 @@ export function useAutoSave(
 				debounceTimerRef.current = setTimeout(tryAutoSave, IME_COMPOSITION_DEFER_MS);
 				return;
 			}
-			save(contentRef.current).catch(() => {});
+			save(getContentRef.current()).catch(() => {});
 		}, autoSaveDelay);
-		return () => {
-			if (debounceTimerRef.current) {
-				clearTimeout(debounceTimerRef.current);
-			}
-		};
-	}, [content, filePath, save, autoSaveDelay, clearRetryState]);
+	}, [filePath, save, autoSaveDelay, clearRetryState]);
 
 	useEffect(() => {
 		isMountedRef.current = true;
@@ -264,7 +271,7 @@ export function useAutoSave(
 		// 親の markSaved 漏れでゲートが立ったままになると autosave が永久に止まる。
 		// 手動セーブ完了時点で「現在のファイル」を書いた事実があるので safety net として解除。
 		awaitingNewFileRef.current = false;
-		const promise = save(contentRef.current, { skipRetry: true });
+		const promise = save(getContentRef.current(), { skipRetry: true });
 		// Capture the saveId that save() just assigned so we can detect
 		// whether a newer save superseded this one before the error fires.
 		const id = saveIdRef.current;
@@ -295,5 +302,12 @@ export function useAutoSave(
 		return lastSavedContentRef.current;
 	}, []);
 
-	return { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent };
+	return {
+		saveStatus,
+		saveNow,
+		markSaved,
+		waitForPending,
+		getLastSavedContent,
+		scheduleAutoSave,
+	};
 }

@@ -213,7 +213,16 @@ export function AppLayout() {
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
 	const pendingGoToLineRef = useRef<GoToLineRequest | null>(null);
 
-	const [content, setContent] = useState("");
+	// 本文を React state から外し、controlled CodeMirror の per-keystroke 全文再レンダーを
+	// 避ける (#302)。loadedDoc はロード/タブ切替/外部リロード時のみ変わり、CodeMirror の
+	// `value` にはこれを渡す。keystroke 毎の最新本文は editorViewRef 経由で直接読む。
+	const [loadedDoc, setLoadedDoc] = useState("");
+	const loadedDocRef = useRef(loadedDoc);
+	loadedDocRef.current = loadedDoc;
+	const getContent = useCallback(
+		() => editorViewRef.current?.state.doc.toString() ?? loadedDocRef.current,
+		[],
+	);
 	const [editorKey, setEditorKey] = useState(0);
 	const isNewTab = activeTabPath ? isNewTabPath(activeTabPath) : false;
 	const isEditorComposing = useCallback(() => editorViewRef.current?.composing ?? false, []);
@@ -250,23 +259,22 @@ export function AppLayout() {
 			// flush 対象タブが現在アクティブで、かつ flush 後にさらに編集されていた場合は
 			// dirty をクリアしない（ユーザーの編集が未保存のまま残っている）
 			const currentActive = useWorkspaceStore.getState().activeTabPath;
-			if (currentActive === path && contentRef.current !== rawContent) {
+			if (currentActive === path && getContent() !== rawContent) {
 				return;
 			}
 			setTabDirty(path, false);
 		},
-		[setTabDirty],
+		[setTabDirty, getContent],
 	);
-	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent } = useAutoSave(
-		isNewTab ? "" : (activeTabPath ?? ""),
-		content,
-		isEditorComposing,
-		handleFlushComplete,
-	);
+	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent, scheduleAutoSave } =
+		useAutoSave(
+			isNewTab ? "" : (activeTabPath ?? ""),
+			getContent,
+			isEditorComposing,
+			handleFlushComplete,
+		);
 	const prevTabPathRef = useRef<string | null>(null);
 	const contentLoadedForPathRef = useRef<string | null>(null);
-	const contentRef = useRef(content);
-	contentRef.current = content;
 	const savedContentRef = useRef("");
 	const saveNowRef = useRef(saveNow);
 	saveNowRef.current = saveNow;
@@ -428,39 +436,42 @@ export function AppLayout() {
 		}
 	}, [workspacePath, configLoaded, workspaceInitialized]);
 
-	const handleExport = useCallback((path: string) => {
-		// Prefer in-memory content so unsaved edits are included
-		const state = useWorkspaceStore.getState();
-		if (path === state.activeTabPath) {
-			setExportTarget({ markdown: contentRef.current, filePath: path });
-			setExportOpen(true);
-			return;
-		}
-		const cached = tabCacheRef.current.get(path);
-		if (cached) {
-			setExportTarget({ markdown: cached.content, filePath: path });
-			setExportOpen(true);
-			return;
-		}
-		// File not open in any tab — read from disk.
-		// Track request ID so only the latest readFile response takes effect.
-		const requestId = ++exportRequestIdRef.current;
-		readFile(path)
-			.then((markdown) => {
-				if (exportRequestIdRef.current !== requestId) return;
-				setExportTarget({ markdown, filePath: path });
+	const handleExport = useCallback(
+		(path: string) => {
+			// Prefer in-memory content so unsaved edits are included
+			const state = useWorkspaceStore.getState();
+			if (path === state.activeTabPath) {
+				setExportTarget({ markdown: getContent(), filePath: path });
 				setExportOpen(true);
-			})
-			.catch((err) => {
-				if (exportRequestIdRef.current !== requestId) return;
-				useToastStore
-					.getState()
-					.addToast(
-						"error",
-						`エクスポート用のファイル読み込みに失敗しました: ${translateError(err)}`,
-					);
-			});
-	}, []);
+				return;
+			}
+			const cached = tabCacheRef.current.get(path);
+			if (cached) {
+				setExportTarget({ markdown: cached.content, filePath: path });
+				setExportOpen(true);
+				return;
+			}
+			// File not open in any tab — read from disk.
+			// Track request ID so only the latest readFile response takes effect.
+			const requestId = ++exportRequestIdRef.current;
+			readFile(path)
+				.then((markdown) => {
+					if (exportRequestIdRef.current !== requestId) return;
+					setExportTarget({ markdown, filePath: path });
+					setExportOpen(true);
+				})
+				.catch((err) => {
+					if (exportRequestIdRef.current !== requestId) return;
+					useToastStore
+						.getState()
+						.addToast(
+							"error",
+							`エクスポート用のファイル読み込みに失敗しました: ${translateError(err)}`,
+						);
+				});
+		},
+		[getContent],
+	);
 
 	// Listen for native menu events
 	useEffect(() => {
@@ -491,7 +502,7 @@ export function AppLayout() {
 			if (
 				currentActiveTab &&
 				!isNewTabPath(currentActiveTab) &&
-				contentRef.current !== savedContentRef.current
+				getContent() !== savedContentRef.current
 			) {
 				const saved = await saveNowRef.current();
 				if (cancelled) return;
@@ -546,7 +557,7 @@ export function AppLayout() {
 			cancelled = true;
 			unlisten();
 		};
-	}, [setTabDirty]);
+	}, [setTabDirty, getContent]);
 
 	// Cache previous tab's content and restore new tab's content on switch
 	useEffect(() => {
@@ -583,7 +594,7 @@ export function AppLayout() {
 				// 含まれない (= 別タブから戻っても汚染なし、検索バー開放中の編集でも履歴維持)。
 				const prevSnapshot = markdownEditorHandleRef.current?.captureSnapshot();
 				tabCacheRef.current.set(prevPath, {
-					content: contentRef.current,
+					content: getContent(),
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
 					editorStateSnapshot: prevSnapshot ?? currentCache?.editorStateSnapshot,
 				});
@@ -597,7 +608,7 @@ export function AppLayout() {
 
 		if (!activeTabPath) {
 			contentLoadedForPathRef.current = null;
-			setContent("");
+			setLoadedDoc("");
 			savedContentRef.current = "";
 			markSaved("");
 			return;
@@ -606,7 +617,7 @@ export function AppLayout() {
 		// New-tab page — no editor, no content to load
 		if (isNewTabPath(activeTabPath)) {
 			contentLoadedForPathRef.current = null;
-			setContent("");
+			setLoadedDoc("");
 			savedContentRef.current = "";
 			markSaved("");
 			return;
@@ -617,7 +628,7 @@ export function AppLayout() {
 			contentLoadedForPathRef.current = activeTabPath;
 			savedContentRef.current = cached.savedContent;
 			markSaved(cached.savedContent);
-			setContent(cached.content);
+			setLoadedDoc(cached.content);
 			// editorStateSnapshot が保存されていれば最新の extensions で組み立て直して
 			// undo/redo 履歴ごと復元する (#220)。失敗条件 (どれかでも該当):
 			// - handle 未取得 (SlideView 表示中など MarkdownEditor が mount されていない)
@@ -653,7 +664,7 @@ export function AppLayout() {
 				contentLoadedForPathRef.current = activeTabPath;
 				savedContentRef.current = loaded;
 				markSaved(loaded);
-				setContent(loaded);
+				setLoadedDoc(loaded);
 				setEditorKey((k) => k + 1);
 				if (pendingGoToLineRef.current !== null) {
 					setGoToLine(pendingGoToLineRef.current);
@@ -667,18 +678,18 @@ export function AppLayout() {
 				contentLoadedForPathRef.current = activeTabPath;
 				savedContentRef.current = "";
 				markSaved("");
-				setContent("");
+				setLoadedDoc("");
 				pendingGoToLineRef.current = null;
 			});
 		return () => {
 			ignore = true;
 		};
-	}, [activeTabPath, workspacePath, markSaved]);
+	}, [activeTabPath, workspacePath, markSaved, getContent]);
 
 	// Keep savedContent in cache and ref in sync when save completes.
 	// Guard with contentLoadedForPathRef to avoid misattributing a flush save
 	// (for the previous file) as a save for the current activeTabPath.
-	// Also skip when just switched tabs — contentRef still has the old tab's content.
+	// Also skip when just switched tabs — the editor still has the old tab's content.
 	useEffect(() => {
 		if (justSwitchedRef.current) {
 			justSwitchedRef.current = false;
@@ -689,14 +700,15 @@ export function AppLayout() {
 			saveStatus === "saved" &&
 			contentLoadedForPathRef.current === activeTabPath
 		) {
-			savedContentRef.current = contentRef.current;
+			const current = getContent();
+			savedContentRef.current = current;
 			const cached = tabCacheRef.current.get(activeTabPath);
 			if (cached) {
-				cached.savedContent = contentRef.current;
+				cached.savedContent = current;
 			}
 			bumpContentVersion();
 		}
-	}, [activeTabPath, saveStatus, bumpContentVersion]);
+	}, [activeTabPath, saveStatus, bumpContentVersion, getContent]);
 
 	// Sync dirty flag to store.
 	// Guard with contentLoadedForPathRef to avoid misattributing a stale saveStatus
@@ -783,7 +795,7 @@ export function AppLayout() {
 							if (loaded === getLastSavedContentRef.current()) return;
 							savedContentRef.current = loaded;
 							markSaved(loaded);
-							setContent(loaded);
+							setLoadedDoc(loaded);
 							setEditorKey((k) => k + 1);
 						})
 						.catch((err) => {
@@ -829,7 +841,7 @@ export function AppLayout() {
 				if (useWorkspaceStore.getState().activeTabPath === path) {
 					savedContentRef.current = loaded;
 					markSaved(loaded);
-					setContent(loaded);
+					setLoadedDoc(loaded);
 					setEditorKey((k) => k + 1);
 				}
 			})
@@ -877,7 +889,7 @@ export function AppLayout() {
 				}
 
 				if (id === state.activeTabId) {
-					if (contentRef.current !== savedContentRef.current) {
+					if (getContent() !== savedContentRef.current) {
 						const saved = await saveNow();
 						if (!saved) return;
 					}
@@ -892,7 +904,7 @@ export function AppLayout() {
 				// Re-check: tab may have become active during waitForPending
 				const currentState = useWorkspaceStore.getState();
 				if (id === currentState.activeTabId) {
-					if (contentRef.current !== savedContentRef.current) {
+					if (getContent() !== savedContentRef.current) {
 						const saved = await saveNow();
 						if (!saved) return;
 					}
@@ -924,7 +936,7 @@ export function AppLayout() {
 				closingTabsRef.current.delete(id);
 			}
 		},
-		[saveNow, closeTabById, waitForPending],
+		[saveNow, closeTabById, waitForPending, getContent],
 	);
 
 	const handleFileRenamed = useCallback(
@@ -1008,7 +1020,7 @@ export function AppLayout() {
 	const handleFileSelect = useCallback(
 		async (path: string) => {
 			// Save current file before navigating if dirty
-			if (activeTabPath && contentRef.current !== savedContentRef.current) {
+			if (activeTabPath && getContent() !== savedContentRef.current) {
 				const saved = await saveNow();
 				if (!saved) return;
 			}
@@ -1019,7 +1031,7 @@ export function AppLayout() {
 				navigateInTab(path);
 			}
 		},
-		[activeTabPath, navigateInTab, openFileFromNewTab, saveNow],
+		[activeTabPath, navigateInTab, openFileFromNewTab, saveNow, getContent],
 	);
 
 	const handleFileOpenNewTab = useCallback(
@@ -1038,21 +1050,21 @@ export function AppLayout() {
 
 	const handleGoBack = useCallback(async () => {
 		// Save current file before navigating if dirty
-		if (activeTabPath && contentRef.current !== savedContentRef.current) {
+		if (activeTabPath && getContent() !== savedContentRef.current) {
 			const saved = await saveNow();
 			if (!saved) return;
 		}
 		goBackInTab();
-	}, [activeTabPath, goBackInTab, saveNow]);
+	}, [activeTabPath, goBackInTab, saveNow, getContent]);
 
 	const handleGoForward = useCallback(async () => {
 		// Save current file before navigating if dirty
-		if (activeTabPath && contentRef.current !== savedContentRef.current) {
+		if (activeTabPath && getContent() !== savedContentRef.current) {
 			const saved = await saveNow();
 			if (!saved) return;
 		}
 		goForwardInTab();
-	}, [activeTabPath, goForwardInTab, saveNow]);
+	}, [activeTabPath, goForwardInTab, saveNow, getContent]);
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {
@@ -1124,6 +1136,21 @@ export function AppLayout() {
 	const handleSave = useCallback(() => {
 		void saveNow();
 	}, [saveNow]);
+
+	// CodeMirror が docChanged を通知するたびに呼ばれる (#302)。
+	// scheduleAutoSave() は O(1) (debounce タイマーの張り替えのみ)。dirty は
+	// 既に true なら setTabDirty を呼ばない (transition-only, per-keystroke 再レンダー防止)。
+	const handleDocChanged = useCallback(() => {
+		scheduleAutoSave();
+		const path = useWorkspaceStore.getState().activeTabPath;
+		if (path) {
+			const state = useWorkspaceStore.getState();
+			const tab = state.tabs.find((t) => t.path === path);
+			if (tab && !tab.dirty) {
+				setTabDirty(path, true);
+			}
+		}
+	}, [scheduleAutoSave, setTabDirty]);
 
 	// Close search bar when switching to non-file tab, close go-to-line on any tab switch,
 	// reset slide view on tab switch
@@ -1300,8 +1327,8 @@ export function AppLayout() {
 	}
 
 	const editorProps = {
-		value: content,
-		onChange: setContent,
+		value: loadedDoc,
+		onDocChanged: handleDocChanged,
 		onSave: handleSave,
 		onEditorView: handleEditorView,
 		goToLine,

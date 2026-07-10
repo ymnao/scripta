@@ -1,4 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
 	fileExists,
@@ -102,26 +103,72 @@ vi.mock("./Sidebar", () => ({
 	},
 }));
 
-const mockEditorView = { hasFocus: false, state: { doc: { lines: 100 } } };
+const mockEditorView = { hasFocus: false, state: { doc: { lines: 100, toString: () => "" } } };
 let capturedOnEditorView: ((view: unknown) => void) | null = null;
 
+// AppLayout は本文を state から外し、CodeMirror の EditorView (editorViewRef) から
+// getContent() で直接読む設計 (#302) になったため、mock も実 CodeMirror の
+// uncontrolled 挙動を模倣する: `value` prop は初回マウント時にのみ内部 doc を
+// 初期化し、以後の編集は内部 doc のみを更新して onDocChanged() で通知する。
+// タブ切替時は AppLayout 側が editorKey を bump してこのコンポーネントごと
+// remount するため、内部 doc は新しい `value` で再初期化される。
 vi.mock("../editor/MarkdownEditor", () => ({
 	MarkdownEditor: ({
 		value,
-		onChange,
+		onDocChanged,
 		onSave,
 		onEditorView,
 	}: {
 		value: string;
-		onChange: (v: string) => void;
+		onDocChanged?: () => void;
 		onSave: () => void;
 		onEditorView?: (view: unknown) => void;
 	}) => {
-		capturedOnEditorView = onEditorView ?? null;
+		const docRef = useRef(value);
+		const [renderedDoc, setRenderedDoc] = useState(value);
+		const onEditorViewRef = useRef(onEditorView);
+		onEditorViewRef.current = onEditorView;
+		const view = useMemo(
+			() => ({
+				hasFocus: false,
+				dispatch: () => {},
+				state: {
+					doc: { lines: 100, toString: () => docRef.current },
+					selection: { main: { empty: true, from: 0, to: 0, head: 0 } },
+					sliceDoc: () => "",
+					// SearchBar (@codemirror/search) が state.field() / state.facet() を
+					// 呼ぶが、この mock は実 EditorState ではないので両方とも安全なデフォルトを返す。
+					field: () => undefined,
+					facet: () => ({
+						top: false,
+						caseSensitive: false,
+						literal: false,
+						regexp: false,
+						wholeWord: false,
+						createPanel: undefined,
+						scrollToMatch: undefined,
+					}),
+				},
+			}),
+			[],
+		);
+		useEffect(() => {
+			capturedOnEditorView = onEditorViewRef.current ?? null;
+			onEditorViewRef.current?.(view);
+			return () => onEditorViewRef.current?.(null);
+		}, [view]);
 		return (
 			<div data-testid="mock-editor">
-				<span data-testid="editor-value">{value}</span>
-				<button type="button" data-testid="editor-change" onClick={() => onChange("new content")}>
+				<span data-testid="editor-value">{renderedDoc}</span>
+				<button
+					type="button"
+					data-testid="editor-change"
+					onClick={() => {
+						docRef.current = "new content";
+						setRenderedDoc("new content");
+						onDocChanged?.();
+					}}
+				>
 					change
 				</button>
 				<button type="button" data-testid="editor-save" onClick={onSave}>

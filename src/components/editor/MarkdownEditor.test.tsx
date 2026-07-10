@@ -65,18 +65,25 @@ function renderEditor(value: string, onChange?: (v: string) => void) {
 	const onEditorView = (view: EditorView | null) => {
 		editorView = view;
 	};
-	const result = render(
-		<MarkdownEditor
-			value={value}
-			onChange={onChange ?? (() => {})}
-			onSave={() => {}}
-			onEditorView={onEditorView}
-		/>,
-	);
 	const getView = (): EditorView => {
 		if (!editorView) throw new Error("EditorView not initialized");
 		return editorView;
 	};
+	// onChange 相当のテスト API を維持するため、onDocChanged 経由で
+	// 現在の doc 文字列を呼び出し元コールバックへ橋渡しする。
+	const onDocChanged = onChange
+		? () => {
+				onChange(getView().state.doc.toString());
+			}
+		: undefined;
+	const result = render(
+		<MarkdownEditor
+			value={value}
+			onDocChanged={onDocChanged}
+			onSave={() => {}}
+			onEditorView={onEditorView}
+		/>,
+	);
 	return { ...result, getView };
 }
 

@@ -152,7 +152,7 @@ export interface MarkdownEditorHandle {
 
 interface MarkdownEditorProps {
 	value: string;
-	onChange: (value: string) => void;
+	onDocChanged?: () => void;
 	onSave: () => void;
 	onEditorView?: (view: EditorView | null) => void;
 	goToLine?: GoToLineRequest | null;
@@ -163,7 +163,7 @@ interface MarkdownEditorProps {
 
 export function MarkdownEditor({
 	value,
-	onChange,
+	onDocChanged,
 	onSave,
 	onEditorView,
 	goToLine,
@@ -177,6 +177,8 @@ export function MarkdownEditor({
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
+	const onDocChangedRef = useRef(onDocChanged);
+	onDocChangedRef.current = onDocChanged;
 	const editorRef = useRef<ReactCodeMirrorRef>(null);
 	const onEditorViewRef = useRef(onEditorView);
 	onEditorViewRef.current = onEditorView;
@@ -396,6 +398,9 @@ export function MarkdownEditor({
 				{ key: "Mod-Shift-v", run: pasteAsMarkdownLinkCommand },
 			]),
 			EditorView.updateListener.of((update) => {
+				if (update.docChanged) {
+					onDocChangedRef.current?.();
+				}
 				if (!(update.docChanged || update.selectionSet)) return;
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
@@ -755,7 +760,6 @@ export function MarkdownEditor({
 					ref={editorRef}
 					className="h-full"
 					value={value}
-					onChange={onChange}
 					extensions={extensions}
 					height="100%"
 					theme="none"

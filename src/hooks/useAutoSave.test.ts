@@ -43,29 +43,35 @@ describe("useAutoSave", () => {
 	});
 
 	it("starts with saved status", () => {
-		const { result } = renderHook(() => useAutoSave("test.md", "initial"));
+		const { result } = renderHook(() => useAutoSave("test.md", () => "initial"));
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
 	it("transitions to unsaved when content changes", () => {
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("unsaved");
 	});
 
 	it("auto-saves after debounce period", async () => {
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 
 		await act(async () => {
@@ -77,13 +83,16 @@ describe("useAutoSave", () => {
 	});
 
 	it("saveNow cancels debounce and saves immediately", async () => {
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("unsaved");
 
 		await act(async () => {
@@ -102,7 +111,7 @@ describe("useAutoSave", () => {
 	});
 
 	it("skips save when content matches lastSaved", async () => {
-		const { result } = renderHook(() => useAutoSave("test.md", "initial"));
+		const { result } = renderHook(() => useAutoSave("test.md", () => "initial"));
 
 		result.current.markSaved("initial");
 
@@ -115,9 +124,9 @@ describe("useAutoSave", () => {
 	});
 
 	it("markSaved updates lastSaved and sets saved status", () => {
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
@@ -126,20 +135,26 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 
 		// Content matching lastSaved should not trigger unsaved
-		rerender({ content: "initial" });
+		currentContent = "initial";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
 	it("transitions to error on save failure", async () => {
 		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
@@ -151,13 +166,16 @@ describe("useAutoSave", () => {
 	it("resets from error to unsaved on next edit", async () => {
 		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
@@ -166,29 +184,38 @@ describe("useAutoSave", () => {
 
 		mockedWriteFile.mockResolvedValue(undefined);
 
-		rerender({ content: "changed again" });
+		currentContent = "changed again";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("unsaved");
 	});
 
 	it("resets debounce timer on rapid edits", async () => {
 		mockedWriteFile.mockClear();
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
-		rerender({ content: "edit1" });
+		currentContent = "edit1";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(1500);
 		});
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 
-		rerender({ content: "edit2" });
+		currentContent = "edit2";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(1500);
@@ -202,22 +229,26 @@ describe("useAutoSave", () => {
 	});
 
 	it("flushes pending changes to old path when filePath changes", async () => {
-		const { result, rerender } = renderHook(
-			({ filePath, content }) => useAutoSave(filePath, content),
-			{ initialProps: { filePath: "a.md", content: "initial" } },
-		);
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Edit content for file A
-		rerender({ filePath: "a.md", content: "edited A" });
+		currentContent = "edited A";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("unsaved");
 
 		// Switch to file B — should flush "edited A" to "a.md"
 		await act(async () => {
-			rerender({ filePath: "b.md", content: "edited A" });
+			rerender({ filePath: "b.md" });
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
@@ -226,24 +257,28 @@ describe("useAutoSave", () => {
 	});
 
 	it("shows error when flush save fails on file switch", async () => {
-		const { result, rerender } = renderHook(
-			({ filePath, content }) => useAutoSave(filePath, content),
-			{ initialProps: { filePath: "a.md", content: "initial" } },
-		);
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Edit content for file A
-		rerender({ filePath: "a.md", content: "edited A" });
+		currentContent = "edited A";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// Make flush save fail
 		mockedWriteFile.mockRejectedValueOnce(new Error("disk full"));
 
 		// Switch to file B — flush should fail
 		await act(async () => {
-			rerender({ filePath: "b.md", content: "edited A" });
+			rerender({ filePath: "b.md" });
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
@@ -251,10 +286,11 @@ describe("useAutoSave", () => {
 	});
 
 	it("does not save to old path when content is unchanged on switch", async () => {
-		const { result, rerender } = renderHook(
-			({ filePath, content }) => useAutoSave(filePath, content),
-			{ initialProps: { filePath: "a.md", content: "initial" } },
-		);
+		const currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
 
 		act(() => {
 			result.current.markSaved("initial");
@@ -264,31 +300,35 @@ describe("useAutoSave", () => {
 
 		// Switch without editing — no save should occur
 		await act(async () => {
-			rerender({ filePath: "b.md", content: "initial" });
+			rerender({ filePath: "b.md" });
 		});
 
 		expect(mockedWriteFile).not.toHaveBeenCalled();
 	});
 
 	it("cancels pending debounce on filePath change", async () => {
-		const { result, rerender } = renderHook(
-			({ filePath, content }) => useAutoSave(filePath, content),
-			{ initialProps: { filePath: "a.md", content: "initial" } },
-		);
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Edit to start debounce timer
-		rerender({ filePath: "a.md", content: "edited" });
+		currentContent = "edited";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("unsaved");
 
 		mockedWriteFile.mockClear();
 
 		// Switch file — flush happens immediately, debounce cancelled
 		await act(async () => {
-			rerender({ filePath: "b.md", content: "edited" });
+			rerender({ filePath: "b.md" });
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
@@ -320,23 +360,23 @@ describe("useAutoSave", () => {
 					}),
 			);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Save A starts (content "v1")
-		rerender({ content: "v1" });
+		currentContent = "v1";
 		await act(async () => {
 			result.current.saveNow();
 		});
 		expect(result.current.saveStatus).toBe("saving");
 
 		// Save B starts before A completes (content "v2")
-		rerender({ content: "v2" });
+		currentContent = "v2";
 		await act(async () => {
 			result.current.saveNow();
 		});
@@ -356,13 +396,13 @@ describe("useAutoSave", () => {
 	});
 
 	it("saveNow returns true on successful save", async () => {
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
 
 		let saved!: boolean;
 		await act(async () => {
@@ -380,13 +420,13 @@ describe("useAutoSave", () => {
 
 		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
 
 		let saved!: boolean;
 		await act(async () => {
@@ -404,7 +444,7 @@ describe("useAutoSave", () => {
 	it("saveNow returns true when content is already saved (no-op)", async () => {
 		mockedWriteFile.mockClear();
 
-		const { result } = renderHook(() => useAutoSave("test.md", "initial"));
+		const { result } = renderHook(() => useAutoSave("test.md", () => "initial"));
 
 		result.current.markSaved("initial");
 
@@ -435,16 +475,19 @@ describe("useAutoSave", () => {
 			return Promise.resolve();
 		});
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Trigger auto-save with "v1"
-		rerender({ content: "v1" });
+		currentContent = "v1";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
@@ -452,7 +495,7 @@ describe("useAutoSave", () => {
 		expect(writeOrder).toEqual(["v1\n"]);
 
 		// User edits to "v2" and calls saveNow (chains on inflightRef)
-		rerender({ content: "v2" });
+		currentContent = "v2";
 		act(() => {
 			result.current.saveNow().catch(() => {});
 		});
@@ -473,13 +516,16 @@ describe("useAutoSave", () => {
 	it("trims trailing whitespace when trimTrailingWhitespace is true", async () => {
 		useSettingsStore.setState({ trimTrailingWhitespace: true });
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "hello world   \nfoo\t\t\n" });
+		currentContent = "hello world   \nfoo\t\t\n";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
@@ -492,13 +538,16 @@ describe("useAutoSave", () => {
 	it("preserves trailing whitespace when trimTrailingWhitespace is false", async () => {
 		useSettingsStore.setState({ trimTrailingWhitespace: false });
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "hello world   \nfoo\t\t" });
+		currentContent = "hello world   \nfoo\t\t";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
@@ -513,14 +562,17 @@ describe("useAutoSave", () => {
 		useSettingsStore.setState({ trimTrailingWhitespace: true });
 		mockedWriteFile.mockClear();
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
 		// Edit to content that differs only by trailing whitespace
-		rerender({ content: "initial   " });
+		currentContent = "initial   ";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// After processing, "initial   " → "initial\n" which matches saved content
 		await act(async () => {
@@ -535,13 +587,16 @@ describe("useAutoSave", () => {
 	it("schedules auto-retry on transient save error", async () => {
 		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// Trigger auto-save
 		await act(async () => {
@@ -561,13 +616,16 @@ describe("useAutoSave", () => {
 	it("does not retry on non-transient save error", async () => {
 		mockedWriteFile.mockRejectedValue(kindError("NOT_FOUND", "Not found: /test.md"));
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
@@ -594,13 +652,16 @@ describe("useAutoSave", () => {
 			.mockRejectedValueOnce("Connection timed out")
 			.mockRejectedValueOnce(kindError("EACCES", "Permission denied"));
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// Trigger auto-save (fails with transient error → retrying)
 		await act(async () => {
@@ -622,13 +683,16 @@ describe("useAutoSave", () => {
 	it("cancels retry when content changes", async () => {
 		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// Trigger auto-save (fails)
 		await act(async () => {
@@ -639,7 +703,10 @@ describe("useAutoSave", () => {
 		mockedWriteFile.mockClear();
 
 		// Edit again before retry fires — retry should be cancelled
-		rerender({ content: "changed again" });
+		currentContent = "changed again";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		expect(result.current.saveStatus).toBe("unsaved");
 
 		// Advance past original retry time — the new debounce save should fire, not the retry
@@ -652,13 +719,16 @@ describe("useAutoSave", () => {
 	it("saveNow cancels pending retry timer", async () => {
 		mockedWriteFile.mockRejectedValueOnce("Connection timed out").mockResolvedValue(undefined);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// Trigger auto-save (fails with transient error → retry scheduled at 5s)
 		await act(async () => {
@@ -690,12 +760,12 @@ describe("useAutoSave", () => {
 
 		mockedWriteFile.mockRejectedValue("Connection timed out");
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
-		rerender({ content: "changed" });
+		currentContent = "changed";
 
 		let saved!: boolean;
 		await act(async () => {
@@ -736,16 +806,16 @@ describe("useAutoSave", () => {
 			)
 			.mockResolvedValueOnce(undefined);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// First saveNow starts (will be slow — manually rejected later)
-		rerender({ content: "v1" });
+		currentContent = "v1";
 		act(() => {
 			result.current.saveNow();
 		});
@@ -753,7 +823,7 @@ describe("useAutoSave", () => {
 		await act(async () => {});
 
 		// Second saveNow starts before the first completes (chains on inflightRef)
-		rerender({ content: "v2" });
+		currentContent = "v2";
 		act(() => {
 			result.current.saveNow();
 		});
@@ -778,36 +848,37 @@ describe("useAutoSave", () => {
 				}),
 		);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Edit to "v1" and trigger auto-save
-		rerender({ content: "v1" });
+		currentContent = "v1";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
 		expect(mockedWriteFile).toHaveBeenCalledTimes(1);
 		expect(result.current.saveStatus).toBe("saving");
 
-		// While write is in-flight, content reverts to saved value
-		rerender({ content: "initial" });
+		// While write is in-flight, content reverts to saved value, then changes to "v2"
+		currentContent = "initial";
+		currentContent = "v2";
 
-		// Then changes to "v2"
-		rerender({ content: "v2" });
-
-		// Content effect sees "v2" !== lastSavedRef ("initial\n") → sets timer.
-		// But now resolve the in-flight save for "v1" — lastSavedRef becomes "v1\n".
+		// Content is now "v2" !== lastSavedRef ("initial\n"). Resolve the in-flight
+		// save for "v1" — lastSavedRef becomes "v1\n".
 		mockedWriteFile.mockResolvedValue(undefined);
 		await act(async () => {
 			resolveSave();
 		});
 
-		// The success handler detects contentRef ("v2") !== saved ("v1\n")
+		// The success handler detects getContent() ("v2") !== saved ("v1\n")
 		// and sets status to "unsaved", scheduling a follow-up timer.
 		expect(result.current.saveStatus).toBe("unsaved");
 
@@ -830,16 +901,19 @@ describe("useAutoSave", () => {
 				}),
 		);
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		act(() => {
 			result.current.markSaved("initial");
 		});
 
 		// Edit and trigger save
-		rerender({ content: "v1" });
+		currentContent = "v1";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});
@@ -866,13 +940,16 @@ describe("useAutoSave", () => {
 
 		mockedWriteFile.mockRejectedValue("Connection timed out");
 
-		const { result, rerender } = renderHook(({ content }) => useAutoSave("test.md", content), {
-			initialProps: { content: "initial" },
-		});
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
 
 		result.current.markSaved("initial");
 
-		rerender({ content: "changed" });
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
 
 		// Initial save fails — status should be "retrying"
 		await act(async () => {
@@ -921,13 +998,15 @@ describe("useAutoSave", () => {
 			const composing = { value: true };
 			const isComposing = () => composing.value;
 
-			const { result, rerender } = renderHook(
-				({ content }) => useAutoSave("test.md", content, isComposing),
-				{ initialProps: { content: "initial" } },
-			);
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result } = renderHook(() => useAutoSave("test.md", getContent, isComposing));
 
 			result.current.markSaved("initial");
-			rerender({ content: "日本語" });
+			currentContent = "日本語";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			// Advance past debounce period
 			await act(async () => {
@@ -965,24 +1044,26 @@ describe("useAutoSave", () => {
 			const composing = { value: false };
 			const isComposing = () => composing.value;
 
-			const { result, rerender } = renderHook(
-				({ content }) => useAutoSave("test.md", content, isComposing),
-				{ initialProps: { content: "initial" } },
-			);
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result } = renderHook(() => useAutoSave("test.md", getContent, isComposing));
 
 			act(() => {
 				result.current.markSaved("initial");
 			});
 
 			// Edit to "v1" and trigger auto-save
-			rerender({ content: "v1" });
+			currentContent = "v1";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 			await act(async () => {
 				vi.advanceTimersByTime(2000);
 			});
 			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
 
 			// While write is in-flight, content changes to "v2"
-			rerender({ content: "v2" });
+			currentContent = "v2";
 
 			// Start composing before save completes
 			composing.value = true;
@@ -1016,13 +1097,12 @@ describe("useAutoSave", () => {
 		it("saveNow saves immediately even during IME composition", async () => {
 			const isComposing = () => true;
 
-			const { result, rerender } = renderHook(
-				({ content }) => useAutoSave("test.md", content, isComposing),
-				{ initialProps: { content: "initial" } },
-			);
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result } = renderHook(() => useAutoSave("test.md", getContent, isComposing));
 
 			result.current.markSaved("initial");
-			rerender({ content: "changed" });
+			currentContent = "changed";
 
 			await act(async () => {
 				await result.current.saveNow();
@@ -1036,13 +1116,15 @@ describe("useAutoSave", () => {
 			const composing = { value: true };
 			const isComposing = () => composing.value;
 
-			const { result, rerender } = renderHook(
-				({ content }) => useAutoSave("test.md", content, isComposing),
-				{ initialProps: { content: "initial" } },
-			);
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result } = renderHook(() => useAutoSave("test.md", getContent, isComposing));
 
 			result.current.markSaved("initial");
-			rerender({ content: "v1" });
+			currentContent = "v1";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			// Advance past debounce — enters composition defer loop
 			await act(async () => {
@@ -1052,9 +1134,12 @@ describe("useAutoSave", () => {
 
 			// Content changes — should cancel defer and start new debounce
 			composing.value = false;
-			rerender({ content: "v2" });
+			currentContent = "v2";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
-			// Old defer timer should not fire (cancelled by content effect cleanup)
+			// Old defer timer should not fire (cancelled by scheduleAutoSave)
 			await act(async () => {
 				vi.advanceTimersByTime(200);
 			});
@@ -1073,13 +1158,15 @@ describe("useAutoSave", () => {
 			const composing = { value: false };
 			const isComposing = () => composing.value;
 
-			const { result, rerender } = renderHook(
-				({ content }) => useAutoSave("test.md", content, isComposing),
-				{ initialProps: { content: "initial" } },
-			);
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result } = renderHook(() => useAutoSave("test.md", getContent, isComposing));
 
 			result.current.markSaved("initial");
-			rerender({ content: "changed" });
+			currentContent = "changed";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			// Trigger auto-save (fails with transient error → retry scheduled at 5s)
 			await act(async () => {
@@ -1114,9 +1201,11 @@ describe("useAutoSave", () => {
 			const isComposing = () => composing.value;
 			const onFlushComplete = vi.fn();
 
+			let currentContent = "initial";
+			const getContent = () => currentContent;
 			const { result, rerender } = renderHook(
-				({ filePath, content }) => useAutoSave(filePath, content, isComposing, onFlushComplete),
-				{ initialProps: { filePath: "a.md", content: "initial" } },
+				({ filePath }) => useAutoSave(filePath, getContent, isComposing, onFlushComplete),
+				{ initialProps: { filePath: "a.md" } },
 			);
 
 			act(() => {
@@ -1124,11 +1213,14 @@ describe("useAutoSave", () => {
 			});
 
 			// Edit content for file A
-			rerender({ filePath: "a.md", content: "edited A" });
+			currentContent = "edited A";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			// Switch to file B while composing — flush should be deferred
 			await act(async () => {
-				rerender({ filePath: "b.md", content: "edited A" });
+				rerender({ filePath: "b.md" });
 			});
 			expect(mockedWriteFile).not.toHaveBeenCalled();
 
@@ -1157,9 +1249,11 @@ describe("useAutoSave", () => {
 			const isComposing = () => composing.value;
 			const onFlushComplete = vi.fn();
 
+			let currentContent = "initial A";
+			const getContent = () => currentContent;
 			const { result, rerender } = renderHook(
-				({ filePath, content }) => useAutoSave(filePath, content, isComposing, onFlushComplete),
-				{ initialProps: { filePath: "a.md", content: "initial A" } },
+				({ filePath }) => useAutoSave(filePath, getContent, isComposing, onFlushComplete),
+				{ initialProps: { filePath: "a.md" } },
 			);
 
 			act(() => {
@@ -1167,22 +1261,28 @@ describe("useAutoSave", () => {
 			});
 
 			// Make A dirty
-			rerender({ filePath: "a.md", content: "edited A" });
+			currentContent = "edited A";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			// Switch A → B while composing (schedules flush of A)
 			await act(async () => {
-				rerender({ filePath: "b.md", content: "edited A" });
+				rerender({ filePath: "b.md" });
 			});
 
 			// Mark B as loaded with some content so a B→C switch can find unsaved diff
 			act(() => {
 				result.current.markSaved("initial B");
 			});
-			rerender({ filePath: "b.md", content: "edited B" });
+			currentContent = "edited B";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			// Switch B → C while composing (schedules flush of B — must NOT leave A's flush dangling)
 			await act(async () => {
-				rerender({ filePath: "c.md", content: "edited B" });
+				rerender({ filePath: "c.md" });
 			});
 
 			// Mark C as loaded
@@ -1206,10 +1306,11 @@ describe("useAutoSave", () => {
 
 	describe("recovery defenses", () => {
 		it("saveNow clears the awaiting-new-file gate so autosave resumes if markSaved was missed", async () => {
-			const { result, rerender } = renderHook(
-				({ filePath, content }) => useAutoSave(filePath, content),
-				{ initialProps: { filePath: "a.md", content: "initial" } },
-			);
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+				initialProps: { filePath: "a.md" },
+			});
 
 			act(() => {
 				result.current.markSaved("initial");
@@ -1218,11 +1319,14 @@ describe("useAutoSave", () => {
 			// Switch to B but never call markSaved (simulates parent component bug or
 			// readFile race that drops markSaved). awaitingNewFileRef stays true.
 			await act(async () => {
-				rerender({ filePath: "b.md", content: "initial" });
+				rerender({ filePath: "b.md" });
 			});
 
 			// Subsequent edits to B should be blocked from autosave (current behavior).
-			rerender({ filePath: "b.md", content: "edited B" });
+			currentContent = "edited B";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 			await act(async () => {
 				vi.advanceTimersByTime(2000);
 			});
@@ -1237,7 +1341,10 @@ describe("useAutoSave", () => {
 			mockedWriteFile.mockClear();
 
 			// Further edits should now autosave — gate is lifted by the manual save.
-			rerender({ filePath: "b.md", content: "edited B more" });
+			currentContent = "edited B more";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 			await act(async () => {
 				vi.advanceTimersByTime(2000);
 			});
