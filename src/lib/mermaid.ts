@@ -270,9 +270,17 @@ async function ensureInitialized(
 ): Promise<void> {
 	if (!mermaidModule) {
 		if (!initPromise) {
-			initPromise = import("mermaid").then((m) => {
-				mermaidModule = m;
-			});
+			initPromise = import("mermaid")
+				.then((m) => {
+					mermaidModule = m;
+				})
+				.catch((e: unknown) => {
+					// rejected promise を抱えたままだと以後リトライ不能になるため、
+					// リセット + rethrow（katex 側 ensureKatex は fire-and-forget で握りつぶすが、
+					// こちらは await されるため rethrow が必要）。
+					initPromise = null;
+					throw e;
+				});
 		}
 		await initPromise;
 	}
