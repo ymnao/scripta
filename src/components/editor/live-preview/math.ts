@@ -365,7 +365,9 @@ export interface MathFieldValue {
 
 /** math candidate 判定の marker 文字。挿入/削除テキストに `$` が含まれれば
  *  新規候補の出現/消滅の可能性があるため full rebuild にフォールバックする。 */
-const MATH_MARKER_RE = /\$/g;
+// non-global にすることで `.test()` が stateless になり、呼び出しをまたいだ
+// lastIndex 状態漏れ (false negative = rebuild 漏れ) が構造的に発生しなくなる。
+const MATH_MARKER_RE = /\$/;
 
 /** テスト用に export。StateField 自体を state.field() で直接読むことで、
  *  update() の rebuild / skip 判定を EditorView / 実 focus イベントなしに検証できる

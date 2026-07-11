@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import type { ChangeDesc, Transaction } from "@codemirror/state";
 import type { DecorationSet, EditorView, ViewUpdate } from "@codemirror/view";
+import { cursorInRange } from "./cursor-utils";
 
 /** 「カーソル位置フィルタ前」の全マッチ範囲 (candidate)。 */
 export interface CandidateRange {
@@ -70,13 +71,70 @@ export function handleComposingUpdate(
 }
 
 /**
+ * 挿入/削除テキストが marker 文字を含むかどうか (`.test()` のみで消費、副作用なし)。
+ * 呼び出し側は non-global regex (`/\$/` 等) を渡すこと — global (`/g`) では
+ * `.test()` が lastIndex を更新し呼び出しをまたいで状態が漏れる。stateless に
+ * することで前バージョンの `markerRe.lastIndex = 0` reset パターンが不要になる。
+ */
+function changedTextContainsMarker(tr: Transaction, markerRe: RegExp): boolean {
+	let hit = false;
+	tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+		if (hit) return;
+		if (markerRe.test(inserted.toString())) {
+			hit = true;
+			return;
+		}
+		if (fromA < toA) {
+			const deletedText = tr.startState.doc.sliceString(fromA, toA);
+			if (markerRe.test(deletedText)) hit = true;
+		}
+	});
+	return hit;
+}
+
+/**
+ * 変更範囲 (新座標) が candidates と交差 or ±1 行 隣接するかどうか。
+ * ±1 行 pad は table/fence の marker 行対策 (issue #303 の設計方針)。
+ * candidates は tr.changes.mapPos で新座標へ写像してから比較する。
+ */
+function changedRangeTouchesCandidates(
+	tr: Transaction,
+	candidates: readonly CandidateRange[],
+): boolean {
+	const newDoc = tr.state.doc;
+	// candidates を新座標へ 1 回だけ写像 (iterChanges の外で hoist)。
+	const mapped: CandidateRange[] = [];
+	for (const c of candidates) {
+		mapped.push({
+			from: tr.changes.mapPos(c.from, -1),
+			to: tr.changes.mapPos(c.to, 1),
+		});
+	}
+	let hit = false;
+	tr.changes.iterChanges((_fromA, _toA, fromB, toB, _inserted) => {
+		if (hit) return;
+		// ±1 行 pad は変更範囲側で 1 回計算 (candidate ごとに再計算しない)。
+		const padFromLine = Math.max(1, newDoc.lineAt(Math.min(fromB, newDoc.length)).number - 1);
+		const padToLine = Math.min(
+			newDoc.lines,
+			newDoc.lineAt(Math.min(toB, newDoc.length)).number + 1,
+		);
+		const padFrom = newDoc.line(padFromLine).from;
+		const padTo = newDoc.line(padToLine).to;
+		for (const m of mapped) {
+			if (m.from < padTo && m.to > padFrom) {
+				hit = true;
+				return;
+			}
+		}
+	});
+	return hit;
+}
+
+/**
  * blockFieldNeedsRebuild: docChanged 時に full rebuild が必要か判定する。
  * ① 挿入/削除テキストが marker 文字を含むなら true (新規候補の出現/消滅を検知)
- *    - 挿入: iterChanges の `inserted` を文字列化
- *    - 削除: `tr.startState.sliceDoc(fromA, toA)` (削除範囲の旧テキスト)
- * ② 変更範囲 (fromB..toB を旧座標 fromA..toA) が candidates と交差 or ±1 行 隣接するなら true
- *    - candidates は tr.changes.mapPos で新座標へ写像してから比較
- *    - テーブル/fence は行構造なので行 pad が安全 (issue の設計通り)
+ * ② 変更範囲 (新座標) が candidates と交差 or ±1 行 隣接するなら true
  * どちらも false なら false = decos.map + candidates map で済む。
  */
 export function blockFieldNeedsRebuild(
@@ -85,95 +143,35 @@ export function blockFieldNeedsRebuild(
 	markerRe: RegExp,
 ): boolean {
 	if (!tr.docChanged) return false;
-	let needsRebuild = false;
-	tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-		if (needsRebuild) return;
-		// ① marker 文字判定。global regex は呼び出しをまたいで lastIndex が
-		// 残る可能性があるので `.test()` 前に必ず reset (前回 true で早期 return した
-		// 場合の残留対策も含む)。
-		const insertedText = inserted.toString();
-		markerRe.lastIndex = 0;
-		if (markerRe.test(insertedText)) {
-			needsRebuild = true;
-			return;
-		}
-		const deletedText = fromA < toA ? tr.startState.doc.sliceString(fromA, toA) : "";
-		if (deletedText) {
-			markerRe.lastIndex = 0;
-			if (markerRe.test(deletedText)) {
-				needsRebuild = true;
-				return;
-			}
-		}
-		markerRe.lastIndex = 0;
-		// ② 変更範囲と candidates の交差 / ±1 行 隣接
-		// candidates を新座標へ写像
-		for (const c of candidates) {
-			const mappedFrom = tr.changes.mapPos(c.from, -1);
-			const mappedTo = tr.changes.mapPos(c.to, 1);
-			// 変更範囲 (新座標での fromB..toB) と mapped candidate の交差
-			const changeFromB = tr.changes.mapPos(fromA, -1);
-			const changeToB = tr.changes.mapPos(toA, 1);
-			// ±1 行 pad: 変更前後の行を含めて比較 (issue の設計、テーブル/fence の marker 行対策で
-			// math も同型)
-			const newDoc = tr.state.doc;
-			const padFromLine = Math.max(
-				1,
-				newDoc.lineAt(Math.min(changeFromB, newDoc.length)).number - 1,
-			);
-			const padToLine = Math.min(
-				newDoc.lines,
-				newDoc.lineAt(Math.min(changeToB, newDoc.length)).number + 1,
-			);
-			const padFrom = newDoc.line(padFromLine).from;
-			const padTo = newDoc.line(padToLine).to;
-			if (mappedFrom < padTo && mappedTo > padFrom) {
-				needsRebuild = true;
-				return;
-			}
-		}
-	});
-	return needsRebuild;
+	return changedTextContainsMarker(tr, markerRe) || changedRangeTouchesCandidates(tr, candidates);
 }
 
 /**
- * cursorTouchesCandidates: selection 変化時、旧/新カーソル行が candidates と交差するときのみ true。
+ * cursorTouchesCandidates: selection 変化時、カーソル行が candidates と交差するときのみ true。
  * 現状の cursorLinesChanged 比較 (行が変わる度全再構築) を置換する。
+ * 呼び出し規約: docChanged=false の transaction 限定 (呼び出し側で
+ * `if (tr.docChanged) ... return; if (tr.selection && cursorTouchesCandidates(tr, ...))` の形)。
+ * この規約下では tr.changes は恒等写像なので candidates を写像する必要はない。
  */
 export function cursorTouchesCandidates(
 	tr: Transaction,
 	candidates: readonly CandidateRange[],
 ): boolean {
 	if (!tr.selection) return false;
-	// 旧カーソル位置 (startState.selection) と新カーソル位置の行番号を集計
-	const oldSel = tr.startState.selection;
-	const newSel = tr.state.selection;
-	const oldDoc = tr.startState.doc;
-	const newDoc = tr.state.doc;
-	const oldLines = new Set<number>();
-	const newLines = new Set<number>();
-	for (const r of oldSel.ranges) {
-		oldLines.add(oldDoc.lineAt(Math.min(r.head, oldDoc.length)).number);
+	// 旧カーソル位置 (startState.selection) と新カーソル位置の行番号を集計。
+	// docChanged=false 前提なので oldDoc === newDoc、oldLines/newLines を同じ doc で集める。
+	const doc = tr.state.doc;
+	const cursorLines = new Set<number>();
+	for (const r of tr.startState.selection.ranges) {
+		cursorLines.add(doc.lineAt(Math.min(r.head, doc.length)).number);
 	}
-	for (const r of newSel.ranges) {
-		newLines.add(newDoc.lineAt(Math.min(r.head, newDoc.length)).number);
+	for (const r of tr.state.selection.ranges) {
+		cursorLines.add(doc.lineAt(Math.min(r.head, doc.length)).number);
 	}
-	// candidates の行を旧/新座標で判定
 	for (const c of candidates) {
-		// 旧座標での candidate の行範囲
-		const oldFromLine = oldDoc.lineAt(Math.min(c.from, oldDoc.length)).number;
-		const oldToLine = oldDoc.lineAt(Math.min(c.to, oldDoc.length)).number;
-		for (let ln = oldFromLine; ln <= oldToLine; ln++) {
-			if (oldLines.has(ln)) return true;
-		}
-		// 新座標では tr.changes.mapPos で写像 (candidates はまだ update() で map してない前提)
-		const newFrom = tr.changes.mapPos(c.from, -1);
-		const newTo = tr.changes.mapPos(c.to, 1);
-		const newFromLine = newDoc.lineAt(Math.min(newFrom, newDoc.length)).number;
-		const newToLine = newDoc.lineAt(Math.min(newTo, newDoc.length)).number;
-		for (let ln = newFromLine; ln <= newToLine; ln++) {
-			if (newLines.has(ln)) return true;
-		}
+		const fromLine = doc.lineAt(Math.min(c.from, doc.length)).number;
+		const toLine = doc.lineAt(Math.min(c.to, doc.length)).number;
+		if (cursorInRange(cursorLines, fromLine, toLine)) return true;
 	}
 	return false;
 }

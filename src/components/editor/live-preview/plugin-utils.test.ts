@@ -163,41 +163,32 @@ describe("handleComposingUpdate", () => {
 	});
 });
 
-// #303: blockFieldNeedsRebuild は global regex を呼び出しをまたいで再利用する。
-// `.test()` が true を返すと lastIndex が非 0 のまま残り、次の呼び出しで先頭からの
-// 検索が失敗し得る (false negative → rebuild 漏れ = widget 更新されない regression)。
-// helper 側で `.test()` 前に必ず lastIndex を reset することを担保する回帰テスト。
-describe("blockFieldNeedsRebuild — global regex lastIndex reset", () => {
+// #303: blockFieldNeedsRebuild は non-global regex 前提。/g を渡すと `.test()` が
+// lastIndex を更新し呼び出しをまたいで状態が漏れる (false negative = rebuild 漏れ =
+// widget 更新されない regression)。math.ts は non-global (`/\$/`) を使うことで
+// stateless 化しているが、将来 mermaid/table で誤って /g を渡した場合の防御も兼ねて、
+// non-global で連続呼び出しが安定して動くことと、削除経路の判定を確認する。
+describe("blockFieldNeedsRebuild — marker detection stability", () => {
 	function makeInsertTransaction(doc: string, at: number, insert: string): Transaction {
 		const state = EditorState.create({ doc });
 		return state.update({ changes: { from: at, to: at, insert } });
 	}
 
-	it("does not leak lastIndex across calls with a shared global regex", () => {
-		const marker = /\$/g;
+	it("stateless non-global regex is safe across repeated calls", () => {
+		const marker = /\$/;
 		const candidates: CandidateRange[] = [];
 
-		// 1 回目: 挿入テキストに marker が含まれる → true (実装内で lastIndex が
-		// 非 0 のまま残る可能性がある)
-		const tr1 = makeInsertTransaction("hello", 5, "$");
-		expect(blockFieldNeedsRebuild(tr1, candidates, marker)).toBe(true);
-
-		// 2 回目: 短い挿入 "$" (長さ 1) — もし lastIndex が 1 以上残っていたら
-		// `.test("$")` は false を返す (false negative = rebuild 漏れ)
-		const tr2 = makeInsertTransaction("hello", 5, "$");
-		expect(blockFieldNeedsRebuild(tr2, candidates, marker)).toBe(true);
-
-		// 3 回目: marker を含まない挿入 → false
-		const tr3 = makeInsertTransaction("hello", 5, "abc");
-		expect(blockFieldNeedsRebuild(tr3, candidates, marker)).toBe(false);
-
-		// 4 回目: 再度 marker 挿入 → true (前回 false でも lastIndex が正しく 0 に戻っているか)
-		const tr4 = makeInsertTransaction("hello", 5, "$");
-		expect(blockFieldNeedsRebuild(tr4, candidates, marker)).toBe(true);
+		// 連続呼び出しで挙動が一致する (lastIndex 状態を持たない)
+		for (let i = 0; i < 4; i++) {
+			const trHit = makeInsertTransaction("hello", 5, "$");
+			expect(blockFieldNeedsRebuild(trHit, candidates, marker)).toBe(true);
+			const trMiss = makeInsertTransaction("hello", 5, "abc");
+			expect(blockFieldNeedsRebuild(trMiss, candidates, marker)).toBe(false);
+		}
 	});
 
 	it("detects marker in deletion via startState.sliceDoc", () => {
-		const marker = /\$/g;
+		const marker = /\$/;
 		const candidates: CandidateRange[] = [];
 
 		// "$" を含む範囲を削除
