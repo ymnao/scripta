@@ -142,6 +142,45 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
+	// #302 regression: タブ切替キャッシュ復元時、cached.content !== cached.savedContent の
+	// ケース (flush 失敗 / IME defer で savedContent が stale なまま復帰) を dirty 状態
+	// として復元し autosave を張り直す。旧設計は useEffect([content, ...]) が自動で
+	// 再導出していたが、新設計は onDocChanged 経路が (view.setState / remount 初期化で)
+	// 発火しないため、markSaved 側で明示的に検知する必要がある。
+	it("markSaved with dirty currentContent restores unsaved status and arms autosave", async () => {
+		const currentContent = "dirty edits";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
+
+		act(() => {
+			// savedContent と currentContent が異なる (キャッシュ dirty tab を復元するシナリオ)
+			result.current.markSaved("saved on disk", currentContent);
+		});
+
+		expect(result.current.saveStatus).toBe("unsaved");
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+
+		// autosave debounce が張られているので、advance で writeFile が発火する
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("test.md", "dirty edits\n");
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("markSaved with matching currentContent stays saved (equivalent to no-arg form)", () => {
+		const currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
+
+		act(() => {
+			result.current.markSaved("initial", currentContent);
+		});
+
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
 	it("transitions to error on save failure", async () => {
 		mockedWriteFile.mockRejectedValue(kindError("EACCES", "Permission denied"));
 

@@ -140,13 +140,14 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	// Prefer in-memory cache to avoid reading stale disk content
 	// when the panel is closed and immediately reopened (the previous
 	// unmount's async save may still be in-flight).
-	// markSaved receives savedContent (confirmed on disk), NOT content,
-	// so a failed previous save is detected as a diff and retried.
+	// markSaved receives savedContent (confirmed on disk); currentContent を
+	// 併せて渡すことで、キャッシュに未保存編集が残っていた場合に dirty 状態を
+	// 復元して autosave 再スケジュールする (#302 regression fix)。
 	useEffect(() => {
 		const cached = scratchpadContentCache.get(scratchpadPath);
 		if (cached !== undefined) {
 			setContent(cached.content);
-			markSaved(cached.savedContent);
+			markSaved(cached.savedContent, cached.content);
 			setLoaded(true);
 			return;
 		}

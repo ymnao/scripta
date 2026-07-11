@@ -627,7 +627,11 @@ export function AppLayout() {
 		if (cached) {
 			contentLoadedForPathRef.current = activeTabPath;
 			savedContentRef.current = cached.savedContent;
-			markSaved(cached.savedContent);
+			// キャッシュに未保存編集が残っていた場合 (flush 失敗 / IME defer で
+			// savedContent が stale) は dirty 状態を復元する必要がある。
+			// setLoadedDoc + restoreSnapshot/remount のいずれも updateListener の
+			// docChanged を発火しないため、markSaved 側で content 差分を検知させる (#302 fix)。
+			markSaved(cached.savedContent, cached.content);
 			setLoadedDoc(cached.content);
 			// editorStateSnapshot が保存されていれば最新の extensions で組み立て直して
 			// undo/redo 履歴ごと復元する (#220)。失敗条件 (どれかでも該当):
@@ -870,6 +874,13 @@ export function AppLayout() {
 
 	const closingTabsRef = useRef<Set<number>>(new Set());
 
+	// save-before-navigate 系ハンドラで共通利用: 現在の doc が最終保存内容と異なれば
+	// saveNow() で強制フラッシュ。dirty でない or 保存成功なら true、失敗なら false。
+	const saveIfDirty = useCallback(async (): Promise<boolean> => {
+		if (getContent() === savedContentRef.current) return true;
+		return await saveNow();
+	}, [getContent, saveNow]);
+
 	const handleCloseTab = useCallback(
 		async (id: number) => {
 			if (closingTabsRef.current.has(id)) return;
@@ -889,10 +900,7 @@ export function AppLayout() {
 				}
 
 				if (id === state.activeTabId) {
-					if (getContent() !== savedContentRef.current) {
-						const saved = await saveNow();
-						if (!saved) return;
-					}
+					if (!(await saveIfDirty())) return;
 					tabCacheRef.current.delete(path);
 					closeTabById(id);
 					return;
@@ -904,10 +912,7 @@ export function AppLayout() {
 				// Re-check: tab may have become active during waitForPending
 				const currentState = useWorkspaceStore.getState();
 				if (id === currentState.activeTabId) {
-					if (getContent() !== savedContentRef.current) {
-						const saved = await saveNow();
-						if (!saved) return;
-					}
+					if (!(await saveIfDirty())) return;
 					tabCacheRef.current.delete(path);
 					closeTabById(id);
 					return;
@@ -936,7 +941,7 @@ export function AppLayout() {
 				closingTabsRef.current.delete(id);
 			}
 		},
-		[saveNow, closeTabById, waitForPending, getContent],
+		[closeTabById, waitForPending, saveIfDirty],
 	);
 
 	const handleFileRenamed = useCallback(
@@ -1020,10 +1025,7 @@ export function AppLayout() {
 	const handleFileSelect = useCallback(
 		async (path: string) => {
 			// Save current file before navigating if dirty
-			if (activeTabPath && getContent() !== savedContentRef.current) {
-				const saved = await saveNow();
-				if (!saved) return;
-			}
+			if (activeTabPath && !(await saveIfDirty())) return;
 			const state = useWorkspaceStore.getState();
 			if (state.activeTabPath && isNewTabPath(state.activeTabPath)) {
 				openFileFromNewTab(path);
@@ -1031,7 +1033,7 @@ export function AppLayout() {
 				navigateInTab(path);
 			}
 		},
-		[activeTabPath, navigateInTab, openFileFromNewTab, saveNow, getContent],
+		[activeTabPath, navigateInTab, openFileFromNewTab, saveIfDirty],
 	);
 
 	const handleFileOpenNewTab = useCallback(
@@ -1050,21 +1052,15 @@ export function AppLayout() {
 
 	const handleGoBack = useCallback(async () => {
 		// Save current file before navigating if dirty
-		if (activeTabPath && getContent() !== savedContentRef.current) {
-			const saved = await saveNow();
-			if (!saved) return;
-		}
+		if (activeTabPath && !(await saveIfDirty())) return;
 		goBackInTab();
-	}, [activeTabPath, goBackInTab, saveNow, getContent]);
+	}, [activeTabPath, goBackInTab, saveIfDirty]);
 
 	const handleGoForward = useCallback(async () => {
 		// Save current file before navigating if dirty
-		if (activeTabPath && getContent() !== savedContentRef.current) {
-			const saved = await saveNow();
-			if (!saved) return;
-		}
+		if (activeTabPath && !(await saveIfDirty())) return;
 		goForwardInTab();
-	}, [activeTabPath, goForwardInTab, saveNow, getContent]);
+	}, [activeTabPath, goForwardInTab, saveIfDirty]);
 
 	const handleCommandPaletteSelect = useCallback(
 		(filePath: string) => {

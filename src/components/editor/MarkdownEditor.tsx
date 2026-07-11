@@ -11,7 +11,7 @@ import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState, Prec, type SelectionRange } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import CodeMirror, { ExternalChange, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
 	type MouseEvent as ReactMouseEvent,
 	useCallback,
@@ -399,7 +399,13 @@ export function MarkdownEditor({
 			]),
 			EditorView.updateListener.of((update) => {
 				if (update.docChanged) {
-					onDocChangedRef.current?.();
+					// @uiw/react-codemirror が value prop 同期で dispatch する
+					// ExternalChange annotation 付き transaction はユーザー編集ではないので
+					// scheduleAutoSave を発火させない (dormant defense、#302 レビュー知見)。
+					const isExternal = update.transactions.some((tr) => tr.annotation(ExternalChange));
+					if (!isExternal) {
+						onDocChangedRef.current?.();
+					}
 				}
 				if (!(update.docChanged || update.selectionSet)) return;
 				const callback = onStatisticsRef.current;

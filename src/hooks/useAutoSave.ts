@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
 import { processContent } from "../lib/content";
@@ -21,7 +21,10 @@ interface SaveOptions {
 interface UseAutoSaveReturn {
 	saveStatus: SaveStatus;
 	saveNow: () => Promise<boolean>;
-	markSaved: (content: string) => void;
+	// currentContent 省略で従来通り status="saved" 化のみ。
+	// タブ切替キャッシュ復元等で「savedContent と現在の doc が異なる」ロード時に
+	// currentContent を渡すと dirty 状態を導出し debounce autosave を張る (#302)。
+	markSaved: (savedContent: string, currentContent?: string) => void;
 	waitForPending: () => Promise<void>;
 	getLastSavedContent: () => string;
 	scheduleAutoSave: () => void;
@@ -68,6 +71,29 @@ export function useAutoSave(
 		saveRetryCountRef.current = 0;
 	}, []);
 
+	// IME composition 中は保存を defer するタイマーを張る共通 helper。
+	// timerRef の張り直し + composition ループ + action の 3 パーツをカプセル化して、
+	// autosave debounce / follow-up / retry の 3 経路で同じ挙動を保つ。
+	const scheduleWithComposition = useCallback(
+		(
+			timerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>,
+			delay: number,
+			action: () => void,
+		): void => {
+			if (timerRef.current) {
+				clearTimeout(timerRef.current);
+			}
+			timerRef.current = setTimeout(function tick() {
+				if (isComposingRef.current?.()) {
+					timerRef.current = setTimeout(tick, IME_COMPOSITION_DEFER_MS);
+					return;
+				}
+				action();
+			}, delay);
+		},
+		[],
+	);
+
 	const save = useCallback(
 		(contentToSave: string, options?: SaveOptions): Promise<void> => {
 			if (!filePath) return Promise.resolve();
@@ -97,16 +123,9 @@ export function useAutoSave(
 					const currentProcessed = processContent(getContentRef.current(), tw);
 					if (currentProcessed !== processed) {
 						setSaveStatus("unsaved");
-						if (debounceTimerRef.current) {
-							clearTimeout(debounceTimerRef.current);
-						}
-						debounceTimerRef.current = setTimeout(function tryFollowUp() {
-							if (isComposingRef.current?.()) {
-								debounceTimerRef.current = setTimeout(tryFollowUp, IME_COMPOSITION_DEFER_MS);
-								return;
-							}
+						scheduleWithComposition(debounceTimerRef, followUpDelay, () => {
 							save(getContentRef.current()).catch(() => {});
-						}, followUpDelay);
+						});
 					} else {
 						setSaveStatus("saved");
 					}
@@ -122,13 +141,9 @@ export function useAutoSave(
 							saveRetryCountRef.current += 1;
 							const delay = SAVE_RETRY_BASE_MS * 2 ** (saveRetryCountRef.current - 1);
 							setSaveStatus("retrying");
-							retryTimerRef.current = setTimeout(function tryRetry() {
-								if (isComposingRef.current?.()) {
-									retryTimerRef.current = setTimeout(tryRetry, IME_COMPOSITION_DEFER_MS);
-									return;
-								}
+							scheduleWithComposition(retryTimerRef, delay, () => {
 								save(getContentRef.current()).catch(() => {});
-							}, delay);
+							});
 						} else {
 							setSaveStatus("error");
 							if (saveRetryCountRef.current > 0) {
@@ -140,7 +155,7 @@ export function useAutoSave(
 				},
 			);
 		},
-		[filePath, clearRetryState],
+		[filePath, clearRetryState, scheduleWithComposition],
 	);
 
 	// Flush pending changes to the OLD path when filePath changes
@@ -237,17 +252,10 @@ export function useAutoSave(
 			clearRetryState();
 		}
 
-		if (debounceTimerRef.current) {
-			clearTimeout(debounceTimerRef.current);
-		}
-		debounceTimerRef.current = setTimeout(function tryAutoSave() {
-			if (isComposingRef.current?.()) {
-				debounceTimerRef.current = setTimeout(tryAutoSave, IME_COMPOSITION_DEFER_MS);
-				return;
-			}
+		scheduleWithComposition(debounceTimerRef, autoSaveDelay, () => {
 			save(getContentRef.current()).catch(() => {});
-		}, autoSaveDelay);
-	}, [filePath, save, autoSaveDelay, clearRetryState]);
+		});
+	}, [filePath, save, autoSaveDelay, clearRetryState, scheduleWithComposition]);
 
 	useEffect(() => {
 		isMountedRef.current = true;
@@ -289,13 +297,32 @@ export function useAutoSave(
 		);
 	}, [save, clearRetryState]);
 
-	const markSaved = useCallback((savedContent: string) => {
-		// Normalize to match the format written to disk for consistent comparison
-		const { trimTrailingWhitespace } = useSettingsStore.getState();
-		lastSavedContentRef.current = processContent(savedContent, trimTrailingWhitespace);
-		awaitingNewFileRef.current = false;
-		setSaveStatus("saved");
-	}, []);
+	const markSaved = useCallback(
+		(savedContent: string, currentContent?: string): void => {
+			// Normalize to match the format written to disk for consistent comparison
+			const { trimTrailingWhitespace } = useSettingsStore.getState();
+			const processedSaved = processContent(savedContent, trimTrailingWhitespace);
+			lastSavedContentRef.current = processedSaved;
+			awaitingNewFileRef.current = false;
+
+			// キャッシュ復元で「disk に書けなかった編集が残ったまま復帰する」ケース (#302
+			// regression fix)。currentContent と savedContent が processContent 適用後で
+			// 一致すれば従来通り "saved"。異なれば dirty 状態を導出し debounce autosave を張る。
+			const dirty =
+				currentContent !== undefined &&
+				processContent(currentContent, trimTrailingWhitespace) !== processedSaved;
+			if (dirty) {
+				setSaveStatus("unsaved");
+				clearRetryState();
+				scheduleWithComposition(debounceTimerRef, autoSaveDelay, () => {
+					save(getContentRef.current()).catch(() => {});
+				});
+			} else {
+				setSaveStatus("saved");
+			}
+		},
+		[autoSaveDelay, clearRetryState, save, scheduleWithComposition],
+	);
 
 	const waitForPending = useCallback((): Promise<void> => {
 		return inflightRef.current;
