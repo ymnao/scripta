@@ -20,6 +20,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
+import { blockFieldNeedsRebuild, type CandidateRange, mapCandidates } from "./plugin-utils";
 import { findUnescapedPipe, trimToLastTableLine } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
@@ -1500,9 +1501,24 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 
 // ── Decoration builder (takes EditorState, not EditorView) ──
 
-export function buildTableDecorations(state: EditorState): DecorationSet {
+export interface TableFieldValue {
+	decos: DecorationSet;
+	candidates: CandidateRange[];
+}
+
+/** buildTableDecorations の内部実装。decoration set に加えて、StateField の差分
+ *  再構築判定 (blockFieldNeedsRebuild) が使う candidate 範囲 (`Table` node として
+ *  検出した全範囲) を返す。widget 化が rejected されたマッチ (parseTableFromLines
+ *  失敗 / rows < 2 / minCols < 2) も candidate に含める — それらが隣接編集で
+ *  non-table ⇔ table に切り替わりうる以上、bail-early は安全側 (false = full
+ *  rebuild) に倒すべきため (math.ts の buildMathDecorationsAndCandidates と同型)。 */
+function buildTableDecorationsAndCandidates(state: EditorState): {
+	decos: DecorationSet;
+	candidates: CandidateRange[];
+} {
 	const tree = syntaxTree(state);
 	const ranges: Range<Decoration>[] = [];
+	const candidates: CandidateRange[] = [];
 
 	tree.iterate({
 		enter(node) {
@@ -1510,6 +1526,10 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 
 			const startLine = state.doc.lineAt(node.from).number;
 			const endLine = trimToLastTableLine(state.doc, startLine, state.doc.lineAt(node.to).number);
+
+			const from = state.doc.line(startLine).from;
+			const to = state.doc.line(endLine).to;
+			candidates.push({ from, to });
 
 			const lines: string[] = [];
 			for (let l = startLine; l <= endLine; l++) {
@@ -1522,9 +1542,6 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 			const minCols = Math.min(...tableData.rows.map((r) => r.cells.length));
 			if (minCols < 2) return;
 
-			const from = state.doc.line(startLine).from;
-			const to = state.doc.line(endLine).to;
-
 			ranges.push(
 				Decoration.replace({
 					widget: new EditableTableWidget(tableData, from),
@@ -1536,16 +1553,31 @@ export function buildTableDecorations(state: EditorState): DecorationSet {
 		},
 	});
 
-	return Decoration.set(ranges, true);
+	return { decos: Decoration.set(ranges, true), candidates };
 }
+
+/** 公開 API: DecorationSet のみを返す (既存の呼び出し元 / テスト向けの後方互換ラッパー)。 */
+export function buildTableDecorations(state: EditorState): DecorationSet {
+	return buildTableDecorationsAndCandidates(state).decos;
+}
+
+/** table candidate 判定の marker 文字。挿入/削除テキストに `|` が含まれれば
+ *  新規候補の出現/消滅の可能性があるため full rebuild にフォールバックする。 */
+// non-global にすることで `.test()` が stateless になり、呼び出しをまたいだ
+// lastIndex 状態漏れ (false negative = rebuild 漏れ) が構造的に発生しなくなる。
+const TABLE_MARKER_RE = /\|/;
 
 // ── StateField (allows block + multi-line replace) ────
 
-const tableDecorationField = StateField.define<DecorationSet>({
+export const tableDecorationField = StateField.define<TableFieldValue>({
 	create(state) {
-		return buildTableDecorations(state);
+		return buildTableDecorationsAndCandidates(state);
 	},
-	update(decos, tr) {
+	update(value, tr) {
+		// focusTableCellEffect の副作用 (pendingFocus 更新) と rebuildTableDecos 判定は
+		// 1 pass で処理する。rebuild 効果があっても pendingFocus 側の副作用は落とさない
+		// ため、return は effects を全て走査してから行う。
+		let needsRebuild = false;
 		for (const effect of tr.effects) {
 			if (effect.is(focusTableCellEffect)) {
 				pendingFocus = {
@@ -1553,16 +1585,68 @@ const tableDecorationField = StateField.define<DecorationSet>({
 					row: effect.value.row,
 					col: effect.value.col,
 				};
+			} else if (effect.is(rebuildTableDecos)) {
+				needsRebuild = true;
 			}
 		}
+		if (needsRebuild) return buildTableDecorationsAndCandidates(tr.state);
 
-		if (tr.docChanged || tr.effects.some((e) => e.is(rebuildTableDecos))) {
-			return buildTableDecorations(tr.state);
+		if (tr.docChanged) {
+			if (blockFieldNeedsRebuild(tr, value.candidates, TABLE_MARKER_RE)) {
+				return buildTableDecorationsAndCandidates(tr.state);
+			}
+			return {
+				decos: value.decos.map(tr.changes),
+				candidates: mapCandidates(value.candidates, tr.changes),
+			};
 		}
-		return decos;
+
+		// table はカーソル出入りで見た目が変わらない (math と違い hasFocus に連動しない)
+		// ため、selection 変化での rebuild は不要。math のような cursorTouchesCandidates
+		// 分岐はここでは入れない。
+		return value;
 	},
-	provide: (f) => EditorView.decorations.from(f),
+	provide: (f) => EditorView.decorations.from(f, (v) => v.decos),
 });
+
+// ── widgetPositions / dataset.tableFrom の位置同期 (#303 Phase 2) ──
+//
+// Phase 2 の差分再構築で `blockFieldNeedsRebuild` が false を返すと、field は
+// `value.decos.map(tr.changes)` で widget インスタンスをそのまま再利用する。この
+// 経路では CodeMirror が widget の toDOM/updateDOM を呼ばないため、そこで
+// widgetPositions.set / dataset.tableFrom = String(this.tableFrom) を実行している
+// リフレッシュが行われず、テーブルより前を編集して doc 座標が shift したときに
+// widgetPositions と dataset.tableFrom がテーブルの旧オフセットのまま残る。
+//
+// この結果、`getTableNodeFor` (widgetPositions ベース) や `findWidgetForTable`
+// (dataset.tableFrom ベース) が旧オフセットを新 tree に投影して Table node を取り
+// 損ね、toolbar 操作 / 矢印キー遷移 / pendingFocus マッチが silent に失敗する。
+// Phase 1 以前は docChanged で常に full rebuild → toDOM/updateDOM が走っていたため
+// この invariant は暗黙に保たれていた。
+//
+// ここでは docChanged 毎に `posAtDOM` で widget wrapper の現在位置を引き直し、両
+// キャッシュを live 位置へ矯正する。full rebuild 経路でも直後の toDOM/updateDOM
+// が同じ値を再設定するので副作用はない。
+//
+// ViewPlugin.update は DOM commit の**前**に走るため、この時点で view.posAtDOM が
+// 返すのは旧 DOM の doc 座標。DOM commit 後に posAtDOM を再評価する必要があるので
+// queueMicrotask 経由で defer する (treeChangeDetector が rebuild dispatch を defer
+// するのと同じ理由)。
+const tableWidgetPositionSync = ViewPlugin.fromClass(
+	class {
+		update(update: ViewUpdate) {
+			if (!update.docChanged) return;
+			const { view } = update;
+			queueMicrotask(() => {
+				for (const el of view.dom.querySelectorAll<HTMLElement>(".cm-table-widget")) {
+					const pos = view.posAtDOM(el);
+					widgetPositions.set(el, pos);
+					el.dataset.tableFrom = String(pos);
+				}
+			});
+		}
+	},
+);
 
 // ── Tree-change detector (triggers rebuild after async parse) ──
 
@@ -1596,7 +1680,7 @@ const treeChangeDetector = ViewPlugin.fromClass(
 //    tableGapMaterialize（typing / paste）と tableGapImeKeydown（IME）が担う。
 
 const tableAtomicRanges = EditorView.atomicRanges.of(
-	(view) => view.state.field(tableDecorationField, false) ?? Decoration.none,
+	(view) => view.state.field(tableDecorationField, false)?.decos ?? Decoration.none,
 );
 
 /**
@@ -1607,7 +1691,7 @@ const tableAtomicRanges = EditorView.atomicRanges.of(
  *  - この transaction で新規に作られたテーブルの境界も拾える（取りこぼし防止）
  */
 function tableBoundaries(tr: Transaction): { starts: Set<number>; ends: Set<number> } {
-	const decos = tr.state.field(tableDecorationField, false);
+	const decos = tr.state.field(tableDecorationField, false)?.decos;
 	const starts = new Set<number>();
 	const ends = new Set<number>();
 	if (!decos) return { starts, ends };
@@ -1625,7 +1709,7 @@ function tableBoundaries(tr: Transaction): { starts: Set<number>; ends: Set<numb
  */
 function gapAt(state: EditorState, head: number): "bof" | "eof" | null {
 	if (head !== 0 && head !== state.doc.length) return null;
-	const decos = state.field(tableDecorationField, false);
+	const decos = state.field(tableDecorationField, false)?.decos;
 	if (!decos) return null;
 	const iter = decos.iter();
 	while (iter.value) {
@@ -1879,6 +1963,7 @@ export const tableDecoration: Extension = [
 	tableDecorationField,
 	tableCellFocusField,
 	treeChangeDetector,
+	tableWidgetPositionSync,
 	tableAtomicRanges,
 	// 同一 precedence の transactionFilter は登録の逆順に適用される（@codemirror/state の
 	// filterTransaction は facet 値を末尾から走査する）。materialize → cursorFilter の

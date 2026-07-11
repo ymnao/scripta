@@ -2,7 +2,7 @@ import { history, redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, type WidgetType } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	buildTableDecorations,
@@ -13,6 +13,7 @@ import {
 	sanitizePasteText,
 	tableCellFocusField,
 	tableDecoration,
+	tableDecorationField,
 } from "./table-decoration";
 import {
 	collectDecorations,
@@ -1271,5 +1272,261 @@ describe("parseTsv", () => {
 			["A", "B"],
 			["1", "2"],
 		]);
+	});
+});
+
+// tableDecorationField.update() の差分再構築 (#303 Phase 2) を、EditorView / 実イベントなしに
+// pure EditorState.update() で検証する。math.test.ts の
+// 「mathDecorationField (StateField diff rebuild)」describe (math.test.ts:350-583) と同型。
+//
+// rebuild が起きたかどうかは「既存 table widget オブジェクト参照が保たれているか」で判定する:
+// - skip path (`decos.map` + `mapCandidates`) は RangeSet.map で既存の Decoration/Widget
+//   オブジェクトをそのまま使い回す（位置だけ shift される）
+// - full rebuild path (`buildTableDecorationsAndCandidates`) は常に新しい
+//   EditableTableWidget インスタンスを生成する（内容が同じでも参照は別物になる）
+describe("tableDecorationField (StateField diff rebuild)", () => {
+	function makeState(doc: string, selection?: EditorSelection): EditorState {
+		let state = EditorState.create({
+			doc,
+			selection,
+			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		// LanguageState.apply の tree 同期を発火させる (math.test.ts の makeState と同型)。
+		state = state.update({}).state;
+		return state;
+	}
+
+	interface WidgetEntry {
+		from: number;
+		to: number;
+		widget: WidgetType;
+	}
+
+	function getWidgets(state: EditorState): WidgetEntry[] {
+		const value = state.field(tableDecorationField);
+		const out: WidgetEntry[] = [];
+		const iter = value.decos.iter();
+		while (iter.value) {
+			const spec = iter.value.spec as { widget?: WidgetType };
+			if (spec.widget) out.push({ from: iter.from, to: iter.to, widget: spec.widget });
+			iter.next();
+		}
+		return out;
+	}
+
+	function candidateCount(state: EditorState): number {
+		return state.field(tableDecorationField).candidates.length;
+	}
+
+	const table = "| a | b |\n| - | - |\n| 1 | 2 |";
+
+	it("テーブルから離れた位置への非 | 挿入は rebuild を回避し、widget 参照を維持したまま位置を map する", () => {
+		// line1: "hello world", line2: "", line3-5: table, line6: "", line7: "after text"
+		const doc = `hello world\n\n${table}\n\nafter text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const [{ widget: originalWidget, from: originalFrom, to: originalTo }] = before;
+
+		// line1 の先頭に挿入。table (line3-5) の pad 範囲 (line2..line6) に触れない。
+		const tr = state.update({ changes: { from: 0, to: 0, insert: "XXXXX " } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).toBe(originalWidget);
+		expect(after[0].from).toBe(originalFrom + 6);
+		expect(after[0].to).toBe(originalTo + 6);
+		expect(candidateCount(tr.state)).toBe(candidateCount(state));
+	});
+
+	it("| を挿入すると full rebuild が走り、新しい widget インスタンスに置き換わる", () => {
+		const doc = `hello world\n\n${table}\n\nafter text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// 離れた行に | を単体挿入 (新規候補が生まれうる marker 文字)。
+		const tr = state.update({ changes: { from: 0, to: 0, insert: "|" } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+
+	it("既存テーブル内部の編集で full rebuild が走る", () => {
+		const doc = `text\n\n${table}\n\nmore text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+		const tableFrom = before[0].from;
+
+		// "a" セルの内容を書き換える (table 範囲の内部編集)。
+		const insertPos = tableFrom + 2; // "| a| b |" の "a" 直後
+		const tr = state.update({ changes: { from: insertPos, to: insertPos, insert: "X" } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+
+	it("既存テーブルの隣接行 (±1 行) を編集すると full rebuild が走る", () => {
+		const doc = `text\n\n${table}\n\nmore text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// table の直前の空行 (line2) に挿入する。
+		const line2From = state.doc.line(2).from;
+		const tr = state.update({ changes: { from: line2From, to: line2From, insert: "y" } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+
+	it("selection のみ変化 (docChanged なし) では rebuild しない (table はカーソル出入りで見た目が変わらない)", () => {
+		const doc = `line one\n\n${table}\n\nline seven`;
+		const state = makeState(doc, EditorSelection.single(0));
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// カーソルを table 内部の行へ移動しても widget 参照は変わらない。
+		const tableLineFrom = state.doc.line(3).from;
+		const tr = state.update({ selection: EditorSelection.cursor(tableLineFrom) });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).toBe(originalWidget);
+	});
+
+	it("削除で | が消えるケース (削除範囲の旧テキスト判定) では full rebuild が走る", () => {
+		const doc = `text\n\n${table}\n\nmore text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const tableFrom = before[0].from;
+
+		// table 先頭行の先頭 "| " を削除 (delimiter を壊さないが | 文字自体が消える編集)。
+		const tr = state.update({ changes: { from: tableFrom, to: tableFrom + 1, insert: "" } });
+		const after = getWidgets(tr.state);
+
+		// | が失われて table 構文が崩れる可能性があるため full rebuild され、
+		// widget 参照は元のものと異なる (削除後の再パース結果次第で widget 自体が
+		// 消えることもある)。
+		if (after.length > 0) {
+			expect(after[0].widget).not.toBe(before[0].widget);
+		} else {
+			expect(after).toHaveLength(0);
+		}
+	});
+
+	it("CRLF 改行を含む挿入・削除でも行判定が正しく機能する (改行前後の row 判定漏れ防止)", () => {
+		const crlfTable = "| a | b |\r\n| - | - |\r\n| 1 | 2 |";
+		const doc = `text\r\n\r\n${crlfTable}\r\n\r\nmore text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+		const originalFrom = before[0].from;
+		const originalTo = before[0].to;
+
+		// 遠い行 (先頭) への非 | 挿入 → skip path、CRLF でも位置 map が正しいことを確認。
+		const tr1 = state.update({ changes: { from: 0, to: 0, insert: "zzzz" } });
+		const after1 = getWidgets(tr1.state);
+		expect(after1).toHaveLength(1);
+		expect(after1[0].widget).toBe(originalWidget);
+		expect(after1[0].from).toBe(originalFrom + 4);
+		expect(after1[0].to).toBe(originalTo + 4);
+
+		// table の隣接行 (直前の空行) への挿入 → CRLF 環境でも rebuild が正しく検知される。
+		const line2From = tr1.state.doc.line(2).from;
+		const tr2 = tr1.state.update({ changes: { from: line2From, to: line2From, insert: "w" } });
+		const after2 = getWidgets(tr2.state);
+		expect(after2).toHaveLength(1);
+		expect(after2[0].widget).not.toBe(after1[0].widget);
+	});
+
+	it("undo 相当の複合 changes (compound transaction) でも rebuild 判定が正しく機能する", () => {
+		const doc = `hello world\n\n${table}\n\nafter text`;
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// 1 つの transaction 内に「table と無関係な遠隔地の編集」+「| を含む編集」を複合させる
+		// (undo が生成する compound ChangeSet を模擬)。
+		const tr = state.update({
+			changes: [
+				{ from: 0, to: 0, insert: "zzzz" },
+				{ from: state.doc.length, to: state.doc.length, insert: " |" },
+			],
+		});
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+});
+
+// widgetPositions / dataset.tableFrom は EditableTableWidget の toDOM/updateDOM で
+// リフレッシュされる。差分再構築の skip path (`decos.map(tr.changes)`) では
+// widget インスタンスが再利用され toDOM/updateDOM が呼ばれないため、位置キャッシュが
+// 旧オフセットのまま残り getTableNodeFor / findWidgetForTable が toolbar 操作を
+// silent に取りこぼす回帰があり得る。tableWidgetPositionSync ViewPlugin が
+// docChanged 毎に posAtDOM で live 位置へ矯正するのを EditorView 経由で検証する。
+describe("tableWidgetPositionSync (skip path でも dataset.tableFrom が live に矯正される)", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			mounted.pop()?.destroy();
+		}
+	});
+
+	function mountEditor(doc: string): EditorView {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		let state = EditorState.create({
+			doc,
+			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		state = state.update({}).state;
+		const view = new EditorView({ state, parent });
+		mounted.push(view);
+		return view;
+	}
+
+	it("テーブルより前を編集 (skip path) して doc 座標が shift しても dataset.tableFrom が live 位置に追随する", async () => {
+		const table = "| a | b |\n| - | - |\n| 1 | 2 |";
+		const view = mountEditor(`hello\n\n${table}\n\nafter`);
+
+		const widgetBefore = view.dom.querySelector<HTMLElement>(".cm-table-widget");
+		expect(widgetBefore).not.toBeNull();
+		if (!widgetBefore) return;
+
+		const tableFromBefore = Number(widgetBefore.dataset.tableFrom);
+		expect(tableFromBefore).toBe(view.posAtDOM(widgetBefore));
+
+		// テーブルより前へ 5 文字挿入 (marker | を含まず、pad 範囲外 → skip path)。
+		view.dispatch({ changes: { from: 0, to: 0, insert: "XXXXX" } });
+		// tableWidgetPositionSync は DOM commit 後に queueMicrotask で走るため await する。
+		await new Promise((r) => queueMicrotask(() => r(null)));
+
+		const widgetAfter = view.dom.querySelector<HTMLElement>(".cm-table-widget");
+		expect(widgetAfter).not.toBeNull();
+		if (!widgetAfter) return;
+
+		// 同じ DOM element が再利用されている (block widget の DOM は skip path で維持される)。
+		expect(widgetAfter).toBe(widgetBefore);
+		// dataset は live 位置へ矯正されており、posAtDOM の返す新座標と一致する。
+		const tableFromAfter = Number(widgetAfter.dataset.tableFrom);
+		expect(tableFromAfter).toBe(view.posAtDOM(widgetAfter));
+		expect(tableFromAfter).toBe(tableFromBefore + 5);
 	});
 });
