@@ -1,7 +1,12 @@
-import { ChangeSet } from "@codemirror/state";
+import { ChangeSet, EditorState, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
-import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
+import {
+	blockFieldNeedsRebuild,
+	type CandidateRange,
+	handleComposingUpdate,
+	iterateVisibleSyntax,
+} from "./plugin-utils";
 import { createMockView, createTestState } from "./test-helper";
 
 describe("iterateVisibleSyntax", () => {
@@ -155,5 +160,40 @@ describe("handleComposingUpdate", () => {
 
 		const atomicIter = target.atomicRanges.iter();
 		expect(atomicIter.from).toBe(1);
+	});
+});
+
+// #303: blockFieldNeedsRebuild は non-global regex 前提。/g を渡すと `.test()` が
+// lastIndex を更新し呼び出しをまたいで状態が漏れる (false negative = rebuild 漏れ =
+// widget 更新されない regression)。math.ts は non-global (`/\$/`) を使うことで
+// stateless 化しているが、将来 mermaid/table で誤って /g を渡した場合の防御も兼ねて、
+// non-global で連続呼び出しが安定して動くことと、削除経路の判定を確認する。
+describe("blockFieldNeedsRebuild — marker detection stability", () => {
+	function makeInsertTransaction(doc: string, at: number, insert: string): Transaction {
+		const state = EditorState.create({ doc });
+		return state.update({ changes: { from: at, to: at, insert } });
+	}
+
+	it("stateless non-global regex is safe across repeated calls", () => {
+		const marker = /\$/;
+		const candidates: CandidateRange[] = [];
+
+		// 連続呼び出しで挙動が一致する (lastIndex 状態を持たない)
+		for (let i = 0; i < 4; i++) {
+			const trHit = makeInsertTransaction("hello", 5, "$");
+			expect(blockFieldNeedsRebuild(trHit, candidates, marker)).toBe(true);
+			const trMiss = makeInsertTransaction("hello", 5, "abc");
+			expect(blockFieldNeedsRebuild(trMiss, candidates, marker)).toBe(false);
+		}
+	});
+
+	it("detects marker in deletion via startState.sliceDoc", () => {
+		const marker = /\$/;
+		const candidates: CandidateRange[] = [];
+
+		// "$" を含む範囲を削除
+		const state = EditorState.create({ doc: "a$b" });
+		const tr = state.update({ changes: { from: 1, to: 2, insert: "" } });
+		expect(blockFieldNeedsRebuild(tr, candidates, marker)).toBe(true);
 	});
 });

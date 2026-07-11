@@ -17,7 +17,13 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { isEscaped } from "../../../lib/content";
-import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
+import { collectCursorLines, cursorInRange } from "./cursor-utils";
+import {
+	blockFieldNeedsRebuild,
+	type CandidateRange,
+	cursorTouchesCandidates,
+	mapCandidates,
+} from "./plugin-utils";
 
 export { isEscaped };
 
@@ -101,7 +107,7 @@ const activeMathViews = new Set<EditorView>();
  */
 function notifyKatexReady(): void {
 	for (const view of activeMathViews) {
-		if (view.state.field(mathDecorationField, false)?.size === 0) continue;
+		if (view.state.field(mathDecorationField, false)?.decos.size === 0) continue;
 		view.dispatch({ effects: rebuildMathDecos.of(view.hasFocus) });
 	}
 }
@@ -243,9 +249,19 @@ export class MathWidget extends WidgetType {
 	}
 }
 
-export function buildMathDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
+/** buildMathDecorations の内部実装。decoration set に加えて、StateField の差分
+ *  再構築判定 (blockFieldNeedsRebuild / cursorTouchesCandidates) が使う candidate
+ *  範囲 (カーソル位置フィルタ前の $ / $$ 正規表現マッチ全件) を返す。
+ *  escape / code-block 判定で除外されたマッチも candidate に含める — それらが
+ *  隣接編集で non-math ⇔ math に切り替わりうる以上、bail-early は安全側 (false
+ *  = full rebuild) に倒すべきため。 */
+function buildMathDecorationsAndCandidates(
+	state: EditorState,
+	hasFocus: boolean,
+): { decos: DecorationSet; candidates: CandidateRange[] } {
 	const cursorLines = collectCursorLines(state, hasFocus);
 	const ranges: Range<Decoration>[] = [];
+	const candidates: CandidateRange[] = [];
 
 	const docLength = state.doc.length;
 	const text = state.doc.sliceString(0, docLength);
@@ -256,6 +272,7 @@ export function buildMathDecorations(state: EditorState, hasFocus: boolean): Dec
 	for (const match of text.matchAll(DISPLAY_MATH_RE)) {
 		const matchFrom = match.index;
 		const matchTo = matchFrom + match[0].length;
+		candidates.push({ from: matchFrom, to: matchTo });
 
 		if (isEscaped(text, match.index)) continue;
 		const closingDisplayPos = match.index + match[0].length - 2;
@@ -298,6 +315,7 @@ export function buildMathDecorations(state: EditorState, hasFocus: boolean): Dec
 	for (const match of textForInline.matchAll(INLINE_MATH_RE)) {
 		const matchFrom = match.index;
 		const matchTo = matchFrom + match[0].length;
+		candidates.push({ from: matchFrom, to: matchTo });
 
 		if (isEscaped(textForInline, match.index)) continue;
 		const closingInlinePos = match.index + match[0].length - 1;
@@ -318,7 +336,12 @@ export function buildMathDecorations(state: EditorState, hasFocus: boolean): Dec
 		);
 	}
 
-	return Decoration.set(ranges, true);
+	return { decos: Decoration.set(ranges, true), candidates };
+}
+
+/** 公開 API: DecorationSet のみを返す (既存の呼び出し元 / テスト向けの後方互換ラッパー)。 */
+export function buildMathDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
+	return buildMathDecorationsAndCandidates(state, hasFocus).decos;
 }
 
 const rebuildMathDecos = StateEffect.define<boolean>();
@@ -335,30 +358,45 @@ const mathHasFocusField = StateField.define<boolean>({
 	},
 });
 
-const mathDecorationField = StateField.define<DecorationSet>({
+export interface MathFieldValue {
+	decos: DecorationSet;
+	candidates: CandidateRange[];
+}
+
+/** math candidate 判定の marker 文字。挿入/削除テキストに `$` が含まれれば
+ *  新規候補の出現/消滅の可能性があるため full rebuild にフォールバックする。 */
+// non-global にすることで `.test()` が stateless になり、呼び出しをまたいだ
+// lastIndex 状態漏れ (false negative = rebuild 漏れ) が構造的に発生しなくなる。
+const MATH_MARKER_RE = /\$/;
+
+/** テスト用に export。StateField 自体を state.field() で直接読むことで、
+ *  update() の rebuild / skip 判定を EditorView / 実 focus イベントなしに検証できる
+ *  （math.test.ts 参照）。 */
+export const mathDecorationField = StateField.define<MathFieldValue>({
 	create(state) {
-		return buildMathDecorations(state, false);
+		return buildMathDecorationsAndCandidates(state, false);
 	},
-	update(decos, tr) {
+	update(value, tr) {
 		for (const e of tr.effects) {
 			if (e.is(rebuildMathDecos)) {
-				return buildMathDecorations(tr.state, e.value);
+				return buildMathDecorationsAndCandidates(tr.state, e.value);
 			}
 		}
 		if (tr.docChanged) {
-			return buildMathDecorations(tr.state, tr.state.field(mathHasFocusField));
-		}
-		if (tr.selection) {
-			const hasFocus = tr.state.field(mathHasFocusField);
-			const oldLines = collectCursorLines(tr.startState, tr.startState.field(mathHasFocusField));
-			const newLines = collectCursorLines(tr.state, hasFocus);
-			if (cursorLinesChanged(oldLines, newLines)) {
-				return buildMathDecorations(tr.state, hasFocus);
+			if (blockFieldNeedsRebuild(tr, value.candidates, MATH_MARKER_RE)) {
+				return buildMathDecorationsAndCandidates(tr.state, tr.state.field(mathHasFocusField));
 			}
+			return {
+				decos: value.decos.map(tr.changes),
+				candidates: mapCandidates(value.candidates, tr.changes),
+			};
 		}
-		return decos;
+		if (tr.selection && cursorTouchesCandidates(tr, value.candidates)) {
+			return buildMathDecorationsAndCandidates(tr.state, tr.state.field(mathHasFocusField));
+		}
+		return value;
 	},
-	provide: (f) => EditorView.decorations.from(f),
+	provide: (f) => EditorView.decorations.from(f, (v) => v.decos),
 });
 
 const mathFocusHandler = ViewPlugin.fromClass(
@@ -386,13 +424,13 @@ function createMathClickHandler() {
 			const mathEl = target.closest(".cm-math-inline, .cm-math-display");
 			if (!mathEl) return false;
 
-			const decorations = view.state.field(mathDecorationField, false);
-			if (!decorations) return false;
+			const fieldValue = view.state.field(mathDecorationField, false);
+			if (!fieldValue) return false;
 
 			const pos = view.posAtDOM(mathEl);
 			let endPos = -1;
 
-			const iter = decorations.iter();
+			const iter = fieldValue.decos.iter();
 			while (iter.value) {
 				if (iter.from <= pos && pos <= iter.to) {
 					endPos = iter.to;
