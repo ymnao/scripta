@@ -33,6 +33,14 @@ async function openSlideFile(page: import("@playwright/test").Page) {
 	return editor;
 }
 
+// スライドビュー時はプレビューがエディタに被るので click でフォーカスできない。
+// 直接 focus してから Playwright の keyboard 入力を使う。
+async function focusEditor(page: import("@playwright/test").Page) {
+	await page.evaluate(() => {
+		(document.querySelector(".cm-content") as HTMLElement | null)?.focus();
+	});
+}
+
 test.describe("slide view", () => {
 	test("Cmd+Shift+S でスライドビューが開いてプレビューが表示される", async ({ page }) => {
 		const mock = new ElectronApiMock(page);
@@ -80,11 +88,7 @@ test.describe("slide view", () => {
 		await page.keyboard.press(`${modKey}+Shift+s`);
 		await expect(page.getByText("1 / 3")).toBeVisible();
 
-		// スライドビュー時はプレビューがエディタに被るので click でフォーカスできない。
-		// 直接 focus してから Playwright の keyboard 入力を使う。
-		await page.evaluate(() => {
-			(document.querySelector(".cm-content") as HTMLElement | null)?.focus();
-		});
+		await focusEditor(page);
 		await page.keyboard.press(`${modKey}+End`);
 
 		await expect(page.getByText("3 / 3")).toBeVisible();
@@ -101,6 +105,42 @@ test.describe("slide view", () => {
 		const preview = page.locator(".slide-preview-content");
 		await expect(preview).toBeVisible();
 		await expect(preview.getByText("Slide 1")).toBeVisible();
+	});
+
+	test("スライドビュー中の編集がプレビューに反映される", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs, dialogResult: "/workspace" });
+
+		await openSlideFile(page);
+
+		await page.keyboard.press(`${modKey}+Shift+s`);
+		const preview = page.locator(".slide-preview-content");
+		await expect(preview.getByText("Slide 1")).toBeVisible();
+
+		await focusEditor(page);
+		await page.keyboard.press(`${modKey}+Home`);
+		// "# Slide 1" の "1" を "Z" に置き換える
+		await page.keyboard.press("End");
+		await page.keyboard.press("Backspace");
+		await page.keyboard.type("Z");
+
+		await expect(preview.getByText("Slide Z")).toBeVisible();
+	});
+
+	test("スライドビュー中に区切りを追加するとスライド数が増える", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs, dialogResult: "/workspace" });
+
+		await openSlideFile(page);
+
+		await page.keyboard.press(`${modKey}+Shift+s`);
+		await expect(page.getByText("1 / 3")).toBeVisible();
+
+		await focusEditor(page);
+		await page.keyboard.press(`${modKey}+End`);
+		await page.keyboard.type("\n\n---\n\n# Slide 4");
+
+		await expect(page.getByText("4 / 4")).toBeVisible();
 	});
 
 	test("ヘルプダイアログにスライドビューのショートカットが記載されている", async ({ page }) => {
