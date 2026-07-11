@@ -1,5 +1,14 @@
 import type { EditorView } from "@codemirror/view";
-import { type ComponentType, lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import {
+	type ComponentType,
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { findSlideAtCursor, parseSlides } from "../../lib/slide-parser";
 import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
@@ -46,9 +55,17 @@ export function SlideView({
 	onStatistics,
 }: SlideViewProps) {
 	const [cursorPos, setCursorPos] = useState(0);
+	// value prop は #302 以降 loadedDoc（ロード / タブ切替 / 外部リロード時のみ更新）で、
+	// キー入力では変わらない。プレビュー用の doc は editorView から onDocChanged 経由で
+	// 都度読み直して内部 state に反映する。value 変化時は差し替えとして同期する。
+	const [docText, setDocText] = useState(value);
 	const editorViewRef = useRef<EditorView | null>(null);
 
-	const slides = useMemo(() => parseSlides(value), [value]);
+	useEffect(() => {
+		setDocText(value);
+	}, [value]);
+
+	const slides = useMemo(() => parseSlides(docText), [docText]);
 
 	const currentSlideIndex = useMemo(
 		() => findSlideAtCursor(slides, cursorPos),
@@ -65,9 +82,23 @@ export function SlideView({
 		[onEditorView],
 	);
 
-	// カーソル位置を onStatistics コールバック経由で更新
-	// MarkdownEditor が updateListener で onStatistics を呼ぶので、
-	// そこでカーソル位置も取得する
+	// docChanged 発火時（selectionSet では発火しない）に doc を読み直す。
+	// onStatistics は rAF スケジューリング (MarkdownEditor.tsx:415) で 1 フレーム
+	// 遅れて cursorPos を更新するため、doc と cursor を同じ tick で反映しないと
+	// 「区切り挿入直後に slides は増えたのに cursor が古い → 1 フレームだけ前の
+	// スライドが表示される」flicker が起きる。handleDocChanged 内で cursorPos も
+	// 同時に読み直しておくことで desync を防ぐ。
+	const handleDocChanged = useCallback(() => {
+		const view = editorViewRef.current;
+		if (view) {
+			setDocText(view.state.doc.toString());
+			setCursorPos(view.state.selection.main.head);
+		}
+		onDocChanged?.();
+	}, [onDocChanged]);
+
+	// selectionSet のみで発火する経路（純カーソル移動）のためのバックアップ。
+	// doc 変更時は handleDocChanged 側で cursorPos を先に更新する。
 	const handleStatistics = useCallback(
 		(info: CursorInfo) => {
 			const view = editorViewRef.current;
@@ -84,7 +115,7 @@ export function SlideView({
 			<div className="min-h-0 min-w-0 flex-1">
 				<MarkdownEditor
 					value={value}
-					onDocChanged={onDocChanged}
+					onDocChanged={handleDocChanged}
 					onSave={onSave}
 					onEditorView={handleEditorView}
 					goToLine={goToLine}
