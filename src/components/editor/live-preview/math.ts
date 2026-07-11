@@ -19,6 +19,7 @@ import {
 import { isEscaped } from "../../../lib/content";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 import {
+	type BlockFieldValue,
 	blockFieldNeedsRebuild,
 	type CandidateRange,
 	cursorTouchesCandidates,
@@ -255,10 +256,7 @@ export class MathWidget extends WidgetType {
  *  escape / code-block 判定で除外されたマッチも candidate に含める — それらが
  *  隣接編集で non-math ⇔ math に切り替わりうる以上、bail-early は安全側 (false
  *  = full rebuild) に倒すべきため。 */
-function buildMathDecorationsAndCandidates(
-	state: EditorState,
-	hasFocus: boolean,
-): { decos: DecorationSet; candidates: CandidateRange[] } {
+function buildMathDecorationsAndCandidates(state: EditorState, hasFocus: boolean): BlockFieldValue {
 	const cursorLines = collectCursorLines(state, hasFocus);
 	const ranges: Range<Decoration>[] = [];
 	const candidates: CandidateRange[] = [];
@@ -358,11 +356,6 @@ const mathHasFocusField = StateField.define<boolean>({
 	},
 });
 
-export interface MathFieldValue {
-	decos: DecorationSet;
-	candidates: CandidateRange[];
-}
-
 /** math candidate 判定の marker 文字。挿入/削除テキストに `$` が含まれれば
  *  新規候補の出現/消滅の可能性があるため full rebuild にフォールバックする。 */
 // non-global にすることで `.test()` が stateless になり、呼び出しをまたいだ
@@ -372,7 +365,7 @@ const MATH_MARKER_RE = /\$/;
 /** テスト用に export。StateField 自体を state.field() で直接読むことで、
  *  update() の rebuild / skip 判定を EditorView / 実 focus イベントなしに検証できる
  *  （math.test.ts 参照）。 */
-export const mathDecorationField = StateField.define<MathFieldValue>({
+export const mathDecorationField = StateField.define<BlockFieldValue>({
 	create(state) {
 		return buildMathDecorationsAndCandidates(state, false);
 	},

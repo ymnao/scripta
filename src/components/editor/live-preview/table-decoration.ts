@@ -20,7 +20,14 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { blockFieldNeedsRebuild, type CandidateRange, mapCandidates } from "./plugin-utils";
+import {
+	type BlockFieldValue,
+	blockFieldNeedsRebuild,
+	type CandidateRange,
+	mapCandidates,
+	treeChangeDispatcher,
+	treeParseProgressed,
+} from "./plugin-utils";
 import { findUnescapedPipe, trimToLastTableLine } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
@@ -30,8 +37,6 @@ export const focusTableCellEffect = StateEffect.define<{
 	row: number;
 	col: number;
 }>();
-
-const rebuildTableDecos = StateEffect.define<null>();
 
 // テーブルセル（widget 内の contentEditable）へ実フォーカスが入った/外れたを CM state に
 // 持ち込む effect。gap 判定（tableGapCursorLayer / tableGapActiveClass）がセル編集中かを
@@ -1501,21 +1506,13 @@ function showContextMenu(e: MouseEvent, view: EditorView, wrapperEl: HTMLElement
 
 // ── Decoration builder (takes EditorState, not EditorView) ──
 
-export interface TableFieldValue {
-	decos: DecorationSet;
-	candidates: CandidateRange[];
-}
-
 /** buildTableDecorations の内部実装。decoration set に加えて、StateField の差分
  *  再構築判定 (blockFieldNeedsRebuild) が使う candidate 範囲 (`Table` node として
  *  検出した全範囲) を返す。widget 化が rejected されたマッチ (parseTableFromLines
  *  失敗 / rows < 2 / minCols < 2) も candidate に含める — それらが隣接編集で
  *  non-table ⇔ table に切り替わりうる以上、bail-early は安全側 (false = full
  *  rebuild) に倒すべきため (math.ts の buildMathDecorationsAndCandidates と同型)。 */
-function buildTableDecorationsAndCandidates(state: EditorState): {
-	decos: DecorationSet;
-	candidates: CandidateRange[];
-} {
+function buildTableDecorationsAndCandidates(state: EditorState): BlockFieldValue {
 	const tree = syntaxTree(state);
 	const ranges: Range<Decoration>[] = [];
 	const candidates: CandidateRange[] = [];
@@ -1569,12 +1566,12 @@ const TABLE_MARKER_RE = /\|/;
 
 // ── StateField (allows block + multi-line replace) ────
 
-export const tableDecorationField = StateField.define<TableFieldValue>({
+export const tableDecorationField = StateField.define<BlockFieldValue>({
 	create(state) {
 		return buildTableDecorationsAndCandidates(state);
 	},
 	update(value, tr) {
-		// focusTableCellEffect の副作用 (pendingFocus 更新) と rebuildTableDecos 判定は
+		// focusTableCellEffect の副作用 (pendingFocus 更新) と treeParseProgressed 判定は
 		// 1 pass で処理する。rebuild 効果があっても pendingFocus 側の副作用は落とさない
 		// ため、return は effects を全て走査してから行う。
 		let needsRebuild = false;
@@ -1585,7 +1582,7 @@ export const tableDecorationField = StateField.define<TableFieldValue>({
 					row: effect.value.row,
 					col: effect.value.col,
 				};
-			} else if (effect.is(rebuildTableDecos)) {
+			} else if (effect.is(treeParseProgressed)) {
 				needsRebuild = true;
 			}
 		}
@@ -1644,21 +1641,6 @@ const tableWidgetPositionSync = ViewPlugin.fromClass(
 					el.dataset.tableFrom = String(pos);
 				}
 			});
-		}
-	},
-);
-
-// ── Tree-change detector (triggers rebuild after async parse) ──
-
-const treeChangeDetector = ViewPlugin.fromClass(
-	class {
-		update(update: ViewUpdate) {
-			if (!update.docChanged && syntaxTree(update.state) !== syntaxTree(update.startState)) {
-				const { view } = update;
-				queueMicrotask(() => {
-					view.dispatch({ effects: rebuildTableDecos.of(null) });
-				});
-			}
 		}
 	},
 );
@@ -1962,7 +1944,9 @@ const tableGapImeKeydown = EditorView.domEventHandlers({
 export const tableDecoration: Extension = [
 	tableDecorationField,
 	tableCellFocusField,
-	treeChangeDetector,
+	// treeChangeDispatcher は mermaidDecoration でも include される (dedup は
+	// mermaid.ts の同名 include コメント参照)。
+	treeChangeDispatcher,
 	tableWidgetPositionSync,
 	tableAtomicRanges,
 	// 同一 precedence の transactionFilter は登録の逆順に適用される（@codemirror/state の
