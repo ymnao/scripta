@@ -1,7 +1,12 @@
-import { ChangeSet } from "@codemirror/state";
+import { ChangeSet, EditorState, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
-import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
+import {
+	blockFieldNeedsRebuild,
+	type CandidateRange,
+	handleComposingUpdate,
+	iterateVisibleSyntax,
+} from "./plugin-utils";
 import { createMockView, createTestState } from "./test-helper";
 
 describe("iterateVisibleSyntax", () => {
@@ -155,5 +160,49 @@ describe("handleComposingUpdate", () => {
 
 		const atomicIter = target.atomicRanges.iter();
 		expect(atomicIter.from).toBe(1);
+	});
+});
+
+// #303: blockFieldNeedsRebuild は global regex を呼び出しをまたいで再利用する。
+// `.test()` が true を返すと lastIndex が非 0 のまま残り、次の呼び出しで先頭からの
+// 検索が失敗し得る (false negative → rebuild 漏れ = widget 更新されない regression)。
+// helper 側で `.test()` 前に必ず lastIndex を reset することを担保する回帰テスト。
+describe("blockFieldNeedsRebuild — global regex lastIndex reset", () => {
+	function makeInsertTransaction(doc: string, at: number, insert: string): Transaction {
+		const state = EditorState.create({ doc });
+		return state.update({ changes: { from: at, to: at, insert } });
+	}
+
+	it("does not leak lastIndex across calls with a shared global regex", () => {
+		const marker = /\$/g;
+		const candidates: CandidateRange[] = [];
+
+		// 1 回目: 挿入テキストに marker が含まれる → true (実装内で lastIndex が
+		// 非 0 のまま残る可能性がある)
+		const tr1 = makeInsertTransaction("hello", 5, "$");
+		expect(blockFieldNeedsRebuild(tr1, candidates, marker)).toBe(true);
+
+		// 2 回目: 短い挿入 "$" (長さ 1) — もし lastIndex が 1 以上残っていたら
+		// `.test("$")` は false を返す (false negative = rebuild 漏れ)
+		const tr2 = makeInsertTransaction("hello", 5, "$");
+		expect(blockFieldNeedsRebuild(tr2, candidates, marker)).toBe(true);
+
+		// 3 回目: marker を含まない挿入 → false
+		const tr3 = makeInsertTransaction("hello", 5, "abc");
+		expect(blockFieldNeedsRebuild(tr3, candidates, marker)).toBe(false);
+
+		// 4 回目: 再度 marker 挿入 → true (前回 false でも lastIndex が正しく 0 に戻っているか)
+		const tr4 = makeInsertTransaction("hello", 5, "$");
+		expect(blockFieldNeedsRebuild(tr4, candidates, marker)).toBe(true);
+	});
+
+	it("detects marker in deletion via startState.sliceDoc", () => {
+		const marker = /\$/g;
+		const candidates: CandidateRange[] = [];
+
+		// "$" を含む範囲を削除
+		const state = EditorState.create({ doc: "a$b" });
+		const tr = state.update({ changes: { from: 1, to: 2, insert: "" } });
+		expect(blockFieldNeedsRebuild(tr, candidates, marker)).toBe(true);
 	});
 });

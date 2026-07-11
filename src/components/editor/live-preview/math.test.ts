@@ -1,3 +1,6 @@
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
@@ -16,7 +19,14 @@ vi.mock("katex", () => ({
 // 明示的にモックして依存を軽くする。
 vi.mock("katex/dist/katex.min.css", () => ({}));
 
-const { buildMathDecorations, isEscaped, MathWidget, preloadKatexForTest } = await import("./math");
+const {
+	buildMathDecorations,
+	isEscaped,
+	MathWidget,
+	mathDecoration,
+	mathDecorationField,
+	preloadKatexForTest,
+} = await import("./math");
 const { collectDecorations, createViewForTest, widgetDecorations } = await import("./test-helper");
 
 // MathWidget.toDOM は katex の動的 import 完了後にのみ同期 render される
@@ -334,5 +344,240 @@ describe("buildDecorations", () => {
 		const decos = collectDecorations(buildMathDecorations(view.state, view.hasFocus));
 		const widgets = widgetDecorations(decos);
 		expect(widgets).toHaveLength(0);
+	});
+});
+
+// mathDecorationField.update() の差分再構築 (#303) を、EditorView / 実 focus イベントなしに
+// pure EditorState.update() で検証する。field は EditorState 単体で動作する (ViewPlugin
+// 部分の mathFocusHandler 等は無関係) ため、州 (state) レベルのテストで rebuild / skip
+// 判定を直接担保できる。
+//
+// rebuild が起きたかどうかは「既存 math の widget オブジェクト参照が保たれているか」で判定する:
+// - skip path (`decos.map` + `mapCandidates`) は RangeSet.map で既存の Decoration/Widget
+//   オブジェクトをそのまま使い回す（位置だけ shift される）
+// - full rebuild path (`buildMathDecorationsAndCandidates`) は常に新しい MathWidget
+//   インスタンスを生成する（内容が同じでも参照は別物になる）
+// vi.spyOn によるコール検知は Vite/Vitest の ESM 変換下では同一モジュール内呼び出しを
+// 素通りしてしまい機能しないため（同一モジュール内の直接呼び出しは export バインディング
+// 経由ではないため spy が引っかからない）、widget 参照比較という外部から観測可能な副作用で
+// 代替する。
+describe("mathDecorationField (StateField diff rebuild)", () => {
+	function makeState(doc: string, selection?: EditorSelection): EditorState {
+		let state = EditorState.create({
+			doc,
+			selection,
+			extensions: [markdown({ base: markdownLanguage }), mathDecoration],
+		});
+		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
+		// LanguageState.apply の tree 同期を発火させる (test-helper.ts の createTestState と同型)。
+		state = state.update({}).state;
+		return state;
+	}
+
+	interface WidgetEntry {
+		from: number;
+		to: number;
+		widget: MathWidgetType;
+	}
+
+	function getWidgets(state: EditorState): WidgetEntry[] {
+		const value = state.field(mathDecorationField);
+		const out: WidgetEntry[] = [];
+		const iter = value.decos.iter();
+		while (iter.value) {
+			const spec = iter.value.spec as { widget?: MathWidgetType };
+			if (spec.widget) out.push({ from: iter.from, to: iter.to, widget: spec.widget });
+			iter.next();
+		}
+		return out;
+	}
+
+	function candidateCount(state: EditorState): number {
+		return state.field(mathDecorationField).candidates.length;
+	}
+
+	it("数式から離れた位置への非 $ 挿入は rebuild を回避し、widget 参照を維持したまま位置を map する", () => {
+		// line1: "hello world", line2: "", line3: "$$disp$$", line4: "", line5: "after math text"
+		const doc = "hello world\n\n$$disp$$\n\nafter math text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const [{ widget: originalWidget, from: originalFrom, to: originalTo }] = before;
+
+		// line1 の先頭に挿入。math (line3) の pad 範囲 (line2..line4) に触れない。
+		const tr = state.update({ changes: { from: 0, to: 0, insert: "XXXXX " } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).toBe(originalWidget);
+		expect(after[0].from).toBe(originalFrom + 6);
+		expect(after[0].to).toBe(originalTo + 6);
+		expect(candidateCount(tr.state)).toBe(candidateCount(state));
+	});
+
+	it("$ を 1 文字挿入すると full rebuild が走り、新しい候補が反映される", () => {
+		const doc = "hello world\n\n$$disp$$\n\nafter math text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+		const originalCandidateCount = candidateCount(state);
+
+		// 離れた行に $ を単体挿入 (新規候補が生まれうる文字)。
+		const tr = state.update({ changes: { from: 0, to: 0, insert: "$" } });
+		const after = getWidgets(tr.state);
+
+		// 既存の display math widget は rebuild により新しいインスタンスに置き換わる。
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+		// 挿入した単体の $ 自体は閉じ引用符がなくマッチしないが、
+		// 既存の $$disp$$ の walk が candidates に再度含まれることを確認する。
+		expect(candidateCount(tr.state)).toBeGreaterThanOrEqual(originalCandidateCount);
+	});
+
+	it("既存の数式範囲内部を編集すると full rebuild が走る", () => {
+		const doc = "text\n\n$$disp$$\n\nmore text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+		const mathFrom = before[0].from;
+
+		// "disp" の中身を書き換える (math 範囲の内部編集)。
+		const insertPos = mathFrom + 3; // "$$d|isp$$"
+		const tr = state.update({ changes: { from: insertPos, to: insertPos, insert: "X" } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+
+	it("既存の数式範囲の隣接行 (±1 行) を編集すると full rebuild が走る", () => {
+		const doc = "text\n\n$$disp$$\n\nmore text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// math の直前の空行 (line2) に挿入する。
+		const line2From = state.doc.line(2).from;
+		const tr = state.update({ changes: { from: line2From, to: line2From, insert: "y" } });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+
+	it("数式のない行から別の数式のない行へカーソル移動しても rebuild しない", () => {
+		const doc = "line one\n\n$$disp$$\n\nline five";
+		const state = makeState(doc, EditorSelection.single(0));
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// line1 → line5、どちらも math の pad 範囲 (line2..line4) に含まれない。
+		const line5From = state.doc.line(5).from;
+		const tr = state.update({ selection: EditorSelection.cursor(line5From) });
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).toBe(originalWidget);
+	});
+
+	it("数式行へカーソルが出入りすると rebuild する (widget 表示⇔ソース表示の切替に必要)", () => {
+		const doc = "line one\n\n$$disp$$\n\nline five";
+		const state = makeState(doc, EditorSelection.single(0));
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		const mathLineFrom = state.doc.line(3).from;
+		const tr = state.update({ selection: EditorSelection.cursor(mathLineFrom) });
+		const after = getWidgets(tr.state);
+
+		// hasFocus は field 作成時点で false のまま (queueMicrotask 経由の focus effect は
+		// EditorView なしでは発火しない) なので、cursorLines 自体は空集合のまま widget は
+		// 引き続き描画される。ここで検証したいのは「rebuild が起きたか」であり、
+		// widget 参照の入れ替わりで判定する。
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
+	});
+
+	it("削除で $ が消えるケース (削除範囲の旧テキスト判定) では full rebuild が走る", () => {
+		const doc = "text\n\n$$disp$$\n\nmore text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const mathTo = before[0].to;
+
+		// math 自身の閉じ "$$" を削除 (display math が壊れる編集)。
+		const tr = state.update({ changes: { from: mathTo - 2, to: mathTo, insert: "" } });
+		const after = getWidgets(tr.state);
+
+		// display math の閉じが壊れるため widget 自体は消える (別内容として rebuild)。
+		expect(after).toHaveLength(0);
+	});
+
+	it("CRLF 改行を含む挿入・削除でも行判定が正しく機能する (改行前後の row 判定漏れ防止)", () => {
+		const doc = "text\r\n\r\n$$disp$$\r\n\r\nmore text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+		const originalFrom = before[0].from;
+		const originalTo = before[0].to;
+
+		// 遠い行 (先頭) への非 $ 挿入 → skip path、CRLF でも位置 map が正しいことを確認。
+		const tr1 = state.update({ changes: { from: 0, to: 0, insert: "zzzz" } });
+		const after1 = getWidgets(tr1.state);
+		expect(after1).toHaveLength(1);
+		expect(after1[0].widget).toBe(originalWidget);
+		expect(after1[0].from).toBe(originalFrom + 4);
+		expect(after1[0].to).toBe(originalTo + 4);
+
+		// math の隣接行 (直前の空行) への挿入 → CRLF 環境でも rebuild が正しく検知される。
+		const line2From = tr1.state.doc.line(2).from;
+		const tr2 = tr1.state.update({ changes: { from: line2From, to: line2From, insert: "w" } });
+		const after2 = getWidgets(tr2.state);
+		expect(after2).toHaveLength(1);
+		expect(after2[0].widget).not.toBe(after1[0].widget);
+	});
+
+	it("IME composition 中でも判定は同一 (math の StateField は ViewUpdate.composing を参照しない)", () => {
+		// mathDecorationField.update() のシグネチャは (value, tr: Transaction) であり、
+		// composing 状態を持つ ViewUpdate を経由しない。handleComposingUpdate (plugin-utils.ts)
+		// は ViewPlugin 向けのヘルパーで、StateField ベースの mathDecorationField では
+		// そもそも使用していない (mathFocusHandler など他の ViewPlugin でも math では未使用)。
+		// そのため IME composing 中かどうかで docChanged 時の rebuild / skip 判定が変わることは
+		// 構造的にあり得ない。ここでは通常の docChanged と同じ判定が単に適用されることを
+		// 再確認する (композing 有無で分岐する実装ではないため専用の composing テストは
+		// 意味を持たない)。
+		const doc = "hello world\n\n$$disp$$\n\nafter math text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		const tr = state.update({ changes: { from: 0, to: 0, insert: "zzz" } });
+		const after = getWidgets(tr.state);
+		expect(after[0].widget).toBe(before[0].widget);
+	});
+
+	it("undo 相当の複合 changes (compound transaction) でも rebuild 判定が正しく機能する", () => {
+		const doc = "hello world\n\n$$disp$$\n\nafter math text";
+		const state = makeState(doc);
+		const before = getWidgets(state);
+		expect(before).toHaveLength(1);
+		const originalWidget = before[0].widget;
+
+		// 1 つの transaction 内に「math と無関係な遠隔地の編集」+「$ を含む編集」を複合させる
+		// (undo が生成する compound ChangeSet を模擬)。
+		const tr = state.update({
+			changes: [
+				{ from: 0, to: 0, insert: "zzzz" },
+				{ from: state.doc.length, to: state.doc.length, insert: " $" },
+			],
+		});
+		const after = getWidgets(tr.state);
+
+		expect(after).toHaveLength(1);
+		expect(after[0].widget).not.toBe(originalWidget);
 	});
 });
