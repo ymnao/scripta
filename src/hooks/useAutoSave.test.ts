@@ -169,6 +169,40 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
+	// #302 fast-path: 一度 unsaved になった後は processContent equality check を skip する。
+	// ユーザーが「入力→保存内容に戻す」undo をした場合、debounce は fire するが
+	// save() 側の同じ equality check で writeFile は走らない (status が "unsaved" のまま
+	// 残るのは pre-existing な限定挙動、本テストは write が起きないことのみを保証)。
+	it("typed then undo back to saved content does not write to disk (fast-path safety)", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result } = renderHook(() => useAutoSave("test.md", getContent));
+
+		result.current.markSaved("initial");
+
+		// Edit → unsaved 遷移
+		currentContent = "changed";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		expect(result.current.saveStatus).toBe("unsaved");
+
+		// debounce 前に content を saved と一致する内容に戻す
+		currentContent = "initial";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		// fast-path が発火して processContent 比較は skip されるため status は "unsaved" のまま
+		expect(result.current.saveStatus).toBe("unsaved");
+
+		mockedWriteFile.mockClear();
+		await act(async () => {
+			vi.advanceTimersByTime(2000);
+		});
+		// debounce fire → save() 側の equality check で write は skip される
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
 	it("markSaved with matching currentContent stays saved (equivalent to no-arg form)", () => {
 		const currentContent = "initial";
 		const getContent = () => currentContent;

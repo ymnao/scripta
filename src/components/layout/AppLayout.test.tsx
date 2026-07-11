@@ -103,6 +103,16 @@ vi.mock("./Sidebar", () => ({
 	},
 }));
 
+// #302: getContent() (editorViewRef 経由の uncontrolled 読み) が Export に反映される
+// ことを検証するため ExportDialog を軽量 mock 化し、渡された markdown prop を露出する。
+let capturedExportMarkdown: string | null = null;
+vi.mock("../common/ExportDialog", () => ({
+	ExportDialog: (props: { open: boolean; markdown: string }) => {
+		if (props.open) capturedExportMarkdown = props.markdown;
+		return null;
+	},
+}));
+
 const mockEditorView = { hasFocus: false, state: { doc: { lines: 100, toString: () => "" } } };
 let capturedOnEditorView: ((view: unknown) => void) | null = null;
 
@@ -213,6 +223,7 @@ describe("AppLayout", () => {
 		closeHandler = null;
 		capturedOnFileSelect = null;
 		capturedOnEditorView = null;
+		capturedExportMarkdown = null;
 		mockEditorView.hasFocus = false;
 		(onFsChange as Mock).mockReset();
 		(onFsChange as Mock).mockImplementation((cb: (events: FsChangeEvent[]) => void) => {
@@ -1341,5 +1352,54 @@ describe("AppLayout", () => {
 			useWorkspaceStore.getState().setActiveTab("/workspace/b.md");
 		});
 		expect(screen.queryByLabelText("行番号:")).not.toBeInTheDocument();
+	});
+
+	// #302 regression guards: uncontrolled edit を editor mock 経由で発生させ、
+	// getContent() 経路が実際に最新 doc を読むことを end-to-end に確認する。
+
+	it("saveIfDirty flushes uncontrolled edit on sidebar navigation", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// mock editor で uncontrolled 編集 (docRef.current = "new content")
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		expect(screen.getByText("未保存")).toBeInTheDocument();
+
+		mockedWriteFile.mockClear();
+
+		// Sidebar からの navigation → saveIfDirty 経由で強制フラッシュ
+		await act(async () => {
+			capturedOnFileSelect?.("/workspace/b.md");
+		});
+
+		// getContent() が uncontrolled doc ("new content") を読み、writeFile が発火
+		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content\n");
+	});
+
+	it("export uses uncontrolled edit content (getContent from EditorView)", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		// mock editor で uncontrolled 編集
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+
+		// Cmd+Shift+E で export ダイアログを開く
+		await act(async () => {
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "e", metaKey: true, shiftKey: true }),
+			);
+		});
+
+		// ExportDialog mock が受け取った markdown は、stale な loadedDoc ("# Hello") ではなく
+		// 最新の uncontrolled doc ("new content") でなければならない
+		expect(capturedExportMarkdown).toBe("new content");
 	});
 });
