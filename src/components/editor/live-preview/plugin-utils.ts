@@ -1,12 +1,21 @@
 import { syntaxTree } from "@codemirror/language";
-import type { ChangeDesc, Transaction } from "@codemirror/state";
-import type { DecorationSet, EditorView, ViewUpdate } from "@codemirror/view";
+import { type ChangeDesc, StateEffect, type Transaction } from "@codemirror/state";
+import { type DecorationSet, type EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { cursorInRange } from "./cursor-utils";
 
 /** 「カーソル位置フィルタ前」の全マッチ範囲 (candidate)。 */
 export interface CandidateRange {
 	from: number;
 	to: number;
+}
+
+/** math / mermaid / table の StateField 値の共通形。
+ *  `decos` は field が provide する DecorationSet、`candidates` は差分再構築判定
+ *  (`blockFieldNeedsRebuild` / `cursorTouchesCandidates`) が参照するカーソル位置
+ *  フィルタ前の全マッチ範囲。3 field で同一形状のため中央に集約している。 */
+export interface BlockFieldValue {
+	decos: DecorationSet;
+	candidates: CandidateRange[];
 }
 
 type IterateSpec = Parameters<ReturnType<typeof syntaxTree>["iterate"]>[0];
@@ -160,13 +169,17 @@ export function cursorTouchesCandidates(
 	if (!tr.selection) return false;
 	// 旧カーソル位置 (startState.selection) と新カーソル位置の行番号を集計。
 	// docChanged=false 前提なので oldDoc === newDoc、oldLines/newLines を同じ doc で集める。
+	// **anchor のみ** を見る (head ではない)。widget 表示可否を決める collectCursorLines
+	// も anchor のみを参照する仕様 (Issue #90 のドラッグ時ちらつき防止) なので、rebuild
+	// トリガもそちらに揃える必要がある。head を混ぜると、anchor が block 外・head が
+	// block 内のドラッグ選択で「見た目は不変なのに毎ステップ full rebuild」が起きる。
 	const doc = tr.state.doc;
 	const cursorLines = new Set<number>();
 	for (const r of tr.startState.selection.ranges) {
-		cursorLines.add(doc.lineAt(Math.min(r.head, doc.length)).number);
+		cursorLines.add(doc.lineAt(Math.min(r.anchor, doc.length)).number);
 	}
 	for (const r of tr.state.selection.ranges) {
-		cursorLines.add(doc.lineAt(Math.min(r.head, doc.length)).number);
+		cursorLines.add(doc.lineAt(Math.min(r.anchor, doc.length)).number);
 	}
 	for (const c of candidates) {
 		const fromLine = doc.lineAt(Math.min(c.from, doc.length)).number;
@@ -192,3 +205,23 @@ export function mapCandidates(
 	}
 	return out;
 }
+
+// 共通 tree-change effect。
+// mermaid / table の StateField はいずれも syntax tree に依存し、CM の lazy parse が
+// 進行するたびに再構築が必要。従来は mermaid.ts と table-decoration.ts に同一実装の
+// treeChangeDetector が別々に存在し、tree 差し替え毎に **別 transaction で 2 回 dispatch**
+// していた。これを 1 transaction にまとめてカスケードを半減させる。
+export const treeParseProgressed = StateEffect.define<null>();
+
+export const treeChangeDispatcher = ViewPlugin.fromClass(
+	class {
+		update(update: ViewUpdate) {
+			if (!update.docChanged && syntaxTree(update.state) !== syntaxTree(update.startState)) {
+				const { view } = update;
+				queueMicrotask(() => {
+					view.dispatch({ effects: treeParseProgressed.of(null) });
+				});
+			}
+		}
+	},
+);

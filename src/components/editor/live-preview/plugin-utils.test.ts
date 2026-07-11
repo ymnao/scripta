@@ -1,9 +1,10 @@
-import { ChangeSet, EditorState, type Transaction } from "@codemirror/state";
+import { ChangeSet, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import {
 	blockFieldNeedsRebuild,
 	type CandidateRange,
+	cursorTouchesCandidates,
 	handleComposingUpdate,
 	iterateVisibleSyntax,
 } from "./plugin-utils";
@@ -195,5 +196,44 @@ describe("blockFieldNeedsRebuild — marker detection stability", () => {
 		const state = EditorState.create({ doc: "a$b" });
 		const tr = state.update({ changes: { from: 1, to: 2, insert: "" } });
 		expect(blockFieldNeedsRebuild(tr, candidates, marker)).toBe(true);
+	});
+});
+
+// #303 Phase 3: cursorTouchesCandidates は anchor のみを見る (head ではない)。
+// widget 表示可否を決める collectCursorLines (cursor-utils.ts) も anchor のみを
+// 参照する仕様 (Issue #90 のドラッグ時ちらつき防止) なので、rebuild トリガと
+// 表示判定を揃える必要がある。head を混ぜると、anchor が block 外・head が block 内の
+// ドラッグ選択で「見た目は不変なのに毎ステップ full rebuild」が起きる。
+describe("cursorTouchesCandidates — uses anchor, not head", () => {
+	it("head が candidate 内に入っても anchor が外にあれば false (drag 中の無駄 rebuild を抑止)", () => {
+		// L1: "line one" (0-8), L2: "" (9), L3: "block" (10-14), L4: "line four" (15-)
+		const doc = "line one\n\nblock\nline four";
+		const state = EditorState.create({
+			doc,
+			selection: EditorSelection.single(0),
+		});
+		// L3 (candidate) の from-to を line 位置から算出
+		const line3 = state.doc.line(3);
+		const candidates: CandidateRange[] = [{ from: line3.from, to: line3.to }];
+
+		// anchor=L1 (0)、head を L3 中盤に伸ばす drag 相当の selection 変化
+		const tr = state.update({
+			selection: EditorSelection.range(0, line3.from + 2),
+		});
+		expect(cursorTouchesCandidates(tr, candidates)).toBe(false);
+	});
+
+	it("anchor が candidate 内に入れば true (実際の widget hide 切替が必要)", () => {
+		const doc = "line one\n\nblock\nline four";
+		const state = EditorState.create({
+			doc,
+			selection: EditorSelection.single(0),
+		});
+		const line3 = state.doc.line(3);
+		const candidates: CandidateRange[] = [{ from: line3.from, to: line3.to }];
+
+		// anchor 自体を L3 内 (block 内) へ移動
+		const tr = state.update({ selection: EditorSelection.cursor(line3.from + 1) });
+		expect(cursorTouchesCandidates(tr, candidates)).toBe(true);
 	});
 });

@@ -18,6 +18,15 @@ import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/me
 import { useSettingsStore } from "../../../stores/settings";
 import { useThemeStore } from "../../../stores/theme";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
+import {
+	type BlockFieldValue,
+	blockFieldNeedsRebuild,
+	type CandidateRange,
+	cursorTouchesCandidates,
+	mapCandidates,
+	treeChangeDispatcher,
+	treeParseProgressed,
+} from "./plugin-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -148,13 +157,25 @@ export class MermaidWidget extends WidgetType {
 
 // ── Decoration builder ────────────────────────────────
 
-export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
+/** buildMermaidDecorations の内部実装。decoration set に加えて、StateField の差分
+ *  再構築判定 (blockFieldNeedsRebuild / cursorTouchesCandidates) が使う candidate
+ *  範囲 (カーソル位置フィルタ前の mermaid ブロック全件) を返す。
+ *  カーソル位置フィルタで hidden 化されるブロックも candidates に含める — math/table
+ *  と同じく、隣接編集で候補が切り替わりうる以上、bail-early は安全側 (= full rebuild)
+ *  に倒すべきため。 */
+function buildMermaidDecorationsAndCandidates(
+	state: EditorState,
+	hasFocus: boolean,
+): BlockFieldValue {
 	const cursorLines = collectCursorLines(state, hasFocus);
 	const blocks = findMermaidBlocks(state);
 	const theme = useThemeStore.getState().theme;
 	const ranges: Range<Decoration>[] = [];
+	const candidates: CandidateRange[] = [];
 
 	for (const block of blocks) {
+		candidates.push({ from: block.from, to: block.to });
+
 		const startLine = state.doc.lineAt(block.from).number;
 		const endLine = state.doc.lineAt(block.to).number;
 
@@ -179,38 +200,58 @@ export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): 
 		);
 	}
 
-	return Decoration.set(ranges, true);
+	return { decos: Decoration.set(ranges, true), candidates };
+}
+
+/** 公開 API: DecorationSet のみを返す (既存の呼び出し元 / テスト向けの後方互換ラッパー)。 */
+export function buildMermaidDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
+	return buildMermaidDecorationsAndCandidates(state, hasFocus).decos;
 }
 
 // ── StateField ────────────────────────────────────────
 
-const mermaidDecorationField = StateField.define<DecorationSet>({
+/** mermaid candidate 判定の marker 文字 (fence)。挿入/削除テキストに ` か ~ が
+ *  含まれれば新規候補の出現/消滅の可能性があるため full rebuild にフォールバックする。 */
+// non-global にすることで `.test()` が stateless になり、呼び出しをまたいだ
+// lastIndex 状態漏れ (false negative = rebuild 漏れ) が構造的に発生しなくなる。
+const MERMAID_MARKER_RE = /`|~/;
+
+/** テスト用に export。StateField 自体を state.field() で直接読むことで、
+ *  update() の rebuild / skip 判定を EditorView / 実 focus イベントなしに検証できる
+ *  （mermaid.test.ts 参照、math.ts の mathDecorationField と同型）。 */
+export const mermaidDecorationField = StateField.define<BlockFieldValue>({
 	create(state) {
 		// 初期生成時は「フォーカスなし」とみなし、すべてのブロックをプレビュー表示する。
 		// エディタがフォーカスを得ると focusChangeHandler が実際の hasFocus で再構築する。
-		return buildMermaidDecorations(state, false);
+		return buildMermaidDecorationsAndCandidates(state, false);
 	},
-	update(decos, tr) {
-		// Effect 経由の場合は実際の hasFocus 値を使用
+	update(value, tr) {
 		for (const e of tr.effects) {
 			if (e.is(rebuildMermaidDecos)) {
-				return buildMermaidDecorations(tr.state, e.value);
+				return buildMermaidDecorationsAndCandidates(tr.state, e.value);
+			}
+			if (e.is(treeParseProgressed)) {
+				return buildMermaidDecorationsAndCandidates(tr.state, tr.state.field(hasFocusField));
 			}
 		}
 		if (tr.docChanged) {
-			return buildMermaidDecorations(tr.state, tr.state.field(hasFocusField));
-		}
-		if (tr.selection) {
-			const hasFocus = tr.state.field(hasFocusField);
-			const oldLines = collectCursorLines(tr.startState, tr.startState.field(hasFocusField));
-			const newLines = collectCursorLines(tr.state, hasFocus);
-			if (cursorLinesChanged(oldLines, newLines)) {
-				return buildMermaidDecorations(tr.state, hasFocus);
+			if (blockFieldNeedsRebuild(tr, value.candidates, MERMAID_MARKER_RE)) {
+				return buildMermaidDecorationsAndCandidates(tr.state, tr.state.field(hasFocusField));
 			}
+			return {
+				decos: value.decos.map(tr.changes),
+				candidates: mapCandidates(value.candidates, tr.changes),
+			};
 		}
-		return decos;
+		// mermaid はカーソルが fence 内に入るとブロックが hidden 化して source 表示に
+		// 切り替わる (table と異なり見た目が hasFocus/cursor に連動する) ため、
+		// selection 変化でも candidates と交差すれば rebuild が必要。
+		if (tr.selection && cursorTouchesCandidates(tr, value.candidates)) {
+			return buildMermaidDecorationsAndCandidates(tr.state, tr.state.field(hasFocusField));
+		}
+		return value;
 	},
-	provide: (f) => EditorView.decorations.from(f),
+	provide: (f) => EditorView.decorations.from(f, (v) => v.decos),
 });
 
 // ── ViewPlugin (async render + theme watch) ───────────
@@ -347,21 +388,6 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 	},
 );
 
-// ── Tree-change detector ──────────────────────────────
-
-const treeChangeDetector = ViewPlugin.fromClass(
-	class {
-		update(update: ViewUpdate) {
-			if (!update.docChanged && syntaxTree(update.state) !== syntaxTree(update.startState)) {
-				const { view } = update;
-				queueMicrotask(() => {
-					view.dispatch({ effects: rebuildMermaidDecos.of(view.hasFocus) });
-				});
-			}
-		}
-	},
-);
-
 // ── Click handler ─────────────────────────────────────
 
 function createMermaidClickHandler() {
@@ -433,7 +459,9 @@ export const mermaidDecoration: Extension = [
 	hasFocusField,
 	mermaidDecorationField,
 	mermaidRenderPlugin,
-	treeChangeDetector,
+	// treeChangeDispatcher は tableDecoration でも個別に include されるが、
+	// CodeMirror が ViewPlugin インスタンス同一性で dedup するため二重登録は無害。
+	treeChangeDispatcher,
 	focusChangeHandler,
 	createMermaidClickHandler(),
 ];
