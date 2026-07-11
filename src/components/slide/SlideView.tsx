@@ -28,7 +28,7 @@ const SlidePreview = lazy(
 
 interface SlideViewProps {
 	value: string;
-	onChange: (value: string) => void;
+	onDocChanged?: () => void;
 	onSave: () => void;
 	onEditorView?: (view: EditorView | null) => void;
 	goToLine?: GoToLineRequest | null;
@@ -38,7 +38,7 @@ interface SlideViewProps {
 
 export function SlideView({
 	value,
-	onChange,
+	onDocChanged,
 	onSave,
 	onEditorView,
 	goToLine,
@@ -84,7 +84,7 @@ export function SlideView({
 			<div className="min-h-0 min-w-0 flex-1">
 				<MarkdownEditor
 					value={value}
-					onChange={onChange}
+					onDocChanged={onDocChanged}
 					onSave={onSave}
 					onEditorView={handleEditorView}
 					goToLine={goToLine}

@@ -11,7 +11,7 @@ import { languages } from "@codemirror/language-data";
 import { search } from "@codemirror/search";
 import { EditorSelection, EditorState, Prec, type SelectionRange } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import CodeMirror, { ExternalChange, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
 	type MouseEvent as ReactMouseEvent,
 	useCallback,
@@ -152,7 +152,7 @@ export interface MarkdownEditorHandle {
 
 interface MarkdownEditorProps {
 	value: string;
-	onChange: (value: string) => void;
+	onDocChanged?: () => void;
 	onSave: () => void;
 	onEditorView?: (view: EditorView | null) => void;
 	goToLine?: GoToLineRequest | null;
@@ -163,7 +163,7 @@ interface MarkdownEditorProps {
 
 export function MarkdownEditor({
 	value,
-	onChange,
+	onDocChanged,
 	onSave,
 	onEditorView,
 	goToLine,
@@ -177,6 +177,8 @@ export function MarkdownEditor({
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const onSaveRef = useRef(onSave);
 	onSaveRef.current = onSave;
+	const onDocChangedRef = useRef(onDocChanged);
+	onDocChangedRef.current = onDocChanged;
 	const editorRef = useRef<ReactCodeMirrorRef>(null);
 	const onEditorViewRef = useRef(onEditorView);
 	onEditorViewRef.current = onEditorView;
@@ -396,6 +398,15 @@ export function MarkdownEditor({
 				{ key: "Mod-Shift-v", run: pasteAsMarkdownLinkCommand },
 			]),
 			EditorView.updateListener.of((update) => {
+				if (update.docChanged) {
+					// @uiw/react-codemirror が value prop 同期で dispatch する
+					// ExternalChange annotation 付き transaction はユーザー編集ではないので
+					// scheduleAutoSave を発火させない (dormant defense、#302 レビュー知見)。
+					const isExternal = update.transactions.some((tr) => tr.annotation(ExternalChange));
+					if (!isExternal) {
+						onDocChangedRef.current?.();
+					}
+				}
 				if (!(update.docChanged || update.selectionSet)) return;
 				const callback = onStatisticsRef.current;
 				if (!callback) return;
@@ -755,7 +766,6 @@ export function MarkdownEditor({
 					ref={editorRef}
 					className="h-full"
 					value={value}
-					onChange={onChange}
 					extensions={extensions}
 					height="100%"
 					theme="none"
