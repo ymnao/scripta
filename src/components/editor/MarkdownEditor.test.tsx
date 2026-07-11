@@ -65,19 +65,46 @@ function renderEditor(value: string, onChange?: (v: string) => void) {
 	const onEditorView = (view: EditorView | null) => {
 		editorView = view;
 	};
-	const result = render(
-		<MarkdownEditor
-			value={value}
-			onChange={onChange ?? (() => {})}
-			onSave={() => {}}
-			onEditorView={onEditorView}
-		/>,
-	);
 	const getView = (): EditorView => {
 		if (!editorView) throw new Error("EditorView not initialized");
 		return editorView;
 	};
+	// onChange 相当のテスト API を維持するため、onDocChanged 経由で
+	// 現在の doc 文字列を呼び出し元コールバックへ橋渡しする。
+	const onDocChanged = onChange
+		? () => {
+				onChange(getView().state.doc.toString());
+			}
+		: undefined;
+	const result = render(
+		<MarkdownEditor
+			value={value}
+			onDocChanged={onDocChanged}
+			onSave={() => {}}
+			onEditorView={onEditorView}
+		/>,
+	);
 	return { ...result, getView };
+}
+
+function renderEditorWithSpy(value: string, onDocChanged: () => void) {
+	let editorView: EditorView | null = null;
+	const onEditorView = (view: EditorView | null) => {
+		editorView = view;
+	};
+	const getView = (): EditorView => {
+		if (!editorView) throw new Error("EditorView not initialized");
+		return editorView;
+	};
+	const utils = render(
+		<MarkdownEditor
+			value={value}
+			onDocChanged={onDocChanged}
+			onSave={() => {}}
+			onEditorView={onEditorView}
+		/>,
+	);
+	return { ...utils, getView };
 }
 
 function selectRange(view: EditorView, from: number, to: number) {
@@ -348,5 +375,48 @@ describe("MarkdownEditor context menu", () => {
 		await openContextMenu(container);
 		await clickMenuItem("取り消し線");
 		expect(currentValue).toContain("~~hello~~");
+	});
+});
+
+// #302: MarkdownEditor 独自 updateListener の ExternalChange annotation フィルタ回帰テスト。
+// @uiw/react-codemirror が value prop 同期で dispatch する ExternalChange 付き transaction
+// では onDocChanged を発火させないこと (dormant defense)。実ユーザー編集は従来通り発火。
+describe("MarkdownEditor onDocChanged annotation filter", () => {
+	it("does not fire onDocChanged when @uiw/react-codemirror syncs value prop (ExternalChange)", async () => {
+		const onDocChanged = vi.fn();
+		const { rerender, getView } = renderEditorWithSpy("initial", onDocChanged);
+
+		// value prop 変更 → 内部 useCodeMirror が ExternalChange 付き transaction を dispatch
+		await act(async () => {
+			rerender(
+				<MarkdownEditor
+					value="externally synced"
+					onDocChanged={onDocChanged}
+					onSave={() => {}}
+					onEditorView={(view) => {
+						if (view) getView(); // keep ref alive
+					}}
+				/>,
+			);
+		});
+
+		// doc は同期されているが onDocChanged は発火しない
+		expect(getView().state.doc.toString()).toBe("externally synced");
+		expect(onDocChanged).not.toHaveBeenCalled();
+	});
+
+	it("fires onDocChanged on real user edits (unannotated dispatch)", async () => {
+		const onDocChanged = vi.fn();
+		const { getView } = renderEditorWithSpy("initial", onDocChanged);
+
+		// ExternalChange annotation なしの通常 transaction (実ユーザー編集相当)
+		await act(async () => {
+			getView().dispatch({
+				changes: { from: 0, to: 0, insert: "typed " },
+			});
+		});
+
+		expect(getView().state.doc.toString()).toBe("typed initial");
+		expect(onDocChanged).toHaveBeenCalled();
 	});
 });

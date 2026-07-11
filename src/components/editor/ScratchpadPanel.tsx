@@ -70,9 +70,13 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	const scratchpadPath = getScratchpadPath(workspacePath);
 
 	const isEditorComposing = useCallback(() => editorRef.current?.view?.composing ?? false, []);
-	const { saveStatus, saveNow, markSaved, getLastSavedContent } = useAutoSave(
+	// ScratchpadPanel はまだ controlled CodeMirror（content state）のままなので、
+	// useAutoSave の getContent には単にその時点の content を返すだけの関数を渡す。
+	const contentRef = useRef(content);
+	contentRef.current = content;
+	const { saveStatus, saveNow, markSaved, getLastSavedContent, scheduleAutoSave } = useAutoSave(
 		scratchpadPath,
-		content,
+		() => contentRef.current,
 		isEditorComposing,
 	);
 
@@ -86,6 +90,9 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	const handleChange = useCallback(
 		(value: string) => {
 			setContent(value);
+			// scheduleAutoSave() は同期的に getContent() を評価するため、次の再レンダー
+			// を待たずに ref を先に更新しておく（でないと直前の値のまま判定してしまう）。
+			contentRef.current = value;
 			const entry = scratchpadContentCache.get(scratchpadPath);
 			if (entry) {
 				entry.content = value;
@@ -95,8 +102,9 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 					savedContent: getLastSavedContentRef.current(),
 				});
 			}
+			scheduleAutoSave();
 		},
-		[scratchpadPath],
+		[scratchpadPath, scheduleAutoSave],
 	);
 
 	// Expose saveNow to parent via ref (for window close handling)
@@ -132,13 +140,14 @@ export function ScratchpadPanel({ workspacePath, onClose, saveRef }: ScratchpadP
 	// Prefer in-memory cache to avoid reading stale disk content
 	// when the panel is closed and immediately reopened (the previous
 	// unmount's async save may still be in-flight).
-	// markSaved receives savedContent (confirmed on disk), NOT content,
-	// so a failed previous save is detected as a diff and retried.
+	// markSaved receives savedContent (confirmed on disk); currentContent を
+	// 併せて渡すことで、キャッシュに未保存編集が残っていた場合に dirty 状態を
+	// 復元して autosave 再スケジュールする (#302 regression fix)。
 	useEffect(() => {
 		const cached = scratchpadContentCache.get(scratchpadPath);
 		if (cached !== undefined) {
 			setContent(cached.content);
-			markSaved(cached.savedContent);
+			markSaved(cached.savedContent, cached.content);
 			setLoaded(true);
 			return;
 		}
