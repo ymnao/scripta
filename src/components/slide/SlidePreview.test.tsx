@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useWorkspaceStore } from "../../stores/workspace";
-import { SlidePreview } from "./SlidePreview";
+import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH, SlidePreview } from "./SlidePreview";
 
 describe("SlidePreview", () => {
 	it("Markdown をプレビュー表示する", () => {
@@ -36,6 +36,19 @@ describe("SlidePreview", () => {
 		const content = container.querySelector(".slide-preview-content");
 		expect(content).not.toBeNull();
 		expect(content?.querySelector("hr")).not.toBeNull();
+	});
+
+	it("論理サイズ 1280×720 のステージにレンダリングする", () => {
+		const { container } = render(
+			<SlidePreview markdown="# fit test" slideIndex={0} totalSlides={1} />,
+		);
+		const stage = container.querySelector<HTMLDivElement>(".slide-preview");
+		expect(stage).not.toBeNull();
+		// jsdom には layout がないため clientWidth = 0 で ResizeObserver 経路も no-op mock。
+		// 結果 scale は初期値 1 のまま、論理サイズがそのまま inline style に載る。
+		expect(stage?.style.width).toBe(`${SLIDE_LOGICAL_WIDTH}px`);
+		expect(stage?.style.height).toBe(`${SLIDE_LOGICAL_HEIGHT}px`);
+		expect(stage?.style.transform).toBe("scale(1)");
 	});
 
 	// パス解決ロジック自体の網羅は image-src.test.ts / resolve-html-images.test.ts

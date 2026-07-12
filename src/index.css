@@ -457,11 +457,14 @@
 	padding: 0 1px;
 }
 
-/* Slide Preview */
+/* Slide Preview
+ * `.slide-preview` は 1280×720 の論理サイズで描画され、
+ * 実表示は SlidePreview 側の transform: scale() で縮小 fit される。
+ * よってこの中のフォントサイズは "1280×720 の presentation としての可読性" を基準にする。 */
 .slide-preview-content {
 	color: var(--color-text-primary);
-	font-size: 14px;
-	line-height: 1.7;
+	font-size: 28px;
+	line-height: 1.6;
 }
 
 .slide-preview-content h1 {
