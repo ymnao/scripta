@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PdfExportOptions } from "../../../src/types/pdf";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 // `new BrowserWindow(opts)` の捕捉と printToPDF / loadFile / executeJavaScript の
@@ -270,6 +271,66 @@ describe("exportPdfImpl", () => {
 		} finally {
 			setTimeoutSpy.mockRestore();
 		}
+	});
+
+	// IPC 信頼境界: renderer からの options を validate してから main に流す。
+	// 極端な pageSize / margin は printToPDF の allocation 爆発を招くため上限を絞る。
+	describe("PdfExportOptions validation", () => {
+		it("極端に大きい pageSize (μm) は拒否する", async () => {
+			const outputPath = join(workspace, "big.pdf");
+			await expect(
+				exportPdfImpl(SENDER_ID, "<html></html>", outputPath, {
+					pageSize: { width: 10_000_000, height: 10_000_000 },
+				}),
+			).rejects.toThrow(/pageSize/);
+			expect(createdWindows.length).toBe(0);
+		});
+
+		it("負の marginsInches は拒否する", async () => {
+			const outputPath = join(workspace, "neg.pdf");
+			await expect(
+				exportPdfImpl(SENDER_ID, "<html></html>", outputPath, {
+					marginsInches: { top: -1, bottom: 0, left: 0, right: 0 },
+				}),
+			).rejects.toThrow(/margin/);
+			expect(createdWindows.length).toBe(0);
+		});
+
+		it("非数値 pageSize.width は拒否する", async () => {
+			const outputPath = join(workspace, "nan.pdf");
+			// validate は unknown を受けるので、negative-path 用の不正 payload を
+			// as unknown 経由でキャストして renderer 側の型崩れを再現する。
+			const bad = { pageSize: { width: "1000", height: 1000 } } as unknown as PdfExportOptions;
+			await expect(exportPdfImpl(SENDER_ID, "<html></html>", outputPath, bad)).rejects.toThrow(
+				/pageSize/,
+			);
+		});
+
+		it("skipSectionBreakScript が boolean 以外は拒否する", async () => {
+			const outputPath = join(workspace, "bool.pdf");
+			const bad = { skipSectionBreakScript: 1 } as unknown as PdfExportOptions;
+			await expect(exportPdfImpl(SENDER_ID, "<html></html>", outputPath, bad)).rejects.toThrow(
+				/skipSectionBreakScript/,
+			);
+		});
+
+		it("undefined options は既存挙動どおり素通しする (backward compat)", async () => {
+			const outputPath = join(workspace, "compat.pdf");
+			await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+			const written = await fsp.readFile(outputPath);
+			expect(written.toString("utf8")).toContain("%PDF-1.4");
+		});
+
+		it("有効な slide サイズ (1280×720 μm 換算) を受理する", async () => {
+			const outputPath = join(workspace, "slide.pdf");
+			await exportPdfImpl(SENDER_ID, "<html></html>", outputPath, {
+				pageSize: { width: 338667, height: 190500 },
+				marginsInches: { top: 0, bottom: 0, left: 0, right: 0 },
+				skipSectionBreakScript: true,
+			});
+			const written = await fsp.readFile(outputPath);
+			expect(written.toString("utf8")).toContain("%PDF-1.4");
+		});
 	});
 });
 

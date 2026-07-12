@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { is } from "@electron-toolkit/utils";
 import { BrowserWindow, session } from "electron";
 import writeFileAtomic from "write-file-atomic";
+import type { PdfExportOptions } from "../../../src/types/pdf";
 import { handle } from "../utils/ipc-handle";
 import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
@@ -130,17 +131,71 @@ function installPdfWebRequestFilter(): void {
 // margins を inches で要求するため mm から換算する（1 inch = 25.4 mm）。
 const PDF_MARGIN_MM = 20;
 const PDF_MARGIN_INCHES = PDF_MARGIN_MM / 25.4;
-const PDF_OPTIONS = {
-	pageSize: "A4" as const,
-	margins: {
-		top: PDF_MARGIN_INCHES,
-		bottom: PDF_MARGIN_INCHES,
-		left: PDF_MARGIN_INCHES,
-		right: PDF_MARGIN_INCHES,
-	},
-	printBackground: true,
-	scale: 1.0,
+const DEFAULT_MARGINS = {
+	top: PDF_MARGIN_INCHES,
+	bottom: PDF_MARGIN_INCHES,
+	left: PDF_MARGIN_INCHES,
+	right: PDF_MARGIN_INCHES,
 };
+
+// renderer は contextIsolation + trusted bundle 経由なので直接の攻撃面ではないが、
+// 既存 IPC が outputPath を assertWritePathAllowed で必ず validate している defense in
+// depth 方針と揃える。極端な pageSize は printToPDF の allocation 爆発 (μm 単位で
+// 数千万を渡すと数百 MB のバッファ) を招くので上限を絞る。
+// pageSize μm 範囲: 1 mm (1000μm) 〜 3 m (3,000,000μm)。slide 経路の 190500 / 338667 と
+// A4 (210×297 mm ≈ 210000×297000 μm) を余裕をもってカバー。
+const MIN_PAGE_MICRONS = 1000;
+const MAX_PAGE_MICRONS = 3_000_000;
+// margin inch 範囲: 0 〜 5 inch。printToPDF は inch 単位、通常 20mm ≈ 0.79 inch。
+const MAX_MARGIN_INCHES = 5;
+
+function isFiniteNumberInRange(value: unknown, min: number, max: number): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+
+/**
+ * renderer からの PdfExportOptions を IPC 信頼境界で validate する。不正値は throw で
+ * 拒否し、renderer 側 exportPdf の Promise が reject して toast 表示される。
+ */
+function validatePdfExportOptions(
+	options: unknown,
+): asserts options is PdfExportOptions | undefined {
+	if (options === undefined || options === null) return;
+	if (typeof options !== "object") {
+		throw new Error("PDFエクスポート設定が不正です (object でない)");
+	}
+	const opts = options as Record<string, unknown>;
+	if (opts.pageSize !== undefined) {
+		const ps = opts.pageSize as Record<string, unknown> | null;
+		if (
+			!ps ||
+			typeof ps !== "object" ||
+			!isFiniteNumberInRange(ps.width, MIN_PAGE_MICRONS, MAX_PAGE_MICRONS) ||
+			!isFiniteNumberInRange(ps.height, MIN_PAGE_MICRONS, MAX_PAGE_MICRONS)
+		) {
+			throw new Error("PDFエクスポートの pageSize が不正です");
+		}
+	}
+	if (opts.marginsInches !== undefined) {
+		const m = opts.marginsInches as Record<string, unknown> | null;
+		if (
+			!m ||
+			typeof m !== "object" ||
+			!isFiniteNumberInRange(m.top, 0, MAX_MARGIN_INCHES) ||
+			!isFiniteNumberInRange(m.bottom, 0, MAX_MARGIN_INCHES) ||
+			!isFiniteNumberInRange(m.left, 0, MAX_MARGIN_INCHES) ||
+			!isFiniteNumberInRange(m.right, 0, MAX_MARGIN_INCHES)
+		) {
+			throw new Error("PDFエクスポートの margin が不正です");
+		}
+	}
+	if (
+		opts.skipSectionBreakScript !== undefined &&
+		typeof opts.skipSectionBreakScript !== "boolean"
+	) {
+		throw new Error("PDFエクスポートの skipSectionBreakScript が不正です");
+	}
+}
 
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -150,7 +205,9 @@ export async function exportPdfImpl(
 	senderId: number,
 	html: string,
 	outputPath: string,
+	options?: PdfExportOptions,
 ): Promise<void> {
+	validatePdfExportOptions(options);
 	const canonical = await assertWritePathAllowed(senderId, outputPath);
 
 	// session.fromPartition は app ready 後でないと動かないため、IPC 受信時 (=必ず
@@ -210,23 +267,32 @@ export async function exportPdfImpl(
 			// Section の改ページ判定: 見出しに直接 inline `break-before: page` を注入する
 			// 方式 (#93)。wrapper への `break-inside: avoid` は Chromium で overcaution
 			// を起こす quirk (#601033) があり、inline forced break の方が確実。
+			// スライド export はページ単位が「1 スライド = 1 ページ」で固定なので section
+			// break は不要 (呼び出し側が skipSectionBreakScript:true で明示 skip)。
 			// 診断ログは `SCRIPTA_PDF_DEBUG` 環境変数を立てた時だけ出力する。
 			// SCRIPTA_PDF_DEBUG_HTML_PATH と同様 dev ビルド限定とし、本番に env を
 			// 仕込まれても診断ログが stderr に漏れない（プライバシ含み）ことを担保。
-			try {
-				const diag = (await w.webContents.executeJavaScript(
-					buildSectionBreakScript(),
-					true,
-				)) as string;
-				if (is.dev && process.env.SCRIPTA_PDF_DEBUG) {
-					process.stderr.write(
-						`[scripta:#93] break-before script: ${diag} (html ${html.length} bytes)\n`,
-					);
+			if (!options?.skipSectionBreakScript) {
+				try {
+					const diag = (await w.webContents.executeJavaScript(
+						buildSectionBreakScript(),
+						true,
+					)) as string;
+					if (is.dev && process.env.SCRIPTA_PDF_DEBUG) {
+						process.stderr.write(
+							`[scripta:#93] break-before script: ${diag} (html ${html.length} bytes)\n`,
+						);
+					}
+				} catch (err) {
+					console.warn("[scripta:#93] break-before correction failed:", err);
 				}
-			} catch (err) {
-				console.warn("[scripta:#93] break-before correction failed:", err);
 			}
-			return await w.webContents.printToPDF(PDF_OPTIONS);
+			return await w.webContents.printToPDF({
+				pageSize: options?.pageSize ?? "A4",
+				margins: options?.marginsInches ?? DEFAULT_MARGINS,
+				printBackground: true,
+				scale: 1.0,
+			});
 		})();
 		// timeout が race に勝った後 exportWork が遅れて reject すると unhandled
 		// rejection になるので、最終的な結果を捨てる no-op handler を attach する。
@@ -256,8 +322,8 @@ export async function exportPdfImpl(
 export function registerPdfIpc(): void {
 	handle(
 		"pdf:export",
-		(event, html: string, outputPath: string): Promise<void> =>
-			exportPdfImpl(event.sender.id, html, outputPath),
+		(event, html: string, outputPath: string, options?: PdfExportOptions): Promise<void> =>
+			exportPdfImpl(event.sender.id, html, outputPath, options),
 	);
 }
 

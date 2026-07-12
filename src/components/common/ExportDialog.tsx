@@ -28,11 +28,12 @@ interface ExportDialogProps {
 	onScriptaDirConfirm?: () => void;
 }
 
-type Section = "html" | "pdf" | "prompt";
+type Section = "html" | "pdf" | "slide" | "prompt";
 
 // PDF を先頭に置く (ユーザ要望、利用頻度順)
 const sections: { key: Section; label: string }[] = [
 	{ key: "pdf", label: "PDF" },
+	{ key: "slide", label: "スライド" },
 	{ key: "html", label: "HTML" },
 	{ key: "prompt", label: "プロンプト" },
 ];
@@ -123,6 +124,21 @@ export function ExportDialog({
 			useToastStore
 				.getState()
 				.addToast("error", `PDFエクスポートに失敗しました: ${translateError(err)}`);
+		} finally {
+			setExporting(false);
+		}
+	};
+
+	const handleExportSlides = async () => {
+		setExporting(true);
+		try {
+			const { exportSlidesAsPdf } = await loadExportModule();
+			const result = await exportSlidesAsPdf(markdown, filePath);
+			if (result) onClose();
+		} catch (err: unknown) {
+			useToastStore
+				.getState()
+				.addToast("error", `スライドPDFエクスポートに失敗しました: ${translateError(err)}`);
 		} finally {
 			setExporting(false);
 		}
@@ -277,6 +293,26 @@ export function ExportDialog({
 								className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 							>
 								{exporting ? "エクスポート中..." : "PDFとしてエクスポート"}
+							</button>
+						</div>
+					</>
+				)}
+
+				{activeSection === "slide" && (
+					<>
+						<p className="text-[11px] leading-relaxed text-text-secondary">
+							Markdownを `---`
+							区切りでスライド化し、16:9（1280×720）1スライド1ページのPDFとして書き出します。プレビュー通りの見た目で出力されます。
+							{!isPdfSupported && " macOS・Windowsのみ対応。"}
+						</p>
+						<div className="flex justify-end">
+							<button
+								type="button"
+								disabled={exporting || !isPdfSupported}
+								onClick={handleExportSlides}
+								className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+							>
+								{exporting ? "エクスポート中..." : "スライドPDFとしてエクスポート"}
 							</button>
 						</div>
 					</>

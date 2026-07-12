@@ -27,6 +27,7 @@ const {
 	exportAsHtml,
 	exportAsPdf,
 	exportAsPrompt,
+	exportSlidesAsPdf,
 	extractSvgNaturalSizeAttrs,
 	findMermaidCodeBlocks,
 	getDefaultPromptTemplate,
@@ -909,5 +910,55 @@ describe("preprocessMermaidBlocks", () => {
 		expect(result).not.toContain("```mermaid");
 		expect(result).toContain("text\r\n\r\n");
 		expect(result).toContain("\r\n\r\nmore");
+	});
+});
+
+describe("exportSlidesAsPdf", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("save ダイアログでキャンセルされたら false を返し exportPdf を呼ばない", async () => {
+		mockedSave.mockResolvedValue(null);
+		const result = await exportSlidesAsPdf("# A\n---\n# B", "/workspace/deck.md");
+		expect(result).toBe(false);
+		expect(mockedExportPdf).not.toHaveBeenCalled();
+	});
+
+	it("スライドを --- で分割して 1 section = 1 スライドの HTML を生成する", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# Slide 1\n---\n# Slide 2\n---\n# Slide 3", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		const sectionMatches = html.match(/<section class="slide/g);
+		expect(sectionMatches?.length).toBe(3);
+		expect(html).toContain("Slide 1");
+		expect(html).toContain("Slide 2");
+		expect(html).toContain("Slide 3");
+	});
+
+	it("論理サイズ 1280×720 のページサイズ + マージン 0 で printToPDF を呼ぶ", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# only", "/workspace/deck.md");
+		const options = mockedExportPdf.mock.calls[0][2];
+		expect(options.pageSize.width).toBe(Math.round(1280 * (25400 / 96)));
+		expect(options.pageSize.height).toBe(Math.round(720 * (25400 / 96)));
+		expect(options.marginsInches).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
+		expect(options.skipSectionBreakScript).toBe(true);
+	});
+
+	it("最終スライドの余分な空白ページを避けるため :not(:last-child) で break-after を絞る", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# A\n---\n# B", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain(".slide:not(:last-child)");
+		expect(html).toContain("break-after: page");
+	});
+
+	it("default 保存名は <basename>-slides.pdf", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# A", "/workspace/deck.md");
+		expect(mockedSave).toHaveBeenCalledWith(
+			expect.objectContaining({ defaultPath: "deck-slides.pdf" }),
+		);
 	});
 });
