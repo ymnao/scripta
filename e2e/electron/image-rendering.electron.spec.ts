@@ -5,7 +5,7 @@ import { expect, test } from "./helpers/launch";
 // 領域6: Image rendering（live-preview の画像描画 + 実 asset protocol ロード）。
 // 相対パス（activeTabPath 基準で解決）と絶対パスの両方が scripta-asset:// に解決され、
 // 実 main の protocol 越しに実際に読み込まれる（fallback にならない）ことを踏む。
-// `resolveImageSrc`（src/components/editor/live-preview/images.ts）の解決結果が実 IPC
+// `resolveImageSrc`（src/lib/image-src.ts）の解決結果が実 IPC
 // と噛み合うかは mock では検証できない。
 //
 // 注: wikilink-image（`![[img.png]]`）は現状 live-preview 未実装（images.ts は標準

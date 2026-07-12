@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { useWorkspaceStore } from "../../stores/workspace";
 import { SlidePreview } from "./SlidePreview";
 
 describe("SlidePreview", () => {
@@ -35,5 +36,23 @@ describe("SlidePreview", () => {
 		const content = container.querySelector(".slide-preview-content");
 		expect(content).not.toBeNull();
 		expect(content?.querySelector("hr")).not.toBeNull();
+	});
+
+	// パス解決ロジック自体の網羅は image-src.test.ts / resolve-html-images.test.ts
+	// 側で行い、ここでは activeTabPath が SlidePreview まで配線されて反映されることの
+	// smoke だけ抑える。
+	it("activeTabPath 基準で画像パスを解決してレンダリングする", () => {
+		useWorkspaceStore.setState({ activeTabPath: "/workspace/notes/deck.md" });
+		try {
+			const { container } = render(
+				<SlidePreview markdown="![alt](./img/hero.png)" slideIndex={0} totalSlides={1} />,
+			);
+			const img = container.querySelector<HTMLImageElement>(".slide-preview-content img");
+			expect(img?.getAttribute("src")).toBe(
+				"scripta-asset://localhost/workspace/notes/img/hero.png",
+			);
+		} finally {
+			useWorkspaceStore.setState({ activeTabPath: null });
+		}
 	});
 });

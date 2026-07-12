@@ -39,6 +39,10 @@ const { createdWindows, createFakeWindow, simulateState, mockIs, pdfFakeSession 
 			webRequest: { onBeforeRequest: vi.fn() },
 			setPermissionRequestHandler: vi.fn(),
 			setPermissionCheckHandler: vi.fn(),
+			// registerScriptaAssetProtocol が pdfSession.protocol.handle(scheme, ...) を
+			// 呼ぶため mock。実際の handler は本 test では発火させない (webRequest filter
+			// の verify のみ意図)。
+			protocol: { handle: vi.fn() },
 		};
 		const create = (opts: unknown): FakeWindow => {
 			const id = nextId++;
@@ -229,6 +233,18 @@ describe("exportPdfImpl", () => {
 		});
 	});
 
+	it("registers scripta-asset protocol handler on the PDF partition session", async () => {
+		// PDF export 用の隔離 partition (defaultSession とは別) からも `<img
+		// src="scripta-asset://...">` を配信できるよう、pdfSession に scripta-asset の
+		// protocol handler を registered する。defaultSession の登録は継承されない。
+		const outputPath = join(workspace, "asset.pdf");
+		await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+		expect(pdfFakeSession.protocol.handle).toHaveBeenCalledWith(
+			"scripta-asset",
+			expect.any(Function),
+		);
+	});
+
 	it("installs permission deny handlers on the dedicated PDF session", async () => {
 		// installPdfWebRequestFilter は module-level flag で 1 度しか install しない。
 		// 他テストでも累積するため、ここでは「少なくとも 1 度は install されている」
@@ -263,6 +279,11 @@ describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {
 	});
 	it("allows data: URIs", () => {
 		expect(shouldAllowPdfRequest("data:image/png;base64,iVBORw0K")).toBe(true);
+	});
+	it("allows scripta-asset: (workspace-guarded by handler)", () => {
+		// pdfSession 側にも protocol handler が registered され、handler 内で
+		// workspace 内 path のみ配信することで安全性を担保している。
+		expect(shouldAllowPdfRequest("scripta-asset://localhost/workspace/img.png")).toBe(true);
 	});
 	it("allows https: to public hostname", () => {
 		expect(shouldAllowPdfRequest("https://example.com/image.png")).toBe(true);
