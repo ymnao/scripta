@@ -26,6 +26,17 @@ if (!Range.prototype.getBoundingClientRect) {
 	Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
 }
 
+// jsdom は ResizeObserver を持たないため no-op を注入する（SlidePreview の scale
+// 計算はここでは検証せず、コンポーネント側は typeof チェックで observer 未起動でも
+// 初期値でレンダリングできる）。
+if (typeof globalThis.ResizeObserver === "undefined") {
+	globalThis.ResizeObserver = class ResizeObserver {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	};
+}
+
 Object.defineProperty(window, "matchMedia", {
 	writable: true,
 	configurable: true,
