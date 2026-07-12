@@ -1,14 +1,12 @@
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, net, protocol, session } from "electron";
-import { urlPathnameToFsPath } from "../preload/scripta-asset-url";
+import { app, BrowserWindow, protocol, session } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getWindowState, persistWindowState } from "./ipc/settings";
 import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
-import { isPathWithinAnyAllowedRoot } from "./utils/path-guard";
 import { installMainSessionPermissionHandlers } from "./utils/permission-handler";
+import { registerScriptaAssetProtocol, SCRIPTA_ASSET_SCHEME } from "./utils/scripta-asset-protocol";
 import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachNavigationGuards } from "./utils/window-guards";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
@@ -18,7 +16,8 @@ import { attachWindowStateTracker, resolveInitialGeometry } from "./utils/window
 // CSP `img-src` に許可するのは本スキームだけで、`file:` は許可しない。これによりファイル
 // アクセスは必ず `protocol.handle` のハンドラ → path-guard を経由する（任意 file 読み取り
 // 防止）。`registerSchemesAsPrivileged` は `app.ready` より前に呼ぶ必要がある（Electron）。
-const SCRIPTA_ASSET_SCHEME = "scripta-asset";
+// 実際の handler 登録は utils/scripta-asset-protocol.ts に集約 (PDF export の隔離 partition
+// からも同じロジックで登録するため)。
 protocol.registerSchemesAsPrivileged([
 	{
 		scheme: SCRIPTA_ASSET_SCHEME,
@@ -154,30 +153,6 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
-
-// 失敗時は status のみ返し本文に path を含めない（拒否された path がレンダラ DevTools
-// から見える形だとワークスペース外パスの存在情報が漏れるため）。hostname を `localhost`
-// 固定にするのは、悪意あるレンダラが任意ホスト名で URL を組み立てた際の挙動を予測可能
-// にする目的（特権スキームでホスト名は意味を持たないが、表記の一貫性を強制する）。
-function registerScriptaAssetProtocol(): void {
-	protocol.handle(SCRIPTA_ASSET_SCHEME, async (request) => {
-		try {
-			const url = new URL(request.url);
-			if (url.hostname !== "localhost") {
-				return new Response(null, { status: 400 });
-			}
-			const path = urlPathnameToFsPath(url.pathname);
-			if (!(await isPathWithinAnyAllowedRoot(path))) {
-				console.warn(`[scripta-asset] denied outside workspace: ${path}`);
-				return new Response(null, { status: 403 });
-			}
-			return await net.fetch(pathToFileURL(path).toString());
-		} catch (error) {
-			console.error("[scripta-asset] failed:", error);
-			return new Response(null, { status: 500 });
-		}
-	});
-}
 
 app.whenReady().then(async () => {
 	electronApp.setAppUserModelId("com.scripta.app");

@@ -6,6 +6,7 @@ import { getDefaultPromptTemplate } from "./export-templates";
 import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { basename } from "./path";
+import { resolveHtmlImageSrcs } from "./resolve-html-images";
 import { svgToPng } from "./svg-rasterize";
 
 export type ExportTheme = "system" | "light" | "dark";
@@ -502,7 +503,12 @@ export async function exportAsPdf(
 		{ htmlLabels: false, useMaxWidth: false },
 		{ rasterize: true },
 	);
-	const bodyHtml = markdownToHtml(preprocessed, { breaks: true });
+	// activeTabPath 基準で `![](./foo.png)` などを `scripta-asset://` に解決する
+	// (相対のままだと main の隔離セッションが temp file 隣に画像が無いため 404 になる)。
+	// PDF 経路の scripta-asset 解決は pdf.ts 側でも協力が必要 (protocol 登録 + webRequest
+	// 白リスト)。HTML export は外部ブラウザで開かれる前提のため対象外 (data URI 埋め込みは
+	// 別 PR)。
+	const bodyHtml = resolveHtmlImageSrcs(markdownToHtml(preprocessed, { breaks: true }), filePath);
 
 	// section の改ページ判定は main 側 (pdf.ts) で executeJavaScript により行う (#93 v5)。
 	// renderer 側で wrap せず、main の script が heading 自身に inline break-before を

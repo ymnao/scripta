@@ -9,50 +9,9 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { buildAssetUrl } from "../../../lib/commands";
-import { useWorkspaceStore } from "../../../stores/workspace";
+import { resolveImageSrc } from "../../../lib/image-src";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
-
-/** dirname/getSep (path.ts) は最初のセパレータを基準にするが、
- *  mixed separator ("C:/Users\\docs\\note.md") では最後のセパレータを
- *  基準にする必要があるため、独自実装を維持する。 */
-export function parentDir(filePath: string): string {
-	const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-	if (lastSep === -1) return "";
-	if (lastSep === 0) return filePath[0];
-	return filePath.substring(0, lastSep);
-}
-
-function detectSeparator(filePath: string): string {
-	const lastSlash = filePath.lastIndexOf("/");
-	const lastBackslash = filePath.lastIndexOf("\\");
-	if (lastSlash === -1 && lastBackslash === -1) return "/";
-	return lastBackslash > lastSlash ? "\\" : "/";
-}
-
-export function resolveImageSrc(
-	rawUrl: string,
-	activeTabPath: string | null = useWorkspaceStore.getState().activeTabPath,
-): string {
-	if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
-		return rawUrl;
-	}
-	if (rawUrl.startsWith("/") || rawUrl.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(rawUrl)) {
-		return buildAssetUrl(rawUrl);
-	}
-	if (!activeTabPath) return rawUrl;
-	const dir = parentDir(activeTabPath);
-	if (!dir) return rawUrl;
-	let normalized = rawUrl;
-	if (normalized.startsWith("./") || normalized.startsWith(".\\")) {
-		normalized = normalized.slice(2);
-	}
-	const sep = detectSeparator(activeTabPath);
-	const needsSep = !dir.endsWith("/") && !dir.endsWith("\\");
-	const resolved = needsSep ? `${dir}${sep}${normalized}` : `${dir}${normalized}`;
-	return buildAssetUrl(resolved);
-}
 
 class ImageWidget extends WidgetType {
 	src: string;

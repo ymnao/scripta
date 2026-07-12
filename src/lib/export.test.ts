@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
-vi.mock("./commands", () => ({
-	writeFile: vi.fn().mockResolvedValue(undefined),
-	exportPdf: vi.fn().mockResolvedValue(undefined),
-	showSaveDialog: vi.fn(),
-}));
+vi.mock("./commands", async () => {
+	const { buildScriptaAssetUrl } = await import("../../electron/preload/scripta-asset-url");
+	return {
+		writeFile: vi.fn().mockResolvedValue(undefined),
+		exportPdf: vi.fn().mockResolvedValue(undefined),
+		showSaveDialog: vi.fn(),
+		// resolveHtmlImageSrcs 経由の resolveImageSrc が呼ぶ。既存 image-src.test.ts と
+		// 同一の production 実装で mock (mock ドリフト防止)。
+		buildAssetUrl: (path: string) => buildScriptaAssetUrl(path),
+	};
+});
 
 vi.mock("./mermaid", () => ({
 	renderMermaid: vi.fn(async (source: string) => `<svg>${source}</svg>`),
@@ -221,6 +227,17 @@ describe("exportAsPdf", () => {
 		const html = mockedExportPdf.mock.calls[0][0] as string;
 		expect(html).toContain("size: A4");
 		expect(html).toContain("margin: 20mm");
+	});
+
+	it("resolves relative image paths against filePath into scripta-asset URLs (PDF)", async () => {
+		// PDF は Electron 内部で printToPDF に渡すため scripta-asset:// をそのまま
+		// 使える (pdf.ts 側で pdfSession に protocol handler 登録済み)。activeTabPath
+		// 基準で workspace 内相対パスが解決されることを回帰として固定。
+		mockedSave.mockResolvedValue("/output/deck.pdf");
+		await exportAsPdf("![alt](./img/pic.png)", "/workspace/notes/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("scripta-asset://localhost/workspace/notes/img/pic.png");
+		expect(html).not.toMatch(/<img[^>]+src="\.\/img\/pic\.png"/);
 	});
 
 	it("converts single newlines to <br> in PDF HTML", async () => {

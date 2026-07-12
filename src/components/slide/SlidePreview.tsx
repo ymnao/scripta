@@ -3,6 +3,8 @@
 import "katex/dist/katex.min.css";
 import { memo, useDeferredValue, useMemo } from "react";
 import { markdownToHtml } from "../../lib/markdown-to-html";
+import { resolveHtmlImageSrcs } from "../../lib/resolve-html-images";
+import { useWorkspaceStore } from "../../stores/workspace";
 
 export interface SlidePreviewProps {
 	markdown: string;
@@ -20,13 +22,14 @@ export const SlidePreview = memo(function SlidePreview({
 	totalSlides,
 }: SlidePreviewProps) {
 	const deferredMarkdown = useDeferredValue(markdown);
+	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 
 	const html = useMemo(() => {
 		// 末尾の区切り行を除去してプレビュー
 		const cleaned = deferredMarkdown.replace(/\n---\s*$/, "").trim();
 		if (!cleaned) return "";
-		return markdownToHtml(cleaned);
-	}, [deferredMarkdown]);
+		return resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
+	}, [deferredMarkdown, activeTabPath]);
 
 	return (
 		<div className="flex h-full flex-col items-center justify-center p-4">

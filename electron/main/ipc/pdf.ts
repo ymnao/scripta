@@ -9,6 +9,10 @@ import { handle } from "../utils/ipc-handle";
 import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { installPermissionDenyHandlers } from "../utils/permission-handler";
+import {
+	registerScriptaAssetProtocol,
+	SCRIPTA_ASSET_SCHEME,
+} from "../utils/scripta-asset-protocol";
 import { isGlobalIp } from "../utils/ssrf-guard";
 
 // Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
@@ -63,6 +67,10 @@ function shouldAllowPdfRequest(rawUrl: string): boolean {
 	}
 	const protocol = parsed.protocol;
 	if (protocol === "data:") return true;
+	// PDF export 内で `<img src="scripta-asset://localhost/...">` を配信するための許可。
+	// scheme handler 自体が workspace 内 path のみ返す (utils/scripta-asset-protocol.ts)
+	// ので任意 file 読みリスクは handler 側で閉じている。
+	if (protocol === `${SCRIPTA_ASSET_SCHEME}:`) return true;
 	if (protocol === "file:") {
 		// PDF 用 temp HTML は OS の tmpdir 配下に作るので、それ以外への file: 参照は弾く。
 		// `URL.pathname` は POSIX 表現（Windows でも `/C:/...`）になる一方、`tmpdir()`
@@ -111,6 +119,10 @@ function installPdfWebRequestFilter(): void {
 	// permission policy（clipboard 許可）を共有させない。clipboard 等の web permission
 	// は PDF 描画に不要なので全 deny にする。
 	installPermissionDenyHandlers(pdfSession);
+	// scripta-asset:// は session 単位で protocol.handle 登録が必要 (defaultSession の
+	// 登録は継承されない)。同 session で複数回 handle するとエラーになるため flag で
+	// 単一化 (== 同 partition なので同 session を再取得する)。
+	registerScriptaAssetProtocol(pdfSession);
 	pdfWebRequestFilterInstalled = true;
 }
 

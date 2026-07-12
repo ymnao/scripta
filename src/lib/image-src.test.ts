@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildScriptaAssetUrl } from "../../../../electron/preload/scripta-asset-url";
-import { parentDir, resolveImageSrc } from "./images";
+import { buildScriptaAssetUrl } from "../../electron/preload/scripta-asset-url";
+import { parentDir, resolveImageSrc } from "./image-src";
 
-vi.mock("../../../lib/commands", () => ({
+vi.mock("./commands", () => ({
 	// production と同一ロジックでモックする。preload の `buildAssetUrl` も同じ helper を
 	// 呼んでおり、ここで挙動を分岐させる理由はない（mock がドリフトしてバグを隠す事故防止）。
 	buildAssetUrl: (path: string) => buildScriptaAssetUrl(path),
 }));
 
-vi.mock("../../../stores/workspace", () => ({
+vi.mock("../stores/workspace", () => ({
 	useWorkspaceStore: {
 		getState: () => ({ activeTabPath: null }),
 	},
@@ -57,6 +57,17 @@ describe("resolveImageSrc", () => {
 		expect(resolveImageSrc("https://example.com/img.png", null)).toBe(
 			"https://example.com/img.png",
 		);
+	});
+
+	it("returns data: URIs as-is even with activeTabPath set", () => {
+		// activeTabPath がセットされていても data: を相対パスとして巻き取らない (画像が壊れる)。
+		const src = "data:image/png;base64,iVBORw0KG==";
+		expect(resolveImageSrc(src, "/workspace/notes/deck.md")).toBe(src);
+	});
+
+	it("returns blob: URIs as-is even with activeTabPath set", () => {
+		const src = "blob:file:///abc";
+		expect(resolveImageSrc(src, "/workspace/notes/deck.md")).toBe(src);
 	});
 
 	it("converts Unix absolute path via buildAssetUrl", () => {
