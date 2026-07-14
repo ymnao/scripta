@@ -58,6 +58,7 @@ import {
 	mathDecoration,
 	mermaidDecoration,
 	pasteAsMarkdownLinkCommand,
+	slideSeparatorDecoration,
 	strikethroughDecoration,
 	tableDecoration,
 	tableKeymap,
@@ -159,6 +160,11 @@ interface MarkdownEditorProps {
 	onGoToLineDone?: () => void;
 	onStatistics?: (info: CursorInfo) => void;
 	snapshotHandleRef?: React.RefObject<MarkdownEditorHandle | null>;
+	/**
+	 * true のとき、HR (`---`) の live-preview を通常の細線ではなく
+	 * スライド区切り強調 (太めの破線 + アクセントカラー) にする。SlideView 用。
+	 */
+	slideSeparatorMode?: boolean;
 }
 
 export function MarkdownEditor({
@@ -170,6 +176,7 @@ export function MarkdownEditor({
 	onGoToLineDone,
 	onStatistics,
 	snapshotHandleRef,
+	slideSeparatorMode = false,
 }: MarkdownEditorProps) {
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
 	const fontSize = useSettingsStore((s) => s.fontSize);
@@ -360,7 +367,7 @@ export function MarkdownEditor({
 			mermaidDecoration,
 			listDecoration,
 			blockquoteDecoration,
-			horizontalRuleDecoration,
+			slideSeparatorMode ? slideSeparatorDecoration : horizontalRuleDecoration,
 			mathDecoration,
 			tableDecoration,
 			...(showLinkCards ? [linkCardDecoration] : []),
@@ -430,7 +437,7 @@ export function MarkdownEditor({
 				});
 			}),
 		],
-		[fontSize, showLinkCards],
+		[fontSize, showLinkCards, slideSeparatorMode],
 	);
 
 	// タブ切替で undo 履歴を維持する snapshot handle (#220)。

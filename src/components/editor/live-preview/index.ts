@@ -10,6 +10,7 @@ export { buildMarkdownLink, linkDecoration, pasteAsMarkdownLinkCommand } from ".
 export { listDecoration, listKeymap } from "./lists";
 export { mathDecoration } from "./math";
 export { mermaidDecoration } from "./mermaid";
+export { slideSeparatorDecoration } from "./slide-separators";
 export { strikethroughDecoration } from "./strikethrough";
 export { tableDecoration } from "./table-decoration";
 export { insertTable, rangeOverlapsCodeOrTable, tableKeymap, tsvPasteHandler } from "./tables";
