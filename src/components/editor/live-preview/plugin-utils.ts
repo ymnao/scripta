@@ -1,11 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import {
-	type ChangeDesc,
-	type Extension,
-	type Range,
-	StateEffect,
-	type Transaction,
-} from "@codemirror/state";
+import { type ChangeDesc, type Range, StateEffect, type Transaction } from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
@@ -246,7 +240,7 @@ export function createHrReplaceDecoration(
 	lineFilter?: (trimmedLineText: string) => boolean,
 ): {
 	buildDecorations: (view: EditorView) => DecorationSet;
-	extension: Extension;
+	extension: ViewPlugin<{ decorations: DecorationSet }>;
 } {
 	const buildDecorations = (view: EditorView): DecorationSet => {
 		const { state } = view;
