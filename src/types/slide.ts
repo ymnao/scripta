@@ -20,6 +20,11 @@ export const SLIDE_LOGICAL_HEIGHT = 720;
 // px 固定に上げ、root font-size に依存しないよう altitude を揃えた。
 export const SLIDE_LOGICAL_PADDING_PX = 64;
 
+// SlideThumbnails の 1 枚あたりの描画幅。scale は THUMB_WIDTH / SLIDE_LOGICAL_WIDTH で
+// 導出する (アスペクト比 16:9 固定なので高さも自動で決まる)。他のスライドドメイン
+// UI knob と同じく types/slide に集約する (SLIDE_PREVIEW_WIDTH_RATIO_* と同 pattern)。
+export const SLIDE_THUMBNAIL_WIDTH = 160;
+
 // Fable #13: SlideView の右側プレビューペイン幅を editor コンテナに対する比率で
 // 保持する。極端な値だと片方のペインが潰れて操作不能になるため、min 0.2 / max
 // 0.7 でクランプする。step は矢印キー操作 1 回あたりの ratio 増減（2%）。

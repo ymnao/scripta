@@ -51,6 +51,18 @@ describe("SlideView", () => {
 		expect(await screen.findByText("1 / 1")).toBeDefined();
 	});
 
+	it("1 枚だけならサムネイル一覧を出さない", async () => {
+		render(<SlideView value="# Only" onDocChanged={vi.fn()} onSave={vi.fn()} />);
+		await screen.findByText("1 / 1");
+		expect(screen.queryByTestId("slide-thumbnails")).toBeNull();
+	});
+
+	it("複数スライドでサムネイル一覧を表示する", async () => {
+		render(<SlideView value={"A\n---\nB\n---\nC"} onDocChanged={vi.fn()} onSave={vi.fn()} />);
+		await screen.findByText("1 / 3");
+		expect(screen.getByTestId("slide-thumbnails")).toBeDefined();
+	});
+
 	it("onEditorView コールバックが呼ばれる", () => {
 		const onEditorView = vi.fn();
 		render(

@@ -23,6 +23,7 @@ import {
 import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import type { SlidePreviewProps } from "./SlidePreview";
+import { SlideThumbnails } from "./SlideThumbnails";
 
 // aria-valuenow/min/max は「%」整数を期待するため事前に計算しておく。
 const RATIO_ARIA_VALUEMIN = Math.round(SLIDE_PREVIEW_WIDTH_RATIO_MIN * 100);
@@ -233,45 +234,75 @@ export function SlideView({
 
 	const previewWidthPct = `${activeRatio * 100}%`;
 
+	// currentSlideIndex は cursorPos → onStatistics 経路の追随に任せ、ここでは
+	// editor カーソル移動と focus 引き取りだけを行う。
+	const handleSelectSlide = useCallback(
+		(index: number) => {
+			const view = editorViewRef.current;
+			const slide = slides[index];
+			if (!view || !slide) return;
+			view.dispatch({
+				selection: { anchor: slide.from },
+				scrollIntoView: true,
+			});
+			view.focus();
+		},
+		[slides],
+	);
+
 	return (
-		<div ref={containerRef} className="flex min-h-0 flex-1">
-			<div className="min-h-0 min-w-0 flex-1">
-				<MarkdownEditor
-					value={value}
-					onDocChanged={handleDocChanged}
-					onSave={onSave}
-					onEditorView={handleEditorView}
-					goToLine={goToLine}
-					onGoToLineDone={onGoToLineDone}
-					onStatistics={handleStatistics}
-					slideSeparatorMode
-				/>
-			</div>
-			{/* biome-ignore lint/a11y/useSemanticElements: separator role is the ARIA
-			    convention for a resize handle; <hr> would collapse the split panes. */}
-			<div
-				role="separator"
-				aria-orientation="vertical"
-				aria-label="スライドプレビューの幅を調整"
-				aria-valuemin={RATIO_ARIA_VALUEMIN}
-				aria-valuemax={RATIO_ARIA_VALUEMAX}
-				aria-valuenow={Math.round(activeRatio * 100)}
-				tabIndex={0}
-				onPointerDown={handlePointerDown}
-				onKeyDown={handleKeyDown}
-				data-testid="slide-preview-resize-handle"
-				className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-text-link focus:bg-text-link focus:outline-none"
-			/>
-			<div className="min-h-0 bg-bg-secondary" style={{ width: previewWidthPct }}>
-				<Suspense fallback={null}>
-					<SlidePreview
-						markdown={currentSlide?.content ?? ""}
-						slideIndex={currentSlideIndex}
-						totalSlides={slides.length}
-						themeOverride={frontmatterTheme}
+		<div className="flex min-h-0 flex-1 flex-col">
+			<div ref={containerRef} className="flex min-h-0 flex-1">
+				<div className="min-h-0 min-w-0 flex-1">
+					<MarkdownEditor
+						value={value}
+						onDocChanged={handleDocChanged}
+						onSave={onSave}
+						onEditorView={handleEditorView}
+						goToLine={goToLine}
+						onGoToLineDone={onGoToLineDone}
+						onStatistics={handleStatistics}
+						slideSeparatorMode
 					/>
-				</Suspense>
+				</div>
+				{/* biome-ignore lint/a11y/useSemanticElements: separator role is the ARIA
+				    convention for a resize handle; <hr> would collapse the split panes. */}
+				<div
+					role="separator"
+					aria-orientation="vertical"
+					aria-label="スライドプレビューの幅を調整"
+					aria-valuemin={RATIO_ARIA_VALUEMIN}
+					aria-valuemax={RATIO_ARIA_VALUEMAX}
+					aria-valuenow={Math.round(activeRatio * 100)}
+					tabIndex={0}
+					onPointerDown={handlePointerDown}
+					onKeyDown={handleKeyDown}
+					data-testid="slide-preview-resize-handle"
+					className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-text-link focus:bg-text-link focus:outline-none"
+				/>
+				<div className="min-h-0 bg-bg-secondary" style={{ width: previewWidthPct }}>
+					<Suspense fallback={null}>
+						<SlidePreview
+							markdown={currentSlide?.content ?? ""}
+							slideIndex={currentSlideIndex}
+							totalSlides={slides.length}
+							themeOverride={frontmatterTheme}
+						/>
+					</Suspense>
+				</div>
 			</div>
+			{/* 1 枚だけなら SlideThumbnails を mount しない。内部 gate だと
+			    useSlideHtmls (hook) が early return 前に unconditional で発火し、
+			    単一 slide deck でも Promise.all(mermaid preprocess) を毎キー走らせて
+			    しまうため、gate は呼び出し側で mount を抑える。 */}
+			{slides.length > 1 && (
+				<SlideThumbnails
+					slides={slides}
+					currentSlideIndex={currentSlideIndex}
+					themeOverride={frontmatterTheme}
+					onSelectSlide={handleSelectSlide}
+				/>
+			)}
 		</div>
 	);
 }
