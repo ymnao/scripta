@@ -14,9 +14,23 @@ import {
 	findSlideAtCursor,
 	parseSlides,
 } from "../../lib/slide-parser";
+import { useSettingsStore } from "../../stores/settings";
+import {
+	SLIDE_PREVIEW_WIDTH_RATIO_MAX,
+	SLIDE_PREVIEW_WIDTH_RATIO_MIN,
+	SLIDE_PREVIEW_WIDTH_RATIO_STEP,
+} from "../../types/slide";
 import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import type { SlidePreviewProps } from "./SlidePreview";
+
+// aria-valuenow/min/max は「%」整数を期待するため事前に計算しておく。
+const RATIO_ARIA_VALUEMIN = Math.round(SLIDE_PREVIEW_WIDTH_RATIO_MIN * 100);
+const RATIO_ARIA_VALUEMAX = Math.round(SLIDE_PREVIEW_WIDTH_RATIO_MAX * 100);
+
+function clampRatio(ratio: number): number {
+	return Math.min(SLIDE_PREVIEW_WIDTH_RATIO_MAX, Math.max(SLIDE_PREVIEW_WIDTH_RATIO_MIN, ratio));
+}
 
 /** chunk ロード失敗時のフォールバック。このリポジトリは ErrorBoundary を持たない
  *  （クラスコンポーネント禁止）ため import 側で catch し、プレビューペインのみ
@@ -64,6 +78,19 @@ export function SlideView({
 	// 都度読み直して内部 state に反映する。value 変化時は差し替えとして同期する。
 	const [docText, setDocText] = useState(value);
 	const editorViewRef = useRef<EditorView | null>(null);
+
+	// Fable #13: プレビュー幅リサイズ。store 値を SoT にしつつドラッグ中は毎フレーム
+	// 更新するとディスク I/O が跳ねるため、ドラッグ中は local state に反映して pointerup
+	// で store へコミットする。draftRatio は render 用 state、draftRatioRef は
+	// pointerup / pointercancel が pure に読み出すための最新値を保持する。
+	// 用途を分けることで setState updater 内で副作用 (setPersistedRatio) を呼ぶ
+	// React anti-pattern を避けている。
+	const persistedRatio = useSettingsStore((s) => s.slidePreviewWidthRatio);
+	const setPersistedRatio = useSettingsStore((s) => s.setSlidePreviewWidthRatio);
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const [draftRatio, setDraftRatio] = useState<number | null>(null);
+	const draftRatioRef = useRef<number | null>(null);
+	const activeRatio = clampRatio(draftRatio ?? persistedRatio);
 
 	useEffect(() => {
 		setDocText(value);
@@ -118,8 +145,96 @@ export function SlideView({
 		[onStatistics],
 	);
 
+	const handlePointerDown = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			if (e.button !== 0) return;
+			const container = containerRef.current;
+			if (!container) return;
+			// コンテナ矩形はドラッグ中不変（レイアウトが動く経路がない）なので pointerdown で
+			// 1 回だけ読み、pointermove 60-120Hz の layout read を避ける。
+			const rect = container.getBoundingClientRect();
+			if (rect.width <= 0) return;
+			e.preventDefault();
+			const target = e.currentTarget;
+			target.setPointerCapture(e.pointerId);
+
+			// pointermove の React 再 render を 60Hz に throttle する。setDraftRatio 自体で
+			// SlideView 全体が再 render され、隣接する MarkdownEditor (memo 化なし) の
+			// subtree reconciliation まで走るため、rAF 単位で coalesce する。
+			let rafId: number | null = null;
+			const onMove = (moveEvent: PointerEvent) => {
+				const nextRatio = clampRatio((rect.right - moveEvent.clientX) / rect.width);
+				draftRatioRef.current = nextRatio;
+				if (rafId !== null) return;
+				rafId = requestAnimationFrame(() => {
+					rafId = null;
+					setDraftRatio(draftRatioRef.current);
+				});
+			};
+			const cleanup = (endEvent: PointerEvent) => {
+				target.removeEventListener("pointermove", onMove);
+				target.removeEventListener("pointerup", onUp);
+				target.removeEventListener("pointercancel", onCancel);
+				if (rafId !== null) {
+					cancelAnimationFrame(rafId);
+					rafId = null;
+				}
+				if (target.hasPointerCapture(endEvent.pointerId)) {
+					target.releasePointerCapture(endEvent.pointerId);
+				}
+			};
+			const onUp = (upEvent: PointerEvent) => {
+				cleanup(upEvent);
+				const finalRatio = draftRatioRef.current;
+				draftRatioRef.current = null;
+				setDraftRatio(null);
+				if (finalRatio !== null) {
+					setPersistedRatio(finalRatio);
+				}
+			};
+			// OS / ブラウザが gesture を中断した場合 (touch → scroll escalation, window
+			// blur, system modal 等) はユーザーの意図的な release ではないため、
+			// draft を破棄して store には書かない。ARIA/UX 慣例に従う挙動。
+			const onCancel = (cancelEvent: PointerEvent) => {
+				cleanup(cancelEvent);
+				draftRatioRef.current = null;
+				setDraftRatio(null);
+			};
+			target.addEventListener("pointermove", onMove);
+			target.addEventListener("pointerup", onUp);
+			target.addEventListener("pointercancel", onCancel);
+		},
+		[setPersistedRatio],
+	);
+
+	const handleKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLDivElement>) => {
+			// WAI-ARIA APG (role="separator"): ArrowLeft = separator を左へ動かす =
+			// 左ペイン (editor) が縮む = 右ペイン (preview) が広がる = ratio 増加。
+			// ドラッグ方向 (rect.right - clientX) とも符号が一致する。
+			// Home/End は「primary pane (editor) を min/max にする」定義なので
+			// Home = editor min = preview max ratio、End = editor max = preview min ratio。
+			const next =
+				e.key === "ArrowLeft"
+					? persistedRatio + SLIDE_PREVIEW_WIDTH_RATIO_STEP
+					: e.key === "ArrowRight"
+						? persistedRatio - SLIDE_PREVIEW_WIDTH_RATIO_STEP
+						: e.key === "Home"
+							? SLIDE_PREVIEW_WIDTH_RATIO_MAX
+							: e.key === "End"
+								? SLIDE_PREVIEW_WIDTH_RATIO_MIN
+								: null;
+			if (next === null) return;
+			e.preventDefault();
+			setPersistedRatio(clampRatio(next));
+		},
+		[persistedRatio, setPersistedRatio],
+	);
+
+	const previewWidthPct = `${activeRatio * 100}%`;
+
 	return (
-		<div className="flex min-h-0 flex-1">
+		<div ref={containerRef} className="flex min-h-0 flex-1">
 			<div className="min-h-0 min-w-0 flex-1">
 				<MarkdownEditor
 					value={value}
@@ -132,7 +247,22 @@ export function SlideView({
 					slideSeparatorMode
 				/>
 			</div>
-			<div className="min-h-0 w-[45%] border-l border-border bg-bg-secondary">
+			{/* biome-ignore lint/a11y/useSemanticElements: separator role is the ARIA
+			    convention for a resize handle; <hr> would collapse the split panes. */}
+			<div
+				role="separator"
+				aria-orientation="vertical"
+				aria-label="スライドプレビューの幅を調整"
+				aria-valuemin={RATIO_ARIA_VALUEMIN}
+				aria-valuemax={RATIO_ARIA_VALUEMAX}
+				aria-valuenow={Math.round(activeRatio * 100)}
+				tabIndex={0}
+				onPointerDown={handlePointerDown}
+				onKeyDown={handleKeyDown}
+				data-testid="slide-preview-resize-handle"
+				className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-text-link focus:bg-text-link focus:outline-none"
+			/>
+			<div className="min-h-0 bg-bg-secondary" style={{ width: previewWidthPct }}>
 				<Suspense fallback={null}>
 					<SlidePreview
 						markdown={currentSlide?.content ?? ""}

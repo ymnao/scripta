@@ -85,6 +85,22 @@ describe("useSettingsStore", () => {
 		expect(useSettingsStore.getState().trimTrailingWhitespace).toBe(false);
 	});
 
+	it("setSlidePreviewWidthRatio clamps out-of-range values before persist (A4)", () => {
+		// writer 側の clamp: 範囲外を渡しても store と disk には MIN/MAX にクランプされた
+		// 値のみが到達する。future caller が誤って書いても preference が壊れないための防御。
+		useSettingsStore.getState().setSlidePreviewWidthRatio(0.9);
+		expect(useSettingsStore.getState().slidePreviewWidthRatio).toBe(0.7);
+		expect(saveSetting).toHaveBeenLastCalledWith("slidePreviewWidthRatio", 0.7);
+
+		useSettingsStore.getState().setSlidePreviewWidthRatio(0.05);
+		expect(useSettingsStore.getState().slidePreviewWidthRatio).toBe(0.2);
+		expect(saveSetting).toHaveBeenLastCalledWith("slidePreviewWidthRatio", 0.2);
+
+		useSettingsStore.getState().setSlidePreviewWidthRatio(0.55);
+		expect(useSettingsStore.getState().slidePreviewWidthRatio).toBe(0.55);
+		expect(saveSetting).toHaveBeenLastCalledWith("slidePreviewWidthRatio", 0.55);
+	});
+
 	it("hydrate sets state without calling save functions", () => {
 		vi.mocked(saveSetting).mockClear();
 

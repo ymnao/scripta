@@ -1,6 +1,11 @@
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
+import {
+	SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
+	SLIDE_PREVIEW_WIDTH_RATIO_MAX,
+	SLIDE_PREVIEW_WIDTH_RATIO_MIN,
+} from "../types/slide";
 import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
 import { applyMigrations } from "./store-migration";
 
@@ -35,6 +40,7 @@ interface AppSettings {
 	autoUpdateCheck: boolean;
 	fileTreeShowHidden: boolean;
 	fileTreeExcludePatterns: string;
+	slidePreviewWidthRatio: number;
 }
 
 const DEFAULTS: AppSettings = {
@@ -60,6 +66,7 @@ const DEFAULTS: AppSettings = {
 	autoUpdateCheck: true,
 	fileTreeShowHidden: false,
 	fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+	slidePreviewWidthRatio: SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
 };
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -193,6 +200,15 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawFileTreeExcludePatterns
 				: DEFAULTS.fileTreeExcludePatterns;
 
+		const rawSlidePreviewWidthRatio = await settingsGet("slidePreviewWidthRatio");
+		const slidePreviewWidthRatio: number =
+			typeof rawSlidePreviewWidthRatio === "number" &&
+			Number.isFinite(rawSlidePreviewWidthRatio) &&
+			rawSlidePreviewWidthRatio >= SLIDE_PREVIEW_WIDTH_RATIO_MIN &&
+			rawSlidePreviewWidthRatio <= SLIDE_PREVIEW_WIDTH_RATIO_MAX
+				? rawSlidePreviewWidthRatio
+				: DEFAULTS.slidePreviewWidthRatio;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -216,6 +232,7 @@ export async function loadSettings(): Promise<AppSettings> {
 			autoUpdateCheck,
 			fileTreeShowHidden,
 			fileTreeExcludePatterns,
+			slidePreviewWidthRatio,
 		};
 	} catch {
 		return { ...DEFAULTS };
