@@ -32,6 +32,11 @@ export function useSlideHtml(markdown: string): string {
  * 複数スライドの HTML を並列に mermaid 込みでレンダリングするフック。
  * 発表モード (SlideShowOverlay) が全スライドを事前レンダーするのに使う。
  * mount 中 `slides` は snapshot なので通常は 1 回だけ async 実行される。
+ *
+ * ⚠️ 呼び出し側は `slides` の identity を安定させる (useMemo 等で memoize する)
+ * こと。`useAsyncDerived` は `slides` を useEffect 依存として `===` 比較する
+ * ため、毎 render で新しい配列を渡すと effect が render 毎に fire し、setState
+ * が繰り返し呼ばれて再 render → effect fire → ... のループになる。
  */
 export function useSlideHtmls(slides: readonly { content: string }[]): string[] {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
