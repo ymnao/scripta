@@ -4,6 +4,12 @@ export interface SlideSection {
 	to: number;
 }
 
+/**
+ * スライド deck に適用可能なテーマ。app theme と同じ 2 値だが、frontmatter override
+ * (Fable #12) / preview / PDF の 3 経路で共有する型として types/slide に置く。
+ */
+export type SlideTheme = "light" | "dark";
+
 // スライドの論理サイズ。16:9。SlidePreview は transform: scale() でコンテナに fit、
 // PDF export は printToPDF の pageSize (μm) にこのピクセル寸法を 96dpi 換算で流し込む。
 // 両 consumer で同じ WYSIWYG 前提を共有するため、UI 層でなくドメイン層に置く。

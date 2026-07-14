@@ -28,7 +28,11 @@ import {
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
-import { findSlideAtCursor, parseSlides } from "../../lib/slide-parser";
+import {
+	extractSlideFrontmatterTheme,
+	findSlideAtCursor,
+	parseSlides,
+} from "../../lib/slide-parser";
 import { loadSettings, saveSetting } from "../../lib/store";
 import { useBacklinkStore } from "../../stores/backlink";
 import { useGitSyncStore } from "../../stores/git-sync";
@@ -39,7 +43,7 @@ import { useToastStore } from "../../stores/toast";
 import { useWikilinkStore } from "../../stores/wikilink";
 import { selectNavigation, useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
-import type { SlideSection } from "../../types/slide";
+import type { SlideSection, SlideTheme } from "../../types/slide";
 import { Dialog } from "../common/Dialog";
 import { DirectoryPickerDialog } from "../common/DirectoryPickerDialog";
 import { ExportDialog } from "../common/ExportDialog";
@@ -212,6 +216,7 @@ export function AppLayout() {
 	const [slideShow, setSlideShow] = useState<{
 		slides: SlideSection[];
 		startIndex: number;
+		themeOverride: SlideTheme | null;
 	} | null>(null);
 	const [goToLineOpen, setGoToLineOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
@@ -1177,9 +1182,13 @@ export function AppLayout() {
 		const path = useWorkspaceStore.getState().activeTabPath;
 		if (!path || isNewTabPath(path)) return;
 		const view = editorViewRef.current;
-		const slides = parseSlides(getContent());
+		const content = getContent();
+		const slides = parseSlides(content);
 		const startIndex = findSlideAtCursor(slides, view?.state.selection.main.head ?? 0);
-		setSlideShow({ slides, startIndex });
+		// Fable #12: F5 押下時に frontmatter theme も snapshot する。overlay mount 中は
+		// markdown 変更を反映しないので snapshot 契約と揃える。
+		const themeOverride = extractSlideFrontmatterTheme(content);
+		setSlideShow({ slides, startIndex, themeOverride });
 	}, [getContent]);
 
 	// overlay の keydown effect が deps 差分で毎レンダー再購読しないよう identity を安定化。
@@ -1551,6 +1560,7 @@ export function AppLayout() {
 					<SlideShowOverlay
 						slides={slideShow.slides}
 						startIndex={slideShow.startIndex}
+						themeOverride={slideShow.themeOverride}
 						onClose={closeSlideShow}
 					/>
 				</Suspense>

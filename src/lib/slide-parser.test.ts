@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSlideAtCursor, parseSlides } from "./slide-parser";
+import { extractSlideFrontmatterTheme, findSlideAtCursor, parseSlides } from "./slide-parser";
 
 describe("parseSlides", () => {
 	it("空のドキュメントでは1枚のスライドを返す", () => {
@@ -56,12 +56,15 @@ describe("parseSlides", () => {
 		expect(slides).toHaveLength(2);
 	});
 
-	it("YAML frontmatter をスキップ", () => {
+	it("YAML frontmatter を slide 1 本文からも除外する", () => {
 		const text = "---\ntitle: My Slides\n---\n# Slide 1\n---\n# Slide 2";
 		const slides = parseSlides(text);
 		expect(slides).toHaveLength(2);
-		expect(slides[0].content).toContain("title: My Slides");
+		// slide 1 は frontmatter を含まず本文のみ (Fable #12 で preview に生 YAML が
+		// 見えるのを避ける)
+		expect(slides[0].content).not.toContain("title: My Slides");
 		expect(slides[0].content).toContain("# Slide 1");
+		expect(slides[0].from).toBe(text.indexOf("# Slide 1"));
 		expect(slides[1].content).toBe("# Slide 2");
 	});
 
@@ -94,6 +97,7 @@ describe("parseSlides", () => {
 		const text = "---\n# comment\ntitle: X\n---\n# Slide 1\n---\n# Slide 2";
 		const slides = parseSlides(text);
 		expect(slides).toHaveLength(2);
+		expect(slides[0].content).not.toContain("title: X");
 		expect(slides[0].content).toContain("# Slide 1");
 		expect(slides[1].content).toBe("# Slide 2");
 	});
@@ -102,8 +106,16 @@ describe("parseSlides", () => {
 		const text = "---\ntitle: Test\nauthor: Alice\ndate: 2025-01-01\n---\nContent\n---\nSlide 2";
 		const slides = parseSlides(text);
 		expect(slides).toHaveLength(2);
-		expect(slides[0].content).toContain("title: Test");
-		expect(slides[0].content).toContain("Content");
+		expect(slides[0].content).not.toContain("title: Test");
+		expect(slides[0].content).not.toContain("author: Alice");
+		expect(slides[0].content).toBe("Content\n---");
+	});
+
+	it("frontmatter のみで本文が無い場合は空スライド 1 枚を返す", () => {
+		const text = "---\ntheme: dark\n---\n";
+		const slides = parseSlides(text);
+		expect(slides).toHaveLength(1);
+		expect(slides[0].content).toBe("");
 	});
 
 	it("前後に空白がある --- も認識する", () => {
@@ -134,5 +146,43 @@ describe("findSlideAtCursor", () => {
 	it("空のスライドリストで 0 を返す", () => {
 		const slides = parseSlides("");
 		expect(findSlideAtCursor(slides, 0)).toBe(0);
+	});
+});
+
+describe("extractSlideFrontmatterTheme", () => {
+	it("frontmatter が無ければ null", () => {
+		expect(extractSlideFrontmatterTheme("# Slide 1\n---\n# Slide 2")).toBeNull();
+		expect(extractSlideFrontmatterTheme("")).toBeNull();
+	});
+
+	it("frontmatter に theme が無ければ null", () => {
+		const text = "---\ntitle: Hello\n---\n\n# Slide 1";
+		expect(extractSlideFrontmatterTheme(text)).toBeNull();
+	});
+
+	it("theme: light を抽出", () => {
+		const text = "---\ntheme: light\n---\n\n# Slide 1";
+		expect(extractSlideFrontmatterTheme(text)).toBe("light");
+	});
+
+	it("theme: dark を抽出", () => {
+		const text = "---\ntheme: dark\ntitle: Hello\n---\n\n# Slide 1";
+		expect(extractSlideFrontmatterTheme(text)).toBe("dark");
+	});
+
+	it("未知の theme 値は null", () => {
+		const text = "---\ntheme: solarized\n---\n\n# Slide 1";
+		expect(extractSlideFrontmatterTheme(text)).toBeNull();
+	});
+
+	it("theme が非文字列 (数値等) は null", () => {
+		const text = "---\ntheme: 42\n---\n\n# Slide 1";
+		expect(extractSlideFrontmatterTheme(text)).toBeNull();
+	});
+
+	it("frontmatter でない先頭 --- では null", () => {
+		// 先頭 --- 直後がフリーテキスト → frontmatter 扱いされない
+		const text = "---\njust text\nno colon\n---\n\nrest";
+		expect(extractSlideFrontmatterTheme(text)).toBeNull();
 	});
 });

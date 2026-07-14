@@ -3,6 +3,7 @@ import {
 	SLIDE_LOGICAL_HEIGHT,
 	SLIDE_LOGICAL_PADDING_PX,
 	SLIDE_LOGICAL_WIDTH,
+	type SlideTheme,
 } from "../types/slide";
 import { buildFence } from "./code-fence";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
@@ -14,7 +15,7 @@ import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown
 import { preprocessMermaidBlocks } from "./mermaid-preprocess";
 import { basename } from "./path";
 import { resolveHtmlImageSrcs } from "./resolve-html-images";
-import { parseSlides } from "./slide-parser";
+import { extractSlideFrontmatterTheme, parseSlides } from "./slide-parser";
 import { renderSlideHtmlWithMermaid } from "./slide-render";
 
 export {
@@ -411,10 +412,49 @@ export async function exportAsPdf(
 // 1:1 に対応させ、スライド 1 枚 = PDF 1 ページの WYSIWYG を保証する。
 const MICRONS_PER_PX = 25400 / 96;
 
-function buildSlideHtmlDocument(slides: string[], title: string): string {
+// preview / 発表モードの `.slide-theme-*` (src/index.css:585-604) と 1:1 一致させる。
+// CSS 側は CSS 変数上書き / こちらは PDF 用に静的 HTML を吐くため値を JS 側でも保持。
+// どちらか変更する時は両方を揃える (WYSIWYG 契約)。link 色も preview の
+// `--color-text-link` と揃えて dark deck のリンク視認性を保つ。
+const SLIDE_PDF_PALETTE: Record<
+	SlideTheme,
+	{
+		bg: string;
+		text: string;
+		codeBg: string;
+		tableBorder: string;
+		thBg: string;
+		link: string;
+	}
+> = {
+	light: {
+		bg: "#ffffff",
+		text: "#333333",
+		codeBg: "#f8f8f8",
+		tableBorder: "#e8e8e8",
+		thBg: "#f8f8f8",
+		link: "#2563eb",
+	},
+	dark: {
+		bg: "#1a1a1a",
+		text: "#d4d4d4",
+		codeBg: "#222222",
+		tableBorder: "#333333",
+		thBg: "#222222",
+		link: "#60a5fa",
+	},
+};
+
+function buildSlideHtmlDocument(
+	slides: string[],
+	title: string,
+	theme: SlideTheme = "light",
+): string {
 	// 各スライドを固定 1280×720 の section に格納。最後以外は break-after: page で
 	// 明示的にページ送り (`:not(:last-child)` で最終 slide の余分な空白ページを回避)。
 	const sections = slides.map((html) => `<section class="slide">\n${html}\n</section>`).join("\n");
+
+	const p = SLIDE_PDF_PALETTE[theme];
 
 	return `<!DOCTYPE html>
 <html lang="ja">
@@ -424,12 +464,12 @@ function buildSlideHtmlDocument(slides: string[], title: string): string {
 <title>${escapeHtml(title)}</title>
 <style>${katexInlineCss}</style>
 <style>
-:root { color-scheme: light; }
+:root { color-scheme: ${theme}; }
 html, body {
   margin: 0;
   padding: 0;
-  background: #fff;
-  color: #333;
+  background: ${p.bg};
+  color: ${p.text};
   font-family: system-ui, -apple-system, sans-serif;
   line-height: 1.6;
   -webkit-print-color-adjust: exact;
@@ -452,12 +492,13 @@ h2 { font-size: 1.6em; font-weight: 700; }
 h3 { font-size: 1.3em; font-weight: 600; }
 p { margin: 0.6em 0; }
 code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9em; }
-pre { padding: 0.8em 1em; background: #f5f5f5; border-radius: 6px; overflow-x: auto; }
+pre { padding: 0.8em 1em; background: ${p.codeBg}; border-radius: 6px; overflow-x: auto; }
 pre code { background: none; padding: 0; }
 img { max-width: 100%; height: auto; }
 table { border-collapse: collapse; margin: 0.5em 0; }
-th, td { border: 1px solid #e8e8e8; padding: 0.4em 0.7em; }
-th { background: #f8f8f8; font-weight: 600; }
+th, td { border: 1px solid ${p.tableBorder}; padding: 0.4em 0.7em; }
+th { background: ${p.thBg}; font-weight: 600; }
+a { color: ${p.link}; text-decoration: underline; }
 .mermaid-diagram { text-align: center; margin: 0.5em 0; }
 .mermaid-diagram svg, .mermaid-diagram img { max-width: 100%; height: auto; }
 ul, ol { padding-left: 1.5em; margin: 0.5em 0; }
@@ -488,6 +529,9 @@ export async function exportSlidesAsPdf(markdown: string, filePath: string): Pro
 	if (!savePath) return false;
 
 	const sections = parseSlides(markdown);
+	// Fable #12: frontmatter `theme:` があれば PDF もそれに従う。無ければ従来通り light
+	// (印刷デフォルト)。preview / 発表 / PDF の 3 経路で同じ theme が効く WYSIWYG 契約。
+	const slideTheme = extractSlideFrontmatterTheme(markdown) ?? "light";
 	// SlidePreview / 発表モードと共通の `renderSlideHtmlWithMermaid` を通し、
 	// 「末尾 `---` 除去 → 空スライドは空文字 → mermaid preprocess → markdownToHtml →
 	// image src 解決」の順序と契約を preview / presentation / PDF export で一致させる。
@@ -498,14 +542,14 @@ export async function exportSlidesAsPdf(markdown: string, filePath: string): Pro
 	// 挙動を優先)。
 	const slidesHtml = await Promise.all(
 		sections.map((slide) =>
-			renderSlideHtmlWithMermaid(slide.content, filePath, "light", {
+			renderSlideHtmlWithMermaid(slide.content, filePath, slideTheme, {
 				mermaidOptions: { htmlLabels: false, useMaxWidth: false },
 				embedOptions: { rasterize: true },
 			}),
 		),
 	);
 
-	const html = buildSlideHtmlDocument(slidesHtml, title);
+	const html = buildSlideHtmlDocument(slidesHtml, title, slideTheme);
 
 	await exportPdf(html, savePath, {
 		pageSize: {
