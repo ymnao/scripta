@@ -1,5 +1,13 @@
 import type { EditorView } from "@codemirror/view";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	type ComponentType,
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
@@ -20,6 +28,7 @@ import {
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
+import { findSlideAtCursor, parseSlides } from "../../lib/slide-parser";
 import { loadSettings, saveSetting } from "../../lib/store";
 import { useBacklinkStore } from "../../stores/backlink";
 import { useGitSyncStore } from "../../stores/git-sync";
@@ -30,6 +39,7 @@ import { useToastStore } from "../../stores/toast";
 import { useWikilinkStore } from "../../stores/wikilink";
 import { selectNavigation, useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
+import type { SlideSection } from "../../types/slide";
 import { Dialog } from "../common/Dialog";
 import { DirectoryPickerDialog } from "../common/DirectoryPickerDialog";
 import { ExportDialog } from "../common/ExportDialog";
@@ -45,10 +55,18 @@ import { TabBar } from "../editor/TabBar";
 import { CommandPalette } from "../search/CommandPalette";
 import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
+import type { SlideShowOverlayProps } from "../slide/SlideShowOverlay";
 import { SlideView } from "../slide/SlideView";
 import { NewTabContent } from "./NewTabContent";
 import { Sidebar, type SidebarPanel } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
+
+// SlideShowOverlay → markdown-to-html → katex の静的 import チェーンを初期チャンクから
+// 切り離すため lazy 化する (SlidePreview と同じ意図、#301)。F5 押下まで load しない。
+const SlideShowOverlay = lazy(
+	(): Promise<{ default: ComponentType<SlideShowOverlayProps> }> =>
+		import("../slide/SlideShowOverlay").then((m) => ({ default: m.SlideShowOverlay })),
+);
 
 type GoToLine = GoToLineRequest | null;
 
@@ -191,6 +209,10 @@ export function AppLayout() {
 	} | null>(null);
 	const exportRequestIdRef = useRef(0);
 	const [slideViewActive, setSlideViewActive] = useState(false);
+	const [slideShow, setSlideShow] = useState<{
+		slides: SlideSection[];
+		startIndex: number;
+	} | null>(null);
 	const [goToLineOpen, setGoToLineOpen] = useState(false);
 	const [searchBarOpen, setSearchBarOpen] = useState(false);
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
@@ -1143,10 +1165,25 @@ export function AppLayout() {
 	useEffect(() => {
 		setGoToLineOpen(false);
 		setSlideViewActive(false);
+		setSlideShow(null);
 		if (!activeTabPath || isNewTabPath(activeTabPath)) {
 			setSearchBarOpen(false);
 		}
 	}, [activeTabPath]);
+
+	// F5 で発表モードを開く。SlideView と独立に、通常エディタからも起動できる。
+	// slides を snapshot して overlay に渡す (mount 中 markdown 変更を反映しない仕様)。
+	const startSlideShow = useCallback(() => {
+		const path = useWorkspaceStore.getState().activeTabPath;
+		if (!path || isNewTabPath(path)) return;
+		const view = editorViewRef.current;
+		const slides = parseSlides(getContent());
+		const startIndex = findSlideAtCursor(slides, view?.state.selection.main.head ?? 0);
+		setSlideShow({ slides, startIndex });
+	}, [getContent]);
+
+	// overlay の keydown effect が deps 差分で毎レンダー再購読しないよう identity を安定化。
+	const closeSlideShow = useCallback(() => setSlideShow(null), []);
 
 	// Keyboard shortcuts
 	useEffect(() => {
@@ -1292,6 +1329,24 @@ export function AppLayout() {
 				e.preventDefault();
 				setHelpOpen((prev) => !prev);
 			}
+			// F5 は素押しのみ (Ctrl+F5 / Shift+F5 等はブラウザ/デバッガ側の慣例を尊重)。
+			// IME 合成中や他 modal open 中は横取りしない (発表モードが Overlay で覆う想定なので二重表示も回避)。
+			if (
+				e.key === "F5" &&
+				!e.metaKey &&
+				!e.ctrlKey &&
+				!e.altKey &&
+				!e.shiftKey &&
+				!e.isComposing &&
+				!slideShow &&
+				!commandPaletteOpen &&
+				!settingsOpen &&
+				!helpOpen &&
+				!exportOpen
+			) {
+				e.preventDefault();
+				startSlideShow();
+			}
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
@@ -1299,11 +1354,17 @@ export function AppLayout() {
 		activeTabId,
 		activateNextTab,
 		activatePrevTab,
+		commandPaletteOpen,
+		exportOpen,
 		handleCloseTab,
 		handleExport,
 		handleGoBack,
 		handleGoForward,
+		helpOpen,
 		openNewTab,
+		settingsOpen,
+		slideShow,
+		startSlideShow,
 		toggleScratchpad,
 		workspacePath,
 	]);
@@ -1485,6 +1546,15 @@ export function AppLayout() {
 			)}
 			{workspacePath && <DirectoryPickerDialog workspacePath={workspacePath} />}
 			<ToastContainer />
+			{slideShow && (
+				<Suspense fallback={null}>
+					<SlideShowOverlay
+						slides={slideShow.slides}
+						startIndex={slideShow.startIndex}
+						onClose={closeSlideShow}
+					/>
+				</Suspense>
+			)}
 			<Dialog
 				open={updateDialogOpen}
 				title="アップデートのお知らせ"

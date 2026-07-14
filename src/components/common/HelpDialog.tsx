@@ -72,6 +72,7 @@ const groups: ShortcutGroup[] = [
 		shortcuts: [
 			{ keys: [[MOD_KEY_LABEL, "/"]], action: "サイドバーの切り替え" },
 			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "S"]], action: "スライドビュー" },
+			{ keys: [["F5"]], action: "スライド発表モード" },
 			{ keys: [[MOD_KEY_LABEL, "J"]], action: "スクラッチパッド" },
 			{ keys: [[MOD_KEY_LABEL, "E"]], action: "ファイルエクスプローラー" },
 			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "E"]], action: "エクスポート" },

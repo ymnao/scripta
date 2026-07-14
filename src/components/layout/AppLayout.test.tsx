@@ -113,6 +113,18 @@ vi.mock("../common/ExportDialog", () => ({
 	},
 }));
 
+// F5 発表モードの起動可否と startIndex 選択を検証するため、SlideShowOverlay を
+// 軽量 mock 化して渡された props を露出する。lazy import の非同期解決を回避したい
+// ため、ここではデフォルト export ではなく named + default 両方を返す。
+let capturedSlideShowProps: { slides: unknown[]; startIndex: number } | null = null;
+vi.mock("../slide/SlideShowOverlay", () => {
+	const Overlay = (props: { slides: unknown[]; startIndex: number }) => {
+		capturedSlideShowProps = { slides: props.slides, startIndex: props.startIndex };
+		return <div data-testid="mock-slide-overlay" />;
+	};
+	return { SlideShowOverlay: Overlay, default: Overlay };
+});
+
 const mockEditorView = { hasFocus: false, state: { doc: { lines: 100, toString: () => "" } } };
 let capturedOnEditorView: ((view: unknown) => void) | null = null;
 
@@ -224,6 +236,7 @@ describe("AppLayout", () => {
 		capturedOnFileSelect = null;
 		capturedOnEditorView = null;
 		capturedExportMarkdown = null;
+		capturedSlideShowProps = null;
 		mockEditorView.hasFocus = false;
 		(onFsChange as Mock).mockReset();
 		(onFsChange as Mock).mockImplementation((cb: (events: FsChangeEvent[]) => void) => {
@@ -1378,6 +1391,179 @@ describe("AppLayout", () => {
 
 		// getContent() が uncontrolled doc ("new content") を読み、writeFile が発火
 		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/a.md", "new content\n");
+	});
+
+	it("F5 で発表モードが開く (通常タブ)", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		mockedReadFile.mockReset().mockResolvedValue("# One\n---\n# Two");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps).not.toBeNull();
+		expect(capturedSlideShowProps?.slides.length).toBe(2);
+		expect(capturedSlideShowProps?.startIndex).toBe(0);
+	});
+
+	it("F5 の startIndex はカーソル位置のスライドを反映する", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		mockedReadFile.mockReset().mockResolvedValue("# One\n---\n# Two\n---\n# Three");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		// カーソルを 2 枚目 (index=1) の範囲に置く: "# One\n---\n" = 10 chars → head=12
+		await act(async () => {
+			capturedOnEditorView?.({
+				...mockEditorView,
+				state: {
+					...mockEditorView.state,
+					doc: { lines: 5, toString: () => "# One\n---\n# Two\n---\n# Three" },
+					selection: { main: { empty: true, from: 12, to: 12, head: 12 } },
+				},
+			});
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps?.startIndex).toBe(1);
+	});
+
+	it("F5 は未保存の編集内容 (getContent) を snapshot する", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		mockedReadFile.mockReset().mockResolvedValue("# Disk");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		// mock editor で uncontrolled 編集 (docRef.current = "new content")
+		await act(async () => {
+			screen.getByTestId("editor-change").click();
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps?.slides.length).toBe(1);
+		// 事前レンダーされる HTML は "new content" 由来 (実 test は SlideShowOverlay mock で
+		// slides しか見えないため、content フィールドで確認)
+		expect((capturedSlideShowProps?.slides[0] as { content: string } | undefined)?.content).toBe(
+			"new content",
+		);
+	});
+
+	it("F5 は修飾キー付き (Ctrl / Meta / Shift / Alt) では発火しない", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		for (const mods of [
+			{ ctrlKey: true },
+			{ metaKey: true },
+			{ shiftKey: true },
+			{ altKey: true },
+		]) {
+			await act(async () => {
+				document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5", ...mods }));
+			});
+		}
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("F5 は activeTabPath が null なら発火しない", async () => {
+		// workspace はあるがタブが無い状態
+		useWorkspaceStore.setState({ workspacePath: "/workspace" });
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("F5 は新規タブ (newtab://) では発火しない", async () => {
+		openFileInStore("/workspace", "newtab://1");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("F5 は IME 合成中 (isComposing) では発火しない", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5", isComposing: true }));
+		});
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("F5 は helpOpen 中は発火しない", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F1" }));
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("F5 は settingsOpen 中は発火しない", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true }));
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("F5 は既に slideShow 開放中は 2 度目を開かない", async () => {
+		openFileInStore("/workspace", "/workspace/deck.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		const firstCall = capturedSlideShowProps;
+		expect(firstCall).not.toBeNull();
+		capturedSlideShowProps = null;
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		// slideShow gate により再起動されない
+		expect(capturedSlideShowProps).toBeNull();
+	});
+
+	it("発表モード表示中に activeTabPath が変わると overlay が閉じる", async () => {
+		openFileInStore("/workspace", "/workspace/a.md");
+		useWorkspaceStore.getState().openTab("/workspace/b.md");
+		useWorkspaceStore.getState().setActiveTab("/workspace/a.md");
+		await act(async () => {
+			render(<AppLayout />);
+		});
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
+		});
+		expect(screen.queryByTestId("mock-slide-overlay")).toBeInTheDocument();
+		await act(async () => {
+			useWorkspaceStore.getState().setActiveTab("/workspace/b.md");
+		});
+		expect(screen.queryByTestId("mock-slide-overlay")).not.toBeInTheDocument();
 	});
 
 	it("export uses uncontrolled edit content (getContent from EditorView)", async () => {
