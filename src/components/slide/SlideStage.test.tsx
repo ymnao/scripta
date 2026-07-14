@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
 import { useWorkspaceStore } from "../../stores/workspace";
-import { renderSlideHtml, renderSlideHtmlWithMermaid } from "./SlideStage";
 
 describe("renderSlideHtml", () => {
 	it("空文字は空を返す", () => {
