@@ -1,43 +1,39 @@
 import { useEffect, useState } from "react";
 
 /**
- * 「同期即返し → 非同期完了で上書き」パターンの汎用フック。
+ * 「初回は同期の initial を返し、非同期完了後は前回の成功値を保持しつつ次の
+ * 完了で上書きする」パターンの汎用フック。
  *
- * `deps` が変わるたびに `asyncFn()` を再起動し、完了時の deps が呼び出し側の
- * 現 render の deps と識別子一致する場合のみ結果を採用する (stale ガード)。
- * `deps` は React の useEffect と同じ順序で識別子比較される (`===`)。
- * `asyncFn` が reject した場合は初期値 (`initial`) にフォールバックする。
+ * `deps` が変わるたびに `asyncFn()` を再起動する。deps が変わっても直前の
+ * async 成功値を保持し続けるため、theme 切替や rapid typing 時に initial
+ * (mermaid が fenced code のままなど「不完全な状態」) へ一瞬戻す flash を防ぐ。
+ * 初回描画 (まだどの async も成功していない状態) では initial を返す。
+ *
+ * `asyncFn` が reject した場合は `console.error` に記録し、既存の async 値を
+ * そのまま保持する (silent 化しない)。
  */
 export function useAsyncDerived<Output>(
 	deps: readonly unknown[],
 	initial: Output,
 	asyncFn: () => Promise<Output>,
 ): Output {
-	const [async_, setAsync] = useState<{
-		value: Output;
-		deps: readonly unknown[];
-	} | null>(null);
+	const [async_, setAsync] = useState<{ value: Output } | null>(null);
 	useEffect(() => {
 		let cancelled = false;
 		asyncFn()
 			.then((value) => {
-				if (!cancelled) setAsync({ value, deps });
+				if (!cancelled) setAsync({ value });
 			})
-			.catch(() => {
-				// 非同期失敗時は initial にフォールバック
+			.catch((err) => {
+				if (!cancelled) {
+					// silent 化禁止 (mermaid-preprocess.ts #106 と同ポリシー)。
+					console.error("[useAsyncDerived] async failed:", err);
+				}
 			});
 		return () => {
 			cancelled = true;
 		};
 		// biome-ignore lint/correctness/useExhaustiveDependencies: deps は呼び出し側が明示的に管理する
 	}, deps);
-	return async_ && depsEqual(async_.deps, deps) ? async_.value : initial;
-}
-
-function depsEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
-	if (a.length !== b.length) return false;
-	for (let i = 0; i < a.length; i++) {
-		if (a[i] !== b[i]) return false;
-	}
-	return true;
+	return async_ ? async_.value : initial;
 }

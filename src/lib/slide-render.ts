@@ -14,15 +14,6 @@ export function renderSlideHtml(markdown: string, activeTabPath: string | null):
 	return resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
 }
 
-/**
- * mermaid ブロックが少なくとも 1 つ含まれる可能性がある場合のみ true を返す軽量判定。
- * fenced code の開始行 (``` 3 個以上 + `mermaid`) を line-based で検出する。false ならば
- * `preprocessMermaidBlocks` の async 経路をスキップして sync 版と同一の結果になる。
- */
-export function containsMermaidFence(markdown: string): boolean {
-	return /(^|\n)\s*`{3,}\s*mermaid\s*(\n|$)/i.test(markdown);
-}
-
 export interface RenderSlideHtmlOptions {
 	mermaidOptions?: MermaidRenderOptions;
 	embedOptions?: { rasterize?: boolean };
@@ -38,8 +29,9 @@ export interface RenderSlideHtmlOptions {
  * こうして「スライド 1 枚 → HTML」の contract (末尾 `---` 除去 / 空文字 convention /
  * mermaid → markdown → image resolve の順序) を preview / 発表 / PDF export で一致させる。
  *
- * mermaid fence を含まない markdown は sync 版と同じ結果になるため、preprocess を
- * スキップして 1 回だけの `markdownToHtml` に短縮する (typing 中の hot path 最適化)。
+ * mermaid fence を含まない markdown は `preprocessMermaidBlocks` が no-op で返す
+ * (line-scan 1 回のみ) ので、fast path を追加せず単一経路で扱う (fence 判定ロジックを
+ * 二重化しない = case sensitivity 等の divergence 源を潰す)。
  */
 export async function renderSlideHtmlWithMermaid(
 	markdown: string,
@@ -49,9 +41,6 @@ export async function renderSlideHtmlWithMermaid(
 ): Promise<string> {
 	const cleaned = markdown.replace(/\n---\s*$/, "").trim();
 	if (!cleaned) return "";
-	if (!containsMermaidFence(cleaned)) {
-		return resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
-	}
 	const withMermaid = await preprocessMermaidBlocks(
 		cleaned,
 		theme,
