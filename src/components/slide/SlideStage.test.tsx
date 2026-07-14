@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
 import { useWorkspaceStore } from "../../stores/workspace";
-import { renderSlideHtml } from "./SlideStage";
 
 describe("renderSlideHtml", () => {
 	it("空文字は空を返す", () => {
@@ -35,6 +35,25 @@ describe("renderSlideHtml", () => {
 		// resolveHtmlImageSrcs は activeTabPath なしなら書き換えない
 		const html = renderSlideHtml("![](./img/a.png)", null);
 		expect(html).toContain('src="./img/a.png"');
+	});
+});
+
+describe("renderSlideHtmlWithMermaid", () => {
+	it("mermaid ブロックが無ければ sync 版と同じ結果を返す", async () => {
+		const sync = renderSlideHtml("# Title\n\nbody", null);
+		const asyncHtml = await renderSlideHtmlWithMermaid("# Title\n\nbody", null, "light");
+		expect(asyncHtml).toBe(sync);
+	});
+
+	it("空文字は空を返す", async () => {
+		expect(await renderSlideHtmlWithMermaid("", null, "light")).toBe("");
+		expect(await renderSlideHtmlWithMermaid("   \n\n  ", null, "dark")).toBe("");
+	});
+
+	it("末尾の区切り行 `---` は除去される", async () => {
+		const html = await renderSlideHtmlWithMermaid("# Title\n---", null, "light");
+		expect(html).toContain("Title");
+		expect(html).not.toContain("<hr");
 	});
 });
 

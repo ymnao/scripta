@@ -1,6 +1,7 @@
 import { useMemo } from "react";
-import { markdownToHtml } from "../../lib/markdown-to-html";
-import { resolveHtmlImageSrcs } from "../../lib/resolve-html-images";
+import { useAsyncDerived } from "../../hooks/useAsyncDerived";
+import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
+import { useThemeStore } from "../../stores/theme";
 import { useWorkspaceStore } from "../../stores/workspace";
 import {
 	SLIDE_LOGICAL_HEIGHT,
@@ -9,22 +10,44 @@ import {
 } from "../../types/slide";
 
 /**
- * スライド本文の Markdown を DOMPurify 済み HTML に変換する純粋関数。
- * 末尾の区切り行 `---` は除去する (プレビュー / 発表モードの共通仕様)。
- */
-export function renderSlideHtml(markdown: string, activeTabPath: string | null): string {
-	const cleaned = markdown.replace(/\n---\s*$/, "").trim();
-	if (!cleaned) return "";
-	return resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
-}
-
-/**
- * activeTabPath を Zustand から読みつつ renderSlideHtml を memoize するフック。
- * SlidePreview のようにキーストロークごとに再レンダーされる場合に有効。
+ * activeTabPath / theme を Zustand から読みつつスライド HTML を計算するフック。
+ *
+ * 表示方針: まず sync 版 (mermaid 未変換) を即返し、mermaid preprocess が完了したら
+ * 上書きする。入力 (markdown / activeTabPath / theme) が async 完了前に変わった場合は
+ * 古い結果を破棄して sync 版に戻す (`useAsyncDerived` の stale ガードで担保)。
  */
 export function useSlideHtml(markdown: string): string {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
-	return useMemo(() => renderSlideHtml(markdown, activeTabPath), [markdown, activeTabPath]);
+	const theme = useThemeStore((s) => s.theme);
+	const initial = useMemo(
+		() => renderSlideHtml(markdown, activeTabPath),
+		[markdown, activeTabPath],
+	);
+	return useAsyncDerived([markdown, activeTabPath, theme], initial, () =>
+		renderSlideHtmlWithMermaid(markdown, activeTabPath, theme),
+	);
+}
+
+/**
+ * 複数スライドの HTML を並列に mermaid 込みでレンダリングするフック。
+ * 発表モード (SlideShowOverlay) が全スライドを事前レンダーするのに使う。
+ * mount 中 `slides` は snapshot なので通常は 1 回だけ async 実行される。
+ *
+ * ⚠️ 呼び出し側は `slides` の identity を安定させる (useMemo 等で memoize する)
+ * こと。`useAsyncDerived` は `slides` を useEffect 依存として `===` 比較する
+ * ため、毎 render で新しい配列を渡すと effect が render 毎に fire し、setState
+ * が繰り返し呼ばれて再 render → effect fire → ... のループになる。
+ */
+export function useSlideHtmls(slides: readonly { content: string }[]): string[] {
+	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
+	const theme = useThemeStore((s) => s.theme);
+	const initial = useMemo(
+		() => slides.map((s) => renderSlideHtml(s.content, activeTabPath)),
+		[slides, activeTabPath],
+	);
+	return useAsyncDerived([slides, activeTabPath, theme], initial, () =>
+		Promise.all(slides.map((s) => renderSlideHtmlWithMermaid(s.content, activeTabPath, theme))),
+	);
 }
 
 export interface SlideFrameProps {
