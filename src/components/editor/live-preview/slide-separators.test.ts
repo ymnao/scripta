@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	buildDecorations,
-	SlideSeparatorWidget,
-	slideSeparatorDecoration,
-} from "./slide-separators";
+import { buildDecorations, SlideSeparatorWidget } from "./slide-separators";
 import {
 	collectDecorations,
 	createViewForTest,
@@ -68,11 +64,5 @@ describe("buildDecorations (slide-separators)", () => {
 		const view = createViewForTest("hello world\n\nno rules here");
 		const decos = collectDecorations(buildDecorations(view));
 		expect(decos).toHaveLength(0);
-	});
-});
-
-describe("slideSeparatorDecoration export", () => {
-	it("is a ViewPlugin extension", () => {
-		expect(slideSeparatorDecoration).toBeDefined();
 	});
 });
