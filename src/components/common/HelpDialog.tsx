@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { useId } from "react";
-import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
+import { IS_MAC, MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { DialogBase } from "./DialogBase";
 import { Kbd } from "./Kbd";
 
@@ -11,7 +11,7 @@ interface HelpDialogProps {
 
 interface ShortcutGroup {
 	title: string;
-	shortcuts: { keys: string[][]; action: string }[];
+	shortcuts: { keys: string[][]; action: string; note?: string }[];
 }
 
 const groups: ShortcutGroup[] = [
@@ -72,7 +72,11 @@ const groups: ShortcutGroup[] = [
 		shortcuts: [
 			{ keys: [[MOD_KEY_LABEL, "/"]], action: "サイドバーの切り替え" },
 			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "S"]], action: "スライドビュー" },
-			{ keys: [["F5"]], action: "スライド発表モード" },
+			{
+				keys: [["F5"]],
+				action: "スライド発表モード",
+				note: IS_MAC ? "macOS では Fn+F5" : undefined,
+			},
 			{ keys: [[MOD_KEY_LABEL, "J"]], action: "スクラッチパッド" },
 			{ keys: [[MOD_KEY_LABEL, "E"]], action: "ファイルエクスプローラー" },
 			{ keys: [[MOD_KEY_LABEL, SHIFT_KEY_LABEL, "E"]], action: "エクスポート" },
@@ -129,7 +133,10 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
 									key={s.action}
 									className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-bg-secondary"
 								>
-									<span className="text-xs text-text-primary">{s.action}</span>
+									<div className="flex flex-col">
+										<span className="text-xs text-text-primary">{s.action}</span>
+										{s.note && <span className="text-[10px] text-text-secondary">{s.note}</span>}
+									</div>
 									<KeyCombo keys={s.keys} />
 								</div>
 							))}
