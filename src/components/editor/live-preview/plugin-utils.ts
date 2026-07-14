@@ -1,7 +1,15 @@
 import { syntaxTree } from "@codemirror/language";
-import { type ChangeDesc, StateEffect, type Transaction } from "@codemirror/state";
-import { type DecorationSet, type EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { cursorInRange } from "./cursor-utils";
+import { type ChangeDesc, type Range, StateEffect, type Transaction } from "@codemirror/state";
+import {
+	Decoration,
+	type DecorationSet,
+	type EditorView,
+	type PluginValue,
+	ViewPlugin,
+	type ViewUpdate,
+	type WidgetType,
+} from "@codemirror/view";
+import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 
 /** 「カーソル位置フィルタ前」の全マッチ範囲 (candidate)。 */
 export interface CandidateRange {
@@ -212,6 +220,76 @@ export function mapCandidates(
 // treeChangeDetector が別々に存在し、tree 差し替え毎に **別 transaction で 2 回 dispatch**
 // していた。これを 1 transaction にまとめてカスケードを半減させる。
 export const treeParseProgressed = StateEffect.define<null>();
+
+/**
+ * `HorizontalRule` ノード (`---` / `***` / `___`) を `widgetFactory()` の widget で
+ * replace する ViewPlugin を生成する。カーソルがある行では replace を抑制し
+ * (raw マーカーを残す)、docChanged / viewportChanged / syntax tree 差し替え時に
+ * 全再構築、selection / focus 変化はカーソル行集合の変化があった場合のみ再構築する。
+ *
+ * horizontal-rules.ts と slide-separators.ts の共通実装。tests から
+ * buildDecorations を呼ぶユースケース (widget 数の snapshot 検証) のため、
+ * extension だけでなく buildDecorations も返す。
+ *
+ * `lineFilter` を渡すと、HR ノードの属する行のテキスト (trim 後) を検査して
+ * false を返した行は装飾しない。slide-separators はこれで parseSlides と同じ
+ * `---` のみに絞り、`***` / `___` を除外する。
+ */
+export function createHrReplaceDecoration(
+	widgetFactory: () => WidgetType,
+	lineFilter?: (trimmedLineText: string) => boolean,
+): {
+	buildDecorations: (view: EditorView) => DecorationSet;
+	extension: ViewPlugin<{ decorations: DecorationSet }>;
+} {
+	const buildDecorations = (view: EditorView): DecorationSet => {
+		const { state } = view;
+		const cursorLines = collectCursorLines(view);
+		const ranges: Range<Decoration>[] = [];
+		iterateVisibleSyntax(view, (node) => {
+			if (node.name !== "HorizontalRule") return;
+			const line = state.doc.lineAt(node.from);
+			if (lineFilter && !lineFilter(line.text.trim())) return;
+			if (cursorLines.size > 0 && cursorLines.has(line.number)) return;
+			ranges.push(Decoration.replace({ widget: widgetFactory() }).range(node.from, node.to));
+		});
+		return Decoration.set(ranges, true);
+	};
+
+	class HrReplacePlugin implements PluginValue {
+		decorations: DecorationSet;
+		prevCursorLines: Set<number>;
+
+		constructor(view: EditorView) {
+			this.decorations = buildDecorations(view);
+			this.prevCursorLines = collectCursorLines(view);
+		}
+
+		update(update: ViewUpdate) {
+			if (handleComposingUpdate(update, this)) return;
+			const forceRebuild =
+				update.docChanged ||
+				update.viewportChanged ||
+				syntaxTree(update.state) !== syntaxTree(update.startState);
+			if (forceRebuild) {
+				this.decorations = buildDecorations(update.view);
+				this.prevCursorLines = collectCursorLines(update.view);
+			} else if (update.selectionSet || update.focusChanged) {
+				const next = collectCursorLines(update.view);
+				if (cursorLinesChanged(this.prevCursorLines, next)) {
+					this.prevCursorLines = next;
+					this.decorations = buildDecorations(update.view);
+				}
+			}
+		}
+	}
+
+	const extension = ViewPlugin.fromClass(HrReplacePlugin, {
+		decorations: (v) => v.decorations,
+	});
+
+	return { buildDecorations, extension };
+}
 
 export const treeChangeDispatcher = ViewPlugin.fromClass(
 	class {

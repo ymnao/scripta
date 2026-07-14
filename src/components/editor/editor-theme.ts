@@ -320,6 +320,11 @@ export const staticEditorTheme = EditorView.theme({
 		borderTop: "1px solid var(--color-border)",
 		margin: "8px 0",
 	},
+	".cm-slide-separator-widget": {
+		borderTop: "2px dashed var(--color-text-link)",
+		margin: "14px 0",
+		opacity: "0.7",
+	},
 	".cm-strikethrough": {
 		textDecoration: "line-through",
 	},

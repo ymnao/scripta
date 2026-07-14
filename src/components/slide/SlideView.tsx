@@ -121,6 +121,7 @@ export function SlideView({
 					goToLine={goToLine}
 					onGoToLineDone={onGoToLineDone}
 					onStatistics={handleStatistics}
+					slideSeparatorMode
 				/>
 			</div>
 			<div className="min-h-0 w-[45%] border-l border-border bg-bg-secondary">
