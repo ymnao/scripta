@@ -984,4 +984,46 @@ describe("exportSlidesAsPdf", () => {
 		const sectionMatches = html.match(/<section class="slide/g);
 		expect(sectionMatches?.length).toBe(3);
 	});
+
+	it("frontmatter theme が無ければ light 背景で出力 (Fable #12 default)", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# A\n---\n# B", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: light");
+		expect(html).toContain("background: #ffffff");
+	});
+
+	it("frontmatter theme: dark で背景・前景を dark に切り替える (Fable #12)", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("---\ntheme: dark\n---\n\n# A\n---\n# B", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: dark");
+		expect(html).toContain("background: #1a1a1a");
+		expect(html).toContain("color: #d4d4d4");
+		// link 色 (F3): preview `--color-text-link` (dark: #60a5fa) と揃える
+		expect(html).toContain("a { color: #60a5fa;");
+	});
+
+	it("frontmatter theme: light を明示指定しても light のまま", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("---\ntheme: light\n---\n\n# A", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("color-scheme: light");
+		expect(html).toContain("background: #ffffff");
+		expect(html).toContain("a { color: #2563eb;");
+	});
+
+	it("frontmatter を slide 1 本文から除外して PDF に出力する (F1)", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf(
+			"---\ntheme: dark\ntitle: T\n---\n\n# First\n---\n# Second",
+			"/workspace/deck.md",
+		);
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		// frontmatter 本文 (theme: dark / title: T) が section 内に含まれないこと
+		expect(html).not.toContain("theme: dark");
+		expect(html).not.toContain("title: T");
+		expect(html).toContain("First");
+		expect(html).toContain("Second");
+	});
 });

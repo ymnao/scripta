@@ -3,13 +3,15 @@
 import "katex/dist/katex.min.css";
 import { memo, useDeferredValue } from "react";
 import { useFitScale } from "../../hooks/useFitScale";
-import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
+import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH, type SlideTheme } from "../../types/slide";
 import { SlideFrame, useSlideHtml } from "./SlideStage";
 
 export interface SlidePreviewProps {
 	markdown: string;
 	slideIndex: number;
 	totalSlides: number;
+	/** Fable #12: frontmatter `theme:` 由来の deck-level テーマ。null なら app theme。 */
+	themeOverride?: SlideTheme | null;
 }
 
 /**
@@ -21,9 +23,10 @@ export const SlidePreview = memo(function SlidePreview({
 	markdown,
 	slideIndex,
 	totalSlides,
+	themeOverride,
 }: SlidePreviewProps) {
 	const deferredMarkdown = useDeferredValue(markdown);
-	const html = useSlideHtml(deferredMarkdown);
+	const html = useSlideHtml(deferredMarkdown, themeOverride);
 	const { ref: boxRef, scale } = useFitScale<HTMLDivElement>(
 		SLIDE_LOGICAL_WIDTH,
 		SLIDE_LOGICAL_HEIGHT,
@@ -42,6 +45,7 @@ export const SlidePreview = memo(function SlidePreview({
 				<SlideFrame
 					scale={scale}
 					html={html}
+					themeOverride={themeOverride}
 					frameClassName="rounded-lg border border-border bg-white shadow-sm dark:bg-[#2a2a2a]"
 				/>
 				<span className="text-xs text-text-secondary">

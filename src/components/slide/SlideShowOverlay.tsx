@@ -1,13 +1,15 @@
 import "katex/dist/katex.min.css";
 import { useEffect, useMemo, useState } from "react";
 import { useFitScale } from "../../hooks/useFitScale";
-import type { SlideSection } from "../../types/slide";
+import type { SlideSection, SlideTheme } from "../../types/slide";
 import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
 import { SlideFrame, useSlideHtmls } from "./SlideStage";
 
 export interface SlideShowOverlayProps {
 	slides: SlideSection[];
 	startIndex: number;
+	/** Fable #12: frontmatter `theme:` 由来の deck-level テーマ。null なら app theme。 */
+	themeOverride?: SlideTheme | null;
 	onClose: () => void;
 }
 
@@ -26,7 +28,12 @@ export interface SlideShowOverlayProps {
  * - Home → 先頭 / End → 末尾
  * - Esc → onClose
  */
-export function SlideShowOverlay({ slides, startIndex, onClose }: SlideShowOverlayProps) {
+export function SlideShowOverlay({
+	slides,
+	startIndex,
+	themeOverride,
+	onClose,
+}: SlideShowOverlayProps) {
 	// slides は parseSlides の契約上 1 件以上返るはずだが、テスト用途で空配列が
 	// 渡されても "1 / 0" 表示や index=-1 にならないよう単一の空スライドで補う。
 	const safeSlides = useMemo(
@@ -41,7 +48,7 @@ export function SlideShowOverlay({ slides, startIndex, onClose }: SlideShowOverl
 
 	// 全スライドを事前レンダーしてナビゲーション時の markdownToHtml/KaTeX 再計算を回避。
 	// mermaid ブロックは sync 版で fenced code のまま表示され、非同期で SVG に差し替わる。
-	const htmls = useSlideHtmls(safeSlides);
+	const htmls = useSlideHtmls(safeSlides, themeOverride);
 
 	useEffect(() => {
 		const next = () => setIndex((i) => Math.min(i + 1, safeSlides.length - 1));
@@ -95,6 +102,7 @@ export function SlideShowOverlay({ slides, startIndex, onClose }: SlideShowOverl
 				<SlideFrame
 					scale={scale}
 					html={htmls[index] ?? ""}
+					themeOverride={themeOverride}
 					frameClassName="bg-white shadow-2xl dark:bg-[#2a2a2a]"
 				/>
 			</div>

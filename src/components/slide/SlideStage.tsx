@@ -7,18 +7,25 @@ import {
 	SLIDE_LOGICAL_HEIGHT,
 	SLIDE_LOGICAL_PADDING_PX,
 	SLIDE_LOGICAL_WIDTH,
+	type SlideTheme,
 } from "../../types/slide";
+
+/** frontmatter override があれば優先、無ければ app theme (Fable #12)。 */
+function useResolvedSlideTheme(themeOverride: SlideTheme | null | undefined): SlideTheme {
+	const appTheme = useThemeStore((s) => s.theme);
+	return themeOverride ?? appTheme;
+}
 
 /**
  * activeTabPath / theme を Zustand から読みつつスライド HTML を計算するフック。
  *
  * 表示方針: まず sync 版 (mermaid 未変換) を即返し、mermaid preprocess が完了したら
- * 上書きする。入力 (markdown / activeTabPath / theme) が async 完了前に変わった場合は
- * 古い結果を破棄して sync 版に戻す (`useAsyncDerived` の stale ガードで担保)。
+ * 上書きする。入力が async 完了前に変わった場合は `useAsyncDerived` の keepPrevious
+ * で前回成功値を保持しつつ次で上書き。`themeOverride` は Fable #12 の frontmatter theme。
  */
-export function useSlideHtml(markdown: string): string {
+export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null): string {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
-	const theme = useThemeStore((s) => s.theme);
+	const theme = useResolvedSlideTheme(themeOverride);
 	const initial = useMemo(
 		() => renderSlideHtml(markdown, activeTabPath),
 		[markdown, activeTabPath],
@@ -38,9 +45,12 @@ export function useSlideHtml(markdown: string): string {
  * ため、毎 render で新しい配列を渡すと effect が render 毎に fire し、setState
  * が繰り返し呼ばれて再 render → effect fire → ... のループになる。
  */
-export function useSlideHtmls(slides: readonly { content: string }[]): string[] {
+export function useSlideHtmls(
+	slides: readonly { content: string }[],
+	themeOverride?: SlideTheme | null,
+): string[] {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
-	const theme = useThemeStore((s) => s.theme);
+	const theme = useResolvedSlideTheme(themeOverride);
 	const initial = useMemo(
 		() => slides.map((s) => renderSlideHtml(s.content, activeTabPath)),
 		[slides, activeTabPath],
@@ -53,8 +63,10 @@ export function useSlideHtmls(slides: readonly { content: string }[]): string[] 
 export interface SlideFrameProps {
 	scale: number;
 	html: string;
-	/** 枠 (pixel 寸法 div) に付ける追加クラス。背景・borders・shadow など。 */
+	/** 枠 (pixel 寸法 div) に付ける追加クラス。borders・shadow など。 */
 	frameClassName?: string;
+	/** Fable #12: `.slide-theme-*` を付与して deck-level テーマを固定する。 */
+	themeOverride?: SlideTheme | null;
 }
 
 /**
@@ -65,14 +77,18 @@ export interface SlideFrameProps {
  * 呼び出し側は useFitScale の ref を貼った fit container の中に置く
  * (fit container の flex 構成が consumer ごとに違うため SlideFrame は持たない)。
  */
-export function SlideFrame({ scale, html, frameClassName }: SlideFrameProps) {
+export function SlideFrame({ scale, html, frameClassName, themeOverride }: SlideFrameProps) {
 	const stageWidth = SLIDE_LOGICAL_WIDTH * scale;
 	const stageHeight = SLIDE_LOGICAL_HEIGHT * scale;
+	const classes = [
+		"slide-preview-frame relative overflow-hidden",
+		frameClassName,
+		themeOverride && `slide-theme-${themeOverride}`,
+	]
+		.filter(Boolean)
+		.join(" ");
 	return (
-		<div
-			className={`slide-preview-frame relative overflow-hidden ${frameClassName ?? ""}`}
-			style={{ width: stageWidth, height: stageHeight }}
-		>
+		<div className={classes} style={{ width: stageWidth, height: stageHeight }}>
 			<div
 				className="slide-preview absolute left-0 top-0 origin-top-left"
 				style={{

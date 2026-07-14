@@ -9,7 +9,11 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { findSlideAtCursor, parseSlides } from "../../lib/slide-parser";
+import {
+	extractSlideFrontmatterTheme,
+	findSlideAtCursor,
+	parseSlides,
+} from "../../lib/slide-parser";
 import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import type { SlidePreviewProps } from "./SlidePreview";
@@ -66,6 +70,10 @@ export function SlideView({
 	}, [value]);
 
 	const slides = useMemo(() => parseSlides(docText), [docText]);
+
+	// Fable #12: frontmatter の `theme:` があれば SlidePreview の app theme を上書きする。
+	// deck 全体に効かせる 1 デッキ = 1 テーマの契約。
+	const frontmatterTheme = useMemo(() => extractSlideFrontmatterTheme(docText), [docText]);
 
 	const currentSlideIndex = useMemo(
 		() => findSlideAtCursor(slides, cursorPos),
@@ -130,6 +138,7 @@ export function SlideView({
 						markdown={currentSlide?.content ?? ""}
 						slideIndex={currentSlideIndex}
 						totalSlides={slides.length}
+						themeOverride={frontmatterTheme}
 					/>
 				</Suspense>
 			</div>
