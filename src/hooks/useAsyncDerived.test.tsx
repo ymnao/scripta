@@ -115,6 +115,35 @@ describe("useAsyncDerived", () => {
 		expect(errorSpy).toHaveBeenCalled();
 	});
 
+	it("unmount 後の resolve では state 更新 / console.error のいずれも起きない (cancelled 分岐)", async () => {
+		const ctrl = createControllablePromise<string>();
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { unmount } = renderHook(() => useAsyncDerived(["k"], "sync", () => ctrl.promise));
+			unmount();
+			await act(async () => {
+				ctrl.resolve("late");
+				await ctrl.promise;
+			});
+			// 状態更新に伴う React 警告も出ない
+			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringMatching(/unmounted component/i));
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("unmount 後の reject でも console.error が発火しない (cancelled 分岐)", async () => {
+		const ctrl = createControllablePromise<string>();
+		const { unmount } = renderHook(() => useAsyncDerived(["k"], "sync", () => ctrl.promise));
+		unmount();
+		await act(async () => {
+			ctrl.reject(new Error("late-boom"));
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
 	it("初回で reject した場合は initial を保持し、console.error を出す", async () => {
 		const ctrl = createControllablePromise<string>();
 		const { result } = renderHook(() => useAsyncDerived(["k"], "sync", () => ctrl.promise));

@@ -961,4 +961,27 @@ describe("exportSlidesAsPdf", () => {
 			expect.objectContaining({ defaultPath: "deck-slides.pdf" }),
 		);
 	});
+
+	it("mermaid ブロックを PNG (data:image/png;base64,...) として埋め込む (rasterize option)", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# Slide\n\n```mermaid\ngraph TD\n  A-->B\n```", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain('src="data:image/png;base64,MOCK"');
+		expect(html).toContain("mermaid-diagram");
+	});
+
+	it("filePath 基準で相対画像パスを scripta-asset URL に解決する", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# Slide\n\n![](./img/hero.png)", "/workspace/notes/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		expect(html).toContain("scripta-asset://localhost/workspace/notes/img/hero.png");
+	});
+
+	it("空スライド (末尾 --- 分割による空 section) も 1 ページとして保持する", async () => {
+		mockedSave.mockResolvedValue("/output/deck-slides.pdf");
+		await exportSlidesAsPdf("# A\n---\n\n---\n# C", "/workspace/deck.md");
+		const html = mockedExportPdf.mock.calls[0][0] as string;
+		const sectionMatches = html.match(/<section class="slide/g);
+		expect(sectionMatches?.length).toBe(3);
+	});
 });

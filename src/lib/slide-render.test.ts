@@ -1,15 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // mermaid をモックして SVG 出力を決定的にする (lib/mermaid.test.ts と同パターン)
+const renderSpy = vi.fn(async (_id: string, source: string) => {
+	if (source.includes("FAIL")) throw new Error("mermaid parse error");
+	return { svg: `<svg data-source="${source.replace(/"/g, "&quot;")}"></svg>` };
+});
+const initializeSpy = vi.fn();
+
 vi.mock("mermaid", () => {
-	let idCounter = 0;
 	return {
 		default: {
-			initialize: vi.fn(),
-			render: vi.fn(async (_id: string, _source: string) => {
-				idCounter++;
-				return { svg: `<svg data-testid="mock-mermaid-${idCounter}"></svg>` };
-			}),
+			initialize: initializeSpy,
+			render: renderSpy,
 		},
 	};
 });
@@ -17,9 +19,14 @@ vi.mock("mermaid", () => {
 const { renderSlideHtmlWithMermaid } = await import("./slide-render");
 const { clearMermaidCache } = await import("./mermaid");
 
+beforeEach(() => {
+	clearMermaidCache();
+	renderSpy.mockClear();
+	initializeSpy.mockClear();
+});
+
 describe("renderSlideHtmlWithMermaid: mermaid fence 変換", () => {
 	it("mermaid fenced code を SVG に置換して mermaid-diagram wrapper に格納する", async () => {
-		clearMermaidCache();
 		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n";
 		const html = await renderSlideHtmlWithMermaid(md, null, "light");
 		expect(html).toContain("mermaid-diagram");
@@ -28,21 +35,38 @@ describe("renderSlideHtmlWithMermaid: mermaid fence 変換", () => {
 		expect(html).not.toMatch(/<code[^>]*>graph TD/);
 	});
 
-	it("light / dark テーマを preprocessMermaidBlocks に伝搬する (キャッシュが分離される)", async () => {
-		clearMermaidCache();
+	it("light / dark テーマが initialize に伝搬される (theme=default vs dark)", async () => {
 		const md = "```mermaid\ngraph TD\n  X-->Y\n```";
-		const lightHtml = await renderSlideHtmlWithMermaid(md, null, "light");
-		const darkHtml = await renderSlideHtmlWithMermaid(md, null, "dark");
-		// 両方とも SVG 化された HTML を返す
-		expect(lightHtml).toContain("mermaid-diagram");
-		expect(darkHtml).toContain("mermaid-diagram");
+		await renderSlideHtmlWithMermaid(md, null, "light");
+		expect(initializeSpy).toHaveBeenLastCalledWith(expect.objectContaining({ theme: "default" }));
+		await renderSlideHtmlWithMermaid(md, null, "dark");
+		expect(initializeSpy).toHaveBeenLastCalledWith(expect.objectContaining({ theme: "dark" }));
 	});
 
 	it("mermaid fence 前の末尾 `---` を除去する", async () => {
-		clearMermaidCache();
 		const md = "```mermaid\ngraph TD\n  A-->B\n```\n---";
 		const html = await renderSlideHtmlWithMermaid(md, null, "light");
 		expect(html).toContain("mermaid-diagram");
 		expect(html).not.toContain("<hr");
 	});
+
+	it("mermaid render 失敗時は元の fenced code をそのまま HTML 化する (silent 失敗させない)", async () => {
+		const md = "before\n\n```mermaid\nFAIL diagram\n```\n\nafter";
+		const html = await renderSlideHtmlWithMermaid(md, null, "light");
+		expect(html).not.toContain("mermaid-diagram");
+		// preprocess は match ごとの try/catch で元コードを保持 → markdownToHtml が code block 化
+		expect(html).toContain("FAIL diagram");
+		expect(html).toContain("before");
+		expect(html).toContain("after");
+	});
+
+	it("options.mermaidOptions を preprocessMermaidBlocks 経由で initialize に伝搬する", async () => {
+		const md = "```mermaid\ngraph TD\n  A-->B\n```";
+		await renderSlideHtmlWithMermaid(md, null, "light", {
+			mermaidOptions: { htmlLabels: false, useMaxWidth: false },
+		});
+		expect(initializeSpy).toHaveBeenLastCalledWith(expect.objectContaining({ htmlLabels: false }));
+	});
+	// rasterize=true (embedOptions) 経路は svg-rasterize を要するため
+	// export.test.ts 側 (svg-rasterize モック済み) の exportSlidesAsPdf テストでカバー。
 });
