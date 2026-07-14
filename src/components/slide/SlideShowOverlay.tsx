@@ -1,10 +1,9 @@
 import "katex/dist/katex.min.css";
 import { useEffect, useMemo, useState } from "react";
 import { useFitScale } from "../../hooks/useFitScale";
-import { useWorkspaceStore } from "../../stores/workspace";
 import type { SlideSection } from "../../types/slide";
 import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
-import { renderSlideHtml, SlideFrame } from "./SlideStage";
+import { SlideFrame, useSlideHtmls } from "./SlideStage";
 
 export interface SlideShowOverlayProps {
 	slides: SlideSection[];
@@ -40,12 +39,9 @@ export function SlideShowOverlay({ slides, startIndex, onClose }: SlideShowOverl
 		Math.max(0, Math.min(startIndex, safeSlides.length - 1)),
 	);
 
-	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 	// 全スライドを事前レンダーしてナビゲーション時の markdownToHtml/KaTeX 再計算を回避。
-	const htmls = useMemo(
-		() => safeSlides.map((s) => renderSlideHtml(s.content, activeTabPath)),
-		[safeSlides, activeTabPath],
-	);
+	// mermaid ブロックは sync 版で fenced code のまま表示され、非同期で SVG に差し替わる。
+	const htmls = useSlideHtmls(safeSlides);
 
 	useEffect(() => {
 		const next = () => setIndex((i) => Math.min(i + 1, safeSlides.length - 1));
