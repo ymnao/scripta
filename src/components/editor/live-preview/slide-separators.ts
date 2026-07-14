@@ -22,7 +22,13 @@ export class SlideSeparatorWidget extends WidgetType {
 	}
 }
 
-const slideDecoration = createHrReplaceDecoration(() => new SlideSeparatorWidget());
+// parseSlides (src/lib/slide-parser.ts) がスライドを分割する条件と揃えて `---`
+// のみを装飾対象にする。lezer の HorizontalRule は `***` / `___` / `-----` 等
+// も含むが、それらでスライドは切れないため装飾すると認識ズレが起きる。
+const slideDecoration = createHrReplaceDecoration(
+	() => new SlideSeparatorWidget(),
+	(trimmed) => trimmed === "---",
+);
 
 export const { buildDecorations } = slideDecoration;
 export const slideSeparatorDecoration = slideDecoration.extension;

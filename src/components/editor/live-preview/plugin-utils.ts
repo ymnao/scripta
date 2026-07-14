@@ -236,8 +236,15 @@ export const treeParseProgressed = StateEffect.define<null>();
  * horizontal-rules.ts と slide-separators.ts の共通実装。tests から
  * buildDecorations を呼ぶユースケース (widget 数の snapshot 検証) のため、
  * extension だけでなく buildDecorations も返す。
+ *
+ * `lineFilter` を渡すと、HR ノードの属する行のテキスト (trim 後) を検査して
+ * false を返した行は装飾しない。slide-separators はこれで parseSlides と同じ
+ * `---` のみに絞り、`***` / `___` を除外する。
  */
-export function createHrReplaceDecoration(widgetFactory: () => WidgetType): {
+export function createHrReplaceDecoration(
+	widgetFactory: () => WidgetType,
+	lineFilter?: (trimmedLineText: string) => boolean,
+): {
 	buildDecorations: (view: EditorView) => DecorationSet;
 	extension: Extension;
 } {
@@ -247,10 +254,9 @@ export function createHrReplaceDecoration(widgetFactory: () => WidgetType): {
 		const ranges: Range<Decoration>[] = [];
 		iterateVisibleSyntax(view, (node) => {
 			if (node.name !== "HorizontalRule") return;
-			if (cursorLines.size > 0) {
-				const lineNumber = state.doc.lineAt(node.from).number;
-				if (cursorLines.has(lineNumber)) return;
-			}
+			const line = state.doc.lineAt(node.from);
+			if (lineFilter && !lineFilter(line.text.trim())) return;
+			if (cursorLines.size > 0 && cursorLines.has(line.number)) return;
 			ranges.push(Decoration.replace({ widget: widgetFactory() }).range(node.from, node.to));
 		});
 		return Decoration.set(ranges, true);

@@ -65,4 +65,12 @@ describe("buildDecorations (slide-separators)", () => {
 		const decos = collectDecorations(buildDecorations(view));
 		expect(decos).toHaveLength(0);
 	});
+
+	it("skips *** and ___ (only --- is a slide boundary per parseSlides)", () => {
+		const doc = "a\n\n---\n\nb\n\n***\n\nc\n\n___";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		// --- のみ装飾、*** / ___ は素通し
+		expect(widgetDecorations(decos)).toHaveLength(1);
+	});
 });
