@@ -1,5 +1,8 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+
+const setSlidePreviewWidthRatio = vi.fn();
+let mockSlidePreviewWidthRatio = 0.45;
 
 vi.mock("../../stores/settings", () => ({
 	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -9,6 +12,8 @@ vi.mock("../../stores/settings", () => ({
 			fontFamily: "monospace",
 			highlightActiveLine: false,
 			showLinkCards: false,
+			slidePreviewWidthRatio: mockSlidePreviewWidthRatio,
+			setSlidePreviewWidthRatio,
 		}),
 }));
 
@@ -58,6 +63,90 @@ describe("SlideView", () => {
 		);
 		// MarkdownEditor が EditorView を生成したタイミングでコールバックが呼ばれる
 		expect(onEditorView).toHaveBeenCalled();
+	});
+
+	describe("プレビュー幅リサイズ (Fable #13)", () => {
+		it("リサイズハンドルがレンダリングされ、store 値を width に反映する", () => {
+			mockSlidePreviewWidthRatio = 0.45;
+			const { container } = render(
+				<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />,
+			);
+			const handle = screen.getByTestId("slide-preview-resize-handle");
+			expect(handle).toBeDefined();
+			expect(handle.getAttribute("aria-valuenow")).toBe("45");
+			const previewPane = container.querySelector<HTMLDivElement>('[style*="width"]');
+			expect(previewPane).not.toBeNull();
+			// jsdom normalizes "45.0000%" → "45%"; check both parse to the same value.
+			expect(previewPane?.style.width && parseFloat(previewPane.style.width)).toBe(45);
+		});
+
+		it("ArrowLeft で preview が広がる (ARIA splitter 規約と drag 方向に一致)", () => {
+			mockSlidePreviewWidthRatio = 0.45;
+			setSlidePreviewWidthRatio.mockClear();
+			render(<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />);
+			const handle = screen.getByTestId("slide-preview-resize-handle");
+			fireEvent.keyDown(handle, { key: "ArrowLeft" });
+			expect(setSlidePreviewWidthRatio).toHaveBeenCalledWith(expect.closeTo(0.47, 5));
+		});
+
+		it("ArrowRight で preview が縮む", () => {
+			mockSlidePreviewWidthRatio = 0.45;
+			setSlidePreviewWidthRatio.mockClear();
+			render(<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />);
+			const handle = screen.getByTestId("slide-preview-resize-handle");
+			fireEvent.keyDown(handle, { key: "ArrowRight" });
+			expect(setSlidePreviewWidthRatio).toHaveBeenCalledWith(expect.closeTo(0.43, 5));
+		});
+
+		it("Home / End キーで editor を min / max に (preview は max / min に)", () => {
+			mockSlidePreviewWidthRatio = 0.45;
+			setSlidePreviewWidthRatio.mockClear();
+			render(<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />);
+			const handle = screen.getByTestId("slide-preview-resize-handle");
+			// Home: editor min = preview MAX ratio
+			fireEvent.keyDown(handle, { key: "Home" });
+			expect(setSlidePreviewWidthRatio).toHaveBeenCalledWith(0.7);
+			// End: editor max = preview MIN ratio
+			fireEvent.keyDown(handle, { key: "End" });
+			expect(setSlidePreviewWidthRatio).toHaveBeenCalledWith(0.2);
+		});
+
+		it("pointercancel は draft を破棄して setSlidePreviewWidthRatio を呼ばない (A2)", () => {
+			// OS/ブラウザによる gesture 中断 (touch → scroll escalation, window blur, system
+			// modal 等) は「ユーザーの意図的な release」ではないため commit しない。
+			mockSlidePreviewWidthRatio = 0.45;
+			setSlidePreviewWidthRatio.mockClear();
+			render(<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />);
+			const handle = screen.getByTestId("slide-preview-resize-handle");
+			// pointerdown → pointermove → pointercancel の一連。pointercancel は
+			// pointerup とは別 handler なので commit されない。
+			fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
+			// pointermove / pointercancel は React 合成でなく listener 登録経由
+			// (addEventListener) なので dispatchEvent で発火する。
+			handle.dispatchEvent(
+				new PointerEvent("pointermove", { clientX: 100, bubbles: true, pointerId: 1 }),
+			);
+			handle.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 1 }));
+			expect(setSlidePreviewWidthRatio).not.toHaveBeenCalled();
+		});
+
+		it("min / max を超える ArrowLeft/Right はクランプされる", () => {
+			mockSlidePreviewWidthRatio = 0.7;
+			setSlidePreviewWidthRatio.mockClear();
+			const { rerender } = render(
+				<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />,
+			);
+			const handle = screen.getByTestId("slide-preview-resize-handle");
+			// 0.7 で ArrowLeft (拡大方向) を押しても MAX (0.7) で頭打ち
+			fireEvent.keyDown(handle, { key: "ArrowLeft" });
+			expect(setSlidePreviewWidthRatio).toHaveBeenLastCalledWith(0.7);
+
+			mockSlidePreviewWidthRatio = 0.2;
+			rerender(<SlideView value="# Slide" onDocChanged={vi.fn()} onSave={vi.fn()} />);
+			// 0.2 で ArrowRight (縮小方向) を押しても MIN (0.2) で頭打ち
+			fireEvent.keyDown(handle, { key: "ArrowRight" });
+			expect(setSlidePreviewWidthRatio).toHaveBeenLastCalledWith(0.2);
+		});
 	});
 
 	it("onStatistics コールバックが呼ばれる", async () => {

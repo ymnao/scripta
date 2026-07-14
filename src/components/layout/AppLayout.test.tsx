@@ -69,6 +69,7 @@ vi.mock("../../lib/store", () => ({
 		autoUpdateCheck: true,
 		fileTreeShowHidden: false,
 		fileTreeExcludePatterns: "",
+		slidePreviewWidthRatio: 0.45,
 	}),
 	saveSetting: vi.fn().mockResolvedValue(undefined),
 	loadLastUpdateCheck: vi.fn().mockResolvedValue(0),

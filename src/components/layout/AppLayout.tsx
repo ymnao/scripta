@@ -355,6 +355,7 @@ export function AppLayout() {
 				autoUpdateCheck: settings.autoUpdateCheck,
 				fileTreeShowHidden: settings.fileTreeShowHidden,
 				fileTreeExcludePatterns: settings.fileTreeExcludePatterns,
+				slidePreviewWidthRatio: settings.slidePreviewWidthRatio,
 			});
 			hydrateGitSync({
 				gitSyncEnabled: settings.gitSyncEnabled,

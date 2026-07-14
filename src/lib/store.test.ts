@@ -32,6 +32,7 @@ describe("store", () => {
 				autoUpdateCheck: true,
 				fileTreeShowHidden: false,
 				fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+				slidePreviewWidthRatio: 0.45,
 			});
 		});
 
@@ -79,6 +80,7 @@ describe("store", () => {
 				autoUpdateCheck: true,
 				fileTreeShowHidden: false,
 				fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+				slidePreviewWidthRatio: 0.45,
 			});
 		});
 
@@ -190,6 +192,38 @@ describe("store", () => {
 			});
 			const settings = await loadSettings();
 			expect(settings.commitMessage).toBe("vault backup: {{date}}");
+		});
+
+		it("accepts in-range slidePreviewWidthRatio", async () => {
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = { slidePreviewWidthRatio: 0.6 };
+				return values[key];
+			});
+			const settings = await loadSettings();
+			expect(settings.slidePreviewWidthRatio).toBe(0.6);
+		});
+
+		it("falls back to default for out-of-range slidePreviewWidthRatio", async () => {
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = { slidePreviewWidthRatio: 0.05 };
+				return values[key];
+			});
+			expect((await loadSettings()).slidePreviewWidthRatio).toBe(0.45);
+
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = { slidePreviewWidthRatio: 0.9 };
+				return values[key];
+			});
+			expect((await loadSettings()).slidePreviewWidthRatio).toBe(0.45);
+		});
+
+		it("falls back to default for invalid slidePreviewWidthRatio type", async () => {
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+				const values: Record<string, unknown> = { slidePreviewWidthRatio: "0.5" };
+				return values[key];
+			});
+			const settings = await loadSettings();
+			expect(settings.slidePreviewWidthRatio).toBe(0.45);
 		});
 
 		it("trims commitMessage on load", async () => {

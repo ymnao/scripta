@@ -19,3 +19,13 @@ export const SLIDE_LOGICAL_HEIGHT = 720;
 // 見え方 (WYSIWYG) を一致させる。旧 SlidePreview の Tailwind `p-16` (= 4rem) を
 // px 固定に上げ、root font-size に依存しないよう altitude を揃えた。
 export const SLIDE_LOGICAL_PADDING_PX = 64;
+
+// Fable #13: SlideView の右側プレビューペイン幅を editor コンテナに対する比率で
+// 保持する。極端な値だと片方のペインが潰れて操作不能になるため、min 0.2 / max
+// 0.7 でクランプする。step は矢印キー操作 1 回あたりの ratio 増減（2%）。
+// スライドドメインの UI tuning knob として同一モジュールに集約する（HANDOFF §84
+// で SLIDE_PDF_PALETTE を types/slide に上げる altitude 方針を確立した継続）。
+export const SLIDE_PREVIEW_WIDTH_RATIO_MIN = 0.2;
+export const SLIDE_PREVIEW_WIDTH_RATIO_MAX = 0.7;
+export const SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT = 0.45;
+export const SLIDE_PREVIEW_WIDTH_RATIO_STEP = 0.02;

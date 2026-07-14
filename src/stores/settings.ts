@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, type FontFamily, saveSetting } from "../lib/store";
+import {
+	SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
+	SLIDE_PREVIEW_WIDTH_RATIO_MAX,
+	SLIDE_PREVIEW_WIDTH_RATIO_MIN,
+} from "../types/slide";
 import { createPersistedSetter } from "./store-helpers";
 
 interface SettingsValues {
@@ -14,6 +19,7 @@ interface SettingsValues {
 	autoUpdateCheck: boolean;
 	fileTreeShowHidden: boolean;
 	fileTreeExcludePatterns: string;
+	slidePreviewWidthRatio: number;
 }
 
 interface SettingsState extends SettingsValues {
@@ -28,6 +34,7 @@ interface SettingsState extends SettingsValues {
 	setAutoUpdateCheck: (enabled: boolean) => void;
 	setFileTreeShowHidden: (show: boolean) => void;
 	setFileTreeExcludePatterns: (patterns: string) => void;
+	setSlidePreviewWidthRatio: (ratio: number) => void;
 	/** Set state without persisting — used for initial hydration from store */
 	hydrate: (values: Partial<SettingsValues>) => void;
 }
@@ -46,6 +53,7 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		autoUpdateCheck: true,
 		fileTreeShowHidden: false,
 		fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
+		slidePreviewWidthRatio: SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
 		setShowLineNumbers: persist("showLineNumbers"),
 		setFontSize: persist("fontSize"),
 		setAutoSaveDelay: persist("autoSaveDelay"),
@@ -57,6 +65,12 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		setAutoUpdateCheck: persist("autoUpdateCheck"),
 		setFileTreeShowHidden: persist("fileTreeShowHidden"),
 		setFileTreeExcludePatterns: persist("fileTreeExcludePatterns"),
+		// writer 側で clamp。ここが SoT なので future caller (migration / IPC / 別コンポーネント等)
+		// が範囲外を書いても disk に out-of-range が漏れず、次回 loadSettings で default fallback
+		// して preference が消える事故を防ぐ。
+		setSlidePreviewWidthRatio: persist("slidePreviewWidthRatio", (ratio) =>
+			Math.min(SLIDE_PREVIEW_WIDTH_RATIO_MAX, Math.max(SLIDE_PREVIEW_WIDTH_RATIO_MIN, ratio)),
+		),
 		hydrate: (values: Partial<SettingsValues>) => {
 			set(values);
 		},
