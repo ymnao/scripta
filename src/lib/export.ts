@@ -1,4 +1,9 @@
 import { katexInlineCss } from "../generated/katex-inline-css";
+import {
+	SLIDE_LOGICAL_HEIGHT,
+	SLIDE_LOGICAL_PADDING_PX,
+	SLIDE_LOGICAL_WIDTH,
+} from "../types/slide";
 import { buildFence } from "./code-fence";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
@@ -7,6 +12,7 @@ import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { basename } from "./path";
 import { resolveHtmlImageSrcs } from "./resolve-html-images";
+import { parseSlides } from "./slide-parser";
 import { svgToPng } from "./svg-rasterize";
 
 export type ExportTheme = "system" | "light" | "dark";
@@ -530,6 +536,122 @@ export async function exportAsPdf(
 	// `break-before: page` を実 layout 基準で注入する hybrid 設計 (#93)。renderer は
 	// 上位レベルの force-break CSS と meta tag emit までを担当する。
 	await exportPdf(html, savePath);
+	return true;
+}
+
+// 96 CSS px per inch × 25400 μm per inch = 25400/96 μm per px。
+// SlidePreview の論理サイズ (1280×720 px) と printToPDF の pageSize (μm) を
+// 1:1 に対応させ、スライド 1 枚 = PDF 1 ページの WYSIWYG を保証する。
+const MICRONS_PER_PX = 25400 / 96;
+
+function buildSlideHtmlDocument(slides: string[], title: string): string {
+	// 各スライドを固定 1280×720 の section に格納。最後以外は break-after: page で
+	// 明示的にページ送り (`:not(:last-child)` で最終 slide の余分な空白ページを回避)。
+	const sections = slides.map((html) => `<section class="slide">\n${html}\n</section>`).join("\n");
+
+	return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(title)}</title>
+<style>${katexInlineCss}</style>
+<style>
+:root { color-scheme: light; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  color: #333;
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.slide {
+  width: ${SLIDE_LOGICAL_WIDTH}px;
+  height: ${SLIDE_LOGICAL_HEIGHT}px;
+  padding: ${SLIDE_LOGICAL_PADDING_PX}px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.slide:not(:last-child) {
+  break-after: page;
+  page-break-after: always;
+}
+h1, h2, h3, h4, h5, h6 { line-height: 1.3; margin: 0 0 0.4em; }
+h1 { font-size: 2em; font-weight: 700; }
+h2 { font-size: 1.6em; font-weight: 700; }
+h3 { font-size: 1.3em; font-weight: 600; }
+p { margin: 0.6em 0; }
+code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9em; }
+pre { padding: 0.8em 1em; background: #f5f5f5; border-radius: 6px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+img { max-width: 100%; height: auto; }
+table { border-collapse: collapse; margin: 0.5em 0; }
+th, td { border: 1px solid #e8e8e8; padding: 0.4em 0.7em; }
+th { background: #f8f8f8; font-weight: 600; }
+.mermaid-diagram { text-align: center; margin: 0.5em 0; }
+.mermaid-diagram svg, .mermaid-diagram img { max-width: 100%; height: auto; }
+ul, ol { padding-left: 1.5em; margin: 0.5em 0; }
+/* @page size のみ指定。margin は printToPDF の marginsInches:0 で担保するので不要。 */
+@page { size: ${SLIDE_LOGICAL_WIDTH}px ${SLIDE_LOGICAL_HEIGHT}px; }
+</style>
+</head>
+<body>
+${sections}
+</body>
+</html>`;
+}
+
+/**
+ * スライド Markdown を 16:9 (1280×720 論理サイズ) の PDF としてエクスポートする。
+ * 1 スライド = 1 ページ。SlidePreview と同じ論理寸法・padding を使うことで、
+ * プレビュー通りの WYSIWYG になる (#4)。
+ * @returns save ダイアログでキャンセルされた場合は false
+ */
+export async function exportSlidesAsPdf(markdown: string, filePath: string): Promise<boolean> {
+	const title = extractTitle(filePath);
+	const defaultName = `${title}-slides.pdf`;
+
+	const savePath = await showSaveDialog({
+		defaultPath: defaultName,
+		filters: [{ name: "PDF", extensions: ["pdf"] }],
+	});
+	if (!savePath) return false;
+
+	const sections = parseSlides(markdown);
+	// SlidePreview と同じ pre-processing:「末尾 `---` 除去 → trim → 空なら空文字」。
+	// 空スライドも「1 ページ = 空白」として保持したいので、null で潰さず空文字のまま。
+	const slidesHtml = await Promise.all(
+		sections.map(async (slide) => {
+			const cleaned = slide.content.replace(/\n---\s*$/, "").trim();
+			if (!cleaned) return "";
+			// mermaid は PDF 経路 (SVG→PNG rasterize) と同じ扱い。
+			const withMermaid = await preprocessMermaidBlocks(
+				cleaned,
+				"light",
+				{ htmlLabels: false, useMaxWidth: false },
+				{ rasterize: true },
+			);
+			// breaks オプションは SlidePreview と揃える (default = false)。ExportDialog の
+			// 「プレビュー通りの見た目」文言と WYSIWYG 契約を保つため、単一改行を <br> に
+			// 変えない (通常 PDF export では `breaks: true` を使うが、スライドでは preview の
+			// 挙動を優先)。
+			return resolveHtmlImageSrcs(markdownToHtml(withMermaid), filePath);
+		}),
+	);
+
+	const html = buildSlideHtmlDocument(slidesHtml, title);
+
+	await exportPdf(html, savePath, {
+		pageSize: {
+			width: Math.round(SLIDE_LOGICAL_WIDTH * MICRONS_PER_PX),
+			height: Math.round(SLIDE_LOGICAL_HEIGHT * MICRONS_PER_PX),
+		},
+		marginsInches: { top: 0, bottom: 0, left: 0, right: 0 },
+		skipSectionBreakScript: true,
+	});
 	return true;
 }
 

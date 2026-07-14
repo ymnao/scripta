@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useWorkspaceStore } from "../../stores/workspace";
-import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH, SlidePreview } from "./SlidePreview";
+import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
+import { SlidePreview } from "./SlidePreview";
 
 describe("SlidePreview", () => {
 	it("Markdown をプレビュー表示する", () => {

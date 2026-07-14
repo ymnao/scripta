@@ -1,5 +1,6 @@
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
 import type { OgpData } from "../../src/types/ogp";
+import type { PdfExportOptions } from "../../src/types/pdf";
 import type { SearchFilesResponse } from "../../src/types/search";
 import type { UpdateInfo } from "../../src/types/update";
 import type { BacklinkSource, UnresolvedWikilink } from "../../src/types/wikilink";
@@ -66,7 +67,7 @@ export type Api = Readonly<{
 
 	fetchOgp: (requestId: string, url: string) => Promise<OgpData>;
 	ogpCancel: (requestId: string) => Promise<void>;
-	exportPdf: (html: string, outputPath: string) => Promise<void>;
+	exportPdf: (html: string, outputPath: string, options?: PdfExportOptions) => Promise<void>;
 	checkForUpdate: (currentVersion: string) => Promise<UpdateInfo>;
 
 	gitCheckAvailable: () => Promise<boolean>;

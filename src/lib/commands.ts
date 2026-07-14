@@ -151,8 +151,12 @@ export function cancelOgpFetch(requestId: string): Promise<void> {
 	return window.api.ogpCancel(requestId);
 }
 
-export function exportPdf(html: string, outputPath: string): Promise<void> {
-	return window.api.exportPdf(html, outputPath);
+export function exportPdf(
+	html: string,
+	outputPath: string,
+	options?: import("../types/pdf").PdfExportOptions,
+): Promise<void> {
+	return window.api.exportPdf(html, outputPath, options);
 }
 
 export function openExternal(url: string): Promise<void> {

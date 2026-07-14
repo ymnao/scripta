@@ -5,18 +5,17 @@ import { memo, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } fr
 import { markdownToHtml } from "../../lib/markdown-to-html";
 import { resolveHtmlImageSrcs } from "../../lib/resolve-html-images";
 import { useWorkspaceStore } from "../../stores/workspace";
+import {
+	SLIDE_LOGICAL_HEIGHT,
+	SLIDE_LOGICAL_PADDING_PX,
+	SLIDE_LOGICAL_WIDTH,
+} from "../../types/slide";
 
 export interface SlidePreviewProps {
 	markdown: string;
 	slideIndex: number;
 	totalSlides: number;
 }
-
-// スライドの論理サイズ。実表示は transform: scale() でコンテナに fit させるため、
-// 表示ペイン幅に関わらず「同じ文字量・同じ配置」で見えることを保証する（WYSIWYG）。
-// 16:9 は #4 スライド PDF export と共通の前提。
-export const SLIDE_LOGICAL_WIDTH = 1280;
-export const SLIDE_LOGICAL_HEIGHT = 720;
 
 /**
  * スライドの Markdown プレビューを 16:9 論理サイズで表示する。
@@ -90,10 +89,11 @@ export const SlidePreview = memo(function SlidePreview({
 					style={{ width: stageWidth, height: stageHeight }}
 				>
 					<div
-						className="slide-preview absolute left-0 top-0 origin-top-left p-16"
+						className="slide-preview absolute left-0 top-0 origin-top-left"
 						style={{
 							width: SLIDE_LOGICAL_WIDTH,
 							height: SLIDE_LOGICAL_HEIGHT,
+							padding: SLIDE_LOGICAL_PADDING_PX,
 							transform: `scale(${scale})`,
 						}}
 					>

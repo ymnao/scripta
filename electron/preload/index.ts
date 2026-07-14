@@ -82,7 +82,8 @@ const api: Api = Object.freeze({
 
 	fetchOgp: (requestId, url) => invoke(ipcRenderer.invoke("ogp:fetch", requestId, url)),
 	ogpCancel: (requestId) => invoke(ipcRenderer.invoke("ogp:cancel", requestId)),
-	exportPdf: (html, outputPath) => invoke(ipcRenderer.invoke("pdf:export", html, outputPath)),
+	exportPdf: (html, outputPath, options) =>
+		invoke(ipcRenderer.invoke("pdf:export", html, outputPath, options)),
 	checkForUpdate: (currentVersion) => invoke(ipcRenderer.invoke("update:check", currentVersion)),
 
 	gitCheckAvailable: () => invoke(ipcRenderer.invoke("git:check-available")),
