@@ -104,4 +104,38 @@ describe("useSlideHtmls (hook integration)", () => {
 		rerender();
 		expect(result.current[0]).toBe(firstHtml);
 	});
+
+	it("per-slide キャッシュ: 変更のないスライドは再計算されず同一 string identity で返る", async () => {
+		const stable = "# Stable";
+		const initial = [{ content: stable }, { content: "# Before" }];
+		const { result, rerender } = renderHook(({ slides }) => useSlideHtmls(slides), {
+			initialProps: { slides: initial },
+		});
+		await waitFor(() => {
+			expect(result.current[0]).toContain("Stable");
+			expect(result.current[1]).toContain("Before");
+		});
+		const stableHtml = result.current[0];
+		// slides 配列 identity を新しくしつつ、slide 0 の content は同一、slide 1 だけ変える。
+		// キャッシュヒットしていれば slide 0 の HTML string identity が保たれる。
+		rerender({ slides: [{ content: stable }, { content: "# After" }] });
+		await waitFor(() => expect(result.current[1]).toContain("After"));
+		expect(result.current[0]).toBe(stableHtml);
+	});
+
+	it("activeTabPath 変更で per-slide キャッシュは全クリアされる (相対画像パス再解決)", async () => {
+		const slides = [{ content: "![](./img/hero.png)" }];
+		useWorkspaceStore.setState({ activeTabPath: "/workspace/deck.md" });
+		const { result, rerender } = renderHook(() => useSlideHtmls(slides));
+		await waitFor(() => {
+			expect(result.current[0]).toContain("scripta-asset://localhost/workspace/img/hero.png");
+		});
+		act(() => {
+			useWorkspaceStore.setState({ activeTabPath: "/notes/subdir/deck.md" });
+		});
+		rerender();
+		await waitFor(() => {
+			expect(result.current[0]).toContain("scripta-asset://localhost/notes/subdir/img/hero.png");
+		});
+	});
 });

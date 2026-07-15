@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useAsyncDerived } from "../../hooks/useAsyncDerived";
 import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
 import { useThemeStore } from "../../stores/theme";
@@ -35,15 +35,57 @@ export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null
 	);
 }
 
+interface PerSlideCache<T> {
+	key: string;
+	map: Map<string, T>;
+}
+
+/**
+ * `slides` の content 文字列をキーに前回結果を再利用する per-slide キャッシュ。
+ * `cacheKey` 変化で全消し (activeTabPath / theme 等 render 結果に効く外部依存)、
+ * 現在の slides に無い content は末尾で prune して無制限成長を防ぐ。
+ * sync (T=string) / async (T=Promise<string>) 双方で同じ骨格を使い、
+ * 後者は in-flight promise 共有で重複 content の並列 render も 1 回に畳む。
+ */
+function mapPerSlideCached<T>(
+	cacheRef: { current: PerSlideCache<T> },
+	cacheKey: string,
+	slides: readonly { content: string }[],
+	compute: (content: string) => T,
+): T[] {
+	const cache = cacheRef.current;
+	if (cache.key !== cacheKey) {
+		cache.key = cacheKey;
+		cache.map = new Map();
+	}
+	const currentContents = new Set<string>();
+	const result = slides.map((s) => {
+		currentContents.add(s.content);
+		const cached = cache.map.get(s.content);
+		if (cached !== undefined) return cached;
+		const value = compute(s.content);
+		cache.map.set(s.content, value);
+		return value;
+	});
+	for (const key of cache.map.keys()) {
+		if (!currentContents.has(key)) cache.map.delete(key);
+	}
+	return result;
+}
+
 /**
  * 複数スライドの HTML を並列に mermaid 込みでレンダリングするフック。
- * 発表モード (SlideShowOverlay) が全スライドを事前レンダーするのに使う。
- * mount 中 `slides` は snapshot なので通常は 1 回だけ async 実行される。
+ * 発表モード (SlideShowOverlay) / サムネイル一覧 / 大デッキ preview の 3 消費者が使う。
  *
  * ⚠️ 呼び出し側は `slides` の identity を安定させる (useMemo 等で memoize する)
  * こと。`useAsyncDerived` は `slides` を useEffect 依存として `===` 比較する
  * ため、毎 render で新しい配列を渡すと effect が render 毎に fire し、setState
  * が繰り返し呼ばれて再 render → effect fire → ... のループになる。
+ *
+ * per-slide キャッシュ: content 文字列をキーに前回描画結果を保持し、typing で
+ * 1 枚だけ変わる大デッキで N-1 枚分の markdownToHtml + DOMPurify + mermaid
+ * preprocess を丸ごとスキップする。activeTabPath / theme が変わったら cache
+ * は成果物 identity が変わるため全クリアする。
  */
 export function useSlideHtmls(
 	slides: readonly { content: string }[],
@@ -51,12 +93,33 @@ export function useSlideHtmls(
 ): string[] {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 	const theme = useResolvedSlideTheme(themeOverride);
+	const syncCacheRef = useRef<PerSlideCache<string>>({
+		key: "",
+		map: new Map(),
+	});
+	const asyncCacheRef = useRef<PerSlideCache<Promise<string>>>({
+		key: "",
+		map: new Map(),
+	});
 	const initial = useMemo(
-		() => slides.map((s) => renderSlideHtml(s.content, activeTabPath)),
+		() =>
+			mapPerSlideCached(syncCacheRef, activeTabPath ?? "", slides, (content) =>
+				renderSlideHtml(content, activeTabPath),
+			),
 		[slides, activeTabPath],
 	);
 	return useAsyncDerived([slides, activeTabPath, theme], initial, () =>
-		Promise.all(slides.map((s) => renderSlideHtmlWithMermaid(s.content, activeTabPath, theme))),
+		Promise.all(
+			mapPerSlideCached(asyncCacheRef, `${activeTabPath ?? ""}\0${theme}`, slides, (content) => {
+				const p = renderSlideHtmlWithMermaid(content, activeTabPath, theme);
+				// 失敗した Promise を cache に固定させない (次 render で retry させる)。
+				p.catch(() => {
+					const cache = asyncCacheRef.current;
+					if (cache.map.get(content) === p) cache.map.delete(content);
+				});
+				return p;
+			}),
+		),
 	);
 }
 
