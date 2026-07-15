@@ -102,7 +102,7 @@ test.describe("slide view", () => {
 
 		await page.keyboard.press(`${modKey}+Shift+s`);
 
-		const preview = page.locator(".slide-preview-content");
+		const preview = page.locator('[data-testid="slide-preview-pane"] .slide-preview-content');
 		await expect(preview).toBeVisible();
 		await expect(preview.getByText("Slide 1")).toBeVisible();
 	});
@@ -114,7 +114,7 @@ test.describe("slide view", () => {
 		await openSlideFile(page);
 
 		await page.keyboard.press(`${modKey}+Shift+s`);
-		const preview = page.locator(".slide-preview-content");
+		const preview = page.locator('[data-testid="slide-preview-pane"] .slide-preview-content');
 		await expect(preview.getByText("Slide 1")).toBeVisible();
 
 		await focusEditor(page);

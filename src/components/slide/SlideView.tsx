@@ -280,7 +280,11 @@ export function SlideView({
 					data-testid="slide-preview-resize-handle"
 					className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-text-link focus:bg-text-link focus:outline-none"
 				/>
-				<div className="min-h-0 bg-bg-secondary" style={{ width: previewWidthPct }}>
+				<div
+					className="min-h-0 bg-bg-secondary"
+					style={{ width: previewWidthPct }}
+					data-testid="slide-preview-pane"
+				>
 					<Suspense fallback={null}>
 						<SlidePreview
 							markdown={currentSlide?.content ?? ""}
