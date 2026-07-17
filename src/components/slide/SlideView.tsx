@@ -305,16 +305,18 @@ export function SlideView({
 			    thumbnailsVisible が false の時も同様に mount しない (再表示時に
 			    再描画する trade-off で hidden 時の CPU / メモリを節約)。 */}
 			{slides.length > 1 && (
-				<div className="flex shrink-0 flex-col border-t border-border bg-bg-secondary">
+				<div className="flex shrink-0 flex-col">
 					<button
 						type="button"
 						onClick={() => setThumbnailsVisible(!thumbnailsVisible)}
 						aria-pressed={thumbnailsVisible}
 						aria-label={thumbnailsVisible ? "サムネイル一覧を非表示" : "サムネイル一覧を表示"}
 						data-testid="slide-thumbnails-toggle"
-						className="flex h-5 items-center justify-center text-text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+						className="flex h-5 items-center justify-center border-t border-border bg-bg-secondary text-text-secondary hover:bg-black/5 dark:hover:bg-white/5"
 					>
-						{thumbnailsVisible ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+						{/* 展開時 = 上向き (click で閉じる = content が上に畳まれる方向)、
+						    折り畳み時 = 下向き (click で開く = 下から現れる方向)。 */}
+						{thumbnailsVisible ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
 					</button>
 					{thumbnailsVisible && (
 						<SlideThumbnails

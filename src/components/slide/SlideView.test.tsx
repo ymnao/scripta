@@ -69,7 +69,6 @@ describe("SlideView", () => {
 	});
 
 	it("複数スライドでサムネイル一覧を表示する", async () => {
-		mockSlideThumbnailsVisible = true;
 		render(<SlideView value={"A\n---\nB\n---\nC"} onDocChanged={vi.fn()} onSave={vi.fn()} />);
 		await screen.findByText("1 / 3");
 		expect(screen.getByTestId("slide-thumbnails")).toBeDefined();
@@ -84,8 +83,6 @@ describe("SlideView", () => {
 	});
 
 	it("toggle ボタン click で setSlideThumbnailsVisible を反転して呼ぶ", async () => {
-		mockSlideThumbnailsVisible = true;
-		setSlideThumbnailsVisible.mockClear();
 		render(<SlideView value={"A\n---\nB\n---\nC"} onDocChanged={vi.fn()} onSave={vi.fn()} />);
 		await screen.findByText("1 / 3");
 		fireEvent.click(screen.getByTestId("slide-thumbnails-toggle"));
