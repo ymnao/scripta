@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("mermaid", () => ({
 	default: {
@@ -19,11 +19,6 @@ const SLIDES: SlideSection[] = [
 ];
 
 describe("SlideThumbnails", () => {
-	afterEach(() => {
-		vi.restoreAllMocks();
-		delete (HTMLElement.prototype as unknown as { scrollBy?: unknown }).scrollBy;
-	});
-
 	it("スライド数と同じボタンをレンダリングする", () => {
 		render(<SlideThumbnails slides={SLIDES} currentSlideIndex={0} onSelectSlide={vi.fn()} />);
 		expect(screen.getAllByRole("button")).toHaveLength(3);
@@ -54,30 +49,22 @@ describe("SlideThumbnails", () => {
 	it("current thumbnail が右側に切れている時 nav.scrollBy で追随する", () => {
 		// nav: [0, 300], thumbnails: 各 120 幅で 0-based に配置。
 		// index=2 は [240, 360] で右端 360 が nav.right=300 を超える → scrollBy(60) 期待。
-		const scrollBy = vi.fn();
-		const navRect = { left: 0, right: 300, top: 0, bottom: 100, width: 300, height: 100 };
-		const rectAt = (i: number) => ({
-			left: i * 120,
-			right: (i + 1) * 120,
-			top: 0,
-			bottom: 100,
-			width: 120,
-			height: 100,
-		});
-		const origGBCR = Element.prototype.getBoundingClientRect;
-		vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
-			this: Element,
-		) {
-			if (this.tagName === "NAV") return navRect as DOMRect;
-			const btns = Array.from((this.ownerDocument as Document).querySelectorAll("button"));
-			const i = btns.indexOf(this as HTMLButtonElement);
-			if (i >= 0) return rectAt(i) as DOMRect;
-			return origGBCR.call(this);
-		});
-		(HTMLElement.prototype as unknown as { scrollBy: (arg: ScrollToOptions) => void }).scrollBy =
-			scrollBy;
+		const rect = (left: number, right: number) =>
+			({ left, right, top: 0, bottom: 100, width: right - left, height: 100 }) as DOMRect;
 
-		render(<SlideThumbnails slides={SLIDES} currentSlideIndex={2} onSelectSlide={vi.fn()} />);
+		const { rerender } = render(
+			<SlideThumbnails slides={SLIDES} currentSlideIndex={0} onSelectSlide={vi.fn()} />,
+		);
+		const nav = screen.getByTestId("slide-thumbnails");
+		const buttons = screen.getAllByRole("button");
+		nav.getBoundingClientRect = () => rect(0, 300);
+		buttons.forEach((b, i) => {
+			b.getBoundingClientRect = () => rect(i * 120, (i + 1) * 120);
+		});
+		const scrollBy = vi.fn();
+		(nav as unknown as { scrollBy: (arg: ScrollToOptions) => void }).scrollBy = scrollBy;
+
+		rerender(<SlideThumbnails slides={SLIDES} currentSlideIndex={2} onSelectSlide={vi.fn()} />);
 
 		expect(scrollBy).toHaveBeenCalledWith({ left: 60, behavior: "smooth" });
 	});

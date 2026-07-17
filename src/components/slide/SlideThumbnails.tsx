@@ -39,6 +39,7 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 	const htmls = useSlideHtmls(slides, themeOverride);
 	const navRef = useRef<HTMLElement>(null);
 	const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+	buttonRefs.current.length = slides.length;
 
 	// current thumbnail が水平スクロール範囲外なら nav の scrollLeft を最小移動で調整。
 	// scrollIntoView は祖先まで scroll し得るため使わず、nav 内で局所化する。
