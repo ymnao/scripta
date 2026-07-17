@@ -38,22 +38,23 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 }: SlideThumbnailsProps) {
 	const htmls = useSlideHtmls(slides, themeOverride);
 	const navRef = useRef<HTMLElement>(null);
-	const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
-	buttonRefs.current.length = slides.length;
 
 	// current thumbnail が水平スクロール範囲外なら nav の scrollLeft を最小移動で調整。
 	// scrollIntoView は祖先まで scroll し得るため使わず、nav 内で局所化する。
+	// nav の直接子は map した button のみなので children[currentSlideIndex] で該当ボタンを取得。
 	useEffect(() => {
 		const nav = navRef.current;
-		const btn = buttonRefs.current[currentSlideIndex];
+		const btn = nav?.children[currentSlideIndex] as HTMLElement | undefined;
 		if (!nav || !btn) return;
 		const navRect = nav.getBoundingClientRect();
 		const btnRect = btn.getBoundingClientRect();
-		if (btnRect.left < navRect.left) {
-			nav.scrollBy({ left: btnRect.left - navRect.left, behavior: "smooth" });
-		} else if (btnRect.right > navRect.right) {
-			nav.scrollBy({ left: btnRect.right - navRect.right, behavior: "smooth" });
-		}
+		const delta =
+			btnRect.left < navRect.left
+				? btnRect.left - navRect.left
+				: btnRect.right > navRect.right
+					? btnRect.right - navRect.right
+					: 0;
+		if (delta) nav.scrollBy({ left: delta, behavior: "smooth" });
 	}, [currentSlideIndex]);
 
 	return (
@@ -70,9 +71,6 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 						// slide.from は挿入・削除で既存スライドの安定性が保たれるため
 						// index より key として優れる (index だと挿入時に全 thumbnail 再描画)。
 						key={slide.from}
-						ref={(node) => {
-							buttonRefs.current[index] = node;
-						}}
 						type="button"
 						onClick={() => onSelectSlide(index)}
 						aria-current={isCurrent ? "true" : undefined}

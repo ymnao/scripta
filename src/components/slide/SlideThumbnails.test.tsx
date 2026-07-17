@@ -49,17 +49,14 @@ describe("SlideThumbnails", () => {
 	it("current thumbnail が右側に切れている時 nav.scrollBy で追随する", () => {
 		// nav: [0, 300], thumbnails: 各 120 幅で 0-based に配置。
 		// index=2 は [240, 360] で右端 360 が nav.right=300 を超える → scrollBy(60) 期待。
-		const rect = (left: number, right: number) =>
-			({ left, right, top: 0, bottom: 100, width: right - left, height: 100 }) as DOMRect;
-
 		const { rerender } = render(
 			<SlideThumbnails slides={SLIDES} currentSlideIndex={0} onSelectSlide={vi.fn()} />,
 		);
 		const nav = screen.getByTestId("slide-thumbnails");
 		const buttons = screen.getAllByRole("button");
-		nav.getBoundingClientRect = () => rect(0, 300);
+		nav.getBoundingClientRect = () => new DOMRect(0, 0, 300, 100);
 		buttons.forEach((b, i) => {
-			b.getBoundingClientRect = () => rect(i * 120, (i + 1) * 120);
+			b.getBoundingClientRect = () => new DOMRect(i * 120, 0, 120, 100);
 		});
 		const scrollBy = vi.fn();
 		(nav as unknown as { scrollBy: (arg: ScrollToOptions) => void }).scrollBy = scrollBy;
