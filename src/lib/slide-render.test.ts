@@ -94,6 +94,18 @@ describe("renderSlideHtmlWithMermaid: mermaid fence 変換", () => {
 		// 逆順で 1 ブロック目だけ処理して abort、残 2 ブロックは render 呼ばれない
 		expect(renderSpy).toHaveBeenCalledTimes(1);
 	});
+	it("renderMermaid が AbortError で reject した場合 catch 節で swallow せず伝搬させる", async () => {
+		// renderMermaid 直下が AbortError で reject する状況 (loop-head の abort 検出を
+		// すり抜けたケース) — 元の実装は `catch {}` で silent 化していたため、rethrow
+		// branch がなければ fenced code をそのまま HTML 化して "成功" 扱いになる。
+		const md = "```mermaid\ngraph TD\n  A-->B\n```";
+		renderSpy.mockImplementationOnce(async () => {
+			throw new DOMException("Aborted", "AbortError");
+		});
+		await expect(renderSlideHtmlWithMermaid(md, null, "light")).rejects.toMatchObject({
+			name: "AbortError",
+		});
+	});
 	// rasterize=true (embedOptions) 経路は svg-rasterize を要するため
 	// export.test.ts 側 (svg-rasterize モック済み) の exportSlidesAsPdf テストでカバー。
 });
