@@ -2,7 +2,7 @@
 // lazy chunk に閉じている katex CSS を eager path でも確保する必要がある。
 // Vite の INEFFECTIVE_DYNAMIC_IMPORT warning は他 2 箇所と同じ既知の噪音。
 import "katex/dist/katex.min.css";
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import {
 	SLIDE_LOGICAL_WIDTH,
 	SLIDE_THUMBNAIL_WIDTH,
@@ -37,9 +37,27 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 	onSelectSlide,
 }: SlideThumbnailsProps) {
 	const htmls = useSlideHtmls(slides, themeOverride);
+	const navRef = useRef<HTMLElement>(null);
+	const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+	// current thumbnail が水平スクロール範囲外なら nav の scrollLeft を最小移動で調整。
+	// scrollIntoView は祖先まで scroll し得るため使わず、nav 内で局所化する。
+	useEffect(() => {
+		const nav = navRef.current;
+		const btn = buttonRefs.current[currentSlideIndex];
+		if (!nav || !btn) return;
+		const navRect = nav.getBoundingClientRect();
+		const btnRect = btn.getBoundingClientRect();
+		if (btnRect.left < navRect.left) {
+			nav.scrollBy({ left: btnRect.left - navRect.left, behavior: "smooth" });
+		} else if (btnRect.right > navRect.right) {
+			nav.scrollBy({ left: btnRect.right - navRect.right, behavior: "smooth" });
+		}
+	}, [currentSlideIndex]);
 
 	return (
 		<nav
+			ref={navRef}
 			className="flex shrink-0 gap-2 overflow-x-auto border-t border-border bg-bg-secondary p-2"
 			data-testid="slide-thumbnails"
 			aria-label="スライドサムネイル一覧"
@@ -51,6 +69,9 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 						// slide.from は挿入・削除で既存スライドの安定性が保たれるため
 						// index より key として優れる (index だと挿入時に全 thumbnail 再描画)。
 						key={slide.from}
+						ref={(node) => {
+							buttonRefs.current[index] = node;
+						}}
 						type="button"
 						onClick={() => onSelectSlide(index)}
 						aria-current={isCurrent ? "true" : undefined}

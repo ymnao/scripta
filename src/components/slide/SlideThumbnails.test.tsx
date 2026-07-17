@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("mermaid", () => ({
 	default: {
@@ -19,6 +19,11 @@ const SLIDES: SlideSection[] = [
 ];
 
 describe("SlideThumbnails", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+		delete (HTMLElement.prototype as unknown as { scrollBy?: unknown }).scrollBy;
+	});
+
 	it("スライド数と同じボタンをレンダリングする", () => {
 		render(<SlideThumbnails slides={SLIDES} currentSlideIndex={0} onSelectSlide={vi.fn()} />);
 		expect(screen.getAllByRole("button")).toHaveLength(3);
@@ -44,5 +49,36 @@ describe("SlideThumbnails", () => {
 		expect(screen.getByText("1")).toBeDefined();
 		expect(screen.getByText("2")).toBeDefined();
 		expect(screen.getByText("3")).toBeDefined();
+	});
+
+	it("current thumbnail が右側に切れている時 nav.scrollBy で追随する", () => {
+		// nav: [0, 300], thumbnails: 各 120 幅で 0-based に配置。
+		// index=2 は [240, 360] で右端 360 が nav.right=300 を超える → scrollBy(60) 期待。
+		const scrollBy = vi.fn();
+		const navRect = { left: 0, right: 300, top: 0, bottom: 100, width: 300, height: 100 };
+		const rectAt = (i: number) => ({
+			left: i * 120,
+			right: (i + 1) * 120,
+			top: 0,
+			bottom: 100,
+			width: 120,
+			height: 100,
+		});
+		const origGBCR = Element.prototype.getBoundingClientRect;
+		vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+			this: Element,
+		) {
+			if (this.tagName === "NAV") return navRect as DOMRect;
+			const btns = Array.from((this.ownerDocument as Document).querySelectorAll("button"));
+			const i = btns.indexOf(this as HTMLButtonElement);
+			if (i >= 0) return rectAt(i) as DOMRect;
+			return origGBCR.call(this);
+		});
+		(HTMLElement.prototype as unknown as { scrollBy: (arg: ScrollToOptions) => void }).scrollBy =
+			scrollBy;
+
+		render(<SlideThumbnails slides={SLIDES} currentSlideIndex={2} onSelectSlide={vi.fn()} />);
+
+		expect(scrollBy).toHaveBeenCalledWith({ left: 60, behavior: "smooth" });
 	});
 });
