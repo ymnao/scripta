@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { useAsyncDerived } from "../../hooks/useAsyncDerived";
 import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
 import { useThemeStore } from "../../stores/theme";
@@ -22,6 +22,9 @@ function useResolvedSlideTheme(themeOverride: SlideTheme | null | undefined): Sl
  * 表示方針: まず sync 版 (mermaid 未変換) を即返し、mermaid preprocess が完了したら
  * 上書きする。入力が async 完了前に変わった場合は `useAsyncDerived` の keepPrevious
  * で前回成功値を保持しつつ次で上書き。`themeOverride` は Fable #12 の frontmatter theme。
+ *
+ * per-content の重複 render 抑止 / 別 hook instance (SlideThumbnails 等) とのキャッシュ共有は
+ * `slide-render.ts` の module-level cache に委譲する。
  */
 export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null): string {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
@@ -35,54 +38,6 @@ export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null
 	);
 }
 
-interface PerSlideCache<T> {
-	key: string;
-	map: Map<string, T>;
-}
-
-/**
- * `slides` の content 文字列をキーに前回結果を再利用する per-slide キャッシュ。
- * `cacheKey` 変化で全消し (activeTabPath / theme 等 render 結果に効く外部依存)、
- * 現在の slides に無い content は末尾で prune して無制限成長を防ぐ。
- * sync (T=string) / async (T=Promise<string>) 双方で同じ骨格を使い、
- * 後者は in-flight promise 共有で重複 content の並列 render も 1 回に畳む。
- */
-function mapPerSlideCached<T>(
-	cacheRef: { current: PerSlideCache<T> },
-	cacheKey: string,
-	slides: readonly { content: string }[],
-	compute: (content: string) => T,
-): T[] {
-	const cache = cacheRef.current;
-	if (cache.key !== cacheKey) {
-		cache.key = cacheKey;
-		cache.map = new Map();
-	}
-	const currentContents = new Set<string>();
-	const result = slides.map((s) => {
-		currentContents.add(s.content);
-		const cached = cache.map.get(s.content);
-		if (cached !== undefined) return cached;
-		const value = compute(s.content);
-		cache.map.set(s.content, value);
-		return value;
-	});
-	for (const key of cache.map.keys()) {
-		if (!currentContents.has(key)) cache.map.delete(key);
-	}
-	return result;
-}
-
-interface PerSlideAsyncEntry {
-	promise: Promise<string>;
-	controller: AbortController;
-}
-
-interface PerSlideAsyncCache {
-	key: string;
-	map: Map<string, PerSlideAsyncEntry>;
-}
-
 /**
  * 複数スライドの HTML を並列に mermaid 込みでレンダリングするフック。
  * 発表モード (SlideShowOverlay) / サムネイル一覧 / 大デッキ preview の 3 消費者が使う。
@@ -92,17 +47,12 @@ interface PerSlideAsyncCache {
  * ため、毎 render で新しい配列を渡すと effect が render 毎に fire し、setState
  * が繰り返し呼ばれて再 render → effect fire → ... のループになる。
  *
- * per-slide キャッシュ: content 文字列をキーに前回描画結果を保持し、typing で
- * 1 枚だけ変わる大デッキで N-1 枚分の markdownToHtml + DOMPurify + mermaid
- * preprocess を丸ごとスキップする。activeTabPath / theme が変わったら cache
- * は成果物 identity が変わるため全クリアする。
- *
- * per-entry AbortController: 各 async entry が自前の signal を持ち、entry が
- * eviction される (content が slides から消える / cache key 変化 / unmount) タイミングで
- * のみ abort する。useAsyncDerived の shared signal は使わない — deps 変更ごとに
- * shared signal を abort すると、cache 内で同じ content を共有中の promise を
- * 巻き添え reject して次 effect が「rejected promise を await → keepPrevious 継続」の
- * 死角に嵌る (session 90 codex qa-fixture Finding 1)。
+ * per-content の dedup / 別 hook instance との共有 / LRU eviction はすべて
+ * `slide-render.ts` の module-level cache に委譲する。以前は hook-instance-local な
+ * `useRef` cache + per-entry AbortController を持っていたが、SlidePreview の
+ * useSlideHtml と SlideThumbnails の useSlideHtmls が同一スライドを重複 render する
+ * altitude 課題を解消するため module scope に集約した (session 91)。caller の signal は
+ * `renderSlideHtmlWithMermaid` 内で「新規 render を起動しない」pre-check にのみ使われる。
  */
 export function useSlideHtmls(
 	slides: readonly { content: string }[],
@@ -110,63 +60,15 @@ export function useSlideHtmls(
 ): string[] {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 	const theme = useResolvedSlideTheme(themeOverride);
-	const syncCacheRef = useRef<PerSlideCache<string>>({
-		key: "",
-		map: new Map(),
-	});
-	const asyncCacheRef = useRef<PerSlideAsyncCache>({
-		key: "",
-		map: new Map(),
-	});
-	// unmount で残っている全 in-flight を abort。
-	useEffect(
-		() => () => {
-			for (const entry of asyncCacheRef.current.map.values()) entry.controller.abort();
-			asyncCacheRef.current.map.clear();
-		},
-		[],
-	);
 	const initial = useMemo(
-		() =>
-			mapPerSlideCached(syncCacheRef, activeTabPath ?? "", slides, (content) =>
-				renderSlideHtml(content, activeTabPath),
-			),
+		() => slides.map((s) => renderSlideHtml(s.content, activeTabPath)),
 		[slides, activeTabPath],
 	);
-	return useAsyncDerived([slides, activeTabPath, theme], initial, () => {
-		const cacheKey = `${activeTabPath ?? ""}\0${theme}`;
-		const cache = asyncCacheRef.current;
-		if (cache.key !== cacheKey) {
-			// activeTabPath / theme が変わったら成果物 identity が変わるため全 abort + 全クリア。
-			for (const entry of cache.map.values()) entry.controller.abort();
-			cache.key = cacheKey;
-			cache.map = new Map();
-		}
-		const currentContents = new Set<string>();
-		const promises = slides.map((s) => {
-			currentContents.add(s.content);
-			const cached = cache.map.get(s.content);
-			if (cached) return cached.promise;
-			const controller = new AbortController();
-			const p = renderSlideHtmlWithMermaid(s.content, activeTabPath, theme, {
-				signal: controller.signal,
-			});
-			// 失敗した Promise を cache に固定させない (次 render で retry させる)。
-			p.catch(() => {
-				if (cache.map.get(s.content)?.promise === p) cache.map.delete(s.content);
-			});
-			cache.map.set(s.content, { promise: p, controller });
-			return p;
-		});
-		// 今 slides に無い content の entry を abort + eviction。
-		for (const [content, entry] of cache.map) {
-			if (!currentContents.has(content)) {
-				entry.controller.abort();
-				cache.map.delete(content);
-			}
-		}
-		return Promise.all(promises);
-	});
+	return useAsyncDerived([slides, activeTabPath, theme], initial, (signal) =>
+		Promise.all(
+			slides.map((s) => renderSlideHtmlWithMermaid(s.content, activeTabPath, theme, { signal })),
+		),
+	);
 }
 
 export interface SlideFrameProps {

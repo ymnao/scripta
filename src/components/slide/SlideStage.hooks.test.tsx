@@ -15,13 +15,16 @@ const { useSlideHtml, useSlideHtmls } = await import("./SlideStage");
 const { useWorkspaceStore } = await import("../../stores/workspace");
 const { useThemeStore } = await import("../../stores/theme");
 const { clearMermaidCache } = await import("../../lib/mermaid");
+const { clearSlideRenderCache } = await import("../../lib/slide-render");
 
 beforeEach(() => {
 	clearMermaidCache();
+	clearSlideRenderCache();
 	useWorkspaceStore.setState({ activeTabPath: null });
 	useThemeStore.setState({ theme: "light" });
 });
 afterEach(() => {
+	clearSlideRenderCache();
 	useWorkspaceStore.setState({ activeTabPath: null });
 	useThemeStore.setState({ theme: "light" });
 });

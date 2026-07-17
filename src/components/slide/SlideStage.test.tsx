@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+	clearSlideRenderCache,
+	renderSlideHtml,
+	renderSlideHtmlWithMermaid,
+} from "../../lib/slide-render";
 import { useWorkspaceStore } from "../../stores/workspace";
+
+beforeEach(() => {
+	clearSlideRenderCache();
+});
 
 describe("renderSlideHtml", () => {
 	it("空文字は空を返す", () => {
