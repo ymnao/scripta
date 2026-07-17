@@ -5,6 +5,33 @@ import { preprocessMermaidBlocks } from "./mermaid-preprocess";
 import { resolveHtmlImageSrcs } from "./resolve-html-images";
 
 /**
+ * 末尾の区切り行 `---` を除去して trim する。`renderSlideHtml` / `renderSlideHtmlWithMermaid`
+ * の両方で同じ regex を書くと preview / 発表 / PDF export で契約が drift するリスクが
+ * あるため 1 箇所に集約する (JSDoc 記述と対応)。
+ */
+function cleanSlideMarkdown(markdown: string): string {
+	return markdown.replace(/\n---\s*$/, "").trim();
+}
+
+/**
+ * 挿入順 LRU: hit ごとに delete + set で末尾へ移動、cap 超過時に先頭 (最古) を 1 件 evict する。
+ * caller は 1 回の set → 1 回の maybeEvictOldest 呼び出しで size が cap+1 以下しか超えないため
+ * evict は最大 1 件で十分 (while ループの必要なし)。
+ */
+function touchLru<K, V>(map: Map<K, V>, key: K, value: V): void {
+	map.delete(key);
+	map.set(key, value);
+}
+function maybeEvictOldest<K, V>(map: Map<K, V>, cap: number, onEvict?: (value: V) => void): void {
+	if (map.size <= cap) return;
+	const oldest = map.keys().next().value;
+	if (oldest === undefined) return;
+	const value = map.get(oldest);
+	map.delete(oldest);
+	if (value !== undefined) onEvict?.(value);
+}
+
+/**
  * スライド本文の Markdown を DOMPurify 済み HTML に変換する純粋関数（sync 版）。
  * 末尾の区切り行 `---` は除去する。mermaid ブロックは fenced code のまま残るため、
  * mermaid をレンダリングしたい場合は `renderSlideHtmlWithMermaid` を使う。
@@ -16,23 +43,17 @@ import { resolveHtmlImageSrcs } from "./resolve-html-images";
  * 共有できる)。
  */
 export function renderSlideHtml(markdown: string, activeTabPath: string | null): string {
-	const cleaned = markdown.replace(/\n---\s*$/, "").trim();
+	const cleaned = cleanSlideMarkdown(markdown);
 	if (!cleaned) return "";
 	const key = `${activeTabPath ?? ""}\0${cleaned}`;
 	const hit = syncCache.get(key);
 	if (hit !== undefined) {
-		// LRU: 直近アクセスを末尾へ
-		syncCache.delete(key);
-		syncCache.set(key, hit);
+		touchLru(syncCache, key, hit);
 		return hit;
 	}
 	const html = resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
 	syncCache.set(key, html);
-	while (syncCache.size > MAX_CACHE_SIZE) {
-		const oldest = syncCache.keys().next().value;
-		if (oldest === undefined) break;
-		syncCache.delete(oldest);
-	}
+	maybeEvictOldest(syncCache, MAX_CACHE_SIZE);
 	return html;
 }
 
@@ -128,7 +149,7 @@ export function renderSlideHtmlWithMermaid(
 	theme: "light" | "dark",
 	options?: RenderSlideHtmlOptions,
 ): Promise<string> {
-	const cleaned = markdown.replace(/\n---\s*$/, "").trim();
+	const cleaned = cleanSlideMarkdown(markdown);
 	if (!cleaned) return Promise.resolve("");
 	const callerSignal = options?.signal;
 	if (shouldBypassCache(options)) {
@@ -139,8 +160,7 @@ export function renderSlideHtmlWithMermaid(
 	if (hit) {
 		// cache-hit は caller の signal 状態に関わらず shared promise を返す
 		// (session 90 の「1 caller の意思で shared cache を reject させない」原則)。
-		asyncCache.delete(key);
-		asyncCache.set(key, hit);
+		touchLru(asyncCache, key, hit);
 		return hit.promise;
 	}
 	// cache-miss + pre-abort されている場合のみ「新規 render を起動しない」意味で reject する
@@ -153,12 +173,9 @@ export function renderSlideHtmlWithMermaid(
 		if (asyncCache.get(key)?.promise === promise) asyncCache.delete(key);
 	});
 	asyncCache.set(key, { promise, controller });
-	while (asyncCache.size > MAX_CACHE_SIZE) {
-		const [oldestKey, oldestEntry] = asyncCache.entries().next().value ?? [];
-		if (oldestKey === undefined) break;
-		asyncCache.delete(oldestKey);
-		oldestEntry?.controller.abort();
-	}
+	maybeEvictOldest(asyncCache, MAX_CACHE_SIZE, (entry) => {
+		entry.controller.abort();
+	});
 	return promise;
 }
 
