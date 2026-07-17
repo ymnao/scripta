@@ -33,6 +33,7 @@ describe("store", () => {
 				fileTreeShowHidden: false,
 				fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 				slidePreviewWidthRatio: 0.45,
+				slideThumbnailsVisible: true,
 			});
 		});
 
@@ -81,6 +82,7 @@ describe("store", () => {
 				fileTreeShowHidden: false,
 				fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 				slidePreviewWidthRatio: 0.45,
+				slideThumbnailsVisible: true,
 			});
 		});
 

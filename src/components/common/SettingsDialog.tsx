@@ -247,6 +247,8 @@ export function SettingsDialog({
 	const setTrimTrailingWhitespace = useSettingsStore((s) => s.setTrimTrailingWhitespace);
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const setShowLinkCards = useSettingsStore((s) => s.setShowLinkCards);
+	const slideThumbnailsVisible = useSettingsStore((s) => s.slideThumbnailsVisible);
+	const setSlideThumbnailsVisible = useSettingsStore((s) => s.setSlideThumbnailsVisible);
 	const scratchpadVolatile = useSettingsStore((s) => s.scratchpadVolatile);
 	const setScratchpadVolatile = useSettingsStore((s) => s.setScratchpadVolatile);
 	const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
@@ -344,6 +346,12 @@ export function SettingsDialog({
 							label="URLリンクカードを表示"
 							checked={showLinkCards}
 							onChange={setShowLinkCards}
+						/>
+						<Toggle
+							id="slide-thumbnails-visible-toggle"
+							label="スライドサムネイル一覧を表示"
+							checked={slideThumbnailsVisible}
+							onChange={setSlideThumbnailsVisible}
 						/>
 					</>
 				)}

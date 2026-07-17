@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const setSlidePreviewWidthRatio = vi.fn();
+const setSlideThumbnailsVisible = vi.fn();
 let mockSlidePreviewWidthRatio = 0.45;
+let mockSlideThumbnailsVisible = true;
 
 vi.mock("../../stores/settings", () => ({
 	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -14,6 +16,8 @@ vi.mock("../../stores/settings", () => ({
 			showLinkCards: false,
 			slidePreviewWidthRatio: mockSlidePreviewWidthRatio,
 			setSlidePreviewWidthRatio,
+			slideThumbnailsVisible: mockSlideThumbnailsVisible,
+			setSlideThumbnailsVisible,
 		}),
 }));
 
@@ -28,6 +32,13 @@ vi.mock("mermaid", () => ({
 import { SlideView } from "./SlideView";
 
 describe("SlideView", () => {
+	beforeEach(() => {
+		mockSlidePreviewWidthRatio = 0.45;
+		mockSlideThumbnailsVisible = true;
+		setSlidePreviewWidthRatio.mockClear();
+		setSlideThumbnailsVisible.mockClear();
+	});
+
 	// SlidePreview は #301 で React.lazy 化されたため、初回描画は Suspense fallback
 	// (null) になる。動的 import の解決を待つには findByText（非同期）を使う。
 	it("エディタとプレビューの両方をレンダリングする", async () => {
@@ -58,9 +69,27 @@ describe("SlideView", () => {
 	});
 
 	it("複数スライドでサムネイル一覧を表示する", async () => {
+		mockSlideThumbnailsVisible = true;
 		render(<SlideView value={"A\n---\nB\n---\nC"} onDocChanged={vi.fn()} onSave={vi.fn()} />);
 		await screen.findByText("1 / 3");
 		expect(screen.getByTestId("slide-thumbnails")).toBeDefined();
+	});
+
+	it("slideThumbnailsVisible=false ならサムネイル本体は非表示 (toggle ボタンは残る)", async () => {
+		mockSlideThumbnailsVisible = false;
+		render(<SlideView value={"A\n---\nB\n---\nC"} onDocChanged={vi.fn()} onSave={vi.fn()} />);
+		await screen.findByText("1 / 3");
+		expect(screen.queryByTestId("slide-thumbnails")).toBeNull();
+		expect(screen.getByTestId("slide-thumbnails-toggle")).toBeDefined();
+	});
+
+	it("toggle ボタン click で setSlideThumbnailsVisible を反転して呼ぶ", async () => {
+		mockSlideThumbnailsVisible = true;
+		setSlideThumbnailsVisible.mockClear();
+		render(<SlideView value={"A\n---\nB\n---\nC"} onDocChanged={vi.fn()} onSave={vi.fn()} />);
+		await screen.findByText("1 / 3");
+		fireEvent.click(screen.getByTestId("slide-thumbnails-toggle"));
+		expect(setSlideThumbnailsVisible).toHaveBeenCalledWith(false);
 	});
 
 	it("onEditorView コールバックが呼ばれる", () => {

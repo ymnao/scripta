@@ -34,3 +34,7 @@ export const SLIDE_PREVIEW_WIDTH_RATIO_MIN = 0.2;
 export const SLIDE_PREVIEW_WIDTH_RATIO_MAX = 0.7;
 export const SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT = 0.45;
 export const SLIDE_PREVIEW_WIDTH_RATIO_STEP = 0.02;
+
+// サムネイル一覧の表示 / 非表示のデフォルト。SlideView 下部の toggle button と
+// 設定ダイアログのトグルから制御する。デフォルトは表示 (従来動作を維持)。
+export const SLIDE_THUMBNAILS_VISIBLE_DEFAULT = true;
