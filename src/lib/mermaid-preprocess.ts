@@ -1,3 +1,4 @@
+import { abortError, isAbortError } from "./abort";
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { svgToPng } from "./svg-rasterize";
 
@@ -91,12 +92,16 @@ export function extractSvgNaturalSizeAttrs(svg: string): string {
  * `mermaidOptions`: 描画モード切替（PDF は `{htmlLabels:false, useMaxWidth:false}`、#106）。
  * `embedOptions.rasterize`: SVG → PNG 化して `<img>` 埋め込み（PDF 経路の SVG quirk
  * 完全 bypass、失敗時は inline SVG にフォールバック）。
+ * `signal`: 各ブロック処理の直前と `renderMermaid` へのキャンセル伝搬。theme /
+ * activeTabPath 連打時の CPU waste 軽減 (deck に mermaid が N 個並んでいても、
+ * abort されれば次ブロックの処理には入らない)。
  */
 export async function preprocessMermaidBlocks(
 	markdown: string,
 	theme: "light" | "dark" = "light",
 	mermaidOptions: MermaidRenderOptions = {},
 	embedOptions: { rasterize?: boolean } = {},
+	signal?: AbortSignal,
 ): Promise<string> {
 	const matches = findMermaidCodeBlocks(markdown);
 	if (matches.length === 0) return markdown;
@@ -104,9 +109,10 @@ export async function preprocessMermaidBlocks(
 	let result = markdown;
 	// Process in reverse order to preserve offsets
 	for (let i = matches.length - 1; i >= 0; i--) {
+		if (signal?.aborted) throw abortError();
 		const match = matches[i];
 		try {
-			const svg = await renderMermaid(match.source, theme, mermaidOptions);
+			const svg = await renderMermaid(match.source, theme, mermaidOptions, signal);
 			let raw: string;
 			if (embedOptions.rasterize) {
 				try {
@@ -134,7 +140,9 @@ export async function preprocessMermaidBlocks(
 				: raw;
 			result =
 				result.slice(0, match.index) + replacement + result.slice(match.index + match.length);
-		} catch {
+		} catch (err) {
+			// AbortError は上に伝搬させる (silent 化するとキャンセルが効かない)。
+			if (isAbortError(err)) throw err;
 			// Keep original code block on error
 		}
 	}

@@ -297,10 +297,16 @@ describe("exportAsPdf", () => {
 
 		// 印刷経路の foreignObject 不可視 / SVG 高さ 0 を回避するため、
 		// renderMermaid の 3 番目の引数で export モード指定を渡す。
-		expect(renderMermaid).toHaveBeenCalledWith(expect.any(String), "light", {
-			htmlLabels: false,
-			useMaxWidth: false,
-		});
+		// 4 番目の signal は export 経路では未指定 (undefined)。
+		expect(renderMermaid).toHaveBeenCalledWith(
+			expect.any(String),
+			"light",
+			{
+				htmlLabels: false,
+				useMaxWidth: false,
+			},
+			undefined,
+		);
 	});
 
 	it("ラスタライズ失敗時は inline SVG にフォールバックする (#106)", async () => {
@@ -331,7 +337,12 @@ describe("exportAsPdf", () => {
 		// PNG ラスタライズは呼ばれない（PDF 専用）
 		expect(svgToPng).not.toHaveBeenCalled();
 		// HTML 出力はリッチな foreignObject ラベル維持（既定: htmlLabels=true）
-		expect(renderMermaid).toHaveBeenCalledWith(expect.any(String), expect.any(String), {});
+		expect(renderMermaid).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.any(String),
+			{},
+			undefined,
+		);
 	});
 
 	it("smart=false の force-break CSS が出力される（modern + legacy alias）", async () => {

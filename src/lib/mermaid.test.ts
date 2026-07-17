@@ -158,6 +158,54 @@ describe("renderMermaid", () => {
 		expect(themeCSS).toContain("messageText");
 	});
 
+	it("signal が事前に abort されていれば AbortError を throw し mermaid を呼ばない (cache miss)", async () => {
+		clearMermaidCache();
+		const mermaidMod = (await import("mermaid")).default;
+		const renderSpy = mermaidMod.render as ReturnType<typeof vi.fn>;
+		renderSpy.mockClear();
+		const controller = new AbortController();
+		controller.abort();
+		await expect(
+			renderMermaid("graph TD\n  Z-->W", "light", {}, controller.signal),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(renderSpy).not.toHaveBeenCalled();
+	});
+
+	it("pre-aborted signal でも cache rendered hit は既存 SVG を返す (poisoning 防止)", async () => {
+		clearMermaidCache();
+		const source = "graph TD\n  H-->I";
+		// 先に成功させて cache に "rendered" を作る
+		const firstSvg = await renderMermaid(source, "light");
+		expect(getCacheEntry(source, "light")?.status).toBe("rendered");
+		const mermaidMod = (await import("mermaid")).default;
+		const renderSpy = mermaidMod.render as ReturnType<typeof vi.fn>;
+		renderSpy.mockClear();
+		// 2 回目は pre-aborted signal で呼ぶ → cache hit のため throw せず SVG を返す
+		const controller = new AbortController();
+		controller.abort();
+		const cachedSvg = await renderMermaid(source, "light", {}, controller.signal);
+		expect(cachedSvg).toBe(firstSvg);
+		expect(renderSpy).not.toHaveBeenCalled();
+	});
+
+	it("rendering 中の共有 promise は pre-aborted caller に対しても reject せず健常 caller の結果を届ける", async () => {
+		clearMermaidCache();
+		const source = "graph TD\n  J-->L";
+		const mermaidMod = (await import("mermaid")).default;
+		const renderSpy = mermaidMod.render as ReturnType<typeof vi.fn>;
+		renderSpy.mockClear();
+		// 健常 caller が先に起動 → cache に "rendering" が入る
+		const healthyPromise = renderMermaid(source, "light");
+		// 共有 promise を掴む後発 caller (pre-aborted) は「cache hit rendering」経路を通り
+		// 実 render は 1 回のみ、両 caller が同じ SVG を得る
+		const controller = new AbortController();
+		controller.abort();
+		const abortedCallerPromise = renderMermaid(source, "light", {}, controller.signal);
+		const [healthy, abortedCaller] = await Promise.all([healthyPromise, abortedCallerPromise]);
+		expect(healthy).toBe(abortedCaller);
+		expect(renderSpy).toHaveBeenCalledTimes(1);
+	});
+
 	it("options が異なるとキャッシュも分離される (#106)", async () => {
 		clearMermaidCache();
 		const source = "graph TD\n  M-->N";
