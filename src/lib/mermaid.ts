@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import type { MermaidConfig } from "mermaid";
 import { FONT_FAMILY_MAP } from "../components/editor/editor-theme";
 import { useSettingsStore } from "../stores/settings";
+import { abortError } from "./abort";
 
 type CacheEntry =
 	| { status: "rendering"; promise: Promise<string> }
@@ -355,18 +356,30 @@ function evictIfNeeded(): void {
  * `options` を渡すと別キャッシュエントリ・別 init key として扱われる。
  * 画面プレビューは options 省略（既定: htmlLabels=true, useMaxWidth=true）で呼び、
  * PDF export は `{ htmlLabels: false, useMaxWidth: false }` を渡す（#106）。
+ *
+ * `signal` は「新規レンダー起動前の pre-abort skip」用途に限定: cache hit / rendering-in-progress
+ * 経路では検査しない (共有中の promise を abort 経路で reject させると、他の健常 caller
+ * まで AbortError で巻き添え reject させてしまうため)。fresh render を起動しない
+ * pre-aborted caller の CPU 削減はここで、複数 mermaid ブロックがある場合の 2 個目以降の
+ * skip は `preprocessMermaidBlocks` の loop-head check で担う。
  */
 export async function renderMermaid(
 	source: string,
 	theme: "light" | "dark",
 	options: MermaidRenderOptions = {},
+	signal?: AbortSignal,
 ): Promise<string> {
 	const font = takeFontSnapshot();
 	const key = cacheKey(source, theme, font, options);
 	const cached = cache.get(key);
+	// cache hit は signal に依らず即返す (pre-aborted caller も既存 SVG を破棄する
+	// 理由がない — useAsyncDerived 側で結果は無視される)。
 	if (cached?.status === "rendered") return cached.svg;
 	if (cached?.status === "error") throw new Error(cached.message);
 	if (cached?.status === "rendering") return cached.promise;
+
+	// 新規レンダー起動前の pre-abort skip (cache miss 経路限定)。
+	if (signal?.aborted) throw abortError();
 
 	const gen = cacheGeneration;
 	const promise = new Promise<string>((resolve, reject) => {
@@ -386,6 +399,10 @@ export async function renderMermaid(
 				reject(new Error(entry.message));
 				return;
 			}
+			// 共有 promise は abort 経路で reject させない (他 caller の巻き添えを防ぐ)。
+			// caller 側の pre-abort は render 起動前に filter 済み、queue 待ち中の abort は
+			// CPU waste の余地が残るが、preprocessMermaidBlocks の loop-head check で
+			// バッチ N-1 個分の skip は既に効いている。
 			try {
 				await ensureInitialized(theme, font, options);
 				const id = `mermaid-${idCounter++}`;

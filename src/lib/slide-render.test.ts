@@ -67,6 +67,33 @@ describe("renderSlideHtmlWithMermaid: mermaid fence 変換", () => {
 		});
 		expect(initializeSpy).toHaveBeenLastCalledWith(expect.objectContaining({ htmlLabels: false }));
 	});
+
+	it("signal が事前に abort されている場合は AbortError で reject し、mermaid は呼ばれない", async () => {
+		const md = "```mermaid\ngraph TD\n  A-->B\n```";
+		const controller = new AbortController();
+		controller.abort();
+		await expect(
+			renderSlideHtmlWithMermaid(md, null, "light", { signal: controller.signal }),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(renderSpy).not.toHaveBeenCalled();
+	});
+
+	it("複数 mermaid ブロックで途中 abort されると残ブロックの render をスキップする", async () => {
+		const md =
+			"```mermaid\ngraph TD\n  A-->B\n```\n\n```mermaid\ngraph TD\n  C-->D\n```\n\n```mermaid\ngraph TD\n  E-->F\n```";
+		const controller = new AbortController();
+		// 1 ブロック目 render 呼び出しの時点で abort する (逆順処理なので E-->F の render が
+		// 最初に呼ばれる → その完了直後の checkpoint で C-->D 以降がスキップされる)。
+		renderSpy.mockImplementationOnce(async (_id: string, source: string) => {
+			controller.abort();
+			return { svg: `<svg data-source="${source}"></svg>` };
+		});
+		await expect(
+			renderSlideHtmlWithMermaid(md, null, "light", { signal: controller.signal }),
+		).rejects.toMatchObject({ name: "AbortError" });
+		// 逆順で 1 ブロック目だけ処理して abort、残 2 ブロックは render 呼ばれない
+		expect(renderSpy).toHaveBeenCalledTimes(1);
+	});
 	// rasterize=true (embedOptions) 経路は svg-rasterize を要するため
 	// export.test.ts 側 (svg-rasterize モック済み) の exportSlidesAsPdf テストでカバー。
 });

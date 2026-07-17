@@ -30,8 +30,8 @@ export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null
 		() => renderSlideHtml(markdown, activeTabPath),
 		[markdown, activeTabPath],
 	);
-	return useAsyncDerived([markdown, activeTabPath, theme], initial, () =>
-		renderSlideHtmlWithMermaid(markdown, activeTabPath, theme),
+	return useAsyncDerived([markdown, activeTabPath, theme], initial, (signal) =>
+		renderSlideHtmlWithMermaid(markdown, activeTabPath, theme, { signal }),
 	);
 }
 
@@ -108,11 +108,14 @@ export function useSlideHtmls(
 			),
 		[slides, activeTabPath],
 	);
-	return useAsyncDerived([slides, activeTabPath, theme], initial, () =>
+	return useAsyncDerived([slides, activeTabPath, theme], initial, (signal) =>
 		Promise.all(
 			mapPerSlideCached(asyncCacheRef, `${activeTabPath ?? ""}\0${theme}`, slides, (content) => {
-				const p = renderSlideHtmlWithMermaid(content, activeTabPath, theme);
+				const p = renderSlideHtmlWithMermaid(content, activeTabPath, theme, { signal });
 				// 失敗した Promise を cache に固定させない (次 render で retry させる)。
+				// AbortError も cache eviction 対象: 次 effect で fresh promise を作り直す
+				// (poison を防ぐが、evict は reject microtask で行われるため 1 render 分は
+				// stale keepPrevious になり得る。keepPrevious の想定挙動で許容)。
 				p.catch(() => {
 					const cache = asyncCacheRef.current;
 					if (cache.map.get(content) === p) cache.map.delete(content);

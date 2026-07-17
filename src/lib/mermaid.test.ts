@@ -158,6 +158,19 @@ describe("renderMermaid", () => {
 		expect(themeCSS).toContain("messageText");
 	});
 
+	it("signal が事前に abort されていれば AbortError を throw し mermaid を呼ばない", async () => {
+		clearMermaidCache();
+		const mermaidMod = (await import("mermaid")).default;
+		const renderSpy = mermaidMod.render as ReturnType<typeof vi.fn>;
+		renderSpy.mockClear();
+		const controller = new AbortController();
+		controller.abort();
+		await expect(
+			renderMermaid("graph TD\n  Z-->W", "light", {}, controller.signal),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(renderSpy).not.toHaveBeenCalled();
+	});
+
 	it("options が異なるとキャッシュも分離される (#106)", async () => {
 		clearMermaidCache();
 		const source = "graph TD\n  M-->N";

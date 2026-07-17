@@ -144,6 +144,53 @@ describe("useAsyncDerived", () => {
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
+	it("deps 変更で前回の signal が abort され、asyncFn 側で観測できる", async () => {
+		const observed: { first: AbortSignal | null; firstAborted: boolean } = {
+			first: null,
+			firstAborted: false,
+		};
+		let ctrl = createControllablePromise<string>();
+		const { rerender } = renderHook(
+			({ dep }) =>
+				useAsyncDerived([dep], "sync", (signal) => {
+					if (observed.first === null) observed.first = signal;
+					return ctrl.promise;
+				}),
+			{ initialProps: { dep: "a" } },
+		);
+		expect(observed.first?.aborted).toBe(false);
+		ctrl = createControllablePromise<string>();
+		rerender({ dep: "b" });
+		observed.firstAborted = observed.first?.aborted ?? false;
+		expect(observed.firstAborted).toBe(true);
+	});
+
+	it("unmount で signal が abort される", async () => {
+		let captured: AbortSignal | null = null;
+		const ctrl = createControllablePromise<string>();
+		const { unmount } = renderHook(() =>
+			useAsyncDerived(["k"], "sync", (signal) => {
+				captured = signal;
+				return ctrl.promise;
+			}),
+		);
+		expect(captured).not.toBeNull();
+		unmount();
+		expect((captured as unknown as AbortSignal).aborted).toBe(true);
+	});
+
+	it("AbortError の reject では console.error を出さない (キャンセルは意図通り)", async () => {
+		const ctrl = createControllablePromise<string>();
+		const { result } = renderHook(() => useAsyncDerived(["k"], "sync", () => ctrl.promise));
+		await act(async () => {
+			ctrl.reject(new DOMException("Aborted", "AbortError"));
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+		expect(result.current).toBe("sync");
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
 	it("初回で reject した場合は initial を保持し、console.error を出す", async () => {
 		const ctrl = createControllablePromise<string>();
 		const { result } = renderHook(() => useAsyncDerived(["k"], "sync", () => ctrl.promise));

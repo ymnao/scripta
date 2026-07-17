@@ -17,6 +17,12 @@ export function renderSlideHtml(markdown: string, activeTabPath: string | null):
 export interface RenderSlideHtmlOptions {
 	mermaidOptions?: MermaidRenderOptions;
 	embedOptions?: { rasterize?: boolean };
+	/**
+	 * `preprocessMermaidBlocks` → `renderMermaid` へ協調的キャンセルを伝搬する。
+	 * theme / activeTabPath 連打時の CPU waste 軽減 (useAsyncDerived の cleanup
+	 * が abort → 次ブロックの mermaid render に入る前に AbortError で早期終了)。
+	 */
+	signal?: AbortSignal;
 }
 
 /**
@@ -46,6 +52,7 @@ export async function renderSlideHtmlWithMermaid(
 		theme,
 		options?.mermaidOptions,
 		options?.embedOptions,
+		options?.signal,
 	);
 	return resolveHtmlImageSrcs(markdownToHtml(withMermaid), activeTabPath);
 }
