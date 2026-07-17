@@ -5,6 +5,7 @@ import {
 	SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
 	SLIDE_PREVIEW_WIDTH_RATIO_MAX,
 	SLIDE_PREVIEW_WIDTH_RATIO_MIN,
+	SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 } from "../types/slide";
 import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
 import { applyMigrations } from "./store-migration";
@@ -41,6 +42,7 @@ interface AppSettings {
 	fileTreeShowHidden: boolean;
 	fileTreeExcludePatterns: string;
 	slidePreviewWidthRatio: number;
+	slideThumbnailsVisible: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -67,6 +69,7 @@ const DEFAULTS: AppSettings = {
 	fileTreeShowHidden: false,
 	fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 	slidePreviewWidthRatio: SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
+	slideThumbnailsVisible: SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 };
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -209,6 +212,12 @@ export async function loadSettings(): Promise<AppSettings> {
 				? rawSlidePreviewWidthRatio
 				: DEFAULTS.slidePreviewWidthRatio;
 
+		const rawSlideThumbnailsVisible = await settingsGet("slideThumbnailsVisible");
+		const slideThumbnailsVisible: boolean =
+			typeof rawSlideThumbnailsVisible === "boolean"
+				? rawSlideThumbnailsVisible
+				: DEFAULTS.slideThumbnailsVisible;
+
 		return {
 			workspacePath,
 			themePreference,
@@ -233,6 +242,7 @@ export async function loadSettings(): Promise<AppSettings> {
 			fileTreeShowHidden,
 			fileTreeExcludePatterns,
 			slidePreviewWidthRatio,
+			slideThumbnailsVisible,
 		};
 	} catch {
 		return { ...DEFAULTS };

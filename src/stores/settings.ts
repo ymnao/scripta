@@ -4,6 +4,7 @@ import {
 	SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
 	SLIDE_PREVIEW_WIDTH_RATIO_MAX,
 	SLIDE_PREVIEW_WIDTH_RATIO_MIN,
+	SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 } from "../types/slide";
 import { createPersistedSetter } from "./store-helpers";
 
@@ -20,6 +21,7 @@ interface SettingsValues {
 	fileTreeShowHidden: boolean;
 	fileTreeExcludePatterns: string;
 	slidePreviewWidthRatio: number;
+	slideThumbnailsVisible: boolean;
 }
 
 interface SettingsState extends SettingsValues {
@@ -35,6 +37,7 @@ interface SettingsState extends SettingsValues {
 	setFileTreeShowHidden: (show: boolean) => void;
 	setFileTreeExcludePatterns: (patterns: string) => void;
 	setSlidePreviewWidthRatio: (ratio: number) => void;
+	setSlideThumbnailsVisible: (visible: boolean) => void;
 	/** Set state without persisting — used for initial hydration from store */
 	hydrate: (values: Partial<SettingsValues>) => void;
 }
@@ -54,6 +57,7 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		fileTreeShowHidden: false,
 		fileTreeExcludePatterns: DEFAULT_FILE_TREE_EXCLUDE_PATTERNS,
 		slidePreviewWidthRatio: SLIDE_PREVIEW_WIDTH_RATIO_DEFAULT,
+		slideThumbnailsVisible: SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 		setShowLineNumbers: persist("showLineNumbers"),
 		setFontSize: persist("fontSize"),
 		setAutoSaveDelay: persist("autoSaveDelay"),
@@ -71,6 +75,7 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		setSlidePreviewWidthRatio: persist("slidePreviewWidthRatio", (ratio) =>
 			Math.min(SLIDE_PREVIEW_WIDTH_RATIO_MAX, Math.max(SLIDE_PREVIEW_WIDTH_RATIO_MIN, ratio)),
 		),
+		setSlideThumbnailsVisible: persist("slideThumbnailsVisible"),
 		hydrate: (values: Partial<SettingsValues>) => {
 			set(values);
 		},

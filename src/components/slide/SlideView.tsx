@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
 	type ComponentType,
 	lazy,
@@ -88,6 +89,8 @@ export function SlideView({
 	// React anti-pattern を避けている。
 	const persistedRatio = useSettingsStore((s) => s.slidePreviewWidthRatio);
 	const setPersistedRatio = useSettingsStore((s) => s.setSlidePreviewWidthRatio);
+	const thumbnailsVisible = useSettingsStore((s) => s.slideThumbnailsVisible);
+	const setThumbnailsVisible = useSettingsStore((s) => s.setSlideThumbnailsVisible);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const [draftRatio, setDraftRatio] = useState<number | null>(null);
 	const draftRatioRef = useRef<number | null>(null);
@@ -298,14 +301,32 @@ export function SlideView({
 			{/* 1 枚だけなら SlideThumbnails を mount しない。内部 gate だと
 			    useSlideHtmls (hook) が early return 前に unconditional で発火し、
 			    単一 slide deck でも Promise.all(mermaid preprocess) を毎キー走らせて
-			    しまうため、gate は呼び出し側で mount を抑える。 */}
+			    しまうため、gate は呼び出し側で mount を抑える。
+			    thumbnailsVisible が false の時も同様に mount しない (再表示時に
+			    再描画する trade-off で hidden 時の CPU / メモリを節約)。 */}
 			{slides.length > 1 && (
-				<SlideThumbnails
-					slides={slides}
-					currentSlideIndex={currentSlideIndex}
-					themeOverride={frontmatterTheme}
-					onSelectSlide={handleSelectSlide}
-				/>
+				<div className="flex shrink-0 flex-col">
+					<button
+						type="button"
+						onClick={() => setThumbnailsVisible(!thumbnailsVisible)}
+						aria-pressed={thumbnailsVisible}
+						aria-label={thumbnailsVisible ? "サムネイル一覧を非表示" : "サムネイル一覧を表示"}
+						data-testid="slide-thumbnails-toggle"
+						className="flex h-5 items-center justify-center border-t border-border bg-bg-secondary text-text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+					>
+						{/* 展開時 = 上向き (click で閉じる = content が上に畳まれる方向)、
+						    折り畳み時 = 下向き (click で開く = 下から現れる方向)。 */}
+						{thumbnailsVisible ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+					</button>
+					{thumbnailsVisible && (
+						<SlideThumbnails
+							slides={slides}
+							currentSlideIndex={currentSlideIndex}
+							themeOverride={frontmatterTheme}
+							onSelectSlide={handleSelectSlide}
+						/>
+					)}
+				</div>
 			)}
 		</div>
 	);

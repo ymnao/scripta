@@ -356,6 +356,7 @@ export function AppLayout() {
 				fileTreeShowHidden: settings.fileTreeShowHidden,
 				fileTreeExcludePatterns: settings.fileTreeExcludePatterns,
 				slidePreviewWidthRatio: settings.slidePreviewWidthRatio,
+				slideThumbnailsVisible: settings.slideThumbnailsVisible,
 			});
 			hydrateGitSync({
 				gitSyncEnabled: settings.gitSyncEnabled,
