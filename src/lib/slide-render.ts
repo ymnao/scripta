@@ -131,10 +131,16 @@ async function renderSlideHtmlDirect(
  *   signal を無視して shared promise を返す (caller 側の useAsyncDerived が cancelled
  *   flag で await 継続を捨てる)。
  * - **cache-miss 時のみ pre-abort check**: caller signal が既に aborted なら AbortError で
- *   throw して cache エントリを作らない (新規 render を起動しない)。
- * - **eviction 時のみ entry の controller を abort**: LRU cap 超過 (128) で古い entry を
- *   evict する際に entry の controller を abort → downstream の preprocess loop-head /
- *   mermaid pre-check で残作業を skip (協調的キャンセル)。
+ *   reject して cache エントリを作らない (新規 render を起動しない)。
+ * - **LRU eviction は entry を delete するだけで controller を abort しない**: `useSlideHtmls`
+ *   の `Promise.all(slides.map(...))` は 1 batch 中に N 個の cache-miss を同期的に登録するため、
+ *   N > MAX_CACHE_SIZE の deck では 129 個目の set が 1 個目の in-flight entry を evict する。
+ *   evict 時に abort すると同 batch 中の兄弟 promise が AbortError で reject → Promise.all
+ *   全体 reject → useAsyncDerived が silent 化 (isAbortError) → deck が凍結、というシナリオが
+ *   起きる (session 91 で /code-review 3 angle が同時 surface)。orphan render は完了まで走らせて
+ *   結果を捨てる (bounded CPU waste) — abort による cross-instance poisoning より安全。
+ * - **`clearSlideRenderCache` のみ entry を abort**: テスト isolation 用の全消し経路では
+ *   in-flight を abort する (テスト間で lingering CPU work を残さない)。
  * - **カスタム options 経路は cache bypass**: `mermaidOptions` / `embedOptions` 指定
  *   (PDF export 等) は module cache を通さず直接 render (出力 HTML が異なるため相互汚染
  *   を避ける)。
@@ -157,7 +163,7 @@ export function renderSlideHtmlWithMermaid(
 	}
 	const key = `${theme}\0${activeTabPath ?? ""}\0${cleaned}`;
 	const hit = asyncCache.get(key);
-	if (hit) {
+	if (hit !== undefined) {
 		// cache-hit は caller の signal 状態に関わらず shared promise を返す
 		// (session 90 の「1 caller の意思で shared cache を reject させない」原則)。
 		touchLru(asyncCache, key, hit);
@@ -173,9 +179,9 @@ export function renderSlideHtmlWithMermaid(
 		if (asyncCache.get(key)?.promise === promise) asyncCache.delete(key);
 	});
 	asyncCache.set(key, { promise, controller });
-	maybeEvictOldest(asyncCache, MAX_CACHE_SIZE, (entry) => {
-		entry.controller.abort();
-	});
+	// eviction では abort しない (self-poisoning 対策、上記 JSDoc 参照)。orphan render は
+	// 完了まで走らせて結果は捨てる。in-flight を止められるのは clearSlideRenderCache のみ。
+	maybeEvictOldest(asyncCache, MAX_CACHE_SIZE);
 	return promise;
 }
 
