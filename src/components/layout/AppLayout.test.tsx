@@ -98,10 +98,12 @@ function emitFsChange(events: FsChangeEvent[]) {
 let closeHandler: (() => void | Promise<void>) | null = null;
 
 let capturedOnFileSelect: ((path: string) => void) | null = null;
+let capturedActivePanel: string | null = null;
 vi.mock("./Sidebar", () => ({
-	Sidebar: (props: { onFileSelect: (path: string) => void }) => {
+	Sidebar: (props: { activePanel: string; onFileSelect: (path: string) => void }) => {
 		capturedOnFileSelect = props.onFileSelect;
-		return <div data-testid="mock-sidebar" />;
+		capturedActivePanel = props.activePanel;
+		return <div data-testid="mock-sidebar" data-panel={props.activePanel} />;
 	},
 }));
 
@@ -1255,6 +1257,8 @@ describe("AppLayout", () => {
 
 		// preventDefault が呼ばれる = 該当 Shortcut が match=true として判定された。
 		expect(ev.defaultPrevented).toBe(true);
+		// run が実行されて sidebarPanel が "search" に切り替わっていることを確認。
+		expect(capturedActivePanel).toBe("search");
 	});
 
 	it("closes search bar when switching to newtab page", async () => {
