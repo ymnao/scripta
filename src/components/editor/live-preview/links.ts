@@ -10,6 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { openExternal } from "../../../lib/commands";
+import { cmdOrCtrl } from "../../../lib/keyboard";
 import { IS_MAC, PRIMARY_MOD_SYMBOL } from "../../../lib/platform";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
 import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
@@ -642,7 +643,7 @@ const modifierTrackPlugin = ViewPlugin.fromClass(
 				// 単独 modifier 解放だけでなく、metaKey/ctrlKey の両方が false に
 				// なったら必ず class を外す（OS によっては key === "Meta" でなく
 				// "OS" などになる稀ケース対策）
-				if (isOpenLinkModifierKey(e.key) || (!e.metaKey && !e.ctrlKey)) {
+				if (isOpenLinkModifierKey(e.key) || !cmdOrCtrl(e)) {
 					this.view.dom.classList.remove("cm-link-mod-down");
 				}
 			};

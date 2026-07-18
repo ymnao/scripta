@@ -2,6 +2,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
+import { cmdOrCtrl } from "../../lib/keyboard";
 import { toRelativePath } from "../../lib/path";
 import { useDragStore } from "../../stores/drag";
 import type { FileEntry } from "../../types/workspace";
@@ -147,7 +148,7 @@ export function FileTreeItem({
 				} else if (loaded) {
 					setExpanded((prev) => !prev);
 				}
-			} else if ((e.metaKey || e.ctrlKey) && onFileOpenNewTab) {
+			} else if (cmdOrCtrl(e) && onFileOpenNewTab) {
 				onFileOpenNewTab(entry.path);
 			} else {
 				onFileSelect(entry.path);

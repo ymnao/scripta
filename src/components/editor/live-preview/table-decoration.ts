@@ -20,6 +20,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
+import { cmdOrCtrl } from "../../../lib/keyboard";
 import {
 	type BlockFieldValue,
 	blockFieldNeedsRebuild,
@@ -725,7 +726,7 @@ class EditableTableWidget extends WidgetType {
 	}
 
 	ignoreEvent(e: Event): boolean {
-		if (e instanceof KeyboardEvent && (e.metaKey || e.ctrlKey)) {
+		if (e instanceof KeyboardEvent && cmdOrCtrl(e)) {
 			return false;
 		}
 		// undo / redo の InputEvent（Cmd+Z や Edit メニュー Undo 等が contentEditable で
@@ -963,7 +964,7 @@ function handleKeydown(e: KeyboardEvent, view: EditorView, wrapperEl: HTMLElemen
 	// の keydown.target を子ノード（テキストノード等）にすることがあり、td に向けた
 	// dataset.row チェックを掻い潜って素通りし、native の contentEditable undo（cell
 	// だけが変わり markdown と desync する）等が走ってしまうのを防ぐ。
-	if (e.metaKey || e.ctrlKey) {
+	if (cmdOrCtrl(e)) {
 		const key = e.key.toLowerCase();
 		if (key === "v") return;
 		if (key === "c" || key === "x") {

@@ -28,6 +28,7 @@ import {
 } from "../../lib/commands";
 import { processContent } from "../../lib/content";
 import { translateError } from "../../lib/errors";
+import { cmdOrCtrl } from "../../lib/keyboard";
 import { addTrailingSep, basename, isNewTabPath, replacePrefix } from "../../lib/path";
 import {
 	extractSlideFrontmatterTheme,
@@ -1203,7 +1204,6 @@ export function AppLayout() {
 	// preventDefault は match=true 時に useShortcuts が自動で呼ぶため、run 側では呼ばない。
 	// preventDefault を条件付きで抑制したいエントリは、そのガードを match に含めれば match=false
 	// 時に preventDefault が走らない (editor-search-bar / go-to-line が該当)。
-	const cmdOrCtrl = (e: KeyboardEvent): boolean => e.metaKey || e.ctrlKey;
 	const shortcuts: Shortcut[] = [
 		{
 			// Cmd+Shift+[ / Cmd+Shift+{ — 前のタブ
@@ -1394,8 +1394,7 @@ export function AppLayout() {
 			id: "slide-show",
 			match: (e) =>
 				e.key === "F5" &&
-				!e.metaKey &&
-				!e.ctrlKey &&
+				!cmdOrCtrl(e) &&
 				!e.altKey &&
 				!e.shiftKey &&
 				!e.isComposing &&
