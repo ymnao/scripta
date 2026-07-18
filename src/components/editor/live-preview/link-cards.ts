@@ -59,6 +59,9 @@ type CacheEntry =
 	| { status: "error"; errorAt: number };
 
 const MAX_CACHE_SIZE = 500;
+// LRU 順序更新は set/delete (cache 遷移) 側で行うので、read-only 参照は peek を使う。
+// buildDecorations は viewport / cursor 更新のたびに走る hot path で、URL が visible なら
+// 次の fetchMissingOgp で set され MRU に上がるため peek でも eviction 順序は壊れない。
 const ogpCache = new LruCache<string, CacheEntry>(MAX_CACHE_SIZE);
 
 const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
