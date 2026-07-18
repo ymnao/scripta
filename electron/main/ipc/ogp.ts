@@ -27,7 +27,9 @@ interface CacheEntry {
 }
 
 // TTL sweep は撤去し、freshness は cacheGet の read-time TTL check で担保する。
-// cap 超過時は LruCache が O(1) で最古 1 件を evict する。
+// cap 超過時は LruCache が O(1) で最も長く未参照 (LRU) の 1 件を evict する。
+// cacheGet が hit ごとに LruCache.get で touch するため、頻繁に再描画される URL は
+// 保持されやすく、放置された URL が優先的に押し出される。
 const cache = new LruCache<string, CacheEntry>(MAX_CACHE_SIZE);
 
 function cacheGet(url: string, now: number = Date.now()): OgpData | null {
