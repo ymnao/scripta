@@ -25,6 +25,7 @@ export function createApiMock(): Api {
 		workspaceSet: vi.fn(async () => {}),
 
 		readFile: vi.fn(async () => ""),
+		readFileBase64: vi.fn(async () => ""),
 		writeFile: vi.fn(async () => {}),
 		writeNewFile: vi.fn(async () => {}),
 		listDirectory: vi.fn(async () => []),

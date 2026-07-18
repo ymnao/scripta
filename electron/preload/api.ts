@@ -38,6 +38,7 @@ export type Api = Readonly<{
 	workspaceSet: (path: string | null) => Promise<void>;
 
 	readFile: (path: string) => Promise<string>;
+	readFileBase64: (path: string) => Promise<string>;
 	writeFile: (path: string, content: string) => Promise<void>;
 	writeNewFile: (path: string, content: string) => Promise<void>;
 	listDirectory: (path: string, opts?: ListDirectoryOptions) => Promise<FileEntry[]>;

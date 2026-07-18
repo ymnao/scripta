@@ -416,6 +416,10 @@ function installApiMock(opts: {
 			if (path in store.files) return store.files[path];
 			throw Object.assign(new Error(`File not found: ${path}`), { kind: "ENOENT" });
 		},
+		readFileBase64: async (path: string): Promise<string> => {
+			track("readFileBase64", [path]);
+			throw Object.assign(new Error(`File not found: ${path}`), { kind: "ENOENT" });
+		},
 		writeFile: async (path: string, content: string): Promise<void> => {
 			track("writeFile", [path, content]);
 			store.files[path] = content;

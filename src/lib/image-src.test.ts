@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildScriptaAssetUrl } from "../../electron/preload/scripta-asset-url";
-import { parentDir, resolveImageSrc } from "./image-src";
+import { parentDir, resolveImageSrc, resolveImageToOsPath } from "./image-src";
 
 vi.mock("./commands", () => ({
 	// production と同一ロジックでモックする。preload の `buildAssetUrl` も同じ helper を
@@ -134,5 +134,31 @@ describe("resolveImageSrc", () => {
 
 	it("returns raw URL when parentDir is empty (bare filename tab)", () => {
 		expect(resolveImageSrc("image.png", "note.md")).toBe("image.png");
+	});
+});
+
+describe("resolveImageToOsPath", () => {
+	it("returns null for http(s)", () => {
+		expect(resolveImageToOsPath("http://a.example/x.png", null)).toBeNull();
+		expect(resolveImageToOsPath("https://a.example/x.png", null)).toBeNull();
+	});
+
+	it("returns null for data:/blob:", () => {
+		expect(resolveImageToOsPath("data:image/png;base64,AAAA", null)).toBeNull();
+		expect(resolveImageToOsPath("blob:file:///abc", null)).toBeNull();
+	});
+
+	it("returns absolute unix path unchanged", () => {
+		expect(resolveImageToOsPath("/workspace/logo.svg", null)).toBe("/workspace/logo.svg");
+	});
+
+	it("resolves relative path against activeTabPath", () => {
+		expect(resolveImageToOsPath("./img/hero.png", "/workspace/notes/deck.md")).toBe(
+			"/workspace/notes/img/hero.png",
+		);
+	});
+
+	it("returns null when activeTabPath is null and src is relative", () => {
+		expect(resolveImageToOsPath("image.png", null)).toBeNull();
 	});
 });

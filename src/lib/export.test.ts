@@ -9,6 +9,9 @@ vi.mock("./commands", async () => {
 		// resolveHtmlImageSrcs 経由の resolveImageSrc が呼ぶ。既存 image-src.test.ts と
 		// 同一の production 実装で mock (mock ドリフト防止)。
 		buildAssetUrl: (path: string) => buildScriptaAssetUrl(path),
+		// exportAsHtml が呼ぶ #314 data URI 埋め込み経路。default は「常に失敗」で
+		// 元の src を残し、必要なテストだけ mockImplementation で成功挙動を上書きする。
+		readFileBase64: vi.fn().mockRejectedValue(new Error("mock: not stubbed")),
 	};
 });
 
@@ -20,7 +23,7 @@ vi.mock("./svg-rasterize", () => ({
 	svgToPng: vi.fn(async () => "data:image/png;base64,MOCK"),
 }));
 
-const { writeFile, exportPdf, showSaveDialog } = await import("./commands");
+const { writeFile, exportPdf, showSaveDialog, readFileBase64 } = await import("./commands");
 const {
 	buildHtmlDocument,
 	buildPromptFromTemplate,
@@ -39,6 +42,7 @@ const {
 const mockedSave = showSaveDialog as Mock;
 const mockedWriteFile = writeFile as Mock;
 const mockedExportPdf = exportPdf as Mock;
+const mockedReadFileBase64 = readFileBase64 as Mock;
 
 describe("exportAsHtml", () => {
 	beforeEach(() => {
@@ -121,6 +125,38 @@ describe("exportAsHtml", () => {
 		expect(html).toContain("<svg>");
 		expect(html).toContain("mermaid-diagram");
 		expect(html).not.toContain("```mermaid");
+	});
+
+	it("embeds local relative images as data URI (#314)", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		mockedReadFileBase64.mockImplementation(async (path: string) => {
+			expect(path).toBe("/workspace/img/hero.png");
+			return "AAAA";
+		});
+		await exportAsHtml("![alt](./img/hero.png)", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain('src="data:image/png;base64,AAAA"');
+		expect(html).not.toContain('src="./img/hero.png"');
+		// 外部ブラウザで解決できない scripta-asset:// も混入しないこと
+		expect(html).not.toContain("scripta-asset://");
+	});
+
+	it("leaves http(s) src untouched (no fetch attempt)", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("![](https://example.com/x.png)", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toContain('src="https://example.com/x.png"');
+		expect(mockedReadFileBase64).not.toHaveBeenCalled();
+	});
+
+	it("keeps original src when readFileBase64 fails (broken image, but export succeeds)", async () => {
+		mockedSave.mockResolvedValue("/output/test.html");
+		mockedReadFileBase64.mockRejectedValue(new Error("EACCES"));
+		const result = await exportAsHtml("![](./missing.png)", "/workspace/test.md");
+		expect(result).toBe(true);
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		// data: に置換されず元 src が残る (browser は broken image を表示するが export は完遂)
+		expect(html).toContain('src="./missing.png"');
 	});
 });
 

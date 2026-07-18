@@ -22,31 +22,34 @@ function detectSeparator(filePath: string): string {
 	return lastBackslash > lastSlash ? "\\" : "/";
 }
 
-export function resolveImageSrc(
-	rawUrl: string,
-	activeTabPath: string | null = useWorkspaceStore.getState().activeTabPath,
-): string {
-	if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
-		return rawUrl;
-	}
-	// data: / blob: は既に自己完結の URL なのでそのまま返す。
-	// これらを相対パス分岐に落とすと activeTabPath 配下として scripta-asset URL に
-	// 巻き取られ、画像が壊れる。
-	if (rawUrl.startsWith("data:") || rawUrl.startsWith("blob:")) {
-		return rawUrl;
-	}
+/**
+ * markdown img の src (相対 / 絶対 / http(s) / data / blob) を OS 絶対パスに解決する。
+ * 解決できない (remote scheme / self-contained scheme / activeTabPath 不在で相対) 場合は
+ * null。exportAsHtml の data URI 埋め込み経路 (#314) と `resolveImageSrc` の共通コア。
+ */
+export function resolveImageToOsPath(rawUrl: string, activeTabPath: string | null): string | null {
+	if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) return null;
+	if (rawUrl.startsWith("data:") || rawUrl.startsWith("blob:")) return null;
 	if (rawUrl.startsWith("/") || rawUrl.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(rawUrl)) {
-		return buildAssetUrl(rawUrl);
+		return rawUrl;
 	}
-	if (!activeTabPath) return rawUrl;
+	if (!activeTabPath) return null;
 	const dir = parentDir(activeTabPath);
-	if (!dir) return rawUrl;
+	if (!dir) return null;
 	let normalized = rawUrl;
 	if (normalized.startsWith("./") || normalized.startsWith(".\\")) {
 		normalized = normalized.slice(2);
 	}
 	const sep = detectSeparator(activeTabPath);
 	const needsSep = !dir.endsWith("/") && !dir.endsWith("\\");
-	const resolved = needsSep ? `${dir}${sep}${normalized}` : `${dir}${normalized}`;
-	return buildAssetUrl(resolved);
+	return needsSep ? `${dir}${sep}${normalized}` : `${dir}${normalized}`;
+}
+
+export function resolveImageSrc(
+	rawUrl: string,
+	activeTabPath: string | null = useWorkspaceStore.getState().activeTabPath,
+): string {
+	const osPath = resolveImageToOsPath(rawUrl, activeTabPath);
+	if (osPath === null) return rawUrl;
+	return buildAssetUrl(osPath);
 }

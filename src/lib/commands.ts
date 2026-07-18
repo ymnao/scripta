@@ -49,6 +49,14 @@ export function readFile(path: string): Promise<string> {
 	return withRetry(() => window.api.readFile(path));
 }
 
+/**
+ * ワークスペース内の画像ファイルを base64 で読む (exportAsHtml の data URI 埋め込み用、#314)。
+ * main 側で拡張子ホワイトリスト + workspace 内 path guard により、任意 binary の吸い上げは不可。
+ */
+export function readFileBase64(path: string): Promise<string> {
+	return withRetry(() => window.api.readFileBase64(path));
+}
+
 export function writeFile(path: string, content: string): Promise<void> {
 	return withRetry(() => window.api.writeFile(path, content));
 }
