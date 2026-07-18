@@ -2,6 +2,7 @@ import "katex/dist/katex.min.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFitScale } from "../../hooks/useFitScale";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { useShortcuts } from "../../hooks/useShortcuts";
 import { cmdOrCtrl } from "../../lib/keyboard";
 import type { SlideSection, SlideTheme } from "../../types/slide";
 import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
@@ -52,37 +53,43 @@ export function SlideShowOverlay({
 	// mermaid ブロックは sync 版で fenced code のまま表示され、非同期で SVG に差し替わる。
 	const htmls = useSlideHtmls(safeSlides, themeOverride);
 
-	useEffect(() => {
-		const next = () => setIndex((i) => Math.min(i + 1, safeSlides.length - 1));
-		const prev = () => setIndex((i) => Math.max(i - 1, 0));
-		// キー → アクションのテーブル。素押しでのみ発火するグループ (n/j/p/k) は
-		// meta/ctrl/alt 修飾を弾いた後に、`toLowerCase()` で CapsLock/Shift 併用にも
-		// マッチさせる。
-		const nav: Record<string, () => void> = {
-			Escape: onClose,
-			ArrowRight: next,
-			PageDown: next,
-			" ": next,
-			ArrowLeft: prev,
-			PageUp: prev,
-			Backspace: prev,
-			Home: () => setIndex(0),
-			End: () => setIndex(safeSlides.length - 1),
-		};
-		const plain: Record<string, () => void> = { n: next, j: next, p: prev, k: prev };
-		const handler = (e: KeyboardEvent) => {
-			// IME 確定中は無視 (composition 中の Enter/Esc を発表ナビにしない)。
-			if (e.isComposing) return;
-			const action =
-				nav[e.key] ?? (!cmdOrCtrl(e) && !e.altKey ? plain[e.key.toLowerCase()] : undefined);
-			if (!action) return;
-			e.preventDefault();
-			e.stopPropagation();
-			action();
-		};
-		document.addEventListener("keydown", handler, true);
-		return () => document.removeEventListener("keydown", handler, true);
-	}, [onClose, safeSlides.length]);
+	// キー → アクションのテーブルを毎レンダー 1 回だけ組む (findAction 内での再構築を避ける)。
+	// useShortcuts は shortcuts 配列を ref 経由で常に最新参照するため useMemo 不要。
+	const next = () => setIndex((i) => Math.min(i + 1, safeSlides.length - 1));
+	const prev = () => setIndex((i) => Math.max(i - 1, 0));
+	const nav: Record<string, () => void> = {
+		Escape: onClose,
+		ArrowRight: next,
+		PageDown: next,
+		" ": next,
+		ArrowLeft: prev,
+		PageUp: prev,
+		Backspace: prev,
+		Home: () => setIndex(0),
+		End: () => setIndex(safeSlides.length - 1),
+	};
+	// 素押しでのみ発火するグループ (n/j/p/k) は meta/ctrl/alt 修飾を弾いた後に、
+	// `toLowerCase()` で CapsLock/Shift 併用にもマッチさせる。
+	const plain: Record<string, () => void> = { n: next, j: next, p: prev, k: prev };
+	const findAction = (e: KeyboardEvent): (() => void) | undefined => {
+		// IME 確定中は無視 (composition 中の Enter/Esc を発表ナビにしない)。
+		if (e.isComposing) return undefined;
+		if (nav[e.key]) return nav[e.key];
+		if (cmdOrCtrl(e) || e.altKey) return undefined;
+		return plain[e.key.toLowerCase()];
+	};
+	// capture: true で AppLayout のグローバルショートカット競合を回避、stopPropagation で
+	// bubble フェーズの他 listener (テスト等) にも届かないようにする。
+	useShortcuts(
+		[
+			{
+				id: "slide-show-nav",
+				match: (e) => findAction(e) !== undefined,
+				run: (e) => findAction(e)?.(),
+			},
+		],
+		{ capture: true, stopPropagation: true },
+	);
 
 	const { ref: stageRef, scale } = useFitScale<HTMLDivElement>(
 		SLIDE_LOGICAL_WIDTH,
