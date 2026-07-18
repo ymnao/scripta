@@ -98,10 +98,12 @@ function emitFsChange(events: FsChangeEvent[]) {
 let closeHandler: (() => void | Promise<void>) | null = null;
 
 let capturedOnFileSelect: ((path: string) => void) | null = null;
+let capturedActivePanel: string | null = null;
 vi.mock("./Sidebar", () => ({
-	Sidebar: (props: { onFileSelect: (path: string) => void }) => {
+	Sidebar: (props: { activePanel: string; onFileSelect: (path: string) => void }) => {
 		capturedOnFileSelect = props.onFileSelect;
-		return <div data-testid="mock-sidebar" />;
+		capturedActivePanel = props.activePanel;
+		return <div data-testid="mock-sidebar" data-panel={props.activePanel} />;
 	},
 }));
 
@@ -1231,6 +1233,32 @@ describe("AppLayout", () => {
 
 		// Export dialog should NOT appear
 		expect(screen.queryByText("エクスポート")).not.toBeInTheDocument();
+	});
+
+	// Cmd+Shift+F は KeyboardEvent.key が "F" (Shift 押下により大文字化) になる。
+	// 兄弟 Cmd+Shift+X エントリと同じく match が toLowerCase 判定であることを検証する
+	// (旧実装は e.key === "f" で不発になっていた)。
+	it("Cmd+Shift+F (KeyboardEvent.key='F') triggers sidebar search panel switch", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "F",
+			metaKey: true,
+			shiftKey: true,
+			cancelable: true,
+		});
+		await act(async () => {
+			document.dispatchEvent(ev);
+		});
+
+		// preventDefault が呼ばれる = 該当 Shortcut が match=true として判定された。
+		expect(ev.defaultPrevented).toBe(true);
+		// run が実行されて sidebarPanel が "search" に切り替わっていることを確認。
+		expect(capturedActivePanel).toBe("search");
 	});
 
 	it("closes search bar when switching to newtab page", async () => {
