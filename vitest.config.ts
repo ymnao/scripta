@@ -29,6 +29,15 @@ export default defineConfig({
 					exclude: [...configDefaults.exclude, "e2e/**", "out/**"],
 				},
 			},
+			{
+				extends: true,
+				test: {
+					name: "workflows",
+					environment: "node",
+					include: ["test/**/*.test.ts"],
+					exclude: [...configDefaults.exclude, "e2e/**", "out/**"],
+				},
+			},
 		],
 	},
 });
