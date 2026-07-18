@@ -10,6 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { cancelOgpFetch, fetchOgp, openExternal } from "../../../lib/commands";
+import { LruCache } from "../../../lib/lru-cache";
 import { getErrorKind } from "../../../types/errors";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
@@ -57,7 +58,8 @@ type CacheEntry =
 	| { status: "loaded"; data: OgpData; cachedAt: number }
 	| { status: "error"; errorAt: number };
 
-const ogpCache = new Map<string, CacheEntry>();
+const MAX_CACHE_SIZE = 500;
+const ogpCache = new LruCache<string, CacheEntry>(MAX_CACHE_SIZE);
 
 const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
@@ -66,7 +68,6 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
 // 理由で event が届かなかった場合 (broadcast 経路の bug 等) の fallback として 60s 後に
 // 別 plugin が re-fetch する。
 const LOADING_STALE_MS = 60_000;
-const MAX_CACHE_ENTRIES = 500;
 
 // 開始者の plugin instance が完了 (loaded / error) もしくは cancel (ABORTED) で cache
 // を更新したことを、生存中の他 plugin に通知する broadcast channel。loading を共有
@@ -85,27 +86,6 @@ function broadcastOgpCacheInvalidated(url: string): void {
 			detail: { url },
 		}),
 	);
-}
-
-function evictStaleCache() {
-	const now = Date.now();
-	for (const [key, entry] of ogpCache) {
-		const age = entry.status === "error" ? now - entry.errorAt : now - entry.cachedAt;
-		if (age > CACHE_TTL_MS) {
-			ogpCache.delete(key);
-		}
-	}
-	if (ogpCache.size > MAX_CACHE_ENTRIES) {
-		const entries = [...ogpCache.entries()].sort((a, b) => {
-			const timeA = a[1].status === "error" ? a[1].errorAt : a[1].cachedAt;
-			const timeB = b[1].status === "error" ? b[1].errorAt : b[1].cachedAt;
-			return timeA - timeB;
-		});
-		const excess = ogpCache.size - MAX_CACHE_ENTRIES;
-		for (let i = 0; i < excess; i++) {
-			ogpCache.delete(entries[i][0]);
-		}
-	}
 }
 
 function extractDomain(url: string): string {
@@ -325,7 +305,6 @@ class LinkCardDecorationPlugin implements PluginValue {
 	}
 
 	private fetchMissingOgp(view: EditorView) {
-		let evicted = false;
 		forEachStandaloneUrl(view, ({ url }) => {
 			if (this.fetchingUrls.has(url)) return;
 			const cached = ogpCache.get(url);
@@ -342,10 +321,6 @@ class LinkCardDecorationPlugin implements PluginValue {
 				}
 			}
 
-			if (!evicted) {
-				evictStaleCache();
-				evicted = true;
-			}
 			const requestId = crypto.randomUUID();
 			ogpCache.set(url, { status: "loading", cachedAt: Date.now(), requestId });
 			this.fetchingUrls.set(url, requestId);
