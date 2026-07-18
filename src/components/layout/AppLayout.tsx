@@ -13,6 +13,7 @@ import { useAutoSave } from "../../hooks/useAutoSave";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
 import { useGitSync } from "../../hooks/useGitSync";
 import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
+import { type Shortcut, useShortcuts } from "../../hooks/useShortcuts";
 import { useUpdateCheck } from "../../hooks/useUpdateCheck";
 import {
 	clearWebviewBrowsingData,
@@ -1197,42 +1198,54 @@ export function AppLayout() {
 	const closeSlideShow = useCallback(() => setSlideShow(null), []);
 
 	// Keyboard shortcuts
-	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
-			// Tab switching: Cmd+Shift+[ / Cmd+Shift+] (must be checked before non-shift variants)
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "{" || e.key === "[")) {
-				e.preventDefault();
-				activatePrevTab();
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "}" || e.key === "]")) {
-				e.preventDefault();
-				activateNextTab();
-				return;
-			}
-			// Navigation: Cmd+[ / Alt+Left = back, Cmd+] / Alt+Right = forward
-			if ((e.metaKey || e.ctrlKey) && e.key === "[") {
-				e.preventDefault();
-				void handleGoBack();
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.key === "]") {
-				e.preventDefault();
-				void handleGoForward();
-				return;
-			}
-			if (e.altKey && e.key === "ArrowLeft") {
-				e.preventDefault();
-				void handleGoBack();
-				return;
-			}
-			if (e.altKey && e.key === "ArrowRight") {
-				e.preventDefault();
-				void handleGoForward();
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") {
-				e.preventDefault();
+	// 配列順に評価して最初にマッチしたエントリを実行する (useShortcuts が listener を一元管理)。
+	// 修飾キー付きの類似ショートカット (例: Cmd+Shift+[ vs Cmd+[) は shift 有り側を先に置く。
+	// preventDefault は match=true 時に useShortcuts が自動で呼ぶため、run 側では呼ばない。
+	// preventDefault を条件付きで抑制したいエントリは、そのガードを match に含めれば match=false
+	// 時に preventDefault が走らない (editor-search-bar / go-to-line が該当)。
+	const cmdOrCtrl = (e: KeyboardEvent): boolean => e.metaKey || e.ctrlKey;
+	const shortcuts: Shortcut[] = [
+		{
+			// Cmd+Shift+[ / Cmd+Shift+{ — 前のタブ
+			id: "prev-tab",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && (e.key === "{" || e.key === "["),
+			run: () => activatePrevTab(),
+		},
+		{
+			// Cmd+Shift+] / Cmd+Shift+} — 次のタブ
+			id: "next-tab",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && (e.key === "}" || e.key === "]"),
+			run: () => activateNextTab(),
+		},
+		{
+			// Cmd+[ — 履歴戻る
+			id: "history-back-bracket",
+			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key === "[",
+			run: () => void handleGoBack(),
+		},
+		{
+			// Cmd+] — 履歴進む
+			id: "history-forward-bracket",
+			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key === "]",
+			run: () => void handleGoForward(),
+		},
+		{
+			// Alt+Left — 履歴戻る
+			id: "history-back-alt",
+			match: (e) => e.altKey && e.key === "ArrowLeft",
+			run: () => void handleGoBack(),
+		},
+		{
+			// Alt+Right — 履歴進む
+			id: "history-forward-alt",
+			match: (e) => e.altKey && e.key === "ArrowRight",
+			run: () => void handleGoForward(),
+		},
+		{
+			// Cmd+W / Cmd+Shift+W — タブ/ウィンドウを閉じる
+			id: "close-tab-or-window",
+			match: (e) => cmdOrCtrl(e) && e.key.toLowerCase() === "w",
+			run: (e) => {
 				if (e.shiftKey) {
 					// Cmd+Shift+W: タブの有無に関わらずウィンドウを閉じる（未保存の変更は保存される）
 					void closeWindow();
@@ -1244,105 +1257,142 @@ export function AppLayout() {
 					// タブがない時はウィンドウを閉じる
 					void closeWindow();
 				}
-			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "/") {
-				e.preventDefault();
-				setSidebarVisible((prev) => !prev);
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "e") {
-				e.preventDefault();
-				setSidebarPanel("files");
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "s") {
-				e.preventDefault();
+			},
+		},
+		{
+			// Cmd+/ — サイドバー表示切替
+			id: "toggle-sidebar",
+			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key === "/",
+			run: () => setSidebarVisible((prev) => !prev),
+		},
+		{
+			// Cmd+E — Files パネル
+			id: "sidebar-files",
+			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key.toLowerCase() === "e",
+			run: () => setSidebarPanel("files"),
+		},
+		{
+			// Cmd+Shift+S — スライドビュー切替 (active tab がファイルの時のみ)
+			id: "toggle-slide-view",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && e.key.toLowerCase() === "s",
+			run: () => {
 				const path = useWorkspaceStore.getState().activeTabPath;
 				if (path && !isNewTabPath(path)) {
 					setSlideViewActive((prev) => !prev);
 				}
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
-				e.preventDefault();
+			},
+		},
+		{
+			// Cmd+Shift+E — Export
+			id: "export",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && e.key.toLowerCase() === "e",
+			run: () => {
 				const path = useWorkspaceStore.getState().activeTabPath;
 				if (!path || isNewTabPath(path)) return;
 				handleExport(path);
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
-				e.preventDefault();
+			},
+		},
+		{
+			// Cmd+Shift+F — 検索パネル
+			id: "sidebar-search",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && e.key.toLowerCase() === "f",
+			run: () => {
 				setSidebarPanel("search");
 				requestAnimationFrame(() => {
 					searchInputRef.current?.focus();
 				});
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "u") {
-				e.preventDefault();
-				setSidebarPanel((prev) => (prev === "unresolved" ? "files" : "unresolved"));
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "b") {
-				e.preventDefault();
-				setSidebarPanel((prev) => (prev === "backlink" ? "files" : "backlink"));
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "f" || e.key === "h")) {
+			},
+		},
+		{
+			// Cmd+Shift+U — Unresolved パネル切替
+			id: "sidebar-unresolved",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && e.key.toLowerCase() === "u",
+			run: () => setSidebarPanel((prev) => (prev === "unresolved" ? "files" : "unresolved")),
+		},
+		{
+			// Cmd+Shift+B — Backlink パネル切替
+			id: "sidebar-backlink",
+			match: (e) => cmdOrCtrl(e) && e.shiftKey && e.key.toLowerCase() === "b",
+			run: () => setSidebarPanel((prev) => (prev === "backlink" ? "files" : "backlink")),
+		},
+		{
+			// Cmd+F / Cmd+H — エディタ内検索/置換バー (エディタが存在する時のみ)
+			id: "editor-search-bar",
+			match: (e) =>
+				cmdOrCtrl(e) &&
+				!e.shiftKey &&
+				(e.key === "f" || e.key === "h") &&
+				editorViewRef.current !== null,
+			run: (e) => {
 				const view = editorViewRef.current;
-				if (view) {
-					e.preventDefault();
-					const sel = view.state.selection.main;
-					const selectedText =
-						!sel.empty && sel.to - sel.from <= 200 ? view.state.sliceDoc(sel.from, sel.to) : "";
-					if (searchBarOpenRef.current) {
-						// Already open: update text if there's a selection, then re-focus
-						if (selectedText) {
-							searchBarHandleRef.current?.setSearch(selectedText);
-						} else {
-							searchBarHandleRef.current?.focusInput();
-						}
-						if (e.key === "h") setSearchBarExpanded(true);
+				if (!view) return;
+				const sel = view.state.selection.main;
+				const selectedText =
+					!sel.empty && sel.to - sel.from <= 200 ? view.state.sliceDoc(sel.from, sel.to) : "";
+				if (searchBarOpenRef.current) {
+					// Already open: update text if there's a selection, then re-focus
+					if (selectedText) {
+						searchBarHandleRef.current?.setSearch(selectedText);
 					} else {
-						setSearchBarInitialText(selectedText);
-						setSearchBarExpanded(e.key === "h");
-						setSearchBarOpen(true);
+						searchBarHandleRef.current?.focusInput();
 					}
+					if (e.key === "h") setSearchBarExpanded(true);
+				} else {
+					setSearchBarInitialText(selectedText);
+					setSearchBarExpanded(e.key === "h");
+					setSearchBarOpen(true);
 				}
-			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "t") {
-				e.preventDefault();
+			},
+		},
+		{
+			// Cmd+T — 新規タブ (workspace 無しでも preventDefault は行う: Electron/ブラウザ既定の新規タブ抑止)
+			id: "new-tab",
+			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key.toLowerCase() === "t",
+			run: () => {
 				if (workspacePath) openNewTab();
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
-				e.preventDefault();
+			},
+		},
+		{
+			// Cmd+J — スクラッチパッド切替 (workspace 無しでも preventDefault は行う: 既定挙動を抑止)
+			id: "toggle-scratchpad",
+			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key.toLowerCase() === "j",
+			run: () => {
 				if (workspacePath) toggleScratchpad();
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "g") {
-				const view = editorViewRef.current;
-				if (view?.hasFocus) {
-					e.preventDefault();
-					setGoToLineOpen((prev) => !prev);
-				}
-				return;
-			}
-			if ((e.metaKey || e.ctrlKey) && e.key === "p") {
-				e.preventDefault();
-				setCommandPaletteOpen((prev) => !prev);
-			}
-			if ((e.metaKey || e.ctrlKey) && e.key === ",") {
-				e.preventDefault();
-				setSettingsOpen((prev) => !prev);
-			}
-			if (e.key === "F1") {
-				e.preventDefault();
-				setHelpOpen((prev) => !prev);
-			}
-			// F5 は素押しのみ (Ctrl+F5 / Shift+F5 等はブラウザ/デバッガ側の慣例を尊重)。
-			// IME 合成中や他 modal open 中は横取りしない (発表モードが Overlay で覆う想定なので二重表示も回避)。
-			if (
+			},
+		},
+		{
+			// Cmd+G — Go to line (エディタに focus がある時のみ)
+			id: "go-to-line",
+			match: (e) =>
+				cmdOrCtrl(e) &&
+				!e.shiftKey &&
+				e.key.toLowerCase() === "g" &&
+				!!editorViewRef.current?.hasFocus,
+			run: () => setGoToLineOpen((prev) => !prev),
+		},
+		{
+			// Cmd+P — コマンドパレット
+			id: "command-palette",
+			match: (e) => cmdOrCtrl(e) && e.key === "p",
+			run: () => setCommandPaletteOpen((prev) => !prev),
+		},
+		{
+			// Cmd+, — 設定
+			id: "settings",
+			match: (e) => cmdOrCtrl(e) && e.key === ",",
+			run: () => setSettingsOpen((prev) => !prev),
+		},
+		{
+			// F1 — ヘルプ
+			id: "help",
+			match: (e) => e.key === "F1",
+			run: () => setHelpOpen((prev) => !prev),
+		},
+		{
+			// F5 素押し — 発表モード起動 (IME 合成中や他 modal open 中は横取りしない)。
+			// Ctrl+F5 / Shift+F5 等はブラウザ/デバッガ側の慣例を尊重。
+			id: "slide-show",
+			match: (e) =>
 				e.key === "F5" &&
 				!e.metaKey &&
 				!e.ctrlKey &&
@@ -1353,32 +1403,11 @@ export function AppLayout() {
 				!commandPaletteOpen &&
 				!settingsOpen &&
 				!helpOpen &&
-				!exportOpen
-			) {
-				e.preventDefault();
-				startSlideShow();
-			}
-		};
-		document.addEventListener("keydown", handler);
-		return () => document.removeEventListener("keydown", handler);
-	}, [
-		activeTabId,
-		activateNextTab,
-		activatePrevTab,
-		commandPaletteOpen,
-		exportOpen,
-		handleCloseTab,
-		handleExport,
-		handleGoBack,
-		handleGoForward,
-		helpOpen,
-		openNewTab,
-		settingsOpen,
-		slideShow,
-		startSlideShow,
-		toggleScratchpad,
-		workspacePath,
-	]);
+				!exportOpen,
+			run: () => startSlideShow(),
+		},
+	];
+	useShortcuts(shortcuts);
 
 	if (loading) {
 		return <div className="flex h-screen flex-col bg-bg-primary text-text-primary" />;
