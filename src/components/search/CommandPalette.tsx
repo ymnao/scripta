@@ -1,6 +1,7 @@
 import { Archive, FileText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { useScrollActiveChildIntoView } from "../../hooks/useScrollActiveChildIntoView";
 import { listDirectory, searchFilenames } from "../../lib/commands";
 import { isIMEComposing } from "../../lib/ime";
@@ -22,6 +23,8 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 	const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const requestIdRef = useRef(0);
 	const listRef = useRef<HTMLDivElement>(null);
+	const dialogRef = useRef<HTMLDivElement>(null);
+	useFocusTrap(dialogRef, open);
 
 	useEffect(() => {
 		if (open) {
@@ -155,6 +158,7 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 				tabIndex={-1}
 			/>
 			<div
+				ref={dialogRef}
 				role="dialog"
 				aria-modal="true"
 				aria-label="コマンドパレット"
