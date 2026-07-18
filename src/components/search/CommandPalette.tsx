@@ -1,6 +1,7 @@
 import { Archive, FileText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useScrollActiveChildIntoView } from "../../hooks/useScrollActiveChildIntoView";
 import { listDirectory, searchFilenames } from "../../lib/commands";
 import { isIMEComposing } from "../../lib/ime";
 import { basename } from "../../lib/path";
@@ -116,10 +117,8 @@ export function CommandPalette({ open, workspacePath, onSelect, onClose }: Comma
 		};
 	}, []);
 
-	useEffect(() => {
-		const item = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
-		item?.scrollIntoView({ block: "nearest" });
-	}, [selectedIndex]);
+	// selectedIndex 追随を SlideThumbnails と共通 hook で統一 (以前は scrollIntoView)。
+	useScrollActiveChildIntoView(listRef, selectedIndex);
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
