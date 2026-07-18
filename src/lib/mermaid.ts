@@ -3,6 +3,7 @@ import type { MermaidConfig } from "mermaid";
 import { FONT_FAMILY_MAP } from "../components/editor/editor-theme";
 import { useSettingsStore } from "../stores/settings";
 import { abortError } from "./abort";
+import { LruCache } from "./lru-cache";
 
 type CacheEntry =
 	| { status: "rendering"; promise: Promise<string> }
@@ -10,7 +11,11 @@ type CacheEntry =
 	| { status: "error"; message: string };
 
 const MAX_CACHE_SIZE = 128;
-const cache = new Map<string, CacheEntry>();
+// in-flight render を捨てないよう rendering 中を protect し、完了済み (rendered / error) を
+// 優先的に evict する (詳細ポリシーは LruCache 側 JSDoc 参照)。
+const cache = new LruCache<string, CacheEntry>(MAX_CACHE_SIZE, {
+	protectFromEviction: (entry) => entry.status === "rendering",
+});
 /** clearMermaidCache 呼び出しごとにインクリメントし、古い世代のレンダリング結果を無視する */
 let cacheGeneration = 0;
 
@@ -329,24 +334,6 @@ export function forceVisibleTextInSvg(svg: string, theme: "light" | "dark"): str
 	});
 }
 
-/** キャッシュが上限を超えた場合、古いエントリを削除する。
- *  まず完了済みエントリを優先的に削除し、それでも不足する場合は rendering 中も含めて削除する。 */
-function evictIfNeeded(): void {
-	if (cache.size < MAX_CACHE_SIZE) return;
-	// Map は insert 順を保持するので、先頭の完了済みエントリから削除する
-	for (const [key, entry] of cache) {
-		if (entry.status !== "rendering") {
-			cache.delete(key);
-			if (cache.size < MAX_CACHE_SIZE) return;
-		}
-	}
-	// 完了済みだけでは足りない場合、rendering 中も含めて削除する
-	for (const [key] of cache) {
-		cache.delete(key);
-		if (cache.size < MAX_CACHE_SIZE) break;
-	}
-}
-
 /**
  * Mermaid ソースコードを SVG 文字列にレンダリングする。
  * 動的 import でバンドルサイズを軽減し、結果をキャッシュする。
@@ -389,8 +376,9 @@ export async function renderMermaid(
 				reject(new Error("Cache generation mismatch"));
 				return;
 			}
-			// キュー待ち中に別の呼び出しで完了済みになっている可能性
-			const entry = cache.get(key);
+			// キュー待ち中に別の呼び出しで完了済みになっている可能性 (再チェックは
+			// semantic な "use" ではないので LRU 順序は変えない → peek)
+			const entry = cache.peek(key);
 			if (entry?.status === "rendered") {
 				resolve(entry.svg);
 				return;
@@ -433,7 +421,6 @@ export async function renderMermaid(
 		});
 	});
 
-	evictIfNeeded();
 	cache.set(key, { status: "rendering", promise });
 	return promise;
 }
@@ -447,7 +434,7 @@ export function getCacheEntry(
 	theme: "light" | "dark",
 	options: MermaidRenderOptions = {},
 ): CacheEntry | undefined {
-	return cache.get(cacheKey(source, theme, takeFontSnapshot(), options));
+	return cache.peek(cacheKey(source, theme, takeFontSnapshot(), options));
 }
 
 /**

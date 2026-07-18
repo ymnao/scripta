@@ -1,4 +1,5 @@
 import { abortError } from "./abort";
+import { LruCache } from "./lru-cache";
 import { markdownToHtml } from "./markdown-to-html";
 import type { MermaidRenderOptions } from "./mermaid";
 import { preprocessMermaidBlocks } from "./mermaid-preprocess";
@@ -11,24 +12,6 @@ import { resolveHtmlImageSrcs } from "./resolve-html-images";
  */
 function cleanSlideMarkdown(markdown: string): string {
 	return markdown.replace(/\n---\s*$/, "").trim();
-}
-
-/**
- * 挿入順 LRU: hit ごとに delete + set で末尾へ移動、cap 超過時に先頭 (最古) を 1 件 evict する。
- * caller は 1 回の set → 1 回の maybeEvictOldest 呼び出しで size が cap+1 以下しか超えないため
- * evict は最大 1 件で十分 (while ループの必要なし)。
- */
-function touchLru<K, V>(map: Map<K, V>, key: K, value: V): void {
-	map.delete(key);
-	map.set(key, value);
-}
-function maybeEvictOldest<K, V>(map: Map<K, V>, cap: number, onEvict?: (value: V) => void): void {
-	if (map.size <= cap) return;
-	const oldest = map.keys().next().value;
-	if (oldest === undefined) return;
-	const value = map.get(oldest);
-	map.delete(oldest);
-	if (value !== undefined) onEvict?.(value);
 }
 
 /**
@@ -47,13 +30,9 @@ export function renderSlideHtml(markdown: string, activeTabPath: string | null):
 	if (!cleaned) return "";
 	const key = `${activeTabPath ?? ""}\0${cleaned}`;
 	const hit = syncCache.get(key);
-	if (hit !== undefined) {
-		touchLru(syncCache, key, hit);
-		return hit;
-	}
+	if (hit !== undefined) return hit;
 	const html = resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
 	syncCache.set(key, html);
-	maybeEvictOldest(syncCache, MAX_CACHE_SIZE);
 	return html;
 }
 
@@ -78,8 +57,8 @@ interface AsyncCacheEntry {
 }
 
 const MAX_CACHE_SIZE = 128;
-const syncCache = new Map<string, string>();
-const asyncCache = new Map<string, AsyncCacheEntry>();
+const syncCache = new LruCache<string, string>(MAX_CACHE_SIZE);
+const asyncCache = new LruCache<string, AsyncCacheEntry>(MAX_CACHE_SIZE);
 
 /**
  * カスタム mermaid / embed オプションが指定された場合は module cache を bypass する
@@ -163,25 +142,23 @@ export function renderSlideHtmlWithMermaid(
 	}
 	const key = `${theme}\0${activeTabPath ?? ""}\0${cleaned}`;
 	const hit = asyncCache.get(key);
-	if (hit !== undefined) {
-		// cache-hit は caller の signal 状態に関わらず shared promise を返す
-		// (session 90 の「1 caller の意思で shared cache を reject させない」原則)。
-		touchLru(asyncCache, key, hit);
-		return hit.promise;
-	}
+	// cache-hit は caller の signal 状態に関わらず shared promise を返す
+	// (session 90 の「1 caller の意思で shared cache を reject させない」原則)。
+	if (hit !== undefined) return hit.promise;
 	// cache-miss + pre-abort されている場合のみ「新規 render を起動しない」意味で reject する
 	// (cache に entry を作らない = 他 caller が cache 経由で拾わない)。
 	if (callerSignal?.aborted) return Promise.reject(abortError());
 	const controller = new AbortController();
 	const promise = renderSlideHtmlDirect(cleaned, activeTabPath, theme, options, controller.signal);
-	// 失敗した Promise を cache に固定させない (次 render で retry させる)。
+	// 失敗した Promise を cache に固定させない (次 render で retry させる)。peek で
+	// LRU 順序を変えずに identity 照合してから delete する。
 	promise.catch(() => {
-		if (asyncCache.get(key)?.promise === promise) asyncCache.delete(key);
+		if (asyncCache.peek(key)?.promise === promise) asyncCache.delete(key);
 	});
+	// LruCache.set 側で eviction を実施する。eviction では abort しない (self-poisoning
+	// 対策、上記 JSDoc 参照)。orphan render は完了まで走らせて結果は捨てる。in-flight を
+	// 止められるのは clearSlideRenderCache のみ。
 	asyncCache.set(key, { promise, controller });
-	// eviction では abort しない (self-poisoning 対策、上記 JSDoc 参照)。orphan render は
-	// 完了まで走らせて結果は捨てる。in-flight を止められるのは clearSlideRenderCache のみ。
-	maybeEvictOldest(asyncCache, MAX_CACHE_SIZE);
 	return promise;
 }
 
