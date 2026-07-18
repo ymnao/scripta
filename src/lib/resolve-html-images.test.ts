@@ -163,6 +163,38 @@ describe("embedHtmlImagesAsDataUri", () => {
 		expect(matches?.length).toBe(3);
 	});
 
+	it("skips remaining images once total embedded bytes exceed the cap (#354)", async () => {
+		readFileBase64.mockClear();
+		// TOTAL_EMBED_BYTES_LIMIT = 256MB。3 個の 100MB base64 を投げれば 3 個目で超過する想定
+		const CHUNK = "x".repeat(100 * 1024 * 1024);
+		readFileBase64
+			.mockResolvedValueOnce(CHUNK)
+			.mockResolvedValueOnce(CHUNK)
+			.mockResolvedValueOnce(CHUNK);
+		const out = await embedHtmlImagesAsDataUri(
+			'<img src="./a.png"><img src="./b.png"><img src="./c.png">',
+			"/workspace/deck.md",
+		);
+		// 1〜2 個目は data URI 化される (累積 200MB < 256MB) → data URI が 2 箇所出現
+		expect(out.split("data:image/png;base64,").length - 1).toBe(2);
+		// 3 個目は上限超過で元 src を維持
+		expect(out.includes('src="./c.png"')).toBe(true);
+	});
+
+	it("keeps original src when a single image would push over the total cap (#354)", async () => {
+		readFileBase64.mockClear();
+		// 1 個目で 200MB を使い、2 個目 (100MB) で累積 300MB > 256MB になり skip
+		readFileBase64
+			.mockResolvedValueOnce("y".repeat(200 * 1024 * 1024))
+			.mockResolvedValueOnce("z".repeat(100 * 1024 * 1024));
+		const out = await embedHtmlImagesAsDataUri(
+			'<img src="./big.png"><img src="./over.png">',
+			"/workspace/deck.md",
+		);
+		expect(out.split("data:image/png;base64,").length - 1).toBe(1);
+		expect(out.includes('src="./over.png"')).toBe(true);
+	});
+
 	it("caps in-flight readFileBase64 to EMBED_CONCURRENCY (bounded concurrency)", async () => {
 		readFileBase64.mockClear();
 		let inFlight = 0;
