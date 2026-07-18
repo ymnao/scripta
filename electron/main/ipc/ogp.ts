@@ -1,4 +1,5 @@
 import { URL } from "node:url";
+import { LruCache } from "../../../src/lib/lru-cache";
 import type { OgpData } from "../../../src/types/ogp";
 import { AbortError, httpFetch } from "../utils/http-fetch";
 import { handle } from "../utils/ipc-handle";
@@ -15,7 +16,7 @@ import { StructuredError } from "../utils/structured-error";
 // HTTP 層の Promise / timeout / body-limit boilerplate は utils/http-fetch.ts へ集約。
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_CACHE_ENTRIES = 500;
+const MAX_CACHE_SIZE = 500;
 const MAX_BODY_BYTES = 100 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_REDIRECTS = 5;
@@ -25,7 +26,11 @@ interface CacheEntry {
 	fetchedAt: number;
 }
 
-const cache = new Map<string, CacheEntry>();
+// TTL sweep は撤去し、freshness は cacheGet の read-time TTL check で担保する。
+// cap 超過時は LruCache が O(1) で最も長く未参照 (LRU) の 1 件を evict する。
+// cacheGet が hit ごとに LruCache.get で touch するため、頻繁に再描画される URL は
+// 保持されやすく、放置された URL が優先的に押し出される。
+const cache = new LruCache<string, CacheEntry>(MAX_CACHE_SIZE);
 
 function cacheGet(url: string, now: number = Date.now()): OgpData | null {
 	const entry = cache.get(url);
@@ -38,26 +43,6 @@ function cacheGet(url: string, now: number = Date.now()): OgpData | null {
 }
 
 function cacheSet(url: string, data: OgpData, now: number = Date.now()): void {
-	// 期限切れの除去と最古エントリ探索を 1 パスに統合する。500 件規模で従来は
-	// 2 回イテレートしていたところを 1 回にし、cacheSet が link card 描画の
-	// hot path で呼ばれる前提で per-insert オーバーヘッドを半減させる。
-	let oldestKey: string | null = null;
-	let oldestTime = Number.POSITIVE_INFINITY;
-	for (const [k, v] of cache) {
-		if (now - v.fetchedAt >= CACHE_TTL_MS) {
-			cache.delete(k);
-			continue;
-		}
-		if (v.fetchedAt < oldestTime) {
-			oldestTime = v.fetchedAt;
-			oldestKey = k;
-		}
-	}
-	// 期限切れ掃除後に容量超過していて、かつ新規キーなら最古を evict する。
-	// 既存 url の上書きは「容量を増やさない」のでこの分岐に入らない。
-	if (!cache.has(url) && cache.size >= MAX_CACHE_ENTRIES && oldestKey !== null) {
-		cache.delete(oldestKey);
-	}
 	cache.set(url, { data, fetchedAt: now });
 }
 
@@ -185,5 +170,5 @@ export const __testing = {
 	cancelOgpFetch,
 	hasInFlight: (requestId: string) => inFlight.has(requestId),
 	CACHE_TTL_MS,
-	MAX_CACHE_ENTRIES,
+	MAX_CACHE_SIZE,
 };
