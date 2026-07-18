@@ -17,6 +17,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { isEscaped } from "../../../lib/content";
+import { LruCache } from "../../../lib/lru-cache";
 import { collectCursorLines, cursorInRange } from "./cursor-utils";
 import {
 	type BlockFieldValue,
@@ -71,10 +72,9 @@ export function preloadKatexForTest(): Promise<void> {
 
 // ── Render cache ──────────────────────────────────────
 
-const MAX_RENDER_CACHE_SIZE = 500;
-/** key = `${displayMode}:${tex}`、value = katex.renderToString の結果 HTML。
- *  LRU ではなく単純 clear（上限到達時に全消去）。 */
-const renderCache = new Map<string, string>();
+const MAX_CACHE_SIZE = 500;
+/** key = `${displayMode}:${tex}`、value = katex.renderToString の結果 HTML。 */
+const renderCache = new LruCache<string, string>(MAX_CACHE_SIZE);
 
 function renderKatexToHtml(tex: string, displayMode: boolean): string {
 	const key = `${displayMode}:${tex}`;
@@ -82,7 +82,6 @@ function renderKatexToHtml(tex: string, displayMode: boolean): string {
 	if (cached !== undefined) return cached;
 	if (!katexMod) throw new Error("katex module is not loaded yet");
 	const html = katexMod.renderToString(tex, { displayMode, throwOnError: false });
-	if (renderCache.size >= MAX_RENDER_CACHE_SIZE) renderCache.clear();
 	renderCache.set(key, html);
 	return html;
 }
