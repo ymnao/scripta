@@ -10,6 +10,7 @@ import {
 	WidgetType,
 } from "@codemirror/view";
 import { cancelOgpFetch, fetchOgp, openExternal } from "../../../lib/commands";
+import { LruCache } from "../../../lib/lru-cache";
 import { getErrorKind } from "../../../types/errors";
 import type { OgpData } from "../../../types/ogp";
 import { collectCursorLines, cursorLinesChanged } from "./cursor-utils";
@@ -57,7 +58,11 @@ type CacheEntry =
 	| { status: "loaded"; data: OgpData; cachedAt: number }
 	| { status: "error"; errorAt: number };
 
-const ogpCache = new Map<string, CacheEntry>();
+const MAX_CACHE_SIZE = 500;
+// LRU 順序更新は set/delete (cache 遷移) 側で行うので、read-only 参照は peek を使う。
+// buildDecorations は viewport / cursor 更新のたびに走る hot path で、URL が visible なら
+// 次の fetchMissingOgp で set され MRU に上がるため peek でも eviction 順序は壊れない。
+const ogpCache = new LruCache<string, CacheEntry>(MAX_CACHE_SIZE);
 
 const ERROR_RETRY_MS = 30_000; // 30秒後にリトライ可能
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
@@ -66,7 +71,6 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24時間
 // 理由で event が届かなかった場合 (broadcast 経路の bug 等) の fallback として 60s 後に
 // 別 plugin が re-fetch する。
 const LOADING_STALE_MS = 60_000;
-const MAX_CACHE_ENTRIES = 500;
 
 // 開始者の plugin instance が完了 (loaded / error) もしくは cancel (ABORTED) で cache
 // を更新したことを、生存中の他 plugin に通知する broadcast channel。loading を共有
@@ -85,27 +89,6 @@ function broadcastOgpCacheInvalidated(url: string): void {
 			detail: { url },
 		}),
 	);
-}
-
-function evictStaleCache() {
-	const now = Date.now();
-	for (const [key, entry] of ogpCache) {
-		const age = entry.status === "error" ? now - entry.errorAt : now - entry.cachedAt;
-		if (age > CACHE_TTL_MS) {
-			ogpCache.delete(key);
-		}
-	}
-	if (ogpCache.size > MAX_CACHE_ENTRIES) {
-		const entries = [...ogpCache.entries()].sort((a, b) => {
-			const timeA = a[1].status === "error" ? a[1].errorAt : a[1].cachedAt;
-			const timeB = b[1].status === "error" ? b[1].errorAt : b[1].cachedAt;
-			return timeA - timeB;
-		});
-		const excess = ogpCache.size - MAX_CACHE_ENTRIES;
-		for (let i = 0; i < excess; i++) {
-			ogpCache.delete(entries[i][0]);
-		}
-	}
 }
 
 function extractDomain(url: string): string {
@@ -279,7 +262,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 	const ranges: Range<Decoration>[] = [];
 
 	forEachStandaloneUrl(view, ({ line, url }) => {
-		const entry = ogpCache.get(url);
+		const entry = ogpCache.peek(url);
 		// Skip if error — show as normal text
 		if (entry?.status === "error") return;
 
@@ -325,10 +308,9 @@ class LinkCardDecorationPlugin implements PluginValue {
 	}
 
 	private fetchMissingOgp(view: EditorView) {
-		let evicted = false;
 		forEachStandaloneUrl(view, ({ url }) => {
 			if (this.fetchingUrls.has(url)) return;
-			const cached = ogpCache.get(url);
+			const cached = ogpCache.peek(url);
 			if (cached) {
 				if (cached.status === "error") {
 					if (Date.now() - cached.errorAt < ERROR_RETRY_MS) return;
@@ -342,10 +324,6 @@ class LinkCardDecorationPlugin implements PluginValue {
 				}
 			}
 
-			if (!evicted) {
-				evictStaleCache();
-				evicted = true;
-			}
 			const requestId = crypto.randomUUID();
 			ogpCache.set(url, { status: "loading", cachedAt: Date.now(), requestId });
 			this.fetchingUrls.set(url, requestId);
@@ -367,7 +345,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 						// に即時 re-fetch を促す（他 plugin が loading を共有して待ち続ける
 						// 膠着を回避）。loading entry の owner が別の requestId なら触らない
 						// — その plugin の責任で更新される。
-						const cached = ogpCache.get(url);
+						const cached = ogpCache.peek(url);
 						if (cached?.status === "loading" && cached.requestId === requestId) {
 							ogpCache.delete(url);
 							broadcastOgpCacheInvalidated(url);
