@@ -1,0 +1,75 @@
+# ci.yml が paths-ignore で skip される PR (docs-only など) のための stub。
+# branch protection で ci.yml の各 job (lint / typecheck / test / e2e / electron-e2e /
+# build / dependency-review) を必須 check に指定している関係上、実 CI workflow が
+# trigger されないと永遠に pending → BLOCKED になる (paths-ignore で skip された
+# 必須 check は GitHub 仕様上 "neutral" ではなく未生成扱い)。
+#
+# 本 workflow は ci.yml の paths-ignore と完全に補完する paths filter で trigger され、
+# 同名の check を success として作成する。
+#
+# 参考: GitHub 公式トラブルシュート
+# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/troubleshooting-required-status-checks#handling-skipped-but-required-checks
+#
+# code + docs 混在 PR では ci.yml と本 workflow が両方 trigger される
+# (paths-ignore は「全ファイルが ignore patterns に該当」のみ skip、paths は「1 つでも該当」で trigger)。
+# その場合は両方の同名 check が success である必要があるが、本 stub は数秒で完了するため実害なし。
+name: CI (paths-skip stub)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # ci.yml の paths-ignore と完全一致させる (補完関係を維持)
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+
+permissions:
+  contents: read
+
+jobs:
+  # job 名は ci.yml と完全一致させる (必須 check 名は job 名で参照されるため)。
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml lint skipped, marking success"
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml typecheck skipped, marking success"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml test skipped, marking success"
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml e2e skipped, marking success"
+
+  electron-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml electron-e2e skipped, marking success"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml build skipped, marking success"
+
+  # dependency-review は PR trigger 限定 (ci.yml でも同じ if 条件)。
+  # push trigger には PR diff の概念が無く、実 workflow もこの job を出さないため
+  # stub 側でも PR 限定にして parity を保つ。
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docs-only diff — ci.yml dependency-review skipped, marking success"
