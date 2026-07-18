@@ -259,7 +259,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 	const ranges: Range<Decoration>[] = [];
 
 	forEachStandaloneUrl(view, ({ line, url }) => {
-		const entry = ogpCache.get(url);
+		const entry = ogpCache.peek(url);
 		// Skip if error — show as normal text
 		if (entry?.status === "error") return;
 
@@ -307,7 +307,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 	private fetchMissingOgp(view: EditorView) {
 		forEachStandaloneUrl(view, ({ url }) => {
 			if (this.fetchingUrls.has(url)) return;
-			const cached = ogpCache.get(url);
+			const cached = ogpCache.peek(url);
 			if (cached) {
 				if (cached.status === "error") {
 					if (Date.now() - cached.errorAt < ERROR_RETRY_MS) return;
@@ -342,7 +342,7 @@ class LinkCardDecorationPlugin implements PluginValue {
 						// に即時 re-fetch を促す（他 plugin が loading を共有して待ち続ける
 						// 膠着を回避）。loading entry の owner が別の requestId なら触らない
 						// — その plugin の責任で更新される。
-						const cached = ogpCache.get(url);
+						const cached = ogpCache.peek(url);
 						if (cached?.status === "loading" && cached.requestId === requestId) {
 							ogpCache.delete(url);
 							broadcastOgpCacheInvalidated(url);
