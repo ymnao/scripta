@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 type DialogSize = "sm" | "md" | "lg";
 
@@ -48,31 +49,12 @@ export function DialogBase({
 				e.preventDefault();
 				if (!preventClose) onClose();
 			}
-			if (e.key === "Tab") {
-				const dialog = dialogRef.current;
-				if (!dialog) return;
-				const focusable = dialog.querySelectorAll<HTMLElement>(
-					'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-				);
-				if (focusable.length === 0) return;
-				const first = focusable[0];
-				const last = focusable[focusable.length - 1];
-				if (e.shiftKey) {
-					if (document.activeElement === first) {
-						e.preventDefault();
-						last.focus();
-					}
-				} else {
-					if (document.activeElement === last) {
-						e.preventDefault();
-						first.focus();
-					}
-				}
-			}
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
 	}, [open, onClose, preventClose]);
+
+	useFocusTrap(dialogRef, open);
 
 	if (!open) return null;
 

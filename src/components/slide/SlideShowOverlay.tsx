@@ -1,6 +1,7 @@
 import "katex/dist/katex.min.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFitScale } from "../../hooks/useFitScale";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import type { SlideSection, SlideTheme } from "../../types/slide";
 import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
 import { SlideFrame, useSlideHtmls } from "./SlideStage";
@@ -88,9 +89,19 @@ export function SlideShowOverlay({
 		SLIDE_LOGICAL_HEIGHT,
 	);
 
+	const overlayRef = useRef<HTMLDivElement>(null);
+	// mount 時に overlay 自体へ focus を移す (呼び出し元 = エディタに focus が残ると
+	// useFocusTrap は activeElement === first/last を判定できず trap が inert になる)。
+	useEffect(() => {
+		overlayRef.current?.focus();
+	}, []);
+	useFocusTrap(overlayRef);
+
 	return (
 		<div
-			className="slide-show-overlay fixed inset-0 z-50 flex flex-col bg-black"
+			ref={overlayRef}
+			tabIndex={-1}
+			className="slide-show-overlay fixed inset-0 z-50 flex flex-col bg-black outline-none"
 			role="dialog"
 			aria-label="スライド発表モード"
 			aria-modal="true"
