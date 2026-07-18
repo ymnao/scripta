@@ -57,6 +57,9 @@ const TOTAL_EMBED_BYTES_LIMIT = 256 * 1024 * 1024;
  *   元の src を残す (broken image になるが export 自体は失敗させない)
  * - 同一 osPath は 1 回だけ read し、複数 img に data URI を再利用 (メモリ + IPC 節約)
  * - 並列度は EMBED_CONCURRENCY で bound (multi-image 悪意 md による OOM 抑止)
+ * - 埋め込み base64 の累積長が TOTAL_EMBED_BYTES_LIMIT を超えた以降は data URI 化せず
+ *   元 src を維持 (#354 renderer OOM 対策)。cap 到達時にどの画像が skip されるかは
+ *   I/O 完了順に依存する
  */
 export async function embedHtmlImagesAsDataUri(
 	html: string,
@@ -102,7 +105,8 @@ export async function embedHtmlImagesAsDataUri(
 			try {
 				const b64 = await readFileBase64(task.osPath);
 				// 累積上限を超える場合は data URI 化せず元 src を維持 (broken image と同じ扱いで
-				// export 自体は完遂)。worker 並列で最大 K-1 個のオーバーシュートは許容。
+				// export 自体は完遂)。JS は単スレッドで check → += の間に await が無いため
+				// 他 worker が割り込む余地は無く、実オーバーシュートは発生しない。
 				if (totalEmbeddedBytes + b64.length > TOTAL_EMBED_BYTES_LIMIT) continue;
 				totalEmbeddedBytes += b64.length;
 				const dataUri = `data:${task.mime};base64,${b64}`;
