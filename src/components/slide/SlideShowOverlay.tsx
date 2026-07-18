@@ -2,6 +2,7 @@ import "katex/dist/katex.min.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFitScale } from "../../hooks/useFitScale";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { cmdOrCtrl } from "../../lib/keyboard";
 import type { SlideSection, SlideTheme } from "../../types/slide";
 import { SLIDE_LOGICAL_HEIGHT, SLIDE_LOGICAL_WIDTH } from "../../types/slide";
 import { SlideFrame, useSlideHtmls } from "./SlideStage";
@@ -73,8 +74,7 @@ export function SlideShowOverlay({
 			// IME 確定中は無視 (composition 中の Enter/Esc を発表ナビにしない)。
 			if (e.isComposing) return;
 			const action =
-				nav[e.key] ??
-				(!e.metaKey && !e.ctrlKey && !e.altKey ? plain[e.key.toLowerCase()] : undefined);
+				nav[e.key] ?? (!cmdOrCtrl(e) && !e.altKey ? plain[e.key.toLowerCase()] : undefined);
 			if (!action) return;
 			e.preventDefault();
 			e.stopPropagation();
