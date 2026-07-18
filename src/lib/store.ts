@@ -72,6 +72,65 @@ const DEFAULTS: AppSettings = {
 	slideThumbnailsVisible: SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 };
 
+// 各 key ごとの検証器。invalid なら undefined を返し、呼び出し側で ?? DEFAULTS[key]。
+// 新規 setting 追加時は AppSettings / DEFAULTS / PARSERS の 3 箇所のみ触る。
+type Parser<T> = (raw: unknown) => T | undefined;
+
+const asBoolean: Parser<boolean> = (raw) => (typeof raw === "boolean" ? raw : undefined);
+
+const asString: Parser<string> = (raw) => (typeof raw === "string" ? raw : undefined);
+
+const asNumberInRange =
+	(min: number, max: number): Parser<number> =>
+	(raw) =>
+		typeof raw === "number" && raw >= min && raw <= max ? raw : undefined;
+
+const asFiniteInRange =
+	(min: number, max: number): Parser<number> =>
+	(raw) =>
+		typeof raw === "number" && Number.isFinite(raw) && raw >= min && raw <= max ? raw : undefined;
+
+const asLiteralUnion =
+	<T extends string>(values: readonly T[]): Parser<T> =>
+	(raw) =>
+		(values as readonly unknown[]).includes(raw) ? (raw as T) : undefined;
+
+const PARSERS: { [K in keyof AppSettings]: Parser<AppSettings[K]> } = {
+	workspacePath: asString,
+	themePreference: asLiteralUnion(["system", "light", "dark"] as const),
+	sidebarVisible: asBoolean,
+	showLineNumbers: asBoolean,
+	fontSize: asNumberInRange(8, 32),
+	autoSaveDelay: asNumberInRange(500, 10000),
+	highlightActiveLine: asBoolean,
+	fontFamily: asLiteralUnion(["monospace", "sans-serif", "serif"] as const),
+	trimTrailingWhitespace: asBoolean,
+	showLinkCards: asBoolean,
+	gitSyncEnabled: asBoolean,
+	autoCommitInterval: asNumberInRange(0, 1440),
+	autoPullInterval: asNumberInRange(0, 1440),
+	autoPushInterval: asNumberInRange(0, 1440),
+	pullBeforePush: asBoolean,
+	syncMethod: asLiteralUnion(["merge", "rebase"] as const),
+	// normalizeCommitMessage は必ず string を返すので ?? DEFAULTS は no-op になる。
+	commitMessage: normalizeCommitMessage,
+	autoPullOnStartup: asBoolean,
+	scratchpadVolatile: asBoolean,
+	autoUpdateCheck: asBoolean,
+	fileTreeShowHidden: asBoolean,
+	fileTreeExcludePatterns: asString,
+	slidePreviewWidthRatio: asFiniteInRange(
+		SLIDE_PREVIEW_WIDTH_RATIO_MIN,
+		SLIDE_PREVIEW_WIDTH_RATIO_MAX,
+	),
+	slideThumbnailsVisible: asBoolean,
+};
+
+async function loadOne<K extends keyof AppSettings>(result: AppSettings, key: K): Promise<void> {
+	const raw = await settingsGet(key);
+	result[key] = PARSERS[key](raw) ?? DEFAULTS[key];
+}
+
 export async function loadSettings(): Promise<AppSettings> {
 	try {
 		// 旧 → 新 schema の段階的変換。store-migration.ts の MIGRATIONS に entry を
@@ -85,165 +144,11 @@ export async function loadSettings(): Promise<AppSettings> {
 			await settingsSave();
 		}
 
-		const rawWorkspacePath = await settingsGet("workspacePath");
-		const workspacePath: string | null =
-			typeof rawWorkspacePath === "string" ? rawWorkspacePath : DEFAULTS.workspacePath;
-
-		const rawThemePreference = await settingsGet("themePreference");
-		const themePreference: ThemePreference =
-			rawThemePreference === "system" ||
-			rawThemePreference === "light" ||
-			rawThemePreference === "dark"
-				? rawThemePreference
-				: DEFAULTS.themePreference;
-
-		const rawSidebarVisible = await settingsGet("sidebarVisible");
-		const sidebarVisible: boolean =
-			typeof rawSidebarVisible === "boolean" ? rawSidebarVisible : DEFAULTS.sidebarVisible;
-
-		const rawShowLineNumbers = await settingsGet("showLineNumbers");
-		const showLineNumbers: boolean =
-			typeof rawShowLineNumbers === "boolean" ? rawShowLineNumbers : DEFAULTS.showLineNumbers;
-
-		const rawFontSize = await settingsGet("fontSize");
-		const fontSize: number =
-			typeof rawFontSize === "number" && rawFontSize >= 8 && rawFontSize <= 32
-				? rawFontSize
-				: DEFAULTS.fontSize;
-
-		const rawAutoSaveDelay = await settingsGet("autoSaveDelay");
-		const autoSaveDelay: number =
-			typeof rawAutoSaveDelay === "number" && rawAutoSaveDelay >= 500 && rawAutoSaveDelay <= 10000
-				? rawAutoSaveDelay
-				: DEFAULTS.autoSaveDelay;
-
-		const rawHighlightActiveLine = await settingsGet("highlightActiveLine");
-		const highlightActiveLine: boolean =
-			typeof rawHighlightActiveLine === "boolean"
-				? rawHighlightActiveLine
-				: DEFAULTS.highlightActiveLine;
-
-		const rawFontFamily = await settingsGet("fontFamily");
-		const fontFamily: FontFamily =
-			rawFontFamily === "monospace" || rawFontFamily === "sans-serif" || rawFontFamily === "serif"
-				? rawFontFamily
-				: DEFAULTS.fontFamily;
-
-		const rawTrimTrailingWhitespace = await settingsGet("trimTrailingWhitespace");
-		const trimTrailingWhitespace: boolean =
-			typeof rawTrimTrailingWhitespace === "boolean"
-				? rawTrimTrailingWhitespace
-				: DEFAULTS.trimTrailingWhitespace;
-
-		const rawShowLinkCards = await settingsGet("showLinkCards");
-		const showLinkCards: boolean =
-			typeof rawShowLinkCards === "boolean" ? rawShowLinkCards : DEFAULTS.showLinkCards;
-
-		const rawGitSyncEnabled = await settingsGet("gitSyncEnabled");
-		const gitSyncEnabled: boolean =
-			typeof rawGitSyncEnabled === "boolean" ? rawGitSyncEnabled : DEFAULTS.gitSyncEnabled;
-
-		const rawAutoCommitInterval = await settingsGet("autoCommitInterval");
-		const autoCommitInterval: number =
-			typeof rawAutoCommitInterval === "number" &&
-			rawAutoCommitInterval >= 0 &&
-			rawAutoCommitInterval <= 1440
-				? rawAutoCommitInterval
-				: DEFAULTS.autoCommitInterval;
-
-		const rawAutoPullInterval = await settingsGet("autoPullInterval");
-		const autoPullInterval: number =
-			typeof rawAutoPullInterval === "number" &&
-			rawAutoPullInterval >= 0 &&
-			rawAutoPullInterval <= 1440
-				? rawAutoPullInterval
-				: DEFAULTS.autoPullInterval;
-
-		const rawAutoPushInterval = await settingsGet("autoPushInterval");
-		const autoPushInterval: number =
-			typeof rawAutoPushInterval === "number" &&
-			rawAutoPushInterval >= 0 &&
-			rawAutoPushInterval <= 1440
-				? rawAutoPushInterval
-				: DEFAULTS.autoPushInterval;
-
-		const rawPullBeforePush = await settingsGet("pullBeforePush");
-		const pullBeforePush: boolean =
-			typeof rawPullBeforePush === "boolean" ? rawPullBeforePush : DEFAULTS.pullBeforePush;
-
-		const rawSyncMethod = await settingsGet("syncMethod");
-		const syncMethod: SyncMethod =
-			rawSyncMethod === "merge" || rawSyncMethod === "rebase" ? rawSyncMethod : DEFAULTS.syncMethod;
-
-		const commitMessage: string = normalizeCommitMessage(await settingsGet("commitMessage"));
-
-		const rawAutoPullOnStartup = await settingsGet("autoPullOnStartup");
-		const autoPullOnStartup: boolean =
-			typeof rawAutoPullOnStartup === "boolean" ? rawAutoPullOnStartup : DEFAULTS.autoPullOnStartup;
-
-		const rawScratchpadVolatile = await settingsGet("scratchpadVolatile");
-		const scratchpadVolatile: boolean =
-			typeof rawScratchpadVolatile === "boolean"
-				? rawScratchpadVolatile
-				: DEFAULTS.scratchpadVolatile;
-
-		const rawAutoUpdateCheck = await settingsGet("autoUpdateCheck");
-		const autoUpdateCheck: boolean =
-			typeof rawAutoUpdateCheck === "boolean" ? rawAutoUpdateCheck : DEFAULTS.autoUpdateCheck;
-
-		const rawFileTreeShowHidden = await settingsGet("fileTreeShowHidden");
-		const fileTreeShowHidden: boolean =
-			typeof rawFileTreeShowHidden === "boolean"
-				? rawFileTreeShowHidden
-				: DEFAULTS.fileTreeShowHidden;
-
-		const rawFileTreeExcludePatterns = await settingsGet("fileTreeExcludePatterns");
-		const fileTreeExcludePatterns: string =
-			typeof rawFileTreeExcludePatterns === "string"
-				? rawFileTreeExcludePatterns
-				: DEFAULTS.fileTreeExcludePatterns;
-
-		const rawSlidePreviewWidthRatio = await settingsGet("slidePreviewWidthRatio");
-		const slidePreviewWidthRatio: number =
-			typeof rawSlidePreviewWidthRatio === "number" &&
-			Number.isFinite(rawSlidePreviewWidthRatio) &&
-			rawSlidePreviewWidthRatio >= SLIDE_PREVIEW_WIDTH_RATIO_MIN &&
-			rawSlidePreviewWidthRatio <= SLIDE_PREVIEW_WIDTH_RATIO_MAX
-				? rawSlidePreviewWidthRatio
-				: DEFAULTS.slidePreviewWidthRatio;
-
-		const rawSlideThumbnailsVisible = await settingsGet("slideThumbnailsVisible");
-		const slideThumbnailsVisible: boolean =
-			typeof rawSlideThumbnailsVisible === "boolean"
-				? rawSlideThumbnailsVisible
-				: DEFAULTS.slideThumbnailsVisible;
-
-		return {
-			workspacePath,
-			themePreference,
-			sidebarVisible,
-			showLineNumbers,
-			fontSize,
-			autoSaveDelay,
-			highlightActiveLine,
-			fontFamily,
-			trimTrailingWhitespace,
-			showLinkCards,
-			gitSyncEnabled,
-			autoCommitInterval,
-			autoPullInterval,
-			autoPushInterval,
-			pullBeforePush,
-			syncMethod,
-			commitMessage,
-			autoPullOnStartup,
-			scratchpadVolatile,
-			autoUpdateCheck,
-			fileTreeShowHidden,
-			fileTreeExcludePatterns,
-			slidePreviewWidthRatio,
-			slideThumbnailsVisible,
-		};
+		const result = {} as AppSettings;
+		for (const key of Object.keys(PARSERS) as (keyof AppSettings)[]) {
+			await loadOne(result, key);
+		}
+		return result;
 	} catch {
 		return { ...DEFAULTS };
 	}
