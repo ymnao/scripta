@@ -37,6 +37,13 @@ function extname(p: string): string {
 // ほぼ改善しない (K=4 で十分)。
 const EMBED_CONCURRENCY = 4;
 
+// exportAsHtml 経路で HTML 内に埋め込む base64 文字列の合計サイズ上限 (#354)。
+// 個別ファイルは main 側で 64MB に bound しているが、極端に画像が多い文書 (例: 500
+// 個の 63MB PNG) で累積が V8 heap を圧迫し renderer OOM を招くリスクが残っていた。
+// 累積が超過した以降の画像は data URI 化を skip し、元 src (scripta-asset URL 等) を
+// 維持する。上限は base64 文字列長で 256MB (実画像換算 ~192MB)。
+const TOTAL_EMBED_BYTES_LIMIT = 256 * 1024 * 1024;
+
 /**
  * `resolveHtmlImageSrcs` の async 版。ローカル画像を data URI で HTML に埋め込む (#314)。
  *
@@ -50,6 +57,9 @@ const EMBED_CONCURRENCY = 4;
  *   元の src を残す (broken image になるが export 自体は失敗させない)
  * - 同一 osPath は 1 回だけ read し、複数 img に data URI を再利用 (メモリ + IPC 節約)
  * - 並列度は EMBED_CONCURRENCY で bound (multi-image 悪意 md による OOM 抑止)
+ * - 埋め込み base64 の累積長が TOTAL_EMBED_BYTES_LIMIT を超えた以降は data URI 化せず
+ *   元 src を維持 (#354 renderer OOM 対策)。cap 到達時にどの画像が skip されるかは
+ *   I/O 完了順に依存する
  */
 export async function embedHtmlImagesAsDataUri(
 	html: string,
@@ -86,6 +96,7 @@ export async function embedHtmlImagesAsDataUri(
 	// 頭打ちが出るので、queue から順に pull する worker 型を採用。
 	const queue = [...tasks.values()];
 	let next = 0;
+	let totalEmbeddedBytes = 0;
 	const worker = async (): Promise<void> => {
 		while (true) {
 			const i = next++;
@@ -93,6 +104,11 @@ export async function embedHtmlImagesAsDataUri(
 			const task = queue[i];
 			try {
 				const b64 = await readFileBase64(task.osPath);
+				// 累積上限を超える場合は data URI 化せず元 src を維持 (broken image と同じ扱いで
+				// export 自体は完遂)。JS は単スレッドで check → += の間に await が無いため
+				// 他 worker が割り込む余地は無く、実オーバーシュートは発生しない。
+				if (totalEmbeddedBytes + b64.length > TOTAL_EMBED_BYTES_LIMIT) continue;
+				totalEmbeddedBytes += b64.length;
 				const dataUri = `data:${task.mime};base64,${b64}`;
 				for (const target of task.targets) target.setAttribute("src", dataUri);
 			} catch {
