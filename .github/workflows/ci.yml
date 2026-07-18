@@ -3,8 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
+    # docs-only 変更では実行対象コードが無いため全 job を skip する。
+    # branch protection の required checks は ci-skip.yml が stub success で補完する
+    # (codeql.yml + codeql-skip.yml と同じ pattern、path 定義も揃える)。
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
   workflow_call:
 
 permissions:
