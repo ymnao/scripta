@@ -14,7 +14,7 @@ const {
 	clearCache,
 	cancelOgpFetch,
 	hasInFlight,
-	MAX_CACHE_ENTRIES,
+	MAX_CACHE_SIZE,
 } = __testing;
 
 // SSRF defense (pinSafeLookup) が public IP のみ許可するため、local HTTP サーバを
@@ -141,9 +141,9 @@ describe("ogp cache behavior", () => {
 	});
 
 	it("cacheSet evicts oldest when over capacity", () => {
-		// MAX_CACHE_ENTRIES + 5 を入れて、最初の 5 件が evict されることを確認。
+		// MAX_CACHE_SIZE + 5 を入れて、最初の 5 件が evict されることを確認。
 		// fetchedAt は now を分散させて oldest 判定を安定させる。
-		for (let i = 0; i < MAX_CACHE_ENTRIES + 5; i++) {
+		for (let i = 0; i < MAX_CACHE_SIZE + 5; i++) {
 			cacheSet(
 				`https://example.com/${i}`,
 				{
@@ -158,11 +158,11 @@ describe("ogp cache behavior", () => {
 		}
 		// 容量内に収まっている
 		const stillIn: string[] = [];
-		for (let i = 0; i < MAX_CACHE_ENTRIES + 5; i++) {
+		for (let i = 0; i < MAX_CACHE_SIZE + 5; i++) {
 			if (cacheGet(`https://example.com/${i}`) !== null) {
 				stillIn.push(`${i}`);
 			}
 		}
-		expect(stillIn.length).toBeLessThanOrEqual(MAX_CACHE_ENTRIES);
+		expect(stillIn.length).toBeLessThanOrEqual(MAX_CACHE_SIZE);
 	});
 });
