@@ -1,10 +1,16 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { type Shortcut, useShortcuts } from "./useShortcuts";
+import { type Shortcut, type UseShortcutsOptions, useShortcuts } from "./useShortcuts";
 
-function Harness({ shortcuts }: { shortcuts: Shortcut[] }): ReactElement {
-	useShortcuts(shortcuts);
+function Harness({
+	shortcuts,
+	options,
+}: {
+	shortcuts: Shortcut[];
+	options?: UseShortcutsOptions;
+}): ReactElement {
+	useShortcuts(shortcuts, options);
 	return <div data-testid="harness" />;
 }
 
@@ -119,5 +125,133 @@ describe("useShortcuts", () => {
 		document.dispatchEvent(ev);
 		expect(spy).not.toHaveBeenCalled();
 		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("options.stopPropagation: true → match 時に e.stopPropagation() が呼ばれる", () => {
+		const run = vi.fn();
+		render(
+			<Harness
+				shortcuts={[{ id: "a", match: (e) => e.key === "a", run }]}
+				options={{ stopPropagation: true }}
+			/>,
+		);
+		const ev = new KeyboardEvent("keydown", { key: "a", cancelable: true });
+		const spy = vi.spyOn(ev, "stopPropagation");
+		document.dispatchEvent(ev);
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it("options.stopPropagation を省略すると e.stopPropagation() は呼ばれない (default false)", () => {
+		const run = vi.fn();
+		render(<Harness shortcuts={[{ id: "a", match: (e) => e.key === "a", run }]} />);
+		const ev = new KeyboardEvent("keydown", { key: "a", cancelable: true });
+		const spy = vi.spyOn(ev, "stopPropagation");
+		document.dispatchEvent(ev);
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it("capture: true + stopPropagation: true → match 時に bubble listener に届かない", () => {
+		const bubbleSeen = vi.fn();
+		const bubbleListener = () => bubbleSeen();
+		document.addEventListener("keydown", bubbleListener);
+		try {
+			const run = vi.fn();
+			render(
+				<Harness
+					shortcuts={[{ id: "a", match: (e) => e.key === "a", run }]}
+					options={{ capture: true, stopPropagation: true }}
+				/>,
+			);
+			const target = document.createElement("span");
+			document.body.appendChild(target);
+			try {
+				target.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+			} finally {
+				document.body.removeChild(target);
+			}
+			expect(run).toHaveBeenCalledTimes(1);
+			expect(bubbleSeen).not.toHaveBeenCalled();
+		} finally {
+			document.removeEventListener("keydown", bubbleListener);
+		}
+	});
+
+	it("stopPropagation: true でもマッチしないキーは伝播を止めない", () => {
+		const run = vi.fn();
+		render(
+			<Harness
+				shortcuts={[{ id: "a", match: (e) => e.key === "a", run }]}
+				options={{ stopPropagation: true }}
+			/>,
+		);
+		const ev = new KeyboardEvent("keydown", { key: "b", cancelable: true });
+		const spy = vi.spyOn(ev, "stopPropagation");
+		document.dispatchEvent(ev);
+		expect(run).not.toHaveBeenCalled();
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it("rerender で capture / stopPropagation が変わっても listener 重複しない", () => {
+		const run = vi.fn();
+		const shortcuts: Shortcut[] = [{ id: "a", match: (e) => e.key === "a", run }];
+		const { rerender, unmount } = render(
+			<Harness shortcuts={shortcuts} options={{ capture: false, stopPropagation: false }} />,
+		);
+		dispatchKey({ key: "a" });
+		expect(run).toHaveBeenCalledTimes(1);
+		rerender(<Harness shortcuts={shortcuts} options={{ capture: true, stopPropagation: true }} />);
+		dispatchKey({ key: "a" });
+		// 旧 listener が解除されていれば新 listener 1 回だけで累計 2 回。
+		expect(run).toHaveBeenCalledTimes(2);
+		rerender(
+			<Harness shortcuts={shortcuts} options={{ capture: false, stopPropagation: false }} />,
+		);
+		dispatchKey({ key: "a" });
+		expect(run).toHaveBeenCalledTimes(3);
+		unmount();
+		dispatchKey({ key: "a" });
+		expect(run).toHaveBeenCalledTimes(3);
+	});
+
+	it("capture: true → capture フェーズで attach され、bubble listener より先に発火する", () => {
+		const bubbleSeen = vi.fn();
+		const captureSeen = vi.fn();
+		const order: string[] = [];
+		const bubbleListener = () => {
+			bubbleSeen();
+			order.push("bubble");
+		};
+		document.addEventListener("keydown", bubbleListener);
+		try {
+			render(
+				<Harness
+					shortcuts={[
+						{
+							id: "a",
+							match: (e) => e.key === "a",
+							run: () => {
+								captureSeen();
+								order.push("capture");
+							},
+							// stopPropagation しないので bubble も見る。
+						},
+					]}
+					options={{ capture: true }}
+				/>,
+			);
+			// document 内の bubble ターゲットに向けて dispatch する。
+			const target = document.createElement("span");
+			document.body.appendChild(target);
+			try {
+				target.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+			} finally {
+				document.body.removeChild(target);
+			}
+			expect(captureSeen).toHaveBeenCalledTimes(1);
+			expect(bubbleSeen).toHaveBeenCalledTimes(1);
+			expect(order).toEqual(["capture", "bubble"]);
+		} finally {
+			document.removeEventListener("keydown", bubbleListener);
+		}
 	});
 });
