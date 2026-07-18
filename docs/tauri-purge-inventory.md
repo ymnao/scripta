@@ -185,7 +185,9 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 
 #### B-1. `convertFileSrc` API 名 (Tauri `@tauri-apps/api/core` 由来)
 
-**✅ 完了 (Phase 3 PR-3-1)**。preload の API 名・renderer ラッパー名を `buildAssetUrl` にリネーム済み（内部 helper `buildScriptaAssetUrl` と命名を統一）。下表は rename **前** の残存箇所（baseline 記録）。プロトコル設計とリネームの根拠は scripta-asset protocol の ADR（Phase 3 PR-3-5 で起票）に記録。
+**✅ 完了 (Phase 3 PR-3-1)**。preload の API 名・renderer ラッパー名を `buildAssetUrl` にリネーム済み（内部 helper `buildScriptaAssetUrl` と命名を統一）。下表は rename **前** の残存箇所（baseline 記録、行番号は当時のもの）。プロトコル設計とリネームの根拠は scripta-asset protocol の ADR（Phase 3 PR-3-5 で起票）に記録。
+
+> **path drift 注記**: 下表の `live-preview/images.ts` / `live-preview/images.test.ts` はその後 [PR #315](https://github.com/ymnao/scripta/pull/315) で構造分解された。現在の対応関係は `resolveImageSrc` 系のロジックが `src/lib/image-src.ts`、テストが `src/lib/image-src.test.ts` に移動（`src/components/editor/live-preview/images.ts` 自体は widget 側 wiring として残存）。baseline 記録の意義（rename 前の残存件数）を保つため、下表の行番号・パスはそのまま historical snapshot として残す。
 
 | ファイル | 行 | 内容 |
 |---|---|---|
