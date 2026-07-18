@@ -14,7 +14,7 @@ import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown
 // この経路を共有する)。既存 API 互換のため下記で re-export する。
 import { preprocessMermaidBlocks } from "./mermaid-preprocess";
 import { basename } from "./path";
-import { resolveHtmlImageSrcs } from "./resolve-html-images";
+import { embedHtmlImagesAsDataUri, resolveHtmlImageSrcs } from "./resolve-html-images";
 import { extractSlideFrontmatterTheme, parseSlides } from "./slide-parser";
 import { renderSlideHtmlWithMermaid } from "./slide-render";
 
@@ -320,7 +320,10 @@ export async function exportAsHtml(
 	const mermaidTheme = resolveMermaidTheme(options?.theme);
 	const withMarkers = preprocessPageBreakMarkers(markdown);
 	const preprocessed = await preprocessMermaidBlocks(withMarkers, mermaidTheme);
-	const bodyHtml = markdownToHtml(preprocessed);
+	// 相対 / 絶対 workspace パスのローカル画像を data URI として埋め込む (#314)。
+	// scripta-asset:// では外部ブラウザから解決不能なため、HTML 単体で self-contained
+	// にするにはインライン化が必要。activeTabPath は書き出し元の md path で代用する。
+	const bodyHtml = await embedHtmlImagesAsDataUri(markdownToHtml(preprocessed), filePath);
 	// Mermaid SVG は固定テーマでレンダリングされるため、
 	// system の場合も解決済みテーマで HTML 全体を統一する
 	const htmlTheme = options?.theme === "system" || !options?.theme ? mermaidTheme : options.theme;

@@ -27,6 +27,7 @@ const OTHER_WIN = 2;
 
 const {
 	readFileImpl,
+	readFileBase64Impl,
 	readFileBoundedFromHandle,
 	writeFileImpl,
 	writeNewFileImpl,
@@ -105,6 +106,73 @@ describe("readFileImpl", () => {
 		const boundary = join(workspaceDir, "boundary.bin");
 		await createSparseFile(boundary, MAX_READ_FILE_BYTES);
 		await expect(readFileImpl(TEST_WIN, boundary)).resolves.toHaveLength(MAX_READ_FILE_BYTES);
+	});
+});
+
+describe("readFileBase64Impl (#314 data URI 埋め込み用)", () => {
+	it("reads a png as base64", async () => {
+		const path = join(workspaceDir, "hero.png");
+		// 8-byte PNG magic + minimal payload
+		const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+		await writeFile(path, bytes);
+		const b64 = await readFileBase64Impl(TEST_WIN, path);
+		expect(b64).toBe(bytes.toString("base64"));
+		expect(Buffer.from(b64, "base64")).toEqual(bytes);
+	});
+
+	it("reads a jpeg as base64", async () => {
+		const path = join(workspaceDir, "photo.jpg");
+		const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+		await writeFile(path, bytes);
+		const b64 = await readFileBase64Impl(TEST_WIN, path);
+		expect(Buffer.from(b64, "base64")).toEqual(bytes);
+	});
+
+	it("rejects non-image extensions (mp4)", async () => {
+		const path = join(workspaceDir, "video.mp4");
+		await writeFile(path, Buffer.from([0x00]));
+		await expect(readFileBase64Impl(TEST_WIN, path)).rejects.toThrow(/unsupported extension/);
+	});
+
+	it("rejects extensionless files", async () => {
+		const path = join(workspaceDir, "README");
+		await writeFile(path, Buffer.from([0x00]));
+		await expect(readFileBase64Impl(TEST_WIN, path)).rejects.toThrow(/unsupported extension/);
+	});
+
+	it("case-insensitive extension check (PNG)", async () => {
+		const path = join(workspaceDir, "A.PNG");
+		const bytes = Buffer.from([0x89, 0x50]);
+		await writeFile(path, bytes);
+		const b64 = await readFileBase64Impl(TEST_WIN, path);
+		expect(Buffer.from(b64, "base64")).toEqual(bytes);
+	});
+
+	it("rejects paths outside workspace (path-guard)", async () => {
+		const outside = join(tmpdir(), "scripta-outside.png");
+		await writeFile(outside, Buffer.from([0x00]));
+		try {
+			await expect(readFileBase64Impl(TEST_WIN, outside)).rejects.toThrow(/outside workspace/);
+		} finally {
+			await rm(outside, { force: true });
+		}
+	});
+
+	it("rejects paths not registered by this window (window-scoped)", async () => {
+		const path = join(workspaceDir, "hero.png");
+		await writeFile(path, Buffer.from([0x89, 0x50]));
+		await expect(readFileBase64Impl(OTHER_WIN, path)).rejects.toThrow(/outside workspace/);
+	});
+
+	it("rejects files exceeding MAX_READ_FILE_BYTES", async () => {
+		const path = join(workspaceDir, "huge.png");
+		await createSparseFile(path, MAX_READ_FILE_BYTES + 1);
+		await expect(readFileBase64Impl(TEST_WIN, path)).rejects.toThrow(/too large|FILE_TOO_LARGE/i);
+	});
+
+	it("throws ENOENT for missing file", async () => {
+		const path = join(workspaceDir, "missing.png");
+		await expect(readFileBase64Impl(TEST_WIN, path)).rejects.toThrow(/ENOENT/);
 	});
 });
 

@@ -1,6 +1,7 @@
 import { promises as fsp } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { shell } from "electron";
+import { mimeForImageExt } from "../../../src/types/image";
 import type { FileEntry } from "../../../src/types/workspace";
 import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
@@ -11,6 +12,7 @@ import {
 	consumeTransientWritePath,
 	findContainingWorkspaceRoot,
 } from "../utils/path-guard";
+import { StructuredError } from "../utils/structured-error";
 import { getFileTreeFilterOptions } from "./settings";
 
 // fs:read のサイズ上限。`.md` は通常 1MB 未満なので 64MB は十分なマージン。
@@ -82,6 +84,40 @@ async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const fh = await fsp.open(canonical, "r");
 	try {
 		return await readFileBoundedFromHandle(fh, canonical, MAX_READ_FILE_BYTES);
+	} finally {
+		await fh.close();
+	}
+}
+
+// exportAsHtml の data URI 埋め込み用に、workspace 内の画像を base64 で読む (#314)。
+// - path-guard で workspace 外 read を拒否する (fs:read と同じ保証)
+// - 拡張子を image ホワイトリストで絞る (mimeForImageExt が null → reject)。
+//   任意の binary を base64 で吸い上げられる能力を封じ、能力最小化する
+// - サイズ上限は fs:read と共通 (64MB)。巨大画像は data URI 化しても外部ブラウザで
+//   持たない (HTML file 自体が肥大化) ため、fail-loud で拒否するのが正解
+async function readFileBase64Impl(senderId: number, path: string): Promise<string> {
+	const canonical = await assertPathAllowed(senderId, path);
+	if (mimeForImageExt(extname(canonical)) === null) {
+		throw new StructuredError(
+			"INVALID_PATH",
+			`readFileBase64: unsupported extension: ${extname(canonical) || "(none)"}`,
+			{ path: canonical },
+		);
+	}
+	const fh = await fsp.open(canonical, "r");
+	try {
+		const stat = await fh.stat();
+		if (stat.size > MAX_READ_FILE_BYTES) {
+			throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
+		}
+		const buf = Buffer.alloc(stat.size);
+		let total = 0;
+		while (total < stat.size) {
+			const { bytesRead } = await fh.read(buf, total, stat.size - total);
+			if (bytesRead === 0) break;
+			total += bytesRead;
+		}
+		return buf.subarray(0, total).toString("base64");
 	} finally {
 		await fh.close();
 	}
@@ -212,6 +248,7 @@ async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 
 export function registerFsIpc(): void {
 	handle("fs:read", (event, path: string) => readFileImpl(event.sender.id, path));
+	handle("fs:read-base64", (event, path: string) => readFileBase64Impl(event.sender.id, path));
 	handle("fs:write", (event, path: string, content: string) =>
 		writeFileImpl(event.sender.id, path, content),
 	);
@@ -235,6 +272,7 @@ export function registerFsIpc(): void {
 
 export const __testing = {
 	readFileImpl,
+	readFileBase64Impl,
 	readFileBoundedFromHandle,
 	writeFileImpl,
 	writeNewFileImpl,

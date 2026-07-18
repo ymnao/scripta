@@ -53,6 +53,7 @@ const api: Api = Object.freeze({
 	workspaceSet: (path) => invoke(ipcRenderer.invoke("workspace:set", path)),
 
 	readFile: (path) => invoke(ipcRenderer.invoke("fs:read", path)),
+	readFileBase64: (path) => invoke(ipcRenderer.invoke("fs:read-base64", path)),
 	writeFile: (path, content) => invoke(ipcRenderer.invoke("fs:write", path, content)),
 	writeNewFile: (path, content) => invoke(ipcRenderer.invoke("fs:write-new", path, content)),
 	listDirectory: (path, opts) => invoke(ipcRenderer.invoke("fs:list", path, opts)),
