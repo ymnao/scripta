@@ -148,4 +148,36 @@ describe("embedHtmlImagesAsDataUri", () => {
 		expect(out).toContain("data:image/png;base64,UP1");
 		expect(out).toContain("data:image/jpeg;base64,UP2");
 	});
+
+	it("deduplicates identical osPath: single read for N references", async () => {
+		readFileBase64.mockClear();
+		readFileBase64.mockResolvedValue("DUP");
+		const out = await embedHtmlImagesAsDataUri(
+			'<img src="./same.png"><img src="./same.png"><img src="./same.png">',
+			"/workspace/deck.md",
+		);
+		// 3 img 参照でも readFileBase64 は 1 回だけ
+		expect(readFileBase64).toHaveBeenCalledTimes(1);
+		// 3 箇所全てに data URI が反映される
+		const matches = out.match(/data:image\/png;base64,DUP/g);
+		expect(matches?.length).toBe(3);
+	});
+
+	it("caps in-flight readFileBase64 to EMBED_CONCURRENCY (bounded concurrency)", async () => {
+		readFileBase64.mockClear();
+		let inFlight = 0;
+		let peak = 0;
+		readFileBase64.mockImplementation(async () => {
+			inFlight++;
+			peak = Math.max(peak, inFlight);
+			await new Promise((r) => setTimeout(r, 5));
+			inFlight--;
+			return "X";
+		});
+		const html = Array.from({ length: 20 }, (_, i) => `<img src="./a${i}.png">`).join("");
+		await embedHtmlImagesAsDataUri(html, "/workspace/deck.md");
+		expect(readFileBase64).toHaveBeenCalledTimes(20);
+		// EMBED_CONCURRENCY = 4。上限を超えた並列度が観測されないことを検証
+		expect(peak).toBeLessThanOrEqual(4);
+	});
 });
