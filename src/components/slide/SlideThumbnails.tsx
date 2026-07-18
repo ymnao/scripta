@@ -2,7 +2,8 @@
 // lazy chunk に閉じている katex CSS を eager path でも確保する必要がある。
 // Vite の INEFFECTIVE_DYNAMIC_IMPORT warning は他 2 箇所と同じ既知の噪音。
 import "katex/dist/katex.min.css";
-import { memo, useEffect, useRef } from "react";
+import { memo, useRef } from "react";
+import { useScrollActiveChildIntoView } from "../../hooks/useScrollActiveChildIntoView";
 import {
 	SLIDE_LOGICAL_WIDTH,
 	SLIDE_THUMBNAIL_WIDTH,
@@ -39,23 +40,9 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 	const htmls = useSlideHtmls(slides, themeOverride);
 	const navRef = useRef<HTMLElement>(null);
 
-	// current thumbnail が水平スクロール範囲外なら nav の scrollLeft を最小移動で調整。
-	// scrollIntoView は祖先まで scroll し得るため使わず、nav 内で局所化する。
-	// nav の直接子は map した button のみなので children[currentSlideIndex] で該当ボタンを取得。
-	useEffect(() => {
-		const nav = navRef.current;
-		const btn = nav?.children[currentSlideIndex] as HTMLElement | undefined;
-		if (!nav || !btn) return;
-		const navRect = nav.getBoundingClientRect();
-		const btnRect = btn.getBoundingClientRect();
-		const delta =
-			btnRect.left < navRect.left
-				? btnRect.left - navRect.left
-				: btnRect.right > navRect.right
-					? btnRect.right - navRect.right
-					: 0;
-		if (delta) nav.scrollBy({ left: delta, behavior: "smooth" });
-	}, [currentSlideIndex]);
+	// current thumbnail が nav の水平スクロール範囲外なら container-local に scrollBy で追随。
+	// nav の直接子は map した button のみなので children[currentSlideIndex] で該当ボタンを取得できる。
+	useScrollActiveChildIntoView(navRef, currentSlideIndex, { axis: "x", behavior: "smooth" });
 
 	return (
 		<nav
