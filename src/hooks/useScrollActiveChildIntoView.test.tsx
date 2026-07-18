@@ -127,10 +127,14 @@ describe("useScrollActiveChildIntoView", () => {
 	it("初回 mount 時に activeIndex が範囲外なら scrollBy が呼ばれる", () => {
 		// 既存テストは render → stub rects → rerender の 2 段で index 変化経路を検証していたため、
 		// activeIndex ≠ 0 で mount された時の initial-mount scroll (SlideThumbnails で最後に開いた
-		// slide index が復元される等) が未検証。prototype patch で rects を render 前に注入する。
+		// slide index が復元される等) が未検証。prototype patch で rects と scrollBy を render 前に
+		// 注入する。`Object.defineProperty` を使うのは、DOM `scrollBy` の overload 定義 (options
+		// 単数 or x/y 2 引数) を function 直代入で満たすと strict mode で this の暗黙 any + 引数数
+		// 不一致になるため、value descriptor で型検査を迂回する (テスト内のみの stub なので安全)。
 		const originalGetRect = HTMLElement.prototype.getBoundingClientRect;
+		const originalScrollBy = HTMLElement.prototype.scrollBy;
 		const scrollBy = vi.fn();
-		HTMLElement.prototype.getBoundingClientRect = function () {
+		HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement): DOMRect {
 			if (this.getAttribute("data-testid") === "container") {
 				return new DOMRect(0, 0, 200, 100);
 			}
@@ -143,12 +147,17 @@ describe("useScrollActiveChildIntoView", () => {
 			}
 			return originalGetRect.call(this);
 		};
-		// mount 前に prototype ごと差し替えるので scrollBy も prototype 経由で inject
-		const originalScrollBy = HTMLElement.prototype.scrollBy;
-		HTMLElement.prototype.scrollBy = function (arg: ScrollToOptions) {
-			if (this.getAttribute("data-testid") === "container") scrollBy(arg);
-			else originalScrollBy.call(this, arg);
-		} as HTMLElement["scrollBy"];
+		Object.defineProperty(HTMLElement.prototype, "scrollBy", {
+			configurable: true,
+			writable: true,
+			value(this: HTMLElement, ...args: unknown[]): void {
+				if (this.getAttribute("data-testid") === "container") {
+					scrollBy(args[0]);
+				} else {
+					(originalScrollBy as (...a: unknown[]) => void).apply(this, args);
+				}
+			},
+		});
 
 		try {
 			render(<Harness activeIndex={2} />);
@@ -156,7 +165,11 @@ describe("useScrollActiveChildIntoView", () => {
 			expect(scrollBy).toHaveBeenCalledWith({ top: 20, behavior: "auto" });
 		} finally {
 			HTMLElement.prototype.getBoundingClientRect = originalGetRect;
-			HTMLElement.prototype.scrollBy = originalScrollBy;
+			Object.defineProperty(HTMLElement.prototype, "scrollBy", {
+				configurable: true,
+				writable: true,
+				value: originalScrollBy,
+			});
 		}
 	});
 
