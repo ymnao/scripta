@@ -1233,6 +1233,30 @@ describe("AppLayout", () => {
 		expect(screen.queryByText("エクスポート")).not.toBeInTheDocument();
 	});
 
+	// Cmd+Shift+F は KeyboardEvent.key が "F" (Shift 押下により大文字化) になる。
+	// 兄弟 Cmd+Shift+X エントリと同じく match が toLowerCase 判定であることを検証する
+	// (旧実装は e.key === "f" で不発になっていた)。
+	it("Cmd+Shift+F (KeyboardEvent.key='F') triggers sidebar search panel switch", async () => {
+		openFileInStore("/workspace", "/workspace/test.md");
+
+		await act(async () => {
+			render(<AppLayout />);
+		});
+
+		const ev = new KeyboardEvent("keydown", {
+			key: "F",
+			metaKey: true,
+			shiftKey: true,
+			cancelable: true,
+		});
+		await act(async () => {
+			document.dispatchEvent(ev);
+		});
+
+		// preventDefault が呼ばれる = 該当 Shortcut が match=true として判定された。
+		expect(ev.defaultPrevented).toBe(true);
+	});
+
 	it("closes search bar when switching to newtab page", async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 
