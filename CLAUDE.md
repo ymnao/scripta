@@ -221,6 +221,7 @@ pnpm verify
 - PR は `.github/pull_request_template.md` のテンプレートに従って作成する
 - Issue も既存テンプレートがあればそれに従う
 - コミットメッセージは旧 scripta と同じ規約（`feat:` / `fix:` / `refactor:` / `chore:` / `docs:` / `style:` の Type プレフィックス + 日本語 subject）に従う
+- **merge 方式は全 PR squash merge**。このため merged branch のローカル削除は `git branch -d` が「未 merge」判定で拒否される（squash で SHA が変わるため git が原本 merge を認識できない）。merged 確認済み（`gh pr view <num> --json state`）のブランチ削除は `git branch -D` を使う。`/next` skill が `-d` 拒否で停止した場合も、対象 PR が merged であることを確認した上で `-D` に切り替える
 
 ## 旧リポジトリ参照ガイド
 
