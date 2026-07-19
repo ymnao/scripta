@@ -59,6 +59,15 @@ describe("isWatcherIgnored", () => {
 	it("does NOT ignore a file literally named `node_modules.md` (component-exact match only)", () => {
 		expect(isWatcherIgnored("/home/user/workspace/node_modules.md", root)).toBe(false);
 	});
+
+	it("also ignores a plain file literally named `node_modules` (file/dir distinction is at path-component level)", () => {
+		// FileTree (entry-filter.ts) は gitignore-style `node_modules/` の dirOnly マッチで
+		// プレーンファイルを表示するが、watcher は path component 単位の判定なので同名
+		// プレーンファイルも ignore になる。「ツリーには見えるが監視されない」非対称が
+		// 生じるが、そのような名前のノートが発生するケースは通常なく実害なしと判断
+		// （`.git` プレーンファイルと同じ扱い）。
+		expect(isWatcherIgnored("/home/user/workspace/node_modules", root)).toBe(true);
+	});
 });
 
 describe("mergeEventKind", () => {
