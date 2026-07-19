@@ -10,6 +10,11 @@ export type { FsKind };
 // `node_modules/` 配下も依存パッケージの大量ファイルを監視することになり性能ノイズになる
 // ため同様に除外する。FileTree のデフォルト除外には node_modules がないため「ツリーに見えるが
 // 監視されない」非対称が生じるが、node_modules 内のノート編集は想定外として受容済み（#299）。
+// また path component 単位で判定するため、`node_modules` という名前のプレーンファイル
+// （拡張子なし）は file/dir 区別なく ignore 対象になる。FileTree 側 (entry-filter.ts) は
+// gitignore-style `node_modules/` の dirOnly マッチでプレーンファイルを表示するため、
+// 「ツリーには見えるが監視されない」非対称がこの edge case でも生じるが、そのような名前の
+// ノートが発生するケースは通常なく、過剰除外は実害なしと判断（`.git` と同じ扱い）。
 // `.gitignore` や `.scripta/scratchpads/*.md` のような hidden path は通常通り監視する
 // （ユーザーが開いて編集する可能性がある）。
 export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolean {
