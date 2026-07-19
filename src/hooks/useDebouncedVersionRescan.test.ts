@@ -9,6 +9,12 @@ const bumpFileTree = () => {
 	});
 };
 
+const bumpContent = () => {
+	act(() => {
+		useWorkspaceStore.getState().bumpContentVersion();
+	});
+};
+
 describe("useDebouncedVersionRescan", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -18,6 +24,18 @@ describe("useDebouncedVersionRescan", () => {
 	afterEach(() => {
 		vi.clearAllTimers();
 		vi.useRealTimers();
+	});
+
+	it("fires rescan for a contentVersion bump too (symmetric path)", () => {
+		const rescan = vi.fn();
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		renderHook(() => useDebouncedVersionRescan(rescan, cancel));
+
+		bumpContent();
+		act(() => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(rescan).toHaveBeenCalledTimes(1);
 	});
 
 	it("fires rescan 2000ms after a single bump", () => {
@@ -39,18 +57,32 @@ describe("useDebouncedVersionRescan", () => {
 		expect(rescan).toHaveBeenCalledTimes(1);
 	});
 
-	it("forces rescan when bumps continue past MAX_WAIT_MS (10000ms)", () => {
+	it("forces rescan at MAX_WAIT_MS (10000ms) when bumps keep resetting the debounce", () => {
 		const rescan = vi.fn();
 		const cancel = vi.fn().mockResolvedValue(undefined);
 		renderHook(() => useDebouncedVersionRescan(rescan, cancel));
 
-		for (let i = 0; i < 12; i++) {
+		// bump every 900ms so the classic 2000ms debounce never expires.
+		// streakStart = t=0. At each bump, delay = min(2000, max(0, 10000 - elapsed)).
+		// The forced fire lands exactly at t = streakStart + MAX_WAIT_MS = 10000.
+		let t = 0;
+		while (t < 9900) {
 			bumpFileTree();
 			act(() => {
 				vi.advanceTimersByTime(900);
 			});
+			t += 900;
 		}
+		// t = 9900 now. Next bump computes delay = min(2000, 100) = 100 → fires at t=10000.
+		bumpFileTree();
+		act(() => {
+			vi.advanceTimersByTime(99);
+		});
+		expect(rescan).not.toHaveBeenCalled();
 
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
 		expect(rescan).toHaveBeenCalledTimes(1);
 	});
 
@@ -97,6 +129,41 @@ describe("useDebouncedVersionRescan", () => {
 			vi.advanceTimersByTime(5000);
 		});
 		expect(cancel).not.toHaveBeenCalled();
+	});
+
+	it("resets the streak when rescan is disabled mid-streak and re-enabled later", () => {
+		const rescan = vi.fn();
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		const { rerender } = renderHook(
+			({ r }: { r: (() => void) | null }) => useDebouncedVersionRescan(r, cancel),
+			{ initialProps: { r: rescan as (() => void) | null } },
+		);
+
+		// Start a streak, then disable the hook mid-streak.
+		bumpFileTree();
+		act(() => {
+			vi.advanceTimersByTime(500);
+		});
+		rerender({ r: null });
+
+		// Time passes while disabled (well past MAX_WAIT_MS).
+		act(() => {
+			vi.advanceTimersByTime(20000);
+		});
+
+		// Re-enable and bump. Must follow DEBOUNCE_MS, not fire immediately from a
+		// stale streakStart carried over the disabled period.
+		rerender({ r: rescan });
+		bumpFileTree();
+		act(() => {
+			vi.advanceTimersByTime(1999);
+		});
+		expect(rescan).not.toHaveBeenCalled();
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(rescan).toHaveBeenCalledTimes(1);
 	});
 
 	it("resets the streak when rescan identity changes without a version bump", () => {

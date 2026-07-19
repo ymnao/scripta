@@ -29,7 +29,12 @@ export function useDebouncedVersionRescan(
 	const prevVersionRef = useRef(version);
 	const streakStartAtRef = useRef<number | null>(null);
 	useEffect(() => {
-		if (!rescan) return;
+		if (!rescan) {
+			// hook が無効化された (対象外タブ等)。進行中の streak を落として、
+			// 再有効化時に古い streakStart で即発火するのを防ぐ。
+			streakStartAtRef.current = null;
+			return;
+		}
 		if (prevVersionRef.current === version) {
 			// version 変化なしで effect が再実行された (rescan/cancel の identity 変化)。
 			// 進行中の streak は timer と一緒に破棄されるため、streakStart もリセットして
