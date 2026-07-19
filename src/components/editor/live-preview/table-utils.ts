@@ -43,6 +43,26 @@ export interface TableInfo {
 
 const DELIMITER_RE = /^\s*:?-{1,}:?\s*$/;
 
+/**
+ * テーブルセル用のエスケープ。`\` の倍化 → `|` の escape → 改行の空白化を順に適用する。
+ *
+ * `\` を先に倍化しないと後段の `\|` 挿入で cell separator に化ける
+ * (CodeQL js/incomplete-sanitization #2 対策)。パーサー findUnescapedPipe は
+ * `|` 直前の `\` 個数が偶数なら区切りとみなすため、先 2 段の replace で
+ * `|` 直前の `\` 個数は常に奇数になる。3 段目 (`[\r\n]+` → 空白) は表構造を
+ * 壊す行内改行を潰すためで、パイプエスケープの整合性とは独立。
+ *
+ * tsvToMarkdownTable (tables.ts) / cellContents 組み立て (table-decoration.ts) の
+ * 共通実装。副作用として `|` に隣接しない lone `\` も倍化される (旧 escapeCell は
+ * lone `\` を保持していた) — DOM→md 経路との roundtrip 一貫性を優先した。
+ */
+export function escapeTableCell(text: string): string {
+	return text
+		.replace(/\\/g, "\\\\")
+		.replace(/\|/g, "\\|")
+		.replace(/[\r\n]+/g, " ");
+}
+
 /** エスケープされていない `|` の位置を返す。見つからなければ -1。 */
 export function findUnescapedPipe(text: string, start: number): number {
 	for (let j = start; j < text.length; j++) {
