@@ -29,7 +29,7 @@ import {
 	treeChangeDispatcher,
 	treeParseProgressed,
 } from "./plugin-utils";
-import { findUnescapedPipe, trimToLastTableLine } from "./table-utils";
+import { escapeTableCell, findUnescapedPipe, trimToLastTableLine } from "./table-utils";
 
 // ── Effects ───────────────────────────────────────────
 
@@ -176,13 +176,6 @@ export function focusCell(container: HTMLElement, row: number, col: number): voi
 		`[data-row="${row}"][data-col="${col}"]`,
 	) as HTMLElement | null;
 	if (cell) placeCaretAtEnd(cell);
-}
-
-/** セル内容を正規化する。`\` と `|` をエスケープし改行を除去する。 */
-function sanitizeCellText(text: string): string {
-	// `\` を先に倍化しないと後段の `\|` 挿入で cell separator に化ける
-	// (CodeQL js/incomplete-sanitization #2)。
-	return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 /** セル内の <br> を `<br>` テキストとして読み取る。ゼロ幅スペースは除去する。 */
@@ -367,7 +360,7 @@ function syncRowsToDoc(wrapper: HTMLElement, view: EditorView, rows: number[]): 
 		if (!trEl) continue;
 		const cellContents: string[] = [];
 		for (const td of trEl.querySelectorAll("th, td")) {
-			cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
+			cellContents.push(escapeTableCell(getCellTextContent(td as HTMLElement)));
 		}
 		const newLine = `| ${cellContents.join(" | ")} |`;
 		if (newLine !== view.state.doc.sliceString(docLine.from, docLine.to)) {
@@ -871,7 +864,7 @@ function syncRowFromCell(
 
 	const cellContents: string[] = [];
 	for (const td of tr.querySelectorAll("th, td")) {
-		cellContents.push(sanitizeCellText(getCellTextContent(td as HTMLElement)));
+		cellContents.push(escapeTableCell(getCellTextContent(td as HTMLElement)));
 	}
 
 	const newLine = `| ${cellContents.join(" | ")} |`;

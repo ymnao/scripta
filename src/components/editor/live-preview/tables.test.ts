@@ -365,6 +365,16 @@ describe("tsvToMarkdownTable", () => {
 		expect(dataLine).toContain("a\\\\\\\\\\|b");
 	});
 
+	it("パイプに隣接しない lone `\\` も倍化される (escape 統一の意図固定)", () => {
+		// Windows パスや正規表現の TSV セル (`C:\foo` 等) は倍化されて出力される。
+		// 旧 escapeCell は lone `\` を保持していたが、escapeTableCell への統一で
+		// DOM→md 経路 (旧 sanitizeCellText) と roundtrip 一貫させるため。
+		const grid = [["H"], ["C:\\foo"]];
+		const result = tsvToMarkdownTable(grid);
+		const dataLine = result.split("\n")[2];
+		expect(dataLine).toContain("C:\\\\foo");
+	});
+
 	it("列数が不揃いでも最大列数に揃う", () => {
 		const grid = [["A", "B", "C"], ["1"]];
 		const result = tsvToMarkdownTable(grid);
