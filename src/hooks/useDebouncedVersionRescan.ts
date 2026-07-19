@@ -30,7 +30,13 @@ export function useDebouncedVersionRescan(
 	const streakStartAtRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (!rescan) return;
-		if (prevVersionRef.current === version) return;
+		if (prevVersionRef.current === version) {
+			// version 変化なしで effect が再実行された (rescan/cancel の identity 変化)。
+			// 進行中の streak は timer と一緒に破棄されるため、streakStart もリセットして
+			// 次の bump が古い streakStart で即発火するのを防ぐ。
+			streakStartAtRef.current = null;
+			return;
+		}
 		prevVersionRef.current = version;
 		const now = Date.now();
 		if (streakStartAtRef.current === null) {

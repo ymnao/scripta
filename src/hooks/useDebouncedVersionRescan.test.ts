@@ -99,6 +99,45 @@ describe("useDebouncedVersionRescan", () => {
 		expect(cancel).not.toHaveBeenCalled();
 	});
 
+	it("resets the streak when rescan identity changes without a version bump", () => {
+		const rescan1 = vi.fn();
+		const rescan2 = vi.fn();
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		const { rerender } = renderHook(
+			({ r }: { r: () => void }) => useDebouncedVersionRescan(r, cancel),
+			{ initialProps: { r: rescan1 } },
+		);
+
+		// Start a streak.
+		bumpFileTree();
+		act(() => {
+			vi.advanceTimersByTime(500);
+		});
+
+		// Simulate an identity change (e.g., BacklinkPanel switches targetFilePath).
+		// The pending timer is cleared but no version bump follows.
+		rerender({ r: rescan2 });
+
+		// A long idle period passes.
+		act(() => {
+			vi.advanceTimersByTime(20000);
+		});
+
+		// A new bump must follow the classic DEBOUNCE_MS, not fire immediately due
+		// to a stale streakStart from the abandoned streak.
+		bumpFileTree();
+		act(() => {
+			vi.advanceTimersByTime(1999);
+		});
+		expect(rescan2).not.toHaveBeenCalled();
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(rescan2).toHaveBeenCalledTimes(1);
+		expect(rescan1).not.toHaveBeenCalled();
+	});
+
 	it("starts a fresh streak after firing (maxWait window resets)", () => {
 		const rescan = vi.fn();
 		const cancel = vi.fn().mockResolvedValue(undefined);
