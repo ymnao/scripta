@@ -211,8 +211,9 @@ describe("renderMermaid", () => {
 		const source = "graph TD\n  INIT-->FAIL";
 		const mermaidMod = (await import("mermaid")).default;
 		const initSpy = mermaidMod.initialize as ReturnType<typeof vi.fn>;
-		// 直前 test で lastInitKey が固定される可能性を排して、必ず initialize が
-		// 呼ばれる状況を作る (theme を切り替える): 続く 1 回だけ throw させる
+		// mermaid v11 動的 import 失敗 も initialize() throw も ensureInitialized 内の
+		// 同一 throw path に落ちるため、initialize throw で共通に検証する (動的 import
+		// 失敗は mermaidModule singleton state 都合で個別 test 化が困難)。
 		initSpy.mockImplementationOnce(() => {
 			throw new Error("init failure");
 		});

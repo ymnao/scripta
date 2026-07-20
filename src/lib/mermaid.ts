@@ -394,14 +394,10 @@ export async function renderMermaid(
 			try {
 				await ensureInitialized(theme, font, options);
 			} catch (initErr) {
-				// init 失敗 (動的 import 失敗 / initialize throw) は per-source error として
-				// cache しない。cache すると同一 source の 2 回目以降が rendering placeholder
-				// または error entry で短絡し、ensureInitialized 内の `initPromise = null`
-				// リセット (PR #312 で導入) 経由の再 import 試行に到達できなくなる。
-				// rendering placeholder を撤去して次回 call が再度 queue に乗るようにする
-				// (source を編集する経路 = live-preview / MermaidEditorDialog は新 cacheKey で
-				// retry 可だが、export.ts 経路は同一 source のため clearMermaidCache 発火まで
-				// stack する — session 113 で追跡調査、fix 対応)。
+				// ensureInitialized の throw (動的 import 失敗 も initialize() throw も同 catch
+				// に落ちる) は per-source error として cache しない。cache すると次回同 key の call
+				// が rendering placeholder / error entry で短絡し、ensureInitialized 内の
+				// `initPromise = null` リセット (PR #312) 経由の再試行に到達できないため。
 				if (gen === cacheGeneration) {
 					cache.delete(key);
 				}
