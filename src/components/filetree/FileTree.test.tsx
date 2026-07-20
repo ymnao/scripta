@@ -745,4 +745,150 @@ describe("FileTree", () => {
 			});
 		});
 	});
+
+	describe("keyboard navigation", () => {
+		it("renders root ul as tree with roving tabindex", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			const tree = screen.getByRole("tree");
+			expect(tree).toBeInTheDocument();
+			const treeitems = screen.getAllByRole("treeitem");
+			// First entry is focused by default → tabIndex 0, others -1.
+			expect(treeitems[0].getAttribute("tabindex")).toBe("0");
+			expect(treeitems[1].getAttribute("tabindex")).toBe("-1");
+		});
+
+		it("moves focus down and up with ArrowDown/ArrowUp", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			const items = screen.getAllByRole("treeitem");
+			items[0].focus();
+			fireEvent.keyDown(items[0], { key: "ArrowDown" });
+			expect(document.activeElement).toBe(items[1]);
+			fireEvent.keyDown(items[1], { key: "ArrowDown" });
+			expect(document.activeElement).toBe(items[2]);
+			fireEvent.keyDown(items[2], { key: "ArrowUp" });
+			expect(document.activeElement).toBe(items[1]);
+		});
+
+		it("expands folder with ArrowRight when collapsed", async () => {
+			const childEntries = [
+				{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+			];
+			mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce(childEntries);
+
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			const docs = screen.getByLabelText("docs folder");
+			docs.focus();
+			fireEvent.keyDown(docs, { key: "ArrowRight" });
+			await waitFor(() => {
+				expect(screen.getByText("readme.md")).toBeInTheDocument();
+			});
+		});
+
+		it("moves to first child with ArrowRight when already expanded", async () => {
+			const childEntries = [
+				{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+			];
+			mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce(childEntries);
+
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			const docs = screen.getByLabelText("docs folder");
+			await userEvent.click(docs);
+			await waitFor(() => {
+				expect(screen.getByText("readme.md")).toBeInTheDocument();
+			});
+			docs.focus();
+			fireEvent.keyDown(docs, { key: "ArrowRight" });
+			expect(document.activeElement).toBe(screen.getByLabelText("readme.md file"));
+		});
+
+		it("collapses expanded folder with ArrowLeft", async () => {
+			const childEntries = [
+				{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+			];
+			mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce(childEntries);
+
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			const docs = screen.getByLabelText("docs folder");
+			await userEvent.click(docs);
+			await waitFor(() => {
+				expect(screen.getByText("readme.md")).toBeInTheDocument();
+			});
+			docs.focus();
+			fireEvent.keyDown(docs, { key: "ArrowLeft" });
+			await waitFor(() => {
+				expect(screen.queryByText("readme.md")).not.toBeInTheDocument();
+			});
+		});
+
+		it("moves to parent with ArrowLeft on child", async () => {
+			const childEntries = [
+				{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+			];
+			mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce(childEntries);
+
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			await userEvent.click(screen.getByLabelText("docs folder"));
+			await waitFor(() => {
+				expect(screen.getByText("readme.md")).toBeInTheDocument();
+			});
+
+			const child = screen.getByLabelText("readme.md file");
+			child.focus();
+			fireEvent.keyDown(child, { key: "ArrowLeft" });
+			expect(document.activeElement).toBe(screen.getByLabelText("docs folder"));
+		});
+
+		it("activates file with Enter", async () => {
+			const onFileSelect = vi.fn();
+			render(
+				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
+			);
+			await waitFor(() => {
+				expect(screen.getByText("hello.md")).toBeInTheDocument();
+			});
+
+			const file = screen.getByLabelText("hello.md file");
+			file.focus();
+			fireEvent.keyDown(file, { key: "Enter" });
+			expect(onFileSelect).toHaveBeenCalledWith("/workspace/hello.md");
+		});
+
+		it("jumps to first/last with Home/End", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			const items = screen.getAllByRole("treeitem");
+			items[1].focus();
+			fireEvent.keyDown(items[1], { key: "End" });
+			expect(document.activeElement).toBe(items[items.length - 1]);
+			fireEvent.keyDown(items[items.length - 1], { key: "Home" });
+			expect(document.activeElement).toBe(items[0]);
+		});
+	});
 });

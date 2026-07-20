@@ -19,6 +19,8 @@ interface FileTreeItemProps {
 	entry: FileEntry;
 	depth: number;
 	selectedPath: string | null;
+	focusedPath: string | null;
+	onFocusPath: (path: string) => void;
 	onFileSelect: (path: string) => void;
 	onFileOpenNewTab?: (path: string) => void;
 	refreshKey: number;
@@ -37,6 +39,8 @@ export function FileTreeItem({
 	entry,
 	depth,
 	selectedPath,
+	focusedPath,
+	onFocusPath,
 	onFileSelect,
 	onFileOpenNewTab,
 	refreshKey,
@@ -201,18 +205,25 @@ export function FileTreeItem({
 		);
 	}
 
+	const isFocused = entry.path === focusedPath;
+
 	return (
-		<li>
+		<li role="none">
 			<button
 				type="button"
+				role="treeitem"
 				data-path={entry.path}
 				data-is-directory={entry.isDirectory}
+				data-depth={depth}
+				tabIndex={isFocused ? 0 : -1}
 				aria-label={`${entry.name} ${entry.isDirectory ? "folder" : "file"}`}
 				aria-expanded={entry.isDirectory ? expanded : undefined}
+				aria-selected={isSelected}
 				aria-current={isSelected || undefined}
 				className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${isSelected ? "bg-black/10 dark:bg-white/10" : ""} ${isDragSource ? "opacity-40" : ""} ${isDragOver ? "bg-black/10 dark:bg-white/10" : isHoverTarget ? "bg-black/5 dark:bg-white/5" : ""}`}
 				style={{ paddingLeft: `${depth * 16 + 4}px` }}
 				onClick={handleClick}
+				onFocus={() => onFocusPath(entry.path)}
 				onContextMenu={handleContextMenuEvent}
 			>
 				{entry.isDirectory ? (
@@ -258,7 +269,7 @@ export function FileTreeItem({
 				expanded &&
 				loaded &&
 				(children.length > 0 || isCreatingHere ? (
-					<ul>
+					<ul role="group">
 						{isCreatingHere && (
 							<InlineInput
 								depth={depth + 1}
@@ -273,6 +284,8 @@ export function FileTreeItem({
 								entry={child}
 								depth={depth + 1}
 								selectedPath={selectedPath}
+								focusedPath={focusedPath}
+								onFocusPath={onFocusPath}
 								onFileSelect={onFileSelect}
 								onFileOpenNewTab={onFileOpenNewTab}
 								refreshKey={refreshKey}

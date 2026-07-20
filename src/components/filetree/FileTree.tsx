@@ -64,6 +64,7 @@ export function FileTree({
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [refreshKey, setRefreshKey] = useState(0);
+	const [focusedPath, setFocusedPath] = useState<string | null>(selectedPath);
 
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 	const [creating, setCreating] = useState<CreatingState | null>(null);
@@ -132,6 +133,101 @@ export function FileTree({
 		// trigger a redundant refresh when workspace changes reset the counter.
 		prevFileTreeVersionRef.current = useWorkspaceStore.getState().fileTreeVersion;
 	}, [loadEntries]);
+
+	useEffect(() => {
+		if (selectedPath) setFocusedPath(selectedPath);
+	}, [selectedPath]);
+
+	useEffect(() => {
+		if (focusedPath || entries.length === 0) return;
+		setFocusedPath(entries[0].path);
+	}, [entries, focusedPath]);
+
+	const handleFocusPath = useCallback((path: string) => {
+		setFocusedPath(path);
+	}, []);
+
+	const handleTreeKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLUListElement>) => {
+			// Skip when a rename/create InlineInput or other input owns focus.
+			const target = e.target as HTMLElement;
+			if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+			const currentBtn = target.closest<HTMLElement>("[data-path]");
+			if (!currentBtn) return;
+
+			const rootUl = rootUlRef.current;
+			if (!rootUl) return;
+			const visible = Array.from(
+				rootUl.querySelectorAll<HTMLButtonElement>("[data-path]"),
+			);
+			const idx = visible.indexOf(currentBtn as HTMLButtonElement);
+			if (idx < 0) return;
+
+			const isDirectory = currentBtn.dataset.isDirectory === "true";
+			const expanded = currentBtn.getAttribute("aria-expanded") === "true";
+			const depth = Number(currentBtn.dataset.depth ?? "0");
+
+			const focusIdx = (i: number) => {
+				const btn = visible[i];
+				if (!btn) return;
+				const path = btn.dataset.path;
+				if (path) setFocusedPath(path);
+				btn.focus();
+			};
+
+			switch (e.key) {
+				case "ArrowDown":
+					e.preventDefault();
+					if (idx < visible.length - 1) focusIdx(idx + 1);
+					break;
+				case "ArrowUp":
+					e.preventDefault();
+					if (idx > 0) focusIdx(idx - 1);
+					break;
+				case "ArrowRight":
+					e.preventDefault();
+					if (!isDirectory) break;
+					if (!expanded) {
+						(currentBtn as HTMLButtonElement).click();
+					} else if (idx < visible.length - 1) {
+						const nextDepth = Number(visible[idx + 1].dataset.depth ?? "0");
+						if (nextDepth > depth) focusIdx(idx + 1);
+					}
+					break;
+				case "ArrowLeft":
+					e.preventDefault();
+					if (isDirectory && expanded) {
+						(currentBtn as HTMLButtonElement).click();
+					} else {
+						// Find nearest ancestor (depth < current) walking backward.
+						for (let i = idx - 1; i >= 0; i--) {
+							const d = Number(visible[i].dataset.depth ?? "0");
+							if (d < depth) {
+								focusIdx(i);
+								break;
+							}
+						}
+					}
+					break;
+				case "Home":
+					e.preventDefault();
+					focusIdx(0);
+					break;
+				case "End":
+					e.preventDefault();
+					focusIdx(visible.length - 1);
+					break;
+				case "Enter":
+				case " ":
+					e.preventDefault();
+					(currentBtn as HTMLButtonElement).click();
+					break;
+				default:
+					return;
+			}
+		},
+		[],
+	);
 
 	const refresh = useCallback(() => {
 		loadEntries(true);
@@ -593,9 +689,12 @@ export function FileTree({
 		<>
 			<ul
 				ref={rootUlRef}
+				role="tree"
+				aria-label="File tree"
 				className={`min-h-full select-none overflow-y-auto px-1 py-1 ${isRootDragOver ? "bg-black/5 dark:bg-white/5" : ""}`}
 				onContextMenu={handleRootContextMenu}
 				onPointerDown={handlePointerDown}
+				onKeyDown={handleTreeKeyDown}
 				onClickCapture={(e) => {
 					if (skipNextClickRef.current) {
 						skipNextClickRef.current = false;
@@ -618,6 +717,8 @@ export function FileTree({
 						entry={entry}
 						depth={0}
 						selectedPath={selectedPath}
+						focusedPath={focusedPath}
+						onFocusPath={handleFocusPath}
 						onFileSelect={onFileSelect}
 						onFileOpenNewTab={onFileOpenNewTab}
 						refreshKey={refreshKey}
