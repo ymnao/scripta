@@ -248,11 +248,19 @@ describe("finalizeHtml", () => {
 	// finalize 出力の HTML から `javascript:` scheme を持つ active な href/src が
 	// 残らないことを固定する。
 	describe("javascript: 難読化除去", () => {
+		// active な script-execution scheme のクラス。`javascript:` に加えて `vbscript:` /
+		// `data:` も active URL scheme として同じ攻撃面を持つため 3 種まとめて拒否する
+		// (CodeQL `js/incomplete-url-scheme-check` 準拠)。本 describe の入力は javascript:
+		// 難読化のみだが、helper 側で 3 scheme を検査しておけば別 scheme 経路の regression
+		// も同時に固定できる。
+		const DANGEROUS_SCHEMES = ["javascript:", "vbscript:", "data:"] as const;
+
 		// helper: finalize 後の HTML を DOM parse して、全 href/src attribute から
-		// ASCII 空白 (改行/タブ含む) と制御文字を除去した上で小文字化した値が、
-		// `javascript:` で始まっていないことを assert する。文字列 substring 検査だと
-		// `java\nscript:` のような難読化を跨げないため必ず DOM 経由で確認する。
-		const assertNoActiveJavascriptScheme = (html: string) => {
+		// ASCII 空白 (改行/タブ含む) を除去した上で小文字化した値が、
+		// DANGEROUS_SCHEMES のいずれでも始まっていないことを assert する。
+		// 文字列 substring 検査だと `java\nscript:` のような難読化を跨げないため必ず
+		// DOM 経由で確認する。
+		const assertNoActiveScriptScheme = (html: string) => {
 			const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
 			const elements = doc.querySelectorAll("[href], [src]");
 			for (const el of Array.from(elements)) {
@@ -263,37 +271,38 @@ describe("finalizeHtml", () => {
 					// 小文字化して判定する。DOMPurify が仮に href/src の scheme 難読化を通した
 					// 場合でも substring 検査ではなく scheme 正規化ベースで detect する
 					const normalized = raw.replace(/\s/g, "").toLowerCase();
+					const hit = DANGEROUS_SCHEMES.find((s) => normalized.startsWith(s));
 					expect(
-						normalized.startsWith("javascript:"),
-						`<${el.tagName.toLowerCase()} ${attr}="${raw}"> は active な javascript: を持つ`,
-					).toBe(false);
+						hit,
+						`<${el.tagName.toLowerCase()} ${attr}="${raw}"> は active な ${hit ?? ""} scheme を持つ`,
+					).toBeUndefined();
 				}
 			}
 		};
 
 		it("HTML entity で j を難読化した javascript: (java&#x73;cript:) を除去する", () => {
 			const html = finalizeHtml(markUnsanitized('<a href="java&#x73;cript:alert(1)">x</a>'));
-			assertNoActiveJavascriptScheme(html);
+			assertNoActiveScriptScheme(html);
 		});
 
 		it("大小文字混在の JavaScript: を除去する", () => {
 			const html = finalizeHtml(markUnsanitized('<a href="JavaScript:alert(1)">x</a>'));
-			assertNoActiveJavascriptScheme(html);
+			assertNoActiveScriptScheme(html);
 		});
 
 		it("改行を挟んだ java\\nscript: を除去する", () => {
 			const html = finalizeHtml(markUnsanitized('<a href="java\nscript:alert(1)">x</a>'));
-			assertNoActiveJavascriptScheme(html);
+			assertNoActiveScriptScheme(html);
 		});
 
 		it("タブを挟んだ ja\\tvascript: を img src で除去する", () => {
 			const html = finalizeHtml(markUnsanitized('<img src="ja\tvascript:alert(1)">'));
-			assertNoActiveJavascriptScheme(html);
+			assertNoActiveScriptScheme(html);
 		});
 
 		it("前置空白 ' javascript:' を除去する", () => {
 			const html = finalizeHtml(markUnsanitized('<a href=" javascript:alert(1)">x</a>'));
-			assertNoActiveJavascriptScheme(html);
+			assertNoActiveScriptScheme(html);
 		});
 
 		// allowAssetProtocol: true 経路でも同じく難読化 javascript: が除去されることを
@@ -307,7 +316,7 @@ describe("finalizeHtml", () => {
 				'<a href=" javascript:alert(1)">d</a>',
 			].join("");
 			const html = finalizeHtml(markUnsanitized(attacks), { allowAssetProtocol: true });
-			assertNoActiveJavascriptScheme(html);
+			assertNoActiveScriptScheme(html);
 		});
 	});
 
