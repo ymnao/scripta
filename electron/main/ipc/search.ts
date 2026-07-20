@@ -119,6 +119,11 @@ async function collectMdFilesForWorkspace(
 const searchGeneration = new Map<number, number>();
 const wikilinkGeneration = new Map<number, number>();
 const backlinkGeneration = new Map<number, number>();
+// filename fuzzy scan は CommandPalette / wikilink-completion / live-preview の buildFileMap
+// から呼ばれ、SearchPanel の全文検索とはライフサイクルが独立している。cancelSearchForWindow が
+// filename scan を巻き込むと live-preview 側の副作用（オートコンプリート表示消失）が起きるので
+// 世代を独立管理する（wikilink/backlink と同方針）。
+const filenameGeneration = new Map<number, number>();
 
 function bumpGeneration(map: Map<number, number>, windowId: number): void {
 	const cur = map.get(windowId);
@@ -139,6 +144,7 @@ export function clearSearchForWindow(windowId: number): void {
 	searchGeneration.delete(windowId);
 	wikilinkGeneration.delete(windowId);
 	backlinkGeneration.delete(windowId);
+	filenameGeneration.delete(windowId);
 }
 
 // 明示的な cancel: gen を bump して in-flight searchFilesImpl を bail させる。
@@ -160,6 +166,13 @@ export function cancelWikilinkScanForWindow(windowId: number): void {
 // 全文検索 / 未解決リンクスキャンとは独立して管理（クロスキャンセル防止）。
 export function cancelBacklinkScanForWindow(windowId: number): void {
 	bumpGeneration(backlinkGeneration, windowId);
+}
+
+// 明示的な cancel: gen を bump して in-flight searchFilenamesImpl を bail させる。
+// CommandPalette の unmount / wikilink-completion の close 時に呼べる。
+// 全文検索 / wikilink / backlink とは独立して管理（クロスキャンセル防止）。
+export function cancelFilenameSearchForWindow(windowId: number): void {
+	bumpGeneration(filenameGeneration, windowId);
 }
 
 // 全文検索の実装。
@@ -251,7 +264,13 @@ async function searchFilenamesImpl(
 	workspacePath: string,
 	query: string,
 ): Promise<string[]> {
+	// stale checker は最初の await 前に確保する。await collectMdFilesForWorkspace で microtask に
+	// yield した隙に cancelFilenameSearchForWindow が gen を bump するケースをカバーするため
+	// (searchFilesImpl と同方針)。
+	const isStale = makeStaleChecker(filenameGeneration, senderId);
+
 	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	if (isStale()) return [];
 	// byte 比較（lexicographic byte compare）。
 	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
 	input.sort(byteCmp);
@@ -503,6 +522,9 @@ export function registerSearchIpc(): void {
 		(event, workspacePath: string, query: string): Promise<string[]> =>
 			searchFilenamesImpl(event.sender.id, workspacePath, query),
 	);
+	handle("filename:cancel", (event): void => {
+		cancelFilenameSearchForWindow(event.sender.id);
+	});
 	handle(
 		"search:unresolved-wikilinks",
 		(event, workspacePath: string): Promise<UnresolvedWikilink[]> =>

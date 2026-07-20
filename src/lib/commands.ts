@@ -120,6 +120,13 @@ export function searchFilenames(workspacePath: string, query: string): Promise<s
 	return withRetry(() => window.api.searchFilenames(workspacePath, query));
 }
 
+// in-flight searchFilenames を main 側でキャンセルする。
+// CommandPalette の unmount / wikilink-completion の close 時に呼べる。
+// cancelSearch / cancelWikilinkScan / cancelBacklinkScan を巻き込まない（クロスキャンセル防止）。
+export function cancelFilenameSearch(): Promise<void> {
+	return window.api.cancelFilenameSearch();
+}
+
 export function scanUnresolvedWikilinks(workspacePath: string): Promise<UnresolvedWikilink[]> {
 	return withRetry(() => window.api.scanUnresolvedWikilinks(workspacePath));
 }

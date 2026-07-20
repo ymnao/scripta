@@ -607,6 +607,9 @@ function installApiMock(opts: {
 		cancelSearch: async (): Promise<void> => {
 			track("cancelSearch", []);
 		},
+		cancelFilenameSearch: async (): Promise<void> => {
+			track("cancelFilenameSearch", []);
+		},
 		searchFilenames: async (workspacePath: string, query: string): Promise<string[]> => {
 			track("searchFilenames", [workspacePath, query]);
 			// 本番 search.ts:158-160 と同じ: byte sort → 空クエリは全件、それ以外は basename に

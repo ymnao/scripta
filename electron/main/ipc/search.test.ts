@@ -12,6 +12,7 @@ import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard"
 import {
 	__testing,
 	cancelBacklinkScanForWindow,
+	cancelFilenameSearchForWindow,
 	cancelSearchForWindow,
 	cancelWikilinkScanForWindow,
 	extractWikilinks,
@@ -156,6 +157,56 @@ describe("searchFilenamesImpl", () => {
 		await expect(searchFilenamesImpl(999 /* not registered */, workspaceDir, "")).rejects.toThrow(
 			/Permission denied/,
 		);
+	});
+
+	it("cancels older filename search when a newer search starts on the same window", async () => {
+		// CommandPalette / wikilink-completion で連続入力 → 先発が bail することを確認。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "");
+		}
+		const [r1, r2] = await Promise.all([
+			searchFilenamesImpl(TEST_WIN, workspaceDir, ""),
+			searchFilenamesImpl(TEST_WIN, workspaceDir, ""),
+		]);
+		expect(r1).toEqual([]);
+		expect(r2).toHaveLength(10);
+	});
+
+	it("cancelFilenameSearchForWindow stops in-flight filename search", async () => {
+		// panel unmount / workspace 切替で renderer から `filename:cancel` が送られる。
+		// 後発の search が来なくても先発が isStale で bail することを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "");
+		}
+		const promise = searchFilenamesImpl(TEST_WIN, workspaceDir, "");
+		cancelFilenameSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toEqual([]);
+	});
+
+	it("cancelSearchForWindow does NOT cancel in-flight filename search", async () => {
+		// regression guard: SearchPanel cleanup が CommandPalette / wikilink-completion の
+		// filename fuzzy 結果を空にしないことを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "");
+		}
+		const promise = searchFilenamesImpl(TEST_WIN, workspaceDir, "");
+		cancelSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("cancelFilenameSearchForWindow does NOT cancel in-flight full-text search", async () => {
+		// regression guard: CommandPalette cleanup で SearchPanel の全文検索を
+		// 巻き込まないことを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "hello world");
+		}
+		const promise = searchFilesImpl(TEST_WIN, workspaceDir, "hello");
+		cancelFilenameSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result.results).toHaveLength(10);
+		expect(result.truncated).toBe(false);
 	});
 });
 

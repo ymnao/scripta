@@ -44,6 +44,7 @@ export function createApiMock(): Api {
 		searchFiles: vi.fn(async () => ({ results: [], truncated: false })),
 		cancelSearch: vi.fn(async () => {}),
 		searchFilenames: vi.fn(async () => []),
+		cancelFilenameSearch: vi.fn(async () => {}),
 		scanUnresolvedWikilinks: vi.fn(async () => []),
 		cancelWikilinkScan: vi.fn(async () => {}),
 		scanBacklinks: vi.fn(async () => []),
