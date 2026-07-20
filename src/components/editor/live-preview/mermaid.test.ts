@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock mermaid cache module
 vi.mock("../../../lib/mermaid", () => ({
@@ -26,12 +26,24 @@ vi.mock("../../../stores/settings", () => ({
 	},
 }));
 
+import * as mermaidLib from "../../../lib/mermaid";
 import {
 	buildMermaidDecorations,
+	clearInitFailure,
 	findMermaidBlocks,
+	getInitFailureTrackingGeneration,
+	handleRenderRejection,
+	INIT_FAILURE_MESSAGE,
+	INIT_RETRY_COOLDOWN_MS,
+	initFailureExhausted,
+	initFailureKey,
+	MAX_SILENT_INIT_FAILURES,
 	MermaidWidget,
 	mermaidDecoration,
 	mermaidDecorationField,
+	recordInitFailure,
+	resetMermaidInitFailureTracking,
+	shouldSkipInitRetry,
 } from "./mermaid";
 import { treeParseProgressed } from "./plugin-utils";
 import {
@@ -365,5 +377,162 @@ describe("mermaidDecorationField (StateField diff rebuild)", () => {
 
 		expect(after).toHaveLength(1);
 		expect(after[0].widget).not.toBe(originalWidget);
+	});
+});
+
+// issue #363: init 失敗持続時の永久 loading + 300ms 周期 retry ループ回避
+describe("init-failure back-off (issue #363)", () => {
+	beforeEach(() => {
+		resetMermaidInitFailureTracking();
+		vi.mocked(mermaidLib.getCacheEntry).mockReset();
+		vi.mocked(mermaidLib.getCacheEntry).mockReturnValue(undefined);
+	});
+
+	it("記録直後は cooldown 内で shouldSkipInitRetry が true になる (renderMissing が retry を skip)", () => {
+		const key = initFailureKey("graph TD\n  A-->B", "light");
+		expect(shouldSkipInitRetry(key, 1000)).toBe(false);
+
+		recordInitFailure(key, 1000);
+		expect(shouldSkipInitRetry(key, 1000)).toBe(true);
+		expect(shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS - 1)).toBe(true);
+	});
+
+	it("cooldown 明けで shouldSkipInitRetry が false に戻り retry を許可する", () => {
+		const key = initFailureKey("graph TD\n  A-->B", "light");
+		recordInitFailure(key, 1000);
+		expect(shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS)).toBe(false);
+	});
+
+	it("cap 到達で widget が error 表示に切り替わる (永久 loading の解消)", () => {
+		const doc = "```mermaid\ngraph TD\n  A-->B\n```";
+		const state = createTestState(doc);
+
+		const readWidget = (): MermaidWidget => {
+			const decos = collectDecorations(buildMermaidDecorations(state, false));
+			const widgets = widgetDecorations(decos);
+			expect(widgets).toHaveLength(1);
+			const w = (widgets[0].value.spec as { widget: MermaidWidget }).widget;
+			expect(w).toBeInstanceOf(MermaidWidget);
+			return w;
+		};
+
+		expect(readWidget().error).toBeNull();
+
+		const key = initFailureKey("graph TD\n  A-->B", "light");
+		for (let i = 0; i < MAX_SILENT_INIT_FAILURES; i++) {
+			recordInitFailure(key, 1000 + i);
+		}
+
+		expect(readWidget().error).toBe(INIT_FAILURE_MESSAGE);
+	});
+
+	it("clearInitFailure は対象 key のみ削除し、他 key の record は保持する (`.then` の per-key delete 相当)", () => {
+		const keyA = initFailureKey("block A", "light");
+		const keyB = initFailureKey("block B", "light");
+		recordInitFailure(keyA, 1000);
+		recordInitFailure(keyA, 1001);
+		recordInitFailure(keyA, 1002);
+		recordInitFailure(keyB, 1000);
+		expect(initFailureExhausted(keyA)).toBe(true);
+
+		clearInitFailure(keyA);
+		expect(initFailureExhausted(keyA)).toBe(false);
+		expect(shouldSkipInitRetry(keyA, 1002)).toBe(false);
+		// keyB の record は影響を受けない
+		expect(shouldSkipInitRetry(keyB, 1000)).toBe(true);
+	});
+
+	it("per-source render error (entry が status='error' で残る) は init 失敗として記録しない (PR #312 非退行)", () => {
+		vi.mocked(mermaidLib.getCacheEntry).mockReturnValue({
+			status: "error",
+			message: "Parse error",
+		} as unknown as ReturnType<typeof mermaidLib.getCacheEntry>);
+
+		const source = "graph TD\n  A-->B";
+		const key = initFailureKey(source, "light");
+		handleRenderRejection(source, "light", 1000);
+
+		expect(initFailureExhausted(key)).toBe(false);
+		expect(shouldSkipInitRetry(key, 1000)).toBe(false);
+	});
+
+	it("init 失敗 (entry が undefined) は handleRenderRejection で記録される", () => {
+		vi.mocked(mermaidLib.getCacheEntry).mockReturnValue(undefined);
+
+		const source = "graph TD\n  A-->B";
+		const key = initFailureKey(source, "light");
+		handleRenderRejection(source, "light", 1000);
+
+		expect(shouldSkipInitRetry(key, 1000)).toBe(true);
+	});
+
+	it("recordInitFailure が cooldown の 2 倍より古い entry を opportunistic に prune する (Map 肥大化の抑制)", () => {
+		const oldKey = initFailureKey("old block", "light");
+		const freshKey = initFailureKey("fresh block", "light");
+		recordInitFailure(oldKey, 1000);
+		expect(initFailureExhausted(oldKey)).toBe(false);
+
+		// cooldown の 2 倍を超える時点で fresh entry を記録すると oldKey は prune される
+		recordInitFailure(freshKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1);
+		expect(shouldSkipInitRetry(oldKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1)).toBe(false);
+		expect(shouldSkipInitRetry(freshKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1)).toBe(true);
+	});
+
+	it("prune の境界: ちょうど 2×cooldown 時点では削除しない (strict `<` の固定)", () => {
+		const oldKey = initFailureKey("old block", "light");
+		const freshKey = initFailureKey("fresh block", "light");
+		recordInitFailure(oldKey, 1000);
+		recordInitFailure(freshKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2);
+		// oldKey.lastFailedAt === staleBefore 相当 (strict `<` により kept)
+		expect(shouldSkipInitRetry(oldKey, 1000 + INIT_RETRY_COOLDOWN_MS - 1)).toBe(true);
+	});
+
+	it("記録対象 key 自身は prune されない (view update 疎な user で cap 未到達不具合の防止)", () => {
+		const key = initFailureKey("slow retry block", "light");
+		recordInitFailure(key, 1000);
+		// 2×cooldown を超えた時点で同 key を再記録: self-prune されないので count は 2 になる
+		recordInitFailure(key, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1);
+		recordInitFailure(key, 1000 + INIT_RETRY_COOLDOWN_MS * 4 + 2);
+		expect(initFailureExhausted(key)).toBe(true);
+	});
+
+	it("cap 到達後も cooldown 明けの retry は許可される (error 表示 + 復帰路)", () => {
+		const key = initFailureKey("graph TD\n  A-->B", "light");
+		for (let i = 0; i < MAX_SILENT_INIT_FAILURES; i++) {
+			recordInitFailure(key, 1000 + i);
+		}
+		expect(initFailureExhausted(key)).toBe(true);
+		// error 表示中でも cooldown 明けは skip されない → 編集/スクロールで retry 継続
+		expect(shouldSkipInitRetry(key, 1002 + INIT_RETRY_COOLDOWN_MS)).toBe(false);
+	});
+
+	it("theme キーの衝突不在: light/dark で別 key、片方の記録が他方に波及しない", () => {
+		const source = "graph TD\n  A-->B";
+		const lightKey = initFailureKey(source, "light");
+		const darkKey = initFailureKey(source, "dark");
+		expect(lightKey).not.toBe(darkKey);
+
+		recordInitFailure(lightKey, 1000);
+		expect(shouldSkipInitRetry(lightKey, 1000)).toBe(true);
+		expect(shouldSkipInitRetry(darkKey, 1000)).toBe(false);
+	});
+
+	it("resetMermaidInitFailureTracking を跨いだ stale reject は無視される (generation guard)", () => {
+		vi.mocked(mermaidLib.getCacheEntry).mockReturnValue(undefined);
+
+		const source = "graph TD\n  A-->B";
+		const key = initFailureKey(source, "light");
+		const startGen = getInitFailureTrackingGeneration();
+
+		// render 起動後に reset が走ったケースを模擬
+		resetMermaidInitFailureTracking();
+		expect(getInitFailureTrackingGeneration()).not.toBe(startGen);
+
+		// caller (renderMissing) は startGen === current でない場合 handleRenderRejection を
+		// 呼ばない。テストでは caller の gate ロジックを直接検証する。
+		if (getInitFailureTrackingGeneration() === startGen) {
+			handleRenderRejection(source, "light", 1000);
+		}
+		expect(shouldSkipInitRetry(key, 1000)).toBe(false);
 	});
 });
