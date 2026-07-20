@@ -27,7 +27,6 @@ const {
 	isMermaidInitFailureExhausted,
 	recordMermaidInitFailure,
 	clearMermaidInitFailure,
-	resetMermaidInitFailureTracking,
 	MERMAID_INIT_RETRY_COOLDOWN_MS,
 	MAX_SILENT_MERMAID_INIT_FAILURES,
 } = await import("./mermaid");
@@ -326,7 +325,7 @@ describe("forceVisibleTextInSvg (#106 最終防衛線)", () => {
 // issue #384: init 失敗のグローバル 1 record 集約 (旧 live-preview 側 per-key back-off の後継)。
 describe("mermaid init-failure global back-off (issue #384)", () => {
 	it("記録直後は cooldown 内で shouldSkipMermaidInitRetry が true", () => {
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		expect(shouldSkipMermaidInitRetry(1000)).toBe(false);
 		recordMermaidInitFailure(1000);
 		expect(shouldSkipMermaidInitRetry(1000)).toBe(true);
@@ -334,13 +333,13 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 	});
 
 	it("cooldown 明けで shouldSkipMermaidInitRetry が false に戻る (strict `<` 境界)", () => {
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		recordMermaidInitFailure(1000);
 		expect(shouldSkipMermaidInitRetry(1000 + MERMAID_INIT_RETRY_COOLDOWN_MS)).toBe(false);
 	});
 
 	it("cooldown を跨いで MAX 回失敗すると isMermaidInitFailureExhausted が true", () => {
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		for (let i = 0; i < MAX_SILENT_MERMAID_INIT_FAILURES; i++) {
 			recordMermaidInitFailure(1000 + i * MERMAID_INIT_RETRY_COOLDOWN_MS);
 		}
@@ -348,7 +347,7 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 	});
 
 	it("burst collapse: cooldown 内の連続失敗は count を進めない (複数ブロック同時失敗で cap 即到達を防ぐ)", () => {
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		// 同一 cooldown ウィンドウ内で 5 回失敗 (3 ブロック同時 reject + 追撃)
 		recordMermaidInitFailure(1000);
 		recordMermaidInitFailure(1001);
@@ -363,7 +362,7 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 	});
 
 	it("clearMermaidInitFailure で record が消え shouldSkip / exhausted とも false になる", () => {
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		for (let i = 0; i < MAX_SILENT_MERMAID_INIT_FAILURES; i++) {
 			recordMermaidInitFailure(1000 + i * MERMAID_INIT_RETRY_COOLDOWN_MS);
 		}
@@ -374,7 +373,7 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 	});
 
 	it("clearMermaidCache が init failure record を同時リセットする", () => {
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		recordMermaidInitFailure(1000);
 		expect(shouldSkipMermaidInitRetry(1000)).toBe(true);
 		clearMermaidCache();
@@ -384,7 +383,7 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 
 	it("renderMermaid の init 失敗が record を進め、成功後に record を clear する (queue 内 hook)", async () => {
 		clearMermaidCache();
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		const source = "graph TD\n  BACKOFF-->OK";
 		const mermaidMod = (await import("mermaid")).default;
 		const initSpy = mermaidMod.initialize as ReturnType<typeof vi.fn>;
@@ -405,7 +404,7 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 
 	it("clearMermaidCache (gen bump) を跨いだ stale init 失敗は record に反映されない (cacheGeneration guard)", async () => {
 		clearMermaidCache();
-		resetMermaidInitFailureTracking();
+		clearMermaidInitFailure();
 		const source = "graph TD\n  STALE-->REJECT";
 		const mermaidMod = (await import("mermaid")).default;
 		const initSpy = mermaidMod.initialize as ReturnType<typeof vi.fn>;

@@ -68,9 +68,7 @@ interface MermaidBlock {
 //  - `shouldSkipMermaidInitRetry` で fresh render 起動の gate
 //  - `isMermaidInitFailureExhausted` で cap 到達時の error 表示切り替え
 // のみ利用する。theme/font 変更時の record reset は `clearMermaidCache` が内包する。
-const INIT_FAILURE_MESSAGE = "Mermaid の読み込みに失敗しました (編集すると再試行します)";
-
-export { INIT_FAILURE_MESSAGE };
+export const INIT_FAILURE_MESSAGE = "Mermaid の読み込みに失敗しました (編集すると再試行します)";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -187,6 +185,9 @@ function buildMermaidDecorationsAndCandidates(
 	const cursorLines = collectCursorLines(state, hasFocus);
 	const blocks = findMermaidBlocks(state);
 	const theme = useThemeStore.getState().theme;
+	// init 失敗はグローバル 1 record なので block ごとに再評価せずループ前に 1 回で足りる
+	// (renderMissing 側の shouldSkipMermaidInitRetry の hoist と対称的な扱い)。
+	const initExhausted = isMermaidInitFailureExhausted();
 	const ranges: Range<Decoration>[] = [];
 	const candidates: CandidateRange[] = [];
 
@@ -206,7 +207,7 @@ function buildMermaidDecorationsAndCandidates(
 			svg = entry.svg;
 		} else if (entry?.status === "error") {
 			error = entry.message;
-		} else if (!entry && isMermaidInitFailureExhausted()) {
+		} else if (!entry && initExhausted) {
 			// entry undefined かつ cap 到達 → 永久 loading を回避して user に失敗を可視化する。
 			// cooldown 明けの view update で retry は継続する (lib 側の record は cap 到達後も
 			// 残るが shouldSkipMermaidInitRetry は cooldown 経過で false を返す)。
@@ -396,8 +397,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 				if (skipInit) continue;
 
 				needsRebuild = true;
-				// record / clear / stale reject の誤記録防止は lib 側の queue 内で
-				// `cacheGeneration` guard により完結する (旧 trackingGeneration を統合)。
+				// 成功/失敗いずれも lib 内 (queue 内 `cacheGeneration` guard) で record は完結。
 				renderMermaid(block.source, theme)
 					.then(() => this.scheduleRebuild())
 					.catch(() => this.scheduleRebuild());

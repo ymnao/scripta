@@ -73,13 +73,11 @@ export function recordMermaidInitFailure(now: number = Date.now()): void {
 	};
 }
 
-/** init 成功時の record 消去。`ensureInitialized` 成功直後に呼ぶ。 */
+/** record を消去する。init 成功時 (`ensureInitialized` 成功直後) と、
+ *  theme/font 変更時の世代交代 (`clearMermaidCache` 経由) の両方から呼ばれる。
+ *  現状はグローバル 1 record のため実装は共通だが、意味論として呼び分ける必要が
+ *  生じても呼び出し元側に分岐は残さない (状態は単一 record に閉じる)。 */
 export function clearMermaidInitFailure(): void {
-	initFailure = null;
-}
-
-/** 全消去。theme/font 変更時の cache 世代交代と同時に呼ばれる (clearMermaidCache 経由)。 */
-export function resetMermaidInitFailureTracking(): void {
 	initFailure = null;
 }
 
@@ -449,9 +447,8 @@ export async function renderMermaid(
 			// バッチ N-1 個分の skip は既に効いている。
 			try {
 				await ensureInitialized(theme, font, options);
-				// init 成功で失敗記録をクリア (cap 到達後の復帰路)。clear は record と同じ
-				// `cacheGeneration` guard 内に置く: reset を跨いだ stale resolve が古い失敗を
-				// 消してしまうのを防ぐ。
+				// clear/record は `cacheGeneration` guard 内で行う (stale reject/resolve の
+				// 誤動作防止、詳細は #384 tracking record の module 見出しコメント参照)。
 				if (gen === cacheGeneration) {
 					clearMermaidInitFailure();
 				}
@@ -460,8 +457,6 @@ export async function renderMermaid(
 				// に落ちる) は per-source error として cache しない。cache すると次回同 key の call
 				// が rendering placeholder / error entry で短絡し、ensureInitialized 内の
 				// `initPromise = null` リセット (PR #312) 経由の再試行に到達できないため。
-				// 失敗記録も同じ guard 内で行う: reset (clearMermaidCache) を跨いだ stale reject
-				// が新世代の record を汚染するのを構造的に防ぐ (旧 trackingGeneration の役割)。
 				if (gen === cacheGeneration) {
 					cache.delete(key);
 					recordMermaidInitFailure();
@@ -517,13 +512,12 @@ export function getCacheEntry(
 }
 
 /**
- * テーマ変更時にキャッシュをクリアする。init 失敗記録も同時にリセットする
- * (gen bump と record reset を原子的に、旧 trackingGeneration が担っていた
- * stale reject 誤記録防止は `cacheGeneration` guard に集約 — issue #384)。
+ * テーマ変更時にキャッシュをクリアする。init 失敗記録も原子的にリセットする
+ * (issue #384、詳細は init-failure tracking の module 見出しコメント参照)。
  */
 export function clearMermaidCache(): void {
 	cacheGeneration++;
 	cache.clear();
 	lastInitKey = "";
-	resetMermaidInitFailureTracking();
+	clearMermaidInitFailure();
 }
