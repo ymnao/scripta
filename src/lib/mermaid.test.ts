@@ -206,6 +206,43 @@ describe("renderMermaid", () => {
 		expect(renderSpy).toHaveBeenCalledTimes(1);
 	});
 
+	it("init 失敗 (initialize throw) は per-source error として cache されない (#312 追跡 fix)", async () => {
+		clearMermaidCache();
+		const source = "graph TD\n  INIT-->FAIL";
+		const mermaidMod = (await import("mermaid")).default;
+		const initSpy = mermaidMod.initialize as ReturnType<typeof vi.fn>;
+		// mermaid v11 動的 import 失敗 も initialize() throw も ensureInitialized 内の
+		// 同一 throw path に落ちるため、initialize throw で共通に検証する (動的 import
+		// 失敗は mermaidModule singleton state 都合で個別 test 化が困難)。
+		initSpy.mockImplementationOnce(() => {
+			throw new Error("init failure");
+		});
+		await expect(renderMermaid(source, "dark")).rejects.toThrow("init failure");
+		// per-source error entry が書き込まれていないことを検証 (書き込まれると次回 call が
+		// 短絡し、ensureInitialized 内の initPromise=null リセット経由の再 import に到達しない)
+		const entry = getCacheEntry(source, "dark");
+		expect(entry).toBeUndefined();
+	});
+
+	it("init 失敗後の再 call が新規 render を試みる (retry 経路が生きている)", async () => {
+		clearMermaidCache();
+		const source = "graph TD\n  RETRY-->OK";
+		const mermaidMod = (await import("mermaid")).default;
+		const initSpy = mermaidMod.initialize as ReturnType<typeof vi.fn>;
+		const renderSpy = mermaidMod.render as ReturnType<typeof vi.fn>;
+		renderSpy.mockClear();
+		initSpy.mockImplementationOnce(() => {
+			throw new Error("transient init failure");
+		});
+		// 1 回目: init 失敗で reject
+		await expect(renderMermaid(source, "dark")).rejects.toThrow("transient init failure");
+		expect(renderSpy).not.toHaveBeenCalled();
+		// 2 回目: initialize が正常復帰 → 実 render に到達し SVG を得る
+		const svg = await renderMermaid(source, "dark");
+		expect(svg).toContain("<svg");
+		expect(renderSpy).toHaveBeenCalledTimes(1);
+	});
+
 	it("options が異なるとキャッシュも分離される (#106)", async () => {
 		clearMermaidCache();
 		const source = "graph TD\n  M-->N";
