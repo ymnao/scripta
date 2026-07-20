@@ -80,7 +80,13 @@ function shouldSkipInitRetry(key: string, now: number): boolean {
 	return !!rec && now - rec.lastFailedAt < INIT_RETRY_COOLDOWN_MS;
 }
 
-function recordInitFailure(key: string, now: number): void {
+export function recordInitFailure(key: string, now: number): void {
+	// cooldown の 2 倍より古い entry を opportunistic に prune (無制限成長の抑制)。
+	// mermaid の source を key に含むため長寿命 session で map が肥大化するのを防ぐ。
+	const staleBefore = now - INIT_RETRY_COOLDOWN_MS * 2;
+	for (const [k, v] of initFailureMap) {
+		if (v.lastFailedAt < staleBefore) initFailureMap.delete(k);
+	}
 	const rec = initFailureMap.get(key);
 	initFailureMap.set(key, {
 		count: (rec?.count ?? 0) + 1,
@@ -88,13 +94,13 @@ function recordInitFailure(key: string, now: number): void {
 	});
 }
 
-function initFailureExhausted(key: string): boolean {
+export function initFailureExhausted(key: string): boolean {
 	const rec = initFailureMap.get(key);
 	return !!rec && rec.count >= MAX_SILENT_INIT_FAILURES;
 }
 
-/** テスト用: 各 spec の beforeEach で呼んで module state をリセットする。
- *  production では theme / font 変更時に `clearMermaidCache` と併せて呼ばれる。 */
+/** production では theme / font 変更時に `clearMermaidCache` と併せて呼ばれる。
+ *  テスト用にも export。 */
 export function resetMermaidInitFailureTracking(): void {
 	initFailureMap.clear();
 }
@@ -104,22 +110,24 @@ export function resetMermaidInitFailureTracking(): void {
  *  reject 直後に entry が undefined なら init 失敗として記録する。entry が status="error"
  *  で残っていれば per-source render 失敗として cache 済みで、`renderMissing` の
  *  `if (entry) continue` により以降 skip されるため記録しない (PR #312 非退行)。 */
-function handleRenderRejection(source: string, theme: "light" | "dark", now: number): void {
+export function handleRenderRejection(
+	source: string,
+	theme: "light" | "dark",
+	failureKey: string,
+	now: number,
+): void {
 	if (!getCacheEntry(source, theme)) {
-		recordInitFailure(initFailureKey(source, theme), now);
+		recordInitFailure(failureKey, now);
 	}
 }
 
-/** テスト専用 export: pure helper を直接検証するため。production からは import しない。 */
-export const __testOnly = {
-	INIT_RETRY_COOLDOWN_MS,
-	MAX_SILENT_INIT_FAILURES,
+// テスト用に export (repo 慣行に合わせ named export)。
+export {
 	INIT_FAILURE_MESSAGE,
+	INIT_RETRY_COOLDOWN_MS,
 	initFailureKey,
+	MAX_SILENT_INIT_FAILURES,
 	shouldSkipInitRetry,
-	recordInitFailure,
-	initFailureExhausted,
-	handleRenderRejection,
 };
 
 // ── Helpers ───────────────────────────────────────────
@@ -354,9 +362,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 			this.unsubscribeTheme = useThemeStore.subscribe((state) => {
 				if (state.theme !== this.lastTheme) {
 					this.lastTheme = state.theme;
-					clearMermaidCache();
-					resetMermaidInitFailureTracking();
-					this.triggerRender();
+					this.resetCachesAndRerender();
 				}
 			});
 
@@ -365,9 +371,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 				if (state.fontFamily !== this.lastFontFamily || state.fontSize !== this.lastFontSize) {
 					this.lastFontFamily = state.fontFamily;
 					this.lastFontSize = state.fontSize;
-					clearMermaidCache();
-					resetMermaidInitFailureTracking();
-					this.triggerRender();
+					this.resetCachesAndRerender();
 				}
 			});
 		}
@@ -396,6 +400,12 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 					this.triggerRender();
 				}
 			}
+		}
+
+		private resetCachesAndRerender() {
+			clearMermaidCache();
+			resetMermaidInitFailureTracking();
+			this.triggerRender();
 		}
 
 		private triggerRender() {
@@ -448,7 +458,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 						this.scheduleRebuild();
 					})
 					.catch(() => {
-						handleRenderRejection(block.source, theme, Date.now());
+						handleRenderRejection(block.source, theme, failureKey, Date.now());
 						this.scheduleRebuild();
 					});
 			}

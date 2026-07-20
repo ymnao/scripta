@@ -28,13 +28,20 @@ vi.mock("../../../stores/settings", () => ({
 
 import * as mermaidLib from "../../../lib/mermaid";
 import {
-	__testOnly,
 	buildMermaidDecorations,
 	findMermaidBlocks,
+	handleRenderRejection,
+	INIT_FAILURE_MESSAGE,
+	INIT_RETRY_COOLDOWN_MS,
+	initFailureExhausted,
+	initFailureKey,
+	MAX_SILENT_INIT_FAILURES,
 	MermaidWidget,
 	mermaidDecoration,
 	mermaidDecorationField,
+	recordInitFailure,
 	resetMermaidInitFailureTracking,
+	shouldSkipInitRetry,
 } from "./mermaid";
 import { treeParseProgressed } from "./plugin-utils";
 import {
@@ -373,8 +380,6 @@ describe("mermaidDecorationField (StateField diff rebuild)", () => {
 
 // issue #363: init 失敗持続時の永久 loading + 300ms 周期 retry ループ回避
 describe("init-failure back-off (issue #363)", () => {
-	const { INIT_RETRY_COOLDOWN_MS, MAX_SILENT_INIT_FAILURES, INIT_FAILURE_MESSAGE } = __testOnly;
-
 	beforeEach(() => {
 		resetMermaidInitFailureTracking();
 		vi.mocked(mermaidLib.getCacheEntry).mockReset();
@@ -382,25 +387,24 @@ describe("init-failure back-off (issue #363)", () => {
 	});
 
 	it("記録直後は cooldown 内で shouldSkipInitRetry が true になる (renderMissing が retry を skip)", () => {
-		const key = __testOnly.initFailureKey("graph TD\n  A-->B", "light");
-		expect(__testOnly.shouldSkipInitRetry(key, 1000)).toBe(false);
+		const key = initFailureKey("graph TD\n  A-->B", "light");
+		expect(shouldSkipInitRetry(key, 1000)).toBe(false);
 
-		__testOnly.recordInitFailure(key, 1000);
-		expect(__testOnly.shouldSkipInitRetry(key, 1000)).toBe(true);
-		expect(__testOnly.shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS - 1)).toBe(true);
+		recordInitFailure(key, 1000);
+		expect(shouldSkipInitRetry(key, 1000)).toBe(true);
+		expect(shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS - 1)).toBe(true);
 	});
 
 	it("cooldown 明けで shouldSkipInitRetry が false に戻り retry を許可する", () => {
-		const key = __testOnly.initFailureKey("graph TD\n  A-->B", "light");
-		__testOnly.recordInitFailure(key, 1000);
-		expect(__testOnly.shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS)).toBe(false);
+		const key = initFailureKey("graph TD\n  A-->B", "light");
+		recordInitFailure(key, 1000);
+		expect(shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS)).toBe(false);
 	});
 
 	it("cap 到達で widget が error 表示に切り替わる (永久 loading の解消)", () => {
 		const doc = "```mermaid\ngraph TD\n  A-->B\n```";
 		const state = createTestState(doc);
 
-		// cap 未到達: loading (error null / svg null) のまま
 		const readWidget = (): MermaidWidget => {
 			const decos = collectDecorations(buildMermaidDecorations(state, false));
 			const widgets = widgetDecorations(decos);
@@ -412,48 +416,60 @@ describe("init-failure back-off (issue #363)", () => {
 
 		expect(readWidget().error).toBeNull();
 
-		const key = __testOnly.initFailureKey("graph TD\n  A-->B", "light");
+		const key = initFailureKey("graph TD\n  A-->B", "light");
 		for (let i = 0; i < MAX_SILENT_INIT_FAILURES; i++) {
-			__testOnly.recordInitFailure(key, 1000 + i);
+			recordInitFailure(key, 1000 + i);
 		}
 
 		expect(readWidget().error).toBe(INIT_FAILURE_MESSAGE);
 	});
 
 	it("成功時の delete で記録がクリアされる (retry 数が振り出しに戻る)", () => {
-		const key = __testOnly.initFailureKey("graph TD\n  A-->B", "light");
+		const key = initFailureKey("graph TD\n  A-->B", "light");
 		for (let i = 0; i < MAX_SILENT_INIT_FAILURES; i++) {
-			__testOnly.recordInitFailure(key, 1000 + i);
+			recordInitFailure(key, 1000 + i);
 		}
-		expect(__testOnly.initFailureExhausted(key)).toBe(true);
+		expect(initFailureExhausted(key)).toBe(true);
 
 		// `.then` で initFailureMap.delete(failureKey) を呼ぶ経路の等価: reset で全消去
 		resetMermaidInitFailureTracking();
-		expect(__testOnly.initFailureExhausted(key)).toBe(false);
-		expect(__testOnly.shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS - 1)).toBe(false);
+		expect(initFailureExhausted(key)).toBe(false);
+		expect(shouldSkipInitRetry(key, 1000 + INIT_RETRY_COOLDOWN_MS - 1)).toBe(false);
 	});
 
 	it("per-source render error (entry が status='error' で残る) は init 失敗として記録しない (PR #312 非退行)", () => {
-		// lib 側で per-source error として cache 済みのケースを模擬
 		vi.mocked(mermaidLib.getCacheEntry).mockReturnValue({
 			status: "error",
 			message: "Parse error",
 		} as unknown as ReturnType<typeof mermaidLib.getCacheEntry>);
 
-		const key = __testOnly.initFailureKey("graph TD\n  A-->B", "light");
-		__testOnly.handleRenderRejection("graph TD\n  A-->B", "light", 1000);
+		const source = "graph TD\n  A-->B";
+		const key = initFailureKey(source, "light");
+		handleRenderRejection(source, "light", key, 1000);
 
-		expect(__testOnly.initFailureExhausted(key)).toBe(false);
-		expect(__testOnly.shouldSkipInitRetry(key, 1000)).toBe(false);
+		expect(initFailureExhausted(key)).toBe(false);
+		expect(shouldSkipInitRetry(key, 1000)).toBe(false);
 	});
 
 	it("init 失敗 (entry が undefined) は handleRenderRejection で記録される", () => {
-		// lib 側で init 失敗時に cache から delete された状態を模擬
 		vi.mocked(mermaidLib.getCacheEntry).mockReturnValue(undefined);
 
-		const key = __testOnly.initFailureKey("graph TD\n  A-->B", "light");
-		__testOnly.handleRenderRejection("graph TD\n  A-->B", "light", 1000);
+		const source = "graph TD\n  A-->B";
+		const key = initFailureKey(source, "light");
+		handleRenderRejection(source, "light", key, 1000);
 
-		expect(__testOnly.shouldSkipInitRetry(key, 1000)).toBe(true);
+		expect(shouldSkipInitRetry(key, 1000)).toBe(true);
+	});
+
+	it("recordInitFailure が cooldown の 2 倍より古い entry を opportunistic に prune する (Map 肥大化の抑制)", () => {
+		const oldKey = initFailureKey("old block", "light");
+		const freshKey = initFailureKey("fresh block", "light");
+		recordInitFailure(oldKey, 1000);
+		expect(initFailureExhausted(oldKey)).toBe(false);
+
+		// cooldown の 2 倍を超える時点で fresh entry を記録すると oldKey は prune される
+		recordInitFailure(freshKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1);
+		expect(shouldSkipInitRetry(oldKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1)).toBe(false);
+		expect(shouldSkipInitRetry(freshKey, 1000 + INIT_RETRY_COOLDOWN_MS * 2 + 1)).toBe(true);
 	});
 });
