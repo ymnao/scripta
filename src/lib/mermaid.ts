@@ -393,6 +393,22 @@ export async function renderMermaid(
 			// バッチ N-1 個分の skip は既に効いている。
 			try {
 				await ensureInitialized(theme, font, options);
+			} catch (initErr) {
+				// init 失敗 (動的 import 失敗 / initialize throw) は per-source error として
+				// cache しない。cache すると同一 source の 2 回目以降が rendering placeholder
+				// または error entry で短絡し、ensureInitialized 内の `initPromise = null`
+				// リセット (PR #312 で導入) 経由の再 import 試行に到達できなくなる。
+				// rendering placeholder を撤去して次回 call が再度 queue に乗るようにする
+				// (source を編集する経路 = live-preview / MermaidEditorDialog は新 cacheKey で
+				// retry 可だが、export.ts 経路は同一 source のため clearMermaidCache 発火まで
+				// stack する — session 113 で追跡調査、fix 対応)。
+				if (gen === cacheGeneration) {
+					cache.delete(key);
+				}
+				reject(initErr);
+				return;
+			}
+			try {
 				const id = `mermaid-${idCounter++}`;
 
 				const result = await mermaidModule?.default.render(id, source);
@@ -412,6 +428,8 @@ export async function renderMermaid(
 				cache.set(key, { status: "rendered", svg });
 				resolve(svg);
 			} catch (e) {
+				// render 失敗 (mermaid.render の parse error 等) は per-source error として
+				// cache する — 同一 source の再 render は必ず同じエラーになるため CPU 節約。
 				if (gen === cacheGeneration && cache.has(key)) {
 					const message = e instanceof Error ? e.message : String(e);
 					cache.set(key, { status: "error", message });
