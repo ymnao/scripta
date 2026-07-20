@@ -14,7 +14,13 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from "@codemirror/view";
-import { clearMermaidCache, getCacheEntry, renderMermaid } from "../../../lib/mermaid";
+import {
+	clearMermaidCache,
+	getCacheEntry,
+	isMermaidInitFailureExhausted,
+	renderMermaid,
+	shouldSkipMermaidInitRetry,
+} from "../../../lib/mermaid";
 import { useSettingsStore } from "../../../stores/settings";
 import { useThemeStore } from "../../../stores/theme";
 import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-utils";
@@ -55,91 +61,14 @@ interface MermaidBlock {
 	source: string;
 }
 
-// ── Init-failure tracking (issue #363) ────────────────
-
-/** live-preview 側の gate: `renderMermaid` の `ensureInitialized` 失敗 (dynamic import 失敗
- *  等) は `src/lib/mermaid.ts` で cache に書かれず、`renderMissing` の `if (entry) continue`
- *  経路をすり抜けて view update ごとに再起動される。放置すると 300ms 周期の永久 retry ループ
- *  + 永久 loading UX になるため、live-preview 内で per-key の cool-down と失敗回数を持つ。
- *  lib 側の cache 意味論 (PR #312 の init retry) は変更しない。 */
-const INIT_RETRY_COOLDOWN_MS = 5000;
-const MAX_SILENT_INIT_FAILURES = 3;
-const INIT_FAILURE_MESSAGE = "Mermaid の読み込みに失敗しました (編集すると再試行します)";
-interface InitFailureRecord {
-	count: number;
-	lastFailedAt: number;
-}
-const initFailureMap = new Map<string, InitFailureRecord>();
-/** resetMermaidInitFailureTracking ごとに increment。`.catch` は render 起動時の gen を
- *  capture し、reset を跨いだ stale reject (Cache generation mismatch / font race 等、
- *  src/lib/mermaid.ts:375-377 / :429-432 参照) を誤って init 失敗として記録しないよう
- *  gate する。 */
-let trackingGeneration = 0;
-export function getInitFailureTrackingGeneration(): number {
-	return trackingGeneration;
-}
-
-function initFailureKey(source: string, theme: "light" | "dark"): string {
-	return `${theme}::${source}`;
-}
-
-function shouldSkipInitRetry(key: string, now: number): boolean {
-	const rec = initFailureMap.get(key);
-	return !!rec && now - rec.lastFailedAt < INIT_RETRY_COOLDOWN_MS;
-}
-
-export function recordInitFailure(key: string, now: number): void {
-	// cooldown の 2 倍より古い entry を opportunistic に prune (無制限成長の抑制)。
-	// mermaid の source を key に含むため長寿命 session で map が肥大化するのを防ぐ。
-	// ただし記録対象の `key` 自身の record は保持する (view update が疎な user で
-	// 再失敗の間隔が 2×cooldown を超えると count がリセットされ cap に到達しない不具合を防ぐ)。
-	const staleBefore = now - INIT_RETRY_COOLDOWN_MS * 2;
-	for (const [k, v] of initFailureMap) {
-		if (k !== key && v.lastFailedAt < staleBefore) initFailureMap.delete(k);
-	}
-	const rec = initFailureMap.get(key);
-	initFailureMap.set(key, {
-		count: (rec?.count ?? 0) + 1,
-		lastFailedAt: now,
-	});
-}
-
-/** 成功時の per-key clear。`resetMermaidInitFailureTracking` (全消去) と分離する。 */
-export function clearInitFailure(key: string): void {
-	initFailureMap.delete(key);
-}
-
-export function initFailureExhausted(key: string): boolean {
-	const rec = initFailureMap.get(key);
-	return !!rec && rec.count >= MAX_SILENT_INIT_FAILURES;
-}
-
-/** production では theme / font 変更時に `clearMermaidCache` と併せて呼ばれる。
- *  テスト用にも export。generation を bump して stale reject の誤記録を防ぐ。 */
-export function resetMermaidInitFailureTracking(): void {
-	trackingGeneration++;
-	initFailureMap.clear();
-}
-
-/** `renderMermaid` reject 経路の判別ヘルパー。
- *  lib 側は init 失敗時に cache から delete する (src/lib/mermaid.ts:401-403) ため、
- *  reject 直後に entry が undefined なら init 失敗として記録する。entry が status="error"
- *  で残っていれば per-source render 失敗として cache 済みで、`renderMissing` の
- *  `if (entry) continue` により以降 skip されるため記録しない (PR #312 非退行)。 */
-export function handleRenderRejection(source: string, theme: "light" | "dark", now: number): void {
-	if (!getCacheEntry(source, theme)) {
-		recordInitFailure(initFailureKey(source, theme), now);
-	}
-}
-
-// テスト用に export (repo 慣行に合わせ named export)。
-export {
-	INIT_FAILURE_MESSAGE,
-	INIT_RETRY_COOLDOWN_MS,
-	initFailureKey,
-	MAX_SILENT_INIT_FAILURES,
-	shouldSkipInitRetry,
-};
+// ── Init-failure UI wiring (issue #363 / #384) ────────
+//
+// init 失敗の back-off・cap 判定・reset は `src/lib/mermaid.ts` に集約されている
+// (グローバル 1 record + burst collapse + `cacheGeneration` guard)。ここでは:
+//  - `shouldSkipMermaidInitRetry` で fresh render 起動の gate
+//  - `isMermaidInitFailureExhausted` で cap 到達時の error 表示切り替え
+// のみ利用する。theme/font 変更時の record reset は `clearMermaidCache` が内包する。
+export const INIT_FAILURE_MESSAGE = "Mermaid の読み込みに失敗しました (編集すると再試行します)";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -256,6 +185,9 @@ function buildMermaidDecorationsAndCandidates(
 	const cursorLines = collectCursorLines(state, hasFocus);
 	const blocks = findMermaidBlocks(state);
 	const theme = useThemeStore.getState().theme;
+	// init 失敗はグローバル 1 record なので block ごとに再評価せずループ前に 1 回で足りる
+	// (renderMissing 側の shouldSkipMermaidInitRetry の hoist と対称的な扱い)。
+	const initExhausted = isMermaidInitFailureExhausted();
 	const ranges: Range<Decoration>[] = [];
 	const candidates: CandidateRange[] = [];
 
@@ -275,9 +207,10 @@ function buildMermaidDecorationsAndCandidates(
 			svg = entry.svg;
 		} else if (entry?.status === "error") {
 			error = entry.message;
-		} else if (!entry && initFailureExhausted(initFailureKey(block.source, theme))) {
-			// entry undefined かつ MAX_SILENT_INIT_FAILURES 到達 → 永久 loading を回避して
-			// user に失敗を可視化する。cooldown 明けの view update で retry は継続する。
+		} else if (!entry && initExhausted) {
+			// entry undefined かつ cap 到達 → 永久 loading を回避して user に失敗を可視化する。
+			// cooldown 明けの view update で retry は継続する (lib 側の record は cap 到達後も
+			// 残るが shouldSkipMermaidInitRetry は cooldown 経過で false を返す)。
 			error = INIT_FAILURE_MESSAGE;
 		}
 		// status === "rendering" or undefined (未失敗 / cooldown 中) → loading state
@@ -414,8 +347,9 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 		}
 
 		private resetCachesAndRerender() {
+			// clearMermaidCache が cache + init-failure record + lastInitKey を原子的に
+			// リセットする (issue #384)。
 			clearMermaidCache();
-			resetMermaidInitFailureTracking();
 			this.triggerRender();
 		}
 
@@ -454,31 +388,19 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 				}
 			}
 
+			// init 失敗は source に依存しないグローバル状態 (issue #384)。ループ前に 1 回評価。
+			const skipInit = shouldSkipMermaidInitRetry();
 			let needsRebuild = false;
 			for (const block of visibleBlocks) {
 				const entry = getCacheEntry(block.source, theme);
 				if (entry) continue; // Already cached (rendered, error, or rendering)
-
-				const failureKey = initFailureKey(block.source, theme);
-				if (shouldSkipInitRetry(failureKey, Date.now())) continue;
+				if (skipInit) continue;
 
 				needsRebuild = true;
-				const startGen = getInitFailureTrackingGeneration();
+				// 成功/失敗いずれも lib 内 (queue 内 `cacheGeneration` guard) で record は完結。
 				renderMermaid(block.source, theme)
-					.then(() => {
-						if (getInitFailureTrackingGeneration() === startGen) {
-							clearInitFailure(failureKey);
-						}
-						this.scheduleRebuild();
-					})
-					.catch(() => {
-						// resetMermaidInitFailureTracking を跨いだ reject (Cache generation
-						// mismatch / font 変更 race 等) は誤って init 失敗として記録しない。
-						if (getInitFailureTrackingGeneration() === startGen) {
-							handleRenderRejection(block.source, theme, Date.now());
-						}
-						this.scheduleRebuild();
-					});
+					.then(() => this.scheduleRebuild())
+					.catch(() => this.scheduleRebuild());
 			}
 
 			// 未キャッシュのレンダリングを開始した場合、または
