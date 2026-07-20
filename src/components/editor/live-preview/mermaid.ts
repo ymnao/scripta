@@ -55,6 +55,73 @@ interface MermaidBlock {
 	source: string;
 }
 
+// ── Init-failure tracking (issue #363) ────────────────
+
+/** live-preview 側の gate: `renderMermaid` の `ensureInitialized` 失敗 (dynamic import 失敗
+ *  等) は `src/lib/mermaid.ts` で cache に書かれず、`renderMissing` の `if (entry) continue`
+ *  経路をすり抜けて view update ごとに再起動される。放置すると 300ms 周期の永久 retry ループ
+ *  + 永久 loading UX になるため、live-preview 内で per-key の cool-down と失敗回数を持つ。
+ *  lib 側の cache 意味論 (PR #312 の init retry) は変更しない。 */
+const INIT_RETRY_COOLDOWN_MS = 5000;
+const MAX_SILENT_INIT_FAILURES = 3;
+const INIT_FAILURE_MESSAGE = "Mermaid の読み込みに失敗しました (編集すると再試行します)";
+interface InitFailureRecord {
+	count: number;
+	lastFailedAt: number;
+}
+const initFailureMap = new Map<string, InitFailureRecord>();
+
+function initFailureKey(source: string, theme: "light" | "dark"): string {
+	return `${theme}::${source}`;
+}
+
+function shouldSkipInitRetry(key: string, now: number): boolean {
+	const rec = initFailureMap.get(key);
+	return !!rec && now - rec.lastFailedAt < INIT_RETRY_COOLDOWN_MS;
+}
+
+function recordInitFailure(key: string, now: number): void {
+	const rec = initFailureMap.get(key);
+	initFailureMap.set(key, {
+		count: (rec?.count ?? 0) + 1,
+		lastFailedAt: now,
+	});
+}
+
+function initFailureExhausted(key: string): boolean {
+	const rec = initFailureMap.get(key);
+	return !!rec && rec.count >= MAX_SILENT_INIT_FAILURES;
+}
+
+/** テスト用: 各 spec の beforeEach で呼んで module state をリセットする。
+ *  production では theme / font 変更時に `clearMermaidCache` と併せて呼ばれる。 */
+export function resetMermaidInitFailureTracking(): void {
+	initFailureMap.clear();
+}
+
+/** `renderMermaid` reject 経路の判別ヘルパー。
+ *  lib 側は init 失敗時に cache から delete する (src/lib/mermaid.ts:401-403) ため、
+ *  reject 直後に entry が undefined なら init 失敗として記録する。entry が status="error"
+ *  で残っていれば per-source render 失敗として cache 済みで、`renderMissing` の
+ *  `if (entry) continue` により以降 skip されるため記録しない (PR #312 非退行)。 */
+function handleRenderRejection(source: string, theme: "light" | "dark", now: number): void {
+	if (!getCacheEntry(source, theme)) {
+		recordInitFailure(initFailureKey(source, theme), now);
+	}
+}
+
+/** テスト専用 export: pure helper を直接検証するため。production からは import しない。 */
+export const __testOnly = {
+	INIT_RETRY_COOLDOWN_MS,
+	MAX_SILENT_INIT_FAILURES,
+	INIT_FAILURE_MESSAGE,
+	initFailureKey,
+	shouldSkipInitRetry,
+	recordInitFailure,
+	initFailureExhausted,
+	handleRenderRejection,
+};
+
 // ── Helpers ───────────────────────────────────────────
 
 /** Find mermaid fenced code blocks in the document.
@@ -189,8 +256,12 @@ function buildMermaidDecorationsAndCandidates(
 			svg = entry.svg;
 		} else if (entry?.status === "error") {
 			error = entry.message;
+		} else if (!entry && initFailureExhausted(initFailureKey(block.source, theme))) {
+			// entry undefined かつ MAX_SILENT_INIT_FAILURES 到達 → 永久 loading を回避して
+			// user に失敗を可視化する。cooldown 明けの view update で retry は継続する。
+			error = INIT_FAILURE_MESSAGE;
 		}
-		// status === "rendering" or undefined → loading state
+		// status === "rendering" or undefined (未失敗 / cooldown 中) → loading state
 
 		ranges.push(
 			Decoration.replace({
@@ -284,6 +355,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 				if (state.theme !== this.lastTheme) {
 					this.lastTheme = state.theme;
 					clearMermaidCache();
+					resetMermaidInitFailureTracking();
 					this.triggerRender();
 				}
 			});
@@ -294,6 +366,7 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 					this.lastFontFamily = state.fontFamily;
 					this.lastFontSize = state.fontSize;
 					clearMermaidCache();
+					resetMermaidInitFailureTracking();
 					this.triggerRender();
 				}
 			});
@@ -365,10 +438,19 @@ const mermaidRenderPlugin = ViewPlugin.fromClass(
 				const entry = getCacheEntry(block.source, theme);
 				if (entry) continue; // Already cached (rendered, error, or rendering)
 
+				const failureKey = initFailureKey(block.source, theme);
+				if (shouldSkipInitRetry(failureKey, Date.now())) continue;
+
 				needsRebuild = true;
 				renderMermaid(block.source, theme)
-					.then(() => this.scheduleRebuild())
-					.catch(() => this.scheduleRebuild());
+					.then(() => {
+						initFailureMap.delete(failureKey);
+						this.scheduleRebuild();
+					})
+					.catch(() => {
+						handleRenderRejection(block.source, theme, Date.now());
+						this.scheduleRebuild();
+					});
 			}
 
 			// 未キャッシュのレンダリングを開始した場合、または
