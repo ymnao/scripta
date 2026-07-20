@@ -166,6 +166,25 @@ describe("useDebouncedVersionRescan", () => {
 		expect(rescan).toHaveBeenCalledTimes(1);
 	});
 
+	it("fires immediately when elapsed exceeds MAX_WAIT_MS (delay clamped to 0)", () => {
+		const rescan = vi.fn();
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		vi.setSystemTime(0);
+		renderHook(() => useDebouncedVersionRescan(rescan, cancel));
+
+		// First bump starts the streak at t=0.
+		bumpFileTree();
+		// Jump the wall clock far past MAX_WAIT_MS without advancing timers
+		// (simulates a system clock jump or a long event-loop stall).
+		vi.setSystemTime(50000);
+		// Next bump: elapsed = 50000 > 10000, delay clamps to 0.
+		bumpFileTree();
+		act(() => {
+			vi.advanceTimersByTime(0);
+		});
+		expect(rescan).toHaveBeenCalledTimes(1);
+	});
+
 	it("resets the streak when rescan identity changes without a version bump", () => {
 		const rescan1 = vi.fn();
 		const rescan2 = vi.fn();
