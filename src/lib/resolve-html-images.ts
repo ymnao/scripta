@@ -53,7 +53,8 @@ const TOTAL_EMBED_BYTES_LIMIT = 256 * 1024 * 1024;
  * `resolveHtmlImageSrcs` の async 版。ローカル画像を data URI で HTML に埋め込む (#314)。
  *
  * 外部ブラウザで HTML を開いても画像が壊れないことを目的にした exportAsHtml 用の
- * post-processor。呼び出し順は「markdownToHtml → embedHtmlImagesAsDataUri → HTML 出力」。
+ * post-processor。呼び出し順は「markdownToHtmlRaw → embedHtmlImagesAsDataUri → finalizeHtml → HTML 出力」
+ * (sanitize-after pattern、session 115)。
  *
  * 挙動:
  * - http(s) / data: / blob: の src はそのまま維持 (fetch しない)

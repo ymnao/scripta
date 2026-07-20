@@ -16,13 +16,16 @@ function cleanSlideMarkdown(markdown: string): string {
 }
 
 /**
- * スライド本文の Markdown を DOMPurify 済み HTML に変換する純粋関数（sync 版）。
+ * スライド本文の Markdown を最終 sanitize 済み HTML に変換する純粋関数（sync 版）。
  * 末尾の区切り行 `---` は除去する。mermaid ブロックは fenced code のまま残るため、
  * mermaid をレンダリングしたい場合は `renderSlideHtmlWithMermaid` を使う。
  *
+ * pipeline: `markdownToHtmlRaw` → `resolveHtmlImageSrcs` → `finalizeHtml` (sanitize-after)。
+ * `allowAssetProtocol: true` で preview 経路の `scripta-asset://` を通す。
+ *
  * 結果は module-level LRU キャッシュ (theme に依らず (activeTabPath, cleaned) キー) に
  * 保持され、`useSlideHtml` / `useSlideHtmls` の初期同期段階の N-1 枚分の
- * markdownToHtml + DOMPurify + regex 呼び出しを skip する (session 87 の per-slide
+ * markdownToHtmlRaw + finalizeHtml + regex 呼び出しを skip する (session 87 の per-slide
  * cache が hook-instance-local だったのを module scope に集約、複数 hook instance で
  * 共有できる)。
  */

@@ -417,10 +417,6 @@ function createMathExtensions(
  * post-processor (`resolveHtmlImageSrcs` / `embedHtmlImagesAsDataUri`) を通した後、
  * 呼び出し側は必ず `finalizeHtml` を通してから sink に渡すこと (sanitize-after pattern)。
  *
- * post-processor が不要な用途では、代わりに `markdownToHtml` を使えば
- * 「markdownToHtmlRaw → finalizeHtml(..., { allowAssetProtocol: true })」の
- * 互換ショートカットになる。
- *
  * @param options.breaks - true にすると単一改行を `<br>` に変換する（PDF 用）。
  *                         デフォルトは false（標準 Markdown の挙動）。
  */
