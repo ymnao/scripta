@@ -1,6 +1,7 @@
 import { abortError } from "./abort";
+import { finalizeHtml } from "./finalize-html";
 import { LruCache } from "./lru-cache";
-import { markdownToHtml } from "./markdown-to-html";
+import { markdownToHtmlRaw } from "./markdown-to-html";
 import type { MermaidRenderOptions } from "./mermaid";
 import { preprocessMermaidBlocks } from "./mermaid-preprocess";
 import { resolveHtmlImageSrcs } from "./resolve-html-images";
@@ -31,7 +32,9 @@ export function renderSlideHtml(markdown: string, activeTabPath: string | null):
 	const key = `${activeTabPath ?? ""}\0${cleaned}`;
 	const hit = syncCache.get(key);
 	if (hit !== undefined) return hit;
-	const html = resolveHtmlImageSrcs(markdownToHtml(cleaned), activeTabPath);
+	const html = finalizeHtml(resolveHtmlImageSrcs(markdownToHtmlRaw(cleaned), activeTabPath), {
+		allowAssetProtocol: true,
+	});
 	syncCache.set(key, html);
 	return html;
 }
@@ -83,7 +86,9 @@ async function renderSlideHtmlDirect(
 		options?.embedOptions,
 		signal,
 	);
-	return resolveHtmlImageSrcs(markdownToHtml(withMermaid), activeTabPath);
+	return finalizeHtml(resolveHtmlImageSrcs(markdownToHtmlRaw(withMermaid), activeTabPath), {
+		allowAssetProtocol: true,
+	});
 }
 
 /**

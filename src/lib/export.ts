@@ -9,7 +9,8 @@ import { buildFence } from "./code-fence";
 import { exportPdf, showSaveDialog, writeFile } from "./commands";
 import { escapeHtml } from "./content";
 import { getDefaultPromptTemplate } from "./export-templates";
-import { collectRawCodeRanges, isInsideRanges, markdownToHtml } from "./markdown-to-html";
+import { finalizeHtml } from "./finalize-html";
+import { collectRawCodeRanges, isInsideRanges, markdownToHtmlRaw } from "./markdown-to-html";
 // mermaid preprocess ヘルパーは循環参照回避のため独立モジュール化 (slide-render.ts が
 // この経路を共有する)。既存 API 互換のため下記で re-export する。
 import { preprocessMermaidBlocks } from "./mermaid-preprocess";
@@ -323,7 +324,11 @@ export async function exportAsHtml(
 	// 相対 / 絶対 workspace パスのローカル画像を data URI として埋め込む (#314)。
 	// scripta-asset:// では外部ブラウザから解決不能なため、HTML 単体で self-contained
 	// にするにはインライン化が必要。activeTabPath は書き出し元の md path で代用する。
-	const bodyHtml = await embedHtmlImagesAsDataUri(markdownToHtml(preprocessed), filePath);
+	// HTML export は data:image/* を埋め込むが DOMPurify default の DATA_URI_TAGS が
+	// `<img>` 等の data: を既に許可するため、finalizeHtml に追加オプションは要らない。
+	const bodyHtml = finalizeHtml(
+		await embedHtmlImagesAsDataUri(markdownToHtmlRaw(preprocessed), filePath),
+	);
 	// Mermaid SVG は固定テーマでレンダリングされるため、
 	// system の場合も解決済みテーマで HTML 全体を統一する
 	const htmlTheme = options?.theme === "system" || !options?.theme ? mermaidTheme : options.theme;
@@ -385,7 +390,10 @@ export async function exportAsPdf(
 	// PDF 経路の scripta-asset 解決は pdf.ts 側でも協力が必要 (protocol 登録 + webRequest
 	// 白リスト)。HTML export は外部ブラウザで開かれる前提のため対象外 (data URI 埋め込みは
 	// 別 PR)。
-	const bodyHtml = resolveHtmlImageSrcs(markdownToHtml(preprocessed, { breaks: true }), filePath);
+	const bodyHtml = finalizeHtml(
+		resolveHtmlImageSrcs(markdownToHtmlRaw(preprocessed, { breaks: true }), filePath),
+		{ allowAssetProtocol: true },
+	);
 
 	// section の改ページ判定は main 側 (pdf.ts) で executeJavaScript により行う (#93 v5)。
 	// renderer 側で wrap せず、main の script が heading 自身に inline break-before を

@@ -1,4 +1,3 @@
-import DOMPurify from "dompurify";
 import katex from "katex";
 import {
 	Marked,
@@ -8,6 +7,7 @@ import {
 	type Tokens,
 } from "marked";
 import { escapeHtml, isEscaped } from "./content";
+import { finalizeHtml, markUnsanitized, type UnsanitizedHtml } from "./finalize-html";
 
 interface MathPlaceholder {
 	placeholder: string;
@@ -413,13 +413,21 @@ function createMathExtensions(
 }
 
 /**
- * Markdown テキストを HTML 文字列に変換する。
- * GFM（テーブル・取り消し線・タスクリスト）と KaTeX 数式をサポート。
+ * Markdown テキストを sanitize 未実施の HTML 文字列 (`UnsanitizedHtml`) に変換する。
+ * post-processor (`resolveHtmlImageSrcs` / `embedHtmlImagesAsDataUri`) を通した後、
+ * 呼び出し側は必ず `finalizeHtml` を通してから sink に渡すこと (sanitize-after pattern)。
+ *
+ * post-processor が不要な用途では、代わりに `markdownToHtml` を使えば
+ * 「markdownToHtmlRaw → finalizeHtml(..., { allowAssetProtocol: true })」の
+ * 互換ショートカットになる。
  *
  * @param options.breaks - true にすると単一改行を `<br>` に変換する（PDF 用）。
  *                         デフォルトは false（標準 Markdown の挙動）。
  */
-export function markdownToHtml(markdown: string, options?: { breaks?: boolean }): string {
+export function markdownToHtmlRaw(
+	markdown: string,
+	options?: { breaks?: boolean },
+): UnsanitizedHtml {
 	const placeholders: MathPlaceholder[] = [];
 	// Per-call nonce to prevent placeholder collision with user content
 	const bytes = new Uint8Array(16);
@@ -484,12 +492,13 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	// Render tokens to HTML
 	let html = marked.parser(tokens);
 
-	// Sanitize before restoring math placeholders so KaTeX output is not affected.
-	html = DOMPurify.sanitize(html);
-
 	// Restore math placeholders. 関数形式必須: KaTeX HTML の annotation には TeX 原文が
 	// 入るため、文字列 replacement だと `$` + 後続文字（$` $' $& 等）が特殊パターン
 	// として解釈され、文書の一部が複製される事故が起こりうる。
+	//
+	// sanitize-after pattern (session 115 refactor) では、KaTeX HTML も含めて最終
+	// `finalizeHtml` で sanitize する。KaTeX 出力の tag/attr は finalize-html.ts の
+	// KATEX_ADD_TAGS / KATEX_ADD_ATTR で allowlist 化してある。
 	for (const { placeholder, html: mathHtml } of placeholders) {
 		html = html.replace(placeholder, () => mathHtml);
 	}
@@ -497,5 +506,15 @@ export function markdownToHtml(markdown: string, options?: { breaks?: boolean })
 	// Restore escaped dollar placeholders to literal $
 	html = html.replaceAll(dollarPlaceholder, "$");
 
-	return html;
+	return markUnsanitized(html);
+}
+
+/**
+ * Markdown を HTML 文字列に変換し、post-processor を通さない用途向けに finalize まで一括で行う。
+ * 互換 API: 従来 `markdownToHtml` を直接呼んでいた caller (テスト・単体変換等) の変更を避ける。
+ * post-processor (画像 src 解決 / data URI 埋め込み) を挟む経路は、代わりに
+ * `markdownToHtmlRaw` + post-processor + `finalizeHtml` を明示的に組み立てること。
+ */
+export function markdownToHtml(markdown: string, options?: { breaks?: boolean }): string {
+	return finalizeHtml(markdownToHtmlRaw(markdown, options), { allowAssetProtocol: true });
 }
