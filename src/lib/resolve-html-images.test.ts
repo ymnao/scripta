@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildScriptaAssetUrl } from "../../electron/preload/scripta-asset-url";
-import { embedHtmlImagesAsDataUri, resolveHtmlImageSrcs } from "./resolve-html-images";
+import { markUnsanitized } from "./finalize-html";
+import {
+	embedHtmlImagesAsDataUri as embedHtmlImagesAsDataUriRaw,
+	resolveHtmlImageSrcs as resolveHtmlImageSrcsRaw,
+} from "./resolve-html-images";
+
+// Test shim: 本 file は post-processor 単体挙動を assert するため、branded type
+// (`UnsanitizedHtml`) の producer を経由せず plain string を渡せる wrapper を用意する。
+// production 経路では `markdownToHtmlRaw` → post-processor → `finalizeHtml` の chain で
+// 型が繋がるため、この shim は test のみに閉じる。
+const resolveHtmlImageSrcs = (html: string, activeTabPath: string | null): string =>
+	resolveHtmlImageSrcsRaw(markUnsanitized(html), activeTabPath);
+const embedHtmlImagesAsDataUri = (html: string, activeTabPath: string | null): Promise<string> =>
+	embedHtmlImagesAsDataUriRaw(markUnsanitized(html), activeTabPath);
 
 const readFileBase64 = vi.fn(async (_path: string) => "AAAA");
 

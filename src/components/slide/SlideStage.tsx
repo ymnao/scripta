@@ -112,7 +112,7 @@ export function SlideFrame({ scale, html, frameClassName, themeOverride }: Slide
 				{html ? (
 					<div
 						className="slide-preview-content"
-						// biome-ignore lint/security/noDangerouslySetInnerHtml: DOMPurify 済み
+						// biome-ignore lint/security/noDangerouslySetInnerHtml: finalizeHtml 済み (sanitize-after pattern)
 						dangerouslySetInnerHTML={{ __html: html }}
 					/>
 				) : (

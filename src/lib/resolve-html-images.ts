@@ -1,15 +1,20 @@
-// markdownToHtml 出力 (DOMPurify.sanitize 済み) の img[src] を asset protocol URL に
-// 解決する共通ヘルパー。DOMPurify は既定で `scripta-asset:` を弾くため、必ず
-// sanitize 後 (=このヘルパーは post-processor として) に適用する。
+// markdownToHtmlRaw 出力 (sanitize 未実施) の img[src] を asset protocol URL に
+// 解決する共通ヘルパー。sanitize-after pattern (session 115) では、この関数が返す
+// `UnsanitizedHtml` を caller が `finalizeHtml({ allowAssetProtocol: true })` に
+// 通して初めて plain string の sink 用 HTML になる。
 //
-// DOMParser で再パースし img 要素の src 属性だけを書き換えるため、既存 sanitize
-// 保証は維持される (テキストノード / 他属性 / KaTeX HTML 等には触らない)。
+// DOMParser で再パースし img 要素の src 属性だけを書き換える (テキストノード /
+// 他属性 / KaTeX HTML 等には触らない)。sanitize は後段で 1 度だけ実施される。
 
 import { mimeForImageExt } from "../types/image";
 import { readFileBase64 } from "./commands";
+import { markUnsanitized, type UnsanitizedHtml } from "./finalize-html";
 import { resolveImageSrc, resolveImageToOsPath } from "./image-src";
 
-export function resolveHtmlImageSrcs(html: string, activeTabPath: string | null): string {
+export function resolveHtmlImageSrcs(
+	html: UnsanitizedHtml,
+	activeTabPath: string | null,
+): UnsanitizedHtml {
 	if (!html.includes("<img")) return html;
 	const doc = new DOMParser().parseFromString(html, "text/html");
 	for (const img of doc.body.querySelectorAll("img")) {
@@ -17,7 +22,7 @@ export function resolveHtmlImageSrcs(html: string, activeTabPath: string | null)
 		if (!src) continue;
 		img.setAttribute("src", resolveImageSrc(src, activeTabPath));
 	}
-	return doc.body.innerHTML;
+	return markUnsanitized(doc.body.innerHTML);
 }
 
 /** 拡張子を末尾から抜き出す (先頭ドット付き、無ければ空文字)。path-lite; node:path/extname 依存を持ちたくないので独自実装。 */
@@ -48,7 +53,8 @@ const TOTAL_EMBED_BYTES_LIMIT = 256 * 1024 * 1024;
  * `resolveHtmlImageSrcs` の async 版。ローカル画像を data URI で HTML に埋め込む (#314)。
  *
  * 外部ブラウザで HTML を開いても画像が壊れないことを目的にした exportAsHtml 用の
- * post-processor。呼び出し順は「markdownToHtml → embedHtmlImagesAsDataUri → HTML 出力」。
+ * post-processor。呼び出し順は「markdownToHtmlRaw → embedHtmlImagesAsDataUri → finalizeHtml → HTML 出力」
+ * (sanitize-after pattern、session 115)。
  *
  * 挙動:
  * - http(s) / data: / blob: の src はそのまま維持 (fetch しない)
@@ -62,9 +68,9 @@ const TOTAL_EMBED_BYTES_LIMIT = 256 * 1024 * 1024;
  *   I/O 完了順に依存する
  */
 export async function embedHtmlImagesAsDataUri(
-	html: string,
+	html: UnsanitizedHtml,
 	activeTabPath: string | null,
-): Promise<string> {
+): Promise<UnsanitizedHtml> {
 	if (!html.includes("<img")) return html;
 	const doc = new DOMParser().parseFromString(html, "text/html");
 	const imgs = doc.body.querySelectorAll("img");
@@ -119,5 +125,5 @@ export async function embedHtmlImagesAsDataUri(
 	await Promise.all(
 		Array.from({ length: Math.min(EMBED_CONCURRENCY, queue.length) }, () => worker()),
 	);
-	return doc.body.innerHTML;
+	return markUnsanitized(doc.body.innerHTML);
 }
