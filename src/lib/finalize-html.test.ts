@@ -205,9 +205,7 @@ describe("finalizeHtml", () => {
 	describe("SVG data URI (仕様固定)", () => {
 		it("<img> の data:image/svg+xml (空 svg) を通す", () => {
 			// PHN2Zy8+ = base64("<svg/>")
-			const html = finalizeHtml(
-				markUnsanitized('<img src="data:image/svg+xml;base64,PHN2Zy8+">'),
-			);
+			const html = finalizeHtml(markUnsanitized('<img src="data:image/svg+xml;base64,PHN2Zy8+">'));
 			expect(html).toContain("data:image/svg+xml;base64,PHN2Zy8+");
 		});
 
