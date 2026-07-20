@@ -95,17 +95,35 @@ renderer は `esnext` ではなく**実 Chromium 版**（`chrome150`）を指す
 scripta-next/                       # 作業ディレクトリ名（dev userData を本番 `scripta` から隔離する目的で `package.json:name` は scripta-next のまま）
 ├── electron/                       # Electron 本体（main / preload プロセス）
 │   ├── main/                       # メインプロセス（Node.js 実行環境）
-│   │   ├── index.ts                # エントリポイント・ウィンドウ管理
+│   │   ├── index.ts                # エントリポイント・ウィンドウ管理・CSP・asset protocol 登録
+│   │   ├── menu.ts                 # アプリケーションメニュー
 │   │   ├── ipc/                    # IPC ハンドラ（旧 src-tauri/src/commands に対応）
-│   │   │   ├── file.ts             # ファイル読み書き・作成・削除
+│   │   │   ├── fs.ts               # ファイル読み書き・作成・削除・rename・パス検証
 │   │   │   ├── workspace.ts        # フォルダ走査・ツリー取得
-│   │   │   ├── search.ts           # 全文検索・ファイル名検索（純 JS、旧 Rust ロジックを 1:1 移植）
+│   │   │   ├── search.ts           # 全文検索・ファイル名検索・wikilink/backlink scan（純 JS、旧 Rust ロジックを 1:1 移植）
+│   │   │   ├── watcher.ts          # ファイル変更監視（chokidar）
 │   │   │   ├── git.ts              # Git 操作（simple-git）
 │   │   │   ├── ogp.ts              # OGP メタデータ取得（自前 http-fetch + 自前 ogp-parser、SSRF 防御）
 │   │   │   ├── pdf.ts              # PDF エクスポート（webContents.printToPDF）
 │   │   │   ├── update.ts           # アップデートチェック（GitHub Releases API ポーリング、存在確認のみ）
-│   │   │   └── watcher.ts          # ファイル変更監視（chokidar）
-│   │   └── menu.ts                 # アプリケーションメニュー
+│   │   │   ├── settings.ts         # 設定永続化（app.getPath("userData")/settings.json、atomic write）
+│   │   │   ├── window.ts           # ウィンドウ状態永続化（位置・サイズ・最大化状態）
+│   │   │   ├── dialog.ts           # ファイル/フォルダ選択ダイアログ
+│   │   │   └── shell.ts            # 外部 URL / ファイルオープン（shell.openExternal 等）
+│   │   └── utils/                  # main 側の共通ユーティリティ
+│   │       ├── path-guard.ts       # workspace 外パスの拒否（realpath 正規化 + window-scoped 認可）
+│   │       ├── ssrf-guard.ts       # プライベート IP / loopback ブロック + DNS pin
+│   │       ├── http-fetch.ts       # Node 標準 http(s).request ベースの HTTP ラッパー
+│   │       ├── ogp-parser.ts       # 旧 Rust parse_ogp の 1:1 移植
+│   │       ├── search-pure.ts      # UTF-16 lowerToOrig マップ等の純関数
+│   │       ├── watcher-pure.ts     # watcher バッチ整形の純関数
+│   │       ├── window-state.ts     # ウィンドウ状態の保存/復元（atomic）
+│   │       ├── window-guards.ts    # navigation / new-window の許可判定
+│   │       ├── permission-handler.ts # permission request 応答
+│   │       ├── scripta-asset-protocol.ts # scripta-asset:// でローカル画像を配信
+│   │       ├── structured-error.ts # IPC 経由のエラーフォーマット統一
+│   │       ├── ipc-handle.ts       # ipcMain.handle ラッパー
+│   │       └── ...                 # その他（entry-filter / git-validators / renderer-url / semver-lite 等）
 │   └── preload/                    # プリロードスクリプト（contextBridge で window.api を公開）
 │       └── index.ts
 │
