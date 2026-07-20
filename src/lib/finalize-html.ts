@@ -34,18 +34,23 @@ export interface FinalizeHtmlOptions {
 	allowAssetProtocol?: boolean;
 }
 
-// DOMPurify 3.x が既定で使う `IS_ALLOWED_URI` regexp (dompurify src の seal 済み regexp と同形)。
-// この default を保持したまま scripta-asset: だけ or 結合する。javascript: 等を防ぐ
-// 「scheme 名の直後が scheme-char でも `:` でもなければ通す」ロジックを崩さないため、
-// default source は改変しない (自前で組み立てると javascript:alert(1) が通る等のレグレッションを起こす)。
-const DEFAULT_URI_REGEXP_SOURCE =
-	"^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\\-:]|$))";
-const ASSET_URI_REGEXP_SOURCE = "^scripta-asset:";
-
-function buildUriRegexp(opts: FinalizeHtmlOptions): RegExp {
-	if (!opts.allowAssetProtocol) return new RegExp(DEFAULT_URI_REGEXP_SOURCE, "i");
-	return new RegExp(`(?:${DEFAULT_URI_REGEXP_SOURCE})|(?:${ASSET_URI_REGEXP_SOURCE})`, "i");
-}
+// `allowAssetProtocol: true` の時にだけ DOMPurify default の `IS_ALLOWED_URI` に
+// `scripta-asset:` scheme を or 結合する。false の時は `ALLOWED_URI_REGEXP` オプション
+// を渡さず DOMPurify default (module-level seal 済み regexp) にそのまま委譲する:
+// (a) dompurify 側の default (matrix: 等の追加 scheme を含む) が更新されても自動追従、
+// (b) hot path (`renderSlideHtml` cache-miss = 実質毎編集) の new RegExp を回避、
+// (c) 「default source を手コピー」した際の drift クラスを構造的に消す。
+//
+// `allowAssetProtocol: true` 経路の合成 regexp は module-level で 1 度だけ生成し、
+// dompurify の内部 default regexp の source をコピーして or 結合する。ここは
+// hand-copied なので dompurify major upgrade 時に手動更新する必要がある (下記コメント参照)。
+//
+// dompurify 3.x default source の再現。3.4.x の実装は
+// `/^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i`
+// と同形。dompurify を major upgrade する際は node_modules/dompurify/dist/purify.cjs.js の
+// `IS_ALLOWED_URI` を確認して追従する。
+const ASSET_ALLOWED_URI_REGEXP =
+	/^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$)|scripta-asset:)/i;
 
 // KaTeX が出力する HTML/MathML の tag / attr allowlist。
 // 公式 https://katex.org/docs/security 準拠 + 実出力 (span/mathml chain) に必要な最小。
@@ -117,9 +122,11 @@ const KATEX_ADD_ATTR = [
  * 依存する)。テストで固定する。
  */
 export function finalizeHtml(html: UnsanitizedHtml, opts: FinalizeHtmlOptions = {}): string {
+	// allowAssetProtocol:false は ALLOWED_URI_REGEXP を渡さず dompurify default に委譲する
+	// (drift 予防 + hot path allocation 回避)。true の時のみ pre-computed 合成 regexp を渡す。
 	return DOMPurify.sanitize(html, {
 		ADD_TAGS: KATEX_ADD_TAGS,
 		ADD_ATTR: KATEX_ADD_ATTR,
-		ALLOWED_URI_REGEXP: buildUriRegexp(opts),
+		...(opts.allowAssetProtocol ? { ALLOWED_URI_REGEXP: ASSET_ALLOWED_URI_REGEXP } : {}),
 	});
 }

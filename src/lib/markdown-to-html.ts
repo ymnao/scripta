@@ -7,7 +7,7 @@ import {
 	type Tokens,
 } from "marked";
 import { escapeHtml, isEscaped } from "./content";
-import { finalizeHtml, markUnsanitized, type UnsanitizedHtml } from "./finalize-html";
+import { markUnsanitized, type UnsanitizedHtml } from "./finalize-html";
 
 interface MathPlaceholder {
 	placeholder: string;
@@ -507,14 +507,4 @@ export function markdownToHtmlRaw(
 	html = html.replaceAll(dollarPlaceholder, "$");
 
 	return markUnsanitized(html);
-}
-
-/**
- * Markdown を HTML 文字列に変換し、post-processor を通さない用途向けに finalize まで一括で行う。
- * 互換 API: 従来 `markdownToHtml` を直接呼んでいた caller (テスト・単体変換等) の変更を避ける。
- * post-processor (画像 src 解決 / data URI 埋め込み) を挟む経路は、代わりに
- * `markdownToHtmlRaw` + post-processor + `finalizeHtml` を明示的に組み立てること。
- */
-export function markdownToHtml(markdown: string, options?: { breaks?: boolean }): string {
-	return finalizeHtml(markdownToHtmlRaw(markdown, options), { allowAssetProtocol: true });
 }

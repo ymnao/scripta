@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { markdownToHtml } from "./markdown-to-html";
+import { finalizeHtml } from "./finalize-html";
+import { markdownToHtmlRaw } from "./markdown-to-html";
+
+// テスト用 helper: 本 file は markdown → HTML → sanitize の合成挙動を assert する
+// (post-processor は経由しない fast path)。production 経路は必ず
+// `markdownToHtmlRaw` + post-processor + `finalizeHtml` を明示的に組み立てるため、
+// この shim は test 側にのみ置く (production コードから再 import される余地を消す)。
+const markdownToHtml = (md: string, opts?: { breaks?: boolean }): string =>
+	finalizeHtml(markdownToHtmlRaw(md, opts), { allowAssetProtocol: true });
 
 describe("markdownToHtml", () => {
 	it("converts headings and paragraphs", () => {
