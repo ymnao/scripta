@@ -95,7 +95,7 @@ describe("finalizeHtml", () => {
 		// 手書き HTML で以下 tag に scripta-asset: を書いた場合も通過する。
 		// この経路の caller (preview / PDF export) は custom protocol の解決を
 		// 提供しており、既存の image/media 経路に閉じる想定なので許容。
-		it("media/source/anchor で scripta-asset: が通過する (現仕様)", () => {
+		it("media/source/anchor/form で scripta-asset: が通過する (現仕様)", () => {
 			expect(finalize('<img src="scripta-asset://a.png">')).toContain("scripta-asset://a.png");
 			expect(finalize('<img srcset="scripta-asset://b.png 2x">')).toContain(
 				"scripta-asset://b.png",
@@ -117,14 +117,20 @@ describe("finalizeHtml", () => {
 		// DOMPurify default の tag allowlist に無い危険 sink は、URI regexp を差し替えても
 		// tag ごと strip される。ここが後日 default 変更等で緩んだ場合の safety net。
 		it("script リソース sink (<link>/<iframe>/<object>/<embed>) は tag ごと strip される", () => {
-			expect(finalize('<link rel="stylesheet" href="scripta-asset://x.css">')).not.toContain(
-				"scripta-asset",
-			);
-			expect(finalize('<iframe src="scripta-asset://x.html"></iframe>')).not.toContain(
-				"scripta-asset",
-			);
-			expect(finalize('<object data="scripta-asset://x"></object>')).not.toContain("scripta-asset");
-			expect(finalize('<embed src="scripta-asset://x">')).not.toContain("scripta-asset");
+			// tag そのものの残存も否定して、DOMPurify default 更新で「tag は残すが URI だけ剥がす」
+			// 挙動になった場合の silent pass を防ぐ (comment で宣言している tag-scope を正確に固定)。
+			const link = finalize('<link rel="stylesheet" href="scripta-asset://x.css">');
+			expect(link).not.toContain("scripta-asset");
+			expect(link).not.toContain("<link");
+			const iframe = finalize('<iframe src="scripta-asset://x.html"></iframe>');
+			expect(iframe).not.toContain("scripta-asset");
+			expect(iframe).not.toContain("<iframe");
+			const object = finalize('<object data="scripta-asset://x"></object>');
+			expect(object).not.toContain("scripta-asset");
+			expect(object).not.toContain("<object");
+			const embed = finalize('<embed src="scripta-asset://x">');
+			expect(embed).not.toContain("scripta-asset");
+			expect(embed).not.toContain("<embed");
 		});
 	});
 
