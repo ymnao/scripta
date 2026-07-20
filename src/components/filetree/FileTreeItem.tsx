@@ -208,7 +208,7 @@ export function FileTreeItem({
 	const isFocused = entry.path === focusedPath;
 
 	return (
-		<li role="none">
+		<div role="none">
 			<button
 				type="button"
 				role="treeitem"
@@ -269,38 +269,43 @@ export function FileTreeItem({
 				expanded &&
 				loaded &&
 				(children.length > 0 || isCreatingHere ? (
-					<ul role="group">
-						{isCreatingHere && (
-							<InlineInput
-								depth={depth + 1}
-								icon={creating.type === "file" ? "file" : "folder"}
-								onConfirm={onCreateConfirm}
-								onCancel={onCreateCancel}
-							/>
-						)}
-						{children.map((child) => (
-							<FileTreeItem
-								key={child.path}
-								entry={child}
-								depth={depth + 1}
-								selectedPath={selectedPath}
-								focusedPath={focusedPath}
-								onFocusPath={onFocusPath}
-								onFileSelect={onFileSelect}
-								onFileOpenNewTab={onFileOpenNewTab}
-								refreshKey={refreshKey}
-								creating={creating}
-								renamingPath={renamingPath}
-								onContextMenu={onContextMenu}
-								onRenameConfirm={onRenameConfirm}
-								onCreateConfirm={onCreateConfirm}
-								onRenameCancel={onRenameCancel}
-								onCreateCancel={onCreateCancel}
-								icons={icons}
-								workspacePath={workspacePath}
-							/>
-						))}
-					</ul>
+					<>
+						{/* biome-ignore lint/a11y/useSemanticElements: role="group" is the WAI-ARIA
+						    tree pattern for nested treeitem containers; <fieldset> would imply
+						    form grouping semantics that break AT tree traversal. */}
+						<div role="group">
+							{isCreatingHere && (
+								<InlineInput
+									depth={depth + 1}
+									icon={creating.type === "file" ? "file" : "folder"}
+									onConfirm={onCreateConfirm}
+									onCancel={onCreateCancel}
+								/>
+							)}
+							{children.map((child) => (
+								<FileTreeItem
+									key={child.path}
+									entry={child}
+									depth={depth + 1}
+									selectedPath={selectedPath}
+									focusedPath={focusedPath}
+									onFocusPath={onFocusPath}
+									onFileSelect={onFileSelect}
+									onFileOpenNewTab={onFileOpenNewTab}
+									refreshKey={refreshKey}
+									creating={creating}
+									renamingPath={renamingPath}
+									onContextMenu={onContextMenu}
+									onRenameConfirm={onRenameConfirm}
+									onCreateConfirm={onCreateConfirm}
+									onRenameCancel={onRenameCancel}
+									onCreateCancel={onCreateCancel}
+									icons={icons}
+									workspacePath={workspacePath}
+								/>
+							))}
+						</div>
+					</>
 				) : (
 					<p
 						className="py-0.5 text-xs text-text-secondary"
@@ -309,6 +314,6 @@ export function FileTreeItem({
 						Empty folder
 					</p>
 				))}
-		</li>
+		</div>
 	);
 }

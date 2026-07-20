@@ -83,7 +83,7 @@ export function FileTree({
 		started: boolean;
 		ghost: HTMLDivElement | null;
 	} | null>(null);
-	const rootUlRef = useRef<HTMLUListElement>(null);
+	const rootUlRef = useRef<HTMLDivElement>(null);
 	const skipNextClickRef = useRef(false);
 
 	const workspacePathRef = useRef(workspacePath);
@@ -146,108 +146,110 @@ export function FileTree({
 	// first visible item so the tree remains reachable via Tab.
 	useEffect(() => {
 		const rootUl = rootUlRef.current;
-		if (!rootUl) return;
-		if (rootUl.querySelector('[data-path][tabindex="0"]')) return;
+		if (!rootUl || entries.length === 0) return;
+		if (focusedPath) {
+			const btn = rootUl.querySelector<HTMLButtonElement>(
+				`[data-path="${CSS.escape(focusedPath)}"]`,
+			);
+			if (btn) return;
+		}
 		const first = rootUl.querySelector<HTMLButtonElement>("[data-path]");
 		const firstPath = first?.dataset.path;
-		if (firstPath) setFocusedPath(firstPath);
-	}, [focusedPath, entries, refreshKey]);
+		if (firstPath && firstPath !== focusedPath) setFocusedPath(firstPath);
+	}, [focusedPath, entries]);
 
 	const handleFocusPath = useCallback((path: string) => {
 		setFocusedPath(path);
 	}, []);
 
-	const handleTreeKeyDown = useCallback(
-		(e: React.KeyboardEvent<HTMLUListElement>) => {
-			// Ignore keys we don't handle before touching the DOM.
-			const key = e.key;
-			if (
-				key !== "ArrowDown" &&
-				key !== "ArrowUp" &&
-				key !== "ArrowRight" &&
-				key !== "ArrowLeft" &&
-				key !== "Home" &&
-				key !== "End" &&
-				key !== "Enter" &&
-				key !== " "
-			) {
-				return;
-			}
-			// Skip when a rename/create InlineInput or other input owns focus.
-			const target = e.target as HTMLElement;
-			if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-			const currentBtn = target.closest<HTMLButtonElement>("[data-path]");
-			if (!currentBtn) return;
+	const handleTreeKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+		// Ignore keys we don't handle before touching the DOM.
+		const key = e.key;
+		if (
+			key !== "ArrowDown" &&
+			key !== "ArrowUp" &&
+			key !== "ArrowRight" &&
+			key !== "ArrowLeft" &&
+			key !== "Home" &&
+			key !== "End" &&
+			key !== "Enter" &&
+			key !== " "
+		) {
+			return;
+		}
+		// Skip when a rename/create InlineInput or other input owns focus.
+		const target = e.target as HTMLElement;
+		if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+		const currentBtn = target.closest<HTMLButtonElement>("[data-path]");
+		if (!currentBtn) return;
 
-			const rootUl = rootUlRef.current;
-			if (!rootUl) return;
-			const visible = Array.from(rootUl.querySelectorAll<HTMLButtonElement>("[data-path]"));
-			const idx = visible.indexOf(currentBtn);
-			if (idx < 0) return;
+		const rootUl = rootUlRef.current;
+		if (!rootUl) return;
+		const visible = Array.from(rootUl.querySelectorAll<HTMLButtonElement>("[data-path]"));
+		const idx = visible.indexOf(currentBtn);
+		if (idx < 0) return;
 
-			const isDirectory = currentBtn.dataset.isDirectory === "true";
-			const expanded = currentBtn.getAttribute("aria-expanded") === "true";
-			const depth = Number(currentBtn.dataset.depth);
+		const isDirectory = currentBtn.dataset.isDirectory === "true";
+		const expanded = currentBtn.getAttribute("aria-expanded") === "true";
+		const depth = Number(currentBtn.dataset.depth);
 
-			const focusIdx = (i: number) => {
-				const btn = visible[i];
-				if (!btn) return;
-				const path = btn.dataset.path;
-				if (path) setFocusedPath(path);
-				btn.focus();
-			};
+		const focusIdx = (i: number) => {
+			const btn = visible[i];
+			if (!btn) return;
+			const path = btn.dataset.path;
+			if (path) setFocusedPath(path);
+			btn.focus();
+		};
 
-			switch (key) {
-				case "ArrowDown":
-					e.preventDefault();
-					if (idx < visible.length - 1) focusIdx(idx + 1);
-					break;
-				case "ArrowUp":
-					e.preventDefault();
-					if (idx > 0) focusIdx(idx - 1);
-					break;
-				case "ArrowRight":
-					e.preventDefault();
-					if (!isDirectory) break;
-					if (!expanded) {
-						currentBtn.click();
-					} else if (idx < visible.length - 1) {
-						const nextDepth = Number(visible[idx + 1].dataset.depth);
-						if (nextDepth > depth) focusIdx(idx + 1);
-					}
-					break;
-				case "ArrowLeft":
-					e.preventDefault();
-					if (isDirectory && expanded) {
-						currentBtn.click();
-					} else {
-						// Find nearest ancestor (depth < current) walking backward.
-						for (let i = idx - 1; i >= 0; i--) {
-							const d = Number(visible[i].dataset.depth);
-							if (d < depth) {
-								focusIdx(i);
-								break;
-							}
+		switch (key) {
+			case "ArrowDown":
+				e.preventDefault();
+				if (idx < visible.length - 1) focusIdx(idx + 1);
+				break;
+			case "ArrowUp":
+				e.preventDefault();
+				if (idx > 0) focusIdx(idx - 1);
+				break;
+			case "ArrowRight":
+				e.preventDefault();
+				if (!isDirectory) break;
+				if (!expanded) {
+					currentBtn.click();
+				} else if (idx < visible.length - 1) {
+					const nextDepth = Number(visible[idx + 1].dataset.depth);
+					if (nextDepth > depth) focusIdx(idx + 1);
+				}
+				break;
+			case "ArrowLeft":
+				e.preventDefault();
+				if (isDirectory && expanded) {
+					currentBtn.click();
+				} else {
+					// Find nearest ancestor (depth < current) walking backward.
+					for (let i = idx - 1; i >= 0; i--) {
+						const d = Number(visible[i].dataset.depth);
+						if (d < depth) {
+							focusIdx(i);
+							break;
 						}
 					}
-					break;
-				case "Home":
-					e.preventDefault();
-					focusIdx(0);
-					break;
-				case "End":
-					e.preventDefault();
-					focusIdx(visible.length - 1);
-					break;
-				case "Enter":
-				case " ":
-					e.preventDefault();
-					currentBtn.click();
-					break;
-			}
-		},
-		[],
-	);
+				}
+				break;
+			case "Home":
+				e.preventDefault();
+				focusIdx(0);
+				break;
+			case "End":
+				e.preventDefault();
+				focusIdx(visible.length - 1);
+				break;
+			case "Enter":
+			case " ":
+				e.preventDefault();
+				currentBtn.click();
+				break;
+		}
+	}, []);
 
 	const refresh = useCallback(() => {
 		loadEntries(true);
@@ -707,7 +709,7 @@ export function FileTree({
 
 	return (
 		<>
-			<ul
+			<div
 				ref={rootUlRef}
 				role="tree"
 				aria-label="File tree"
@@ -754,9 +756,9 @@ export function FileTree({
 					/>
 				))}
 				{entries.length === 0 && !showRootCreating && (
-					<li className="px-3 py-2 text-xs text-text-secondary">Empty folder</li>
+					<div className="px-3 py-2 text-xs text-text-secondary">Empty folder</div>
 				)}
-			</ul>
+			</div>
 
 			{contextMenu && (
 				<ContextMenu

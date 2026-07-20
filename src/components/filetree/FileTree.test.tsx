@@ -446,7 +446,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("hello.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const folderBtn = screen.getByLabelText("docs folder");
 			const fileBtn = screen.getByLabelText("hello.md file");
 
@@ -481,7 +481,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("hello.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const fileBtn = screen.getByLabelText("hello.md file");
 			const otherFileBtn = screen.getByLabelText("notes.md file");
 
@@ -506,7 +506,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("hello.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const fileBtn = screen.getByLabelText("hello.md file");
 
 			mockRect(rootUl, 0, 0, 300, 500);
@@ -541,7 +541,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("readme.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const readmeBtn = screen.getByLabelText("readme.md file");
 
 			mockRect(rootUl, 0, 0, 300, 500);
@@ -576,7 +576,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("subfolder")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const docsBtn = screen.getByLabelText("docs folder");
 			const subfolderBtn = screen.getByLabelText("subfolder folder");
 
@@ -612,7 +612,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("readme.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const readmeBtn = screen.getByLabelText("readme.md file");
 
 			mockRect(rootUl, 0, 0, 300, 500);
@@ -643,7 +643,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("hello.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const folderBtn = screen.getByLabelText("docs folder");
 			const fileBtn = screen.getByLabelText("hello.md file");
 
@@ -673,7 +673,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("hello.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const folderBtn = screen.getByLabelText("docs folder");
 			const fileBtn = screen.getByLabelText("hello.md file");
 
@@ -726,7 +726,7 @@ describe("FileTree", () => {
 				expect(screen.getByText("hello.md")).toBeInTheDocument();
 			});
 
-			const rootUl = document.querySelector("ul") as HTMLUListElement;
+			const rootUl = document.querySelector<HTMLDivElement>("[role=\"tree\"]") as HTMLDivElement;
 			const fileBtn = screen.getByLabelText("hello.md file");
 
 			mockRect(rootUl, 0, 0, 300, 500);
