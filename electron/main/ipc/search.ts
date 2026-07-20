@@ -120,9 +120,12 @@ const searchGeneration = new Map<number, number>();
 const wikilinkGeneration = new Map<number, number>();
 const backlinkGeneration = new Map<number, number>();
 // filename fuzzy scan は CommandPalette / wikilink-completion / live-preview の buildFileMap
-// から呼ばれ、SearchPanel の全文検索とはライフサイクルが独立している。cancelSearchForWindow が
-// filename scan を巻き込むと live-preview 側の副作用（オートコンプリート表示消失）が起きるので
-// 世代を独立管理する（wikilink/backlink と同方針）。
+// の 3 系統が同一 window で並行に叩く。他 3 map と異なり「後発が先発を自動 supersede する」
+// 意味論は取れない（例: live-preview の buildFileMap fetch が CommandPalette 開閉で `[]` に
+// 潰されると全 wikilink が unresolved 表示になる）。よって searchFilenamesImpl は
+// makeExplicitStaleChecker を使い、gen bump は cancelFilenameSearchForWindow の
+// 明示 cancel でのみ発生させる。map を独立に持つのは cancelSearchForWindow 等の
+// cross-cancel 巻き込みを防ぐため（wikilink/backlink と同方針）。
 const filenameGeneration = new Map<number, number>();
 
 function bumpGeneration(map: Map<number, number>, windowId: number): void {
@@ -134,9 +137,24 @@ function bumpGeneration(map: Map<number, number>, windowId: number): void {
 
 // gen を sync に bump し、async resumption ごとの stale 判定クロージャを返す。
 // 後発の同種 op が起きると先発が isStale で bail する仕組みを 1 行で書けるようにする。
+// 「1 window = 1 UI panel が単一で叩く」contract の op 専用（search / wikilink / backlink）。
+// 同一 window で複数の独立 caller が並行に叩く op（filename fuzzy scan など）に使うと、
+// caller 同士が互いの in-flight を無音で `[]` に潰す regression になる。
 function makeStaleChecker(map: Map<number, number>, windowId: number): () => boolean {
 	const myGen = (map.get(windowId) ?? 0) + 1;
 	map.set(windowId, myGen);
+	return () => map.get(windowId) !== myGen;
+}
+
+// bump しない stale checker。呼び出しごとの自動 supersede は行わず、
+// 「明示的な cancelXxxForWindow の呼び出しがあった場合のみ bail する」semantic を提供する。
+// 同一 window で複数の独立 caller が並行に叩く op（filename fuzzy scan: CommandPalette /
+// wikilink-completion / live-preview の buildFileMap 3 系統）向け。
+// gen 未初期化時は 0 で初期化しておき、後段の bumpGeneration が動くようにする。
+function makeExplicitStaleChecker(map: Map<number, number>, windowId: number): () => boolean {
+	const cur = map.get(windowId);
+	const myGen = cur ?? 0;
+	if (cur === undefined) map.set(windowId, myGen);
 	return () => map.get(windowId) !== myGen;
 }
 
@@ -169,8 +187,10 @@ export function cancelBacklinkScanForWindow(windowId: number): void {
 }
 
 // 明示的な cancel: gen を bump して in-flight searchFilenamesImpl を bail させる。
-// CommandPalette の unmount / wikilink-completion の close 時に呼べる。
-// 全文検索 / wikilink / backlink とは独立して管理（クロスキャンセル防止）。
+// **window 単位の全 filename fetch を巻き込む** (3 系統: CommandPalette / wikilink-completion
+// / live-preview buildFileMap) ので、単一 panel の unmount では呼ばず、
+// 全 caller が `[]` を安全に受け入れられるタイミング（ワークスペース切替 / window close 相当）
+// でのみ呼ぶ。全文検索 / wikilink / backlink とは独立管理（クロスキャンセル防止）。
 export function cancelFilenameSearchForWindow(windowId: number): void {
 	bumpGeneration(filenameGeneration, windowId);
 }
@@ -265,9 +285,13 @@ async function searchFilenamesImpl(
 	query: string,
 ): Promise<string[]> {
 	// stale checker は最初の await 前に確保する。await collectMdFilesForWorkspace で microtask に
-	// yield した隙に cancelFilenameSearchForWindow が gen を bump するケースをカバーするため
-	// (searchFilesImpl と同方針)。
-	const isStale = makeStaleChecker(filenameGeneration, senderId);
+	// yield した隙に cancelFilenameSearchForWindow が gen を bump するケースをカバーするため。
+	// 他 3 impl と異なり makeExplicitStaleChecker を使う（呼び出しごとの自動 bump をしない）:
+	// 同一 window で 3 系統の caller が並行に叩くため、caller 同士の相互 supersede が起きると
+	// 他機能の cache に `[]` が正当な結果として書き込まれる（wikilinks.ts の buildFileMap 等）。
+	// また cancel は walkMdFiles の I/O を中断せず、下流の sort / fuzzy filter と stale 結果の
+	// 破棄のみを行う（walkMdFiles 自体の中断は #7 と併せた walk 側の対応が必要）。
+	const isStale = makeExplicitStaleChecker(filenameGeneration, senderId);
 
 	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath);
 	if (isStale()) return [];

@@ -555,9 +555,9 @@ function installApiMock(opts: {
 			track("searchFiles", [workspacePath, rawQuery, caseSensitive ?? false]);
 			const querySearch = caseSensitive ? rawQuery : rawQuery.toLowerCase();
 			if (!querySearch) return { results: [], truncated: false };
-			// 本番 search.ts:250-252 (searchFilenamesImpl の input.sort(byteCmp)) と同じく
-			// path の byte 比較で sort してから走査。mock は並列処理をしないため、file 単位で
-			// sort 済み順に処理すれば本番の最終 sort (search.ts:236-240) と同じ順序が得られる。
+			// 本番 searchFilenamesImpl の input.sort(byteCmp) と同じく path の byte 比較で
+			// sort してから走査。mock は並列処理をしないため、file 単位で sort 済み順に処理すれば
+			// 本番 searchFilesImpl の最終 sort と同じ順序が得られる。
 			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
 			const results: SearchResult[] = [];
 			let truncated = false;
@@ -612,7 +612,7 @@ function installApiMock(opts: {
 		},
 		searchFilenames: async (workspacePath: string, query: string): Promise<string[]> => {
 			track("searchFilenames", [workspacePath, query]);
-			// 本番 search.ts:158-160 と同じ: byte sort → 空クエリは全件、それ以外は basename に
+			// 本番 searchFilenamesImpl と同じ: byte sort → 空クエリは全件、それ以外は basename に
 			// 対して fuzzyMatch（フルパスではない）。
 			const mdFiles = collectMdFiles(workspacePath).sort(byteCmp);
 			if (query === "") return mdFiles;

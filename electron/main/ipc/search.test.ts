@@ -159,8 +159,12 @@ describe("searchFilenamesImpl", () => {
 		);
 	});
 
-	it("cancels older filename search when a newer search starts on the same window", async () => {
-		// CommandPalette / wikilink-completion で連続入力 → 先発が bail することを確認。
+	it("concurrent filename searches on the same window do NOT cancel each other", async () => {
+		// regression guard: 3 系統 (CommandPalette / wikilink-completion / live-preview
+		// buildFileMap) が同一 window で並行に叩くため、caller 同士の supersede が起きると
+		// 他機能の cache (wikilinks.ts:234 の fileMap 等) に `[]` が正当な結果として書き込まれ、
+		// 全 wikilink が unresolved 表示になる。他 3 map と異なり searchFilenamesImpl は
+		// 明示 cancel のみで bail することを固定する。
 		for (let i = 0; i < 10; i++) {
 			await writeFile(join(workspaceDir, `f${i}.md`), "");
 		}
@@ -168,7 +172,7 @@ describe("searchFilenamesImpl", () => {
 			searchFilenamesImpl(TEST_WIN, workspaceDir, ""),
 			searchFilenamesImpl(TEST_WIN, workspaceDir, ""),
 		]);
-		expect(r1).toEqual([]);
+		expect(r1).toHaveLength(10);
 		expect(r2).toHaveLength(10);
 	});
 
@@ -207,6 +211,32 @@ describe("searchFilenamesImpl", () => {
 		const result = await promise;
 		expect(result.results).toHaveLength(10);
 		expect(result.truncated).toBe(false);
+	});
+
+	it("cancelWikilinkScanForWindow does NOT cancel in-flight filename search", async () => {
+		// regression guard: UnresolvedLinksPanel の cleanup で
+		// live-preview の buildFileMap fetch や CommandPalette 用 fuzzy 結果を
+		// 空にしないことを確認する（wikilink↔filename の双方向不干渉、backlink block と同 pattern）。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "");
+		}
+		const promise = searchFilenamesImpl(TEST_WIN, workspaceDir, "");
+		cancelWikilinkScanForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("cancelFilenameSearchForWindow does NOT cancel in-flight wikilink scan", async () => {
+		// regression guard: 逆方向 — filename cancel が UnresolvedLinksPanel の scan を
+		// 巻き込まないことを確認する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "[[missing]]");
+		}
+		const promise = scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+		cancelFilenameSearchForWindow(TEST_WIN);
+		const result = await promise;
+		expect(result).toHaveLength(1);
+		expect(result[0].pageName).toBe("missing");
 	});
 });
 
