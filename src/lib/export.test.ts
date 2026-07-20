@@ -1074,3 +1074,108 @@ describe("exportSlidesAsPdf", () => {
 		expect(html).toContain("Second");
 	});
 });
+
+// #366 / #367: sanitize-after pipeline の end-to-end 統合テスト。
+// exportAsHtml / exportAsPdf の post-processor (embed / resolve) + finalizeHtml が
+// 1 経路として (a) 画像 URL を保持しつつ (b) script / on* / javascript: を除去する
+// ことを、それぞれのモジュール単位ではなく実際の export 経由で固定する。
+describe("exportAsHtml / exportAsPdf sanitize-after 統合", () => {
+	// active な script-execution scheme のクラス (finalize-html.test.ts と同一定義)。
+	// javascript: に加え vbscript: / data: も same-attack-surface。CodeQL
+	// `js/incomplete-url-scheme-check` 準拠。
+	const DANGEROUS_SCHEMES = ["javascript:", "vbscript:", "data:"] as const;
+
+	// helper: export が書き出した HTML を DOM parse し、全 href/src attribute から
+	// ASCII 空白を剥がして小文字化した値が DANGEROUS_SCHEMES で始まらないことを
+	// assert する。substring 検査だと `java\nscript:` のような難読化を跨げないため
+	// 必ず DOM 経由。DOMPurify default は `<img src="data:image/*">` を許可する
+	// (finalize-html.ts の allowedDataUriTags 参照) ため、<img src> の値が
+	// `data:image/` で始まる場合のみ許容し、それ以外 (img の javascript:/vbscript: や
+	// a/link の data:) は検出する — img 全 skip にすると img 経由の script scheme が
+	// 素通りする罠を避ける。
+	const assertNoActiveScriptScheme = (html: string) => {
+		const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+		const elements = doc.querySelectorAll("[href], [src]");
+		for (const el of Array.from(elements)) {
+			for (const attr of ["href", "src"] as const) {
+				const raw = el.getAttribute(attr);
+				if (raw == null) continue;
+				const normalized = raw.replace(/\s/g, "").toLowerCase();
+				if (el.tagName === "IMG" && normalized.startsWith("data:image/")) continue;
+				const hit = DANGEROUS_SCHEMES.find((s) => normalized.startsWith(s));
+				expect(
+					hit,
+					`<${el.tagName.toLowerCase()} ${attr}="${raw}"> に active な ${hit ?? ""} scheme が残っている`,
+				).toBeUndefined();
+			}
+		}
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	// 攻撃入力と正当な画像を同じ markdown に混在させる。exportAsHtml / exportAsPdf の
+	// 両経路で使い回して、post-processor と sanitize の共存を 1 pipeline として固定する。
+	// 各行の間に空行を挟むのは CommonMark type 6 HTML block の吸収を切って、
+	// `[click](javascript:...)` を markdown リンクとして parse させるため
+	// (直前 raw HTML block に飲まれると literal text になり anchor 化されない)。
+	const MALICIOUS_MD = [
+		"![local](./img/hero.png)",
+		"",
+		'<script>alert("xss")</script>',
+		"",
+		'<img src="x" onerror="alert(1)">',
+		"",
+		"[click](javascript:alert(1))",
+		"",
+		'<a href="JavaScript:alert(2)">obf</a>',
+	].join("\n");
+
+	describe("exportAsHtml (#366)", () => {
+		it("画像は data:image/... で保持し、script / on* / javascript: は除去される", async () => {
+			mockedSave.mockResolvedValue("/output/mix.html");
+			mockedReadFileBase64.mockImplementation(async (path: string) => {
+				expect(path).toBe("/workspace/img/hero.png");
+				return "AAAA";
+			});
+			await exportAsHtml(MALICIOUS_MD, "/workspace/test.md");
+			const html = mockedWriteFile.mock.calls[0][1] as string;
+
+			// (a) embed 経路: ローカル画像は data URI として保持
+			expect(html).toContain('src="data:image/png;base64,AAAA"');
+
+			// (b) sanitize 経路: script / on* handler は除去
+			expect(html).not.toMatch(/<script/i);
+			expect(html).not.toMatch(/\bonerror\s*=/i);
+
+			// (c) javascript: (難読化含む) が href/src に active に残らない。
+			// body 部分だけ抽出して assert (head 内の href/src attribute — 例えば将来
+			// <link> 追加や KaTeX 資産 — を検査対象外にする)。
+			const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+			expect(bodyMatch).not.toBeNull();
+			assertNoActiveScriptScheme(bodyMatch?.[1] ?? "");
+		});
+	});
+
+	describe("exportAsPdf (#367)", () => {
+		it("画像は scripta-asset:// で保持し、script / on* / javascript: は除去される", async () => {
+			mockedSave.mockResolvedValue("/output/mix.pdf");
+			await exportAsPdf(MALICIOUS_MD, "/workspace/test.md");
+			const html = mockedExportPdf.mock.calls[0][0] as string;
+
+			// (a) resolve 経路: scripta-asset:// が保持される (allowAssetProtocol: true)
+			expect(html).toContain("scripta-asset://localhost/workspace/img/hero.png");
+
+			// (b) sanitize 経路: script / on* handler は除去
+			expect(html).not.toMatch(/<script/i);
+			expect(html).not.toMatch(/\bonerror\s*=/i);
+
+			// (c) javascript: (難読化含む) が href/src に active に残らない
+			// (body 抽出理由は exportAsHtml 側コメント参照)
+			const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+			expect(bodyMatch).not.toBeNull();
+			assertNoActiveScriptScheme(bodyMatch?.[1] ?? "");
+		});
+	});
+});
