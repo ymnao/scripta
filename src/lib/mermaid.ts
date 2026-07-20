@@ -27,6 +27,62 @@ let lastInitKey = "";
 /** initialize+render をアトミックに直列化するキュー */
 let renderQueue: Promise<void> = Promise.resolve();
 
+// ── Init-failure tracking (issue #363 / #384) ──────────
+//
+// `ensureInitialized` (mermaid の dynamic import + initialize) の失敗は、
+// source に依存しないモジュール全体の状態。従って record はグローバル 1 個で足りる。
+// live-preview からは `shouldSkipMermaidInitRetry` と `isMermaidInitFailureExhausted`
+// で query し、renderMermaid の内部 (queue 内 catch) が record / clear を担う。
+//
+// - cooldown 中の連続失敗 (複数ブロック同時 reject 相当) は lastFailedAt のみ更新して
+//   count を進めない **burst collapse** を入れる (blocks 数に依らず「cooldown サイクル
+//   3 回で cap」の時間的挙動を保つ、#383 の検証済み UX を維持)
+// - reset を跨いだ stale reject の誤記録防止は、record 呼び出し位置を `cacheGeneration`
+//   guard の内側に置くことで構造的に達成する (旧実装の trackingGeneration の役割は
+//   cacheGeneration に統合)
+export const MERMAID_INIT_RETRY_COOLDOWN_MS = 5000;
+export const MAX_SILENT_MERMAID_INIT_FAILURES = 3;
+
+interface MermaidInitFailureRecord {
+	count: number;
+	lastFailedAt: number;
+}
+let initFailure: MermaidInitFailureRecord | null = null;
+
+export function shouldSkipMermaidInitRetry(now: number = Date.now()): boolean {
+	return !!initFailure && now - initFailure.lastFailedAt < MERMAID_INIT_RETRY_COOLDOWN_MS;
+}
+
+export function isMermaidInitFailureExhausted(): boolean {
+	return !!initFailure && initFailure.count >= MAX_SILENT_MERMAID_INIT_FAILURES;
+}
+
+/**
+ * 失敗を記録する。cooldown 内の連続失敗は count を増やさず lastFailedAt のみ更新
+ * (burst collapse — 複数ブロック同時失敗で cap が即到達しないよう時間的挙動を保つ)。
+ * `renderMermaid` の queue 内 `catch (initErr)` から呼ばれるが、テスト用にも export。
+ */
+export function recordMermaidInitFailure(now: number = Date.now()): void {
+	if (initFailure && now - initFailure.lastFailedAt < MERMAID_INIT_RETRY_COOLDOWN_MS) {
+		initFailure.lastFailedAt = now;
+		return;
+	}
+	initFailure = {
+		count: (initFailure?.count ?? 0) + 1,
+		lastFailedAt: now,
+	};
+}
+
+/** init 成功時の record 消去。`ensureInitialized` 成功直後に呼ぶ。 */
+export function clearMermaidInitFailure(): void {
+	initFailure = null;
+}
+
+/** 全消去。theme/font 変更時の cache 世代交代と同時に呼ばれる (clearMermaidCache 経由)。 */
+export function resetMermaidInitFailureTracking(): void {
+	initFailure = null;
+}
+
 /** エディタ設定に合わせたフォントファミリーを返す */
 function getMermaidFontFamily(): string {
 	return FONT_FAMILY_MAP[useSettingsStore.getState().fontFamily];
@@ -393,13 +449,22 @@ export async function renderMermaid(
 			// バッチ N-1 個分の skip は既に効いている。
 			try {
 				await ensureInitialized(theme, font, options);
+				// init 成功で失敗記録をクリア (cap 到達後の復帰路)。clear は record と同じ
+				// `cacheGeneration` guard 内に置く: reset を跨いだ stale resolve が古い失敗を
+				// 消してしまうのを防ぐ。
+				if (gen === cacheGeneration) {
+					clearMermaidInitFailure();
+				}
 			} catch (initErr) {
 				// ensureInitialized の throw (動的 import 失敗 も initialize() throw も同 catch
 				// に落ちる) は per-source error として cache しない。cache すると次回同 key の call
 				// が rendering placeholder / error entry で短絡し、ensureInitialized 内の
 				// `initPromise = null` リセット (PR #312) 経由の再試行に到達できないため。
+				// 失敗記録も同じ guard 内で行う: reset (clearMermaidCache) を跨いだ stale reject
+				// が新世代の record を汚染するのを構造的に防ぐ (旧 trackingGeneration の役割)。
 				if (gen === cacheGeneration) {
 					cache.delete(key);
+					recordMermaidInitFailure();
 				}
 				reject(initErr);
 				return;
@@ -452,10 +517,13 @@ export function getCacheEntry(
 }
 
 /**
- * テーマ変更時にキャッシュをクリアする。
+ * テーマ変更時にキャッシュをクリアする。init 失敗記録も同時にリセットする
+ * (gen bump と record reset を原子的に、旧 trackingGeneration が担っていた
+ * stale reject 誤記録防止は `cacheGeneration` guard に集約 — issue #384)。
  */
 export function clearMermaidCache(): void {
 	cacheGeneration++;
 	cache.clear();
 	lastInitKey = "";
+	resetMermaidInitFailureTracking();
 }
