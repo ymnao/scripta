@@ -140,6 +140,19 @@ export function FileTree({
 
 	const effectiveFocusedPath = focusedPath ?? entries[0]?.path ?? null;
 
+	// Guarantee at least one treeitem is tabbable. If focusedPath points to
+	// an entry not currently rendered (workspace switch, external delete,
+	// deep-nested selectedPath in a collapsed branch), fall back to the
+	// first visible item so the tree remains reachable via Tab.
+	useEffect(() => {
+		const rootUl = rootUlRef.current;
+		if (!rootUl) return;
+		if (rootUl.querySelector('[data-path][tabindex="0"]')) return;
+		const first = rootUl.querySelector<HTMLButtonElement>("[data-path]");
+		const firstPath = first?.dataset.path;
+		if (firstPath) setFocusedPath(firstPath);
+	}, [focusedPath, entries, refreshKey]);
+
 	const handleFocusPath = useCallback((path: string) => {
 		setFocusedPath(path);
 	}, []);

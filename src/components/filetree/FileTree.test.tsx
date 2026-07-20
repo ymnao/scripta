@@ -877,6 +877,24 @@ describe("FileTree", () => {
 			expect(onFileSelect).toHaveBeenCalledWith("/workspace/hello.md");
 		});
 
+		it("keeps a tabbable item when selectedPath references a non-visible entry", async () => {
+			render(
+				<FileTree
+					workspacePath="/workspace"
+					selectedPath="/workspace/does-not-exist.md"
+					onFileSelect={() => {}}
+				/>,
+			);
+			await waitFor(() => {
+				expect(screen.getByText("docs")).toBeInTheDocument();
+			});
+
+			await waitFor(() => {
+				const tabbable = document.querySelector('[data-path][tabindex="0"]');
+				expect(tabbable).not.toBeNull();
+			});
+		});
+
 		it("jumps to first/last with Home/End", async () => {
 			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
 			await waitFor(() => {
