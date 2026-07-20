@@ -196,6 +196,130 @@ describe("finalizeHtml", () => {
 		});
 	});
 
+	// #368: `data:image/svg+xml` は payload に script / event handler を含み得るため、
+	// `data:image/png` とは MIME レベルで security posture が異なる。DOMPurify の
+	// `<img>` 経路は data:image/svg+xml を allow するが、この経路はブラウザが `<img>`
+	// referenced SVG 上で script を実行しないという仕様に依拠して安全と扱う。
+	// 現挙動を仕様として固定し、DOMPurify default 変更 (svg data URI を strip する等)
+	// に silent 追従しないための safety net。
+	describe("SVG data URI (仕様固定)", () => {
+		it("<img> の data:image/svg+xml (空 svg) を通す", () => {
+			// PHN2Zy8+ = base64("<svg/>")
+			const html = finalizeHtml(markUnsanitized('<img src="data:image/svg+xml;base64,PHN2Zy8+">'));
+			expect(html).toContain("data:image/svg+xml;base64,PHN2Zy8+");
+		});
+
+		it("<img> の data:image/svg+xml payload に <script> があっても URL は保持する (img sink は script 実行しない仕様)", () => {
+			// base64("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>")
+			const svgB64 =
+				"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxzY3JpcHQ+YWxlcnQoMSk8L3NjcmlwdD48L3N2Zz4=";
+			const html = finalizeHtml(markUnsanitized(`<img src="data:image/svg+xml;base64,${svgB64}">`));
+			// URL 自体は attribute value として保持される (script は payload 内であり finalize 対象外)
+			expect(html).toContain(`data:image/svg+xml;base64,${svgB64}`);
+			// finalize 出力の HTML レベルで <script> tag が実体化していないことは
+			// base64 のままで保証されるが、念のため裸の <script が出ないことも固定
+			expect(html).not.toMatch(/<script/i);
+		});
+
+		it("<img> の data:image/svg+xml payload に on* があっても URL は保持する", () => {
+			// base64("<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"></svg>")
+			const svgB64 =
+				"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIG9ubG9hZD0iYWxlcnQoMSkiPjwvc3ZnPg==";
+			const html = finalizeHtml(markUnsanitized(`<img src="data:image/svg+xml;base64,${svgB64}">`));
+			expect(html).toContain(`data:image/svg+xml;base64,${svgB64}`);
+			// finalize 経路では base64 は decode されないため、attribute 外に onload=... が
+			// 漏れないことを念のため固定 (DOMPurify default が base64 を decode して inspect
+			// する挙動に変わった場合の regression detector)
+			expect(html).not.toMatch(/\bonload\s*=/i);
+		});
+
+		it("<img> の data:image/svg+xml;utf8, (URL-encoded payload) も URL を保持する", () => {
+			const payload = encodeURIComponent(
+				'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+			);
+			const html = finalizeHtml(markUnsanitized(`<img src="data:image/svg+xml;utf8,${payload}">`));
+			expect(html).toContain(`data:image/svg+xml;utf8,${payload}`);
+			expect(html).not.toMatch(/<script/i);
+		});
+	});
+
+	// #368: `javascript:` の拒否テストが平文小文字のみだった件を補完。
+	// 難読化 (HTML entity / 大小文字 / 改行/タブ / 前後空白) を通しても、
+	// finalize 出力の HTML から `javascript:` scheme を持つ active な href/src が
+	// 残らないことを固定する。
+	describe("javascript: 難読化除去", () => {
+		// active な script-execution scheme のクラス。`javascript:` に加えて `vbscript:` /
+		// `data:` も active URL scheme として同じ攻撃面を持つため 3 種まとめて拒否する
+		// (CodeQL `js/incomplete-url-scheme-check` 準拠)。本 describe の入力は javascript:
+		// 難読化のみだが、helper 側で 3 scheme を検査しておけば別 scheme 経路の regression
+		// も同時に固定できる。
+		const DANGEROUS_SCHEMES = ["javascript:", "vbscript:", "data:"] as const;
+
+		// helper: finalize 後の HTML を DOM parse して、全 href/src attribute から
+		// ASCII 空白 (改行/タブ含む) を除去した上で小文字化した値が、
+		// DANGEROUS_SCHEMES のいずれでも始まっていないことを assert する。
+		// 文字列 substring 検査だと `java\nscript:` のような難読化を跨げないため必ず
+		// DOM 経由で確認する。
+		const assertNoActiveScriptScheme = (html: string) => {
+			const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+			const elements = doc.querySelectorAll("[href], [src]");
+			for (const el of Array.from(elements)) {
+				for (const attr of ["href", "src"] as const) {
+					const raw = el.getAttribute(attr);
+					if (raw == null) continue;
+					// scheme 部分に紛れた ASCII whitespace (改行/タブ/前置空白) を剥がしてから
+					// 小文字化して判定する。DOMPurify が仮に href/src の scheme 難読化を通した
+					// 場合でも substring 検査ではなく scheme 正規化ベースで detect する
+					const normalized = raw.replace(/\s/g, "").toLowerCase();
+					const hit = DANGEROUS_SCHEMES.find((s) => normalized.startsWith(s));
+					expect(
+						hit,
+						`<${el.tagName.toLowerCase()} ${attr}="${raw}"> は active な ${hit ?? ""} scheme を持つ`,
+					).toBeUndefined();
+				}
+			}
+		};
+
+		it("HTML entity で j を難読化した javascript: (java&#x73;cript:) を除去する", () => {
+			const html = finalizeHtml(markUnsanitized('<a href="java&#x73;cript:alert(1)">x</a>'));
+			assertNoActiveScriptScheme(html);
+		});
+
+		it("大小文字混在の JavaScript: を除去する", () => {
+			const html = finalizeHtml(markUnsanitized('<a href="JavaScript:alert(1)">x</a>'));
+			assertNoActiveScriptScheme(html);
+		});
+
+		it("改行を挟んだ java\\nscript: を除去する", () => {
+			const html = finalizeHtml(markUnsanitized('<a href="java\nscript:alert(1)">x</a>'));
+			assertNoActiveScriptScheme(html);
+		});
+
+		it("タブを挟んだ ja\\tvascript: を img src で除去する", () => {
+			const html = finalizeHtml(markUnsanitized('<img src="ja\tvascript:alert(1)">'));
+			assertNoActiveScriptScheme(html);
+		});
+
+		it("前置空白 ' javascript:' を除去する", () => {
+			const html = finalizeHtml(markUnsanitized('<a href=" javascript:alert(1)">x</a>'));
+			assertNoActiveScriptScheme(html);
+		});
+
+		// allowAssetProtocol: true 経路でも同じく難読化 javascript: が除去されることを
+		// 固定する (合成 regexp の書き間違いで難読化パターンだけ通ってしまう regression を検出)。
+		it("allowAssetProtocol: true 経路でも難読化 javascript: を除去する", () => {
+			const attacks = [
+				'<a href="java&#x73;cript:alert(1)">a</a>',
+				'<a href="JavaScript:alert(1)">b</a>',
+				'<a href="java\nscript:alert(1)">c</a>',
+				'<img src="ja\tvascript:alert(1)">',
+				'<a href=" javascript:alert(1)">d</a>',
+			].join("");
+			const html = finalizeHtml(markUnsanitized(attacks), { allowAssetProtocol: true });
+			assertNoActiveScriptScheme(html);
+		});
+	});
+
 	describe("冪等性", () => {
 		it("finalize を 2 回呼んでも結果が変わらない", () => {
 			const raw = markUnsanitized(
