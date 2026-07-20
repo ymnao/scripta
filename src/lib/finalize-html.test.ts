@@ -250,12 +250,27 @@ describe("finalizeHtml", () => {
 	// finalize 出力の HTML から `javascript:` scheme を持つ active な href/src が
 	// 残らないことを固定する。
 	describe("javascript: 難読化除去", () => {
-		// helper: finalize 後の HTML に href/src attribute として javascript: が
-		// active な形で残っていないことを assert する
+		// helper: finalize 後の HTML を DOM parse して、全 href/src attribute から
+		// ASCII 空白 (改行/タブ含む) と制御文字を除去した上で小文字化した値が、
+		// `javascript:` で始まっていないことを assert する。文字列 substring 検査だと
+		// `java\nscript:` のような難読化を跨げないため必ず DOM 経由で確認する。
 		const assertNoActiveJavascriptScheme = (html: string) => {
-			// href / src attribute value の中に (encode 済みでない) javascript: が現れないこと
-			expect(html).not.toMatch(/\b(?:href|src)\s*=\s*"[^"]*javascript:/i);
-			expect(html).not.toMatch(/\b(?:href|src)\s*=\s*'[^']*javascript:/i);
+			const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+			const elements = doc.querySelectorAll("[href], [src]");
+			for (const el of Array.from(elements)) {
+				for (const attr of ["href", "src"] as const) {
+					const raw = el.getAttribute(attr);
+					if (raw == null) continue;
+					// scheme 部分に紛れた ASCII whitespace (改行/タブ/前置空白) を剥がしてから
+					// 小文字化して判定する。DOMPurify が仮に href/src の scheme 難読化を通した
+					// 場合でも substring 検査ではなく scheme 正規化ベースで detect する
+					const normalized = raw.replace(/\s/g, "").toLowerCase();
+					expect(
+						normalized.startsWith("javascript:"),
+						`<${el.tagName.toLowerCase()} ${attr}="${raw}"> は active な javascript: を持つ`,
+					).toBe(false);
+				}
+			}
 		};
 
 		it("HTML entity で j を難読化した javascript: (java&#x73;cript:) を除去する", () => {
