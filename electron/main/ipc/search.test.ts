@@ -162,9 +162,9 @@ describe("searchFilenamesImpl", () => {
 	it("concurrent filename searches on the same window do NOT cancel each other", async () => {
 		// regression guard: 3 系統 (CommandPalette / wikilink-completion / live-preview
 		// buildFileMap) が同一 window で並行に叩くため、caller 同士の supersede が起きると
-		// 他機能の cache (wikilinks.ts:234 の fileMap 等) に `[]` が正当な結果として書き込まれ、
-		// 全 wikilink が unresolved 表示になる。他 3 map と異なり searchFilenamesImpl は
-		// 明示 cancel のみで bail することを固定する。
+		// 他機能の cache (WikilinkDecorationPlugin.fetchFiles の fileMap 等) に `[]` が
+		// 正当な結果として書き込まれ、全 wikilink が unresolved 表示になる。他 3 map と異なり
+		// searchFilenamesImpl は明示 cancel のみで bail することを固定する。
 		for (let i = 0; i < 10; i++) {
 			await writeFile(join(workspaceDir, `f${i}.md`), "");
 		}
@@ -223,6 +223,18 @@ describe("searchFilenamesImpl", () => {
 		const promise = searchFilenamesImpl(TEST_WIN, workspaceDir, "");
 		cancelWikilinkScanForWindow(TEST_WIN);
 		const result = await promise;
+		expect(result).toHaveLength(10);
+	});
+
+	it("filename search after cancel succeeds (gen resync)", async () => {
+		// makeExplicitStaleChecker の `myGen = cur ?? 0` (bump 済み gen の引き継ぎ) が
+		// 壊れると cancel 後の全 search が永久に `[]` になる。テスト実行順への暗黙依存
+		// (先行 cancel テストが残す gen=1 を後続テストが偶発的に検出) を排して固定する。
+		for (let i = 0; i < 10; i++) {
+			await writeFile(join(workspaceDir, `f${i}.md`), "");
+		}
+		cancelFilenameSearchForWindow(TEST_WIN);
+		const result = await searchFilenamesImpl(TEST_WIN, workspaceDir, "");
 		expect(result).toHaveLength(10);
 	});
 
