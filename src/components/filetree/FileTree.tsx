@@ -138,10 +138,7 @@ export function FileTree({
 		if (selectedPath) setFocusedPath(selectedPath);
 	}, [selectedPath]);
 
-	useEffect(() => {
-		if (focusedPath || entries.length === 0) return;
-		setFocusedPath(entries[0].path);
-	}, [entries, focusedPath]);
+	const effectiveFocusedPath = focusedPath ?? entries[0]?.path ?? null;
 
 	const handleFocusPath = useCallback((path: string) => {
 		setFocusedPath(path);
@@ -149,23 +146,35 @@ export function FileTree({
 
 	const handleTreeKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLUListElement>) => {
+			// Ignore keys we don't handle before touching the DOM.
+			const key = e.key;
+			if (
+				key !== "ArrowDown" &&
+				key !== "ArrowUp" &&
+				key !== "ArrowRight" &&
+				key !== "ArrowLeft" &&
+				key !== "Home" &&
+				key !== "End" &&
+				key !== "Enter" &&
+				key !== " "
+			) {
+				return;
+			}
 			// Skip when a rename/create InlineInput or other input owns focus.
 			const target = e.target as HTMLElement;
 			if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-			const currentBtn = target.closest<HTMLElement>("[data-path]");
+			const currentBtn = target.closest<HTMLButtonElement>("[data-path]");
 			if (!currentBtn) return;
 
 			const rootUl = rootUlRef.current;
 			if (!rootUl) return;
-			const visible = Array.from(
-				rootUl.querySelectorAll<HTMLButtonElement>("[data-path]"),
-			);
-			const idx = visible.indexOf(currentBtn as HTMLButtonElement);
+			const visible = Array.from(rootUl.querySelectorAll<HTMLButtonElement>("[data-path]"));
+			const idx = visible.indexOf(currentBtn);
 			if (idx < 0) return;
 
 			const isDirectory = currentBtn.dataset.isDirectory === "true";
 			const expanded = currentBtn.getAttribute("aria-expanded") === "true";
-			const depth = Number(currentBtn.dataset.depth ?? "0");
+			const depth = Number(currentBtn.dataset.depth);
 
 			const focusIdx = (i: number) => {
 				const btn = visible[i];
@@ -175,7 +184,7 @@ export function FileTree({
 				btn.focus();
 			};
 
-			switch (e.key) {
+			switch (key) {
 				case "ArrowDown":
 					e.preventDefault();
 					if (idx < visible.length - 1) focusIdx(idx + 1);
@@ -188,20 +197,20 @@ export function FileTree({
 					e.preventDefault();
 					if (!isDirectory) break;
 					if (!expanded) {
-						(currentBtn as HTMLButtonElement).click();
+						currentBtn.click();
 					} else if (idx < visible.length - 1) {
-						const nextDepth = Number(visible[idx + 1].dataset.depth ?? "0");
+						const nextDepth = Number(visible[idx + 1].dataset.depth);
 						if (nextDepth > depth) focusIdx(idx + 1);
 					}
 					break;
 				case "ArrowLeft":
 					e.preventDefault();
 					if (isDirectory && expanded) {
-						(currentBtn as HTMLButtonElement).click();
+						currentBtn.click();
 					} else {
 						// Find nearest ancestor (depth < current) walking backward.
 						for (let i = idx - 1; i >= 0; i--) {
-							const d = Number(visible[i].dataset.depth ?? "0");
+							const d = Number(visible[i].dataset.depth);
 							if (d < depth) {
 								focusIdx(i);
 								break;
@@ -220,10 +229,8 @@ export function FileTree({
 				case "Enter":
 				case " ":
 					e.preventDefault();
-					(currentBtn as HTMLButtonElement).click();
+					currentBtn.click();
 					break;
-				default:
-					return;
 			}
 		},
 		[],
@@ -717,7 +724,7 @@ export function FileTree({
 						entry={entry}
 						depth={0}
 						selectedPath={selectedPath}
-						focusedPath={focusedPath}
+						focusedPath={effectiveFocusedPath}
 						onFocusPath={handleFocusPath}
 						onFileSelect={onFileSelect}
 						onFileOpenNewTab={onFileOpenNewTab}
