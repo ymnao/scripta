@@ -34,43 +34,66 @@ let renderQueue: Promise<void> = Promise.resolve();
 // live-preview からは `shouldSkipMermaidInitRetry` と `isMermaidInitFailureExhausted`
 // で query し、renderMermaid の内部 (queue 内 catch) が record / clear を担う。
 //
-// - cooldown 中の連続失敗 (複数ブロック同時 reject 相当) は lastFailedAt のみ更新して
-//   count を進めない **burst collapse** を入れる (blocks 数に依らず「cooldown サイクル
-//   3 回で cap」の時間的挙動を保つ、#383 の検証済み UX を維持)
+// - count 前進は「cycle」単位: burst 開始時刻 (`cycleStartedAt`) から cooldown 経過で
+//   次 cycle に入り count が +1 される。同一 cycle 内の連続失敗 (複数ブロック同時
+//   reject / 外部 caller の高頻度呼び出し) は count を進めず lastFailedAt のみ更新
+//   (**burst collapse**、blocks 数に依らず「cooldown サイクル 3 回で cap」の時間軸を保つ、
+//   #383 の検証済み UX を維持)
+// - `lastFailedAt` に依存しない cycle ベース前進により、高頻度な外部 caller
+//   (MermaidEditorDialog / preprocessMermaidBlocks) が cooldown 未満の間隔で
+//   失敗し続けても count は 3×cooldown 経過で必ず cap に到達する (#384 レビュー指摘)
 // - reset を跨いだ stale reject の誤記録防止は、record 呼び出し位置を `cacheGeneration`
 //   guard の内側に置くことで構造的に達成する (旧実装の trackingGeneration の役割は
 //   cacheGeneration に統合)
+//
+// **cross-caller の副作用**: init 失敗記録はモジュール共有のため、`MermaidEditorDialog`
+// や `preprocessMermaidBlocks` (PDF/HTML export) 経由の renderMermaid 失敗も
+// live-preview の back-off gate / cap 判定を進める (逆方向も同様: 外部 caller の成功が
+// live-preview の back-off を解除する)。init 失敗が本質的にグローバルなため意味論的には
+// 妥当。
 export const MERMAID_INIT_RETRY_COOLDOWN_MS = 5000;
 export const MAX_SILENT_MERMAID_INIT_FAILURES = 3;
 
 interface MermaidInitFailureRecord {
 	count: number;
 	lastFailedAt: number;
+	/** 現在の cycle の起点。同一 cycle 内の失敗では更新せず、cooldown 経過後の失敗で
+	 *  next-cycle 遷移と同時に更新される。lastFailedAt は連続失敗で毎回スライドするため
+	 *  count 前進判定には使えない (レビュー指摘 #384)。 */
+	cycleStartedAt: number;
 }
 let initFailure: MermaidInitFailureRecord | null = null;
 
+/** live-preview の renderMissing / 外部 caller の fresh render 起動 gate。
+ *  cooldown 中は true を返す。cross-caller: 全ての caller が同一 record を参照する。 */
 export function shouldSkipMermaidInitRetry(now: number = Date.now()): boolean {
 	return !!initFailure && now - initFailure.lastFailedAt < MERMAID_INIT_RETRY_COOLDOWN_MS;
 }
 
+/** cap 到達の判定 (cycle が MAX_SILENT_MERMAID_INIT_FAILURES 回進んだか)。
+ *  cross-caller: 外部 caller の失敗も count を進めるため cap 到達を早める。 */
 export function isMermaidInitFailureExhausted(): boolean {
 	return !!initFailure && initFailure.count >= MAX_SILENT_MERMAID_INIT_FAILURES;
 }
 
 /**
- * 失敗を記録する。cooldown 内の連続失敗は count を増やさず lastFailedAt のみ更新
- * (burst collapse — 複数ブロック同時失敗で cap が即到達しないよう時間的挙動を保つ)。
+ * 失敗を記録する。cycle ベース前進:
+ * - 初回失敗: count=1、cycleStartedAt=now
+ * - 前 cycle から cooldown 経過後の失敗: count+=1、cycleStartedAt=now (新 cycle 遷移)
+ * - 同一 cycle 内の連続失敗: count 据え置き、lastFailedAt のみ更新 (burst collapse)
+ *
  * `renderMermaid` の queue 内 `catch (initErr)` から呼ばれるが、テスト用にも export。
  */
 export function recordMermaidInitFailure(now: number = Date.now()): void {
-	if (initFailure && now - initFailure.lastFailedAt < MERMAID_INIT_RETRY_COOLDOWN_MS) {
-		initFailure.lastFailedAt = now;
+	if (!initFailure) {
+		initFailure = { count: 1, lastFailedAt: now, cycleStartedAt: now };
 		return;
 	}
-	initFailure = {
-		count: (initFailure?.count ?? 0) + 1,
-		lastFailedAt: now,
-	};
+	if (now - initFailure.cycleStartedAt >= MERMAID_INIT_RETRY_COOLDOWN_MS) {
+		initFailure.count += 1;
+		initFailure.cycleStartedAt = now;
+	}
+	initFailure.lastFailedAt = now;
 }
 
 /** record を消去する。init 成功時 (`ensureInitialized` 成功直後) と、

@@ -346,7 +346,7 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 		expect(isMermaidInitFailureExhausted()).toBe(true);
 	});
 
-	it("burst collapse: cooldown 内の連続失敗は count を進めない (複数ブロック同時失敗で cap 即到達を防ぐ)", () => {
+	it("burst collapse: 同一 cycle 内の連続失敗は count を進めない (複数ブロック同時失敗で cap 即到達を防ぐ)", () => {
 		clearMermaidInitFailure();
 		// 同一 cooldown ウィンドウ内で 5 回失敗 (3 ブロック同時 reject + 追撃)
 		recordMermaidInitFailure(1000);
@@ -359,6 +359,23 @@ describe("mermaid init-failure global back-off (issue #384)", () => {
 		// lastFailedAt は最新に更新されている (cooldown が延長される)
 		expect(shouldSkipMermaidInitRetry(1004 + MERMAID_INIT_RETRY_COOLDOWN_MS - 1)).toBe(true);
 		expect(shouldSkipMermaidInitRetry(1004 + MERMAID_INIT_RETRY_COOLDOWN_MS)).toBe(false);
+	});
+
+	it("cycle ベース前進: cooldown 未満間隔で永続的に失敗しても count は 3×cooldown 経過で cap 到達 (#384 レビュー W1)", () => {
+		clearMermaidInitFailure();
+		// 300ms 間隔で失敗が続くケース (MermaidEditorDialog の debounce と等価)
+		// cooldown = 5000ms のため lastFailedAt は永遠にスライドするが、
+		// cycleStartedAt から cooldown 経過ごとに count が前進する。
+		let now = 1000;
+		while (isMermaidInitFailureExhausted() === false && now < 1000 + 30_000) {
+			recordMermaidInitFailure(now);
+			now += 300;
+		}
+		expect(isMermaidInitFailureExhausted()).toBe(true);
+		// 到達時刻は cycleStartedAt=1000 から 2×cooldown 経過直後 (count 1→2→3)
+		// 具体的には now = 1000 + 5000 + 5000 の直後の tick を挟んだ範囲
+		expect(now).toBeGreaterThanOrEqual(1000 + MERMAID_INIT_RETRY_COOLDOWN_MS * 2);
+		expect(now).toBeLessThan(1000 + MERMAID_INIT_RETRY_COOLDOWN_MS * 3);
 	});
 
 	it("clearMermaidInitFailure で record が消え shouldSkip / exhausted とも false になる", () => {
