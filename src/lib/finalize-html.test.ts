@@ -82,6 +82,52 @@ describe("finalizeHtml", () => {
 		});
 	});
 
+	// `allowAssetProtocol: true` は `ALLOWED_URI_REGEXP` を差し替える分岐で、
+	// regexp レベルでは tag/attr の限定を持たない。DOMPurify の tag allowlist
+	// (default で <link>/<iframe>/<object>/<embed> 等を strip) にのみ依存する形。
+	// 現状挙動を仕様として固定し、post-processor が挿入する `scripta-asset://`
+	// が意図しない sink へ広がっていないか regression 検知する。
+	describe("allowAssetProtocol: true の tag スコープ (仕様固定)", () => {
+		const finalize = (html: string) =>
+			finalizeHtml(markUnsanitized(html), { allowAssetProtocol: true });
+
+		// 想定 sink: post-processor が実際に挿入するのは <img src> のみだが、
+		// 手書き HTML で以下 tag に scripta-asset: を書いた場合も通過する。
+		// この経路の caller (preview / PDF export) は custom protocol の解決を
+		// 提供しており、既存の image/media 経路に閉じる想定なので許容。
+		it("media/source/anchor で scripta-asset: が通過する (現仕様)", () => {
+			expect(finalize('<img src="scripta-asset://a.png">')).toContain("scripta-asset://a.png");
+			expect(finalize('<img srcset="scripta-asset://b.png 2x">')).toContain(
+				"scripta-asset://b.png",
+			);
+			expect(finalize('<video src="scripta-asset://c.mp4"></video>')).toContain(
+				"scripta-asset://c.mp4",
+			);
+			expect(finalize('<audio src="scripta-asset://d.mp3"></audio>')).toContain(
+				"scripta-asset://d.mp3",
+			);
+			expect(finalize('<source src="scripta-asset://e.png">')).toContain("scripta-asset://e.png");
+			// <a href> は clickable link として通過するが、preview / PDF 経路は外部遷移を
+			// 持たない (Electron webview で custom protocol 解決) ため許容範囲。
+			expect(finalize('<a href="scripta-asset://f.png">x</a>')).toContain("scripta-asset://f.png");
+			// <form action> も通過する。preview/PDF 経路で form submit は起きないため許容。
+			expect(finalize('<form action="scripta-asset://g"></form>')).toContain("scripta-asset://g");
+		});
+
+		// DOMPurify default の tag allowlist に無い危険 sink は、URI regexp を差し替えても
+		// tag ごと strip される。ここが後日 default 変更等で緩んだ場合の safety net。
+		it("script リソース sink (<link>/<iframe>/<object>/<embed>) は tag ごと strip される", () => {
+			expect(finalize('<link rel="stylesheet" href="scripta-asset://x.css">')).not.toContain(
+				"scripta-asset",
+			);
+			expect(finalize('<iframe src="scripta-asset://x.html"></iframe>')).not.toContain(
+				"scripta-asset",
+			);
+			expect(finalize('<object data="scripta-asset://x"></object>')).not.toContain("scripta-asset");
+			expect(finalize('<embed src="scripta-asset://x">')).not.toContain("scripta-asset");
+		});
+	});
+
 	describe("KaTeX allowlist", () => {
 		it("KaTeX span + MathML tag/attr を通す", () => {
 			const katexLike =
