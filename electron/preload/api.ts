@@ -61,6 +61,7 @@ export type Api = Readonly<{
 	) => Promise<SearchFilesResponse>;
 	cancelSearch: () => Promise<void>;
 	searchFilenames: (workspacePath: string, query: string) => Promise<string[]>;
+	cancelFilenameSearch: () => Promise<void>;
 	scanUnresolvedWikilinks: (workspacePath: string) => Promise<UnresolvedWikilink[]>;
 	cancelWikilinkScan: () => Promise<void>;
 	scanBacklinks: (workspacePath: string, targetFilePath: string) => Promise<BacklinkSource[]>;

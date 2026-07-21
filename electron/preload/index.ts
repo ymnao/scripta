@@ -74,6 +74,7 @@ const api: Api = Object.freeze({
 	cancelSearch: () => invoke(ipcRenderer.invoke("search:cancel")),
 	searchFilenames: (workspacePath, query) =>
 		invoke(ipcRenderer.invoke("search:filenames", workspacePath, query)),
+	cancelFilenameSearch: () => invoke(ipcRenderer.invoke("filename:cancel")),
 	scanUnresolvedWikilinks: (workspacePath) =>
 		invoke(ipcRenderer.invoke("search:unresolved-wikilinks", workspacePath)),
 	cancelWikilinkScan: () => invoke(ipcRenderer.invoke("wikilink:cancel")),
