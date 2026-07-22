@@ -11,6 +11,7 @@ import {
 	mergeEventKind,
 	reclassifyDeleted,
 } from "../utils/watcher-pure";
+import { acquireFileListCache, applyFsBatch, releaseFileListCache } from "./search-cache";
 import { onFileTreeFilterChange } from "./settings";
 
 // session は webContents.id（windowId 相当）で索引する。各 window は同時に 1 つしか
@@ -50,7 +51,11 @@ function flush(session: Session): void {
 	if (session.stopped) return;
 	reclassifyDeleted(session.pending, existsSync);
 	const batch: FsChangeEvent[] = [];
+	// applyFsBatch は canonical path で cache を索引するため、renderer 向けの
+	// inputPath 変換とは別に canonical batch を並走で組む。
+	const canonicalBatch: FsChangeEvent[] = [];
 	for (const [path, kind] of session.pending) {
+		canonicalBatch.push({ kind, path });
 		batch.push({
 			kind,
 			path: toInputPath(path, session.canonicalRoot, session.inputRoot),
@@ -59,6 +64,9 @@ function flush(session: Session): void {
 	session.pending.clear();
 	session.flushTimer = null;
 	if (batch.length === 0) return;
+	// renderer send の直前に cache を先に更新する。renderer が変更通知を受けて即
+	// 再 fetch しても cache が既に新状態になっている順序保証。
+	applyFsBatch(session.canonicalRoot, canonicalBatch);
 	if (session.webContents.isDestroyed()) return;
 	session.webContents.send("watcher:fs-change", batch);
 }
@@ -122,6 +130,9 @@ export function stopWatcherForWindow(windowId: number): void {
 		console.warn("[watcher] close failed:", err);
 	});
 	sessions.delete(windowId);
+	// refcount -1。0 到達で cache entry が drop され、以降 collectMdFilesForWorkspace は
+	// entry なし = watcher 非稼働経路として直接 walk に落ちる。
+	releaseFileListCache(session.canonicalRoot);
 }
 
 // FileTree フィルタ設定が変わったとき、watcher 側は **何もしない**。watcher は
@@ -144,6 +155,8 @@ export function registerWatcherIpc(): void {
 		const inputRoot = resolve(rawPath);
 		stopWatcherForWindow(event.sender.id);
 		sessions.set(event.sender.id, startSession(event.sender, canonical, inputRoot));
+		// refcount +1。既存 acquire があれば +1 のみで、window 横断で cache を共有する。
+		acquireFileListCache(canonical);
 	});
 
 	handle("watcher:stop", async (event) => {

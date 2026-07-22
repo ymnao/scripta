@@ -15,6 +15,11 @@ import type {
 import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
 import {
+	buildExistingStemsFrom,
+	buildFileMapFrom,
+	canonicalToInputPaths,
+} from "../utils/search-cache-pure";
+import {
 	buildLineStarts,
 	buildLowerToOrigUtf16Map,
 	byteCmp,
@@ -25,6 +30,13 @@ import {
 	isInRanges,
 	maskRanges,
 } from "../utils/search-pure";
+import {
+	getCachedExistingStems,
+	getCachedFileMap,
+	getCachedMdFiles,
+	hasFileListCacheEntry,
+	populateFileListCache,
+} from "./search-cache";
 
 // scan 系 IPC が共有する readFile 並列上限。複数の scan IPC が同時並行しても
 // 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
@@ -43,7 +55,9 @@ async function processMdFilesParallel(
 	inFiles: readonly string[],
 	isStale: () => boolean,
 	options: {
-		skipFile?: (inFile: string) => boolean;
+		// skipFile は canonical ioPath と input inFile の両方を受け取り、readFile 前に skip 判定する。
+		// scanBacklinksImpl の self-reference skip 用 (canonical 一致で判定)。
+		skipFile?: (ioFile: string, inFile: string) => boolean;
 		// 「打ち切り」判定。isStale と異なり、bail は「これまで集めた結果は保持したまま
 		// 追加の走査だけ止める」セマンティクス（searchFilesImpl の件数上限用）。
 		// isStale の cancel セマンティクス（結果は `[]` 相当）とは混同しないこと。
@@ -57,7 +71,7 @@ async function processMdFilesParallel(
 			ioLimit(async () => {
 				if (shouldStop()) return;
 				const inFile = inFiles[idx];
-				if (options.skipFile?.(inFile)) return;
+				if (options.skipFile?.(ioPath, inFile)) return;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");
@@ -73,39 +87,73 @@ async function processMdFilesParallel(
 	);
 }
 
-// ワークスペース配下の `.md` ファイルを再帰的に収集する。
-// I/O は canonical（path-guard 通過後）、戻り値は input-base に揃えるために
-// 2 つの基底パスを並走させる（fs.ts/listDirectoryImpl と同じ方針）。
+// ワークスペース配下の `.md` ファイルを再帰的に収集する (canonical path 側のみ)。
+// input-base への変換は collectMdFilesForWorkspace の返却境界で prefix substitution する。
 // `.` で始まるエントリ（ファイル / ディレクトリ）は早期に skip して、隠しディレクトリの
 // 中身を readdir しないようにする。`node_modules` も同様に早期 skip する（依存パッケージ配下は
 // 検索対象外かつ大量ファイルで性能ノイズになるため）。
-type MdFiles = { io: string[]; input: string[] };
+//
+// isStale は #7 の walk cancel 穴の暫定手当。各ディレクトリの readdir 完了直後 1 回
+// チェックして stale なら early return する (エントリループ内の await は再帰 walk であり、
+// 再帰先の入口チェックで同粒度を得るためループ内チェックは省く)。
+// populate 経路 (cache 共有資産) からは isStale を渡さない — walk 自体は完走させる。
+type MdFiles = { io: readonly string[]; input: readonly string[]; canonicalRoot: string };
 
-async function walkMdFiles(ioDir: string, inputDir: string, out: MdFiles): Promise<void> {
+async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean): Promise<void> {
+	if (isStale?.() === true) return;
 	const entries = await fsp.readdir(ioDir, { withFileTypes: true });
+	if (isStale?.() === true) return;
 	for (const ent of entries) {
 		if (ent.name.startsWith(".") || ent.name === "node_modules") continue;
 		const ioPath = join(ioDir, ent.name);
-		const inPath = join(inputDir, ent.name);
 		if (ent.isDirectory()) {
-			await walkMdFiles(ioPath, inPath, out);
+			await walkMdFiles(ioPath, out, isStale);
 		} else if (ent.name.endsWith(".md")) {
-			out.io.push(ioPath);
-			out.input.push(inPath);
+			out.push(ioPath);
 		}
 	}
 }
 
 // 各 IPC ハンドラ冒頭の「path-guard 通過 → ワークスペース全 .md 収集」を集約。
+// cache 経路:
+//   - hit (watcher 稼働中 + populated): 保持中の canonical sorted 配列をそのまま使う。
+//   - miss (watcher 稼働中 + 未 populate): populateFileListCache 経由で walk 実行 + 結果格納。
+//   - entry なし (watcher 非稼働): 直接 walk 実行 (cache しない)。
+// isStale は entry なし経路の walk にのみ伝播する (populate は shared resource として完走させる)。
+// 認可は cache hit/miss を問わず冒頭で毎回実行する。cache key を認可済み canonical で
+// 生成することで検証スキップの構造を作らない。
 async function collectMdFilesForWorkspace(
 	senderId: number,
 	workspacePath: string,
+	isStale?: () => boolean,
 ): Promise<MdFiles> {
 	const canonical = await assertPathAllowed(senderId, workspacePath);
 	const inputBase = resolve(workspacePath);
-	const out: MdFiles = { io: [], input: [] };
-	await walkMdFiles(canonical, inputBase, out);
-	return out;
+	const cached = getCachedMdFiles(canonical);
+	let ioFiles: readonly string[];
+	if (cached !== null) {
+		ioFiles = cached;
+	} else if (hasFileListCacheEntry(canonical)) {
+		// watcher 稼働中 + 未 populate: populate 経路。walk は複数 caller 間で dedupe されるため
+		// caller 個別の isStale を伝播しない (dedupe 相手が異なる isStale を持つと、早期 return した
+		// 側の walk 結果が他 caller に共有される regression になる)。populate 完了時の cache
+		// 格納可否は populate 内 epoch guard で判定される。
+		ioFiles = await populateFileListCache(canonical, async () => {
+			const arr: string[] = [];
+			await walkMdFiles(canonical, arr);
+			return arr;
+		});
+	} else {
+		// watcher 非稼働: cache しない直接 walk 経路。caller の isStale を反映して #7 の暫定手当。
+		const arr: string[] = [];
+		await walkMdFiles(canonical, arr, isStale);
+		// callers (searchFilenamesImpl 等) が sort 済みを前提にできるよう byteCmp で揃える。
+		// cache 経路 (getSortedFiles) と同じ順序保証。
+		arr.sort(byteCmp);
+		ioFiles = arr;
+	}
+	const input = canonicalToInputPaths(ioFiles, canonical, inputBase);
+	return { io: ioFiles, input, canonicalRoot: canonical };
 }
 
 // 連続入力で古い search / wikilink scan を中断するための per-window 世代カウンタ。
@@ -220,7 +268,7 @@ async function searchFilesImpl(
 	const emptyResponse: SearchFilesResponse = { results: [], truncated: false };
 	if (query === "") return emptyResponse;
 
-	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
 	if (isStale()) return emptyResponse;
 
 	const querySearch = caseSensitive ? query : query.toLowerCase();
@@ -293,12 +341,12 @@ async function searchFilenamesImpl(
 	// 破棄のみを行う（walkMdFiles 自体の中断は #7 と併せた walk 側の対応が必要）。
 	const isStale = makeExplicitStaleChecker(filenameGeneration, senderId);
 
-	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
 	if (isStale()) return [];
-	// byte 比較（lexicographic byte compare）。
+	// collectMdFilesForWorkspace は cache 経路・直接 walk 経路の両方で byteCmp 昇順に揃えて返す
+	// (canonical prefix は全要素共通なので prefix substitution 後も順序保存)。
 	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
-	input.sort(byteCmp);
-	if (query === "") return input;
+	if (query === "") return [...input];
 	return input.filter((p) => fuzzyMatch(query, basename(p)));
 }
 
@@ -402,16 +450,17 @@ async function scanUnresolvedWikilinksImpl(
 ): Promise<UnresolvedWikilink[]> {
 	const isStale = makeStaleChecker(wikilinkGeneration, senderId);
 
-	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	const {
+		io: ioFiles,
+		input: inFiles,
+		canonicalRoot,
+	} = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
 	if (isStale()) return [];
 
 	// existing_pages は basename から `.md`（小文字一致のみ）を剥いで NFC 正規化した Set。
-	const existing = new Set<string>();
-	for (const p of inFiles) {
-		const name = basename(p);
-		if (!name.toLowerCase().endsWith(".md")) continue;
-		existing.add(name.slice(0, -3).normalize("NFC"));
-	}
+	// canonical と input で basename は同一なので、cache 経路 (canonical 集計) と
+	// fallback (input 集計) は結果が一致する。cache hit 時は共有 Set を再利用する。
+	const existing = getCachedExistingStems(canonicalRoot) ?? buildExistingStemsFrom(inFiles);
 
 	const map = new Map<string, UnresolvedWikilinkReference[]>();
 	// iterateWikilinkOccurrences の callback は sync block 内で完結するので、
@@ -462,7 +511,8 @@ async function scanBacklinksImpl(
 	// path-guard 契約: renderer 由来のファイルパスは main 側で認可してから処理する。
 	// workspace は後段の collectMdFilesForWorkspace で検証されるが、targetFilePath は
 	// 別途明示的に通す (searchFilesImpl と同じく拡張子フィルタ・pageName 正規化より前)。
-	await assertPathAllowed(senderId, targetFilePath);
+	// canonical を保持しておくと fileMap / self-reference 判定を canonical で一気通貫にできる。
+	const targetCanonical = await assertPathAllowed(senderId, targetFilePath);
 
 	const targetBase = basename(targetFilePath);
 	// walkMdFiles (line 28) と同じ小文字 `.md` のみを対象にする。大文字拡張子の
@@ -470,37 +520,31 @@ async function scanBacklinksImpl(
 	if (!targetBase.endsWith(".md")) return [];
 	const targetPage = targetBase.slice(0, -3).normalize("NFC");
 	if (targetPage === "") return [];
-	// inFiles は collectMdFilesForWorkspace で `resolve(workspacePath)` ベースに揃って
-	// 構築されており、renderer が渡す targetFilePath も同じワークスペース基底に基づく
-	// (listDirectory が返した input 形式)。symlink を解決した canonical 比較を使うと
-	// `/tmp` → `/private/tmp` のような環境差で self-reference を見落とすので、
-	// 同じ input ベースで `resolve()` 正規化したものどうしを比較する。
-	const targetInput = resolve(targetFilePath);
 
-	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(senderId, workspacePath);
+	const {
+		io: ioFiles,
+		input: inFiles,
+		canonicalRoot,
+	} = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
 	if (isStale()) return [];
 
 	// 同名 basename がワークスペース内に複数ある場合、live-preview の buildFileMap
 	// (src/components/editor/live-preview/wikilinks.ts:45) と同じく
-	// lexicographically smallest path を canonical とする。targetInput がその
-	// canonical でないなら、`[[target]]` の解決先は別ノートになり、本ファイルへの
-	// backlink を表示すると live-preview の動作と食い違う。空配列で早期 return。
-	const fileMap = new Map<string, string>();
-	for (const filePath of inFiles) {
-		const name = basename(filePath).slice(0, -3).normalize("NFC");
-		if (!name) continue;
-		const existing = fileMap.get(name);
-		if (!existing || filePath < existing) {
-			fileMap.set(name, filePath);
-		}
-	}
-	if (fileMap.get(targetPage) !== targetInput) return [];
+	// lexicographically smallest path を canonical とする。target がその canonical で
+	// ないなら、`[[target]]` の解決先は別ノートになり、本ファイルへの backlink を
+	// 表示すると live-preview の動作と食い違う。空配列で早期 return。
+	// fileMap 値は canonical path。cache hit 時は共有 Map を再利用し、miss 時は
+	// canonical ioFiles から buildFileMapFrom で構築する (同一関数で結果同一性を担保)。
+	// target と fileMap 値の両方を canonical にすることで、symlink workspace でも
+	// prefix 差 (`/tmp` vs `/private/tmp`) が原因の見落としが起きない。
+	const fileMap = getCachedFileMap(canonicalRoot) ?? buildFileMapFrom(ioFiles);
+	if (fileMap.get(targetPage) !== targetCanonical) return [];
 
 	const map = new Map<string, WikilinkReference[]>();
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
-		// 不要な fd 消費を避ける。
-		skipFile: (inFile) => inFile === targetInput,
+		// 不要な fd 消費を避ける。canonical 一致で判定する (fileMap と揃える)。
+		skipFile: (ioFile) => ioFile === targetCanonical,
 		process: (inFile, text) => {
 			iterateWikilinkOccurrences(inFile, text, (pageName, ref) => {
 				if (pageName !== targetPage) return;
