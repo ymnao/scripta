@@ -22,6 +22,7 @@ import {
 	getCachedInputFileMap,
 	getCachedMdFiles,
 	getContentCacheHandle,
+	getInvertedIndexHandle,
 	hasFileListCacheEntry,
 	populateFileListCache,
 	releaseFileListCache,
@@ -589,5 +590,142 @@ describe("search-cache: getCachedInputFileMap (candidate C)", () => {
 		expect(mA?.get("a")).toBe(`${INPUT_A}${sep}a.md`);
 		expect(mB?.get("a")).toBe(`${INPUT_B}${sep}a.md`);
 		expect(mA).not.toBe(mB);
+	});
+});
+
+describe("L3 InvertedIndex integration", () => {
+	it("getInvertedIndexHandle is defined right after acquire, undefined after release", () => {
+		expect(getInvertedIndexHandle(ROOT)).toBeUndefined();
+		acquireFileListCache(ROOT);
+		expect(getInvertedIndexHandle(ROOT)).toBeDefined();
+		releaseFileListCache(ROOT);
+		expect(getInvertedIndexHandle(ROOT)).toBeUndefined();
+	});
+
+	describe("applyFsBatch L3 branch", () => {
+		it(".md create is a no-op for L3 (new file is not indexed yet)", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
+			applyFsBatch(ROOT, [{ kind: "create", path: p("b.md") }]);
+			const result = h?.getCandidates("hello");
+			expect(result?.kind).toBe("candidates");
+			if (result?.kind === "candidates") {
+				// a.md は create の影響を受けず valid のまま、b.md は未 index のまま candidate に出ない
+				expect(result.indexedValid.has(p("a.md"))).toBe(true);
+				expect(result.candidates.has(p("b.md"))).toBe(false);
+			}
+		});
+
+		it(".md modify invalidates the file (posting kept, epoch bumped → excluded from indexedValid)", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
+			let result = h?.getCandidates("hello");
+			expect(result?.kind).toBe("candidates");
+			if (result?.kind === "candidates") {
+				expect(result.indexedValid.has(p("a.md"))).toBe(true);
+			}
+			applyFsBatch(ROOT, [{ kind: "modify", path: p("a.md") }]);
+			result = h?.getCandidates("hello");
+			expect(result?.kind).toBe("candidates");
+			if (result?.kind === "candidates") {
+				expect(result.indexedValid.has(p("a.md"))).toBe(false);
+			}
+		});
+
+		it(".md delete removes the file (indexedEpoch cleared, currentEpochOf bumps)", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
+			const epochBefore = h?.currentEpochOf(p("a.md")) ?? 0;
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("a.md") }]);
+			const epochAfter = h?.currentEpochOf(p("a.md")) ?? 0;
+			expect(epochAfter).toBeGreaterThan(epochBefore);
+			const result = h?.getCandidates("hello");
+			expect(result?.kind).toBe("candidates");
+			if (result?.kind === "candidates") {
+				expect(result.indexedValid.has(p("a.md"))).toBe(false);
+			}
+		});
+
+		it("non-.md path invalidates the subtree (exact + prefix, same判定 as L2 deletePrefix)", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			// tombstone 全 clear (indexedValidCount の 50%超) を誘発しないよう、
+			// 3 file 目 (other2.md) を追加して invalidate 後も validCount >= 2 を保つ
+			// (InvertedIndex.maybeClearOnTombstoneRatio、電main/utils/inverted-index.ts 参照)。
+			h?.indexFile(p("dir/a.md"), "hello world", h.currentEpochOf(p("dir/a.md")));
+			h?.indexFile(p("other.md"), "hello world", h.currentEpochOf(p("other.md")));
+			h?.indexFile(p("other2.md"), "hello world", h.currentEpochOf(p("other2.md")));
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("dir") }]);
+			const result = h?.getCandidates("hello");
+			expect(result?.kind).toBe("candidates");
+			if (result?.kind === "candidates") {
+				expect(result.indexedValid.has(p("dir/a.md"))).toBe(false);
+				expect(result.indexedValid.has(p("other.md"))).toBe(true);
+				expect(result.indexedValid.has(p("other2.md"))).toBe(true);
+			}
+		});
+	});
+
+	it("piggyback epoch race: indexFile with a stale capturedEpoch is discarded", () => {
+		acquireFileListCache(ROOT);
+		const h = getInvertedIndexHandle(ROOT);
+		// 事前に file を index 済みにしておく (pathToId 登録がないと invalidate が no-op になるため)。
+		// tombstone 全 clear を避けるため 3 file 分登録しておく。
+		h?.indexFile(p("a.md"), "irrelevant text", h.currentEpochOf(p("a.md")));
+		h?.indexFile(p("b.md"), "irrelevant text", h.currentEpochOf(p("b.md")));
+		h?.indexFile(p("c.md"), "irrelevant text", h.currentEpochOf(p("c.md")));
+		// read 前に epoch を snapshot する。
+		const capturedEpoch = h?.currentEpochOf(p("a.md")) ?? 0;
+		// read 中に modify batch が来て epoch が bump される。
+		applyFsBatch(ROOT, [{ kind: "modify", path: p("a.md") }]);
+		// read 完了後、古い capturedEpoch で indexFile を呼ぶ → 破棄される。
+		h?.indexFile(p("a.md"), "hello world", capturedEpoch);
+		const result = h?.getCandidates("hello");
+		expect(result?.kind).toBe("candidates");
+		if (result?.kind === "candidates") {
+			expect(result.indexedValid.has(p("a.md"))).toBe(false);
+			expect(result.candidates.has(p("a.md"))).toBe(false);
+		}
+	});
+
+	describe("verify (SCRIPTA_DARK_ASSERT smoke)", () => {
+		it("does not throw when hits are within the candidate/unindexed superset", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
+			h?.indexFile(p("b.md"), "goodbye world", h.currentEpochOf(p("b.md")));
+			expect(() =>
+				h?.verify("hello", false, [p("a.md"), p("b.md")], [p("a.md")]),
+			).not.toThrow();
+		});
+
+		it("throws when a hit file is outside the allowed set", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
+			h?.indexFile(p("b.md"), "goodbye world", h.currentEpochOf(p("b.md")));
+			expect(() =>
+				h?.verify("hello", false, [p("a.md"), p("b.md")], [p("b.md")]),
+			).toThrow();
+		});
+	});
+
+	it("a handle held past release becomes stale: indexFile is a no-op", () => {
+		acquireFileListCache(ROOT);
+		const h = getInvertedIndexHandle(ROOT);
+		expect(h).toBeDefined();
+		releaseFileListCache(ROOT);
+		// stale handle 経由の呼び出しは throw せず、かつ再 acquire した新 entry へ漏れ書き込みしない。
+		expect(() => h?.indexFile(p("a.md"), "hello world", 0)).not.toThrow();
+		acquireFileListCache(ROOT);
+		const freshHandle = getInvertedIndexHandle(ROOT);
+		const result = freshHandle?.getCandidates("hello");
+		expect(result?.kind).toBe("candidates");
+		if (result?.kind === "candidates") {
+			expect(result.indexedValid.has(p("a.md"))).toBe(false);
+		}
 	});
 });

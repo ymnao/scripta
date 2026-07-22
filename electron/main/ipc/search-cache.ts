@@ -73,6 +73,7 @@ export interface ContentCacheHandle {
 export interface InvertedIndexHandle {
 	indexFile(ioPath: string, text: string, capturedEpoch: number): void;
 	currentEpochOf(ioPath: string): number;
+	isIndexedAndValid(ioPath: string): boolean;
 	getCandidates(queryLower: string): CandidateResult;
 	verify(
 		query: string,
@@ -304,6 +305,9 @@ export function getInvertedIndexHandle(canonicalRoot: string): InvertedIndexHand
 		},
 		currentEpochOf(ioPath: string): number {
 			return e.l3.currentEpochOf(ioPath);
+		},
+		isIndexedAndValid(ioPath: string): boolean {
+			return e.l3.isIndexedAndValid(ioPath);
 		},
 		getCandidates(queryLower: string): CandidateResult {
 			return e.l3.getCandidates(queryLower);

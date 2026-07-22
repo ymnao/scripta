@@ -30,10 +30,12 @@ import {
 	isInRanges,
 	maskRanges,
 } from "../utils/search-pure";
+import { kickIdleFill } from "./index-fill";
 import {
 	type ContentCacheHandle,
 	getCachedExistingStems,
 	getCachedInputFileMap,
+	getCachedMdFiles,
 	getContentCacheHandle,
 	getInvertedIndexHandle,
 	hasFileListCacheEntry,
@@ -369,6 +371,17 @@ async function searchFilesImpl(
 		if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
 		return a.matchStart - b.matchStart;
 	});
+	// Phase C: searchFilesImpl 完了直後に idle fill を kick (冪等、走行中なら no-op)。
+	// L3 が育つ経路が piggyback (query 依存) だけだと、truncated による bail や cache miss で
+	// 未 indexed が残る。setImmediate ループでバックグラウンド補完する。
+	if (indexHandle !== undefined) {
+		kickIdleFill(canonicalRoot, {
+			listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
+			readFile: (p) => fsp.readFile(p, "utf8"),
+			isAlive: () => hasFileListCacheEntry(canonicalRoot),
+			getIndex: () => getInvertedIndexHandle(canonicalRoot),
+		});
+	}
 	// Phase C dark-launch assert: 「index 経由候補 ⊇ 全走査ヒット file 集合」を検証する。
 	// SCRIPTA_DARK_ASSERT=1 の時のみ enable (デフォルト off で production 経路への影響ゼロ)。
 	// truncated=true でも「hit した file ⊆ 候補」は成立するため skip 不要。
