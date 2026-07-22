@@ -2,6 +2,11 @@ import { sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { ByteLruCache } from "../utils/content-cache-pure";
 import {
+	type CandidateResult,
+	InvertedIndex,
+	verifyIndexSuperset,
+} from "../utils/inverted-index";
+import {
 	applyBatchToState,
 	canonicalToInputPaths,
 	createCacheState,
@@ -41,7 +46,14 @@ interface CacheEntry {
 	l2Generation: number;
 	// input-form fileMap の派生 memo (candidate C)。scanBacklinksImpl が使う。
 	inputFileMapMemo: InputFileMapMemo | null;
+	// L3 InvertedIndex: bigram 転置索引 (Phase C、dark-launch)。
+	// L1/L2 と同じ applyFsBatch で invalidation を同期する。
+	// entry のライフサイクルに便乗して、release で自然に drop される。
+	l3: InvertedIndex;
 }
+
+
+
 
 // L2 に読み書きするための狭い interface。processMdFilesParallel はこの handle 経由で
 // L2 に触るため、helper 側は search-cache module state を直接 import しない
@@ -52,6 +64,23 @@ export interface ContentCacheHandle {
 	// 黙って捨てる (stale-insert race 対策)。
 	set(ioPath: string, text: string, capturedGeneration: number): void;
 	readonly generation: number;
+}
+
+// L3 InvertedIndex の handle。piggyback indexing は processMdFilesParallel の
+// text 確定点で `indexFile` を呼ぶ (fire-and-forget、read 前後で epoch snapshot 照合)。
+// getCandidates / verify は Phase C では dark-launch assert からのみ呼ぶ (production 経路
+// では未使用、Phase D で searchFilesImpl 本配線)。
+export interface InvertedIndexHandle {
+	indexFile(ioPath: string, text: string, capturedEpoch: number): void;
+	currentEpochOf(ioPath: string): number;
+	getCandidates(queryLower: string): CandidateResult;
+	verify(
+		query: string,
+		caseSensitive: boolean,
+		allIoFiles: readonly string[],
+		hitIoFiles: readonly string[],
+	): void;
+	readonly isDisabled: boolean;
 }
 
 const entries = new Map<string, CacheEntry>();
@@ -67,6 +96,7 @@ export function acquireFileListCache(canonicalRoot: string): void {
 			l2: new ByteLruCache(),
 			l2Generation: 0,
 			inputFileMapMemo: null,
+			l3: new InvertedIndex(),
 		});
 	} else {
 		e.refCount++;
@@ -109,11 +139,20 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 			if (ev.kind === "create") continue; // 新規 file → race 対象外
 			e.l2.delete(ev.path);
 			shouldBumpL2 = true;
+			// L3: modify → invalidate (posting 残置 + fileEpoch bump)、
+			//     delete → remove (indexedEpoch 削除 + fileEpoch bump、posting 残置は tombstone clear で回収)。
+			if (ev.kind === "delete") {
+				e.l3.remove(ev.path);
+			} else {
+				e.l3.invalidate(ev.path);
+			}
 		} else {
 			// 非 .md の全 event: dir 可能性を考慮して subtree + exact 一括 evict + bump
 			const prefixWithSep = ev.path.endsWith(sep) ? ev.path : ev.path + sep;
 			e.l2.deletePrefix(ev.path, prefixWithSep);
 			shouldBumpL2 = true;
+			// L3 も同範囲を invalidate (L2 deletePrefix と同じ判定)。
+			e.l3.invalidatePrefix(ev.path);
 		}
 	}
 	if (shouldBumpL2) e.l2Generation++;
@@ -245,6 +284,40 @@ export function getContentCacheHandle(canonicalRoot: string): ContentCacheHandle
 		},
 		get generation(): number {
 			return e.l2Generation;
+		},
+	};
+}
+
+// L3 InvertedIndex handle。entry がなければ undefined (watcher 非稼働時は index 経由しない)。
+// indexFile は capturedEpoch と現在世代を比較し、read 中に modify batch が来ていた場合
+// (= currentEpochOf ≠ capturedEpoch) は無視する (piggyback / idle fill の race 対策、
+// Phase B の capturedGen の姉妹)。
+export function getInvertedIndexHandle(canonicalRoot: string): InvertedIndexHandle | undefined {
+	const e = entries.get(canonicalRoot);
+	if (e === undefined) return undefined;
+	return {
+		indexFile(ioPath: string, text: string, capturedEpoch: number): void {
+			const current = entries.get(canonicalRoot);
+			if (current !== e) return;
+			if (e.l3.currentEpochOf(ioPath) !== capturedEpoch) return;
+			e.l3.indexFile(ioPath, text);
+		},
+		currentEpochOf(ioPath: string): number {
+			return e.l3.currentEpochOf(ioPath);
+		},
+		getCandidates(queryLower: string): CandidateResult {
+			return e.l3.getCandidates(queryLower);
+		},
+		verify(
+			query: string,
+			caseSensitive: boolean,
+			allIoFiles: readonly string[],
+			hitIoFiles: readonly string[],
+		): void {
+			verifyIndexSuperset(e.l3, query, caseSensitive, allIoFiles, hitIoFiles);
+		},
+		get isDisabled(): boolean {
+			return e.l3.isDisabled;
 		},
 	};
 }
