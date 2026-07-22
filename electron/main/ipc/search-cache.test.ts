@@ -19,7 +19,9 @@ import {
 	applyFsBatch,
 	getCachedExistingStems,
 	getCachedFileMap,
+	getCachedInputFileMap,
 	getCachedMdFiles,
+	getContentCacheHandle,
 	hasFileListCacheEntry,
 	populateFileListCache,
 	releaseFileListCache,
@@ -392,5 +394,161 @@ describe("search-cache: batched multi-event apply", () => {
 		];
 		applyFsBatch(ROOT, batch);
 		expect(getCachedMdFiles(ROOT)).toBeNull();
+	});
+});
+
+describe("search-cache: L2 ContentCache", () => {
+	it("returns undefined handle when watcher is not running", () => {
+		expect(getContentCacheHandle(ROOT)).toBeUndefined();
+	});
+
+	it("provides a handle after acquire and empty on first get", () => {
+		acquireFileListCache(ROOT);
+		const h = getContentCacheHandle(ROOT);
+		expect(h).toBeDefined();
+		expect(h?.get(p("a.md"))).toBeUndefined();
+	});
+
+	it("stores and retrieves text via handle", () => {
+		acquireFileListCache(ROOT);
+		const h = getContentCacheHandle(ROOT);
+		const gen = h?.generation ?? 0;
+		h?.set(p("a.md"), "hello", gen);
+		expect(h?.get(p("a.md"))).toBe("hello");
+	});
+
+	it("release drops L2 alongside entry", () => {
+		acquireFileListCache(ROOT);
+		const h = getContentCacheHandle(ROOT);
+		h?.set(p("a.md"), "hello", h.generation);
+		releaseFileListCache(ROOT);
+		expect(getContentCacheHandle(ROOT)).toBeUndefined();
+	});
+
+	describe("applyFsBatch evict", () => {
+		it(".md modify evicts and bumps generation", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("a.md"), "old", h.generation);
+			const genBefore = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "modify", path: p("a.md") }]);
+			expect(h?.get(p("a.md"))).toBeUndefined();
+			expect(h?.generation).toBe(genBefore + 1);
+		});
+
+		it(".md delete evicts and bumps generation", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("a.md"), "old", h.generation);
+			const genBefore = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("a.md") }]);
+			expect(h?.get(p("a.md"))).toBeUndefined();
+			expect(h?.generation).toBe(genBefore + 1);
+		});
+
+		it(".md create does not evict L2", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("a.md"), "aaa", h.generation);
+			const genBefore = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "create", path: p("b.md") }]);
+			expect(h?.get(p("a.md"))).toBe("aaa");
+			expect(h?.generation).toBe(genBefore);
+		});
+
+		it("non-.md delete evicts subtree by prefix", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("dir/a.md"), "aa", h.generation);
+			h?.set(p("dir/b.md"), "bb", h.generation);
+			h?.set(p("other.md"), "cc", h.generation);
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("dir") }]);
+			expect(h?.get(p("dir/a.md"))).toBeUndefined();
+			expect(h?.get(p("dir/b.md"))).toBeUndefined();
+			expect(h?.get(p("other.md"))).toBe("cc");
+		});
+
+		it("does not evict via prefix false-match (/foo vs /foobar)", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("foo"), "x", h.generation);
+			h?.set(p("foobar/a.md"), "y", h.generation);
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("foo") }]);
+			expect(h?.get(p("foo"))).toBeUndefined();
+			expect(h?.get(p("foobar/a.md"))).toBe("y");
+		});
+
+		it("stale set (mismatched generation) is silently dropped", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			// pre-populate so that the subsequent modify actually evicts and bumps generation
+			h?.set(p("a.md"), "cached", h.generation);
+			const genAtStart = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "modify", path: p("a.md") }]);
+			// pretend a readFile started before the modify: try to set with old gen
+			h?.set(p("a.md"), "stale", genAtStart);
+			expect(h?.get(p("a.md"))).toBeUndefined();
+		});
+	});
+});
+
+describe("search-cache: getCachedInputFileMap (candidate C)", () => {
+	it("returns null when entry is missing", () => {
+		expect(getCachedInputFileMap(ROOT, ROOT)).toBeNull();
+	});
+
+	it("returns null before populate", () => {
+		acquireFileListCache(ROOT);
+		expect(getCachedInputFileMap(ROOT, ROOT)).toBeNull();
+	});
+
+	it("returns canonical map directly when canonicalRoot === inputRoot", async () => {
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md"), p("b.md")]);
+		const canonical = getCachedFileMap(ROOT);
+		const input = getCachedInputFileMap(ROOT, ROOT);
+		expect(input).toBe(canonical);
+	});
+
+	it("substitutes root prefix when inputRoot differs from canonicalRoot", async () => {
+		// canonical = /ws/notes, input = /ws/alias (symlink root case)
+		const INPUT_ROOT = `${sep}ws${sep}alias`;
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md"), p("sub/b.md")]);
+		const input = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		expect(input?.get("a")).toBe(`${INPUT_ROOT}${sep}a.md`);
+		expect(input?.get("b")).toBe(`${INPUT_ROOT}${sep}sub${sep}b.md`);
+	});
+
+	it("memoizes result across calls with same inputRoot", async () => {
+		const INPUT_ROOT = `${sep}ws${sep}alias`;
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		const m1 = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		const m2 = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		expect(m1).toBe(m2);
+	});
+
+	it("invalidates memo on epoch change (batch that bumps L1)", async () => {
+		const INPUT_ROOT = `${sep}ws${sep}alias`;
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		const m1 = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		applyFsBatch(ROOT, [{ kind: "create", path: p("b.md") }]);
+		const m2 = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		expect(m2).not.toBe(m1);
+		expect(m2?.get("b")).toBe(`${INPUT_ROOT}${sep}b.md`);
+	});
+
+	it("rebuilds when inputRoot differs from memoized inputRoot", async () => {
+		const INPUT_A = `${sep}ws${sep}aliasA`;
+		const INPUT_B = `${sep}ws${sep}aliasB`;
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		const mA = getCachedInputFileMap(ROOT, INPUT_A);
+		const mB = getCachedInputFileMap(ROOT, INPUT_B);
+		expect(mA?.get("a")).toBe(`${INPUT_A}${sep}a.md`);
+		expect(mB?.get("a")).toBe(`${INPUT_B}${sep}a.md`);
+		expect(mA).not.toBe(mB);
 	});
 });

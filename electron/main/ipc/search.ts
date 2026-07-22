@@ -31,7 +31,10 @@ import {
 	maskRanges,
 } from "../utils/search-pure";
 import {
+	type ContentCacheHandle,
 	getCachedExistingStems,
+	getCachedInputFileMap,
+	getContentCacheHandle,
 	hasFileListCacheEntry,
 	populateFileListCache,
 } from "./search-cache";
@@ -61,15 +64,31 @@ async function processMdFilesParallel(
 		// isStale の cancel セマンティクス（結果は `[]` 相当）とは混同しないこと。
 		shouldBail?: () => boolean;
 		process: (inFile: string, text: string) => void;
+		// L2 ContentCache handle (watcher 稼働中のみ)。undefined 時は従来の readFile 経路と等価。
+		// hit なら readFile を skip、miss なら readFile 後に admission cutoff 通過分のみ set。
+		// set は capture した generation を渡し、stale-insert race を防ぐ。
+		cache?: ContentCacheHandle;
 	},
 ): Promise<void> {
 	const shouldStop = (): boolean => isStale() || options.shouldBail?.() === true;
+	const cache = options.cache;
 	await Promise.all(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
 				if (shouldStop()) return;
 				const inFile = inFiles[idx];
 				if (options.skipFile?.(inFile)) return;
+				const hit = cache?.get(ioPath);
+				if (hit !== undefined) {
+					// L2 hit: readFile を skip して直接 process へ。await 境界が無いが、
+					// 他 task の cache eviction や shouldBail の変化を反映するため stop 判定は継続。
+					if (shouldStop()) return;
+					options.process(inFile, hit);
+					return;
+				}
+				// L2 miss: 従来経路。readFile 開始前に generation を capture し、
+				// set 時に不一致なら破棄する (readFile 中に modify batch → evict → 古い text 格納の race)。
+				const genAtStart = cache?.generation ?? 0;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");
@@ -79,6 +98,9 @@ async function processMdFilesParallel(
 				// readFile の await 中に stale / bail 化していたら per-file 処理は skip して
 				// cancel / 打ち切り反応性を上げる（大きな file ほど効く）。
 				if (shouldStop()) return;
+				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
+				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
+				cache?.set(ioPath, text, genAtStart);
 				options.process(inFile, text);
 			}),
 		),
@@ -267,7 +289,11 @@ async function searchFilesImpl(
 	const emptyResponse: SearchFilesResponse = { results: [], truncated: false };
 	if (query === "") return emptyResponse;
 
-	const { io, input } = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
+	const { io, input, canonicalRoot } = await collectMdFilesForWorkspace(
+		senderId,
+		workspacePath,
+		isStale,
+	);
 	if (isStale()) return emptyResponse;
 
 	const querySearch = caseSensitive ? query : query.toLowerCase();
@@ -276,6 +302,7 @@ async function searchFilesImpl(
 
 	await processMdFilesParallel(io, input, isStale, {
 		shouldBail: () => truncated,
+		cache: getContentCacheHandle(canonicalRoot),
 		process: (inputPath, content) => {
 			// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 			const lines = content.split(/\r?\n/);
@@ -467,6 +494,7 @@ async function scanUnresolvedWikilinksImpl(
 	// iterateWikilinkOccurrences の callback は sync block 内で完結するので、
 	// 並列 task 間で map への push は race しない（await の境界でのみ task が切り替わる）。
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
+		cache: getContentCacheHandle(canonicalRoot),
 		process: (inFile, text) => {
 			// inFile は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
 			// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
@@ -528,11 +556,11 @@ async function scanBacklinksImpl(
 	// symlink workspace の prefix 差 (`/tmp` vs `/private/tmp`) は resolve() で解消される。
 	const targetInput = resolve(targetFilePath);
 
-	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(
-		senderId,
-		workspacePath,
-		isStale,
-	);
+	const {
+		io: ioFiles,
+		input: inFiles,
+		canonicalRoot,
+	} = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
 	if (isStale()) return [];
 
 	// 同名 basename がワークスペース内に複数ある場合、live-preview の buildFileMap
@@ -540,13 +568,17 @@ async function scanBacklinksImpl(
 	// lexicographically smallest path を canonical とする。targetInput がその
 	// canonical でないなら、`[[target]]` の解決先は別ノートになり、本ファイルへの
 	// backlink を表示すると live-preview の動作と食い違う。空配列で早期 return。
-	// fileMap は input 表記で構築する (workspace 内 symlink ノートを正しく扱うため
-	// canonical fileMap cache は使わない — 詳細は上記 targetInput のコメント参照)。
-	const fileMap = buildFileMapFrom(inFiles);
+	// fileMap は input 表記で判定する必要がある (workspace 内 symlink ノートを正しく扱うため
+	// — 詳細は上記 targetInput のコメント参照)。cache 経路 (getCachedInputFileMap) は
+	// canonical fileMap の value の root prefix を inputRoot に差し替えた同等の Map を返す。
+	// cache miss (watcher 非稼働) は buildFileMapFrom(inFiles) の直接構築に fallback。
+	const inputBase = resolve(workspacePath);
+	const fileMap = getCachedInputFileMap(canonicalRoot, inputBase) ?? buildFileMapFrom(inFiles);
 	if (fileMap.get(targetPage) !== targetInput) return [];
 
 	const map = new Map<string, WikilinkReference[]>();
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
+		cache: getContentCacheHandle(canonicalRoot),
 		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
 		// 不要な fd 消費を避ける。input 表記で判定する (fileMap / targetInput と揃える)。
 		skipFile: (inFile) => inFile === targetInput,

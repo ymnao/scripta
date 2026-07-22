@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,12 @@ import {
 	extractWikilinks,
 	isPathTraversal,
 } from "./search";
+import {
+	_resetFileListCacheForTest,
+	acquireFileListCache,
+	applyFsBatch,
+	releaseFileListCache,
+} from "./search-cache";
 
 const TEST_WIN = 1;
 const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl, scanBacklinksImpl } =
@@ -36,6 +42,7 @@ beforeEach(async () => {
 afterEach(async () => {
 	clearWorkspaceRoots();
 	await ws.cleanup();
+	_resetFileListCacheForTest();
 });
 
 describe("isPathTraversal", () => {
@@ -1059,5 +1066,101 @@ describe("searchFilesImpl", () => {
 		const { results: out, truncated } = await searchFilesImpl(TEST_WIN, workspaceDir, "match");
 		expect(out).toHaveLength(3);
 		expect(truncated).toBe(false);
+	});
+});
+
+// Phase B regression: L2 ContentCache 統合。cache 有無 (watcher 稼働 / 非稼働相当) で
+// 結果が変わらないこと、および applyFsBatch 経由の evict で stale hit が起きないことを固定する。
+describe("searchFilesImpl (Phase B: ContentCache integration)", () => {
+	it("returns identical results with and without watcher cache", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "hello world\nfoo bar");
+		await writeFile(join(workspaceDir, "b.md"), "goodbye world\nfoo baz");
+
+		const canonical = await realpath(workspaceDir);
+
+		// 1. cache 非稼働 (watcher なし相当)
+		const noCache = await searchFilesImpl(TEST_WIN, workspaceDir, "world");
+
+		// 2. cache 稼働 (watcher あり相当)
+		acquireFileListCache(canonical);
+		const withCache = await searchFilesImpl(TEST_WIN, workspaceDir, "world");
+
+		expect(withCache).toEqual(noCache);
+
+		// 3. 2 回目 (L2 hit 経路) でも結果不変
+		const withCache2 = await searchFilesImpl(TEST_WIN, workspaceDir, "world");
+		expect(withCache2).toEqual(noCache);
+
+		releaseFileListCache(canonical);
+	});
+
+	it("returns fresh content after modify batch evicts L2", async () => {
+		const filePath = join(workspaceDir, "note.md");
+		await writeFile(filePath, "original content");
+		const canonical = await realpath(workspaceDir);
+
+		acquireFileListCache(canonical);
+		// 1 回目で L2 に "original content" が入る
+		const first = await searchFilesImpl(TEST_WIN, workspaceDir, "original");
+		expect(first.results).toHaveLength(1);
+
+		// fs を直接書き換え。applyFsBatch がなければ L2 は "original" のまま stale hit する。
+		await writeFile(filePath, "updated content");
+
+		// modify batch を注入して L2 を evict
+		const canonicalFile = join(canonical, "note.md");
+		applyFsBatch(canonical, [{ kind: "modify", path: canonicalFile }]);
+
+		// 2 回目は L2 miss → readFile → 新しい内容がヒット
+		const second = await searchFilesImpl(TEST_WIN, workspaceDir, "updated");
+		expect(second.results).toHaveLength(1);
+		const stale = await searchFilesImpl(TEST_WIN, workspaceDir, "original");
+		expect(stale.results).toHaveLength(0);
+
+		releaseFileListCache(canonical);
+	});
+
+	it("still returns results for a file larger than the admission cutoff (no drop)", async () => {
+		// admission cutoff = 1 MiB (chars 524288)。それを超える file は L2 に入らないが、
+		// 検索結果には毎回含まれること (結果落ちは絶対にしない設計)。
+		const bigFile = join(workspaceDir, "big.md");
+		const line = "needle in the haystack\n";
+		// admission cutoff (~1 MiB in code units) を確実に超えるサイズ
+		const content = line.repeat(60_000); // ~ 1.4 MB
+		await writeFile(bigFile, content);
+
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+
+		const first = await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
+		expect(first.results.length).toBeGreaterThan(0);
+
+		// 2 回目でも同じ結果 (L2 に入らず毎回 readFile される経路)
+		const second = await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
+		expect(second.results).toEqual(first.results);
+
+		releaseFileListCache(canonical);
+	});
+});
+
+describe("scanBacklinksImpl (Phase B: getCachedInputFileMap)", () => {
+	it("uses cached input fileMap when watcher is running (result parity with fallback)", async () => {
+		const target = join(workspaceDir, "target.md");
+		const source = join(workspaceDir, "source.md");
+		await writeFile(target, "target content");
+		await writeFile(source, "[[target]] link here");
+
+		const canonical = await realpath(workspaceDir);
+
+		// fallback path (no cache)
+		const fallback = await scanBacklinksImpl(TEST_WIN, workspaceDir, target);
+		expect(fallback).toHaveLength(1);
+
+		// cached path
+		acquireFileListCache(canonical);
+		const cached = await scanBacklinksImpl(TEST_WIN, workspaceDir, target);
+		expect(cached).toEqual(fallback);
+
+		releaseFileListCache(canonical);
 	});
 });

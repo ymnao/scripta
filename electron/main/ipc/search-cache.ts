@@ -1,6 +1,9 @@
+import { sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
+import { ByteLruCache } from "../utils/content-cache-pure";
 import {
 	applyBatchToState,
+	canonicalToInputPaths,
 	createCacheState,
 	type FileListCacheState,
 	getExistingStems,
@@ -16,10 +19,39 @@ import {
 //
 // refCount は同一 root を複数 window (watcher session) が共有するケース用。
 // window close (stopWatcherForWindow) で -1 し、0 で Map から drop する。
+// inputRoot ごとに派生する input-form fileMap の memo。同一 canonical root に複数 window
+// (異なる inputRoot) が張り付くケースは稀なので single slot で十分。mismatch 時は作り直す。
+// epoch が変われば破棄する (L1 files 集合の invalidation と連動)。
+interface InputFileMapMemo {
+	epoch: number;
+	inputRoot: string;
+	map: ReadonlyMap<string, string>;
+}
+
 interface CacheEntry {
 	refCount: number;
 	state: FileListCacheState;
 	inFlight: Promise<readonly string[]> | null;
+	// L2 ContentCache: canonical ioPath → readFile 済み string の byte 予算 LRU。
+	// entry のライフサイクルに便乗して、release (refCount 0) で自然に drop される。
+	l2: ByteLruCache;
+	// L2 の invalidation generation。read 開始前に capture して set 時に不一致なら破棄する
+	// (readFile 中に modify batch が来て evict された場合の stale-insert race 対策)。
+	// L1 epoch は modify で bump しないため専用カウンタが必要。
+	l2Generation: number;
+	// input-form fileMap の派生 memo (candidate C)。scanBacklinksImpl が使う。
+	inputFileMapMemo: InputFileMapMemo | null;
+}
+
+// L2 に読み書きするための狭い interface。processMdFilesParallel はこの handle 経由で
+// L2 に触るため、helper 側は search-cache module state を直接 import しない
+// (helper の独立テスト性を保つ)。
+export interface ContentCacheHandle {
+	get(ioPath: string): string | undefined;
+	// set は capture した generation を渡す。set 時点で最新 generation と不一致なら
+	// 黙って捨てる (stale-insert race 対策)。
+	set(ioPath: string, text: string, capturedGeneration: number): void;
+	readonly generation: number;
 }
 
 const entries = new Map<string, CacheEntry>();
@@ -32,6 +64,9 @@ export function acquireFileListCache(canonicalRoot: string): void {
 			refCount: 1,
 			state: createCacheState(),
 			inFlight: null,
+			l2: new ByteLruCache(),
+			l2Generation: 0,
+			inputFileMapMemo: null,
 		});
 	} else {
 		e.refCount++;
@@ -48,10 +83,39 @@ export function releaseFileListCache(canonicalRoot: string): void {
 }
 
 // watcher flush 直後に呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
+// L1 側は applyBatchToState、L2 側は本関数内で分岐する。
+// - `.md` modify/delete → L2 の該当 ioPath を delete
+// - `.md` create → L2 は無操作 (新規なので cache 側にはない)
+// - 非 `.md` create/delete → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
+//   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
+// evict が 1 件でも発生した batch では l2Generation++ (in-flight readFile が古い text を
+// 格納しに来た場合の破棄用)。
+// inputFileMapMemo は epoch 依存なので、L1 側で epoch が進んだかを比較して invalidate する。
 export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChangeEvent>): void {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
+	const epochBefore = e.state.epoch;
 	applyBatchToState(e.state, batch);
+	let l2Evicted = false;
+	for (const ev of batch) {
+		if (ev.kind === "create") {
+			// .md create は L2 に何も入っていない、非 .md create は dir 作成 (subtree に file なし)。
+			// どちらも L2 evict 不要。
+			continue;
+		}
+		const isMd = ev.path.endsWith(".md");
+		if (isMd) {
+			if (e.l2.delete(ev.path)) l2Evicted = true;
+		} else {
+			// 非 .md modify/delete: dir 可能性 → subtree + exact 一括 evict
+			const prefixWithSep = ev.path.endsWith(sep) ? ev.path : ev.path + sep;
+			if (e.l2.deletePrefix(ev.path, prefixWithSep) > 0) l2Evicted = true;
+		}
+	}
+	if (l2Evicted) e.l2Generation++;
+	// epoch が進んだ場合、input-form fileMap memo は L1 に依存するため破棄。
+	if (e.state.epoch !== epochBefore) e.inputFileMapMemo = null;
 }
 
 // cache hit の canonical file 配列を返す。populated & valid でなければ null。
@@ -114,6 +178,67 @@ export function getCachedFileMap(canonicalRoot: string): ReadonlyMap<string, str
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return null;
 	return getFileMap(e.state);
+}
+
+// candidate C: input-form fileMap の派生 memo。
+// walkMdFiles は entry symlink を解決しないため、canonical fileMap の値は
+// 「canonical root + walk したままの相対パス」の形をしている。この不変条件を利用して、
+// canonical fileMap の value の root prefix を inputRoot に差し替えるだけで input-form
+// fileMap が得られる。inputRoot === canonicalRoot の common case では canonical fileMap を
+// そのまま返す (コピー不要)。
+// scanBacklinksImpl の workspace 内 symlink note 対応と両立するのがこの方式の要点。
+// 前提: walk が entry symlink を解決しない (fs.readdir の contract)。将来 walk が symlink を
+// 解決するよう変わるとこの前提が崩れるので、変更時はこの comment を確認すること。
+export function getCachedInputFileMap(
+	canonicalRoot: string,
+	inputRoot: string,
+): ReadonlyMap<string, string> | null {
+	const e = entries.get(canonicalRoot);
+	if (e === undefined) return null;
+	const canonicalMap = getFileMap(e.state);
+	if (canonicalMap === null) return null;
+	if (canonicalRoot === inputRoot) return canonicalMap;
+	const memo = e.inputFileMapMemo;
+	if (memo !== null && memo.epoch === e.state.epoch && memo.inputRoot === inputRoot) {
+		return memo.map;
+	}
+	// canonicalToInputPaths と同じ prefix 差替ロジックを Map の value 側に適用する。
+	const canonicalPaths = [...canonicalMap.values()];
+	const inputPaths = canonicalToInputPaths(canonicalPaths, canonicalRoot, inputRoot);
+	const built = new Map<string, string>();
+	let i = 0;
+	for (const [key] of canonicalMap) {
+		built.set(key, inputPaths[i]);
+		i++;
+	}
+	e.inputFileMapMemo = { epoch: e.state.epoch, inputRoot, map: built };
+	return built;
+}
+
+// L2 に読み書きするための handle を返す。entry がなければ undefined (watcher 非稼働時は
+// L2 未経由で従来の readFile 経路になる)。
+// handle.set は capturedGeneration が生成時と現在で一致するときのみ格納する
+// (stale-insert race 対策)。
+export function getContentCacheHandle(canonicalRoot: string): ContentCacheHandle | undefined {
+	const e = entries.get(canonicalRoot);
+	if (e === undefined) return undefined;
+	return {
+		get(ioPath: string): string | undefined {
+			return e.l2.get(ioPath);
+		},
+		set(ioPath: string, text: string, capturedGeneration: number): void {
+			// entry が map から drop されていた場合、この closure は古い entry を掴んだままだが、
+			// generation は entry-local なので比較は生きる。ただし drop 済み entry の l2 に書き込む
+			// 意味はないので entries.get で存在チェックする。
+			const current = entries.get(canonicalRoot);
+			if (current !== e) return;
+			if (e.l2Generation !== capturedGeneration) return;
+			e.l2.set(ioPath, text);
+		},
+		get generation(): number {
+			return e.l2Generation;
+		},
+	};
 }
 
 export function getCachedExistingStems(canonicalRoot: string): ReadonlySet<string> | null {
