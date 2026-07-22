@@ -130,6 +130,14 @@ export function buildFileMapFrom(files: Iterable<string>): Map<string, string> {
 	return map;
 }
 
+// walk 結果 (fs 順) を byteCmp 昇順で並べ替えた新しい配列を返す。
+// populate 経路で epoch guard に失敗した場合など、cache 経由の getSortedFiles を
+// 通せない状況で「collectMdFilesForWorkspace は常に sort 済みで返す」不変条件を
+// 満たすために使う。入力を破壊しない (spread して sort)。
+export function sortWalkResult(files: readonly string[]): readonly string[] {
+	return [...files].sort(byteCmp);
+}
+
 export function buildExistingStemsFrom(files: Iterable<string>): Set<string> {
 	const set = new Set<string>();
 	for (const filePath of files) {

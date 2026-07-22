@@ -7,6 +7,7 @@ import {
 	getFileMap,
 	getSortedFiles,
 	setCacheFiles,
+	sortWalkResult,
 } from "../utils/search-cache-pure";
 
 // canonical workspace root ごとに FileListCache を持つ。
@@ -98,7 +99,9 @@ export async function populateFileListCache(
 				// setCacheFiles で state.files を非 null にした直後なので getSortedFiles は必ず配列を返す。
 				return getSortedFiles(current.state) as readonly string[];
 			}
-			return result;
+			// epoch guard 失敗: 格納しないが caller には byteCmp 済みで返す
+			// (collectMdFilesForWorkspace の「常に sort 済み」不変条件を維持するため)。
+			return sortWalkResult(result);
 		} finally {
 			if (e.inFlight === promise) e.inFlight = null;
 		}

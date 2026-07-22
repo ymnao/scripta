@@ -32,7 +32,6 @@ import {
 } from "../utils/search-pure";
 import {
 	getCachedExistingStems,
-	getCachedFileMap,
 	hasFileListCacheEntry,
 	populateFileListCache,
 } from "./search-cache";
@@ -54,9 +53,9 @@ async function processMdFilesParallel(
 	inFiles: readonly string[],
 	isStale: () => boolean,
 	options: {
-		// canonical ioPath を受け取り、readFile 前に skip 判定する。
-		// scanBacklinksImpl の self-reference skip 用 (canonical 一致で判定)。
-		skipFile?: (ioFile: string) => boolean;
+		// input inFile を受け取り、readFile 前に skip 判定する。
+		// scanBacklinksImpl の self-reference skip 用 (input 表記で判定)。
+		skipFile?: (inFile: string) => boolean;
 		// 「打ち切り」判定。isStale と異なり、bail は「これまで集めた結果は保持したまま
 		// 追加の走査だけ止める」セマンティクス（searchFilesImpl の件数上限用）。
 		// isStale の cancel セマンティクス（結果は `[]` 相当）とは混同しないこと。
@@ -69,8 +68,8 @@ async function processMdFilesParallel(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
 				if (shouldStop()) return;
-				if (options.skipFile?.(ioPath)) return;
 				const inFile = inFiles[idx];
+				if (options.skipFile?.(inFile)) return;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");
@@ -513,40 +512,44 @@ async function scanBacklinksImpl(
 	// path-guard 契約: renderer 由来のファイルパスは main 側で認可してから処理する。
 	// workspace は後段の collectMdFilesForWorkspace で検証されるが、targetFilePath は
 	// 別途明示的に通す (searchFilesImpl と同じく拡張子フィルタ・pageName 正規化より前)。
-	// canonical を保持しておくと fileMap / self-reference 判定を canonical で一気通貫にできる。
-	const targetCanonical = await assertPathAllowed(senderId, targetFilePath);
+	await assertPathAllowed(senderId, targetFilePath);
 
 	const targetBase = basename(targetFilePath);
-	// walkMdFiles (line 28) と同じ小文字 `.md` のみを対象にする。大文字拡張子の
+	// walkMdFiles と同じ小文字 `.md` のみを対象にする。大文字拡張子の
 	// ファイルは scan 対象に含まれず backlink 結果が常に空になるため、ここで早期 return。
 	if (!targetBase.endsWith(".md")) return [];
 	const targetPage = targetBase.slice(0, -3).normalize("NFC");
 	if (targetPage === "") return [];
+	// inFiles は collectMdFilesForWorkspace で `resolve(workspacePath)` ベースに揃って
+	// 構築されており、renderer が渡す targetFilePath も同じ input 形式 (listDirectory 経由)。
+	// canonical (realpath 済み) で比較すると、workspace 内 symlink ノート
+	// (`alias.md -> actual.md`) で walk が捉える `.../alias.md` と canonical target
+	// `.../actual.md` が食い違い、backlink が空になる regression が起きる。
+	// symlink workspace の prefix 差 (`/tmp` vs `/private/tmp`) は resolve() で解消される。
+	const targetInput = resolve(targetFilePath);
 
-	const {
-		io: ioFiles,
-		input: inFiles,
-		canonicalRoot,
-	} = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
+	const { io: ioFiles, input: inFiles } = await collectMdFilesForWorkspace(
+		senderId,
+		workspacePath,
+		isStale,
+	);
 	if (isStale()) return [];
 
 	// 同名 basename がワークスペース内に複数ある場合、live-preview の buildFileMap
 	// (src/components/editor/live-preview/wikilinks.ts:45) と同じく
-	// lexicographically smallest path を canonical とする。target がその canonical で
-	// ないなら、`[[target]]` の解決先は別ノートになり、本ファイルへの backlink を
-	// 表示すると live-preview の動作と食い違う。空配列で早期 return。
-	// fileMap 値は canonical path。cache hit 時は共有 Map を再利用し、miss 時は
-	// canonical ioFiles から buildFileMapFrom で構築する (同一関数で結果同一性を担保)。
-	// target と fileMap 値の両方を canonical にすることで、symlink workspace でも
-	// prefix 差 (`/tmp` vs `/private/tmp`) が原因の見落としが起きない。
-	const fileMap = getCachedFileMap(canonicalRoot) ?? buildFileMapFrom(ioFiles);
-	if (fileMap.get(targetPage) !== targetCanonical) return [];
+	// lexicographically smallest path を canonical とする。targetInput がその
+	// canonical でないなら、`[[target]]` の解決先は別ノートになり、本ファイルへの
+	// backlink を表示すると live-preview の動作と食い違う。空配列で早期 return。
+	// fileMap は input 表記で構築する (workspace 内 symlink ノートを正しく扱うため
+	// canonical fileMap cache は使わない — 詳細は上記 targetInput のコメント参照)。
+	const fileMap = buildFileMapFrom(inFiles);
+	if (fileMap.get(targetPage) !== targetInput) return [];
 
 	const map = new Map<string, WikilinkReference[]>();
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
-		// 不要な fd 消費を避ける。canonical 一致で判定する (fileMap と揃える)。
-		skipFile: (ioFile) => ioFile === targetCanonical,
+		// 不要な fd 消費を避ける。input 表記で判定する (fileMap / targetInput と揃える)。
+		skipFile: (inFile) => inFile === targetInput,
 		process: (inFile, text) => {
 			iterateWikilinkOccurrences(inFile, text, (pageName, ref) => {
 				if (pageName !== targetPage) return;

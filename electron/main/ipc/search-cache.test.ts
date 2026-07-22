@@ -276,10 +276,12 @@ describe("search-cache: populateFileListCache", () => {
 		const pending = populateFileListCache(ROOT, async () => await walkPromise);
 		// populate 進行中に batch が来て epoch を進めるケース
 		applyFsBatch(ROOT, [{ kind: "create", path: p("subdir") }]); // full invalidate
-		resolveWalk([p("a.md")]);
+		// walk は unsorted な順序で返してくる (fs 走査順を模す)
+		resolveWalk([p("z.md"), p("a.md"), p("m.md")]);
 		const result = await pending;
-		// walk 結果は caller に返る (query は成功)
-		expect(result).toEqual([p("a.md")]);
+		// walk 結果は caller に返る (query は成功) が、collectMdFilesForWorkspace の
+		// 「常に sort 済み」不変条件を維持するため populate 側で byteCmp 済みにして返す。
+		expect(result).toEqual([p("a.md"), p("m.md"), p("z.md")]);
 		// cache には格納されない (次回 lookup は null で再 populate 必要)
 		expect(getCachedMdFiles(ROOT)).toBeNull();
 	});
