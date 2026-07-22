@@ -60,14 +60,16 @@ describe("Sidebar handleOpenFolder", () => {
 		});
 	});
 
-	it("workspaceSet が reject しても cancelFilenameSearch は 1 回呼ばれ済み (catch 分岐 + cancel の先行実行を pin)", async () => {
+	it("workspaceSet が reject しても cancelFilenameSearch は 1 回呼ばれ済み (catch 分岐カバー)", async () => {
 		(window.api.openDirectoryPicker as Mock).mockResolvedValueOnce("/new/workspace");
 		(window.api.workspaceSet as Mock).mockRejectedValueOnce(new Error("permission denied"));
 
 		renderSidebar();
 		fireEvent.click(screen.getByLabelText("フォルダを開く"));
 
-		// workspaceSet が呼ばれた時点で cancel は先に完了している
+		// workspaceSet が呼ばれた時点で cancel は 1 回呼び出し済み。
+		// 順序 (cancel が workspaceSet より先) は前段の deferred pin テストで保証しており、
+		// ここは catch 分岐に入っても両方が呼ばれる回数だけを assert する。
 		await vi.waitFor(() => {
 			expect(window.api.workspaceSet).toHaveBeenCalledTimes(1);
 		});
