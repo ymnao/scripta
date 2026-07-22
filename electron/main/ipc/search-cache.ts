@@ -89,31 +89,34 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // - `.md` create → L2 は無操作 (新規なので cache 側にはない)
 // - 非 `.md` create/delete → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
 //   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
-// evict が 1 件でも発生した batch では l2Generation++ (in-flight readFile が古い text を
-// 格納しに来た場合の破棄用)。
+// **generation bump は evict の成否ではなく「invalidation の意図」で判定する**。
+// 具体的には .md modify/delete および非 .md create/delete/modify の全てで bump する
+// (.md create のみ bump しない — 新規 file なので進行中の scan の in-flight read と競合しない)。
+// これは「L2 miss で readFile 中の file 自身が modify された」ケース = 本命の
+// stale-insert race を防ぐため。delete 成否で判定すると、cache に無い (=まさに読み中の)
+// key に対する modify で generation が進まず、readFile 完了時の set が古い text を格納する。
+// Phase A の applyBatchToState が files === null 中も epoch を bump する保守側倒しと同方針。
 // inputFileMapMemo は epoch 依存なので、L1 側で epoch が進んだかを比較して invalidate する。
 export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChangeEvent>): void {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
 	const epochBefore = e.state.epoch;
 	applyBatchToState(e.state, batch);
-	let l2Evicted = false;
+	let shouldBumpL2 = false;
 	for (const ev of batch) {
-		if (ev.kind === "create") {
-			// .md create は L2 に何も入っていない、非 .md create は dir 作成 (subtree に file なし)。
-			// どちらも L2 evict 不要。
-			continue;
-		}
 		const isMd = ev.path.endsWith(".md");
 		if (isMd) {
-			if (e.l2.delete(ev.path)) l2Evicted = true;
+			if (ev.kind === "create") continue; // 新規 file → race 対象外
+			e.l2.delete(ev.path);
+			shouldBumpL2 = true;
 		} else {
-			// 非 .md modify/delete: dir 可能性 → subtree + exact 一括 evict
+			// 非 .md の全 event: dir 可能性を考慮して subtree + exact 一括 evict + bump
 			const prefixWithSep = ev.path.endsWith(sep) ? ev.path : ev.path + sep;
-			if (e.l2.deletePrefix(ev.path, prefixWithSep) > 0) l2Evicted = true;
+			e.l2.deletePrefix(ev.path, prefixWithSep);
+			shouldBumpL2 = true;
 		}
 	}
-	if (l2Evicted) e.l2Generation++;
+	if (shouldBumpL2) e.l2Generation++;
 	// epoch が進んだ場合、input-form fileMap memo は L1 に依存するため破棄。
 	if (e.state.epoch !== epochBefore) e.inputFileMapMemo = null;
 }

@@ -478,6 +478,45 @@ describe("search-cache: L2 ContentCache", () => {
 			expect(h?.get(p("foobar/a.md"))).toBe("y");
 		});
 
+		it("bumps generation on .md modify even when key is not cached (in-flight miss race)", () => {
+			// regression: L2 miss で readFile 中の file 自身が modify されたケース =
+			// stale-insert race の本命。L2 に無いから delete が false でも generation を
+			// bump しないと、readFile 完了時の set が古い text を格納してしまう。
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			const genAtStart = h?.generation ?? 0;
+			// pretend scan miss + readFile start: capture generation, no cache entry yet
+			applyFsBatch(ROOT, [{ kind: "modify", path: p("a.md") }]);
+			expect(h?.generation).toBe(genAtStart + 1);
+			// stale set with old generation must be rejected
+			h?.set(p("a.md"), "stale", genAtStart);
+			expect(h?.get(p("a.md"))).toBeUndefined();
+		});
+
+		it("bumps generation on .md delete even when key is not cached", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			const genAtStart = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("a.md") }]);
+			expect(h?.generation).toBe(genAtStart + 1);
+		});
+
+		it("does not bump generation on .md create (no in-flight race)", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			const genAtStart = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "create", path: p("new.md") }]);
+			expect(h?.generation).toBe(genAtStart);
+		});
+
+		it("bumps generation on non-.md events regardless of L2 content", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			const genAtStart = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "create", path: p("subdir") }]);
+			expect(h?.generation).toBe(genAtStart + 1);
+		});
+
 		it("stale set (mismatched generation) is silently dropped", () => {
 			acquireFileListCache(ROOT);
 			const h = getContentCacheHandle(ROOT);

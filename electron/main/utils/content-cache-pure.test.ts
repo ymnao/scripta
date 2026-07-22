@@ -97,6 +97,17 @@ describe("ByteLruCache", () => {
 			const s = "a".repeat(L2_ADMISSION_LIMIT_BYTES / 2);
 			expect(c.set("edge", s)).toBe(true);
 		});
+
+		it("removes existing entry when new value is rejected by admission cutoff", () => {
+			// regression: cutoff 未満 → 超過に成長した file で旧・小さい本文が stale hit し続けないこと
+			const c = new ByteLruCache(1024 * 1024 * 100, L2_ADMISSION_LIMIT_BYTES);
+			expect(c.set("k", "small")).toBe(true);
+			expect(c.get("k")).toBe("small");
+			// oversized value is rejected — but the old entry must be evicted, not preserved
+			expect(c.set("k", "a".repeat(600_000))).toBe(false);
+			expect(c.get("k")).toBeUndefined();
+			expect(c.totalBytes).toBe(0);
+		});
 	});
 
 	describe("deletePrefix", () => {

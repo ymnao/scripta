@@ -60,18 +60,21 @@ export class ByteLruCache {
 
 	// admission: charge が admission limit 超過なら false を返して insert しない
 	// (cutoff 超過ファイル。caller は毎回 readFile 経路)。
+	// admission reject 時も既存 entry は必ず削除する — 「新値は cutoff 超過で受け入れられない」と
+	// 「旧値を保持する」は両立させない (cutoff 未満 → 超過に成長した file で旧・小さい本文が
+	// stale hit し続けるのを避けるため)。
 	// 同 key 上書き時は既存 charge を差し引いてから新 charge を加算する。
 	// 挿入後に予算超過なら挿入順の古い方から evict する (自分自身が evict されないよう
 	// 上書きは一旦 delete → set の順で行う)。
 	// 戻り値: 実際に格納したかどうか。
 	set(key: string, text: string): boolean {
 		const c = charge(text);
-		if (c > this.admissionLimitBytes) return false;
 		const prev = this.entries.get(key);
 		if (prev !== undefined) {
 			this.totalBytesInternal -= prev.bytes;
 			this.entries.delete(key);
 		}
+		if (c > this.admissionLimitBytes) return false;
 		this.entries.set(key, { text, bytes: c });
 		this.totalBytesInternal += c;
 		this.evictToBudget();
