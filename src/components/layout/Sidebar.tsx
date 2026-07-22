@@ -1,6 +1,6 @@
 import { Files, FolderOpen, Link2, Link2Off, Search } from "lucide-react";
 import { useCallback } from "react";
-import { openDirectoryPicker, workspaceSet } from "../../lib/commands";
+import { cancelFilenameSearch, openDirectoryPicker, workspaceSet } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
 import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
 import { useToastStore } from "../../stores/toast";
@@ -63,6 +63,15 @@ export function Sidebar({
 		const selected = await openDirectoryPicker();
 		if (!selected) return;
 		try {
+			// 切替直前に、直前の workspace で走っている searchFilenames の in-flight を明示 cancel する。
+			// これは **window 単位で 3 系統 (CommandPalette / wikilink-completion /
+			// live-preview buildFileMap) を巻き込む** semantic なので、
+			// 単一 panel の unmount では絶対に呼ばず、workspace 切替 (全 caller が `[]` を
+			// 安全に受け入れられる) のこの入口に限定して呼ぶ。切替後は 3 系統いずれも
+			// 新 workspace で即座に再取得するため、既存 in-flight を捨てても回帰しない。
+			// window close 側は main の window-lifecycle が clearSearchForWindow でカバー済。
+			// 失敗しても切替本体は続行させる (cancel 失敗は最悪 stale 結果が 1 回描画されるだけ)。
+			await cancelFilenameSearch().catch(() => {});
 			// fs:* IPC が走り出す前に main 側 workspace 登録を完了させる必要がある
 			// （FileTree などが setWorkspacePath をトリガーに即 listDirectory を打つため）
 			await workspaceSet(selected);
