@@ -65,7 +65,7 @@ export function Sidebar({
 		try {
 			// 切替直前に、直前の workspace で走っている searchFilenames の in-flight を明示 cancel する。
 			// これは **window 単位で 3 系統 (CommandPalette / wikilink-completion /
-			// live-preview `WikilinkDecorationPlugin.fetchFiles`) を巻き込む** semantic なので、
+			// live-preview buildFileMap) を巻き込む** semantic なので、
 			// 単一 panel の unmount では絶対に呼ばず、workspace 切替 (全 caller が `[]` を
 			// 安全に受け入れられる) のこの入口に限定して呼ぶ。切替後は 3 系統いずれも
 			// 新 workspace で即座に再取得するため、既存 in-flight を捨てても回帰しない。

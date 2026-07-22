@@ -31,24 +31,47 @@ function renderSidebar() {
 }
 
 describe("Sidebar handleOpenFolder", () => {
-	it("cancelFilenameSearch を workspaceSet より前に呼ぶ (workspace 切替入口の in-flight bail)", async () => {
+	it("cancelFilenameSearch の完了を await してから workspaceSet を呼ぶ (順序 + await load-bearing)", async () => {
 		(window.api.openDirectoryPicker as Mock).mockResolvedValueOnce("/new/workspace");
 
-		const callOrder: string[] = [];
-		(window.api.cancelFilenameSearch as Mock).mockImplementationOnce(async () => {
-			callOrder.push("cancelFilenameSearch");
-		});
-		(window.api.workspaceSet as Mock).mockImplementationOnce(async () => {
-			callOrder.push("workspaceSet");
-		});
+		// cancel を deferred にして「resolve 前は workspaceSet 未呼び出し」を pin する。
+		// この deferred が無いと `await` を `void` に退行させても呼び出し順は不変で緑になる。
+		let resolveCancel: (() => void) | null = null;
+		(window.api.cancelFilenameSearch as Mock).mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveCancel = resolve;
+				}),
+		);
 
 		renderSidebar();
 		fireEvent.click(screen.getByLabelText("フォルダを開く"));
 
-		// picker → cancel → workspaceSet の順を待つ
+		// picker + cancel の invoke までは進むが、cancel が pending の間 workspaceSet は呼ばれない
 		await vi.waitFor(() => {
-			expect(callOrder).toEqual(["cancelFilenameSearch", "workspaceSet"]);
+			expect(window.api.cancelFilenameSearch).toHaveBeenCalledTimes(1);
 		});
+		expect(window.api.workspaceSet).not.toHaveBeenCalled();
+
+		// cancel を resolve すると workspaceSet が続く
+		resolveCancel?.();
+		await vi.waitFor(() => {
+			expect(window.api.workspaceSet).toHaveBeenCalledWith("/new/workspace");
+		});
+	});
+
+	it("workspaceSet が reject しても cancelFilenameSearch は 1 回呼ばれ済み (catch 分岐 + cancel の先行実行を pin)", async () => {
+		(window.api.openDirectoryPicker as Mock).mockResolvedValueOnce("/new/workspace");
+		(window.api.workspaceSet as Mock).mockRejectedValueOnce(new Error("permission denied"));
+
+		renderSidebar();
+		fireEvent.click(screen.getByLabelText("フォルダを開く"));
+
+		// workspaceSet が呼ばれた時点で cancel は先に完了している
+		await vi.waitFor(() => {
+			expect(window.api.workspaceSet).toHaveBeenCalledTimes(1);
+		});
+		expect(window.api.cancelFilenameSearch).toHaveBeenCalledTimes(1);
 	});
 
 	it("cancelFilenameSearch が reject しても workspaceSet は継続する (cancel は best-effort)", async () => {
