@@ -33,7 +33,6 @@ import {
 import {
 	getCachedExistingStems,
 	getCachedFileMap,
-	getCachedMdFiles,
 	hasFileListCacheEntry,
 	populateFileListCache,
 } from "./search-cache";
@@ -55,9 +54,9 @@ async function processMdFilesParallel(
 	inFiles: readonly string[],
 	isStale: () => boolean,
 	options: {
-		// skipFile は canonical ioPath と input inFile の両方を受け取り、readFile 前に skip 判定する。
+		// canonical ioPath を受け取り、readFile 前に skip 判定する。
 		// scanBacklinksImpl の self-reference skip 用 (canonical 一致で判定)。
-		skipFile?: (ioFile: string, inFile: string) => boolean;
+		skipFile?: (ioFile: string) => boolean;
 		// 「打ち切り」判定。isStale と異なり、bail は「これまで集めた結果は保持したまま
 		// 追加の走査だけ止める」セマンティクス（searchFilesImpl の件数上限用）。
 		// isStale の cancel セマンティクス（結果は `[]` 相当）とは混同しないこと。
@@ -70,8 +69,8 @@ async function processMdFilesParallel(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
 				if (shouldStop()) return;
+				if (options.skipFile?.(ioPath)) return;
 				const inFile = inFiles[idx];
-				if (options.skipFile?.(ioPath, inFile)) return;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");
@@ -97,7 +96,9 @@ async function processMdFilesParallel(
 // チェックして stale なら early return する (エントリループ内の await は再帰 walk であり、
 // 再帰先の入口チェックで同粒度を得るためループ内チェックは省く)。
 // populate 経路 (cache 共有資産) からは isStale を渡さない — walk 自体は完走させる。
-type MdFiles = { io: readonly string[]; input: readonly string[]; canonicalRoot: string };
+// io は cache 経路で共有される readonly array の可能性がある (mutation 禁止)。
+// input は canonicalToInputPaths で毎回新規に確保するため mutable でよい。
+type MdFiles = { io: readonly string[]; input: string[]; canonicalRoot: string };
 
 async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean): Promise<void> {
 	if (isStale?.() === true) return;
@@ -129,15 +130,14 @@ async function collectMdFilesForWorkspace(
 ): Promise<MdFiles> {
 	const canonical = await assertPathAllowed(senderId, workspacePath);
 	const inputBase = resolve(workspacePath);
-	const cached = getCachedMdFiles(canonical);
+	// 2 分岐: watcher 稼働中 (entry あり) は populate 経由、非稼働は直接 walk。
+	// populate は cache hit なら walk 呼び出しをスキップして sorted 済みを即返すため、
+	// hit 判定を collectMdFilesForWorkspace 側に持たない ("populated かどうか" の知識を 1 箇所に集約)。
 	let ioFiles: readonly string[];
-	if (cached !== null) {
-		ioFiles = cached;
-	} else if (hasFileListCacheEntry(canonical)) {
-		// watcher 稼働中 + 未 populate: populate 経路。walk は複数 caller 間で dedupe されるため
-		// caller 個別の isStale を伝播しない (dedupe 相手が異なる isStale を持つと、早期 return した
-		// 側の walk 結果が他 caller に共有される regression になる)。populate 完了時の cache
-		// 格納可否は populate 内 epoch guard で判定される。
+	if (hasFileListCacheEntry(canonical)) {
+		// walk は複数 caller 間で dedupe されるため、caller 個別の isStale を伝播しない
+		// (dedupe 相手が異なる isStale を持つと、早期 return した側の walk 結果が他 caller に
+		// 共有される regression になる)。populate 完了時の cache 格納可否は epoch guard で判定。
 		ioFiles = await populateFileListCache(canonical, async () => {
 			const arr: string[] = [];
 			await walkMdFiles(canonical, arr);
@@ -147,8 +147,8 @@ async function collectMdFilesForWorkspace(
 		// watcher 非稼働: cache しない直接 walk 経路。caller の isStale を反映して #7 の暫定手当。
 		const arr: string[] = [];
 		await walkMdFiles(canonical, arr, isStale);
-		// callers (searchFilenamesImpl 等) が sort 済みを前提にできるよう byteCmp で揃える。
-		// cache 経路 (getSortedFiles) と同じ順序保証。
+		// callers (searchFilenamesImpl 等) が sort 済みを前提にできるよう cache 経路
+		// (getSortedFiles) と同じ byteCmp 順序に揃える。
 		arr.sort(byteCmp);
 		ioFiles = arr;
 	}
@@ -346,7 +346,9 @@ async function searchFilenamesImpl(
 	// collectMdFilesForWorkspace は cache 経路・直接 walk 経路の両方で byteCmp 昇順に揃えて返す
 	// (canonical prefix は全要素共通なので prefix substitution 後も順序保存)。
 	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
-	if (query === "") return [...input];
+	// input は canonicalToInputPaths で毎回新規に確保された配列なので、
+	// caller が破棄前提でそのまま返してよい (共有 cache 参照ではない)。
+	if (query === "") return input;
 	return input.filter((p) => fuzzyMatch(query, basename(p)));
 }
 

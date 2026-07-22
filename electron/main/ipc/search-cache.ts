@@ -95,8 +95,8 @@ export async function populateFileListCache(
 			const current = entries.get(canonicalRoot);
 			if (current === e && current.state.epoch === epochAtStart) {
 				setCacheFiles(current.state, result);
-				const sorted = getSortedFiles(current.state);
-				return sorted ?? result;
+				// setCacheFiles で state.files を非 null にした直後なので getSortedFiles は必ず配列を返す。
+				return getSortedFiles(current.state) as readonly string[];
 			}
 			return result;
 		} finally {
