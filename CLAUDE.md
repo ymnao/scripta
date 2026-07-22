@@ -51,8 +51,9 @@ pnpm lint:fix
 # フォーマット
 pnpm format
 
-# 型チェック
+# 型チェック（tsconfig が node / web / e2e に分割された solution-style 構成のため、素の `tsc --noEmit` は root tsconfig の references を辿らず 0 ファイルチェックで exit 0 になる（沈黙の成功）。CI で落ちる型エラーの見逃しを防ぐには、push 前検証はこの script 経由か、直接叩くなら `./node_modules/.bin/tsc --noEmit -p tsconfig.node.json && ./node_modules/.bin/tsc --noEmit -p tsconfig.web.json` の両方を明示指定する。ただし前者の `pnpm typecheck` script は先頭で `node scripts/generate-katex-css.js` を実行して `src/generated/katex-inline-css.ts` を生成しており、生成物が無い状態で 2 tsconfig を直叩きすると `src/lib/export.ts` の import が module not found で偽陽性の失敗になる点に注意。なお CI の typecheck job は `pnpm typecheck` に加えて `pnpm typecheck:e2e` も走らせるため、push 前は両方の実行が必要）
 pnpm typecheck
+pnpm typecheck:e2e
 
 # ユニットテスト
 pnpm test
@@ -225,6 +226,7 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
   - **実 Electron 起動モード**（`e2e/electron/*.electron.spec.ts`, `playwright.electron.config.ts`, `pnpm test:e2e:electron`）— `electron-vite build` の成果物 (`out/main/index.js`) を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。起動毎に temp userData を切り (`--user-data-dir`)、設定永続化 / Settings migration / asset protocol / マルチウィンドウ等、mock では踏めない main 境界を safety net 化する。Tauri purge (Phase 2-5) の前後で現挙動を固定する目的（ヘルパーは `e2e/electron/helpers/`、CI は `electron-e2e` job で xvfb-run 実行）
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**（実 Electron モードは `pnpm test:e2e:electron` を別途実行）
 - **新規 e2e のモード振り分け**: [ADR-0009](docs/adr/0009-renderer-only-e2e-strategy.md) §「各モードの役割分担（テスト分類方針）」を参照。
+- **deferred promise pattern は `let x!: T` を使う** — test helper で `new Promise((resolve) => { resolveDeferred = resolve })` のように executor 内で外側の変数へ resolver を代入する慣用パターンでは、`let resolveDeferred: (() => void) | null = null` と宣言してから `resolveDeferred?.()` を呼ぶと TypeScript の CFA（TS 5.x / TS 7 いずれも同挙動、TS 7 固有ではなく長年の仕様）が nested function 内の再代入を後続 narrowing に反映せず `never` 型として TS2349 (`never has no call signatures`) を返す。`let resolveDeferred!: () => void`（definite assignment assertion）で宣言すると未代入チェックが「免除」される（同期実行される Promise executor が assertion を正当化する。コンパイラは同期性を検証せず作者責任で宣言する）ため解決する。
 
 ```bash
 # コミット前の検証
