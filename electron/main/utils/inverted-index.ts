@@ -95,10 +95,15 @@ export class InvertedIndex {
 		return this.validCount;
 	}
 
-	// idle fill が read 前に snapshot する用。未登録なら 0 相当を返す。
+	// piggyback / idle fill が read 前に snapshot する用。
+	// **重要**: 未登録 path はここで pathToId に登録する (fileEpoch は未設定のまま=0 相当)。
+	// これをしないと、read 中に applyFsBatch → invalidate(path) が「path 未登録」で no-op になり、
+	// epoch が bump されないまま readFile 完了時の handle.indexFile が capturedEpoch=0 と
+	// current=0 で一致して stale text を index する race (Phase C 版 stale-insert race)。
+	// L2 が cache に無い key への modify でも global generation を bump するのと同じ意図で、
+	// path 単位でも「read 中の file を invalidate 可能な状態」に持ち込む。
 	currentEpochOf(ioPath: string): number {
-		const id = this.pathToId.get(ioPath);
-		if (id === undefined) return 0;
+		const id = this.getOrCreateId(ioPath);
 		return this.fileEpoch.get(id) ?? 0;
 	}
 
@@ -309,7 +314,12 @@ export class InvertedIndex {
 }
 
 /** dark-launch assert: 全走査ヒット集合 ⊆ (candidates ∪ 未indexed/stale 集合) を検証。
- *  違反時は Error を throw (dev/test でのみ呼ばれる)。 */
+ *  違反時は Error を throw (dev/test でのみ呼ばれる)。
+ *
+ *  caseSensitive=true の query は skip する。文脈依存 toLowerCase (例: ギリシャ語 Final_Sigma、
+ *  text "ΑΣΤ" と query "ΑΣ" では lowered bigram 集合が食い違う) により、raw scan と
+ *  lowered index で bigram 分解が原理的に一致しないため superset 不変条件を保証できない。
+ *  Phase D で caseSensitive を index 経由化するなら別途 case-preserving index が必要。 */
 export function verifyIndexSuperset(
 	index: InvertedIndex,
 	query: string,
@@ -317,9 +327,8 @@ export function verifyIndexSuperset(
 	allIoFiles: readonly string[],
 	hitIoFiles: readonly string[],
 ): void {
-	const queryLower = caseSensitive ? query : query.toLowerCase();
-	// 実際には caseSensitive でも lowercase index で候補を取る (superset なので)。
-	const candResult = index.getCandidates(caseSensitive ? query.toLowerCase() : queryLower);
+	if (caseSensitive) return;
+	const candResult = index.getCandidates(query.toLowerCase());
 	if (candResult.kind === "fallback") return; // fallback 時は全走査扱いなので assert 不要
 	const allowed = new Set<string>(candResult.candidates);
 	// 未 indexed または stale な file (allIoFiles \ indexedValid) はどう転んでも allowed。
@@ -330,7 +339,7 @@ export function verifyIndexSuperset(
 		if (!allowed.has(hit)) {
 			throw new Error(
 				`InvertedIndex superset invariant violated: hit file "${hit}" not in candidate set ` +
-					`(query="${query}", caseSensitive=${caseSensitive})`,
+					`(query="${query}")`,
 			);
 		}
 	}

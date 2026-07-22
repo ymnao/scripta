@@ -95,7 +95,9 @@ async function processMdFilesParallel(
 					if (shouldStop()) return;
 					// L3 piggyback: L2 hit 時も index を養う (index への流入が L2 hit で途絶えないため)。
 					// hit path は await 境界が無いので epoch snapshot と indexFile の間に batch は来ない。
-					if (index !== undefined) {
+					// **既に valid なら skip** (production 検索 latency に恒常コストを乗せないため、
+					// dark-launch の受入条件を latency 面でも満たす)。
+					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
 						index.indexFile(ioPath, hit, index.currentEpochOf(ioPath));
 					}
 					options.process(inFile, hit);
@@ -106,7 +108,10 @@ async function processMdFilesParallel(
 				const genAtStart = cache?.generation ?? 0;
 				// L3 piggyback: readFile 開始前に L3 epoch を capture。read 中に modify batch が
 				// 来た場合、handle 側で不一致検出して indexFile を no-op にする (Phase B の姉妹罠)。
-				const indexEpochAtStart = index?.currentEpochOf(ioPath) ?? 0;
+				// currentEpochOf は path を pathToId に登録する副作用があるので、以降の invalidate
+				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
+				const shouldIndex = index !== undefined && !index.isIndexedAndValid(ioPath);
+				const indexEpochAtStart = shouldIndex ? (index as InvertedIndexHandle).currentEpochOf(ioPath) : 0;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");
@@ -119,7 +124,7 @@ async function processMdFilesParallel(
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
 				cache?.set(ioPath, text, genAtStart);
-				index?.indexFile(ioPath, text, indexEpochAtStart);
+				if (shouldIndex) (index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
 				options.process(inFile, text);
 			}),
 		),
@@ -374,12 +379,15 @@ async function searchFilesImpl(
 	// Phase C: searchFilesImpl 完了直後に idle fill を kick (冪等、走行中なら no-op)。
 	// L3 が育つ経路が piggyback (query 依存) だけだと、truncated による bail や cache miss で
 	// 未 indexed が残る。setImmediate ループでバックグラウンド補完する。
+	// **handle は kick 時点で 1 度 capture する** (毎 tick 再取得しない)。workspace close →
+	// 再 open で新 entry に切り替わっても、旧 handle 経由の indexFile は identity check で
+	// no-op になるため、旧 entry 時代に読んだ text が新 entry の index に混入する race を防ぐ。
 	if (indexHandle !== undefined) {
 		kickIdleFill(canonicalRoot, {
 			listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
 			readFile: (p) => fsp.readFile(p, "utf8"),
 			isAlive: () => hasFileListCacheEntry(canonicalRoot),
-			getIndex: () => getInvertedIndexHandle(canonicalRoot),
+			index: indexHandle,
 		});
 	}
 	// Phase C dark-launch assert: 「index 経由候補 ⊇ 全走査ヒット file 集合」を検証する。

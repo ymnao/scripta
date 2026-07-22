@@ -70,6 +70,35 @@ describe("InvertedIndex.indexFile / getCandidates basic", () => {
 	});
 });
 
+describe("currentEpochOf: pathToId registration side effect (Phase C stale-insert race fix)", () => {
+	it("currentEpochOf は未登録 path を pathToId に登録して以降の invalidate を有効化する", () => {
+		const idx = new InvertedIndex();
+		// piggyback / idle fill の read 前 snapshot を模す (path はまだ index されたことがない)。
+		const captured = idx.currentEpochOf("/ws/a.md");
+		expect(captured).toBe(0);
+		// read 中に modify batch が来て invalidate が呼ばれた状態。
+		// 登録前は no-op だったが、登録後は fileEpoch が bump される。
+		idx.invalidate("/ws/a.md");
+		expect(idx.currentEpochOf("/ws/a.md")).toBe(1);
+		// readFile 完了後の handle.indexFile (capturedEpoch=0) は current=1 と一致せず破棄されるので、
+		// InvertedIndex 単体では indexFile を通しても後段の epoch 照合で reject されるべき。
+		// ここでは InvertedIndex API 単体の検証: indexFile 自身は epoch 照合しない (handle が照合する)
+		// が、pathToId 登録の副作用が確実に発生していることを別方向から確認する。
+		idx.indexFile("/ws/a.md", "content");
+		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(true);
+	});
+
+	it("currentEpochOf は既存登録済み path には副作用を持たない", () => {
+		const idx = new InvertedIndex();
+		idx.indexFile("/ws/a.md", "content");
+		const before = idx.currentEpochOf("/ws/a.md");
+		idx.currentEpochOf("/ws/a.md"); // 再取得
+		idx.currentEpochOf("/ws/a.md"); // 再取得
+		expect(idx.currentEpochOf("/ws/a.md")).toBe(before);
+		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(true);
+	});
+});
+
 describe("invalidate (.md modify)", () => {
 	it("excludes file from candidates and indexedValid after invalidate", () => {
 		const idx = new InvertedIndex();

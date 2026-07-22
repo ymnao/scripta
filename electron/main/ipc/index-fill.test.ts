@@ -47,7 +47,7 @@ function makeFakeDeps(
 		listIoFiles: () => initialFiles,
 		readFile: async (p: string) => texts.get(p) ?? "",
 		isAlive: () => alive.value,
-		getIndex: () => (alive.value ? index : undefined),
+		index,
 		yieldTick: async () => {}, // test では即座 resolve
 	};
 
@@ -116,29 +116,47 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.size).toBe(0);
 	});
 
-	it("read 中 invalidation で epoch 不一致 → indexFile が no-op", async () => {
+	it("read 中 invalidation で epoch 不一致 → indexFile が no-op、skipUntilEpochChange で収束", async () => {
 		const files = ["/ws/notes/a.md"];
 		const texts = new Map([["/ws/notes/a.md", "aaa"]]);
-		const { deps, currentEpoch, indexed, alive } = makeFakeDeps(files, texts);
+		const { deps, currentEpoch, indexed } = makeFakeDeps(files, texts);
 		let readCount = 0;
 		deps.readFile = async (p: string) => {
 			readCount++;
 			if (readCount === 1) {
 				// 1 回目の read 中にのみ invalidation が起きて epoch が進んだ状態を模す。
 				currentEpoch.set(p, (currentEpoch.get(p) ?? 0) + 1);
-			} else {
-				// 2 回目以降 (再 tick での retry) は workspace を release して無限ループを防ぐ
-				// (このテストの主張は「1 回の race で no-op になること」のみで、
-				// retry の収束性は別テストの範囲)。
-				alive.value = false;
 			}
 			return texts.get(p) ?? "";
 		};
 		kickIdleFill(ROOT, deps);
 		await waitUntil(() => !_isRunningForTest(ROOT));
-		// captured (0) != current (1) なので indexFile は no-op
-		expect(indexed.has("/ws/notes/a.md")).toBe(false);
-		expect(readCount).toBeGreaterThanOrEqual(1);
+		// 1 回目の read: captured=0, current 変化 (1) → indexFile は fake で no-op → skip 記録 (epoch=0)
+		// 2 回目の read: captured=1, current=1 → indexFile 成功 → indexed
+		expect(indexed.get("/ws/notes/a.md")).toBe(1);
+		expect(readCount).toBe(2);
+	});
+
+	it("indexFile が永久に valid にならない file (cutoff 超過相当) → skipUntilEpochChange で無限ループ回避", async () => {
+		const files = ["/ws/notes/big.md"];
+		const texts = new Map([["/ws/notes/big.md", "big"]]);
+		const { deps, indexed } = makeFakeDeps(files, texts);
+		// fake index を「indexFile 呼び出しでも valid にならない」ように差し替え。
+		let indexFileCallCount = 0;
+		deps.index = {
+			...deps.index,
+			indexFile: (_p, _text, _captured) => {
+				indexFileCallCount++;
+				// no-op: cutoff 超過相当。indexed に記録しない。
+			},
+			isIndexedAndValid: (_p) => false,
+			currentEpochOf: (_p) => 0,
+		};
+		kickIdleFill(ROOT, deps);
+		await waitUntil(() => !_isRunningForTest(ROOT));
+		// 1 回だけ試みて skip 記録 → 次 tick で全 skip → picked=0 で bail
+		expect(indexFileCallCount).toBe(1);
+		expect(indexed.size).toBe(0);
 	});
 
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {
