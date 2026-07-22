@@ -203,13 +203,18 @@ export function getCachedInputFileMap(
 		return memo.map;
 	}
 	// canonicalToInputPaths と同じ prefix 差替ロジックを Map の value 側に適用する。
-	const canonicalPaths = [...canonicalMap.values()];
-	const inputPaths = canonicalToInputPaths(canonicalPaths, canonicalRoot, inputRoot);
+	// entries を 1 度舐めて keys / values を並行に取り、変換後に zip し直す
+	// (canonicalMap 反復順序 = values() 反復順序の spec 保証を利用)。
+	const keys: string[] = [];
+	const values: string[] = [];
+	for (const [k, v] of canonicalMap) {
+		keys.push(k);
+		values.push(v);
+	}
+	const inputPaths = canonicalToInputPaths(values, canonicalRoot, inputRoot);
 	const built = new Map<string, string>();
-	let i = 0;
-	for (const [key] of canonicalMap) {
-		built.set(key, inputPaths[i]);
-		i++;
+	for (let i = 0; i < keys.length; i++) {
+		built.set(keys[i], inputPaths[i]);
 	}
 	e.inputFileMapMemo = { epoch: e.state.epoch, inputRoot, map: built };
 	return built;

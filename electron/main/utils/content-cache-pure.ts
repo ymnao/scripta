@@ -87,16 +87,14 @@ export class ByteLruCache {
 	}
 
 	// prefix と完全一致するエントリ、および prefix + sep 以下のエントリを一括削除する。
-	// 呼び出し側は `path` (exact) と `path + sep` (subtree) の両方を意図した引数を渡すこと。
-	// prefixWithSep は subtree のマーカーで、exact は別引数 (prefix) で照合する。
-	// prefix と prefixWithSep を独立に受けるのは、`/foo` が `/foobar` に誤 match しないよう
-	// にするため (`/foo/` を prefixWithSep として渡す想定)。
+	// prefix / prefixWithSep を独立に受けるのは、`/foo` が `/foobar` に誤 match しないよう
+	// にするため。呼び出し側は path (exact) と path + sep (subtree marker) を渡す。
+	// Map の反復中に delete する場合は、既存/現在のキーの delete は spec で安全 (未訪問キーの
+	// 追加のみ挙動が未規定) — ここでは追加はしないので defensive copy 不要。
 	deletePrefix(prefix: string, prefixWithSep: string): number {
 		let removed = 0;
-		for (const key of [...this.entries.keys()]) {
+		for (const [key, e] of this.entries) {
 			if (key === prefix || key.startsWith(prefixWithSep)) {
-				const e = this.entries.get(key);
-				if (e === undefined) continue;
 				this.totalBytesInternal -= e.bytes;
 				this.entries.delete(key);
 				removed++;
