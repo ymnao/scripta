@@ -36,7 +36,10 @@ describe("Sidebar handleOpenFolder", () => {
 
 		// cancel を deferred にして「resolve 前は workspaceSet 未呼び出し」を pin する。
 		// この deferred が無いと `await` を `void` に退行させても呼び出し順は不変で緑になる。
-		let resolveCancel: (() => void) | null = null;
+		// TS の CFA は Promise executor 内の再代入を後続の narrowing に反映しないため、
+		// `let resolveCancel: (() => void) | null = null` パターンだと後続の `resolveCancel?.()`
+		// が `never` に narrowing されて TS2349 になる。definite assignment (`!`) で回避する。
+		let resolveCancel!: () => void;
 		(window.api.cancelFilenameSearch as Mock).mockImplementationOnce(
 			() =>
 				new Promise<void>((resolve) => {
@@ -54,7 +57,7 @@ describe("Sidebar handleOpenFolder", () => {
 		expect(window.api.workspaceSet).not.toHaveBeenCalled();
 
 		// cancel を resolve すると workspaceSet が続く
-		resolveCancel?.();
+		resolveCancel();
 		await vi.waitFor(() => {
 			expect(window.api.workspaceSet).toHaveBeenCalledWith("/new/workspace");
 		});
