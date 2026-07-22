@@ -61,8 +61,16 @@ export class InvertedIndex {
 
 	// gram → fileId の posting map。
 	private grams = new Map<string, Set<number>>();
+	// fileId → その file が寄与している gram Set の逆引き。
+	// removeFromPostings が O(全 gram) を回避するため (indexFile 更新時 / cutoff reject 時に効く)。
+	// tombstones の計算にも使う (`idToGrams.size - validCount` = posting を持つが valid でない file 数)。
+	private idToGrams = new Map<number, Set<string>>();
 
-	private tombstones = 0;
+	// 差分カウンタ。indexedEpoch === fileEpoch な file 数を常に正確に反映する。
+	// mutator (indexFile / bumpFileEpoch 系 / delete 系) で incremental に更新することで、
+	// indexedEpoch 全走査 (旧 indexedValidCount_ の O(N)) を排除する。
+	// tombstones は `idToGrams.size - validCount` で O(1) 算出できるため field は持たない。
+	private validCount = 0;
 	private disabled = false;
 
 	constructor(opts?: {
@@ -84,15 +92,7 @@ export class InvertedIndex {
 	}
 
 	get indexedValidCount(): number {
-		return this.indexedValidCount_();
-	}
-
-	private indexedValidCount_(): number {
-		let n = 0;
-		for (const [id, epoch] of this.indexedEpoch) {
-			if (epoch === (this.fileEpoch.get(id) ?? 0)) n++;
-		}
-		return n;
+		return this.validCount;
 	}
 
 	// idle fill が read 前に snapshot する用。未登録なら 0 相当を返す。
@@ -120,12 +120,43 @@ export class InvertedIndex {
 	}
 
 	// posting から fileId への参照を全て除去する (indexFile 更新時・admission reject 時に使う)。
+	// idToGrams の逆引きで対象 gram のみを触るため O(this file の gram 数)。
 	private removeFromPostings(id: number): void {
-		for (const [gram, set] of this.grams) {
-			if (set.delete(id)) {
-				if (set.size === 0) this.grams.delete(gram);
-			}
+		const grams = this.idToGrams.get(id);
+		if (grams === undefined) return;
+		for (const gram of grams) {
+			const set = this.grams.get(gram);
+			if (set === undefined) continue;
+			set.delete(id);
+			if (set.size === 0) this.grams.delete(gram);
 		}
+		this.idToGrams.delete(id);
+	}
+
+	// indexedEpoch の set/delete と validCount 差分更新を対で行うヘルパー群。
+	private markValid(id: number): void {
+		const cur = this.fileEpoch.get(id) ?? 0;
+		const prev = this.indexedEpoch.get(id);
+		const wasValid = prev !== undefined && prev === cur;
+		this.indexedEpoch.set(id, cur);
+		if (!wasValid) this.validCount++;
+	}
+
+	private forgetIndexed(id: number): void {
+		const prev = this.indexedEpoch.get(id);
+		if (prev === undefined) return;
+		const wasValid = prev === (this.fileEpoch.get(id) ?? 0);
+		this.indexedEpoch.delete(id);
+		if (wasValid) this.validCount--;
+	}
+
+	// 意図ベース bump: fileEpoch を進めるだけ。posting は残置する (tombstone clear で回収)。
+	private bumpFileEpoch(id: number): void {
+		const cur = this.fileEpoch.get(id) ?? 0;
+		const prev = this.indexedEpoch.get(id);
+		const wasValid = prev !== undefined && prev === cur;
+		this.fileEpoch.set(id, cur + 1);
+		if (wasValid) this.validCount--;
 	}
 
 	indexFile(ioPath: string, text: string): void {
@@ -137,20 +168,15 @@ export class InvertedIndex {
 		if (c > this.admissionMaxBytes) {
 			// reject: 既存 indexed 情報 (indexedEpoch entry と posting からの当該 fileId 削除) を除去する。
 			// 「新値受入拒否 + 旧値保持」は両立させない。
-			if (this.indexedEpoch.has(id)) {
-				this.removeFromPostings(id);
-				this.indexedEpoch.delete(id);
-				this.tombstones++;
-			}
+			this.removeFromPostings(id);
+			this.forgetIndexed(id);
 			this.maybeClearOnTombstoneRatio();
 			return;
 		}
 
 		// 既存 indexed (更新) の場合、先に posting から古い fileId 参照を除去してから追加する
 		// (bigram set が変化しうるため)。
-		if (this.indexedEpoch.has(id)) {
-			this.removeFromPostings(id);
-		}
+		this.removeFromPostings(id);
 
 		const lower = text.toLowerCase();
 		const lines = lower.split(/\r?\n/);
@@ -168,18 +194,22 @@ export class InvertedIndex {
 			}
 			set.add(id);
 		}
+		// idToGrams 逆引きを更新する (uniqueGrams と同じ Set を共有すると mutation の相互作用が
+		// あるため、独立コピーを持たせる)。
+		this.idToGrams.set(id, new Set(uniqueGrams));
 
 		if (this.grams.size > this.maxGramCount) {
 			// gram 上限退避: workspace 生存中は復活しない。
 			this.disabled = true;
 			this.grams.clear();
+			this.idToGrams.clear();
 			this.indexedEpoch.clear();
-			this.tombstones = 0;
+			this.validCount = 0;
 			return;
 		}
 
 		// indexedEpoch を fileEpoch と同期 (indexFile 完了時点で valid にする)。
-		this.indexedEpoch.set(id, this.fileEpoch.get(id) ?? 0);
+		this.markValid(id);
 
 		this.maybeClearOnTombstoneRatio();
 	}
@@ -188,21 +218,18 @@ export class InvertedIndex {
 	invalidate(ioPath: string): void {
 		const id = this.pathToId.get(ioPath);
 		if (id === undefined) return;
-		this.bumpEpoch(id);
+		this.bumpFileEpoch(id);
 		this.maybeClearOnTombstoneRatio();
 	}
 
-	// .md delete。pathToId 未登録なら no-op。posting・pathToId は残置する
-	// (posting は tombstone clear で回収、pathToId は再 create での fileId 再利用のため)。
+	// .md delete。pathToId 未登録なら no-op。posting は残置する (tombstone clear で回収)。
+	// pathToId は残置する (再 create での fileId 再利用のため)。indexedEpoch は削除する
+	// (再 create で新 index が入るまで unindexed 扱い)。
 	remove(ioPath: string): void {
 		const id = this.pathToId.get(ioPath);
 		if (id === undefined) return;
-		this.fileEpoch.set(id, (this.fileEpoch.get(id) ?? 0) + 1);
-		// indexedEpoch は削除する (再 create で新 index が入るまで unindexed 扱い)。
-		if (this.indexedEpoch.has(id)) {
-			this.indexedEpoch.delete(id);
-			this.tombstones++;
-		}
+		this.bumpFileEpoch(id);
+		this.forgetIndexed(id);
 		this.maybeClearOnTombstoneRatio();
 	}
 
@@ -212,7 +239,7 @@ export class InvertedIndex {
 		let count = 0;
 		for (const [path, id] of this.pathToId) {
 			if (path === prefix || path.startsWith(prefixWithSep)) {
-				this.bumpEpoch(id);
+				this.bumpFileEpoch(id);
 				count++;
 			}
 		}
@@ -220,81 +247,64 @@ export class InvertedIndex {
 		return count;
 	}
 
-	// 意図ベース bump: fileEpoch を進めるだけ。既存 indexedEpoch と不一致になった
-	// (かつ indexedEpoch に entry がある) 場合のみ tombstones を増やす。posting は残置する。
-	private bumpEpoch(id: number): void {
-		const prevIndexed = this.indexedEpoch.get(id);
-		const wasValid = prevIndexed !== undefined && prevIndexed === (this.fileEpoch.get(id) ?? 0);
-		this.fileEpoch.set(id, (this.fileEpoch.get(id) ?? 0) + 1);
-		if (wasValid) {
-			this.tombstones++;
-		}
-	}
-
 	getCandidates(queryLower: string): CandidateResult {
-		if (queryLower.length === 0) return { kind: "fallback" };
-		if (queryLower.length === 1) return { kind: "fallback" };
+		if (queryLower.length < 2) return { kind: "fallback" };
 		if (queryLower.includes("\n") || queryLower.includes("\r")) return { kind: "fallback" };
 		if (this.disabled) return { kind: "fallback" };
 
 		const grams = bigramsOfLine(queryLower);
 		// query.length >= 2 なので bigramsOfLine は空を返さない。
 
-		let intersection: Set<number> | null = null;
-		for (const g of grams) {
-			const posting = this.grams.get(g);
-			if (posting === undefined || posting.size === 0) {
-				intersection = new Set<number>();
-				break;
-			}
-			if (intersection === null) {
-				intersection = new Set(posting);
-				continue;
-			}
-			const next = new Set<number>();
+		// posting size 昇順で intersect すると初期集合が最小になり、以降の走査対象を最小化できる。
+		// 先頭 gram で候補 Set を作った後は in-place delete で絞り込む (null 初期値と毎 gram の Set
+		// 再構築を排除)。
+		const indexedValid = this.collectIndexedValid();
+		const postings: Array<Set<number> | undefined> = grams.map((g) => this.grams.get(g));
+		if (postings.some((p) => p === undefined || p.size === 0)) {
+			return { kind: "candidates", candidates: new Set(), indexedValid };
+		}
+		postings.sort((a, b) => (a as Set<number>).size - (b as Set<number>).size);
+		const intersection = new Set(postings[0] as Set<number>);
+		for (let i = 1; i < postings.length; i++) {
+			const posting = postings[i] as Set<number>;
 			for (const id of intersection) {
-				if (posting.has(id)) next.add(id);
+				if (!posting.has(id)) intersection.delete(id);
 			}
-			intersection = next;
+			if (intersection.size === 0) break;
 		}
 
 		const candidates = new Set<string>();
-		if (intersection !== null) {
-			for (const id of intersection) {
-				const indexed = this.indexedEpoch.get(id);
-				if (indexed !== undefined && indexed === (this.fileEpoch.get(id) ?? 0)) {
-					const path = this.idToPath[id];
-					if (path !== undefined) candidates.add(path);
-				}
-			}
-		}
-
-		const indexedValid = new Set<string>();
-		for (const [id, epoch] of this.indexedEpoch) {
-			if (epoch === (this.fileEpoch.get(id) ?? 0)) {
+		for (const id of intersection) {
+			const indexed = this.indexedEpoch.get(id);
+			if (indexed !== undefined && indexed === (this.fileEpoch.get(id) ?? 0)) {
 				const path = this.idToPath[id];
-				if (path !== undefined) indexedValid.add(path);
+				if (path !== undefined) candidates.add(path);
 			}
 		}
-
 		return { kind: "candidates", candidates, indexedValid };
 	}
 
-	// tombstones > indexedValidCount * ratio かつ indexedEpoch のうち valid でない entry が
-	// 実際に多い時、grams / indexedEpoch を全 clear する (lazy 再養成)。
-	private maybeClearOnTombstoneRatio(): void {
-		const validCount = this.indexedValidCount_();
-		if (this.tombstones <= validCount * this.tombstoneRatio) return;
-
-		let staleCount = 0;
+	private collectIndexedValid(): Set<string> {
+		const out = new Set<string>();
 		for (const [id, epoch] of this.indexedEpoch) {
-			if (epoch !== (this.fileEpoch.get(id) ?? 0)) staleCount++;
+			if (epoch === (this.fileEpoch.get(id) ?? 0)) {
+				const path = this.idToPath[id];
+				if (path !== undefined) out.add(path);
+			}
 		}
-		if (staleCount <= validCount * this.tombstoneRatio) return;
+		return out;
+	}
 
+	// tombstones (posting を持つが valid でない file 数) = idToGrams.size - validCount。
+	// 比率が閾値を超えたら grams / indexedEpoch を全 clear する (lazy 再養成)。
+	// validCount と idToGrams.size はいずれも差分維持 / O(1) なので判定は O(1)。
+	private maybeClearOnTombstoneRatio(): void {
+		const tombstones = this.idToGrams.size - this.validCount;
+		if (tombstones <= this.validCount * this.tombstoneRatio) return;
 		this.grams.clear();
+		this.idToGrams.clear();
 		this.indexedEpoch.clear();
-		this.tombstones = 0;
+		this.validCount = 0;
 	}
 }
 

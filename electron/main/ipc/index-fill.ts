@@ -29,28 +29,19 @@ export interface IdleFillDeps {
 	yieldTick?(): Promise<void>;
 }
 
-interface IdleFillState {
-	running: boolean;
-}
-
-const states = new Map<string, IdleFillState>();
+// 「走行中の canonicalRoot 集合」を保持する。field 1 個だけの wrapper を持つより素直。
+const running = new Set<string>();
 
 const TICK_SIZE = 4;
 
 // 冪等: 走行中なら no-op。呼び手は search.ts の searchFilesImpl 完了直後などから呼ぶ。
 export function kickIdleFill(canonicalRoot: string, deps: IdleFillDeps): void {
-	const existing = states.get(canonicalRoot);
-	if (existing !== undefined && existing.running) return;
-	const state: IdleFillState = { running: true };
-	states.set(canonicalRoot, state);
-	void runFill(canonicalRoot, deps, state);
+	if (running.has(canonicalRoot)) return;
+	running.add(canonicalRoot);
+	void runFill(canonicalRoot, deps);
 }
 
-async function runFill(
-	_canonicalRoot: string,
-	deps: IdleFillDeps,
-	state: IdleFillState,
-): Promise<void> {
+async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void> {
 	try {
 		while (deps.isAlive()) {
 			// entry drop / disabled 化を tick ごとに検知するため毎 tick で呼ぶ。
@@ -83,7 +74,7 @@ async function runFill(
 			await y();
 		}
 	} finally {
-		state.running = false;
+		running.delete(canonicalRoot);
 	}
 }
 
@@ -95,10 +86,10 @@ function defaultYield(): Promise<void> {
 
 // test 用: 全 idle fill state をリセットする。production コードから呼んではならない。
 export function _cancelAllIdleFillForTest(): void {
-	states.clear();
+	running.clear();
 }
 
 // test 用: 現在 running 中かどうかを返す。
 export function _isRunningForTest(canonicalRoot: string): boolean {
-	return states.get(canonicalRoot)?.running === true;
+	return running.has(canonicalRoot);
 }

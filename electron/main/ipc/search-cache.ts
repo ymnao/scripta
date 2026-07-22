@@ -49,11 +49,14 @@ interface CacheEntry {
 	// L3 InvertedIndex: bigram 転置索引 (Phase C、dark-launch)。
 	// L1/L2 と同じ applyFsBatch で invalidation を同期する。
 	// entry のライフサイクルに便乗して、release で自然に drop される。
+	// **粒度メモ**: L2 は key ごとの identity を持たない (LRU 単位で cache key ごとに存在有無を
+	// 追うだけ) ため single global generation (l2Generation) で足りるが、L3 は file 単位で
+	// posting の valid/stale 判定 + tombstone 比率計算が必要なため per-file fileEpoch を持つ。
+	// 両者は「意図ベース bump」の姉妹だが実装粒度は異なる — Phase D で共通 primitive に統合
+	// しようとしても L2 の global generation では L3 の tombstone 計算を表現できないため、
+	// 誤って同一 counter に括ってはならない。
 	l3: InvertedIndex;
 }
-
-
-
 
 // L2 に読み書きするための狭い interface。processMdFilesParallel はこの handle 経由で
 // L2 に触るため、helper 側は search-cache module state を直接 import しない
