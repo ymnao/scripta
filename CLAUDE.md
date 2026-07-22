@@ -51,7 +51,7 @@ pnpm lint:fix
 # フォーマット
 pnpm format
 
-# 型チェック
+# 型チェック（CI 相当。tsconfig が node / web に分割されているため、`tsc --noEmit` を素で叩くと project を発見できず CI で落ちる型エラーを見逃す。push 前検証は必ずこの script 経由か、直接叩くなら `./node_modules/.bin/tsc --noEmit -p tsconfig.node.json && ./node_modules/.bin/tsc --noEmit -p tsconfig.web.json` の両方を明示指定する）
 pnpm typecheck
 
 # ユニットテスト
@@ -225,6 +225,7 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
   - **実 Electron 起動モード**（`e2e/electron/*.electron.spec.ts`, `playwright.electron.config.ts`, `pnpm test:e2e:electron`）— `electron-vite build` の成果物 (`out/main/index.js`) を `_electron.launch` で起動し、実 main + preload + 実 IPC を回す。起動毎に temp userData を切り (`--user-data-dir`)、設定永続化 / Settings migration / asset protocol / マルチウィンドウ等、mock では踏めない main 境界を safety net 化する。Tauri purge (Phase 2-5) の前後で現挙動を固定する目的（ヘルパーは `e2e/electron/helpers/`、CI は `electron-e2e` job で xvfb-run 実行）
 - **コミット前に必ずユニットテストと e2e テストの両方を実行すること**（実 Electron モードは `pnpm test:e2e:electron` を別途実行）
 - **新規 e2e のモード振り分け**: [ADR-0009](docs/adr/0009-renderer-only-e2e-strategy.md) §「各モードの役割分担（テスト分類方針）」を参照。
+- **deferred promise pattern は `let x!: T` を使う** — test helper で `new Promise((resolve) => { resolveDeferred = resolve })` のように executor 内で外側の変数へ resolver を代入する慣用パターンでは、`let resolveDeferred: (() => void) | null = null` と宣言してから `resolveDeferred?.()` を呼ぶと TypeScript 7 の CFA が Promise executor 内の再代入を後続 narrowing に反映せず `never` 型として TS2349 (`never has no call signatures`) を返す。`let resolveDeferred!: () => void`（definite assignment assertion）で宣言すると Promise executor が同期実行される保証を型に伝えられて解決する。
 
 ```bash
 # コミット前の検証
