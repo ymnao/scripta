@@ -30,12 +30,16 @@ import {
 	isInRanges,
 	maskRanges,
 } from "../utils/search-pure";
+import { kickIdleFill } from "./index-fill";
 import {
 	type ContentCacheHandle,
 	getCachedExistingStems,
 	getCachedInputFileMap,
+	getCachedMdFiles,
 	getContentCacheHandle,
+	getInvertedIndexHandle,
 	hasFileListCacheEntry,
+	type InvertedIndexHandle,
 	populateFileListCache,
 } from "./search-cache";
 
@@ -68,10 +72,16 @@ async function processMdFilesParallel(
 		// hit なら readFile を skip、miss なら readFile 後に admission cutoff 通過分のみ set。
 		// set は capture した generation を渡し、stale-insert race を防ぐ。
 		cache?: ContentCacheHandle;
+		// L3 InvertedIndex handle (Phase C、dark-launch)。渡された場合、text 確定点で
+		// piggyback indexing を行う (fire-and-forget、read 前に epoch を capture し handle 側で
+		// 不一致検出時は no-op)。process の返り値には一切影響しない (Phase C dark-launch の
+		// 境界: searchFilesImpl の結果を変えないため)。
+		index?: InvertedIndexHandle;
 	},
 ): Promise<void> {
 	const shouldStop = (): boolean => isStale() || options.shouldBail?.() === true;
 	const cache = options.cache;
+	const index = options.index;
 	await Promise.all(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
@@ -83,12 +93,27 @@ async function processMdFilesParallel(
 					// L2 hit: readFile を skip して直接 process へ。await 境界が無いが、
 					// 他 task の cache eviction や shouldBail の変化を反映するため stop 判定は継続。
 					if (shouldStop()) return;
+					// L3 piggyback: L2 hit 時も index を養う (index への流入が L2 hit で途絶えないため)。
+					// hit path は await 境界が無いので epoch snapshot と indexFile の間に batch は来ない。
+					// **既に valid なら skip** (production 検索 latency に恒常コストを乗せないため、
+					// dark-launch の受入条件を latency 面でも満たす)。
+					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
+						index.indexFile(ioPath, hit, index.currentEpochOf(ioPath));
+					}
 					options.process(inFile, hit);
 					return;
 				}
 				// L2 miss: 従来経路。readFile 開始前に generation を capture し、
 				// set 時に不一致なら破棄する (readFile 中に modify batch → evict → 古い text 格納の race)。
 				const genAtStart = cache?.generation ?? 0;
+				// L3 piggyback: readFile 開始前に L3 epoch を capture。read 中に modify batch が
+				// 来た場合、handle 側で不一致検出して indexFile を no-op にする (Phase B の姉妹罠)。
+				// currentEpochOf は path を pathToId に登録する副作用があるので、以降の invalidate
+				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
+				const shouldIndex = index !== undefined && !index.isIndexedAndValid(ioPath);
+				const indexEpochAtStart = shouldIndex
+					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
+					: 0;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");
@@ -101,6 +126,7 @@ async function processMdFilesParallel(
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
 				cache?.set(ioPath, text, genAtStart);
+				if (shouldIndex) (index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
 				options.process(inFile, text);
 			}),
 		),
@@ -299,10 +325,12 @@ async function searchFilesImpl(
 	const querySearch = caseSensitive ? query : query.toLowerCase();
 	const results: SearchResult[] = [];
 	let truncated = false;
+	const indexHandle = getInvertedIndexHandle(canonicalRoot);
 
 	await processMdFilesParallel(io, input, isStale, {
 		shouldBail: () => truncated,
 		cache: getContentCacheHandle(canonicalRoot),
+		index: indexHandle,
 		process: (inputPath, content) => {
 			// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 			const lines = content.split(/\r?\n/);
@@ -350,6 +378,36 @@ async function searchFilesImpl(
 		if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
 		return a.matchStart - b.matchStart;
 	});
+	// Phase C: searchFilesImpl 完了直後に idle fill を kick (冪等、走行中なら no-op)。
+	// L3 が育つ経路が piggyback (query 依存) だけだと、truncated による bail や cache miss で
+	// 未 indexed が残る。setImmediate ループでバックグラウンド補完する。
+	// **handle は kick 時点で 1 度 capture する** (毎 tick 再取得しない)。workspace close →
+	// 再 open で新 entry に切り替わっても、旧 handle 経由の indexFile は identity check で
+	// no-op になるため、旧 entry 時代に読んだ text が新 entry の index に混入する race を防ぐ。
+	if (indexHandle !== undefined) {
+		kickIdleFill(canonicalRoot, {
+			listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
+			readFile: (p) => fsp.readFile(p, "utf8"),
+			isAlive: () => hasFileListCacheEntry(canonicalRoot),
+			index: indexHandle,
+		});
+	}
+	// Phase C dark-launch assert: 「index 経由候補 ⊇ 全走査ヒット file 集合」を検証する。
+	// SCRIPTA_DARK_ASSERT=1 の時のみ enable (デフォルト off で production 経路への影響ゼロ)。
+	// truncated=true でも「hit した file ⊆ 候補」は成立するため skip 不要。
+	// ヒット file 集合は canonical ioPath ではなく input path 側で持つが、index の candidates は
+	// canonical io 側なので、hit file を canonical io に逆写像する必要がある。ここでは
+	// hitInFiles → 対応する ioFiles を lookup Map で解決する。
+	if (indexHandle !== undefined && process.env.SCRIPTA_DARK_ASSERT === "1") {
+		const inputToIo = new Map<string, string>();
+		for (let i = 0; i < input.length; i++) inputToIo.set(input[i], io[i]);
+		const hitIoSet = new Set<string>();
+		for (const r of results) {
+			const ioPath = inputToIo.get(r.filePath);
+			if (ioPath !== undefined) hitIoSet.add(ioPath);
+		}
+		indexHandle.verify(query, caseSensitive, io, Array.from(hitIoSet));
+	}
 	return { results, truncated };
 }
 
@@ -495,6 +553,7 @@ async function scanUnresolvedWikilinksImpl(
 	// 並列 task 間で map への push は race しない（await の境界でのみ task が切り替わる）。
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		cache: getContentCacheHandle(canonicalRoot),
+		index: getInvertedIndexHandle(canonicalRoot),
 		process: (inFile, text) => {
 			// inFile は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
 			// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
@@ -579,6 +638,7 @@ async function scanBacklinksImpl(
 	const map = new Map<string, WikilinkReference[]>();
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		cache: getContentCacheHandle(canonicalRoot),
+		index: getInvertedIndexHandle(canonicalRoot),
 		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
 		// 不要な fd 消費を避ける。input 表記で判定する (fileMap / targetInput と揃える)。
 		skipFile: (inFile) => inFile === targetInput,
