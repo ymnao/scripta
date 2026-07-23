@@ -325,10 +325,7 @@ describe("randomized property test (LCG-seeded)", () => {
 		return out;
 	}
 
-	function naiveScan(
-		docs: ReadonlyMap<string, string>,
-		queryLower: string,
-	): string[] {
+	function naiveScan(docs: ReadonlyMap<string, string>, queryLower: string): string[] {
 		const hits: string[] = [];
 		for (const [path, text] of docs) {
 			if (text.toLowerCase().includes(queryLower)) hits.push(path);
@@ -336,9 +333,7 @@ describe("randomized property test (LCG-seeded)", () => {
 		return hits;
 	}
 
-	function buildDocsAndQueries(
-		seed: number,
-	): { docs: Map<string, string>; queries: string[] } {
+	function buildDocsAndQueries(seed: number): { docs: Map<string, string>; queries: string[] } {
 		const rng = lcg(seed);
 		const docs = new Map<string, string>();
 		const docCount = 20 + (rng() % 11); // 20-30

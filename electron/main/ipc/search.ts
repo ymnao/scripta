@@ -111,7 +111,9 @@ async function processMdFilesParallel(
 				// currentEpochOf は path を pathToId に登録する副作用があるので、以降の invalidate
 				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
 				const shouldIndex = index !== undefined && !index.isIndexedAndValid(ioPath);
-				const indexEpochAtStart = shouldIndex ? (index as InvertedIndexHandle).currentEpochOf(ioPath) : 0;
+				const indexEpochAtStart = shouldIndex
+					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
+					: 0;
 				let text: string;
 				try {
 					text = await fsp.readFile(ioPath, "utf8");

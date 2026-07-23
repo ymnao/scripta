@@ -697,9 +697,7 @@ describe("L3 InvertedIndex integration", () => {
 			const h = getInvertedIndexHandle(ROOT);
 			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
 			h?.indexFile(p("b.md"), "goodbye world", h.currentEpochOf(p("b.md")));
-			expect(() =>
-				h?.verify("hello", false, [p("a.md"), p("b.md")], [p("a.md")]),
-			).not.toThrow();
+			expect(() => h?.verify("hello", false, [p("a.md"), p("b.md")], [p("a.md")])).not.toThrow();
 		});
 
 		it("throws when a hit file is outside the allowed set", () => {
@@ -707,9 +705,7 @@ describe("L3 InvertedIndex integration", () => {
 			const h = getInvertedIndexHandle(ROOT);
 			h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
 			h?.indexFile(p("b.md"), "goodbye world", h.currentEpochOf(p("b.md")));
-			expect(() =>
-				h?.verify("hello", false, [p("a.md"), p("b.md")], [p("b.md")]),
-			).toThrow();
+			expect(() => h?.verify("hello", false, [p("a.md"), p("b.md")], [p("b.md")])).toThrow();
 		});
 	});
 

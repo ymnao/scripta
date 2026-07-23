@@ -1,11 +1,7 @@
 import { sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { ByteLruCache } from "../utils/content-cache-pure";
-import {
-	type CandidateResult,
-	InvertedIndex,
-	verifyIndexSuperset,
-} from "../utils/inverted-index";
+import { type CandidateResult, InvertedIndex, verifyIndexSuperset } from "../utils/inverted-index";
 import {
 	applyBatchToState,
 	canonicalToInputPaths,
