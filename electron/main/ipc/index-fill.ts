@@ -33,12 +33,13 @@ export interface IdleFillDeps {
 	/** 1 tick 遅延を挿入する (デフォルト setImmediate、test では即座 resolve でよい)。 */
 	yieldTick?(): Promise<void>;
 	/**
-	 * indexFile 直前の realpath 再認可 (#394 Phase D / #399 Finding 2)。
-	 * 未指定時は認可 skip (test での fake deps 用途)。production 経路では常に指定し、
-	 * workspace 外 symlink を追跡する file を index に載せないようにする。
+	 * readFile 直前の realpath 再認可 (#394 Phase D / #399 Finding 2)。
+	 * workspace 外 symlink を追跡する file を index に載せないためのゲート。
 	 * false 応答時は cutoff 超過と同じく skipUntilEpochChange に記録される。
+	 * 必須 field: fail-open 事故を避けるため optional にしない (test の fake deps は
+	 * `async () => true` を明示することで境界通過を宣言する)。
 	 */
-	isRealPathAllowed?(ioPath: string): Promise<boolean>;
+	isRealPathAllowed(ioPath: string): Promise<boolean>;
 }
 
 // 「走行中の canonicalRoot 集合」を保持する。field 1 個だけの wrapper を持つより素直。
@@ -89,20 +90,19 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 				const skipped = skipUntilEpochChange.get(p);
 				if (skipped !== undefined && skipped === current) continue;
 				try {
-					const text = await deps.readFile(p);
-					if (!deps.isAlive()) break;
-					if (deps.index.isDisabled) break;
-					// realpath 再認可 (#394 Phase D / #399 Finding 2): workspace 外を指す
-					// symlink file を index に載せない。false / 失敗時は cutoff 超過と同じ経路
-					// (skipUntilEpochChange 記録) に倒す — fileEpoch が動けば自動 retry される。
-					const allowed = deps.isRealPathAllowed
-						? await deps.isRealPathAllowed(p).catch(() => false)
-						: true;
+					// realpath 再認可 (#394 Phase D / #399 Finding 2) を readFile より **先** に
+					// 走らせる: workspace 外を指す symlink file の全文読み込みコストを避ける。
+					// false / 失敗時は cutoff 超過と同じ経路 (skipUntilEpochChange 記録) に倒す —
+					// fileEpoch が動けば自動 retry される。
+					const allowed = await deps.isRealPathAllowed(p).catch(() => false);
 					if (!deps.isAlive()) break;
 					if (deps.index.isDisabled) break;
 					if (!allowed) {
 						skipUntilEpochChange.set(p, current);
 					} else {
+						const text = await deps.readFile(p);
+						if (!deps.isAlive()) break;
+						if (deps.index.isDisabled) break;
 						deps.index.indexFile(p, text, current);
 						// indexFile が noop (identity check / capturedEpoch 不一致 / cutoff reject 等) で
 						// valid にならなかったら skip 記録して次回の epoch 変化まで retry しない。

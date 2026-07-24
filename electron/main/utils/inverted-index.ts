@@ -30,6 +30,20 @@ export type CandidateResult =
 	| { kind: "candidates"; candidates: Set<string>; indexedValid: Set<string> };
 
 /**
+ * candidates kind の CandidateResult に対して「index が no-match を保証しない = scan 対象」
+ * 述語を返す純関数。allowed 集合 = `candidates ∪ (allIoFiles \ indexedValid)` の 1 元素分。
+ * buildScanList (scan 対象の絞り込み) と collectViolations (dark assert の許容集合) が
+ * 同一公式に依存するため、公式ズレを起こさないよう 1 箇所に集約する。
+ */
+function isScanEligible(
+	ioPath: string,
+	candidates: ReadonlySet<string>,
+	indexedValid: ReadonlySet<string>,
+): boolean {
+	return candidates.has(ioPath) || !indexedValid.has(ioPath);
+}
+
+/**
  * #394 Phase D の scan list 構築。allIoFiles と getCandidates 戻り値から
  * 「実際に readFile + scan する対象」に絞る。
  * - fallback kind: 全 file 素通し (query.length < 2 / 改行含む / disabled / 未 indexed 多数)。
@@ -51,7 +65,7 @@ export function buildScanList(
 	const inScan: string[] = [];
 	for (let i = 0; i < ioFiles.length; i++) {
 		const p = ioFiles[i];
-		if (candidates.has(p) || !indexedValid.has(p)) {
+		if (isScanEligible(p, candidates, indexedValid)) {
 			ioScan.push(p);
 			inScan.push(inFiles[i]);
 		}
@@ -367,39 +381,26 @@ export function verifyIndexSuperset(
 }
 
 /**
- * #394 Phase D / #399 Finding 1: verifyIndexSuperset の violation 時に「watcher-latency 窓」
- * (index が旧 epoch 内容を valid と信じている間、scan は新内容を disk から読んでヒット) と
- * 「真の superset 破損」を切り分ける helper。
- *
- * 手順:
- *   1. 現状の (candidates ∪ 未indexed) allowed 集合を計算し violation を集める
- *   2. violation が無ければ null (invariant 成立、caller は成功として扱う)
- *   3. 違反 file の現在の text を reindex(callback) 経由で取り込み直す
- *   4. 再度 allowed を計算し直して残 violation を返す (空なら「窓」= warn 相当、非空なら真の破損)
- *
- * reindex callback は (ioPath) → text | null を返し、null は「読み取り失敗 / 認可外」で
- * skip 扱いにする。text 返却時は index.indexFile を呼ぶ責務を helper 側に持たせない
- * (呼び手が epoch capture と realpath 認可を制御できる余地を残す) — ここでは reindex 前提で
- * 呼び手側 fix を待つ。
- *
- * caseSensitive=true は verifyIndexSuperset と同じく skip (null 返却)。
+ * dark assert 用の violation 内訳返却 (#394 Phase D / #399 Finding 1)。
+ * verifyIndexSuperset は最初の違反で throw するが、こちらは全違反を配列で返し、
+ * 呼び手側で「違反 file を disk から再 index → 再度 collectViolations で残 violation を確認」
+ * → 空になれば watcher-latency 窓と判定 (warn)、残れば真の superset 破損 (throw) の
+ * 切り分けを可能にする。fallback / caseSensitive skip 時は null。
  */
-/** violations 内訳を返す。fallback / caseSensitive skip 時は null。 */
 export function collectViolations(
 	index: InvertedIndex,
 	queryLower: string,
-	allIoFiles: readonly string[],
+	// allIoFiles は現時点で判定に使わない (hit ⊆ io は truth scan の構造上自明) が、
+	// verifyIndexSuperset との対称性 + 将来の hit-outside-io 診断のため signature に残す。
+	_allIoFiles: readonly string[],
 	hitIoFiles: readonly string[],
 ): string[] | null {
 	const candResult = index.getCandidates(queryLower);
 	if (candResult.kind === "fallback") return null;
-	const allowed = new Set<string>(candResult.candidates);
-	for (const p of allIoFiles) {
-		if (!candResult.indexedValid.has(p)) allowed.add(p);
-	}
+	const { candidates, indexedValid } = candResult;
 	const violations: string[] = [];
 	for (const hit of hitIoFiles) {
-		if (!allowed.has(hit)) violations.push(hit);
+		if (!isScanEligible(hit, candidates, indexedValid)) violations.push(hit);
 	}
 	return violations;
 }

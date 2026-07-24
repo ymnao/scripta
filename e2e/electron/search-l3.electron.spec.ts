@@ -45,8 +45,9 @@ test.describe("search L3 candidates end-to-end (electron)", () => {
 				await expect(page.getByText("alpha.md", { exact: false })).toBeVisible({ timeout: 5000 });
 
 				// (2) 新 file を追加して chokidar → L1 invalidate → 検索が新内容を返すこと。
-				//     固定 sleep は flaky 源なので「polling で hit を待つ」。
-				await input.fill("");
+				//     固定 sleep は flaky 源なので「fill で query 切替 → polling で hit を待つ」。
+				//     fill("") を挟まず直接 query を切替えて debounce 2 発火を避ける (SearchPanel の
+				//     debounce は query 変更ごとに reset)。
 				writeFileSync(
 					join(workspaceDir, "gamma.md"),
 					"# Gamma\nsupercalifragilisticnovel\n",
@@ -58,7 +59,6 @@ test.describe("search L3 candidates end-to-end (electron)", () => {
 				});
 
 				// (3) 既存 file の書換で語を除去 → 検索から消えること (invalidate → 再 index / fallback の負方向)。
-				await input.fill("");
 				writeFileSync(join(workspaceDir, "alpha.md"), "# Alpha\n(removed)\n", "utf8");
 				await input.fill("quickbrownfoxjumps");
 				// 結果なしメッセージが表示されるまで待つ (polling)。

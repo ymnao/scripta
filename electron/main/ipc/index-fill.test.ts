@@ -49,6 +49,7 @@ function makeFakeDeps(
 		isAlive: () => alive.value,
 		index,
 		yieldTick: async () => {}, // test では即座 resolve
+		isRealPathAllowed: async () => true, // fake deps は境界通過を明示
 	};
 
 	return { deps, indexed, currentEpoch, alive, disabled };
