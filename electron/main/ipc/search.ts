@@ -100,8 +100,8 @@ async function processMdFilesParallel(
 				if (options.skipFile?.(inFile)) return;
 				const hit = cache?.get(ioPath);
 				if (hit !== undefined) {
-					// L2 hit: readFile を skip して直接 process へ。await 境界が無いが、
-					// 他 task の cache eviction や shouldBail の変化を反映するため stop 判定は継続。
+					// L2 hit: readFile を skip して直接 process へ。realpath 認可の await 境界を経て
+					// 他 task の cache eviction や shouldBail の変化を反映するため stop 判定を継続する。
 					if (shouldStop()) return;
 					// L3 piggyback: L2 hit 時も index を養う (index への流入が L2 hit で途絶えないため)。
 					// **既に valid なら skip** (production 検索 latency に恒常コストを乗せないため、
@@ -114,6 +114,7 @@ async function processMdFilesParallel(
 							index.indexFile(ioPath, hit, epoch);
 						}
 					}
+					if (shouldStop()) return;
 					options.process(inFile, hit);
 					return;
 				}
@@ -142,7 +143,9 @@ async function processMdFilesParallel(
 				cache?.set(ioPath, text, genAtStart);
 				if (shouldIndex) {
 					// realpath 再認可: symlink で workspace 外を指す file の text を L3 に取り込まない。
-					// realpath 失敗 (dangling / ENOENT) も false → skip 扱い。
+					// realpathBestEffort の fall-through 挙動 (dangling は「祖先 realpath + suffix」)
+					// でも root 内なら true になるが、後段 readFile が既に成功している = target が
+					// 実在するケースのみここに到達するため実害はない。
 					if (indexRoot === undefined || (await isRealPathInsideRoot(ioPath, indexRoot))) {
 						(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
 					}
@@ -174,15 +177,14 @@ async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean
 	for (const ent of entries) {
 		if (ent.name.startsWith(".") || ent.name === "node_modules") continue;
 		const ioPath = join(ioDir, ent.name);
-		// symlink ディレクトリの再帰は 2 つの理由で除外する:
-		//   1. workspace 外への symlink loop で walk が無限再帰する事故を防ぐ
-		//   2. #399 Finding 2 の境界問題 (workspace 内 symlink dir 経由で外部 tree の
-		//      .md が in-memory index に取り込まれる) の主要経路を潰す
-		// `.md` symlink ファイルはそのまま残す (workspace 内 symlink ノートを利用する
-		// user regression を避けるため — 個別 file の realpath 再認可は piggyback /
-		// idle-fill 側で行う)。
+		// Node の readdir({withFileTypes}) は symlink→dir に対して isDirectory()=false /
+		// isSymbolicLink()=true を返すため、symlink ディレクトリはこの if/else if の
+		// どちらの分岐にも入らず自然に skip される (#399 Finding 2 の境界問題主要経路 =
+		// symlink dir 経由での外部 tree 巡回 と walk の無限 loop を明示的な check なしに
+		// 遮断できる)。`.md` symlink ファイルは else-if を通って walk 結果に入るため、
+		// 個別 file の realpath 再認可は piggyback / idle-fill 側で行う (index 取り込み
+		// 境界を workspace 内に閉じる)。
 		if (ent.isDirectory()) {
-			if (ent.isSymbolicLink()) continue;
 			await walkMdFiles(ioPath, out, isStale);
 		} else if (ent.name.endsWith(".md")) {
 			out.push(ioPath);
@@ -487,10 +489,11 @@ async function runDarkAssert(
 		indexRoot: canonicalRoot,
 		suppressIndex: true,
 		process: (inputPath, content) => {
-			// 行単位の実 match を確認する (truth = 実際にヒットする file の集合)。
-			// 早期 break で行スキャンを打ち切る (file 判定に足りる 1 hit 以降は不要)。
-			const contentSearch = content.toLowerCase();
-			if (contentSearch.includes(queryLower)) {
+			// truth = 「その file 内で query が 1 度でも substring match するか」の file 単位 hit。
+			// 行分割せず全 content に対して 1 発の toLowerCase().includes(queryLower) で判定する
+			// (index の bigram が改行を跨がないのと対称にするため、改行含む query は
+			// getCandidates が fallback を返し collectViolations が null で無害化する)。
+			if (content.toLowerCase().includes(queryLower)) {
 				const p = inputToIo.get(inputPath);
 				if (p !== undefined) truthHitIo.add(p);
 			}
@@ -504,20 +507,36 @@ async function runDarkAssert(
 	for (const p of violations) {
 		if (isStale()) return;
 		if (!(await isRealPathInsideRoot(p, canonicalRoot))) continue;
+		// epoch capture は readFile より **先** に行う (piggyback / idle-fill と同順序、
+		// read 中に watcher batch が来た時に handle 側の不一致検出で indexFile を no-op 化するため)。
+		// 順序を逆にすると bump 後の epoch を capture して stale text が新 epoch で valid 化する race
+		// を dark assert 自身が作り出してしまう (Fable review W1)。
+		const epoch = indexHandle.currentEpochOf(p);
 		let text: string;
 		try {
 			text = await fsp.readFile(p, "utf8");
 		} catch {
 			continue; // 読み取り失敗 file は skip (次の collectViolations で「変わらず violation」なら throw)
 		}
-		const epoch = indexHandle.currentEpochOf(p);
 		indexHandle.indexFile(p, text, epoch);
 	}
+	if (isStale()) return;
 	violations = indexHandle.collectViolations(queryLower, io, Array.from(truthHitIo));
 	if (violations === null || violations.length === 0) {
 		console.warn(
 			`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
 				`query="${query}"`,
+		);
+		return;
+	}
+	// throw 直前に「reindex 自体が届いていない」ケース (workspace close で handle 側 identity check no-op /
+	// 対象 file が walk 側から消えた等) を切り分けて warn に落とす。isIndexedAndValid が false のままなら
+	// index への書き込みが到達しておらず、真の superset 破損とは切り分けが必要 (Fable review S2)。
+	const stillUnindexed = violations.filter((p) => !indexHandle.isIndexedAndValid(p));
+	if (stillUnindexed.length === violations.length) {
+		console.warn(
+			`[dark-assert] InvertedIndex superset violation unresolved but reindex did not commit ` +
+				`(workspace close or file removed). query="${query}"`,
 		);
 		return;
 	}

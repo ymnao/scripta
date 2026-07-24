@@ -160,6 +160,29 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.size).toBe(0);
 	});
 
+	it("isRealPathAllowed=false → readFile もせず skipUntilEpochChange で bail する (Phase D 境界)", async () => {
+		const files = ["/ws/notes/evil.md", "/ws/notes/ok.md"];
+		const texts = new Map([
+			["/ws/notes/evil.md", "should not be read"],
+			["/ws/notes/ok.md", "ok content"],
+		]);
+		const { deps, indexed } = makeFakeDeps(files, texts);
+		let readCallCount = 0;
+		const origRead = deps.readFile;
+		deps.readFile = async (p: string) => {
+			readCallCount++;
+			return origRead(p);
+		};
+		// evil.md だけ realpath で reject する fake。
+		deps.isRealPathAllowed = async (p) => p !== "/ws/notes/evil.md";
+		kickIdleFill(ROOT, deps);
+		await waitUntil(() => !_isRunningForTest(ROOT));
+		// evil.md は readFile されず (境界チェックで先に落ちる)、ok.md は 1 度 read + index される。
+		expect(readCallCount).toBe(1);
+		expect(indexed.has("/ws/notes/evil.md")).toBe(false);
+		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
+	});
+
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {
 		const files = ["/ws/notes/a.md"];
 		const texts = new Map([["/ws/notes/a.md", "aaa"]]);

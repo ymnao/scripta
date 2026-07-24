@@ -261,8 +261,16 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 // - Window scope を持たない background 経路 (idle fill / piggyback) 用のため、
 //   assertPathAllowed とは別 API になる (window-id を持たない)。
 // - canonicalRoot は既に realpath 済みである前提 (collectMdFilesForWorkspace 通過後)。
-// - validatePath が throw する不正入力や realpath 失敗 (dangling symlink 等) は
-//   false を返す (fail-closed)。
+// - validatePath が throw する不正入力 (相対 path / null byte) は false を返す。
+// - realpath は realpathBestEffort 経由で「最も近い実在祖先の realpath + suffix」に fall-through
+//   するため、dangling symlink や未存在 file でも例外にはならず、そのパスが root 内なら true を返す。
+//   これは意図した挙動 (後段 readFile が ENOENT を吐いて自然に skip される、
+//   index 取り込みには到達しない) だが、この関数単独では「dangling は必ず false」ではない点に注意。
+//   下流 (readFile 失敗の try/catch skip / indexFile 無効化) を合わせた multi-layer defense として機能する。
+// - realpathCache (path-guard 内の LRU) が生きている間、workspace 内→外に symlink が付け替えられた
+//   ケースでは古い判定を返し得る (settings.setPath / clearWorkspaceRoots で cache 全 clear されるまでの窓)。
+//   スコープが限定的 (in-memory index への残留のみ、renderer には出ない) のため既存の realpathCache
+//   staleness 契約を踏襲。
 export async function isRealPathInsideRoot(
 	ioPath: string,
 	canonicalRoot: string,

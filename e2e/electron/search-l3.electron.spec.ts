@@ -35,6 +35,12 @@ test.describe("search L3 candidates end-to-end (electron)", () => {
 			try {
 				const page = await app.firstWindow();
 				await page.waitForLoadState("domcontentloaded");
+				// renderer 側 unhandled error を集める。runDarkAssert の throw は IPC の reject として
+				// 返り main プロセスは落ちないため、その rejection が SearchPanel の catch で
+				// 「結果なし」に化けても検出できるように pageerror / console.error を監視する
+				// (Fable review W4: 「main が例外で落ちる」前提の担保は誤り、監視で補完)。
+				const pageErrors: string[] = [];
+				page.on("pageerror", (e) => pageErrors.push(String(e)));
 
 				// 検索パネルを開く。
 				await page.getByRole("button", { name: "ワークスペース検索" }).click();
@@ -64,8 +70,17 @@ test.describe("search L3 candidates end-to-end (electron)", () => {
 				// 結果なしメッセージが表示されるまで待つ (polling)。
 				await expect(page.getByText("結果なし")).toBeVisible({ timeout: 10_000 });
 
-				// (4) dark assert が throw していないことは、ここまでプロセスが生きていることで担保。
-				// main プロセスが例外で落ちていれば page.getByText 系が timeout していたはず。
+				// (4) dark assert throw の副作用検出用の post-check。
+				// SearchPanel の catch は throw を「結果なし」に置換するため step (3) 単独では
+				// assert 違反を green で通してしまう。ここでヒットする正方向 query をもう 1 回
+				// 実行し、violation なら「結果なし」が返る (throw から SearchPanel が rescue)
+				// ことを利用して throw 発生を検出する。
+				await input.fill("supercalifragilisticnovel");
+				await expect(page.getByText("gamma.md", { exact: false })).toBeVisible({
+					timeout: 10_000,
+				});
+				// unhandled error / pageerror が 0 件であることも確認。
+				expect(pageErrors).toEqual([]);
 			} finally {
 				await app.close();
 			}

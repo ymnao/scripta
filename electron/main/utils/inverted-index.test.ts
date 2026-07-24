@@ -3,6 +3,7 @@ import {
 	bigramsOfLine,
 	buildScanList,
 	type CandidateResult,
+	collectViolations,
 	INDEX_ADMISSION_MAX_BYTES,
 	InvertedIndex,
 	verifyIndexSuperset,
@@ -461,6 +462,42 @@ describe("buildScanList", () => {
 		const { ioScan, inScan } = buildScanList(io, inp, cand);
 		expect(ioScan).toEqual(["/ws/c.md"]);
 		expect(inScan).toEqual(["/base/c.md"]);
+	});
+});
+
+describe("collectViolations", () => {
+	it("returns null when getCandidates returns fallback (query < 2 chars)", () => {
+		const idx = new InvertedIndex();
+		idx.indexFile("/ws/a.md", "hello world");
+		expect(collectViolations(idx, "a", ["/ws/a.md"], ["/ws/a.md"])).toBeNull();
+	});
+
+	it("returns empty array when all hits are eligible (candidates 或は未 indexed)", () => {
+		const idx = new InvertedIndex();
+		idx.indexFile("/ws/a.md", "quickbrown");
+		idx.indexFile("/ws/b.md", "unrelated");
+		// hit=a.md は candidates に含まれるので violation なし
+		const v = collectViolations(idx, "quick", ["/ws/a.md", "/ws/b.md"], ["/ws/a.md"]);
+		expect(v).toEqual([]);
+	});
+
+	it("returns hit files that are indexed valid but not candidates (真の superset 破損 の検出)", () => {
+		const idx = new InvertedIndex();
+		idx.indexFile("/ws/a.md", "quickbrown");
+		idx.indexFile("/ws/b.md", "unrelated");
+		// b.md は indexed valid だが query "quick" の候補に入らない。
+		// もし truth が b.md を hit と主張 (実際にはあり得ないが violation シナリオ)、violation 検出。
+		const v = collectViolations(idx, "quick", ["/ws/a.md", "/ws/b.md"], ["/ws/b.md"]);
+		expect(v).toEqual(["/ws/b.md"]);
+	});
+
+	it("returns empty when hit is indexed 未 valid (invalidated) — eligible via fallback", () => {
+		const idx = new InvertedIndex();
+		idx.indexFile("/ws/a.md", "quickbrown");
+		idx.invalidate("/ws/a.md"); // fileEpoch bump → indexed 未 valid
+		// a.md は indexedValid から外れる = allowed 集合の未 indexed 部分に入る = 違反にはならない
+		const v = collectViolations(idx, "quick", ["/ws/a.md"], ["/ws/a.md"]);
+		expect(v).toEqual([]);
 	});
 });
 
