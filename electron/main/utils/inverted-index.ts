@@ -29,6 +29,50 @@ export type CandidateResult =
 	| { kind: "fallback" }
 	| { kind: "candidates"; candidates: Set<string>; indexedValid: Set<string> };
 
+/**
+ * candidates kind の CandidateResult に対して「index が no-match を保証しない = scan 対象」
+ * 述語を返す純関数。allowed 集合 = `candidates ∪ (allIoFiles \ indexedValid)` の 1 元素分。
+ * buildScanList (scan 対象の絞り込み) と collectViolations (dark assert の許容集合) が
+ * 同一公式に依存するため、公式ズレを起こさないよう 1 箇所に集約する。
+ */
+function isScanEligible(
+	ioPath: string,
+	candidates: ReadonlySet<string>,
+	indexedValid: ReadonlySet<string>,
+): boolean {
+	return candidates.has(ioPath) || !indexedValid.has(ioPath);
+}
+
+/**
+ * #394 Phase D の scan list 構築。allIoFiles と getCandidates 戻り値から
+ * 「実際に readFile + scan する対象」に絞る。
+ * - fallback kind: 全 file 素通し (query.length < 2 / 改行含む / disabled / 未 indexed 多数)。
+ * - candidates kind: `candidates ∪ (allIoFiles \ indexedValid)` = 候補 file + 未 indexed/stale file。
+ *   前者は index が絞った候補、後者は index が「valid ではない」= no-match を保証できない集合。
+ *   両方を scan することで「index 0% でも 100% でも同一結果」不変条件を維持する。
+ *
+ * ioFiles と inFiles は同じ index で対応 (canonical io ↔ input path)。両方を並行に filter して
+ * 返す。allIoFiles の元順序は保存 (下流 sort / truncated の非決定性を増やさない)。
+ */
+export function buildScanList(
+	ioFiles: readonly string[],
+	inFiles: readonly string[],
+	cand: CandidateResult,
+): { ioScan: readonly string[]; inScan: readonly string[] } {
+	if (cand.kind === "fallback") return { ioScan: ioFiles, inScan: inFiles };
+	const { candidates, indexedValid } = cand;
+	const ioScan: string[] = [];
+	const inScan: string[] = [];
+	for (let i = 0; i < ioFiles.length; i++) {
+		const p = ioFiles[i];
+		if (isScanEligible(p, candidates, indexedValid)) {
+			ioScan.push(p);
+			inScan.push(inFiles[i]);
+		}
+	}
+	return { ioScan, inScan };
+}
+
 /** 1 行分の lowercase 文字列を code unit 単位の重複可 bigram 配列へ分解する純関数 (test 用に export)。 */
 export function bigramsOfLine(lineLower: string): string[] {
 	if (lineLower.length < 2) return [];
@@ -328,19 +372,35 @@ export function verifyIndexSuperset(
 	hitIoFiles: readonly string[],
 ): void {
 	if (caseSensitive) return;
-	const candResult = index.getCandidates(query.toLowerCase());
-	if (candResult.kind === "fallback") return; // fallback 時は全走査扱いなので assert 不要
-	const allowed = new Set<string>(candResult.candidates);
-	// 未 indexed または stale な file (allIoFiles \ indexedValid) はどう転んでも allowed。
-	for (const p of allIoFiles) {
-		if (!candResult.indexedValid.has(p)) allowed.add(p);
-	}
+	const violations = collectViolations(index, query.toLowerCase(), allIoFiles, hitIoFiles);
+	if (violations === null || violations.length === 0) return;
+	throw new Error(
+		`InvertedIndex superset invariant violated: hit file "${violations[0]}" not in candidate set ` +
+			`(query="${query}")`,
+	);
+}
+
+/**
+ * dark assert 用の violation 内訳返却 (#394 Phase D / #399 Finding 1)。
+ * verifyIndexSuperset は最初の違反で throw するが、こちらは全違反を配列で返し、
+ * 呼び手側で「違反 file を disk から再 index → 再度 collectViolations で残 violation を確認」
+ * → 空になれば watcher-latency 窓と判定 (warn)、残れば真の superset 破損 (throw) の
+ * 切り分けを可能にする。fallback / caseSensitive skip 時は null。
+ */
+export function collectViolations(
+	index: InvertedIndex,
+	queryLower: string,
+	// allIoFiles は現時点で判定に使わない (hit ⊆ io は truth scan の構造上自明) が、
+	// verifyIndexSuperset との対称性 + 将来の hit-outside-io 診断のため signature に残す。
+	_allIoFiles: readonly string[],
+	hitIoFiles: readonly string[],
+): string[] | null {
+	const candResult = index.getCandidates(queryLower);
+	if (candResult.kind === "fallback") return null;
+	const { candidates, indexedValid } = candResult;
+	const violations: string[] = [];
 	for (const hit of hitIoFiles) {
-		if (!allowed.has(hit)) {
-			throw new Error(
-				`InvertedIndex superset invariant violated: hit file "${hit}" not in candidate set ` +
-					`(query="${query}")`,
-			);
-		}
+		if (!isScanEligible(hit, candidates, indexedValid)) violations.push(hit);
 	}
+	return violations;
 }

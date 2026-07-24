@@ -253,6 +253,37 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 	}
 }
 
+// realpath 済み `ioPath` が canonical root の内側かどうか判定する
+// ("=" または内側)。#394 Phase D で L3 InvertedIndex への
+// piggyback / idle fill 直前に呼ばれ、workspace 内 symlink ファイルが
+// 外部を指すケース (`evil.md -> /Users/x/.ssh/config`) を index 取り込み前で
+// 落とすためのガード。
+// - Window scope を持たない background 経路 (idle fill / piggyback) 用のため、
+//   assertPathAllowed とは別 API になる (window-id を持たない)。
+// - canonicalRoot は既に realpath 済みである前提 (collectMdFilesForWorkspace 通過後)。
+// - validatePath が throw する不正入力 (相対 path / null byte) は false を返す。
+// - realpath は realpathBestEffort 経由で「最も近い実在祖先の realpath + suffix」に fall-through
+//   するため、dangling symlink や未存在 file でも例外にはならず、そのパスが root 内なら true を返す。
+//   これは意図した挙動 (後段 readFile が ENOENT を吐いて自然に skip される、
+//   index 取り込みには到達しない) だが、この関数単独では「dangling は必ず false」ではない点に注意。
+//   下流 (readFile 失敗の try/catch skip / indexFile 無効化) を合わせた multi-layer defense として機能する。
+// - realpathCache (path-guard 内の LRU) が生きている間、workspace 内→外に symlink が付け替えられた
+//   ケースでは古い判定を返し得る (settings.setPath / clearWorkspaceRoots で cache 全 clear されるまでの窓)。
+//   スコープが限定的 (in-memory index への残留のみ、renderer には出ない) のため既存の realpathCache
+//   staleness 契約を踏襲。
+export async function isRealPathInsideRoot(
+	ioPath: string,
+	canonicalRoot: string,
+): Promise<boolean> {
+	let target: string;
+	try {
+		target = await realpathBestEffort(validatePath(ioPath));
+	} catch {
+		return false;
+	}
+	return target === canonicalRoot || isPathInside(target, canonicalRoot);
+}
+
 // 全 window の登録 root を union で評価する process-wide 版。リクエスト元 webContents を
 // 特定できない経路（カスタムプロトコルハンドラ等）専用。approve は window-scoped 化済み
 // だが、protocol.handle コールバックに webContentsId を紐づける仕組みがないため
