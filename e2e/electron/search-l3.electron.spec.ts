@@ -18,8 +18,10 @@ import { markInitialized, seedSettings, writeWorkspaceFiles } from "./helpers/fi
 
 // SearchPanel は query 変更をトリガに検索する (fs-change では自動再検索しない)。
 // watcher batch は 500ms deadline なので、fs 変更 → 単発 fill だと batch 反映前に 1 度だけ検索が
-// 走り stale 結果で終わる。ここでは polling として query を toggle (empty ↔ target) することで
-// 各 iteration で debounce を発火させ、batch 反映後の再検索を確実に踏む (Fable round 2 Critical fix)。
+// 走り stale 結果で終わる。ここでは毎 iteration で「clear → target query 再入力」を行い debounce を
+// 発火させ、batch 反映後の再検索を確実に踏む (Fable round 2 Critical fix)。
+// SearchPanel useEffect は query 変更で cleanup + 新 timer 開始のため、直後の fill(query) で
+// timer が reset され、fill(query) から 300ms 後に IPC が飛ぶ。
 async function pollSearchUntil(
 	page: Page,
 	input: ReturnType<Page["getByPlaceholder"]>,
@@ -28,16 +30,15 @@ async function pollSearchUntil(
 	timeoutMs = 15_000,
 ): Promise<void> {
 	const start = Date.now();
-	let toggle = false;
 	while (Date.now() - start < timeoutMs) {
-		// query 変更を必ず伴わせて debounce を再発火させる (同じ query の re-fill は no-op)。
-		await input.fill(toggle ? "" : query);
-		toggle = !toggle;
-		if (!toggle) {
-			// 直前が target query の fill だったので debounce (300ms) + IPC + 結果反映を待つ余地を確保。
-			await page.waitForTimeout(500);
-			if (await predicate()) return;
-		}
+		// 空 fill → target fill で必ず新しい debounce timer を仕込む (同じ query の re-fill は
+		// state 不変で effect が再走しないため、間に空を挟む)。
+		await input.fill("");
+		await input.fill(query);
+		// debounce 300ms + IPC + 結果反映の余地を確保 (batch 500ms 以上待つと 1 回あたり長く
+		// なりすぎるため、iteration を短くして最終的な待機時間で吸収する)。
+		await page.waitForTimeout(500);
+		if (await predicate()) return;
 	}
 	throw new Error(`pollSearchUntil timed out after ${timeoutMs}ms (query=${query})`);
 }
