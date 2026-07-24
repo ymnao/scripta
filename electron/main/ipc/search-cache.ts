@@ -1,7 +1,12 @@
 import { sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { ByteLruCache } from "../utils/content-cache-pure";
-import { type CandidateResult, InvertedIndex, verifyIndexSuperset } from "../utils/inverted-index";
+import {
+	type CandidateResult,
+	collectViolations,
+	InvertedIndex,
+	verifyIndexSuperset,
+} from "../utils/inverted-index";
 import {
 	applyBatchToState,
 	canonicalToInputPaths,
@@ -80,6 +85,17 @@ export interface InvertedIndexHandle {
 		allIoFiles: readonly string[],
 		hitIoFiles: readonly string[],
 	): void;
+	/**
+	 * dual-run assert 用 (#394 Phase D)。verify() は違反時 throw だが、こちらは違反 file の
+	 * 内訳を配列で返す (空配列 = invariant 成立、null = fallback / 判定 skip)。
+	 * 呼び手は違反 file を reindex → 再度 collectViolations で残 violation を確認して、
+	 * 空になったら watcher-latency 窓と判定して warn、残ったら真の破損として throw する。
+	 */
+	collectViolations(
+		queryLower: string,
+		allIoFiles: readonly string[],
+		hitIoFiles: readonly string[],
+	): string[] | null;
 	readonly isDisabled: boolean;
 }
 
@@ -318,6 +334,13 @@ export function getInvertedIndexHandle(canonicalRoot: string): InvertedIndexHand
 			hitIoFiles: readonly string[],
 		): void {
 			verifyIndexSuperset(e.l3, query, caseSensitive, allIoFiles, hitIoFiles);
+		},
+		collectViolations(
+			queryLower: string,
+			allIoFiles: readonly string[],
+			hitIoFiles: readonly string[],
+		): string[] | null {
+			return collectViolations(e.l3, queryLower, allIoFiles, hitIoFiles);
 		},
 		get isDisabled(): boolean {
 			return e.l3.isDisabled;

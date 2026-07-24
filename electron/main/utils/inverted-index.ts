@@ -29,6 +29,36 @@ export type CandidateResult =
 	| { kind: "fallback" }
 	| { kind: "candidates"; candidates: Set<string>; indexedValid: Set<string> };
 
+/**
+ * #394 Phase D の scan list 構築。allIoFiles と getCandidates 戻り値から
+ * 「実際に readFile + scan する対象」に絞る。
+ * - fallback kind: 全 file 素通し (query.length < 2 / 改行含む / disabled / 未 indexed 多数)。
+ * - candidates kind: `candidates ∪ (allIoFiles \ indexedValid)` = 候補 file + 未 indexed/stale file。
+ *   前者は index が絞った候補、後者は index が「valid ではない」= no-match を保証できない集合。
+ *   両方を scan することで「index 0% でも 100% でも同一結果」不変条件を維持する。
+ *
+ * ioFiles と inFiles は同じ index で対応 (canonical io ↔ input path)。両方を並行に filter して
+ * 返す。allIoFiles の元順序は保存 (下流 sort / truncated の非決定性を増やさない)。
+ */
+export function buildScanList(
+	ioFiles: readonly string[],
+	inFiles: readonly string[],
+	cand: CandidateResult,
+): { ioScan: readonly string[]; inScan: readonly string[] } {
+	if (cand.kind === "fallback") return { ioScan: ioFiles, inScan: inFiles };
+	const { candidates, indexedValid } = cand;
+	const ioScan: string[] = [];
+	const inScan: string[] = [];
+	for (let i = 0; i < ioFiles.length; i++) {
+		const p = ioFiles[i];
+		if (candidates.has(p) || !indexedValid.has(p)) {
+			ioScan.push(p);
+			inScan.push(inFiles[i]);
+		}
+	}
+	return { ioScan, inScan };
+}
+
 /** 1 行分の lowercase 文字列を code unit 単位の重複可 bigram 配列へ分解する純関数 (test 用に export)。 */
 export function bigramsOfLine(lineLower: string): string[] {
 	if (lineLower.length < 2) return [];
@@ -328,19 +358,48 @@ export function verifyIndexSuperset(
 	hitIoFiles: readonly string[],
 ): void {
 	if (caseSensitive) return;
-	const candResult = index.getCandidates(query.toLowerCase());
-	if (candResult.kind === "fallback") return; // fallback 時は全走査扱いなので assert 不要
+	const violations = collectViolations(index, query.toLowerCase(), allIoFiles, hitIoFiles);
+	if (violations === null || violations.length === 0) return;
+	throw new Error(
+		`InvertedIndex superset invariant violated: hit file "${violations[0]}" not in candidate set ` +
+			`(query="${query}")`,
+	);
+}
+
+/**
+ * #394 Phase D / #399 Finding 1: verifyIndexSuperset の violation 時に「watcher-latency 窓」
+ * (index が旧 epoch 内容を valid と信じている間、scan は新内容を disk から読んでヒット) と
+ * 「真の superset 破損」を切り分ける helper。
+ *
+ * 手順:
+ *   1. 現状の (candidates ∪ 未indexed) allowed 集合を計算し violation を集める
+ *   2. violation が無ければ null (invariant 成立、caller は成功として扱う)
+ *   3. 違反 file の現在の text を reindex(callback) 経由で取り込み直す
+ *   4. 再度 allowed を計算し直して残 violation を返す (空なら「窓」= warn 相当、非空なら真の破損)
+ *
+ * reindex callback は (ioPath) → text | null を返し、null は「読み取り失敗 / 認可外」で
+ * skip 扱いにする。text 返却時は index.indexFile を呼ぶ責務を helper 側に持たせない
+ * (呼び手が epoch capture と realpath 認可を制御できる余地を残す) — ここでは reindex 前提で
+ * 呼び手側 fix を待つ。
+ *
+ * caseSensitive=true は verifyIndexSuperset と同じく skip (null 返却)。
+ */
+/** violations 内訳を返す。fallback / caseSensitive skip 時は null。 */
+export function collectViolations(
+	index: InvertedIndex,
+	queryLower: string,
+	allIoFiles: readonly string[],
+	hitIoFiles: readonly string[],
+): string[] | null {
+	const candResult = index.getCandidates(queryLower);
+	if (candResult.kind === "fallback") return null;
 	const allowed = new Set<string>(candResult.candidates);
-	// 未 indexed または stale な file (allIoFiles \ indexedValid) はどう転んでも allowed。
 	for (const p of allIoFiles) {
 		if (!candResult.indexedValid.has(p)) allowed.add(p);
 	}
+	const violations: string[] = [];
 	for (const hit of hitIoFiles) {
-		if (!allowed.has(hit)) {
-			throw new Error(
-				`InvertedIndex superset invariant violated: hit file "${hit}" not in candidate set ` +
-					`(query="${query}")`,
-			);
-		}
+		if (!allowed.has(hit)) violations.push(hit);
 	}
+	return violations;
 }

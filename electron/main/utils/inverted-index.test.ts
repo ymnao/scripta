@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	bigramsOfLine,
+	buildScanList,
+	type CandidateResult,
 	INDEX_ADMISSION_MAX_BYTES,
 	InvertedIndex,
 	verifyIndexSuperset,
@@ -400,6 +402,65 @@ describe("randomized property test (LCG-seeded)", () => {
 			const hits = naiveScan(docs, q);
 			expect(() => verifyIndexSuperset(idx, q, false, allPaths, hits)).not.toThrow();
 		}
+	});
+});
+
+describe("buildScanList", () => {
+	const io = ["/ws/a.md", "/ws/b.md", "/ws/c.md", "/ws/d.md"];
+	const inp = ["/base/a.md", "/base/b.md", "/base/c.md", "/base/d.md"];
+
+	it("passes all files through when cand kind is fallback", () => {
+		const cand: CandidateResult = { kind: "fallback" };
+		const { ioScan, inScan } = buildScanList(io, inp, cand);
+		expect(ioScan).toEqual(io);
+		expect(inScan).toEqual(inp);
+	});
+
+	it("returns candidates ∪ (allIoFiles \\ indexedValid) with original order", () => {
+		const cand: CandidateResult = {
+			kind: "candidates",
+			candidates: new Set(["/ws/a.md"]),
+			indexedValid: new Set(["/ws/a.md", "/ws/b.md", "/ws/c.md"]),
+			// d.md は未 indexed (indexedValid にない) → 必ず含まれる
+			// a.md は候補 → 含まれる、b.md/c.md は valid かつ非候補 → 除外
+		};
+		const { ioScan, inScan } = buildScanList(io, inp, cand);
+		expect(ioScan).toEqual(["/ws/a.md", "/ws/d.md"]);
+		expect(inScan).toEqual(["/base/a.md", "/base/d.md"]);
+	});
+
+	it("returns empty when candidates=∅ and all files are indexedValid", () => {
+		const cand: CandidateResult = {
+			kind: "candidates",
+			candidates: new Set(),
+			indexedValid: new Set(io),
+		};
+		const { ioScan, inScan } = buildScanList(io, inp, cand);
+		expect(ioScan).toEqual([]);
+		expect(inScan).toEqual([]);
+	});
+
+	it("returns all files when indexedValid=∅ regardless of candidates content", () => {
+		// 未 indexed 集合が全 file なので fallback 集合として全 file を通す
+		const cand: CandidateResult = {
+			kind: "candidates",
+			candidates: new Set(),
+			indexedValid: new Set(),
+		};
+		const { ioScan, inScan } = buildScanList(io, inp, cand);
+		expect(ioScan).toEqual(io);
+		expect(inScan).toEqual(inp);
+	});
+
+	it("preserves parallel index alignment between ioFiles and inFiles", () => {
+		const cand: CandidateResult = {
+			kind: "candidates",
+			candidates: new Set(["/ws/c.md"]),
+			indexedValid: new Set(io),
+		};
+		const { ioScan, inScan } = buildScanList(io, inp, cand);
+		expect(ioScan).toEqual(["/ws/c.md"]);
+		expect(inScan).toEqual(["/base/c.md"]);
 	});
 });
 

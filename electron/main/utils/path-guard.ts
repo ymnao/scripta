@@ -253,6 +253,29 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 	}
 }
 
+// realpath 済み `ioPath` が canonical root の内側かどうか判定する
+// ("=" または内側)。#394 Phase D で L3 InvertedIndex への
+// piggyback / idle fill 直前に呼ばれ、workspace 内 symlink ファイルが
+// 外部を指すケース (`evil.md -> /Users/x/.ssh/config`) を index 取り込み前で
+// 落とすためのガード。
+// - Window scope を持たない background 経路 (idle fill / piggyback) 用のため、
+//   assertPathAllowed とは別 API になる (window-id を持たない)。
+// - canonicalRoot は既に realpath 済みである前提 (collectMdFilesForWorkspace 通過後)。
+// - validatePath が throw する不正入力や realpath 失敗 (dangling symlink 等) は
+//   false を返す (fail-closed)。
+export async function isRealPathInsideRoot(
+	ioPath: string,
+	canonicalRoot: string,
+): Promise<boolean> {
+	let target: string;
+	try {
+		target = await realpathBestEffort(validatePath(ioPath));
+	} catch {
+		return false;
+	}
+	return target === canonicalRoot || isPathInside(target, canonicalRoot);
+}
+
 // 全 window の登録 root を union で評価する process-wide 版。リクエスト元 webContents を
 // 特定できない経路（カスタムプロトコルハンドラ等）専用。approve は window-scoped 化済み
 // だが、protocol.handle コールバックに webContentsId を紐づける仕組みがないため

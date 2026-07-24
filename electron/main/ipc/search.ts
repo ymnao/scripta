@@ -12,8 +12,9 @@ import type {
 	UnresolvedWikilinkReference,
 	WikilinkReference,
 } from "../../../src/types/wikilink";
+import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
-import { assertPathAllowed } from "../utils/path-guard";
+import { assertPathAllowed, isRealPathInsideRoot } from "../utils/path-guard";
 import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
@@ -77,11 +78,20 @@ async function processMdFilesParallel(
 		// 不一致検出時は no-op)。process の返り値には一切影響しない (Phase C dark-launch の
 		// 境界: searchFilesImpl の結果を変えないため)。
 		index?: InvertedIndexHandle;
+		// L3 piggyback indexing 直前の realpath 再認可用 root。指定時のみ index を養う file の
+		// realpath が root 内側であることを確認する (#394 Phase D / #399 Finding 2)。
+		// scan (process 呼び出し) には影響しない — 既存挙動と同じく readFile 結果は
+		// symlink 越しでも scan 結果に反映される。
+		indexRoot?: string;
+		// piggyback indexing を完全に抑止する。dual-run assert の全走査側で使い、
+		// index への副作用二重化を防ぐ (candidates 側で既に養った index を汚さない)。
+		suppressIndex?: boolean;
 	},
 ): Promise<void> {
 	const shouldStop = (): boolean => isStale() || options.shouldBail?.() === true;
 	const cache = options.cache;
-	const index = options.index;
+	const index = options.suppressIndex === true ? undefined : options.index;
+	const indexRoot = options.indexRoot;
 	await Promise.all(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
@@ -94,11 +104,15 @@ async function processMdFilesParallel(
 					// 他 task の cache eviction や shouldBail の変化を反映するため stop 判定は継続。
 					if (shouldStop()) return;
 					// L3 piggyback: L2 hit 時も index を養う (index への流入が L2 hit で途絶えないため)。
-					// hit path は await 境界が無いので epoch snapshot と indexFile の間に batch は来ない。
 					// **既に valid なら skip** (production 検索 latency に恒常コストを乗せないため、
 					// dark-launch の受入条件を latency 面でも満たす)。
+					// realpath 再認可 (#394 Phase D / #399 Finding 2): symlink 経由で workspace 外の
+					// target を指す file を index に載せない。scan (process) は既存挙動と同じく通す。
 					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
-						index.indexFile(ioPath, hit, index.currentEpochOf(ioPath));
+						const epoch = index.currentEpochOf(ioPath);
+						if (indexRoot === undefined || (await isRealPathInsideRoot(ioPath, indexRoot))) {
+							index.indexFile(ioPath, hit, epoch);
+						}
 					}
 					options.process(inFile, hit);
 					return;
@@ -126,7 +140,13 @@ async function processMdFilesParallel(
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
 				cache?.set(ioPath, text, genAtStart);
-				if (shouldIndex) (index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
+				if (shouldIndex) {
+					// realpath 再認可: symlink で workspace 外を指す file の text を L3 に取り込まない。
+					// realpath 失敗 (dangling / ENOENT) も false → skip 扱い。
+					if (indexRoot === undefined || (await isRealPathInsideRoot(ioPath, indexRoot))) {
+						(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
+					}
+				}
 				options.process(inFile, text);
 			}),
 		),
@@ -154,7 +174,15 @@ async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean
 	for (const ent of entries) {
 		if (ent.name.startsWith(".") || ent.name === "node_modules") continue;
 		const ioPath = join(ioDir, ent.name);
+		// symlink ディレクトリの再帰は 2 つの理由で除外する:
+		//   1. workspace 外への symlink loop で walk が無限再帰する事故を防ぐ
+		//   2. #399 Finding 2 の境界問題 (workspace 内 symlink dir 経由で外部 tree の
+		//      .md が in-memory index に取り込まれる) の主要経路を潰す
+		// `.md` symlink ファイルはそのまま残す (workspace 内 symlink ノートを利用する
+		// user regression を避けるため — 個別 file の realpath 再認可は piggyback /
+		// idle-fill 側で行う)。
 		if (ent.isDirectory()) {
+			if (ent.isSymbolicLink()) continue;
 			await walkMdFiles(ioPath, out, isStale);
 		} else if (ent.name.endsWith(".md")) {
 			out.push(ioPath);
@@ -185,9 +213,13 @@ async function collectMdFilesForWorkspace(
 		// walk は複数 caller 間で dedupe されるため、caller 個別の isStale を伝播しない
 		// (dedupe 相手が異なる isStale を持つと、早期 return した側の walk 結果が他 caller に
 		// 共有される regression になる)。populate 完了時の cache 格納可否は epoch guard で判定。
+		// #7 クローズ (#394 Phase D): entry 生存を baseline に isStale を渡し、workspace close で
+		// entry が drop された時点で walk を早期 return させる (旧 workspace の walk が完走する
+		// 反応性の穴を塞ぐ)。個別 caller の isStale ではなく entry-alive を条件にすることで、
+		// dedupe 相手を巻き込まない (entry drop = 全 caller が用済み)。
 		ioFiles = await populateFileListCache(canonical, async () => {
 			const arr: string[] = [];
-			await walkMdFiles(canonical, arr);
+			await walkMdFiles(canonical, arr, () => !hasFileListCacheEntry(canonical));
 			return arr;
 		});
 	} else {
@@ -327,10 +359,26 @@ async function searchFilesImpl(
 	let truncated = false;
 	const indexHandle = getInvertedIndexHandle(canonicalRoot);
 
-	await processMdFilesParallel(io, input, isStale, {
+	// #394 Phase D: L3 InvertedIndex 本配線。indexHandle があり caseSensitive でないなら
+	// getCandidates で候補 file 集合を取得、`candidates ∪ (allIoFiles \ indexedValid)` に
+	// scan 対象を絞る。以下のいずれかで全走査 fallback に倒す:
+	//   - indexHandle undefined (watcher 非稼働 / cache 未 populate)
+	//   - caseSensitive = true (verifyIndexSuperset が Final_Sigma で保証放棄。case-preserving
+	//     index は Phase E 以降のスコープ)
+	//   - getCandidates が { kind: "fallback" } を返す (query.length < 2 / 改行含む / disabled)
+	// buildScanList は fallback kind でも呼べる (全 file 素通しを返す) が、caseSensitive gate は
+	// 呼び出し側の意図 (index を「候補絞り」に使うのは lowered 経路のみ) を明示するため冒頭で倒す。
+	const candResult =
+		indexHandle !== undefined && !caseSensitive
+			? indexHandle.getCandidates(querySearch)
+			: ({ kind: "fallback" } as const);
+	const { ioScan, inScan } = buildScanList(io, input, candResult);
+
+	await processMdFilesParallel(ioScan, inScan, isStale, {
 		shouldBail: () => truncated,
 		cache: getContentCacheHandle(canonicalRoot),
 		index: indexHandle,
+		indexRoot: canonicalRoot,
 		process: (inputPath, content) => {
 			// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 			const lines = content.split(/\r?\n/);
@@ -390,25 +438,93 @@ async function searchFilesImpl(
 			readFile: (p) => fsp.readFile(p, "utf8"),
 			isAlive: () => hasFileListCacheEntry(canonicalRoot),
 			index: indexHandle,
+			isRealPathAllowed: (p) => isRealPathInsideRoot(p, canonicalRoot),
 		});
 	}
-	// Phase C dark-launch assert: 「index 経由候補 ⊇ 全走査ヒット file 集合」を検証する。
-	// SCRIPTA_DARK_ASSERT=1 の時のみ enable (デフォルト off で production 経路への影響ゼロ)。
-	// truncated=true でも「hit した file ⊆ 候補」は成立するため skip 不要。
-	// ヒット file 集合は canonical ioPath ではなく input path 側で持つが、index の candidates は
-	// canonical io 側なので、hit file を canonical io に逆写像する必要がある。ここでは
-	// hitInFiles → 対応する ioFiles を lookup Map で解決する。
-	if (indexHandle !== undefined && process.env.SCRIPTA_DARK_ASSERT === "1") {
-		const inputToIo = new Map<string, string>();
-		for (let i = 0; i < input.length; i++) inputToIo.set(input[i], io[i]);
-		const hitIoSet = new Set<string>();
-		for (const r of results) {
-			const ioPath = inputToIo.get(r.filePath);
-			if (ioPath !== undefined) hitIoSet.add(ioPath);
-		}
-		indexHandle.verify(query, caseSensitive, io, Array.from(hitIoSet));
+	// Phase D dual-run assert (#394 Phase D / #399 Finding 1)。
+	// candidates 経由 (本 pass) と全走査 (index 抑止) の 2 pass を実行して file hit 集合を突合。
+	// SCRIPTA_DARK_ASSERT=1 の時のみ有効 (production 経路 off、dev / 実 Electron e2e 1 spec でのみ ON)。
+	//
+	// なぜ Phase C の single-run から dual-run に変えるか:
+	//   - Phase D 本配線後、candidates 経由の hit ⊆ 候補集合 は構造上自明 (trivially true) になる。
+	//   - 意味のある assert は「候補外 file が本当に no-match か」の対偶チェック。これは全走査を
+	//     truth として実行し、その file hit 集合が candidates ∪ (未indexed/stale) に収まるかで判定する。
+	//   - truncated 時は truth と candidates の並列完了順の非決定性で file 集合が不一致になり得るため
+	//     assert を skip する (本 assert のスコープは「index の superset 保証」であり打ち切り一致ではない)。
+	//
+	// Finding 1 の watcher-latency 窓 (idle fill が旧内容で index → 保存 → watcher batch 到達前に検索)
+	// は「violation 検出 → 該当 file を disk から再読 → indexFile 再取り込み → 再検証」で吸収する。
+	// 再検証で解消すれば warn (窓と判定)、未解消なら真の superset 破損として throw。
+	if (
+		indexHandle !== undefined &&
+		process.env.SCRIPTA_DARK_ASSERT === "1" &&
+		!caseSensitive &&
+		!truncated
+	) {
+		await runDarkAssert(indexHandle, canonicalRoot, io, input, query, isStale);
 	}
 	return { results, truncated };
+}
+
+// dual-run assert 本体。truth = 全走査 (index filter なし + piggyback 抑止) の file hit 集合を集めて
+// index.collectViolations に渡す。violation あれば違反 file を再 index → 再検証。解消しなければ throw。
+async function runDarkAssert(
+	indexHandle: InvertedIndexHandle,
+	canonicalRoot: string,
+	io: readonly string[],
+	input: readonly string[],
+	query: string,
+	isStale: () => boolean,
+): Promise<void> {
+	const queryLower = query.toLowerCase();
+	// 全走査 (truth) を実行し hit file 集合を得る。piggyback / index 副作用は suppressIndex で止める。
+	const truthHitIo = new Set<string>();
+	const inputToIo = new Map<string, string>();
+	for (let i = 0; i < input.length; i++) inputToIo.set(input[i], io[i]);
+	await processMdFilesParallel(io, input, isStale, {
+		cache: getContentCacheHandle(canonicalRoot),
+		index: indexHandle,
+		indexRoot: canonicalRoot,
+		suppressIndex: true,
+		process: (inputPath, content) => {
+			// 行単位の実 match を確認する (truth = 実際にヒットする file の集合)。
+			// 早期 break で行スキャンを打ち切る (file 判定に足りる 1 hit 以降は不要)。
+			const contentSearch = content.toLowerCase();
+			if (contentSearch.includes(queryLower)) {
+				const p = inputToIo.get(inputPath);
+				if (p !== undefined) truthHitIo.add(p);
+			}
+		},
+	});
+	if (isStale()) return;
+	let violations = indexHandle.collectViolations(queryLower, io, Array.from(truthHitIo));
+	if (violations === null || violations.length === 0) return;
+	// watcher-latency 窓の可能性: 違反 file を disk から再読 → indexFile (現 epoch capture) して
+	// 再度 collectViolations を呼ぶ。解消すれば window とみなして warn、残れば真の破損として throw。
+	for (const p of violations) {
+		if (isStale()) return;
+		if (!(await isRealPathInsideRoot(p, canonicalRoot))) continue;
+		let text: string;
+		try {
+			text = await fsp.readFile(p, "utf8");
+		} catch {
+			continue; // 読み取り失敗 file は skip (次の collectViolations で「変わらず violation」なら throw)
+		}
+		const epoch = indexHandle.currentEpochOf(p);
+		indexHandle.indexFile(p, text, epoch);
+	}
+	violations = indexHandle.collectViolations(queryLower, io, Array.from(truthHitIo));
+	if (violations === null || violations.length === 0) {
+		console.warn(
+			`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
+				`query="${query}"`,
+		);
+		return;
+	}
+	throw new Error(
+		`InvertedIndex superset invariant violated: hit file "${violations[0]}" not in candidate set ` +
+			`(query="${query}")`,
+	);
 }
 
 async function searchFilenamesImpl(
@@ -554,6 +670,7 @@ async function scanUnresolvedWikilinksImpl(
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		cache: getContentCacheHandle(canonicalRoot),
 		index: getInvertedIndexHandle(canonicalRoot),
+		indexRoot: canonicalRoot,
 		process: (inFile, text) => {
 			// inFile は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
 			// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
@@ -639,6 +756,7 @@ async function scanBacklinksImpl(
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		cache: getContentCacheHandle(canonicalRoot),
 		index: getInvertedIndexHandle(canonicalRoot),
+		indexRoot: canonicalRoot,
 		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
 		// 不要な fd 消費を避ける。input 表記で判定する (fileMap / targetInput と揃える)。
 		skipFile: (inFile) => inFile === targetInput,
