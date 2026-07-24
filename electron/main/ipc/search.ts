@@ -529,17 +529,11 @@ async function runDarkAssert(
 		);
 		return;
 	}
-	// throw 直前に「reindex 自体が届いていない」ケース (workspace close で handle 側 identity check no-op /
-	// 対象 file が walk 側から消えた等) を切り分けて warn に落とす。isIndexedAndValid が false のままなら
-	// index への書き込みが到達しておらず、真の superset 破損とは切り分けが必要 (Fable review S2)。
-	const stillUnindexed = violations.filter((p) => !indexHandle.isIndexedAndValid(p));
-	if (stillUnindexed.length === violations.length) {
-		console.warn(
-			`[dark-assert] InvertedIndex superset violation unresolved but reindex did not commit ` +
-				`(workspace close or file removed). query="${query}"`,
-		);
-		return;
-	}
+	// round 1 S2 で入れた「stillUnindexed 切り分け」は round 2 Fable review で dead code と判明したため除去:
+	//   collectViolations が返す violation の定義自体が `!candidates.has(p) && indexedValid.has(p)` なので、
+	//   その全 p は必ず isIndexedAndValid=true。分岐は成立しない (search-cache.ts:315-319 の workspace close
+	//   時 no-op も collectViolations は捕捉済み e.l3 を直接読むため valid 判定は残る)。真の切り分けは
+	//   dev/e2e で monitor する形 (dark assert 統合 issue で扱う)。
 	throw new Error(
 		`InvertedIndex superset invariant violated: hit file "${violations[0]}" not in candidate set ` +
 			`(query="${query}")`,
