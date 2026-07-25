@@ -500,32 +500,28 @@ async function runDarkAssert(
 		},
 	});
 	if (isStale()) return;
-	let violations = indexHandle.collectViolations(queryLower, io, Array.from(truthHitIo));
-	if (violations === null || violations.length === 0) return;
-	// watcher-latency 窓の可能性: 違反 file を disk から再読 → indexFile (現 epoch capture) して
-	// 再度 collectViolations を呼ぶ。解消すれば window とみなして warn、残れば真の破損として throw。
-	for (const p of violations) {
-		if (isStale()) return;
-		if (!(await isRealPathInsideRoot(p, canonicalRoot))) continue;
-		// epoch capture は readFile より **先** に行う (piggyback / idle-fill と同順序、
-		// read 中に watcher batch が来た時に handle 側の不一致検出で indexFile を no-op 化するため)。
-		// 順序を逆にすると bump 後の epoch を capture して stale text が新 epoch で valid 化する race
-		// を dark assert 自身が作り出してしまう (Fable review W1)。
-		const epoch = indexHandle.currentEpochOf(p);
-		let text: string;
-		try {
-			text = await fsp.readFile(p, "utf8");
-		} catch {
-			continue; // 読み取り失敗 file は skip (次の collectViolations で「変わらず violation」なら throw)
-		}
-		indexHandle.indexFile(p, text, epoch);
-	}
-	if (isStale()) return;
-	violations = indexHandle.collectViolations(queryLower, io, Array.from(truthHitIo));
-	if (violations === null || violations.length === 0) {
+	const verdict = await resolveDarkAssertViolations(queryLower, io, truthHitIo, {
+		collectViolations: (q, all, hits) => indexHandle.collectViolations(q, all, hits),
+		isAuthorized: (p) => isRealPathInsideRoot(p, canonicalRoot),
+		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
+		readFile: async (p) => {
+			try {
+				return await fsp.readFile(p, "utf8");
+			} catch {
+				return null;
+			}
+		},
+		indexFile: (p, text, epoch) => {
+			indexHandle.indexFile(p, text, epoch);
+		},
+		isStale,
+	});
+	if (verdict.kind === "ok" || verdict.kind === "stale") return;
+	if (verdict.kind === "resolved") {
+		// prefix `[dark-assert]` は e2e (search-l3.electron.spec.ts) の stderr filter が拾う契約。変更しないこと。
 		console.warn(
 			`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
-				`query="${query}"`,
+				`query="${query}" droppedStaleTruth=${verdict.droppedCount}`,
 		);
 		return;
 	}
@@ -535,9 +531,91 @@ async function runDarkAssert(
 	//   時 no-op も collectViolations は捕捉済み e.l3 を直接読むため valid 判定は残る)。真の切り分けは
 	//   dev/e2e で monitor する形 (dark assert 統合 issue で扱う)。
 	throw new Error(
-		`InvertedIndex superset invariant violated: hit file "${violations[0]}" not in candidate set ` +
+		`InvertedIndex superset invariant violated: hit file "${verdict.violations[0]}" not in candidate set ` +
 			`(query="${query}")`,
 	);
+}
+
+/**
+ * runDarkAssert の retry / verdict 段に必要な最小依存 (#405 Finding 3)。
+ * InvertedIndexHandle 全体ではなく使う操作だけを構造的に切り出し、unit test で
+ * fake を type assertion なしに書けるようにする。
+ */
+export interface DarkAssertRetryDeps {
+	collectViolations(
+		queryLower: string,
+		allIoFiles: readonly string[],
+		hitIoFiles: readonly string[],
+	): string[] | null;
+	/** workspace root 内 realpath 認可。false の file は index に取り込まない。 */
+	isAuthorized(ioPath: string): Promise<boolean>;
+	currentEpochOf(ioPath: string): number;
+	/** 読み取り失敗 (ENOENT 等) は null。throw しない契約。 */
+	readFile(ioPath: string): Promise<string | null>;
+	indexFile(ioPath: string, text: string, capturedEpoch: number): void;
+	isStale(): boolean;
+}
+
+export type DarkAssertVerdict =
+	/** invariant 成立 (violation なし、または fallback で判定 skip)。 */
+	| { kind: "ok" }
+	/** 途中で cancel/supersede された。判定を下さず打ち切る。 */
+	| { kind: "stale" }
+	/** reindex または truth staleness の解消で violation が消えた (warn 相当)。 */
+	| { kind: "resolved"; droppedCount: number }
+	/** 真の superset 破損 (throw 相当)。 */
+	| { kind: "violated"; violations: string[] };
+
+/**
+ * dark assert の violation 判定 (retry + verdict)。search.ts の副作用から切り離した
+ * deps 注入版で、warn / throw そのものは呼び手に委ねる (#405 Finding 3)。
+ *
+ * violation ごとに「realpath 認可 → epoch capture → readFile → indexFile → fresh text 再検証」を行う。
+ * - epoch capture は readFile より **先** (piggyback / idle-fill と同順序)。逆にすると bump 後の
+ *   epoch を capture して stale text が新 epoch で valid 化する race を assert 自身が作り出す。
+ * - fresh text が query を含まない場合、truth hit は「読取後に file が正当に書き換わった」由来なので
+ *   truth 集合から落とす (#405 Finding 1 の false positive throw 対策)。判定には indexFile に
+ *   渡したものと **同一の text snapshot** を使う (別途読み直すと index 状態と判定の乖離窓を新設する)。
+ * - 認可外 / 読み取り失敗も同様に truth から落とす: 現在の内容で hit を確認できない file について
+ *   「index が取りこぼした」と断定できないため (従来は残して throw に寄与していた)。
+ */
+export async function resolveDarkAssertViolations(
+	queryLower: string,
+	allIoFiles: readonly string[],
+	truthHitIo: ReadonlySet<string>,
+	deps: DarkAssertRetryDeps,
+): Promise<DarkAssertVerdict> {
+	const truth = new Set(truthHitIo);
+	const violations = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
+	if (violations === null || violations.length === 0) return { kind: "ok" };
+	// watcher-latency 窓の可能性: 違反 file を disk から再読 → indexFile (現 epoch capture) して
+	// 再度 collectViolations を呼ぶ。解消すれば window とみなして resolved、残れば真の破損。
+	// retry は 1 周のみ (n 周に広げると「再索引し続けて真の破損を塗りつぶす」方向に劣化する)。
+	let droppedCount = 0;
+	for (const p of violations) {
+		if (deps.isStale()) return { kind: "stale" };
+		if (!(await deps.isAuthorized(p))) {
+			truth.delete(p);
+			droppedCount++;
+			continue;
+		}
+		const epoch = deps.currentEpochOf(p);
+		const text = await deps.readFile(p);
+		if (text === null) {
+			truth.delete(p);
+			droppedCount++;
+			continue;
+		}
+		deps.indexFile(p, text, epoch);
+		if (!text.toLowerCase().includes(queryLower)) {
+			truth.delete(p);
+			droppedCount++;
+		}
+	}
+	if (deps.isStale()) return { kind: "stale" };
+	const remaining = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
+	if (remaining === null || remaining.length === 0) return { kind: "resolved", droppedCount };
+	return { kind: "violated", violations: remaining };
 }
 
 async function searchFilenamesImpl(
