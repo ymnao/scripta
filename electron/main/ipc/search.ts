@@ -517,12 +517,15 @@ async function runDarkAssert(
 		isStale,
 	});
 	if (verdict.kind === "ok" || verdict.kind === "stale") return;
+	// drop 内訳は warn / throw 双方に載せる: 「何件落とした上で残ったか」が、残存 FP (doc の
+	// 既知の残存 FP 参照) と真の破損を dev で切り分ける手掛かりになる。
+	const { staleTruth, unauthorized, unreadable } = verdict.dropped;
+	const droppedSummary = `droppedTruth={stale:${staleTruth},unauthorized:${unauthorized},unreadable:${unreadable}}`;
 	if (verdict.kind === "resolved") {
 		// prefix `[dark-assert]` は e2e (search-l3.electron.spec.ts) の stderr filter が拾う契約。変更しないこと。
-		const { staleTruth, unauthorized, unreadable } = verdict.dropped;
 		console.warn(
 			`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
-				`query="${query}" droppedTruth={stale:${staleTruth},unauthorized:${unauthorized},unreadable:${unreadable}}`,
+				`query="${query}" ${droppedSummary}`,
 		);
 		return;
 	}
@@ -533,7 +536,7 @@ async function runDarkAssert(
 	//   dev/e2e で monitor する形 (dark assert 統合 issue で扱う)。
 	throw new Error(
 		`InvertedIndex superset invariant violated: hit file "${verdict.violations[0]}" not in candidate set ` +
-			`(query="${query}")`,
+			`(query="${query}" ${droppedSummary})`,
 	);
 }
 
@@ -568,8 +571,8 @@ export type DarkAssertVerdict =
 	| { kind: "stale" }
 	/** reindex または truth staleness の解消で violation が消えた (warn 相当)。 */
 	| { kind: "resolved"; dropped: DarkAssertDropCounts }
-	/** 真の superset 破損 (throw 相当)。 */
-	| { kind: "violated"; violations: string[] };
+	/** 真の superset 破損 (throw 相当)。dropped は「何件落とした上で残ったか」の切り分け用。 */
+	| { kind: "violated"; violations: string[]; dropped: DarkAssertDropCounts };
 
 /**
  * dark assert の violation 判定 (retry + verdict)。search.ts の副作用から切り離した
@@ -588,9 +591,15 @@ export type DarkAssertVerdict =
  *   見逃しは transient な 1 回に限られ、読めるようになれば次回検索で回収される。
  *
  * **各 file の再検証は高々 1 回**。ただし retry 中の並走 index 更新 (idle fill 等) で新たに
- * violation 化した file は、未検証のまま throw させず次周で検証する (round 2 の入口から
- * Finding 1 と同型の FP が入るのを塞ぐ)。全 violation が検証済みになった時点で真の破損と判定する
- * ため、「再索引し続けて破損を塗りつぶす」方向には劣化しない (worklist は file 集合で有限)。
+ * violation 化した file は、未検証のまま throw させず次周で検証する (recheck の入口から
+ * Finding 1 と同型の FP が入るのを塞ぐ)。全 violation が検証済みになった時点で violated と
+ * 判定するため、「再索引し続けて破損を塗りつぶす」方向には劣化しない (worklist は file 集合で有限)。
+ *
+ * **既知の残存 FP**: 検証済み file が retry 窓中 (他 file の readFile await 中) に正当に
+ * 書き換えられ、watcher flush → idle fill で新内容 index → 再び violation 化すると、
+ * 「検証済みなので再検証しない」規則により violated へ落ちる。verified は path のみで
+ * epoch を持たないため区別できない。dev/e2e 専用 assert かつ ms オーダーの窓であり、
+ * 完全な解消には検証時 epoch の記録と epoch 変化時の再検証が要る (follow-up issue で追跡)。
  */
 export async function resolveDarkAssertViolations(
 	queryLower: string,
@@ -608,7 +617,7 @@ export async function resolveDarkAssertViolations(
 	while (true) {
 		const pending = violations.filter((p) => !verified.has(p));
 		// 残 violation が全て検証済み = fresh text が query を含むのに候補外 → 真の破損。
-		if (pending.length === 0) return { kind: "violated", violations };
+		if (pending.length === 0) return { kind: "violated", violations, dropped };
 		for (const p of pending) {
 			if (deps.isStale()) return { kind: "stale" };
 			verified.add(p);

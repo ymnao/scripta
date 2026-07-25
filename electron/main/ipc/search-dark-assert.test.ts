@@ -169,7 +169,11 @@ describe("resolveDarkAssertViolations", () => {
 			texts: new Map([["/ws/a.md", "still contains foo"]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(verdict).toEqual({ kind: "violated", violations: ["/ws/a.md"] });
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
 	});
 
 	it("keeps other truth hits when only one file is dropped", async () => {
@@ -186,7 +190,11 @@ describe("resolveDarkAssertViolations", () => {
 			new Set(["/ws/a.md", "/ws/b.md"]),
 			deps,
 		);
-		expect(verdict).toEqual({ kind: "violated", violations: ["/ws/b.md"] });
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/b.md"],
+			dropped: { staleTruth: 1, unauthorized: 0, unreadable: 0 },
+		});
 	});
 
 	it("does not mutate the caller's truth set", async () => {
@@ -215,7 +223,11 @@ describe("resolveDarkAssertViolations", () => {
 			texts: new Map([["/ws/a.md", "FOO bar"]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(verdict).toEqual({ kind: "violated", violations: ["/ws/a.md"] });
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
 	});
 
 	it("returns stale when superseded after the retry loop but before the recheck", async () => {
@@ -277,7 +289,11 @@ describe("resolveDarkAssertViolations", () => {
 			texts: new Map([["/ws/a.md", "foo"]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(verdict).toEqual({ kind: "violated", violations: ["/ws/a.md"] });
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
 		expect(calls.filter((c) => c.startsWith("read:"))).toEqual(["read:/ws/a.md"]);
 	});
 
