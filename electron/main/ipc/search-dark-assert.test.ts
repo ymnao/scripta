@@ -13,13 +13,21 @@ import { type DarkAssertRetryDeps, resolveDarkAssertViolations } from "./search"
 const ALL_IO = ["/ws/a.md", "/ws/b.md"] as const;
 
 interface FakeOptions {
-	/** collectViolations の呼び出しごとの戻り値 (1 回目 / 2 回目 …)。null は fallback。 */
-	violationsByCall?: Array<string[] | null>;
-	/** truth 集合から実際に violation を再計算する場合に使う (drop の反映を見るテスト用)。 */
-	violationsFromTruth?: (hits: readonly string[]) => string[] | null;
+	/**
+	 * collectViolations の戻り値。呼び出しごとの truth hits を受け取るので、
+	 * 「drop が 2 回目に反映されるか」も「1 回目だけ violation を返す」も同じ 1 経路で書ける。
+	 * null は fallback (判定 skip)。
+	 */
+	violationsFromTruth: (hits: readonly string[]) => string[] | null;
 	texts?: Map<string, string | null>;
 	authorized?: (p: string) => boolean;
 	staleAfterCalls?: number;
+}
+
+/** 1 回目だけ violations を返し 2 回目以降は空を返す scripted 版 (reindex で解消するケース用)。 */
+function resolvedOnRetry(first: string[] | null): (hits: readonly string[]) => string[] | null {
+	let call = 0;
+	return () => (call++ === 0 ? first : []);
 }
 
 function makeFakeDeps(opts: FakeOptions): {
@@ -31,17 +39,13 @@ function makeFakeDeps(opts: FakeOptions): {
 	const calls: string[] = [];
 	const indexed: Array<{ path: string; text: string; epoch: number }> = [];
 	const collectArgs: string[][] = [];
-	let collectCount = 0;
 	let staleChecks = 0;
 	const deps: DarkAssertRetryDeps = {
 		collectViolations: (_q, _all, hits) => {
 			collectArgs.push([...hits]);
-			if (opts.violationsFromTruth !== undefined) return opts.violationsFromTruth(hits);
-			const v = opts.violationsByCall?.[collectCount] ?? [];
-			collectCount++;
-			return v;
+			return opts.violationsFromTruth(hits);
 		},
-		isAuthorized: async (p) => {
+		isRealPathAllowed: async (p) => {
 			calls.push(`auth:${p}`);
 			return opts.authorized?.(p) ?? true;
 		},
@@ -67,7 +71,7 @@ function makeFakeDeps(opts: FakeOptions): {
 
 describe("resolveDarkAssertViolations", () => {
 	it("returns ok when collectViolations reports no violation", async () => {
-		const { deps, calls } = makeFakeDeps({ violationsByCall: [[]] });
+		const { deps, calls } = makeFakeDeps({ violationsFromTruth: () => [] });
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
 		expect(verdict).toEqual({ kind: "ok" });
 		// retry loop に入らないので I/O は一切走らない
@@ -75,19 +79,22 @@ describe("resolveDarkAssertViolations", () => {
 	});
 
 	it("returns ok when collectViolations returns null (fallback / 判定 skip)", async () => {
-		const { deps } = makeFakeDeps({ violationsByCall: [null] });
+		const { deps } = makeFakeDeps({ violationsFromTruth: () => null });
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
 		expect(verdict).toEqual({ kind: "ok" });
 	});
 
 	it("returns resolved when reindex clears the violation (watcher-latency window)", async () => {
 		const { deps, indexed } = makeFakeDeps({
-			violationsByCall: [["/ws/a.md"], []],
+			violationsFromTruth: resolvedOnRetry(["/ws/a.md"]),
 			texts: new Map([["/ws/a.md", "hello foo world"]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
 		// fresh text は query を含むので truth は保持されたまま (drop 0)
-		expect(verdict).toEqual({ kind: "resolved", droppedCount: 0 });
+		expect(verdict).toEqual({
+			kind: "resolved",
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
 		expect(indexed).toEqual([{ path: "/ws/a.md", text: "hello foo world", epoch: 1 }]);
 	});
 
@@ -95,7 +102,7 @@ describe("resolveDarkAssertViolations", () => {
 		// 逆順にすると bump 後の epoch で stale text が valid 化する race を assert 自身が作る
 		// (Phase D round 1 Fable W1)。順序を test で恒久 guard する。
 		const { deps, calls } = makeFakeDeps({
-			violationsByCall: [["/ws/a.md"], []],
+			violationsFromTruth: resolvedOnRetry(["/ws/a.md"]),
 			texts: new Map([["/ws/a.md", "foo"]]),
 		});
 		await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
@@ -110,7 +117,10 @@ describe("resolveDarkAssertViolations", () => {
 			texts: new Map([["/ws/a.md", "no longer matching"]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(verdict).toEqual({ kind: "resolved", droppedCount: 1 });
+		expect(verdict).toEqual({
+			kind: "resolved",
+			dropped: { staleTruth: 1, unauthorized: 0, unreadable: 0 },
+		});
 		// 2 回目の collectViolations には drop 後の truth (空) が渡る
 		expect(collectArgs).toEqual([["/ws/a.md"], []]);
 	});
@@ -130,7 +140,10 @@ describe("resolveDarkAssertViolations", () => {
 			texts: new Map([["/ws/a.md", null]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(verdict).toEqual({ kind: "resolved", droppedCount: 1 });
+		expect(verdict).toEqual({
+			kind: "resolved",
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 1 },
+		});
 		expect(indexed).toEqual([]);
 	});
 
@@ -141,7 +154,10 @@ describe("resolveDarkAssertViolations", () => {
 			texts: new Map([["/ws/a.md", "foo"]]),
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(verdict).toEqual({ kind: "resolved", droppedCount: 1 });
+		expect(verdict).toEqual({
+			kind: "resolved",
+			dropped: { staleTruth: 0, unauthorized: 1, unreadable: 0 },
+		});
 		expect(calls).toEqual(["auth:/ws/a.md"]);
 		expect(indexed).toEqual([]);
 	});
@@ -185,7 +201,7 @@ describe("resolveDarkAssertViolations", () => {
 
 	it("returns stale without a verdict when the search is superseded mid-retry", async () => {
 		const { deps } = makeFakeDeps({
-			violationsByCall: [["/ws/a.md"], []],
+			violationsFromTruth: resolvedOnRetry(["/ws/a.md"]),
 			texts: new Map([["/ws/a.md", "foo"]]),
 			staleAfterCalls: 0,
 		});
@@ -200,5 +216,79 @@ describe("resolveDarkAssertViolations", () => {
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
 		expect(verdict).toEqual({ kind: "violated", violations: ["/ws/a.md"] });
+	});
+
+	it("returns stale when superseded after the retry loop but before the recheck", async () => {
+		// staleAfterCalls: 1 → loop 内の check は通過し、loop 後の final check で stale 化する。
+		// drop 済み truth を抱えたまま verdict を下さない cancel semantics の固定。
+		const { deps } = makeFakeDeps({
+			violationsFromTruth: resolvedOnRetry(["/ws/a.md"]),
+			texts: new Map([["/ws/a.md", "foo"]]),
+			staleAfterCalls: 1,
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict).toEqual({ kind: "stale" });
+	});
+
+	it("verifies a violation that first appears in the recheck instead of throwing on it", async () => {
+		// retry 中に idle fill 等が並走して別 file を indexedValid 化すると、その file は
+		// recheck で初めて violation として現れる。未検証のまま throw すると Finding 1 と
+		// 同型の FP が recheck の入口から入るため、次周で 1 度だけ検証する。
+		let call = 0;
+		const { deps, calls } = makeFakeDeps({
+			violationsFromTruth: () => {
+				call++;
+				if (call === 1) return ["/ws/a.md"];
+				if (call === 2) return ["/ws/b.md"];
+				return [];
+			},
+			texts: new Map([
+				["/ws/a.md", "foo"],
+				["/ws/b.md", "rewritten"],
+			]),
+		});
+		const verdict = await resolveDarkAssertViolations(
+			"foo",
+			ALL_IO,
+			new Set(["/ws/a.md", "/ws/b.md"]),
+			deps,
+		);
+		expect(verdict).toEqual({
+			kind: "resolved",
+			dropped: { staleTruth: 1, unauthorized: 0, unreadable: 0 },
+		});
+		expect(calls).toEqual([
+			"auth:/ws/a.md",
+			"epoch:/ws/a.md",
+			"read:/ws/a.md",
+			"index:/ws/a.md",
+			"auth:/ws/b.md",
+			"epoch:/ws/b.md",
+			"read:/ws/b.md",
+			"index:/ws/b.md",
+		]);
+	});
+
+	it("verifies each file at most once (already-verified violations end the loop)", async () => {
+		// 同じ file が recheck でも violation のまま残る = fresh text が query を含むのに候補外。
+		// 再検証を繰り返さず violated で確定する (retry が真の破損を塗りつぶさない保証)。
+		const { deps, calls } = makeFakeDeps({
+			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
+			texts: new Map([["/ws/a.md", "foo"]]),
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict).toEqual({ kind: "violated", violations: ["/ws/a.md"] });
+		expect(calls.filter((c) => c.startsWith("read:"))).toEqual(["read:/ws/a.md"]);
+	});
+
+	it("returns ok when the recheck falls back (index disabled mid-retry), not resolved", async () => {
+		// fallback は「解消」ではなく判定不能。warn を出さない ok に倒す。
+		let call = 0;
+		const { deps } = makeFakeDeps({
+			violationsFromTruth: () => (call++ === 0 ? ["/ws/a.md"] : null),
+			texts: new Map([["/ws/a.md", "rewritten"]]),
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict).toEqual({ kind: "ok" });
 	});
 });

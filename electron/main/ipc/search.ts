@@ -502,7 +502,7 @@ async function runDarkAssert(
 	if (isStale()) return;
 	const verdict = await resolveDarkAssertViolations(queryLower, io, truthHitIo, {
 		collectViolations: (q, all, hits) => indexHandle.collectViolations(q, all, hits),
-		isAuthorized: (p) => isRealPathInsideRoot(p, canonicalRoot),
+		isRealPathAllowed: (p) => isRealPathInsideRoot(p, canonicalRoot),
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		readFile: async (p) => {
 			try {
@@ -519,9 +519,10 @@ async function runDarkAssert(
 	if (verdict.kind === "ok" || verdict.kind === "stale") return;
 	if (verdict.kind === "resolved") {
 		// prefix `[dark-assert]` は e2e (search-l3.electron.spec.ts) の stderr filter が拾う契約。変更しないこと。
+		const { staleTruth, unauthorized, unreadable } = verdict.dropped;
 		console.warn(
 			`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
-				`query="${query}" droppedStaleTruth=${verdict.droppedCount}`,
+				`query="${query}" droppedTruth={stale:${staleTruth},unauthorized:${unauthorized},unreadable:${unreadable}}`,
 		);
 		return;
 	}
@@ -541,28 +542,32 @@ async function runDarkAssert(
  * InvertedIndexHandle 全体ではなく使う操作だけを構造的に切り出し、unit test で
  * fake を type assertion なしに書けるようにする。
  */
-export interface DarkAssertRetryDeps {
-	collectViolations(
-		queryLower: string,
-		allIoFiles: readonly string[],
-		hitIoFiles: readonly string[],
-	): string[] | null;
-	/** workspace root 内 realpath 認可。false の file は index に取り込まない。 */
-	isAuthorized(ioPath: string): Promise<boolean>;
-	currentEpochOf(ioPath: string): number;
+export interface DarkAssertRetryDeps
+	extends Pick<InvertedIndexHandle, "collectViolations" | "currentEpochOf" | "indexFile"> {
+	/** workspace root 内 realpath 認可。false の file は index に取り込まない (IdleFillDeps と同名同義)。 */
+	isRealPathAllowed(ioPath: string): Promise<boolean>;
 	/** 読み取り失敗 (ENOENT 等) は null。throw しない契約。 */
 	readFile(ioPath: string): Promise<string | null>;
-	indexFile(ioPath: string, text: string, capturedEpoch: number): void;
 	isStale(): boolean;
 }
 
+/** resolved 時の truth drop 内訳。dev-monitor として理由別に観測できるようにする (#405 Finding 2)。 */
+export interface DarkAssertDropCounts {
+	/** fresh text が query を含まなくなっていた (読取後の正当な書き換え)。 */
+	staleTruth: number;
+	/** realpath 認可外 (workspace 外 target への retarget 等)。 */
+	unauthorized: number;
+	/** 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。 */
+	unreadable: number;
+}
+
 export type DarkAssertVerdict =
-	/** invariant 成立 (violation なし、または fallback で判定 skip)。 */
+	/** invariant 成立、または fallback で判定不能 (いずれも warn / throw しない)。 */
 	| { kind: "ok" }
 	/** 途中で cancel/supersede された。判定を下さず打ち切る。 */
 	| { kind: "stale" }
 	/** reindex または truth staleness の解消で violation が消えた (warn 相当)。 */
-	| { kind: "resolved"; droppedCount: number }
+	| { kind: "resolved"; dropped: DarkAssertDropCounts }
 	/** 真の superset 破損 (throw 相当)。 */
 	| { kind: "violated"; violations: string[] };
 
@@ -578,6 +583,14 @@ export type DarkAssertVerdict =
  *   渡したものと **同一の text snapshot** を使う (別途読み直すと index 状態と判定の乖離窓を新設する)。
  * - 認可外 / 読み取り失敗も同様に truth から落とす: 現在の内容で hit を確認できない file について
  *   「index が取りこぼした」と断定できないため (従来は残して throw に寄与していた)。
+ *   read 失敗 drop は「破損 + 一時的 EBUSY/EPERM」の同時発生時のみ真の破損を 1 回見逃すが、
+ *   恒常的に読めない file は次回検索の truth scan でも hit しない (= violation が立たない) ため
+ *   見逃しは transient な 1 回に限られ、読めるようになれば次回検索で回収される。
+ *
+ * **各 file の再検証は高々 1 回**。ただし retry 中の並走 index 更新 (idle fill 等) で新たに
+ * violation 化した file は、未検証のまま throw させず次周で検証する (round 2 の入口から
+ * Finding 1 と同型の FP が入るのを塞ぐ)。全 violation が検証済みになった時点で真の破損と判定する
+ * ため、「再索引し続けて破損を塗りつぶす」方向には劣化しない (worklist は file 集合で有限)。
  */
 export async function resolveDarkAssertViolations(
 	queryLower: string,
@@ -586,36 +599,45 @@ export async function resolveDarkAssertViolations(
 	deps: DarkAssertRetryDeps,
 ): Promise<DarkAssertVerdict> {
 	const truth = new Set(truthHitIo);
-	const violations = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
+	let violations = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
 	if (violations === null || violations.length === 0) return { kind: "ok" };
 	// watcher-latency 窓の可能性: 違反 file を disk から再読 → indexFile (現 epoch capture) して
 	// 再度 collectViolations を呼ぶ。解消すれば window とみなして resolved、残れば真の破損。
-	// retry は 1 周のみ (n 周に広げると「再索引し続けて真の破損を塗りつぶす」方向に劣化する)。
-	let droppedCount = 0;
-	for (const p of violations) {
+	const dropped: DarkAssertDropCounts = { staleTruth: 0, unauthorized: 0, unreadable: 0 };
+	const verified = new Set<string>();
+	while (true) {
+		const pending = violations.filter((p) => !verified.has(p));
+		// 残 violation が全て検証済み = fresh text が query を含むのに候補外 → 真の破損。
+		if (pending.length === 0) return { kind: "violated", violations };
+		for (const p of pending) {
+			if (deps.isStale()) return { kind: "stale" };
+			verified.add(p);
+			if (!(await deps.isRealPathAllowed(p))) {
+				truth.delete(p);
+				dropped.unauthorized++;
+				continue;
+			}
+			const epoch = deps.currentEpochOf(p);
+			const text = await deps.readFile(p);
+			if (text === null) {
+				truth.delete(p);
+				dropped.unreadable++;
+				continue;
+			}
+			deps.indexFile(p, text, epoch);
+			if (!text.toLowerCase().includes(queryLower)) {
+				truth.delete(p);
+				dropped.staleTruth++;
+			}
+		}
 		if (deps.isStale()) return { kind: "stale" };
-		if (!(await deps.isAuthorized(p))) {
-			truth.delete(p);
-			droppedCount++;
-			continue;
-		}
-		const epoch = deps.currentEpochOf(p);
-		const text = await deps.readFile(p);
-		if (text === null) {
-			truth.delete(p);
-			droppedCount++;
-			continue;
-		}
-		deps.indexFile(p, text, epoch);
-		if (!text.toLowerCase().includes(queryLower)) {
-			truth.delete(p);
-			droppedCount++;
-		}
+		const remaining = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
+		// null (fallback) は「解消」ではなく判定不能。round 1 の null と同じく ok に倒す
+		// (retry 中の indexFile が admission cutoff を押して index が disabled 化した場合など)。
+		if (remaining === null) return { kind: "ok" };
+		if (remaining.length === 0) return { kind: "resolved", dropped };
+		violations = remaining;
 	}
-	if (deps.isStale()) return { kind: "stale" };
-	const remaining = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
-	if (remaining === null || remaining.length === 0) return { kind: "resolved", droppedCount };
-	return { kind: "violated", violations: remaining };
 }
 
 async function searchFilenamesImpl(
