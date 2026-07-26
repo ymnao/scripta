@@ -49,7 +49,8 @@ function makeFakeDeps(
 		isAlive: () => alive.value,
 		index,
 		yieldTick: async () => {}, // test では即座 resolve
-		isRealPathAllowed: async () => true, // fake deps は境界通過を明示
+		// fake deps は境界通過を明示する。identity 解決 = 「symlink でない通常 file」相当。
+		resolveAllowed: async (p: string) => p,
 	};
 
 	return { deps, indexed, currentEpoch, alive, disabled };
@@ -160,7 +161,7 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.size).toBe(0);
 	});
 
-	it("isRealPathAllowed=false → readFile もせず skipUntilEpochChange で bail する (Phase D 境界)", async () => {
+	it("resolveAllowed=null → readFile もせず skipUntilEpochChange で bail する (Phase D 境界)", async () => {
 		const files = ["/ws/notes/evil.md", "/ws/notes/ok.md"];
 		const texts = new Map([
 			["/ws/notes/evil.md", "should not be read"],
@@ -174,13 +175,36 @@ describe("index-fill: kickIdleFill", () => {
 			return origRead(p);
 		};
 		// evil.md だけ realpath で reject する fake。
-		deps.isRealPathAllowed = async (p) => p !== "/ws/notes/evil.md";
+		deps.resolveAllowed = async (p) => (p === "/ws/notes/evil.md" ? null : p);
 		kickIdleFill(ROOT, deps);
 		await waitUntil(() => !_isRunningForTest(ROOT));
 		// evil.md は readFile されず (境界チェックで先に落ちる)、ok.md は 1 度 read + index される。
 		expect(readCallCount).toBe(1);
 		expect(indexed.has("/ws/notes/evil.md")).toBe(false);
 		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
+	});
+
+	it("readFile は resolveAllowed が返した解決済み path で呼ばれる (#406 Finding 2)", async () => {
+		// workspace 内 symlink `link.md` が `real.md` を指すケース。認可判定に使った実体を
+		// そのまま読むことで、判定後に symlink が外へ swap されても外部内容を読まない。
+		const files = ["/ws/notes/link.md"];
+		const texts = new Map([["/ws/notes/real.md", "real content"]]);
+		const { deps, indexed } = makeFakeDeps(files, texts);
+		const readPaths: string[] = [];
+		deps.resolveAllowed = async (p) => (p === "/ws/notes/link.md" ? "/ws/notes/real.md" : p);
+		deps.readFile = async (p: string) => {
+			readPaths.push(p);
+			const text = texts.get(p);
+			// 未解決 (raw symlink path) で読もうとしたら test が落ちるよう throw する。
+			if (text === undefined) throw new Error(`unexpected read: ${p}`);
+			return text;
+		};
+		kickIdleFill(ROOT, deps);
+		await waitUntil(() => !_isRunningForTest(ROOT));
+		expect(readPaths).toEqual(["/ws/notes/real.md"]);
+		// index の key は workspace 内 path (listIoFiles の並び) 側で持つ。
+		expect(indexed.has("/ws/notes/link.md")).toBe(true);
+		expect(indexed.has("/ws/notes/real.md")).toBe(false);
 	});
 
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {

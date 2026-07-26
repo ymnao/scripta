@@ -1,5 +1,8 @@
 // @vitest-environment node
-import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
+// search.ts が読む実体と同じ object を spy するため `node:fs` の promises を使う
+// (node:fs/promises の ESM namespace は frozen で spy できない)。
+import { promises as fsp } from "node:fs";
+import { mkdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +25,7 @@ import {
 	_resetFileListCacheForTest,
 	acquireFileListCache,
 	applyFsBatch,
+	getInvertedIndexHandle,
 	releaseFileListCache,
 } from "./search-cache";
 
@@ -1142,6 +1146,132 @@ describe("searchFilesImpl (Phase B: ContentCache integration)", () => {
 		releaseFileListCache(canonical);
 	});
 });
+
+// #406: workspace 内 symlink の retarget と L3 index 取り込み境界。
+// index ゲートは realpath cache を通さず毎回 fresh に解決するため、
+// watcher batch が retarget を emit しなくても外部内容は取り込まれない。
+describe.skipIf(process.platform === "win32")(
+	"searchFilesImpl (#406: symlink retarget と index 取り込み境界)",
+	() => {
+		it("does not index a symlink retargeted outside the workspace, but still scans it", async () => {
+			const canonical = await realpath(workspaceDir);
+			const inside = join(canonical, "inside.md");
+			await writeFile(inside, "alphaword inside");
+			const outside = await createTempWorkspace("scripta-search-outside-");
+			try {
+				const secret = join(await realpath(outside.dir), "id_rsa.md");
+				await writeFile(secret, "zzsecretword leaked");
+				const link = join(canonical, "evil.md");
+				await symlink(inside, link);
+
+				acquireFileListCache(canonical);
+				const handle = getInvertedIndexHandle(canonical);
+				if (handle === undefined) throw new Error("index handle must exist after acquire");
+
+				// 1. workspace 内を指している間は index に取り込まれる (正常系)。
+				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+				expect(handle.isIndexedAndValid(link)).toBe(true);
+
+				// 2. attacker が `ln -sf` 相当で外部 file へ付け替える。
+				await unlink(link);
+				await symlink(secret, link);
+				// watcher batch 相当 (retarget を change として拾えたケース)。realpath cache に
+				// 依存する実装では、この invalidate 後の再 index で stale な「root 内」判定を
+				// 引いて外部内容を取り込んでしまう。
+				applyFsBatch(canonical, [{ kind: "modify", path: link }]);
+				expect(handle.isIndexedAndValid(link)).toBe(false);
+
+				// 3. 再検索: scan 結果には出る (既存挙動、workspace 外 symlink も検索対象)。
+				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
+				expect(res.results.some((r) => r.filePath.endsWith("evil.md"))).toBe(true);
+				// index には取り込まれない (境界が retarget 後も維持されている)。
+				expect(handle.isIndexedAndValid(link)).toBe(false);
+
+				releaseFileListCache(canonical);
+			} finally {
+				await outside.cleanup();
+			}
+		});
+
+		it("does not keep out-of-root content in L2 (no swap-back poisoning)", async () => {
+			// ゲート reject 分を L2 に入れてしまうと、attacker が symlink を workspace 内へ
+			// swap back した後の L2 hit で「cache に残った外部内容」が index / 結果に復活する。
+			const canonical = await realpath(workspaceDir);
+			const inside = join(canonical, "inside.md");
+			await writeFile(inside, "alphaword inside");
+			const outside = await createTempWorkspace("scripta-search-outside3-");
+			try {
+				const secret = join(await realpath(outside.dir), "id_rsa.md");
+				await writeFile(secret, "zzsecretword leaked");
+				const link = join(canonical, "evil.md");
+				await symlink(secret, link);
+
+				acquireFileListCache(canonical);
+				// 1 回目: 外部を指しているので index には入らないが、scan 結果には出る。
+				const first = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
+				expect(first.results.some((r) => r.filePath.endsWith("evil.md"))).toBe(true);
+
+				// attacker が workspace 内へ戻す。watcher が retarget を拾えなかったケースを模して
+				// applyFsBatch は **呼ばない** (L2 は evict されない)。
+				await unlink(link);
+				await symlink(inside, link);
+
+				// 2 回目: L2 に外部内容が残っていれば hit して結果に出てしまう。
+				const second = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
+				expect(second.results).toHaveLength(0);
+
+				releaseFileListCache(canonical);
+			} finally {
+				await outside.cleanup();
+			}
+		});
+
+		it("reads the resolved target (not the symlink path) for an in-root symlink", async () => {
+			// #406 Finding 2 の本体: index 対象 file は検査に使った実体から読む。
+			// raw path read に戻すと readFile の引数が link.md になり、この assert が落ちる。
+			const canonical = await realpath(workspaceDir);
+			const real = join(canonical, "real.md");
+			await writeFile(real, "alphaword body");
+			const link = join(canonical, "link.md");
+			await symlink(real, link);
+
+			acquireFileListCache(canonical);
+			const spy = vi.spyOn(fsp, "readFile");
+			try {
+				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+				const readArgs = spy.mock.calls.map((c) => c[0]);
+				expect(readArgs).toContain(real);
+				expect(readArgs).not.toContain(link);
+			} finally {
+				spy.mockRestore();
+				releaseFileListCache(canonical);
+			}
+		});
+
+		it("never indexes a symlink that points outside the workspace from the start", async () => {
+			const canonical = await realpath(workspaceDir);
+			const outside = await createTempWorkspace("scripta-search-outside2-");
+			try {
+				const secret = join(await realpath(outside.dir), "id_rsa.md");
+				await writeFile(secret, "zzsecretword leaked");
+				const link = join(canonical, "evil.md");
+				await symlink(secret, link);
+
+				acquireFileListCache(canonical);
+				const handle = getInvertedIndexHandle(canonical);
+				if (handle === undefined) throw new Error("index handle must exist after acquire");
+
+				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
+				expect(res.results.some((r) => r.filePath.endsWith("evil.md"))).toBe(true);
+				expect(handle.isIndexedAndValid(link)).toBe(false);
+
+				releaseFileListCache(canonical);
+			} finally {
+				await outside.cleanup();
+			}
+		});
+	},
+);
 
 describe("scanBacklinksImpl (Phase B: getCachedInputFileMap)", () => {
 	it("uses cached input fileMap when watcher is running (result parity with fallback)", async () => {

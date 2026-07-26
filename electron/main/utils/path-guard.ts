@@ -48,6 +48,12 @@ export function validatePath(p: string): string {
 // 実在する祖先の realpath 結果を簡易 LRU でキャッシュする。Symlink target の
 // 変更は process 寿命中に発生する稀有なケースで、Electron app の典型的な
 // 使用シナリオでは許容範囲内と判断。
+//
+// **用途境界 (#406)**: この cache は user-IPC 認可 (assertPathAllowed /
+// assertWritePathAllowed / isPathAllowed / isPathWithinAnyAllowedRoot) 専用。
+// L3 index 取り込みゲート (resolveInsideRoot) は cache を通さない —
+// symlink retarget を watcher batch 由来の invalidation で確実に拾えないため、
+// 取り込み時点の fresh な realpath が必要（詳細は resolveInsideRoot の doc）。
 const realpathCache = new Map<string, string>();
 const REALPATH_CACHE_MAX = 256;
 
@@ -66,10 +72,6 @@ async function cachedRealpath(p: string): Promise<string> {
 	}
 	realpathCache.set(p, result);
 	return result;
-}
-
-export function clearRealpathCache(): void {
-	realpathCache.clear();
 }
 
 async function realpathBestEffort(p: string): Promise<string> {
@@ -253,35 +255,49 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 	}
 }
 
-// realpath 済み `ioPath` が canonical root の内側かどうか判定する
-// ("=" または内側)。#394 Phase D で L3 InvertedIndex への
+// `ioPath` を realpath 解決し、canonical root の内側なら **解決済み path** を、
+// 外側 / 解決不能なら null を返す。#394 Phase D で L3 InvertedIndex への
 // piggyback / idle fill 直前に呼ばれ、workspace 内 symlink ファイルが
 // 外部を指すケース (`evil.md -> /Users/x/.ssh/config`) を index 取り込み前で
 // 落とすためのガード。
 // - Window scope を持たない background 経路 (idle fill / piggyback) 用のため、
 //   assertPathAllowed とは別 API になる (window-id を持たない)。
 // - canonicalRoot は既に realpath 済みである前提 (collectMdFilesForWorkspace 通過後)。
-// - validatePath が throw する不正入力 (相対 path / null byte) は false を返す。
-// - realpath は realpathBestEffort 経由で「最も近い実在祖先の realpath + suffix」に fall-through
-//   するため、dangling symlink や未存在 file でも例外にはならず、そのパスが root 内なら true を返す。
-//   これは意図した挙動 (後段 readFile が ENOENT を吐いて自然に skip される、
-//   index 取り込みには到達しない) だが、この関数単独では「dangling は必ず false」ではない点に注意。
-//   下流 (readFile 失敗の try/catch skip / indexFile 無効化) を合わせた multi-layer defense として機能する。
-// - realpathCache (path-guard 内の LRU) が生きている間、workspace 内→外に symlink が付け替えられた
-//   ケースでは古い判定を返し得る (settings.setPath / clearWorkspaceRoots で cache 全 clear されるまでの窓)。
-//   スコープが限定的 (in-memory index への残留のみ、renderer には出ない) のため既存の realpathCache
-//   staleness 契約を踏襲。
-export async function isRealPathInsideRoot(
+// - **戻り値の path で readFile すること** (#406 Finding 2)。raw path を読むと
+//   「検査対象 (T1 の realpath) と読み取り対象 (T2 の symlink target)」がズレ、
+//   検査通過後に workspace 内へ swap back された symlink 経由で外部内容が index に
+//   取り込まれる TOCTOU が成立する。assertPathAllowed が canonical を返して
+//   「判定に使った path で I/O する」契約と同型。ただし **塞げるのは ioPath 自身の retarget 経路**
+//   だけで、窓が完全に消えるわけではない: 戻り値も path なので readFile は再度 traversal する。
+//   resolve から read までの間に解決済み path の構成要素 (中間 dir / 末端 file) を symlink に
+//   差し替えられる窓は残り、これは fd ベースの traversal (openat / O_NOFOLLOW) でないと閉じない
+//   (assertPathAllowed も同じ限界を持つ)。
+// - **realpathCache を通さない** (#406 Finding 1)。symlink の retarget は watcher batch
+//   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、
+//   retarget を change event として emit する保証がない) ため、index 取り込み時点で
+//   毎回 fresh に解決する。呼び出しは `!isIndexedAndValid` の file に限られるため、
+//   index が育った file では syscall は発生しない。ただし「恒久的に index に載らない file」
+//   (admission cutoff 超過 / root 外を指す symlink) は毎回 invalid のままなので、その分だけは
+//   検索ごとに 1 syscall 乗る (件数が限定的なので受容している)。
+// - realpathBestEffort と異なり **祖先 fall-through をしない**: 未存在 / dangling symlink は
+//   realpath が throw して null になる (fail-closed)。index ゲートに「最も近い実在祖先」の
+//   近似は不要で、非実在 file は後段 readFile も失敗するため取り込み挙動に差は出ない。
+// - validatePath が throw する不正入力 (相対 path / null byte) も null を返す。
+// - **本 API 単独では「認可済みの内容」までは保証しない**: 戻り値以外の path や別ソース
+//   (cache 等) から取得した内容と組み合わせる場合、検査時点と内容取得時点がズレるため、
+//   その時間差を許容できるかは呼び手が判断すること (search.ts の L2 hit 経路は明示的に受容)。
+export async function resolveInsideRoot(
 	ioPath: string,
 	canonicalRoot: string,
-): Promise<boolean> {
+): Promise<string | null> {
 	let target: string;
 	try {
-		target = await realpathBestEffort(validatePath(ioPath));
+		target = await realpath(validatePath(ioPath));
 	} catch {
-		return false;
+		return null;
 	}
-	return target === canonicalRoot || isPathInside(target, canonicalRoot);
+	if (target === canonicalRoot || isPathInside(target, canonicalRoot)) return target;
+	return null;
 }
 
 // 全 window の登録 root を union で評価する process-wide 版。リクエスト元 webContents を

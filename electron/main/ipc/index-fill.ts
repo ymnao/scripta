@@ -19,7 +19,10 @@ export interface IdleFillIndex {
 export interface IdleFillDeps {
 	/** 現在の .md file 全リスト (canonical io path)。populate 済みでなければ undefined を返す。 */
 	listIoFiles(): readonly string[] | undefined;
-	/** file を readFile する。失敗時は throw して呼び手が catch/skip する。 */
+	/**
+	 * file を readFile する。失敗時は throw して呼び手が catch/skip する。
+	 * 呼び手は `resolveAllowed` が返した **解決済み path** を渡す (#406 Finding 2)。
+	 */
 	readFile(ioPath: string): Promise<string>;
 	/** entry がまだ生きているか (refCount > 0 で map に残っているか)。 */
 	isAlive(): boolean;
@@ -35,11 +38,13 @@ export interface IdleFillDeps {
 	/**
 	 * readFile 直前の realpath 再認可 (#394 Phase D / #399 Finding 2)。
 	 * workspace 外 symlink を追跡する file を index に載せないためのゲート。
-	 * false 応答時は cutoff 超過と同じく skipUntilEpochChange に記録される。
+	 * 許可時は **解決済み path** を返し、呼び手はその path で readFile する
+	 * (検査対象と読み取り対象を揃えて TOCTOU を閉じる、#406 Finding 2)。
+	 * null 応答時は cutoff 超過と同じく skipUntilEpochChange に記録される。
 	 * 必須 field: fail-open 事故を避けるため optional にしない (test の fake deps は
-	 * `async () => true` を明示することで境界通過を宣言する)。
+	 * 解決済み path を返すことで境界通過を宣言する)。
 	 */
-	isRealPathAllowed(ioPath: string): Promise<boolean>;
+	resolveAllowed(ioPath: string): Promise<string | null>;
 }
 
 // 「走行中の canonicalRoot 集合」を保持する。field 1 個だけの wrapper を持つより素直。
@@ -92,15 +97,17 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 				try {
 					// realpath 再認可 (#394 Phase D / #399 Finding 2) を readFile より **先** に
 					// 走らせる: workspace 外を指す symlink file の全文読み込みコストを避ける。
-					// false / 失敗時は cutoff 超過と同じ経路 (skipUntilEpochChange 記録) に倒す —
+					// null / 失敗時は cutoff 超過と同じ経路 (skipUntilEpochChange 記録) に倒す —
 					// fileEpoch が動けば自動 retry される。
-					const allowed = await deps.isRealPathAllowed(p).catch(() => false);
+					// readFile には **解決済み path** を渡す (#406 Finding 2、契約は resolveInsideRoot の
+					// doc 参照)。index の key は従来どおり `p` (workspace 内の path)。
+					const resolved = await deps.resolveAllowed(p).catch(() => null);
 					if (!deps.isAlive()) break;
 					if (deps.index.isDisabled) break;
-					if (!allowed) {
+					if (resolved === null) {
 						skipUntilEpochChange.set(p, current);
 					} else {
-						const text = await deps.readFile(p);
+						const text = await deps.readFile(resolved);
 						if (!deps.isAlive()) break;
 						if (deps.index.isDisabled) break;
 						deps.index.indexFile(p, text, current);
