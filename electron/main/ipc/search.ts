@@ -562,28 +562,74 @@ async function runDarkAssert(
 		},
 		isStale,
 	});
-	if (verdict.kind === "ok" || verdict.kind === "stale") return;
-	// drop 内訳は warn / throw 双方に載せる: 「何件落とした上で残ったか」が、残存 FP (doc の
-	// 既知の残存 FP 参照) と真の破損を dev で切り分ける手掛かりになる。
-	const { staleTruth, unauthorized, unreadable } = verdict.dropped;
-	const droppedSummary = `droppedTruth={stale:${staleTruth},unauthorized:${unauthorized},unreadable:${unreadable}}`;
-	if (verdict.kind === "resolved") {
-		// prefix `[dark-assert]` は e2e (search-l3.electron.spec.ts) の stderr filter が拾う契約。変更しないこと。
-		console.warn(
-			`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
-				`query="${query}" ${droppedSummary}`,
-		);
+	const report = formatDarkAssertReport(verdict, query);
+	if (report === null) return;
+	if (report.level === "warn") {
+		console.warn(report.message);
 		return;
 	}
-	// round 1 S2 で入れた「stillUnindexed 切り分け」は round 2 Fable review で dead code と判明したため除去:
-	//   collectViolations が返す violation の定義自体が `!candidates.has(p) && indexedValid.has(p)` なので、
-	//   その全 p は必ず isIndexedAndValid=true。分岐は成立しない (search-cache.ts:315-319 の workspace close
-	//   時 no-op も collectViolations は捕捉済み e.l3 を直接読むため valid 判定は残る)。真の切り分けは
-	//   dev/e2e で monitor する形 (dark assert 統合 issue で扱う)。
-	throw new Error(
-		`InvertedIndex superset invariant violated: hit file "${verdict.violations[0]}" not in candidate set ` +
-			`(query="${query}" ${droppedSummary})`,
-	);
+	throw new Error(report.message);
+}
+
+/** verdict をどう報告するか。message は整形済みで、呼び手は出力先を選ぶだけにする (#410 Finding 2)。 */
+export interface DarkAssertReport {
+	level: "warn" | "throw";
+	message: string;
+}
+
+/**
+ * verdict → 無音 / warn / throw の対応と message 整形 (#410 Finding 2)。
+ *
+ * runDarkAssert から純関数として切り出す理由: 従来この対応は truth scan
+ * (processMdFilesParallel) の後段に埋まっており、unit test では到達できず e2e も happy path
+ * (`[dark-assert]` 0 件) しか見ていなかった。resolved と violated を取り違える regression が
+ * 全 suite green のまま通るため、対応表と文言だけを I/O なしで固定できる形にする。
+ *
+ * prefix `[dark-assert]` は e2e (search-l3.electron.spec.ts) の stderr filter が拾う契約。
+ * `droppedTruth={...}` 表記も含め、文言はここが単一ソース (呼び手側で再構築しないこと)。
+ */
+export function formatDarkAssertReport(
+	verdict: DarkAssertVerdict,
+	query: string,
+): DarkAssertReport | null {
+	switch (verdict.kind) {
+		// 成立 / 判定不能 / cancel はいずれも報告しない (dev のノイズにしない)。
+		case "ok":
+		case "stale":
+			return null;
+		case "resolved":
+			return {
+				level: "warn",
+				message:
+					`[dark-assert] InvertedIndex superset violation resolved after reindex (watcher-latency window). ` +
+					`query="${query}" ${formatDroppedSummary(verdict.dropped)}`,
+			};
+		case "exhausted":
+			return {
+				level: "warn",
+				message:
+					`[dark-assert] InvertedIndex superset check inconclusive: reverify budget exhausted ` +
+					`(rounds=${verdict.rounds}) query="${query}" ${formatDroppedSummary(verdict.dropped)}`,
+			};
+		// round 1 S2 で入れた「stillUnindexed 切り分け」は round 2 Fable review で dead code と判明したため除去:
+		//   collectViolations が返す violation の定義自体が `!candidates.has(p) && indexedValid.has(p)` なので、
+		//   その全 p は必ず isIndexedAndValid=true。分岐は成立しない (search-cache.ts:315-319 の workspace close
+		//   時 no-op も collectViolations は捕捉済み e.l3 を直接読むため valid 判定は残る)。
+		case "violated":
+			return {
+				level: "throw",
+				message:
+					`InvertedIndex superset invariant violated: hit file "${verdict.violations[0]}" not in candidate set ` +
+					`(query="${query}" ${formatDroppedSummary(verdict.dropped)})`,
+			};
+	}
+}
+
+// drop 内訳は warn / throw 双方に載せる: 「何件落とした上で残ったか」が、残存 FP (resolveDarkAssertViolations の
+// doc 参照) と真の破損を dev で切り分ける手掛かりになる。
+function formatDroppedSummary(dropped: DarkAssertDropCounts): string {
+	const { staleTruth, unauthorized, unreadable } = dropped;
+	return `droppedTruth={stale:${staleTruth},unauthorized:${unauthorized},unreadable:${unreadable}}`;
 }
 
 /**
@@ -627,8 +673,23 @@ export type DarkAssertVerdict =
 	| { kind: "stale" }
 	/** reindex または truth staleness の解消で violation が消えた (warn 相当)。 */
 	| { kind: "resolved"; dropped: DarkAssertDropCounts }
+	/**
+	 * 再検証の差し戻し上限に達した (warn 相当、#410 Finding 1)。
+	 * 書き換え churn が続いて epoch が動き続ける状態で、判定不能として打ち切ったことを表す。
+	 * violated ではないので throw しない (= その回の真の破損検出は保証しない)。
+	 */
+	| { kind: "exhausted"; dropped: DarkAssertDropCounts; rounds: number }
 	/** 真の superset 破損 (throw 相当)。dropped は「何件落とした上で残ったか」の切り分け用。 */
 	| { kind: "violated"; violations: string[]; dropped: DarkAssertDropCounts };
+
+/**
+ * 検証済み file の epoch 変化による再検証の差し戻し上限 (#410 Finding 1)。
+ * 1 round = 「violated 確定直前に epoch 変化を検出して差し戻した」1 回。epoch が動かなければ
+ * 発火しないので、通常の retry (各 file 高々 1 回検証) のコストには影響しない。
+ * 3 に置くのは、watcher latency 窓 (数百 ms) 内の正当な書き換えは 1〜2 サイクルで吸収され、
+ * それを超えて epoch が動き続けるのは持続的な連続書き込み = 判定自体が不能な状況だから。
+ */
+const DARK_ASSERT_MAX_REVERIFY_ROUNDS = 3;
 
 /**
  * dark assert の violation 判定 (retry + verdict)。search.ts の副作用から切り離した
@@ -646,16 +707,19 @@ export type DarkAssertVerdict =
  *   恒常的に読めない file は次回検索の truth scan でも hit しない (= violation が立たない) ため
  *   見逃しは transient な 1 回に限られ、読めるようになれば次回検索で回収される。
  *
- * **各 file の再検証は高々 1 回**。ただし retry 中の並走 index 更新 (idle fill 等) で新たに
- * violation 化した file は、未検証のまま throw させず次周で検証する (recheck の入口から
- * Finding 1 と同型の FP が入るのを塞ぐ)。全 violation が検証済みになった時点で violated と
- * 判定するため、「再索引し続けて破損を塗りつぶす」方向には劣化しない (worklist は file 集合で有限)。
+ * **各 file の再検証は epoch が変わらない限り高々 1 回**。retry 中の並走 index 更新 (idle fill 等) で
+ * 新たに violation 化した file は、未検証のまま throw させず次周で検証する (recheck の入口から
+ * Finding 1 と同型の FP が入るのを塞ぐ)。worklist は file 集合で有限、差し戻しは下記の上限付きなので
+ * 「再索引し続けて破損を塗りつぶす」方向には劣化しない。
  *
- * **既知の残存 FP**: 検証済み file が retry 窓中 (他 file の readFile await 中) に正当に
- * 書き換えられ、watcher flush → idle fill で新内容 index → 再び violation 化すると、
- * 「検証済みなので再検証しない」規則により violated へ落ちる。verified は path のみで
- * epoch を持たないため区別できない。dev/e2e 専用 assert かつ ms オーダーの窓であり、
- * 完全な解消には検証時 epoch の記録と epoch 変化時の再検証が要る (follow-up issue で追跡)。
+ * **検証済み file の staleness 対策 (#410 Finding 1)**: 検証時に capture した epoch を記録し、
+ * violated 確定の直前に epoch が変化した file を再検証へ差し戻す。これにより「retry 窓中の
+ * 正当な書き換え → invalidate → idle fill 再 index」で検証済み file が再 violation 化する経路の
+ * false positive は、**invalidate が epoch bump として観測できる範囲で**発生しなくなる。限界:
+ * - 差し戻しは {@link DARK_ASSERT_MAX_REVERIFY_ROUNDS} 回まで。持続的な書き換え churn で上限に
+ *   達した場合は判定不能として exhausted (warn) に倒し violated としない
+ *   (= その回の真の破損検出は保証しない)。churn 下で throw すると塞いだはずの FP を再導入するため。
+ * - epoch bump を経ない状態破損 (fileEpoch 自体の不整合等) はこの機構の対象外。
  */
 export async function resolveDarkAssertViolations(
 	queryLower: string,
@@ -669,20 +733,41 @@ export async function resolveDarkAssertViolations(
 	// watcher-latency 窓の可能性: 違反 file を disk から再読 → indexFile (現 epoch capture) して
 	// 再度 collectViolations を呼ぶ。解消すれば window とみなして resolved、残れば真の破損。
 	const dropped: DarkAssertDropCounts = { staleTruth: 0, unauthorized: 0, unreadable: 0 };
-	const verified = new Set<string>();
+	// path → 検証に使った snapshot の epoch。path だけの Set にすると「検証後に内容が変わった file」を
+	// 区別できず、正当な書き換え由来の再 violation を真の破損と誤認する (#410 Finding 1)。
+	const verifiedEpoch = new Map<string, number>();
+	let reverifyRounds = 0;
 	while (true) {
-		const pending = violations.filter((p) => !verified.has(p));
-		// 残 violation が全て検証済み = fresh text が query を含むのに候補外 → 真の破損。
-		if (pending.length === 0) return { kind: "violated", violations, dropped };
+		const pending = violations.filter((p) => !verifiedEpoch.has(p));
+		if (pending.length === 0) {
+			// 残 violation が全て検証済み。ただし violated を確定する前に、検証に使った snapshot が
+			// まだ現行かを epoch で確認する。変化していれば検証結果は当てにならないので差し戻す。
+			const changed = violations.filter((p) => deps.currentEpochOf(p) !== verifiedEpoch.get(p));
+			// epoch 不変 = fresh text が query を含むのに候補外 → 真の破損。
+			if (changed.length === 0) return { kind: "violated", violations, dropped };
+			reverifyRounds++;
+			if (reverifyRounds > DARK_ASSERT_MAX_REVERIFY_ROUNDS) {
+				return { kind: "exhausted", dropped, rounds: DARK_ASSERT_MAX_REVERIFY_ROUNDS };
+			}
+			for (const p of changed) verifiedEpoch.delete(p);
+			continue;
+		}
 		for (const p of pending) {
 			if (deps.isStale()) return { kind: "stale" };
-			verified.add(p);
+			// epoch は file ごとに 1 度だけ capture し、**indexFile に渡す値と検証済みマークを同一**にする。
+			// - read より先: 逆順だと bump 後の epoch を capture して stale text が新 epoch で valid 化する
+			//   race を assert 自身が作り出す (Phase D round 1 Fable W1)。
+			// - indexFile 後に取り直さない: capture→read 間の invalidate で indexFile が no-op になった
+			//   ケースでも「現行 epoch で検証済み」に見えてしまい、上の差し戻しが効かなくなる。
+			// - auth より先: capture が早い分だけ indexFile の一致判定が保守側に倒れるだけで害はなく、
+			//   drop する file にも検証済みマークが付くので二重 drop カウントを構造的に防げる。
+			const epoch = deps.currentEpochOf(p);
+			verifiedEpoch.set(p, epoch);
 			if (!(await deps.isRealPathAllowed(p))) {
 				truth.delete(p);
 				dropped.unauthorized++;
 				continue;
 			}
-			const epoch = deps.currentEpochOf(p);
 			const text = await deps.readFile(p);
 			if (text === null) {
 				truth.delete(p);
