@@ -24,6 +24,12 @@ export interface IdleFillDeps {
 	/**
 	 * file を readFile する。失敗時は throw して呼び手が catch/skip する。
 	 * 呼び手は `resolveAllowed` が返した **解決済み path** を渡す (#406 Finding 2)。
+	 *
+	 * **末端 symlink を拒否する実装 (`readFileUtf8NoFollow`) を注入すること** (#412)。
+	 * これは index 取り込み専用 read で、認可 (`resolveAllowed`) から read までの間に末端
+	 * component を symlink へ差し替えられる窓を open 時点で閉じるための契約。plain readFile を
+	 * 注入するとその窓が再開する。型では強制できないため契約として明文化する
+	 * (production の wiring は search.ts の kickIdleFill 呼び出し側)。
 	 */
 	readFile(ioPath: string): Promise<string>;
 	/** entry がまだ生きているか (refCount > 0 で map に残っているか)。 */

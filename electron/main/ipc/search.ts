@@ -15,6 +15,7 @@ import type {
 import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed, isIndexableResolution, resolveInsideRoot } from "../utils/path-guard";
+import { readFileUtf8NoFollow } from "../utils/read-nofollow";
 import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
@@ -31,7 +32,7 @@ import {
 	isInRanges,
 	maskRanges,
 } from "../utils/search-pure";
-import { kickIdleFill } from "./index-fill";
+import { type IdleFillDeps, kickIdleFill } from "./index-fill";
 import {
 	type ContentCacheHandle,
 	getCachedExistingStems,
@@ -80,8 +81,13 @@ async function processMdFilesParallel(
 		index?: InvertedIndexHandle;
 		// L3 piggyback indexing 直前の realpath 再認可用 root。指定時のみ index を養う file の
 		// realpath が root 内側であることを確認する (#394 Phase D / #399 Finding 2)。
-		// scan (process 呼び出し) には影響しない — 既存挙動と同じく readFile 結果は
-		// symlink 越しでも scan 結果に反映される。
+		// ゲートに弾かれた file (workspace 外 symlink / alias) の内容は既存挙動どおり scan 結果に
+		// 反映される — 認可の境界は「index に載せない」であって「検索結果に出さない」ではない。
+		// **ただし指定時は scan に影響し得る** (#412): ゲートを通って index 対象と判定された file は
+		// 末端 symlink を拒否する fd read で読むため、認可 (T1) から read (T2) の間に末端を
+		// symlink へ差し替えられた file は read 失敗として skip され、その pass の scan 結果からも
+		// 落ちる。正常系では発火しない (ゲート通過 = 末端は非 symlink と確認済み) ので、
+		// 影響は実際に swap が起きた 1 pass × 1 file に限られる。
 		indexRoot?: string;
 		// piggyback indexing を完全に抑止する。dual-run assert の全走査側で使い、
 		// index への副作用二重化を防ぐ (candidates 側で既に養った index を汚さない)。
@@ -172,13 +178,29 @@ async function processMdFilesParallel(
 				// ioPath (index 対象) か null (index 対象外) が入っているので、この 1 つの述語で
 				// 「workspace 外 / alias / そもそも index 対象外」を全て弾ける。
 				const indexable = isIndexableResolution(resolvedForIndex, ioPath);
+				// ゲートを **評価した上で** index 対象と判定した file だけ、末端 symlink を拒否する
+				// fd read で読む (#412)。この 2 条件の conjunction が成り立つとき、かつそのときだけ
+				// resolvedForIndex === ioPath = 「realpath が入力 path と一致する = 末端は symlink では
+				// ない」を確認済みなので、正常系で O_NOFOLLOW が発火することはない
+				// (ゲート評価済みでも alias / workspace 外と判定された file は resolvedForIndex が
+				// ioPath と一致しないため、indexable まで含めて初めてこの含意が立つ)。
+				// 発火する = 認可 (T1) から read (T2) の間に末端が symlink へ swap された瞬間で、
+				// 読める内容は認可した実体ではないため read 失敗として skip するのが正しい。
+				// ゲート未評価の file (index 無効 / 既に valid / indexRoot 未指定) はその前提を
+				// 持たないので従来どおり plain read。scan (process) の契約 = workspace 外を指す
+				// symlink の内容も検索結果に出す、は非 indexable 経路が plain read のままなので不変。
+				const useNoFollow = indexGateEvaluated && indexable;
 				let text: string;
 				try {
-					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
-					// 検索結果には出る。index 対象 file のみ解決済み path から読む (内容は同一)。
-					text = await fsp.readFile(resolvedForIndex ?? ioPath, "utf8");
+					// else 側 (非 indexable / ゲート未評価) は既存挙動どおり raw path または解決済み path を
+					// 読む: workspace 外を指す symlink の内容でも検索結果には出る (#406 / #399)。
+					// then 側は ioPath をそのまま渡す — ゲートが resolvedForIndex === ioPath を
+					// 確認済みなので「解決済み path を読む」(#406) と同値になる。
+					text = useNoFollow
+						? await readFileUtf8NoFollow(ioPath)
+						: await fsp.readFile(resolvedForIndex ?? ioPath, "utf8");
 				} catch {
-					return; // 読み取り失敗ファイルは skip
+					return; // 読み取り失敗ファイルは skip (#412 の ELOOP もこの経路に倒れる)
 				}
 				// readFile の await 中に stale / bail 化していたら per-file 処理は skip して
 				// cancel / 打ち切り反応性を上げる（大きな file ほど効く）。
@@ -494,13 +516,9 @@ async function searchFilesImpl(
 	// 再 open で新 entry に切り替わっても、旧 handle 経由の indexFile は identity check で
 	// no-op になるため、旧 entry 時代に読んだ text が新 entry の index に混入する race を防ぐ。
 	if (indexHandle !== undefined) {
-		kickIdleFill(canonicalRoot, {
-			listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
-			readFile: (p) => fsp.readFile(p, "utf8"),
-			isAlive: () => hasFileListCacheEntry(canonicalRoot),
-			index: indexHandle,
-			resolveAllowed: (p) => resolveInsideRoot(p, canonicalRoot),
-		});
+		// deps は **必ず buildIdleFillDeps 経由**で作ること (#412)。inline literal に戻すと
+		// readFile の nofollow 契約が wiring pin test をすり抜けて退行し得る。
+		kickIdleFill(canonicalRoot, buildIdleFillDeps(canonicalRoot, indexHandle));
 	}
 	// Phase D dual-run assert (#394 Phase D / #399 Finding 1)。
 	// candidates 経由 (本 pass) と全走査 (index 抑止) の 2 pass を実行して file hit 集合を突合。
@@ -525,6 +543,32 @@ async function searchFilesImpl(
 		await runDarkAssert(indexHandle, canonicalRoot, io, input, query, isStale);
 	}
 	return { results, truncated };
+}
+
+// idle fill の deps 構築。**inline literal ではなく named function にしてある**のは、
+// #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollow) を
+// 注入する」契約が型では強制できず wiring 側にしか載らないため、test から直接 pin できる
+// ようにするため (plain readFile への退行を殺す)。契約の詳細は read-nofollow.ts の doc。
+function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHandle): IdleFillDeps {
+	return {
+		listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
+		readFile: (p) => readFileUtf8NoFollow(p),
+		isAlive: () => hasFileListCacheEntry(canonicalRoot),
+		index: indexHandle,
+		resolveAllowed: (p) => resolveInsideRoot(p, canonicalRoot),
+	};
+}
+
+// dark assert が violation file を再 index する際の read。piggyback / idle fill と同じ fd read に
+// 揃える (#412)。この経路は invariant 違反を検出して再取り込みする monitor 自身なので、監視側が
+// 末端 swap 窓を開けたままなのは自己矛盾になる (#413 の「到達不能の論証に頼らず閉じる」と同方針)。
+// 読めない file は null = 「再検証できない」に倒す (ELOOP もここに入る)。
+async function readForReindex(p: string): Promise<string | null> {
+	try {
+		return await readFileUtf8NoFollow(p);
+	} catch {
+		return null;
+	}
 }
 
 // L2 の読み取り専用 view。set を no-op にして「この pass の read は cache を汚さない」を型で表す。
@@ -588,13 +632,9 @@ async function runDarkAssert(
 		isRealPathAllowed: async (p) =>
 			isIndexableResolution(await resolveInsideRoot(p, canonicalRoot), p),
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
-		readFile: async (p) => {
-			try {
-				return await fsp.readFile(p, "utf8");
-			} catch {
-				return null;
-			}
-		},
+		// **必ず readForReindex を使うこと** (#412)。inline の plain read に戻すと wiring pin
+		// test をすり抜けて末端 swap 窓が再開する。
+		readFile: readForReindex,
 		indexFile: (p, text, epoch) => {
 			indexHandle.indexFile(p, text, epoch);
 		},
@@ -712,7 +752,12 @@ export interface DarkAssertDropCounts {
 	 * triage で「削除された file」「workspace 内 alias」を security signal と読み違えないこと。
 	 */
 	unauthorized: number;
-	/** 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。 */
+	/**
+	 * 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。
+	 * **#412 以降は ELOOP (末端が symlink = 認可後に swap された疑い) もここに計上される**。
+	 * triage では良性の transient 失敗と混在する点に注意 — 恒常的に増える場合は
+	 * 末端 swap の可能性を検討すること。
+	 */
 	unreadable: number;
 }
 
@@ -1159,6 +1204,8 @@ export function registerSearchIpc(): void {
 
 export const __testing = {
 	processMdFilesParallel,
+	buildIdleFillDeps,
+	readForReindex,
 	searchFilesImpl,
 	searchFilenamesImpl,
 	scanUnresolvedWikilinksImpl,
