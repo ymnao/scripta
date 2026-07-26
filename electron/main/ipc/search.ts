@@ -207,6 +207,13 @@ async function processMdFilesParallel(
 				// 持たないので従来どおり plain read。scan (process) の契約 = workspace 外を指す
 				// symlink の内容も検索結果に出す、は非 indexable 経路が plain read のままなので不変。
 				const useNoFollow = indexGateEvaluated && indexable;
+				// ゲート未評価の枝で使う symlink 判定は readFile と **同時に** 発行して I/O 待ちに重ねる
+				// (await はしない)。直列に await すると lstat 1 回ぶん pLimit のスロット占有が伸び、
+				// disabled workspace のように全 file がこの枝に流れるケースで並列度が実質的に薄まる。
+				// isNonSymlinkForCache は reject しない契約なので、read が失敗して early return しても
+				// この promise は unhandled rejection にならず、結果が捨てられるだけで済む。
+				const nonSymlinkForCache =
+					!indexGateEvaluated && cache !== undefined ? isNonSymlinkForCache(ioPath) : undefined;
 				let text: string;
 				try {
 					// else 側 (非 indexable / ゲート未評価) は既存挙動どおり raw path または解決済み path を
@@ -233,27 +240,22 @@ async function processMdFilesParallel(
 				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。workspace 内 alias の
 				// 場合は解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
-				// **2 つの枝を使い分ける理由**: ゲート評価済みの read は resolveInsideRoot が末端非 symlink
-				// まで確認済みなので indexable の再利用で足り、正常系 (index 有効 + 未 index) の syscall 数は
-				// 従来と完全に不変。lstat が乗るのは「ゲートを評価しなかった L2-miss」= index disabled /
-				// indexRoot 未指定 / 既に index 済みで valid の 3 ケースだけで、いずれも既に open + read を
-				// 済ませた経路なので相対コストは小さい (#413 Finding 1 が削った「検索ごとに全 file 分の
-				// 非キャッシュ realpath」とは桁が違う)。
-				// **残る窓**: (1) read (T1) と lstat (T2) の間に ioPath を symlink へ差し替えられると、
-				// T1 で読んだ実体の内容を「symlink だった」と誤判定して L2 抑止する (安全側に外す) か、
-				// 逆順の swap なら symlink 経由の内容を非 symlink と判定して載せうる。後者は L2 entry
-				// 1 つの寿命ぶん stale 内容が検索結果に出るところまでで、index への流入は indexable 側
-				// (ゲート評価済みの枝) が別途塞いでいる。単一 syscall 窓まで縮んでおり、watcher の
-				// evict が最終防衛線として効く。
+				// **2 つの枝を使い分ける理由**: ゲート評価済みの枝は syscall なしで判定できる (根拠は
+				// isNonSymlinkForCache の doc 参照)。lstat が乗るのは「ゲートを評価しなかった L2-miss」=
+				// index disabled / indexRoot 未指定 / 既に index 済みで valid の 3 ケースだけ。
+				// **残る窓**: (1) read と lstat は並行に発行するので観測時点が完全には一致せず、その間に
+				// ioPath を差し替えられると、実体の内容を「symlink だった」と誤判定して L2 抑止する
+				// (安全側に外す) か、逆順の swap なら symlink 経由の内容を非 symlink と判定して載せうる。
+				// 後者は L2 entry 1 つの寿命ぶん stale 内容が検索結果に出るところまでで、index への流入は
+				// indexable 側 (ゲート評価済みの枝) が別途塞いでいる。watcher の evict が最終防衛線。
 				// (2) **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は lstat でも
 				// realpath でも「自分自身」を返すため両方の名前が非 symlink として L2 に載り、片方の
 				// 名前で来た modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が
 				// 別 (ino/dev 突合が要る) なので本 fix のスコープ外として受容する。
-				// **判定を 2 箇所に分ける理由**: ゲート評価済みの枝は syscall なしで判定できるので
-				// 従来と同じ位置で set する。ゲート未評価の枝だけ lstat の await が要るが、それを
-				// options.process の **前** に置くと scan (検索結果への反映) が lstat 1 回ぶん遅れ、
-				// さらに await 境界が増えるぶん stop 判定の粒度も変わる。L2 への格納は scan 結果に
-				// 影響しない純粋な最適化なので、process の後ろに回して scan 経路を完全に不変に保つ。
+				// **set が 2 箇所に分かれる理由**: ゲート評価済みの枝は同期に判定できるので従来と同じ
+				// 位置で set する。未評価の枝は lstat の await が要り、それを options.process の **前** に
+				// 置くと scan (検索結果への反映) に新しい await 境界が挟まって stop 判定の粒度が変わる。
+				// L2 への格納は scan 結果に影響しない純粋な最適化なので、process の後ろに回す。
 				if (indexGateEvaluated && indexable) cache?.set(ioPath, text, genAtStart);
 				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
@@ -262,11 +264,11 @@ async function processMdFilesParallel(
 				}
 				options.process(inFile, text);
 				// ゲート未評価の枝 (index disabled / indexRoot 未指定 / 既に index 済みで valid)。
-				// genAtStart は read 開始前に capture したものをそのまま使う: 判定を後ろに回したぶん
-				// 待ち時間は伸びるが、その間に evict が挟まれば generation 不一致で set が no-op に
-				// なるだけで、格納方向に緩むことはない。
-				if (!indexGateEvaluated && cache !== undefined && (await isNonSymlinkForCache(ioPath))) {
-					cache.set(ioPath, text, genAtStart);
+				// genAtStart は read 開始前に capture したものをそのまま使う: 判定を待つぶん set は
+				// 遅れるが、その間に evict が挟まれば generation 不一致で no-op になるだけで、
+				// 格納方向に緩むことはない。
+				if (nonSymlinkForCache !== undefined && (await nonSymlinkForCache)) {
+					cache?.set(ioPath, text, genAtStart);
 				}
 			}),
 		),

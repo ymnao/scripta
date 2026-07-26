@@ -23,6 +23,7 @@ vi.mock("../utils/path-guard", async (importOriginal) => {
 	};
 });
 
+import { makeFakeCache, makeFakeIndex, never } from "../test-utils/search-fakes";
 import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 
 const actualPathGuard =
@@ -30,7 +31,6 @@ const actualPathGuard =
 
 import { resolveInsideRoot } from "../utils/path-guard";
 import { __testing } from "./search";
-import type { ContentCacheHandle, InvertedIndexHandle } from "./search-cache";
 
 const { processMdFilesParallel } = __testing;
 
@@ -49,60 +49,6 @@ beforeEach(async () => {
 afterEach(async () => {
 	await ws.cleanup();
 });
-
-interface FakeIndex {
-	handle: InvertedIndexHandle;
-	indexed: Map<string, string>;
-	disabled: { value: boolean };
-}
-
-function makeFakeIndex(): FakeIndex {
-	const indexed = new Map<string, string>();
-	const disabled = { value: false };
-	const handle: InvertedIndexHandle = {
-		indexFile(ioPath: string, text: string, _capturedEpoch: number): void {
-			indexed.set(ioPath, text);
-		},
-		currentEpochOf(_ioPath: string): number {
-			return 0;
-		},
-		isIndexedAndValid(ioPath: string): boolean {
-			return indexed.has(ioPath);
-		},
-		getCandidates() {
-			return { kind: "fallback" } as const;
-		},
-		verify(): void {},
-		collectViolations(): string[] | null {
-			return null;
-		},
-		get isDisabled(): boolean {
-			return disabled.value;
-		},
-	};
-	return { handle, indexed, disabled };
-}
-
-function makeFakeCache(preloaded: Map<string, string>): {
-	cache: ContentCacheHandle;
-	stored: Map<string, string>;
-} {
-	const stored = new Map<string, string>();
-	const cache: ContentCacheHandle = {
-		get(ioPath: string): string | undefined {
-			return preloaded.get(ioPath);
-		},
-		set(ioPath: string, text: string, _capturedGeneration: number): void {
-			stored.set(ioPath, text);
-		},
-		get generation(): number {
-			return 0;
-		},
-	};
-	return { cache, stored };
-}
-
-const never = (): boolean => false;
 
 describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", () => {
 	it("L2-miss 経路: disabled ならゲートも indexFile も走らないが scan と L2 population は続く", async () => {
