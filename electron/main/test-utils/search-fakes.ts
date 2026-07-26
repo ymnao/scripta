@@ -52,28 +52,36 @@ export interface FakeCache {
 	cache: ContentCacheHandle;
 	/** cache.set で格納された内容 (admission を通ったもの)。 */
 	stored: Map<string, string>;
+	/** cache.set に渡された capturedGeneration (stale-insert race 防御の pin 用)。 */
+	captured: Map<string, number>;
+	/** handle が返す generation。test 中に bump して evict の発生を模す。 */
+	generation: { value: number };
 }
 
 /**
  * `preloaded` を L2-hit として返し、`set` された内容は `stored` に貯める
- * ContentCacheHandle fake。admission cutoff と generation 判定は持たない
- * (呼び手が set を呼んだかどうかだけを観測するため)。
+ * ContentCacheHandle fake。admission cutoff と generation 判定は **持たない**
+ * (呼び手が set を呼んだか / どの generation を渡したかだけを観測するため、
+ * 実 handle のように不一致で破棄したりはしない)。
  * `preloaded` 省略時は常に L2-miss になる。
  */
 export function makeFakeCache(preloaded: Map<string, string> = new Map()): FakeCache {
 	const stored = new Map<string, string>();
+	const captured = new Map<string, number>();
+	const generation = { value: 0 };
 	const cache: ContentCacheHandle = {
 		get(ioPath: string): string | undefined {
 			return preloaded.get(ioPath);
 		},
-		set(ioPath: string, text: string, _capturedGeneration: number): void {
+		set(ioPath: string, text: string, capturedGeneration: number): void {
 			stored.set(ioPath, text);
+			captured.set(ioPath, capturedGeneration);
 		},
 		get generation(): number {
-			return 0;
+			return generation.value;
 		},
 	};
-	return { cache, stored };
+	return { cache, stored, captured, generation };
 }
 
 /** `processMdFilesParallel` の isStale / shouldBail に渡す「打ち切らない」判定。 */

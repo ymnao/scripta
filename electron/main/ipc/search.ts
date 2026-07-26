@@ -212,8 +212,12 @@ async function processMdFilesParallel(
 				// disabled workspace のように全 file がこの枝に流れるケースで並列度が実質的に薄まる。
 				// isNonSymlinkForCache は reject しない契約なので、read が失敗して early return しても
 				// この promise は unhandled rejection にならず、結果が捨てられるだけで済む。
+				// set が no-op と分かっている read-only handle (dark assert の truth pass) では
+				// 判定結果が必ず捨てられるので発行しない。
 				const nonSymlinkForCache =
-					!indexGateEvaluated && cache !== undefined ? isNonSymlinkForCache(ioPath) : undefined;
+					!indexGateEvaluated && cache !== undefined && cache.isReadOnly !== true
+						? isNonSymlinkForCache(ioPath)
+						: undefined;
 				let text: string;
 				try {
 					// else 側 (非 indexable / ゲート未評価) は既存挙動どおり raw path または解決済み path を
@@ -242,12 +246,19 @@ async function processMdFilesParallel(
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
 				// **2 つの枝を使い分ける理由**: ゲート評価済みの枝は syscall なしで判定できる (根拠は
 				// isNonSymlinkForCache の doc 参照)。lstat が乗るのは「ゲートを評価しなかった L2-miss」=
-				// index disabled / indexRoot 未指定 / 既に index 済みで valid の 3 ケースだけ。
+				// index disabled / indexRoot 未指定 / 既に index 済みで valid / index handle 未提供
+				// (suppressIndex を含む) の 4 ケース。ただし最後のうち dark assert の truth pass は
+				// read-only handle なので上の isReadOnly 判定で lstat 自体を発行しない。
 				// **残る窓**: (1) read と lstat は並行に発行するので観測時点が完全には一致せず、その間に
 				// ioPath を差し替えられると、実体の内容を「symlink だった」と誤判定して L2 抑止する
 				// (安全側に外す) か、逆順の swap なら symlink 経由の内容を非 symlink と判定して載せうる。
-				// 後者は L2 entry 1 つの寿命ぶん stale 内容が検索結果に出るところまでで、index への流入は
-				// indexable 側 (ゲート評価済みの枝) が別途塞いでいる。watcher の evict が最終防衛線。
+				// 後者で載った内容の行き先は 2 つある。read 時点の index への直接流入は indexable 側
+				// (ゲート評価済みの枝) が塞ぐが、**L2-hit piggyback 経由の流入は塞げない**: その file が
+				// 後に index 側の内部 evict で invalid 化すると、L2-hit 経路が cache の内容をそのまま
+				// indexFile する (hit 時の fresh ゲートは path の現在状態しか見ず、内容の出所は検査
+				// しない)。これは L2-hit 経路のコメントが #406 の受容窓として既に明記している経路と
+				// 同じもので、本 fix はその入口を「ゲート未評価 read」のぶんだけ狭める。
+				// watcher の evict が最終防衛線。
 				// (2) **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は lstat でも
 				// realpath でも「自分自身」を返すため両方の名前が非 symlink として L2 に載り、片方の
 				// 名前で来た modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が
@@ -620,6 +631,11 @@ function toReadOnlyCacheHandle(
 		get generation(): number {
 			return handle.generation;
 		},
+		// set が no-op である以上、admission 判定の lstat (#416) を払う意味がない。
+		// truth pass は全 file を走査するので、この marker が無いと 1 pass で全 file 分の
+		// 捨てられる lstat が出る (suppressIndex により index が undefined = ゲート未評価に
+		// なるので、marker が無ければ全 file が判定対象に入る)。
+		isReadOnly: true,
 	};
 }
 

@@ -21,6 +21,7 @@ vi.mock("electron", () => ({
 import { makeFakeCache, makeFakeIndex, never } from "../test-utils/search-fakes";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { __testing } from "./search";
+import type { ContentCacheHandle } from "./search-cache";
 
 const { processMdFilesParallel } = __testing;
 
@@ -139,30 +140,6 @@ describe.skipIf(process.platform === "win32")(
 			expect(stored.has(link)).toBe(false);
 			expect(stored.get(real)).toBe("alphaword body");
 		});
-
-		it("lstat が失敗したら fail-closed で L2 に載せない", async () => {
-			const a = join(root, "a.md");
-			await writeFile(a, "alpha");
-			const { handle, disabled } = makeFakeIndex();
-			disabled.value = true;
-			const { cache, stored } = makeFakeCache();
-			const scanned: string[] = [];
-			vi.spyOn(fsp, "lstat").mockRejectedValue(new Error("EIO"));
-
-			await processMdFilesParallel([a], [a], never, {
-				index: handle,
-				indexRoot: root,
-				cache,
-				process: (_inFile, text) => {
-					scanned.push(text);
-				},
-			});
-
-			// 判定不能なら載せない。被害は次回検索の read が 1 回増えることだけで、
-			// scan 結果は L2 を経由しないので不変。
-			expect(stored.size).toBe(0);
-			expect(scanned).toEqual(["alpha"]);
-		});
 	},
 );
 
@@ -209,5 +186,89 @@ describe("processMdFilesParallel: ゲート評価済み read は lstat を足さ
 
 		expect(stored.get(a)).toBe("alpha");
 		expect(stored.get(b)).toBe("beta");
+	});
+
+	// 以下は symlink を作らないので win32 でも実行する (spy と handle の形だけで固定できる)。
+	it("lstat が失敗したら fail-closed で L2 に載せない", async () => {
+		const a = join(root, "a.md");
+		await writeFile(a, "alpha");
+		const { handle, disabled } = makeFakeIndex();
+		disabled.value = true;
+		const { cache, stored } = makeFakeCache();
+		const scanned: string[] = [];
+		vi.spyOn(fsp, "lstat").mockRejectedValue(new Error("EIO"));
+
+		await processMdFilesParallel([a], [a], never, {
+			index: handle,
+			indexRoot: root,
+			cache,
+			process: (_inFile, text) => {
+				scanned.push(text);
+			},
+		});
+
+		// 判定不能なら載せない。被害は次回検索の read が 1 回増えることだけで、
+		// scan 結果は L2 を経由しないので不変。
+		expect(stored.size).toBe(0);
+		expect(scanned).toEqual(["alpha"]);
+	});
+
+	it("set には read 開始前に capture した generation を渡す", async () => {
+		// ゲート未評価の枝は lstat の await を挟んでから set するので、capture から set までの
+		// 窓が第 1 の枝より長い。ここで set 時点の generation を取り直すと、read 中に evict が
+		// 挟まった場合に古い text を新しい generation で格納してしまう (stale-insert race)。
+		// process (= read 完了後・set 前に必ず走る) で generation を bump し、set が受け取った
+		// 値が bump 前のままであることを固定する。
+		const a = join(root, "a.md");
+		await writeFile(a, "alpha");
+		const { handle, disabled } = makeFakeIndex();
+		disabled.value = true;
+		const { cache, stored, captured, generation } = makeFakeCache();
+
+		await processMdFilesParallel([a], [a], never, {
+			index: handle,
+			indexRoot: root,
+			cache,
+			process: () => {
+				generation.value = 7;
+			},
+		});
+
+		expect(stored.get(a)).toBe("alpha");
+		expect(captured.get(a)).toBe(0);
+	});
+
+	it("read-only handle (set が no-op) には lstat を払わない", async () => {
+		// dark assert の truth pass は suppressIndex で index を落とすためゲート未評価になるが、
+		// cache は set が no-op の read-only view。判定結果が必ず捨てられるので lstat も発行しない。
+		const a = join(root, "a.md");
+		await writeFile(a, "alpha");
+		const { handle } = makeFakeIndex();
+		const { cache: inner, stored } = makeFakeCache();
+		const readOnly: ContentCacheHandle = {
+			get: (ioPath) => inner.get(ioPath),
+			set: () => {},
+			get generation(): number {
+				return inner.generation;
+			},
+			isReadOnly: true,
+		};
+		const lstatSpy = vi.spyOn(fsp, "lstat");
+		const scanned: string[] = [];
+
+		await processMdFilesParallel([a], [a], never, {
+			index: handle,
+			indexRoot: root,
+			cache: readOnly,
+			suppressIndex: true,
+			process: (_inFile, text) => {
+				scanned.push(text);
+			},
+		});
+
+		expect(lstatSpy).not.toHaveBeenCalled();
+		expect(stored.size).toBe(0);
+		// scan は read-only handle でも従来どおり回る。
+		expect(scanned).toEqual(["alpha"]);
 	});
 });
