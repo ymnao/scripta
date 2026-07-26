@@ -49,23 +49,6 @@ import {
 // 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
 const ioLimit = pLimit(16);
 
-// L2 admission の symlink 判定 (#416 Finding 1)。realpath ゲートを **評価しなかった** read
-// だけがこの判定を使う: ゲート評価済みの read は resolveInsideRoot が既に「解決先が
-// 入力 path と一致する = 末端は symlink ではない」まで確認しているため、判定は
-// indexable の再利用で足りる (syscall を増やさない)。
-// realpath ではなく lstat を使うのは #413 Finding 1 が削ったコスト (非キャッシュ realpath を
-// 検索ごとに全 file 分) を復活させないため。alias / workspace 外 symlink の区別には realpath が
-// 要るが、L2 抑止の観点では両者とも「載せない」が正解なので symlink かどうかだけで足りる。
-// lstat が失敗したら fail-closed で「載せない」に倒す: L2 は純粋な最適化で、載せ損ねの被害は
-// 次回検索の read が 1 回増えることだけ (scan 結果は L2 を経由せず毎回 read するので不変)。
-async function isNonSymlinkForCache(ioPath: string): Promise<boolean> {
-	try {
-		return !(await fsp.lstat(ioPath)).isSymbolicLink();
-	} catch {
-		return false;
-	}
-}
-
 // 全 .md を ioLimit 下で並列に読み込んで per-file callback を呼ぶ scan 系 helper。
 // searchFilesImpl / scanUnresolvedWikilinksImpl / scanBacklinksImpl が共有する
 // boilerplate (Promise.all + ioLimit + isStale 2 重 check + try/catch readFile) を集約する。
@@ -207,26 +190,35 @@ async function processMdFilesParallel(
 				// 持たないので従来どおり plain read。scan (process) の契約 = workspace 外を指す
 				// symlink の内容も検索結果に出す、は非 indexable 経路が plain read のままなので不変。
 				const useNoFollow = indexGateEvaluated && indexable;
-				// ゲート未評価の枝で使う symlink 判定は readFile と **同時に** 発行して I/O 待ちに重ねる
-				// (await はしない)。直列に await すると lstat 1 回ぶん pLimit のスロット占有が伸び、
-				// disabled workspace のように全 file がこの枝に流れるケースで並列度が実質的に薄まる。
-				// isNonSymlinkForCache は reject しない契約なので、read が失敗して early return しても
-				// この promise は unhandled rejection にならず、結果が捨てられるだけで済む。
-				// set が no-op と分かっている read-only handle (dark assert の truth pass) では
-				// 判定結果が必ず捨てられるので発行しない。
-				const nonSymlinkForCache =
-					!indexGateEvaluated && cache !== undefined && cache.isReadOnly !== true
-						? isNonSymlinkForCache(ioPath)
-						: undefined;
+				// ゲート未評価かつ L2 に載せうる read (cache あり) は、まず O_NOFOLLOW open を試して
+				// **その fd から読む**。成功 = 「開いた対象は symlink ではない」と「読んだ内容」が
+				// 同一 object に束ねられるので、検査と read の間に差し替える窓が存在しない (#416)。
+				const cacheAdmissionCandidate = !indexGateEvaluated && cache !== undefined;
 				let text: string;
+				// この read が「末端非 symlink と確認済みの fd」から読めたか。L2 admission の
+				// もう一方の枝 (ゲート評価済み ∧ indexable) と or を取る。
+				let readFromVerifiedFd = false;
 				try {
-					// else 側 (非 indexable / ゲート未評価) は既存挙動どおり raw path または解決済み path を
-					// 読む: workspace 外を指す symlink の内容でも検索結果には出る (#406 / #399)。
-					// then 側は ioPath をそのまま渡す — ゲートが resolvedForIndex === ioPath を
-					// 確認済みなので「解決済み path を読む」(#406) と同値になる。
-					text = useNoFollow
-						? await readFileUtf8NoFollow(ioPath)
-						: await fsp.readFile(resolvedForIndex ?? ioPath, "utf8");
+					if (useNoFollow) {
+						// ゲートが resolvedForIndex === ioPath を確認済みなので「解決済み path を読む」
+						// (#406) と同値。ここでの O_NOFOLLOW 発火 = 認可後に末端を差し替えられた瞬間で、
+						// 読める内容は認可した実体ではないため read 失敗として skip する (#412)。
+						text = await readFileUtf8NoFollow(ioPath);
+					} else if (cacheAdmissionCandidate) {
+						try {
+							text = await readFileUtf8NoFollow(ioPath);
+							readFromVerifiedFd = true;
+						} catch {
+							// ELOOP = 末端が symlink。**scan の契約は不変** なので plain read で読み直して
+							// 検索結果には出す (#399 の境界は「index に載せない」であって「検索結果に
+							// 出さない」ではない)。ELOOP 以外の失敗も同じ扱いで、readFromVerifiedFd が
+							// false のままなので L2 には載らない (fail-closed)。
+							text = await fsp.readFile(ioPath, "utf8");
+						}
+					} else {
+						// cache 無し (純 scan) 経路は従来どおり raw path または解決済み path を読む。
+						text = await fsp.readFile(resolvedForIndex ?? ioPath, "utf8");
+					}
 				} catch {
 					return; // 読み取り失敗ファイルは skip (#412 の ELOOP もこの経路に倒れる)
 				}
@@ -235,8 +227,8 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				// **L2 admission の不変条件**: 「(ゲート評価済み ∧ indexable) ∨ (lstat で非 symlink と
-				// 確認済み)」を満たす read の内容だけを L2 に載せる。どちらの枝も「格納する内容は
+				// **L2 admission の不変条件**: 「(ゲート評価済み ∧ indexable) ∨ (O_NOFOLLOW open に
+				// 成功した fd から読んだ)」read の内容だけを L2 に載せる。どちらの枝も「格納する内容は
 				// ioPath 自身の実体から読んだもの」を意味し、symlink 経由の内容は L2 に入らない。
 				// symlink を弾く理由は 2 つ。workspace 外を指す symlink の場合は
 				// 「外部内容が L2 に残る → attacker が symlink を workspace 内へ swap back →
@@ -244,43 +236,26 @@ async function processMdFilesParallel(
 				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。workspace 内 alias の
 				// 場合は解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
-				// **2 つの枝を使い分ける理由**: ゲート評価済みの枝は syscall なしで判定できる (根拠は
-				// isNonSymlinkForCache の doc 参照)。lstat が乗るのは「ゲートを評価しなかった L2-miss」=
-				// index disabled / indexRoot 未指定 / 既に index 済みで valid / index handle 未提供
-				// (suppressIndex を含む) の 4 ケース。ただし最後のうち dark assert の truth pass は
-				// read-only handle なので上の isReadOnly 判定で lstat 自体を発行しない。
-				// **残る窓**: (1) read と lstat は並行に発行するので観測時点が完全には一致せず、その間に
-				// ioPath を差し替えられると、実体の内容を「symlink だった」と誤判定して L2 抑止する
-				// (安全側に外す) か、逆順の swap なら symlink 経由の内容を非 symlink と判定して載せうる。
-				// 後者で載った内容の行き先は 2 つある。read 時点の index への直接流入は indexable 側
-				// (ゲート評価済みの枝) が塞ぐが、**L2-hit piggyback 経由の流入は塞げない**: その file が
-				// 後に index 側の内部 evict で invalid 化すると、L2-hit 経路が cache の内容をそのまま
-				// indexFile する (hit 時の fresh ゲートは path の現在状態しか見ず、内容の出所は検査
-				// しない)。これは L2-hit 経路のコメントが #406 の受容窓として既に明記している経路と
-				// 同じもので、本 fix はその入口を「ゲート未評価 read」のぶんだけ狭める。
-				// watcher の evict が最終防衛線。
-				// (2) **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は lstat でも
-				// realpath でも「自分自身」を返すため両方の名前が非 symlink として L2 に載り、片方の
-				// 名前で来た modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が
-				// 別 (ino/dev 突合が要る) なので本 fix のスコープ外として受容する。
-				// **set が 2 箇所に分かれる理由**: ゲート評価済みの枝は同期に判定できるので従来と同じ
-				// 位置で set する。未評価の枝は lstat の await が要り、それを options.process の **前** に
-				// 置くと scan (検索結果への反映) に新しい await 境界が挟まって stop 判定の粒度が変わる。
-				// L2 への格納は scan 結果に影響しない純粋な最適化なので、process の後ろに回す。
-				if (indexGateEvaluated && indexable) cache?.set(ioPath, text, genAtStart);
+				// **2 つの枝を使い分ける理由**: ゲート評価済みの枝は resolveInsideRoot が末端非 symlink
+				// まで確認済みなので追加の syscall なしで判定できる。未評価の枝 (index disabled /
+				// indexRoot 未指定 / 既に index 済みで valid / index handle 未提供) は read そのものを
+				// O_NOFOLLOW open + 同一 fd read にして、判定と内容を同じ object に束ねる。
+				// **検査した対象そのもので I/O する** ので、lstat 等の別 syscall で検査する方式に残る
+				// 「検査と read の間に差し替えられる」窓は存在しない。syscall 数も plain read と同じ
+				// (open/read/close) で、増えるのは実際に symlink だった file の失敗 open 1 回だけ。
+				// **残る窓**: **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は
+				// O_NOFOLLOW でも realpath でも素通りするため両方の名前が L2 に載り、片方の名前で来た
+				// modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が別
+				// (ino/dev 突合が要る) なので本 fix のスコープ外として受容する。
+				if ((indexGateEvaluated && indexable) || readFromVerifiedFd) {
+					cache?.set(ioPath, text, genAtStart);
+				}
 				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
 				}
 				options.process(inFile, text);
-				// ゲート未評価の枝 (index disabled / indexRoot 未指定 / 既に index 済みで valid)。
-				// genAtStart は read 開始前に capture したものをそのまま使う: 判定を待つぶん set は
-				// 遅れるが、その間に evict が挟まれば generation 不一致で no-op になるだけで、
-				// 格納方向に緩むことはない。
-				if (nonSymlinkForCache !== undefined && (await nonSymlinkForCache)) {
-					cache?.set(ioPath, text, genAtStart);
-				}
 			}),
 		),
 	);
@@ -631,11 +606,6 @@ function toReadOnlyCacheHandle(
 		get generation(): number {
 			return handle.generation;
 		},
-		// set が no-op である以上、admission 判定の lstat (#416) を払う意味がない。
-		// truth pass は全 file を走査するので、この marker が無いと 1 pass で全 file 分の
-		// 捨てられる lstat が出る (suppressIndex により index が undefined = ゲート未評価に
-		// なるので、marker が無ければ全 file が判定対象に入る)。
-		isReadOnly: true,
 	};
 }
 

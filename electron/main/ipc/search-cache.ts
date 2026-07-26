@@ -68,10 +68,6 @@ export interface ContentCacheHandle {
 	// 黙って捨てる (stale-insert race 対策)。
 	set(ioPath: string, text: string, capturedGeneration: number): void;
 	readonly generation: number;
-	// set が no-op であることを呼び手に伝える marker (search.ts の toReadOnlyCacheHandle が付ける)。
-	// 「格納しない」と分かっている pass では admission 判定 (#416 の lstat) 自体を省ける。
-	// 実 handle は付けない = undefined なので、判定側は `!== true` で読むこと。
-	readonly isReadOnly?: boolean;
 }
 
 // L3 InvertedIndex の handle。piggyback indexing は processMdFilesParallel の

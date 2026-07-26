@@ -4,7 +4,8 @@
 //
 // #413 Finding 1 で「index が disabled なら realpath ゲートを skip する」ようにした結果、
 // disabled workspace ではゲートが評価されず L2 への格納が無条件に通っていた。ここでは
-// 「ゲートを評価しなかった read は lstat で非 symlink を確認してから L2 に載せる」不変条件と、
+// 「ゲートを評価しなかった read は O_NOFOLLOW open に成功した fd から読めたときだけ L2 に載せる」
+// 不変条件 (= 検査した対象そのものから読む) と、
 // **scan (検索結果) の契約は不変** = symlink の内容も従来どおり検索結果に出ることを pin する。
 //
 // path-guard は **mock しない** (実 realpath ゲートの挙動込みで固定する)。realpath 呼び出し回数を
@@ -21,7 +22,6 @@ vi.mock("electron", () => ({
 import { makeFakeCache, makeFakeIndex, never } from "../test-utils/search-fakes";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { __testing } from "./search";
-import type { ContentCacheHandle } from "./search-cache";
 
 const { processMdFilesParallel } = __testing;
 
@@ -143,30 +143,47 @@ describe.skipIf(process.platform === "win32")(
 	},
 );
 
-describe("processMdFilesParallel: ゲート評価済み read は lstat を足さない (#416 Finding 1)", () => {
-	it("index 有効 + 未 index の通常 file では lstat を呼ばずに L2 に載せる", async () => {
-		// ゲート評価済みの枝は resolveInsideRoot が末端非 symlink まで確認済みなので、
-		// 判定は indexable の再利用で足りる。正常系 (検索 hot path) の syscall 数が
-		// 増えていないことをこの assert で守る。
+describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#416 Finding 1)", () => {
+	it("admission 判定に lstat / stat を使わない (ゲート評価済み / 未評価とも)", async () => {
+		// 判定を read と別の syscall で行うと、その 2 回の観測の間に対象を差し替えられる窓が
+		// 開く (codex-review security の指摘)。判定は「O_NOFOLLOW open に成功した fd から
+		// 読めたか」だけで表現し、lstat / stat 系は一切呼ばないことを固定する。
 		const a = join(root, "a.md");
+		const b = join(root, "b.md");
 		await writeFile(a, "alpha");
-		const { handle, indexed } = makeFakeIndex();
-		const { cache, stored } = makeFakeCache();
+		await writeFile(b, "beta");
+		const gated = makeFakeIndex();
+		const ungated = makeFakeIndex();
+		ungated.disabled.value = true;
 		const lstatSpy = vi.spyOn(fsp, "lstat");
+		const statSpy = vi.spyOn(fsp, "stat");
 
+		const first = makeFakeCache();
 		await processMdFilesParallel([a], [a], never, {
-			index: handle,
+			index: gated.handle,
 			indexRoot: root,
-			cache,
+			cache: first.cache,
+			process: () => {},
+		});
+		const second = makeFakeCache();
+		await processMdFilesParallel([b], [b], never, {
+			index: ungated.handle,
+			indexRoot: root,
+			cache: second.cache,
 			process: () => {},
 		});
 
 		expect(lstatSpy).not.toHaveBeenCalled();
-		expect(stored.get(a)).toBe("alpha");
-		expect(indexed.get(a)).toBe("alpha");
+		expect(statSpy).not.toHaveBeenCalled();
+		// ゲート評価済みは従来どおり index と L2 の両方へ。
+		expect(first.stored.get(a)).toBe("alpha");
+		expect(gated.indexed.get(a)).toBe("alpha");
+		// ゲート未評価は L2 のみ (disabled なので index には載らない)。
+		expect(second.stored.get(b)).toBe("beta");
+		expect(ungated.indexed.size).toBe(0);
 	});
 
-	it("index disabled の通常 file は lstat 経由でも従来どおり L2 に載る", async () => {
+	it("index disabled の通常 file は fd 経路でも従来どおり L2 に載る", async () => {
 		// disabled workspace で L2 population が全停止すると検索が毎回全 file 再読になる。
 		// 抑止対象は symlink だけであることを固定する。
 		const a = join(root, "a.md");
@@ -188,15 +205,16 @@ describe("processMdFilesParallel: ゲート評価済み read は lstat を足さ
 		expect(stored.get(b)).toBe("beta");
 	});
 
-	// 以下は symlink を作らないので win32 でも実行する (spy と handle の形だけで固定できる)。
-	it("lstat が失敗したら fail-closed で L2 に載せない", async () => {
+	it("O_NOFOLLOW open が失敗したら L2 には載せず plain read で scan だけ続ける", async () => {
+		// symlink 以外の理由 (EMFILE 等) で fd 経路が落ちても「検査済みの fd から読めていない」
+		// ことに変わりはないので fail-closed に倒す。scan は plain read の fallback で従来どおり続く。
 		const a = join(root, "a.md");
 		await writeFile(a, "alpha");
 		const { handle, disabled } = makeFakeIndex();
 		disabled.value = true;
 		const { cache, stored } = makeFakeCache();
 		const scanned: string[] = [];
-		vi.spyOn(fsp, "lstat").mockRejectedValue(new Error("EIO"));
+		vi.spyOn(fsp, "open").mockRejectedValue(new Error("EMFILE"));
 
 		await processMdFilesParallel([a], [a], never, {
 			index: handle,
@@ -207,68 +225,7 @@ describe("processMdFilesParallel: ゲート評価済み read は lstat を足さ
 			},
 		});
 
-		// 判定不能なら載せない。被害は次回検索の read が 1 回増えることだけで、
-		// scan 結果は L2 を経由しないので不変。
 		expect(stored.size).toBe(0);
-		expect(scanned).toEqual(["alpha"]);
-	});
-
-	it("set には read 開始前に capture した generation を渡す", async () => {
-		// ゲート未評価の枝は lstat の await を挟んでから set するので、capture から set までの
-		// 窓が第 1 の枝より長い。ここで set 時点の generation を取り直すと、read 中に evict が
-		// 挟まった場合に古い text を新しい generation で格納してしまう (stale-insert race)。
-		// process (= read 完了後・set 前に必ず走る) で generation を bump し、set が受け取った
-		// 値が bump 前のままであることを固定する。
-		const a = join(root, "a.md");
-		await writeFile(a, "alpha");
-		const { handle, disabled } = makeFakeIndex();
-		disabled.value = true;
-		const { cache, stored, captured, generation } = makeFakeCache();
-
-		await processMdFilesParallel([a], [a], never, {
-			index: handle,
-			indexRoot: root,
-			cache,
-			process: () => {
-				generation.value = 7;
-			},
-		});
-
-		expect(stored.get(a)).toBe("alpha");
-		expect(captured.get(a)).toBe(0);
-	});
-
-	it("read-only handle (set が no-op) には lstat を払わない", async () => {
-		// dark assert の truth pass は suppressIndex で index を落とすためゲート未評価になるが、
-		// cache は set が no-op の read-only view。判定結果が必ず捨てられるので lstat も発行しない。
-		const a = join(root, "a.md");
-		await writeFile(a, "alpha");
-		const { handle } = makeFakeIndex();
-		const { cache: inner, stored } = makeFakeCache();
-		const readOnly: ContentCacheHandle = {
-			get: (ioPath) => inner.get(ioPath),
-			set: () => {},
-			get generation(): number {
-				return inner.generation;
-			},
-			isReadOnly: true,
-		};
-		const lstatSpy = vi.spyOn(fsp, "lstat");
-		const scanned: string[] = [];
-
-		await processMdFilesParallel([a], [a], never, {
-			index: handle,
-			indexRoot: root,
-			cache: readOnly,
-			suppressIndex: true,
-			process: (_inFile, text) => {
-				scanned.push(text);
-			},
-		});
-
-		expect(lstatSpy).not.toHaveBeenCalled();
-		expect(stored.size).toBe(0);
-		// scan は read-only handle でも従来どおり回る。
 		expect(scanned).toEqual(["alpha"]);
 	});
 });
