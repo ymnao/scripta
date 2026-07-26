@@ -143,6 +143,11 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // key に対する modify で generation が進まず、readFile 完了時の set が古い text を格納する。
 // Phase A の applyBatchToState が files === null 中も epoch を bump する保守側倒しと同方針。
 // inputFileMapMemo は epoch 依存なので、L1 側で epoch が進んだかを比較して invalidate する。
+// **非責務 (#406)**: symlink target の rewire に対する realpath の鮮度はこの層では扱わない。
+// chokidar は followSymlinks: false で、`ln -sf` による retarget を change event として emit する
+// 保証がないため、batch 由来の invalidation では取りこぼす。L3 index 取り込みゲート側が
+// path-guard の resolveInsideRoot で毎回 fresh に解決する設計にしてある (この module は
+// path-guard に依存しない)。
 export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChangeEvent>): void {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;

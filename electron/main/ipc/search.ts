@@ -14,7 +14,7 @@ import type {
 } from "../../../src/types/wikilink";
 import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
-import { assertPathAllowed, isRealPathInsideRoot } from "../utils/path-guard";
+import { assertPathAllowed, resolveInsideRoot } from "../utils/path-guard";
 import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
@@ -108,9 +108,15 @@ async function processMdFilesParallel(
 					// dark-launch の受入条件を latency 面でも満たす)。
 					// realpath 再認可 (#394 Phase D / #399 Finding 2): symlink 経由で workspace 外の
 					// target を指す file を index に載せない。scan (process) は既存挙動と同じく通す。
+					// ゲートは毎回 fresh に realpath する (#406 Finding 1) が、text は L2 に載った時点の
+					// もの = 「ゲートは現在・内容は過去」の時間差が残る。悪用には「watcher batch を
+					// 取りこぼした外部内容が L2 に載る」+「その file が index 側では invalid」+「検査
+					// 時点で symlink が workspace 内へ swap back」の 3 条件同時成立が必要で、payoff は
+					// main process の in-memory bigram のみ。resolved path から読み直す案は検索 hot path に
+					// I/O を足すため見送り、受容する (#406)。
 					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
 						const epoch = index.currentEpochOf(ioPath);
-						if (indexRoot === undefined || (await isRealPathInsideRoot(ioPath, indexRoot))) {
+						if (indexRoot === undefined || (await resolveInsideRoot(ioPath, indexRoot)) !== null) {
 							index.indexFile(ioPath, hit, epoch);
 						}
 					}
@@ -129,9 +135,22 @@ async function processMdFilesParallel(
 				const indexEpochAtStart = shouldIndex
 					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
 					: 0;
+				// realpath 再認可 (#394 Phase D / #399 Finding 2) を readFile の **前** に行い、
+				// 許可された file は解決済み path を読む (#406 Finding 2)。read → 検査の順だと
+				// 「T1 で外部内容を読む → T2 までに symlink を workspace 内へ swap back → 検査 pass」で
+				// 外部内容が index に入る TOCTOU が成立する。検査と読み取りを同一の実体に揃えて閉じる。
+				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
+				let resolvedForIndex: string | null = null;
+				if (shouldIndex && indexRoot !== undefined) {
+					resolvedForIndex = await resolveInsideRoot(ioPath, indexRoot);
+					if (shouldStop()) return;
+				}
+				const indexAllowed = shouldIndex && (indexRoot === undefined || resolvedForIndex !== null);
 				let text: string;
 				try {
-					text = await fsp.readFile(ioPath, "utf8");
+					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
+					// 検索結果には出る。index 対象 file のみ解決済み path から読む (内容は同一)。
+					text = await fsp.readFile(resolvedForIndex ?? ioPath, "utf8");
 				} catch {
 					return; // 読み取り失敗ファイルは skip
 				}
@@ -141,14 +160,10 @@ async function processMdFilesParallel(
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
 				cache?.set(ioPath, text, genAtStart);
-				if (shouldIndex) {
-					// realpath 再認可: symlink で workspace 外を指す file の text を L3 に取り込まない。
-					// realpathBestEffort の fall-through 挙動 (dangling は「祖先 realpath + suffix」)
-					// でも root 内なら true になるが、後段 readFile が既に成功している = target が
-					// 実在するケースのみここに到達するため実害はない。
-					if (indexRoot === undefined || (await isRealPathInsideRoot(ioPath, indexRoot))) {
-						(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
-					}
+				if (indexAllowed) {
+					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
+					// 従来どおり ioPath (workspace 内の path) 側で持つ。
+					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
 				}
 				options.process(inFile, text);
 			}),
@@ -440,7 +455,7 @@ async function searchFilesImpl(
 			readFile: (p) => fsp.readFile(p, "utf8"),
 			isAlive: () => hasFileListCacheEntry(canonicalRoot),
 			index: indexHandle,
-			isRealPathAllowed: (p) => isRealPathInsideRoot(p, canonicalRoot),
+			resolveAllowed: (p) => resolveInsideRoot(p, canonicalRoot),
 		});
 	}
 	// Phase D dual-run assert (#394 Phase D / #399 Finding 1)。
@@ -502,7 +517,10 @@ async function runDarkAssert(
 	if (isStale()) return;
 	const verdict = await resolveDarkAssertViolations(queryLower, io, truthHitIo, {
 		collectViolations: (q, all, hits) => indexHandle.collectViolations(q, all, hits),
-		isRealPathAllowed: (p) => isRealPathInsideRoot(p, canonicalRoot),
+		// dark assert は dev-monitor 専用経路なので boolean 契約のまま
+		// (再検証は「index に渡したのと同一 snapshot」で行い、readFile は別途 raw path を読む
+		// #405 の設計を維持する)。認可判定だけ #406 の fresh resolve に揃える。
+		isRealPathAllowed: async (p) => (await resolveInsideRoot(p, canonicalRoot)) !== null,
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		readFile: async (p) => {
 			try {

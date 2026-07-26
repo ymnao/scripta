@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
@@ -18,6 +18,7 @@ import {
 	isPathWithinAnyAllowedRoot,
 	registerTransientWritePath,
 	registerWorkspaceRoot,
+	resolveInsideRoot,
 	unregisterWorkspaceRoot,
 	validatePath,
 } from "./path-guard";
@@ -276,6 +277,84 @@ describe("isPathWithinAnyAllowedRoot (process-wide)", () => {
 			await writeFile(target, "leaked", "utf8");
 			await registerWorkspaceRoot(WIN_A, workspaceDir);
 			expect(await isPathWithinAnyAllowedRoot(target)).toBe(false);
+		},
+	);
+});
+
+// L3 index 取り込みゲート (#394 Phase D / #406)。window scope を持たず、
+// canonical root を直接受け取る background 経路用 API。
+describe("resolveInsideRoot (index ingestion gate)", () => {
+	it("returns the resolved path for a regular file inside the root", async () => {
+		const root = await canonicalize(workspaceDir);
+		const file = join(root, "note.md");
+		await writeFile(file, "x", "utf8");
+		expect(await resolveInsideRoot(file, root)).toBe(file);
+	});
+
+	it("returns null for a file outside the root", async () => {
+		const root = await canonicalize(workspaceDir);
+		const outsideFile = join(await canonicalize(outsideDir), "secret.md");
+		await writeFile(outsideFile, "x", "utf8");
+		expect(await resolveInsideRoot(outsideFile, root)).toBeNull();
+	});
+
+	// realpathBestEffort 系 API と異なり祖先 fall-through をしない (fail-closed)。
+	it("returns null for a non-existent path (no ancestor fall-through)", async () => {
+		const root = await canonicalize(workspaceDir);
+		expect(await resolveInsideRoot(join(root, "missing.md"), root)).toBeNull();
+	});
+
+	it("returns null for invalid input", async () => {
+		const root = await canonicalize(workspaceDir);
+		expect(await resolveInsideRoot("relative/path.md", root)).toBeNull();
+		expect(await resolveInsideRoot("", root)).toBeNull();
+		expect(await resolveInsideRoot("/tmp/\0evil", root)).toBeNull();
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"resolves an in-root symlink to its target path",
+		async () => {
+			const root = await canonicalize(workspaceDir);
+			const target = join(root, "real.md");
+			await writeFile(target, "inside", "utf8");
+			const link = join(root, "link.md");
+			await symlink(target, link);
+			// 戻り値は symlink 自身ではなく実体 → 呼び手はこの path で readFile する。
+			expect(await resolveInsideRoot(link, root)).toBe(target);
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"returns null for an in-root symlink pointing outside the root",
+		async () => {
+			const root = await canonicalize(workspaceDir);
+			const outsideFile = join(await canonicalize(outsideDir), "id_rsa");
+			await writeFile(outsideFile, "secret", "utf8");
+			const link = join(root, "evil.md");
+			await symlink(outsideFile, link);
+			expect(await resolveInsideRoot(link, root)).toBeNull();
+		},
+	);
+
+	// #406 Finding 1 の回帰テスト: realpathCache 経由で判定すると 2 回目も stale な
+	// 「root 内」判定を返してしまう (watcher batch はこの retarget を確実には emit しない)。
+	it.skipIf(process.platform === "win32")(
+		"reflects a symlink retarget without any explicit invalidation",
+		async () => {
+			const root = await canonicalize(workspaceDir);
+			const inside = join(root, "inside.md");
+			await writeFile(inside, "inside", "utf8");
+			const outsideFile = join(await canonicalize(outsideDir), "id_rsa");
+			await writeFile(outsideFile, "secret", "utf8");
+			const link = join(root, "evil.md");
+			await symlink(inside, link);
+			// 1 回目: root 内を指しているので許可され、判定が cache されうる。
+			expect(await resolveInsideRoot(link, root)).toBe(inside);
+			// attacker が `ln -sf` 相当で外へ付け替える。
+			await unlink(link);
+			await symlink(outsideFile, link);
+			// 2 回目: cache を通していれば旧判定 (inside) が返る = 外部内容が index に入る。
+			expect(await resolveInsideRoot(link, root)).toBeNull();
 		},
 	);
 });
