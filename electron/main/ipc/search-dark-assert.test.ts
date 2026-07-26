@@ -403,7 +403,7 @@ describe("resolveDarkAssertViolations: 検証済み file の epoch 追跡 (#410 
 	it("returns exhausted (not violated) when the epoch keeps churning", async () => {
 		// 持続的な書き換えで epoch が動き続けるケース。throw すると塞いだはずの FP を再導入するので
 		// 判定不能として打ち切る。上限が無いと無限ループになる。
-		const { deps } = makeFakeDeps({
+		const { deps, calls } = makeFakeDeps({
 			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
 			texts: new Map([["/ws/a.md", "still contains foo"]]),
 			epochs: new Map([["/ws/a.md", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]]),
@@ -411,9 +411,13 @@ describe("resolveDarkAssertViolations: 検証済み file の epoch 追跡 (#410 
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
 		expect(verdict).toEqual({
 			kind: "exhausted",
+			violations: ["/ws/a.md"],
 			rounds: 3,
 			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
 		});
+		// 実際の再検証回数も pin する: 初回検証 1 + 差し戻し 3 = 4 read。rounds を定数で返しているため、
+		// 上限判定が off-by-one しても verdict だけでは検出できない (message が過大報告になる)。
+		expect(calls.filter((c) => c.startsWith("read:"))).toHaveLength(4);
 	});
 
 	it("records the epoch captured before the read, not one re-read after indexFile", async () => {
@@ -451,14 +455,15 @@ describe("formatDarkAssertReport (#410 Finding 2)", () => {
 		expect(report?.message).toContain("droppedTruth={stale:1,unauthorized:2,unreadable:3}");
 	});
 
-	it("warns for exhausted and carries the round count", () => {
+	it("warns for exhausted and carries the round count and churning file", () => {
 		const report = formatDarkAssertReport(
-			{ kind: "exhausted", dropped: DROPPED, rounds: 3 },
+			{ kind: "exhausted", violations: ["/ws/a.md"], dropped: DROPPED, rounds: 3 },
 			"foo",
 		);
 		expect(report?.level).toBe("warn");
 		expect(report?.message).toContain("[dark-assert]");
 		expect(report?.message).toContain("rounds=3");
+		expect(report?.message).toContain("/ws/a.md");
 	});
 
 	it("throws for violated and names the first offending file", () => {

@@ -609,7 +609,8 @@ export function formatDarkAssertReport(
 				level: "warn",
 				message:
 					`[dark-assert] InvertedIndex superset check inconclusive: reverify budget exhausted ` +
-					`(rounds=${verdict.rounds}) query="${query}" ${formatDroppedSummary(verdict.dropped)}`,
+					`(rounds=${verdict.rounds}) still-violating file "${verdict.violations[0]}" ` +
+					`query="${query}" ${formatDroppedSummary(verdict.dropped)}`,
 			};
 		// round 1 S2 で入れた「stillUnindexed 切り分け」は round 2 Fable review で dead code と判明したため除去:
 		//   collectViolations が返す violation の定義自体が `!candidates.has(p) && indexedValid.has(p)` なので、
@@ -636,6 +637,10 @@ function formatDroppedSummary(dropped: DarkAssertDropCounts): string {
  * runDarkAssert の retry / verdict 段に必要な最小依存 (#405 Finding 3)。
  * InvertedIndexHandle 全体ではなく使う操作だけを構造的に切り出し、unit test で
  * fake を type assertion なしに書けるようにする。
+ *
+ * `collectViolations` は **戻り値が渡した hits の部分集合である**ことを前提にしている
+ * (InvertedIndex 実装の不変条件)。retry ループの停止性と「truth から落とした file は
+ * 以降の violations に再登場しない」論証がこれに依存するため、fake もこの契約を守ること。
  */
 export interface DarkAssertRetryDeps
 	extends Pick<InvertedIndexHandle, "collectViolations" | "currentEpochOf" | "indexFile"> {
@@ -677,8 +682,9 @@ export type DarkAssertVerdict =
 	 * 再検証の差し戻し上限に達した (warn 相当、#410 Finding 1)。
 	 * 書き換え churn が続いて epoch が動き続ける状態で、判定不能として打ち切ったことを表す。
 	 * violated ではないので throw しない (= その回の真の破損検出は保証しない)。
+	 * violations は打ち切り時点で残っていた file (dev で「どれが churn していたか」の triage 用)。
 	 */
-	| { kind: "exhausted"; dropped: DarkAssertDropCounts; rounds: number }
+	| { kind: "exhausted"; violations: string[]; dropped: DarkAssertDropCounts; rounds: number }
 	/** 真の superset 破損 (throw 相当)。dropped は「何件落とした上で残ったか」の切り分け用。 */
 	| { kind: "violated"; violations: string[]; dropped: DarkAssertDropCounts };
 
@@ -695,9 +701,11 @@ const DARK_ASSERT_MAX_REVERIFY_ROUNDS = 3;
  * dark assert の violation 判定 (retry + verdict)。search.ts の副作用から切り離した
  * deps 注入版で、warn / throw そのものは呼び手に委ねる (#405 Finding 3)。
  *
- * violation ごとに「realpath 認可 → epoch capture → readFile → indexFile → fresh text 再検証」を行う。
+ * violation ごとに「epoch capture → realpath 認可 → readFile → indexFile → fresh text 再検証」を行う。
  * - epoch capture は readFile より **先** (piggyback / idle-fill と同順序)。逆にすると bump 後の
  *   epoch を capture して stale text が新 epoch で valid 化する race を assert 自身が作り出す。
+ *   indexFile の **後に取り直さない**: capture→read 間の invalidate で indexFile が no-op になった
+ *   ケースでも「現行 epoch で検証済み」に見えてしまい、下記の差し戻しが効かなくなる。
  * - fresh text が query を含まない場合、truth hit は「読取後に file が正当に書き換わった」由来なので
  *   truth 集合から落とす (#405 Finding 1 の false positive throw 対策)。判定には indexFile に
  *   渡したものと **同一の text snapshot** を使う (別途読み直すと index 状態と判定の乖離窓を新設する)。
@@ -735,6 +743,7 @@ export async function resolveDarkAssertViolations(
 	const dropped: DarkAssertDropCounts = { staleTruth: 0, unauthorized: 0, unreadable: 0 };
 	// path → 検証に使った snapshot の epoch。path だけの Set にすると「検証後に内容が変わった file」を
 	// 区別できず、正当な書き換え由来の再 violation を真の破損と誤認する (#410 Finding 1)。
+	// index-fill.ts の skipUntilEpochChange と同型の idiom (capture → currentEpochOf と突合 → 差し戻し)。
 	const verifiedEpoch = new Map<string, number>();
 	let reverifyRounds = 0;
 	while (true) {
@@ -747,20 +756,23 @@ export async function resolveDarkAssertViolations(
 			if (changed.length === 0) return { kind: "violated", violations, dropped };
 			reverifyRounds++;
 			if (reverifyRounds > DARK_ASSERT_MAX_REVERIFY_ROUNDS) {
-				return { kind: "exhausted", dropped, rounds: DARK_ASSERT_MAX_REVERIFY_ROUNDS };
+				return {
+					kind: "exhausted",
+					violations,
+					dropped,
+					rounds: DARK_ASSERT_MAX_REVERIFY_ROUNDS,
+				};
 			}
 			for (const p of changed) verifiedEpoch.delete(p);
 			continue;
 		}
 		for (const p of pending) {
 			if (deps.isStale()) return { kind: "stale" };
-			// epoch は file ごとに 1 度だけ capture し、**indexFile に渡す値と検証済みマークを同一**にする。
-			// - read より先: 逆順だと bump 後の epoch を capture して stale text が新 epoch で valid 化する
-			//   race を assert 自身が作り出す (Phase D round 1 Fable W1)。
-			// - indexFile 後に取り直さない: capture→read 間の invalidate で indexFile が no-op になった
-			//   ケースでも「現行 epoch で検証済み」に見えてしまい、上の差し戻しが効かなくなる。
-			// - auth より先: capture が早い分だけ indexFile の一致判定が保守側に倒れるだけで害はなく、
-			//   drop する file にも検証済みマークが付くので二重 drop カウントを構造的に防げる。
+			// epoch は file ごとに 1 度だけ capture し、**indexFile に渡す値と検証済みマークを同一**にする
+			// (read より先 / indexFile 後に取り直さない理由は上の doc 参照)。認可判定より前に置くのは、
+			// capture が早い分は indexFile の一致判定が保守側に倒れるだけで害がなく、drop する file にも
+			// 検証済みマークが付くため (二重 drop 自体は truth.delete と violations 再計算で既に防がれて
+			// いるので、このマークは defense-in-depth)。
 			const epoch = deps.currentEpochOf(p);
 			verifiedEpoch.set(p, epoch);
 			if (!(await deps.isRealPathAllowed(p))) {
