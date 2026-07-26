@@ -288,6 +288,10 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //     採らない (詳細と再検討条件は read-nofollow.ts の doc)。成立には workspace 書込権限と
 //     精密なタイミングが要り、payoff は main process の in-memory bigram に限られる
 //     (candidates は renderer に非露出)。
+//   - **hard link 置換は「末端が閉じた」の範囲外**: 同一 filesystem 内で外部 file への
+//     hard link を末端に置く変種は realpath が恒等に振る舞うため T1 のゲートを通り、
+//     O_NOFOLLOW も symlink ではないので発火しない。これは TOCTOU ではなく T1 時点から
+//     通る設計境界で (#416 Finding 2 が追跡)、payoff は中間 dir 窓と同じ in-memory bigram 限り。
 //   assertPathAllowed も同じ中間 dir 窓を持つ (下記 doc 参照)。
 // - **realpathCache を通さない** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、

@@ -81,8 +81,13 @@ async function processMdFilesParallel(
 		index?: InvertedIndexHandle;
 		// L3 piggyback indexing 直前の realpath 再認可用 root。指定時のみ index を養う file の
 		// realpath が root 内側であることを確認する (#394 Phase D / #399 Finding 2)。
-		// scan (process 呼び出し) には影響しない — 既存挙動と同じく readFile 結果は
-		// symlink 越しでも scan 結果に反映される。
+		// ゲートに弾かれた file (workspace 外 symlink / alias) の内容は既存挙動どおり scan 結果に
+		// 反映される — 認可の境界は「index に載せない」であって「検索結果に出さない」ではない。
+		// **ただし指定時は scan に影響し得る** (#412): ゲートを通って index 対象と判定された file は
+		// 末端 symlink を拒否する fd read で読むため、認可 (T1) から read (T2) の間に末端を
+		// symlink へ差し替えられた file は read 失敗として skip され、その pass の scan 結果からも
+		// 落ちる。正常系では発火しない (ゲート通過 = 末端は非 symlink と確認済み) ので、
+		// 影響は実際に swap が起きた 1 pass × 1 file に限られる。
 		indexRoot?: string;
 		// piggyback indexing を完全に抑止する。dual-run assert の全走査側で使い、
 		// index への副作用二重化を防ぐ (candidates 側で既に養った index を汚さない)。
@@ -187,8 +192,10 @@ async function processMdFilesParallel(
 				const useNoFollow = indexGateEvaluated && indexable;
 				let text: string;
 				try {
-					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
-					// 検索結果には出る。index 対象 file のみ解決済み path から読む (内容は同一)。
+					// else 側 (非 indexable / ゲート未評価) は既存挙動どおり raw path または解決済み path を
+					// 読む: workspace 外を指す symlink の内容でも検索結果には出る (#406 / #399)。
+					// then 側は ioPath をそのまま渡す — ゲートが resolvedForIndex === ioPath を
+					// 確認済みなので「解決済み path を読む」(#406) と同値になる。
 					text = useNoFollow
 						? await readFileUtf8NoFollow(ioPath)
 						: await fsp.readFile(resolvedForIndex ?? ioPath, "utf8");
@@ -745,7 +752,12 @@ export interface DarkAssertDropCounts {
 	 * triage で「削除された file」「workspace 内 alias」を security signal と読み違えないこと。
 	 */
 	unauthorized: number;
-	/** 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。 */
+	/**
+	 * 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。
+	 * **#412 以降は ELOOP (末端が symlink = 認可後に swap された疑い) もここに計上される**。
+	 * triage では良性の transient 失敗と混在する点に注意 — 恒常的に増える場合は
+	 * 末端 swap の可能性を検討すること。
+	 */
 	unreadable: number;
 }
 

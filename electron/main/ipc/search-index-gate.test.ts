@@ -274,7 +274,9 @@ describe.skipIf(process.platform === "win32")(
 				// swap された file は read 失敗扱いで skip される (scan 結果からも落ちる)。
 				// これは #412 で受け入れた挙動変化: 認可した実体と読める実体が一致しない以上、
 				// 読まないのが正しい。損失は「窓に重なった 1 pass × 1 file」に限られ、次の pass では
-				// alias として (= 非 indexable 経路で) 従来どおり scan される。
+				// ゲートが workspace 外と判定して非 indexable 経路に落ちるため、従来どおり
+				// plain read されて scan には出る (この swap 先は workspace 外なので alias ではなく
+				// resolveInsideRoot が null を返す分岐)。
 				// **範囲**: processMdFilesParallel は検索だけでなく unresolved-wikilink scan /
 				// backlink scan からも index + indexRoot 付きで呼ばれるため、窓中はそれらの結果からも
 				// 同じ 1 file が落ちる。影響の質は同一 (1 pass × 1 file) なので受容は変わらない。
