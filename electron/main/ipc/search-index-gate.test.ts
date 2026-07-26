@@ -99,18 +99,20 @@ function makeFakeCache(preloaded: Map<string, string>): {
 const never = (): boolean => false;
 
 describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", () => {
-	it("L2-miss 経路: disabled なら realpath ゲートも indexFile も走らない (scan 結果は不変)", async () => {
+	it("L2-miss 経路: disabled ならゲートも indexFile も走らないが scan と L2 population は続く", async () => {
 		const a = join(root, "a.md");
 		const b = join(root, "b.md");
 		await writeFile(a, "alpha");
 		await writeFile(b, "beta");
 		const { handle, indexed, disabled } = makeFakeIndex();
 		disabled.value = true;
+		const { cache, stored } = makeFakeCache(new Map());
 		const scanned: string[] = [];
 
 		await processMdFilesParallel([a, b], [a, b], never, {
 			index: handle,
 			indexRoot: root,
+			cache,
 			process: (inFile, text) => {
 				scanned.push(`${inFile}:${text}`);
 			},
@@ -120,6 +122,10 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		expect(indexed.size).toBe(0);
 		// index を通らなくても scan (検索結果) は従来どおり全 file 分行われる。
 		expect(scanned.sort()).toEqual([`${a}:alpha`, `${b}:beta`]);
+		// **ゲート未評価の file は L2 に載せ続ける**。ここを止めると disabled workspace で
+		// L2 population が全停止して検索が毎回全 file 再読になる。search.ts の
+		// `!indexGateEvaluated || indexable` の前半が消える退行を殺すための assert。
+		expect(stored.size).toBe(2);
 	});
 
 	it("L2-hit 経路: disabled なら realpath ゲートも indexFile も走らない", async () => {

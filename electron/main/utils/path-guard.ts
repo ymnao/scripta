@@ -304,8 +304,15 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
  *
  * 判定を誤って実体を alias 扱いしても帰結は「index / L2 に載せず毎回 read + scan」で、
  * 結果の正しさではなくコスト側にしか倒れない (fail-safe)。
+ *
+ * **戻り値は boolean で、type predicate (`resolved is string`) にはしない**: true 側は
+ * 健全 (一致 ⟹ 非 null) だが、false 側は「null (workspace 外)」と「別 string (alias)」の
+ * 2 状態を含むため、predicate にすると TS が else 分岐で `resolved` を `null` に誤 narrow
+ * する。将来 else 側で null と alias を区別する分岐 (dark assert の drop 内訳分類など) を
+ * 書いたときに、alias 分岐が型上 dead code になる事故を避ける。true 側で解決済み path が
+ * 必要な呼び手は、一致が保証されているので入力 path (`ioPath`) をそのまま使えばよい。
  */
-export function isIndexableResolution(resolved: string | null, ioPath: string): resolved is string {
+export function isIndexableResolution(resolved: string | null, ioPath: string): boolean {
 	return resolved === ioPath;
 }
 

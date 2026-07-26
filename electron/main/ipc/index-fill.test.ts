@@ -212,8 +212,9 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.has("/ws/notes/link.md")).toBe(false);
 		expect(indexed.has("/ws/notes/real.md")).toBe(false);
 		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
-		// skipUntilEpochChange に倒れているので、tick を回し切っても無限 retry しない。
-		expect(_isRunningForTest(ROOT)).toBe(false);
+		// skipUntilEpochChange に倒れているので tick を回し切って終了する。無限 retry の
+		// 退行は上の waitUntil が timeout で throw して検出する (この時点の
+		// _isRunningForTest は waitUntil 成功後なので恒真であり、assert には含めない)。
 	});
 
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {

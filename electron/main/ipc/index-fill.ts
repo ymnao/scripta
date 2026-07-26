@@ -117,7 +117,10 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 					if (!isIndexableResolution(resolved, p)) {
 						skipUntilEpochChange.set(p, current);
 					} else {
-						const text = await deps.readFile(resolved);
+						// ここに来た時点で resolved === p (isIndexableResolution の契約) なので、
+						// #406 の「検査した実体を読む」は p を読むことと同値。narrowing に頼らず
+						// p を渡す (述語は boolean 返しで、false 側の型が正確に表せないため)。
+						const text = await deps.readFile(p);
 						if (!deps.isAlive()) break;
 						if (deps.index.isDisabled) break;
 						deps.index.indexFile(p, text, current);
