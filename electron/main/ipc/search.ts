@@ -14,7 +14,7 @@ import type {
 } from "../../../src/types/wikilink";
 import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
-import { assertPathAllowed, resolveInsideRoot } from "../utils/path-guard";
+import { assertPathAllowed, isIndexableResolution, resolveInsideRoot } from "../utils/path-guard";
 import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
@@ -124,15 +124,15 @@ async function processMdFilesParallel(
 					// false を返すため、この分岐に全 file が流れ込んで非キャッシュ realpath が
 					// 検索ごとに全 file 分走る。indexFile 自体は disabled で no-op なので、
 					// ゲートを走らせる意味がない。index-fill.ts の tick 冒頭 bail と同方針。
-					// **alias は index に載せない (#413 Finding 2)**: 解決先が ioPath と異なる file
-					// (= workspace 内 symlink) は、real path 側の modify では invalidate されないため
-					// stale な posting が残る。indexFile を呼ばず未 index のままにする
-					// (未 index file は buildScanList が常に scan 対象に含めるので結果は落ちない)。
+					// **alias は index に載せない (#413 Finding 2)**: 判定は isIndexableResolution
+					// (null = workspace 外 / 解決先 !== ioPath = workspace 内 symlink を 1 つの述語で弾く)。
+					// alias を載せると解決先の modify で invalidate が波及せず stale posting が残る。
+					// 未 index file は buildScanList が常に scan 対象に含めるので結果は落ちない。
 					if (index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath)) {
 						const epoch = index.currentEpochOf(ioPath);
 						const resolved =
 							indexRoot === undefined ? ioPath : await resolveInsideRoot(ioPath, indexRoot);
-						if (resolved === ioPath) {
+						if (isIndexableResolution(resolved, ioPath)) {
 							index.indexFile(ioPath, hit, epoch);
 						}
 					}
@@ -159,26 +159,19 @@ async function processMdFilesParallel(
 				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
 				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
 				let resolvedForIndex: string | null = shouldIndex ? ioPath : null;
-				// ゲートを実際に評価して reject された file (= workspace 外を指す symlink) は
-				// L2 にも入れない。入れてしまうと「外部内容が L2 に残る → attacker が symlink を
-				// workspace 内へ swap back → 次の検索で L2 hit + fresh ゲート pass → cache 中の
-				// 外部内容が index に入る」という経路で Finding 2 が L2 エントリの寿命ぶん persistent に
-				// 復活する。scan 結果は cache 有無に関わらず毎回 read するので影響しない。
-				let indexGateRejected = false;
+				// ゲートを実際に評価したか。評価した上で弾かれた file (workspace 外を指す symlink /
+				// workspace 内 alias) だけが L2 抑止の対象で、そもそも評価していない file
+				// (既に valid / index 無効) は従来どおり L2 に載せる。
+				let indexGateEvaluated = false;
 				if (shouldIndex && indexRoot !== undefined) {
 					resolvedForIndex = await resolveInsideRoot(ioPath, indexRoot);
-					indexGateRejected = resolvedForIndex === null;
+					indexGateEvaluated = true;
 					if (shouldStop()) return;
 				}
-				// workspace 内 symlink (alias) の判定 (#413 Finding 2)。walk は canonical root から
-				// 始まり symlink dir へは降りない (readdir({withFileTypes}) が symlink→dir を
-				// isDirectory=false で返す) ため中間 dir は全て実体で、`resolved !== ioPath` は
-				// 「末端 file 自身が symlink」を意味する。alias は index / L2 の key が ioPath 側に
-				// 付く一方、watcher (followSymlinks: false) の modify は解決先の path でしか
-				// 来ないため invalidate が波及せず、stale な entry が valid のまま残る。
-				// 判定を誤って実体を alias 扱いしても帰結は「index / L2 に載せず毎回 read + scan」で、
-				// 結果の正しさではなくコスト側にしか倒れない (fail-safe)。
-				const isAliasPath = resolvedForIndex !== null && resolvedForIndex !== ioPath;
+				// 「index に載せてよい」判定 (#413 Finding 2)。ゲート未評価時は resolvedForIndex に
+				// ioPath (index 対象) か null (index 対象外) が入っているので、この 1 つの述語で
+				// 「workspace 外 / alias / そもそも index 対象外」を全て弾ける。
+				const indexable = isIndexableResolution(resolvedForIndex, ioPath);
 				let text: string;
 				try {
 					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
@@ -192,14 +185,18 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				// alias も L2 に入れない (#413 Finding 2): 解決先の modify では evict されないため、
-				// 入れると L2 hit 経由で stale な内容が検索結果に出る。
-				// **成立範囲**: この抑止が効くのは「ゲートを評価した read」= index が有効かつ当該 file が
-				// 未 index の場合のみ。index が disabled な workspace ではゲート自体を skip する
-				// (#413 Finding 1) ため alias が L2 に載る窓は残る。既に L2 にある alias entry の
+				// ゲートに弾かれた file は L2 にも入れない。workspace 外 symlink の場合は
+				// 「外部内容が L2 に残る → attacker が symlink を workspace 内へ swap back →
+				// 次の検索で L2 hit + fresh ゲート pass → cache 中の外部内容が index に入る」経路で
+				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。alias の場合は
+				// 解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
+				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
+				// **成立範囲**: alias 抑止が効くのは「ゲートを評価した read」= index が有効かつ当該
+				// file が未 index の場合のみ。index が disabled な workspace ではゲート自体を skip
+				// する (#413 Finding 1) ため alias が L2 に載る窓は残る。既に L2 にある alias entry の
 				// hit 時 stale 提供も同様に残る (follow-up 参照)。
-				if (!indexGateRejected && !isAliasPath) cache?.set(ioPath, text, genAtStart);
-				if (resolvedForIndex !== null && !isAliasPath) {
+				if (!indexGateEvaluated || indexable) cache?.set(ioPath, text, genAtStart);
+				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
@@ -577,11 +574,11 @@ async function runDarkAssert(
 		// dark assert は dev-monitor 専用経路なので boolean 契約のまま
 		// (再検証は「index に渡したのと同一 snapshot」で行い、readFile は別途 raw path を読む
 		// #405 の設計を維持する)。認可判定だけ #406 の fresh resolve に揃える。
-		// alias (`resolved !== p`) も false に倒す (#413 Finding 2): alias は未 index のまま
-		// 常に scan 対象なので violation として上がってくること自体が無いはずだが、
-		// 再 index は「alias を index に載せうる」唯一の残存経路なので到達不能の
-		// 論証に頼らずここで閉じる。
-		isRealPathAllowed: async (p) => (await resolveInsideRoot(p, canonicalRoot)) === p,
+		// alias も false に倒す (#413 Finding 2): alias は未 index のまま常に scan 対象なので
+		// violation として上がってくること自体が無いはずだが、再 index は「alias を index に
+		// 載せうる」唯一の残存経路なので到達不能の論証に頼らずここで閉じる。
+		isRealPathAllowed: async (p) =>
+			isIndexableResolution(await resolveInsideRoot(p, canonicalRoot), p),
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		readFile: async (p) => {
 			try {

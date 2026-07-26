@@ -9,6 +9,8 @@
 // (test 容易性の確保と、helper 側の独立テスト性を保つため — processMdFilesParallel の
 // ContentCacheHandle / InvertedIndexHandle と同じ設計方針)。
 
+import { isIndexableResolution } from "../utils/path-guard";
+
 export interface IdleFillIndex {
 	indexFile(path: string, text: string, capturedEpoch: number): void;
 	currentEpochOf(path: string): number;
@@ -109,10 +111,10 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 					// resolved !== p は workspace 内 symlink (alias)。index の key は p 側に付くが
 					// watcher (followSymlinks: false) の modify は解決先の path でしか来ないため
 					// invalidate が波及せず stale posting が残る。reject と同じ経路に倒して
-					// 未 index のままにする (#413 Finding 2、search.ts の piggyback 側と同方針)。
+					// 未 index のままにする (#413 Finding 2、search.ts の piggyback 側と同じ述語)。
 					// p 自身の epoch が動くまで再訪しない = alias である限り恒久 skip だが、
 					// link が実体 file に差し替われば watcher が p の event を出して epoch が動く。
-					if (resolved === null || resolved !== p) {
+					if (!isIndexableResolution(resolved, p)) {
 						skipUntilEpochChange.set(p, current);
 					} else {
 						const text = await deps.readFile(resolved);

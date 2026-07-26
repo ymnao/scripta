@@ -286,6 +286,24 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 // - **本 API 単独では「認可済みの内容」までは保証しない**: 戻り値以外の path や別ソース
 //   (cache 等) から取得した内容と組み合わせる場合、検査時点と内容取得時点がズレるため、
 //   その時間差を許容できるかは呼び手が判断すること (search.ts の L2 hit 経路は明示的に受容)。
+/**
+ * `resolveInsideRoot` の戻り値が「index に取り込んでよい in-root 実体」を指すかの純関数 (#413)。
+ *
+ * 2 つの除外を 1 つの述語に畳む:
+ *  - null: 解決失敗 / workspace 外 (#394 Phase D / #399 Finding 2 の境界)
+ *  - 解決先 !== 入力 path: workspace 内 symlink (alias)。walk は canonical root から始まり
+ *    symlink dir へ降りない (readdir({withFileTypes}) が symlink→dir を isDirectory=false で
+ *    返す) ため、不一致は「末端 file 自身が symlink」を意味する。alias の index / L2 key は
+ *    walk が返す symlink path 側に付く一方、watcher (followSymlinks: false) の modify は
+ *    解決先の path でしか来ないため invalidate が波及せず、stale entry が valid のまま残る。
+ *
+ * 判定を誤って実体を alias 扱いしても帰結は「index / L2 に載せず毎回 read + scan」で、
+ * 結果の正しさではなくコスト側にしか倒れない (fail-safe)。
+ */
+export function isIndexableResolution(resolved: string | null, ioPath: string): resolved is string {
+	return resolved === ioPath;
+}
+
 export async function resolveInsideRoot(
 	ioPath: string,
 	canonicalRoot: string,
