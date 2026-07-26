@@ -217,6 +217,12 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //   - assert 内で realpath を 1 回だけ計算し、その結果を返すことで重複正規化も
 //     避けられる（hot path の syscall 削減）
 //
+// **TOCTOU の限界 (#412)**: 戻り値が path である以上、呼び出し側の I/O は再度 traversal する。
+// user-IPC 系の read (fs.ts の readFileImpl / readFileBase64Impl) は canonical を fd で開くが
+// O_NOFOLLOW は指定していないため、末端 / 中間 dir いずれの swap 窓も残る。index 取り込み経路
+// (resolveInsideRoot) は #412 で末端側を閉じたが、user-IPC 側は脅威モデルが異なる
+// (内容は元々 renderer に返すもの) ため別途判断する — 追跡は #412 の follow-up issue。
+//
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
 // 呼び出し側 / renderer は getErrorKind で kind を復元し 2 種類を区別できる。
@@ -267,11 +273,22 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   「検査対象 (T1 の realpath) と読み取り対象 (T2 の symlink target)」がズレ、
 //   検査通過後に workspace 内へ swap back された symlink 経由で外部内容が index に
 //   取り込まれる TOCTOU が成立する。assertPathAllowed が canonical を返して
-//   「判定に使った path で I/O する」契約と同型。ただし **塞げるのは ioPath 自身の retarget 経路**
-//   だけで、窓が完全に消えるわけではない: 戻り値も path なので readFile は再度 traversal する。
-//   resolve から read までの間に解決済み path の構成要素 (中間 dir / 末端 file) を symlink に
-//   差し替えられる窓は残り、これは fd ベースの traversal (openat / O_NOFOLLOW) でないと閉じない
-//   (assertPathAllowed も同じ限界を持つ)。
+//   「判定に使った path で I/O する」契約と同型。
+// - **戻り値を path で渡す以上、read は再度 traversal する** ため resolve (T1) から read (T2)
+//   の間に構成要素を symlink へ差し替えられる窓が残る (#412)。この窓は 2 つに分かれ、
+//   **片方だけが閉じている**:
+//   - **末端 component: 閉じた**。index 取り込みに繋がる read (piggyback / idle fill /
+//     dark assert の再 index) は `readFileUtf8NoFollow` (O_NOFOLLOW 付き fd read) を使い、
+//     open 時点で末端が symlink なら ELOOP で reject して「読み取り失敗 = skip」に倒す。
+//     本 API が非 null かつ入力 path 一致を返した時点で末端は非 symlink と確認済みなので、
+//     正常系では発火しない (発火 = 実際に swap が起きた瞬間)。
+//   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
+//     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない。macOS の
+//     `O_NOFOLLOW_ANY` は `fs.constants` に無く magic number 直書き + darwin 限定になるため
+//     採らない (詳細と再検討条件は read-nofollow.ts の doc)。成立には workspace 書込権限と
+//     精密なタイミングが要り、payoff は main process の in-memory bigram に限られる
+//     (candidates は renderer に非露出)。
+//   assertPathAllowed も同じ中間 dir 窓を持つ (下記 doc 参照)。
 // - **realpathCache を通さない** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、
 //   retarget を change event として emit する保証がない) ため、index 取り込み時点で

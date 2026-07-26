@@ -24,6 +24,10 @@ vi.mock("../utils/path-guard", async (importOriginal) => {
 });
 
 import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
+
+const actualPathGuard =
+	await vi.importActual<typeof import("../utils/path-guard")>("../utils/path-guard");
+
 import { resolveInsideRoot } from "../utils/path-guard";
 import { __testing } from "./search";
 import type { ContentCacheHandle, InvertedIndexHandle } from "./search-cache";
@@ -35,6 +39,8 @@ let root = "";
 
 beforeEach(async () => {
 	vi.mocked(resolveInsideRoot).mockClear();
+	// 実挙動へ戻す (#412 の test が mockImplementation でゲートを騙すため)。
+	vi.mocked(resolveInsideRoot).mockImplementation(actualPathGuard.resolveInsideRoot);
 	ws = await createTempWorkspace("scripta-index-gate-");
 	// walk 結果と同じく canonical 側の path を使う (非 alias なら resolved === ioPath)。
 	root = await realpath(ws.dir);
@@ -223,6 +229,83 @@ describe.skipIf(process.platform === "win32")(
 
 			expect(indexed.has(link)).toBe(false);
 			expect(scanned).toEqual(["alphaword cached"]);
+		});
+	},
+);
+
+// symlink 作成が要るので win32 では skip (既存 suite と同方針)。
+describe.skipIf(process.platform === "win32")(
+	"processMdFilesParallel: 認可後に末端が swap された file は読まない (#412)",
+	() => {
+		// TOCTOU の race そのものは再現せず、**swap された後の終状態**を作って決定的に検証する:
+		// ゲート (resolveInsideRoot) には「入力 path と一致する = index 可」と答えさせつつ、
+		// disk 上ではその path が workspace 外を指す symlink になっている状態。
+		// これは T1 (認可) と T2 (read) の間に末端 component を差し替えられた直後と同じ。
+		it("ゲートが index 可と答えても、disk 上の末端が symlink なら index にも L2 にも scan にも出さない", async () => {
+			const outside = await createTempWorkspace("scripta-index-gate-outside-");
+			try {
+				const secret = join(outside.dir, "secret.txt");
+				await writeFile(secret, "SECRETWORD body");
+				const swapped = join(root, "swapped.md");
+				await symlink(secret, swapped);
+				const normal = join(root, "normal.md");
+				await writeFile(normal, "normalword body");
+
+				// 「認可 (T1) の時点では実体だった」= ゲートは入力 path をそのまま返す。
+				vi.mocked(resolveInsideRoot).mockImplementation(async (ioPath: string) => ioPath);
+
+				const { handle, indexed } = makeFakeIndex();
+				const { cache, stored } = makeFakeCache(new Map());
+				const scanned: string[] = [];
+
+				await processMdFilesParallel([normal, swapped], [normal, swapped], never, {
+					index: handle,
+					indexRoot: root,
+					cache,
+					process: (inFile, text) => {
+						scanned.push(`${inFile}:${text}`);
+					},
+				});
+
+				// 外部内容はどこにも流れない。
+				expect(indexed.has(swapped)).toBe(false);
+				expect(stored.has(swapped)).toBe(false);
+				expect(scanned.join("\n")).not.toContain("SECRETWORD");
+				// swap された file は read 失敗扱いで skip される (scan 結果からも落ちる)。
+				// これは #412 で受け入れた挙動変化: 認可した実体と読める実体が一致しない以上、
+				// 読まないのが正しい。窓に重なった 1 query × 1 file だけの損失で、
+				// 次の検索では alias として (= 非 indexable 経路で) 従来どおり scan される。
+				expect(scanned).toEqual([`${normal}:normalword body`]);
+				// 巻き添えで通常 file が落ちていないこと (退行検知)。
+				expect(indexed.get(normal)).toBe("normalword body");
+				expect(stored.get(normal)).toBe("normalword body");
+			} finally {
+				await outside.cleanup();
+			}
+		});
+
+		it("ゲートを評価していない file (index 無効) は従来どおり plain read で scan に出る", async () => {
+			// #412 の fd read は「ゲート評価済み」を前提にした強制なので、前提が無い経路
+			// (index 無効 / 既に valid / indexRoot 未指定) の scan 契約は変えない。
+			// workspace 外を指す symlink の内容が検索結果に出るのは #399 で確立した境界。
+			const outside = await createTempWorkspace("scripta-index-gate-outside2-");
+			try {
+				const target = join(outside.dir, "target.txt");
+				await writeFile(target, "OUTSIDEWORD body");
+				const link = join(root, "link.md");
+				await symlink(target, link);
+				const scanned: string[] = [];
+
+				await processMdFilesParallel([link], [link], never, {
+					process: (inFile, text) => {
+						scanned.push(`${inFile}:${text}`);
+					},
+				});
+
+				expect(scanned).toEqual([`${link}:OUTSIDEWORD body`]);
+			} finally {
+				await outside.cleanup();
+			}
 		});
 	},
 );
