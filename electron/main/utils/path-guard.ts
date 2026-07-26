@@ -221,7 +221,7 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 // user-IPC 系の read (fs.ts の readFileImpl / readFileBase64Impl) は canonical を fd で開くが
 // O_NOFOLLOW は指定していないため、末端 / 中間 dir いずれの swap 窓も残る。index 取り込み経路
 // (resolveInsideRoot) は #412 で末端側を閉じたが、user-IPC 側は脅威モデルが異なる
-// (内容は元々 renderer に返すもの) ため別途判断する — 追跡は #412 の follow-up issue。
+// (内容は元々 renderer に返すもの) ため別途判断する — 追跡は #418。
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。

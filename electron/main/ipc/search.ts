@@ -174,8 +174,11 @@ async function processMdFilesParallel(
 				// 「workspace 外 / alias / そもそも index 対象外」を全て弾ける。
 				const indexable = isIndexableResolution(resolvedForIndex, ioPath);
 				// ゲートを **評価した上で** index 対象と判定した file だけ、末端 symlink を拒否する
-				// fd read で読む (#412)。ゲート評価済み ⟹ resolvedForIndex === ioPath = 「realpath が
-				// 入力 path と一致する」を確認済みなので、正常系で O_NOFOLLOW が発火することはない。
+				// fd read で読む (#412)。この 2 条件の conjunction が成り立つとき、かつそのときだけ
+				// resolvedForIndex === ioPath = 「realpath が入力 path と一致する = 末端は symlink では
+				// ない」を確認済みなので、正常系で O_NOFOLLOW が発火することはない
+				// (ゲート評価済みでも alias / workspace 外と判定された file は resolvedForIndex が
+				// ioPath と一致しないため、indexable まで含めて初めてこの含意が立つ)。
 				// 発火する = 認可 (T1) から read (T2) の間に末端が symlink へ swap された瞬間で、
 				// 読める内容は認可した実体ではないため read 失敗として skip するのが正しい。
 				// ゲート未評価の file (index 無効 / 既に valid / indexRoot 未指定) はその前提を
@@ -506,6 +509,8 @@ async function searchFilesImpl(
 	// 再 open で新 entry に切り替わっても、旧 handle 経由の indexFile は identity check で
 	// no-op になるため、旧 entry 時代に読んだ text が新 entry の index に混入する race を防ぐ。
 	if (indexHandle !== undefined) {
+		// deps は **必ず buildIdleFillDeps 経由**で作ること (#412)。inline literal に戻すと
+		// readFile の nofollow 契約が wiring pin test をすり抜けて退行し得る。
 		kickIdleFill(canonicalRoot, buildIdleFillDeps(canonicalRoot, indexHandle));
 	}
 	// Phase D dual-run assert (#394 Phase D / #399 Finding 1)。
@@ -534,14 +539,12 @@ async function searchFilesImpl(
 }
 
 // idle fill の deps 構築。**inline literal ではなく named function にしてある**のは、
-// #412 の「index 専用 read には末端 symlink を拒否する fd read を注入する」契約が
-// 型では強制できず wiring 側にしか載らないため、test から直接 pin できるようにするため
-// (plain readFile への退行を殺す)。
+// #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollow) を
+// 注入する」契約が型では強制できず wiring 側にしか載らないため、test から直接 pin できる
+// ようにするため (plain readFile への退行を殺す)。契約の詳細は read-nofollow.ts の doc。
 function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHandle): IdleFillDeps {
 	return {
 		listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
-		// index 専用 read なので末端 symlink を拒否する fd read を注入する (#412)。
-		// plain readFile を注入すると認可 (resolveAllowed) と read の間の末端 swap 窓が再開する。
 		readFile: (p) => readFileUtf8NoFollow(p),
 		isAlive: () => hasFileListCacheEntry(canonicalRoot),
 		index: indexHandle,
@@ -622,6 +625,8 @@ async function runDarkAssert(
 		isRealPathAllowed: async (p) =>
 			isIndexableResolution(await resolveInsideRoot(p, canonicalRoot), p),
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
+		// **必ず readForReindex を使うこと** (#412)。inline の plain read に戻すと wiring pin
+		// test をすり抜けて末端 swap 窓が再開する。
 		readFile: readForReindex,
 		indexFile: (p, text, epoch) => {
 			indexHandle.indexFile(p, text, epoch);

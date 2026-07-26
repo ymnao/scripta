@@ -7,7 +7,9 @@ import { readFileUtf8NoFollow } from "./read-nofollow";
 // #412: index 取り込み read の末端 swap 窓。
 // TOCTOU の race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って
 // 決定的に検証する (interleave 不要)。
-describe("readFileUtf8NoFollow", () => {
+// symlink を張って ELOOP を assert するため win32 では skip (既存 suite と同方針)。
+// win32 は O_NOFOLLOW が無く fallback で plain open 相当になるので、拒否 assert は成立しない。
+describe.skipIf(process.platform === "win32")("readFileUtf8NoFollow", () => {
 	let ws: TempWorkspace;
 	let outside: TempWorkspace;
 
@@ -33,12 +35,11 @@ describe("readFileUtf8NoFollow", () => {
 		const link = join(ws.dir, "evil.md");
 		await fsp.symlink(secret, link);
 
-		// 主 assert は「reject されること」(= 外部内容が返らないこと)。errno は platform 差の
-		// 影響を受け得るので soft assert に留める。
-		await expect(readFileUtf8NoFollow(link)).rejects.toThrow();
-		await expect(readFileUtf8NoFollow(link)).rejects.not.toThrow(/SECRET/);
-		const code = await readFileUtf8NoFollow(link).catch((e: NodeJS.ErrnoException) => e.code);
-		expect(code).toBe("ELOOP");
+		// 主 assert は「reject されること」(= 外部内容が返らないこと)。errno も併せて固定する
+		// (win32 は describe ごと skip しているので、残る darwin / linux では ELOOP で一致する)。
+		const err = await readFileUtf8NoFollow(link).catch((e: NodeJS.ErrnoException) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
 	});
 
 	it("rejects an in-root symlink (alias) as well", async () => {

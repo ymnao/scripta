@@ -273,12 +273,44 @@ describe.skipIf(process.platform === "win32")(
 				expect(scanned.join("\n")).not.toContain("SECRETWORD");
 				// swap された file は read 失敗扱いで skip される (scan 結果からも落ちる)。
 				// これは #412 で受け入れた挙動変化: 認可した実体と読める実体が一致しない以上、
-				// 読まないのが正しい。窓に重なった 1 query × 1 file だけの損失で、
-				// 次の検索では alias として (= 非 indexable 経路で) 従来どおり scan される。
+				// 読まないのが正しい。損失は「窓に重なった 1 pass × 1 file」に限られ、次の pass では
+				// alias として (= 非 indexable 経路で) 従来どおり scan される。
+				// **範囲**: processMdFilesParallel は検索だけでなく unresolved-wikilink scan /
+				// backlink scan からも index + indexRoot 付きで呼ばれるため、窓中はそれらの結果からも
+				// 同じ 1 file が落ちる。影響の質は同一 (1 pass × 1 file) なので受容は変わらない。
 				expect(scanned).toEqual([`${normal}:normalword body`]);
 				// 巻き添えで通常 file が落ちていないこと (退行検知)。
 				expect(indexed.get(normal)).toBe("normalword body");
 				expect(stored.get(normal)).toBe("normalword body");
+			} finally {
+				await outside.cleanup();
+			}
+		});
+
+		it("index はあるが indexRoot 未指定なら、ゲート未評価なので plain read のまま", async () => {
+			// `useNoFollow` から `indexGateEvaluated` を落とす mutation を殺すための pin。
+			// index があっても indexRoot が無ければゲートは評価されず (search.ts の
+			// `shouldIndex && indexRoot !== undefined`)、末端 symlink が非 symlink である保証も
+			// 無いので fd read を強制してはいけない。production の呼び出しは 4 箇所とも indexRoot を
+			// 併記するため現状差は出ないが、indexRoot なしの caller が増えたとき (#407 が追う
+			// fail-open) に scan 結果が静かに落ちる退行を防ぐ。
+			const outside = await createTempWorkspace("scripta-index-gate-outside3-");
+			try {
+				const target = join(outside.dir, "target.txt");
+				await writeFile(target, "NOROOTWORD body");
+				const link = join(root, "link.md");
+				await symlink(target, link);
+				const { handle } = makeFakeIndex();
+				const scanned: string[] = [];
+
+				await processMdFilesParallel([link], [link], never, {
+					index: handle,
+					process: (inFile, text) => {
+						scanned.push(`${inFile}:${text}`);
+					},
+				});
+
+				expect(scanned).toEqual([`${link}:NOROOTWORD body`]);
 			} finally {
 				await outside.cleanup();
 			}
