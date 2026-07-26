@@ -1178,9 +1178,13 @@ describe.skipIf(process.platform === "win32")(
 				// 2. attacker が `ln -sf` 相当で外部 file へ付け替える。
 				await unlink(link);
 				await symlink(secret, link);
-				// watcher batch 相当 (retarget を change として拾えたケース)。realpath cache に
-				// 依存する実装では、この invalidate 後の再 index で stale な「root 内」判定を
-				// 引いて外部内容を取り込んでしまう。
+				// watcher batch 相当 (retarget を change として拾えたケース)。
+				// **検出力の注記**: #413 で alias 自体が index 対象外になったため、この
+				// integration test はもはや「ゲートが fresh に realpath するか」を検出しない
+				// (stale cache で inside.md が返っても resolved !== link で弾かれるため)。
+				// fresh-resolve 性の pin は path-guard.test.ts の
+				// "reflects a symlink retarget without any explicit invalidation" が担う。
+				// ここで固定するのは「retarget 後も外部内容が index に入らない」という結果側。
 				applyFsBatch(canonical, [{ kind: "modify", path: link }]);
 				expect(handle.isIndexedAndValid(link)).toBe(false);
 

@@ -277,8 +277,13 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   retarget を change event として emit する保証がない) ため、index 取り込み時点で
 //   毎回 fresh に解決する。呼び出しは `!isIndexedAndValid` の file に限られるため、
 //   index が育った file では syscall は発生しない。ただし「恒久的に index に載らない file」
-//   (admission cutoff 超過 / root 外を指す symlink) は毎回 invalid のままなので、その分だけは
-//   検索ごとに 1 syscall 乗る (件数が限定的なので受容している)。
+//   (admission cutoff 超過 / root 外を指す symlink / workspace 内 alias) は毎回 invalid のまま
+//   なので、その分だけは検索ごとに syscall が乗る (件数が限定的なので受容している)。
+//   内訳: piggyback (search.ts) で 1 回 + idle fill (index-fill.ts) の skipUntilEpochChange が
+//   runFill ローカルで kick ごとに作り直されるため、kick 1 回につきさらに 1 回。
+// - **index が disabled な workspace ではこのゲート自体が呼ばれない** (#413 Finding 1)。
+//   disabled 時は indexedEpoch が clear されて全 file が「未 index」に見えるため、ゲートを
+//   残すと全 file 分の syscall が検索ごとに乗ってしまう (indexFile は no-op なので無駄)。
 // - realpathBestEffort と異なり **祖先 fall-through をしない**: 未存在 / dangling symlink は
 //   realpath が throw して null になる (fail-closed)。index ゲートに「最も近い実在祖先」の
 //   近似は不要で、非実在 file は後段 readFile も失敗するため取り込み挙動に差は出ない。

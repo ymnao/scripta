@@ -191,10 +191,18 @@ async function processMdFilesParallel(
 				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。alias の場合は
 				// 解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
-				// **成立範囲**: alias 抑止が効くのは「ゲートを評価した read」= index が有効かつ当該
-				// file が未 index の場合のみ。index が disabled な workspace ではゲート自体を skip
-				// する (#413 Finding 1) ため alias が L2 に載る窓は残る。既に L2 にある alias entry の
-				// hit 時 stale 提供も同様に残る (follow-up 参照)。
+				// **成立範囲**: この抑止が効くのは「ゲートを評価した read」= index が有効かつ当該 file が
+				// 未 index の場合のみ。index が disabled な workspace ではゲート自体を skip する
+				// (#413 Finding 1) ため、alias だけでなく **workspace 外を指す symlink の内容も**
+				// L2 に載る (#406 時点の disabled workspace 挙動からの変化)。既に L2 にある entry の
+				// hit 時 stale 提供も同様に残る。いずれも follow-up issue で追跡する。
+				// **なぜ受容できるか**: (1) scan 結果への露出は変わらない — workspace 外 symlink の
+				// 内容は cache 有無に関わらず毎回 raw read されて検索結果に出る既存挙動 (#399 の
+				// 境界は「index に載せない」であって「検索結果に出さない」ではない)。(2) #406 で
+				// 塞いだ swap-back 汚染の連鎖は「L2 の外部内容が index に入る」ことが害の本体だが、
+				// disabled は workspace 生存中不可逆 (inverted-index.ts の gram 上限退避に復活経路が
+				// ない) で indexFile が恒久 no-op なので、この連鎖は disabled 下では成立しない。
+				// 残るのは「既に検索結果に出ている内容が L2 エントリの寿命ぶん stale 化する」ことのみ。
 				if (!indexGateEvaluated || indexable) cache?.set(ioPath, text, genAtStart);
 				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
@@ -677,8 +685,9 @@ export interface DarkAssertRetryDeps
 	extends Pick<InvertedIndexHandle, "collectViolations" | "currentEpochOf" | "indexFile"> {
 	/**
 	 * workspace root 内 realpath 認可。false の file は index に取り込まない。
-	 * 呼び手 (runDarkAssert) の実装は「解決先が入力 path と一致する in-root 実体」のみ true に
-	 * する — workspace 内 symlink (alias) は index に載せない契約 (#413 Finding 2) のため。
+	 * 呼び手 (runDarkAssert) の実装は `isIndexableResolution` で「解決先が入力 path と一致する
+	 * in-root 実体」のみ true にする — workspace 内 symlink (alias) は index に載せない契約
+	 * (#413 Finding 2) のため。false は unauthorized として計上される (下記 doc も参照)。
 	 * dev-monitor 専用経路なので boolean 契約のまま維持する (IdleFillDeps は #406 で
 	 * 解決済み path を返す resolveAllowed に移行したが、この経路の再検証は「index に渡したのと
 	 * 同一 snapshot で行う」#405 の設計に従うため、readFile 側を resolve 結果に寄せていない)。
@@ -697,7 +706,10 @@ export interface DarkAssertDropCounts {
 	 * realpath 認可外 (workspace 外 target への retarget 等)。
 	 * #406 でゲートが fail-closed になったため、**非実在 / dangling (resolve 不能) もここに落ちる**
 	 * (旧 realpathBestEffort 版では祖先 fall-through で認可 pass → unreadable に計上されていた)。
-	 * triage で「削除された file」を security signal と読み違えないこと。
+	 * #413 でゲートが alias も弾くようになったため、**workspace 内 symlink もここに落ちる**
+	 * (到達には「以前 index された alias が violation として上がる」= 現行フローでは起きない
+	 * 前提が要るが、計上経路としては存在する)。
+	 * triage で「削除された file」「workspace 内 alias」を security signal と読み違えないこと。
 	 */
 	unauthorized: number;
 	/** 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。 */
