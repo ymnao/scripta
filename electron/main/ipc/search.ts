@@ -115,7 +115,9 @@ async function processMdFilesParallel(
 					// 内容が L2 に載る」経路: watcher が拾えない retarget 中にその read が起きると外部内容が
 					// L2 に入り得る。ここに到達するにはさらに index 側が内部 evict (cutoff / tombstone clear)
 					// で invalid 化し、かつ検査時点で symlink が workspace 内へ swap back されている必要が
-					// あり、payoff は main process の in-memory bigram のみ。resolved path から読み直す案は
+					// あり、index 側の payoff は main process の in-memory bigram のみ (検索結果側への
+					// 露出は「L2 に載った内容がそのまま返る」既存の L2 staleness 契約の範囲)。
+					// resolved path から読み直す案は
 					// 検索 hot path に I/O を足すため見送り、この窓は受容する (#406)。
 					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
 						const epoch = index.currentEpochOf(ioPath);
@@ -491,6 +493,20 @@ async function searchFilesImpl(
 	return { results, truncated };
 }
 
+// L2 の読み取り専用 view。set を no-op にして「この pass の read は cache を汚さない」を型で表す。
+function toReadOnlyCacheHandle(
+	handle: ContentCacheHandle | undefined,
+): ContentCacheHandle | undefined {
+	if (handle === undefined) return undefined;
+	return {
+		get: (ioPath) => handle.get(ioPath),
+		set: () => {},
+		get generation(): number {
+			return handle.generation;
+		},
+	};
+}
+
 // dual-run assert 本体。truth = 全走査 (index filter なし + piggyback 抑止) の file hit 集合を集めて
 // index.collectViolations に渡す。violation あれば違反 file を再 index → 再検証。解消しなければ throw。
 async function runDarkAssert(
@@ -507,7 +523,11 @@ async function runDarkAssert(
 	const inputToIo = new Map<string, string>();
 	for (let i = 0; i < input.length; i++) inputToIo.set(input[i], io[i]);
 	await processMdFilesParallel(io, input, isStale, {
-		cache: getContentCacheHandle(canonicalRoot),
+		// suppressIndex の pass では index が undefined 扱いになり realpath ゲートが評価されない。
+		// そのまま L2 に書き戻すと「ゲート未評価で読んだ外部内容が L2 に載る」= #406 round 1 で
+		// 塞いだ swap-back 汚染の再現経路になるため、read-only handle にして set を落とす
+		// (truth pass は dev-monitor 用の全走査で、L2 を養う責務は本 pass 側が持つ)。
+		cache: toReadOnlyCacheHandle(getContentCacheHandle(canonicalRoot)),
 		index: indexHandle,
 		indexRoot: canonicalRoot,
 		suppressIndex: true,
