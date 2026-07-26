@@ -14,7 +14,7 @@ import type {
 } from "../../../src/types/wikilink";
 import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
-import { assertPathAllowed, resolveInsideRoot } from "../utils/path-guard";
+import { assertPathAllowed, isIndexableResolution, resolveInsideRoot } from "../utils/path-guard";
 import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
@@ -119,9 +119,20 @@ async function processMdFilesParallel(
 					// 露出は「L2 に載った内容がそのまま返る」既存の L2 staleness 契約の範囲)。
 					// resolved path から読み直す案は
 					// 検索 hot path に I/O を足すため見送り、この窓は受容する (#406)。
-					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
+					// **disabled 時はゲートごと skip する (#413 Finding 1)**: index が gram 上限超過で
+					// 恒久 disabled になると indexedEpoch が clear されて isIndexedAndValid が全 file
+					// false を返すため、この分岐に全 file が流れ込んで非キャッシュ realpath が
+					// 検索ごとに全 file 分走る。indexFile 自体は disabled で no-op なので、
+					// ゲートを走らせる意味がない。index-fill.ts の tick 冒頭 bail と同方針。
+					// **alias は index に載せない (#413 Finding 2)**: 判定は isIndexableResolution
+					// (null = workspace 外 / 解決先 !== ioPath = workspace 内 symlink を 1 つの述語で弾く)。
+					// alias を載せると解決先の modify で invalidate が波及せず stale posting が残る。
+					// 未 index file は buildScanList が常に scan 対象に含めるので結果は落ちない。
+					if (index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath)) {
 						const epoch = index.currentEpochOf(ioPath);
-						if (indexRoot === undefined || (await resolveInsideRoot(ioPath, indexRoot)) !== null) {
+						const resolved =
+							indexRoot === undefined ? ioPath : await resolveInsideRoot(ioPath, indexRoot);
+						if (isIndexableResolution(resolved, ioPath)) {
 							index.indexFile(ioPath, hit, epoch);
 						}
 					}
@@ -136,7 +147,10 @@ async function processMdFilesParallel(
 				// 来た場合、handle 側で不一致検出して indexFile を no-op にする (Phase B の姉妹罠)。
 				// currentEpochOf は path を pathToId に登録する副作用があるので、以降の invalidate
 				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
-				const shouldIndex = index !== undefined && !index.isIndexedAndValid(ioPath);
+				// disabled 時は index に載る余地がないので、以降の epoch capture と realpath ゲートを
+				// まとめて skip する (#413 Finding 1、L2-hit 側と同じ理由)。
+				const shouldIndex =
+					index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath);
 				const indexEpochAtStart = shouldIndex
 					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
 					: 0;
@@ -145,17 +159,19 @@ async function processMdFilesParallel(
 				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
 				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
 				let resolvedForIndex: string | null = shouldIndex ? ioPath : null;
-				// ゲートを実際に評価して reject された file (= workspace 外を指す symlink) は
-				// L2 にも入れない。入れてしまうと「外部内容が L2 に残る → attacker が symlink を
-				// workspace 内へ swap back → 次の検索で L2 hit + fresh ゲート pass → cache 中の
-				// 外部内容が index に入る」という経路で Finding 2 が L2 エントリの寿命ぶん persistent に
-				// 復活する。scan 結果は cache 有無に関わらず毎回 read するので影響しない。
-				let indexGateRejected = false;
+				// ゲートを実際に評価したか。評価した上で弾かれた file (workspace 外を指す symlink /
+				// workspace 内 alias) だけが L2 抑止の対象で、そもそも評価していない file
+				// (既に valid / index 無効) は従来どおり L2 に載せる。
+				let indexGateEvaluated = false;
 				if (shouldIndex && indexRoot !== undefined) {
 					resolvedForIndex = await resolveInsideRoot(ioPath, indexRoot);
-					indexGateRejected = resolvedForIndex === null;
+					indexGateEvaluated = true;
 					if (shouldStop()) return;
 				}
+				// 「index に載せてよい」判定 (#413 Finding 2)。ゲート未評価時は resolvedForIndex に
+				// ioPath (index 対象) か null (index 対象外) が入っているので、この 1 つの述語で
+				// 「workspace 外 / alias / そもそも index 対象外」を全て弾ける。
+				const indexable = isIndexableResolution(resolvedForIndex, ioPath);
 				let text: string;
 				try {
 					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
@@ -169,8 +185,26 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				if (!indexGateRejected) cache?.set(ioPath, text, genAtStart);
-				if (resolvedForIndex !== null) {
+				// ゲートに弾かれた file は L2 にも入れない。workspace 外 symlink の場合は
+				// 「外部内容が L2 に残る → attacker が symlink を workspace 内へ swap back →
+				// 次の検索で L2 hit + fresh ゲート pass → cache 中の外部内容が index に入る」経路で
+				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。alias の場合は
+				// 解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
+				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
+				// **成立範囲**: この抑止が効くのは「ゲートを評価した read」= index が有効かつ当該 file が
+				// 未 index の場合のみ。index が disabled な workspace ではゲート自体を skip する
+				// (#413 Finding 1) ため、alias だけでなく **workspace 外を指す symlink の内容も**
+				// L2 に載る (#406 時点の disabled workspace 挙動からの変化)。既に L2 にある entry の
+				// hit 時 stale 提供も同様に残る。いずれも #416 で追跡する。
+				// **なぜ受容できるか**: (1) scan 結果への露出は変わらない — workspace 外 symlink の
+				// 内容は cache 有無に関わらず毎回 raw read されて検索結果に出る既存挙動 (#399 の
+				// 境界は「index に載せない」であって「検索結果に出さない」ではない)。(2) #406 で
+				// 塞いだ swap-back 汚染の連鎖は「L2 の外部内容が index に入る」ことが害の本体だが、
+				// disabled は workspace 生存中不可逆 (inverted-index.ts の gram 上限退避に復活経路が
+				// ない) で indexFile が恒久 no-op なので、この連鎖は disabled 下では成立しない。
+				// 残るのは「既に検索結果に出ている内容が L2 エントリの寿命ぶん stale 化する」ことのみ。
+				if (!indexGateEvaluated || indexable) cache?.set(ioPath, text, genAtStart);
+				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
@@ -548,7 +582,11 @@ async function runDarkAssert(
 		// dark assert は dev-monitor 専用経路なので boolean 契約のまま
 		// (再検証は「index に渡したのと同一 snapshot」で行い、readFile は別途 raw path を読む
 		// #405 の設計を維持する)。認可判定だけ #406 の fresh resolve に揃える。
-		isRealPathAllowed: async (p) => (await resolveInsideRoot(p, canonicalRoot)) !== null,
+		// alias も false に倒す (#413 Finding 2): alias は未 index のまま常に scan 対象なので
+		// violation として上がってくること自体が無いはずだが、再 index は「alias を index に
+		// 載せうる」唯一の残存経路なので到達不能の論証に頼らずここで閉じる。
+		isRealPathAllowed: async (p) =>
+			isIndexableResolution(await resolveInsideRoot(p, canonicalRoot), p),
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		readFile: async (p) => {
 			try {
@@ -647,6 +685,9 @@ export interface DarkAssertRetryDeps
 	extends Pick<InvertedIndexHandle, "collectViolations" | "currentEpochOf" | "indexFile"> {
 	/**
 	 * workspace root 内 realpath 認可。false の file は index に取り込まない。
+	 * 呼び手 (runDarkAssert) の実装は `isIndexableResolution` で「解決先が入力 path と一致する
+	 * in-root 実体」のみ true にする — workspace 内 symlink (alias) は index に載せない契約
+	 * (#413 Finding 2) のため。false は unauthorized として計上される (下記 doc も参照)。
 	 * dev-monitor 専用経路なので boolean 契約のまま維持する (IdleFillDeps は #406 で
 	 * 解決済み path を返す resolveAllowed に移行したが、この経路の再検証は「index に渡したのと
 	 * 同一 snapshot で行う」#405 の設計に従うため、readFile 側を resolve 結果に寄せていない)。
@@ -665,7 +706,10 @@ export interface DarkAssertDropCounts {
 	 * realpath 認可外 (workspace 外 target への retarget 等)。
 	 * #406 でゲートが fail-closed になったため、**非実在 / dangling (resolve 不能) もここに落ちる**
 	 * (旧 realpathBestEffort 版では祖先 fall-through で認可 pass → unreadable に計上されていた)。
-	 * triage で「削除された file」を security signal と読み違えないこと。
+	 * #413 でゲートが alias も弾くようになったため、**workspace 内 symlink もここに落ちる**
+	 * (到達には「以前 index された alias が violation として上がる」= 現行フローでは起きない
+	 * 前提が要るが、計上経路としては存在する)。
+	 * triage で「削除された file」「workspace 内 alias」を security signal と読み違えないこと。
 	 */
 	unauthorized: number;
 	/** 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。 */
@@ -1114,6 +1158,7 @@ export function registerSearchIpc(): void {
 }
 
 export const __testing = {
+	processMdFilesParallel,
 	searchFilesImpl,
 	searchFilenamesImpl,
 	scanUnresolvedWikilinksImpl,

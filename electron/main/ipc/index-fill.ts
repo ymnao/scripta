@@ -9,6 +9,8 @@
 // (test 容易性の確保と、helper 側の独立テスト性を保つため — processMdFilesParallel の
 // ContentCacheHandle / InvertedIndexHandle と同じ設計方針)。
 
+import { isIndexableResolution } from "../utils/path-guard";
+
 export interface IdleFillIndex {
 	indexFile(path: string, text: string, capturedEpoch: number): void;
 	currentEpochOf(path: string): number;
@@ -41,6 +43,8 @@ export interface IdleFillDeps {
 	 * 許可時は **解決済み path** を返し、呼び手はその path で readFile する
 	 * (検査対象と読み取り対象を揃えて TOCTOU を閉じる、#406 Finding 2)。
 	 * null 応答時は cutoff 超過と同じく skipUntilEpochChange に記録される。
+	 * 戻り値が引数 `ioPath` と不一致の場合は workspace 内 symlink (alias) とみなし、
+	 * null と同じく index 取り込みを skip する (#413 Finding 2)。
 	 * 必須 field: fail-open 事故を避けるため optional にしない (test の fake deps は
 	 * 解決済み path を返すことで境界通過を宣言する)。
 	 */
@@ -104,10 +108,19 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 					const resolved = await deps.resolveAllowed(p).catch(() => null);
 					if (!deps.isAlive()) break;
 					if (deps.index.isDisabled) break;
-					if (resolved === null) {
+					// resolved !== p は workspace 内 symlink (alias)。index の key は p 側に付くが
+					// watcher (followSymlinks: false) の modify は解決先の path でしか来ないため
+					// invalidate が波及せず stale posting が残る。reject と同じ経路に倒して
+					// 未 index のままにする (#413 Finding 2、search.ts の piggyback 側と同じ述語)。
+					// p 自身の epoch が動くまで再訪しない = alias である限り恒久 skip だが、
+					// link が実体 file に差し替われば watcher が p の event を出して epoch が動く。
+					if (!isIndexableResolution(resolved, p)) {
 						skipUntilEpochChange.set(p, current);
 					} else {
-						const text = await deps.readFile(resolved);
+						// ここに来た時点で resolved === p (isIndexableResolution の契約) なので、
+						// #406 の「検査した実体を読む」は p を読むことと同値。narrowing に頼らず
+						// p を渡す (述語は boolean 返しで、false 側の型が正確に表せないため)。
+						const text = await deps.readFile(p);
 						if (!deps.isAlive()) break;
 						if (deps.index.isDisabled) break;
 						deps.index.indexFile(p, text, current);

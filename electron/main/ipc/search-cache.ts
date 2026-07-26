@@ -146,6 +146,11 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // **非責務 (#406)**: symlink target の rewire に対する realpath の鮮度はこの層では扱わない
 // (batch 由来の invalidation では取りこぼす — 理由は path-guard の resolveInsideRoot の doc 参照)。
 // L3 index 取り込みゲート側が毎回 fresh に解決するため、この module は path-guard に依存しない。
+// **非責務 (#413)**: workspace 内 symlink (alias) への invalidation 波及もこの層では扱わない。
+// event path (= 解決先) と alias の key (= walk が返す symlink path) は別物で、ここで波及させるには
+// 「解決先 → alias 群」の逆引きを全 file 分保守する必要がある。代わりに取り込み側 (search.ts の
+// piggyback / index-fill.ts) が alias を index / L2 に載せないことで、stale entry が生じる状態
+// そのものを作らない方針を採る (#413 Finding 2)。
 export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChangeEvent>): void {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;

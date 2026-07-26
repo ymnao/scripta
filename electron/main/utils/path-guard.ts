@@ -277,8 +277,13 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   retarget を change event として emit する保証がない) ため、index 取り込み時点で
 //   毎回 fresh に解決する。呼び出しは `!isIndexedAndValid` の file に限られるため、
 //   index が育った file では syscall は発生しない。ただし「恒久的に index に載らない file」
-//   (admission cutoff 超過 / root 外を指す symlink) は毎回 invalid のままなので、その分だけは
-//   検索ごとに 1 syscall 乗る (件数が限定的なので受容している)。
+//   (admission cutoff 超過 / root 外を指す symlink / workspace 内 alias) は毎回 invalid のまま
+//   なので、その分だけは検索ごとに syscall が乗る (件数が限定的なので受容している)。
+//   内訳: piggyback (search.ts) で 1 回 + idle fill (index-fill.ts) の skipUntilEpochChange が
+//   runFill ローカルで kick ごとに作り直されるため、kick 1 回につきさらに 1 回。
+// - **index が disabled な workspace ではこのゲート自体が呼ばれない** (#413 Finding 1)。
+//   disabled 時は indexedEpoch が clear されて全 file が「未 index」に見えるため、ゲートを
+//   残すと全 file 分の syscall が検索ごとに乗ってしまう (indexFile は no-op なので無駄)。
 // - realpathBestEffort と異なり **祖先 fall-through をしない**: 未存在 / dangling symlink は
 //   realpath が throw して null になる (fail-closed)。index ゲートに「最も近い実在祖先」の
 //   近似は不要で、非実在 file は後段 readFile も失敗するため取り込み挙動に差は出ない。
@@ -286,6 +291,31 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 // - **本 API 単独では「認可済みの内容」までは保証しない**: 戻り値以外の path や別ソース
 //   (cache 等) から取得した内容と組み合わせる場合、検査時点と内容取得時点がズレるため、
 //   その時間差を許容できるかは呼び手が判断すること (search.ts の L2 hit 経路は明示的に受容)。
+/**
+ * `resolveInsideRoot` の戻り値が「index に取り込んでよい in-root 実体」を指すかの純関数 (#413)。
+ *
+ * 2 つの除外を 1 つの述語に畳む:
+ *  - null: 解決失敗 / workspace 外 (#394 Phase D / #399 Finding 2 の境界)
+ *  - 解決先 !== 入力 path: workspace 内 symlink (alias)。walk は canonical root から始まり
+ *    symlink dir へ降りない (readdir({withFileTypes}) が symlink→dir を isDirectory=false で
+ *    返す) ため、不一致は「末端 file 自身が symlink」を意味する。alias の index / L2 key は
+ *    walk が返す symlink path 側に付く一方、watcher (followSymlinks: false) の modify は
+ *    解決先の path でしか来ないため invalidate が波及せず、stale entry が valid のまま残る。
+ *
+ * 判定を誤って実体を alias 扱いしても帰結は「index / L2 に載せず毎回 read + scan」で、
+ * 結果の正しさではなくコスト側にしか倒れない (fail-safe)。
+ *
+ * **戻り値は boolean で、type predicate (`resolved is string`) にはしない**: true 側は
+ * 健全 (一致 ⟹ 非 null) だが、false 側は「null (workspace 外)」と「別 string (alias)」の
+ * 2 状態を含むため、predicate にすると TS が else 分岐で `resolved` を `null` に誤 narrow
+ * する。将来 else 側で null と alias を区別する分岐 (dark assert の drop 内訳分類など) を
+ * 書いたときに、alias 分岐が型上 dead code になる事故を避ける。true 側で解決済み path が
+ * 必要な呼び手は、一致が保証されているので入力 path (`ioPath`) をそのまま使えばよい。
+ */
+export function isIndexableResolution(resolved: string | null, ioPath: string): boolean {
+	return resolved === ioPath;
+}
+
 export async function resolveInsideRoot(
 	ioPath: string,
 	canonicalRoot: string,

@@ -13,6 +13,14 @@
 //
 // V8 の String は UTF-16 code unit indexed で 1 コードユニット = 2 バイト消費する。L2 と同じ
 // admission cutoff (charge = text.length * 2) を採用する。
+//
+// **呼び手側の不変条件 (#413)**: workspace 内 symlink (alias、realpath が key と不一致の path) は
+// index に載せない。alias の key に対する invalidate は watcher から来ない (event は解決先の path で
+// 来る) ため、載せると stale posting が valid のまま残る。この class 自身は path の実体性を判定
+// しないので、取り込み側 (search.ts の piggyback / index-fill.ts) がゲートで担保する。
+// **成立範囲**: この担保は symlink に限る。hard link は realpath が解決しない (両名前とも自分自身を
+// 返す) ため両方が index に載り、片方の名前で書かれた modify event はもう片方の posting を
+// invalidate しない — symlink alias と同型の stale posting が残る (#416 で追跡)。
 
 import { sep } from "node:path";
 
