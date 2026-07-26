@@ -99,9 +99,8 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 					// 走らせる: workspace 外を指す symlink file の全文読み込みコストを避ける。
 					// null / 失敗時は cutoff 超過と同じ経路 (skipUntilEpochChange 記録) に倒す —
 					// fileEpoch が動けば自動 retry される。
-					// readFile には **解決済み path** を渡す (#406 Finding 2): 検査後に symlink が
-					// workspace 外へ swap されても、読むのは検査済みの実体なので外部内容は
-					// index に入らない。index の key は従来どおり `p` (workspace 内の path)。
+					// readFile には **解決済み path** を渡す (#406 Finding 2、契約は resolveInsideRoot の
+					// doc 参照)。index の key は従来どおり `p` (workspace 内の path)。
 					const resolved = await deps.resolveAllowed(p).catch(() => null);
 					if (!deps.isAlive()) break;
 					if (deps.index.isDisabled) break;

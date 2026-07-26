@@ -271,12 +271,17 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 // - **realpathCache を通さない** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、
 //   retarget を change event として emit する保証がない) ため、index 取り込み時点で
-//   毎回 fresh に解決する。呼び出しは `!isIndexedAndValid` の file に限られるので
-//   定常状態では syscall はほぼ発生しない。
+//   毎回 fresh に解決する。呼び出しは `!isIndexedAndValid` の file に限られるため、
+//   index が育った file では syscall は発生しない。ただし「恒久的に index に載らない file」
+//   (admission cutoff 超過 / root 外を指す symlink) は毎回 invalid のままなので、その分だけは
+//   検索ごとに 1 syscall 乗る (件数が限定的なので受容している)。
 // - realpathBestEffort と異なり **祖先 fall-through をしない**: 未存在 / dangling symlink は
 //   realpath が throw して null になる (fail-closed)。index ゲートに「最も近い実在祖先」の
 //   近似は不要で、非実在 file は後段 readFile も失敗するため取り込み挙動に差は出ない。
 // - validatePath が throw する不正入力 (相対 path / null byte) も null を返す。
+// - **本 API 単独では「認可済みの内容」までは保証しない**: 戻り値以外の path や別ソース
+//   (cache 等) から取得した内容と組み合わせる場合、検査時点と内容取得時点がズレるため、
+//   その時間差を許容できるかは呼び手が判断すること (search.ts の L2 hit 経路は明示的に受容)。
 export async function resolveInsideRoot(
 	ioPath: string,
 	canonicalRoot: string,

@@ -136,16 +136,14 @@ async function processMdFilesParallel(
 					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
 					: 0;
 				// realpath 再認可 (#394 Phase D / #399 Finding 2) を readFile の **前** に行い、
-				// 許可された file は解決済み path を読む (#406 Finding 2)。read → 検査の順だと
-				// 「T1 で外部内容を読む → T2 までに symlink を workspace 内へ swap back → 検査 pass」で
-				// 外部内容が index に入る TOCTOU が成立する。検査と読み取りを同一の実体に揃えて閉じる。
+				// 許可された file は解決済み path を読む (#406 Finding 2、契約は resolveInsideRoot の doc)。
+				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
 				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
-				let resolvedForIndex: string | null = null;
+				let resolvedForIndex: string | null = shouldIndex ? ioPath : null;
 				if (shouldIndex && indexRoot !== undefined) {
 					resolvedForIndex = await resolveInsideRoot(ioPath, indexRoot);
 					if (shouldStop()) return;
 				}
-				const indexAllowed = shouldIndex && (indexRoot === undefined || resolvedForIndex !== null);
 				let text: string;
 				try {
 					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
@@ -160,7 +158,7 @@ async function processMdFilesParallel(
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
 				cache?.set(ioPath, text, genAtStart);
-				if (indexAllowed) {
+				if (resolvedForIndex !== null) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
@@ -565,7 +563,12 @@ async function runDarkAssert(
  */
 export interface DarkAssertRetryDeps
 	extends Pick<InvertedIndexHandle, "collectViolations" | "currentEpochOf" | "indexFile"> {
-	/** workspace root 内 realpath 認可。false の file は index に取り込まない (IdleFillDeps と同名同義)。 */
+	/**
+	 * workspace root 内 realpath 認可。false の file は index に取り込まない。
+	 * dev-monitor 専用経路なので boolean 契約のまま維持する (IdleFillDeps は #406 で
+	 * 解決済み path を返す resolveAllowed に移行したが、この経路の再検証は「index に渡したのと
+	 * 同一 snapshot で行う」#405 の設計に従うため、readFile 側を resolve 結果に寄せていない)。
+	 */
 	isRealPathAllowed(ioPath: string): Promise<boolean>;
 	/** 読み取り失敗 (ENOENT 等) は null。throw しない契約。 */
 	readFile(ioPath: string): Promise<string | null>;
