@@ -130,7 +130,9 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		expect(scanned.sort()).toEqual([`${a}:alpha`, `${b}:beta`]);
 		// **ゲート未評価の file は L2 に載せ続ける**。ここを止めると disabled workspace で
 		// L2 population が全停止して検索が毎回全 file 再読になる。search.ts の
-		// `!indexGateEvaluated || indexable` の前半が消える退行を殺すための assert。
+		// 「ゲート未評価の枝」全体が消える退行を殺すための assert (#416 Finding 1 の fix 後は
+		// この枝が lstat 判定付きになったので、symlink 側の抑止は
+		// search-l2-symlink-admission.test.ts が固定する)。
 		expect(stored.size).toBe(2);
 	});
 

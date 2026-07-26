@@ -49,6 +49,23 @@ import {
 // 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
 const ioLimit = pLimit(16);
 
+// L2 admission の symlink 判定 (#416 Finding 1)。realpath ゲートを **評価しなかった** read
+// だけがこの判定を使う: ゲート評価済みの read は resolveInsideRoot が既に「解決先が
+// 入力 path と一致する = 末端は symlink ではない」まで確認しているため、判定は
+// indexable の再利用で足りる (syscall を増やさない)。
+// realpath ではなく lstat を使うのは #413 Finding 1 が削ったコスト (非キャッシュ realpath を
+// 検索ごとに全 file 分) を復活させないため。alias / workspace 外 symlink の区別には realpath が
+// 要るが、L2 抑止の観点では両者とも「載せない」が正解なので symlink かどうかだけで足りる。
+// lstat が失敗したら fail-closed で「載せない」に倒す: L2 は純粋な最適化で、載せ損ねの被害は
+// 次回検索の read が 1 回増えることだけ (scan 結果は L2 を経由せず毎回 read するので不変)。
+async function isNonSymlinkForCache(ioPath: string): Promise<boolean> {
+	try {
+		return !(await fsp.lstat(ioPath)).isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
 // 全 .md を ioLimit 下で並列に読み込んで per-file callback を呼ぶ scan 系 helper。
 // searchFilesImpl / scanUnresolvedWikilinksImpl / scanBacklinksImpl が共有する
 // boilerplate (Promise.all + ioLimit + isStale 2 重 check + try/catch readFile) を集約する。
@@ -207,31 +224,50 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				// ゲートに弾かれた file は L2 にも入れない。workspace 外 symlink の場合は
+				// **L2 admission の不変条件**: 「(ゲート評価済み ∧ indexable) ∨ (lstat で非 symlink と
+				// 確認済み)」を満たす read の内容だけを L2 に載せる。どちらの枝も「格納する内容は
+				// ioPath 自身の実体から読んだもの」を意味し、symlink 経由の内容は L2 に入らない。
+				// symlink を弾く理由は 2 つ。workspace 外を指す symlink の場合は
 				// 「外部内容が L2 に残る → attacker が symlink を workspace 内へ swap back →
 				// 次の検索で L2 hit + fresh ゲート pass → cache 中の外部内容が index に入る」経路で
-				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。alias の場合は
-				// 解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
+				// 境界破りが L2 エントリの寿命ぶん persistent に復活するため (#406)。workspace 内 alias の
+				// 場合は解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
-				// **成立範囲**: この抑止が効くのは「ゲートを評価した read」= index が有効かつ当該 file が
-				// 未 index の場合のみ。index が disabled な workspace ではゲート自体を skip する
-				// (#413 Finding 1) ため、alias だけでなく **workspace 外を指す symlink の内容も**
-				// L2 に載る (#406 時点の disabled workspace 挙動からの変化)。既に L2 にある entry の
-				// hit 時 stale 提供も同様に残る。いずれも #416 で追跡する。
-				// **なぜ受容できるか**: (1) scan 結果への露出は変わらない — workspace 外 symlink の
-				// 内容は cache 有無に関わらず毎回 raw read されて検索結果に出る既存挙動 (#399 の
-				// 境界は「index に載せない」であって「検索結果に出さない」ではない)。(2) #406 で
-				// 塞いだ swap-back 汚染の連鎖は「L2 の外部内容が index に入る」ことが害の本体だが、
-				// disabled は workspace 生存中不可逆 (inverted-index.ts の gram 上限退避に復活経路が
-				// ない) で indexFile が恒久 no-op なので、この連鎖は disabled 下では成立しない。
-				// 残るのは「既に検索結果に出ている内容が L2 エントリの寿命ぶん stale 化する」ことのみ。
-				if (!indexGateEvaluated || indexable) cache?.set(ioPath, text, genAtStart);
+				// **2 つの枝を使い分ける理由**: ゲート評価済みの read は resolveInsideRoot が末端非 symlink
+				// まで確認済みなので indexable の再利用で足り、正常系 (index 有効 + 未 index) の syscall 数は
+				// 従来と完全に不変。lstat が乗るのは「ゲートを評価しなかった L2-miss」= index disabled /
+				// indexRoot 未指定 / 既に index 済みで valid の 3 ケースだけで、いずれも既に open + read を
+				// 済ませた経路なので相対コストは小さい (#413 Finding 1 が削った「検索ごとに全 file 分の
+				// 非キャッシュ realpath」とは桁が違う)。
+				// **残る窓**: (1) read (T1) と lstat (T2) の間に ioPath を symlink へ差し替えられると、
+				// T1 で読んだ実体の内容を「symlink だった」と誤判定して L2 抑止する (安全側に外す) か、
+				// 逆順の swap なら symlink 経由の内容を非 symlink と判定して載せうる。後者は L2 entry
+				// 1 つの寿命ぶん stale 内容が検索結果に出るところまでで、index への流入は indexable 側
+				// (ゲート評価済みの枝) が別途塞いでいる。単一 syscall 窓まで縮んでおり、watcher の
+				// evict が最終防衛線として効く。
+				// (2) **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は lstat でも
+				// realpath でも「自分自身」を返すため両方の名前が非 symlink として L2 に載り、片方の
+				// 名前で来た modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が
+				// 別 (ino/dev 突合が要る) なので本 fix のスコープ外として受容する。
+				// **判定を 2 箇所に分ける理由**: ゲート評価済みの枝は syscall なしで判定できるので
+				// 従来と同じ位置で set する。ゲート未評価の枝だけ lstat の await が要るが、それを
+				// options.process の **前** に置くと scan (検索結果への反映) が lstat 1 回ぶん遅れ、
+				// さらに await 境界が増えるぶん stop 判定の粒度も変わる。L2 への格納は scan 結果に
+				// 影響しない純粋な最適化なので、process の後ろに回して scan 経路を完全に不変に保つ。
+				if (indexGateEvaluated && indexable) cache?.set(ioPath, text, genAtStart);
 				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
 				}
 				options.process(inFile, text);
+				// ゲート未評価の枝 (index disabled / indexRoot 未指定 / 既に index 済みで valid)。
+				// genAtStart は read 開始前に capture したものをそのまま使う: 判定を後ろに回したぶん
+				// 待ち時間は伸びるが、その間に evict が挟まれば generation 不一致で set が no-op に
+				// なるだけで、格納方向に緩むことはない。
+				if (!indexGateEvaluated && cache !== undefined && (await isNonSymlinkForCache(ioPath))) {
+					cache.set(ioPath, text, genAtStart);
+				}
 			}),
 		),
 	);
