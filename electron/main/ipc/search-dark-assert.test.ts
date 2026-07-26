@@ -8,7 +8,11 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
-import { type DarkAssertRetryDeps, resolveDarkAssertViolations } from "./search";
+import {
+	type DarkAssertRetryDeps,
+	formatDarkAssertReport,
+	resolveDarkAssertViolations,
+} from "./search";
 
 const ALL_IO = ["/ws/a.md", "/ws/b.md"] as const;
 
@@ -22,6 +26,11 @@ interface FakeOptions {
 	texts?: Map<string, string | null>;
 	authorized?: (p: string) => boolean;
 	staleAfterCalls?: number;
+	/**
+	 * path ごとの currentEpochOf 戻り値を呼び出し順に並べたもの (#410 の epoch 変化シミュレート)。
+	 * 末尾に達したら最後の値を返し続ける。未指定 path / opts 省略時は常に 1 (従来の固定 fake)。
+	 */
+	epochs?: Map<string, number[]>;
 }
 
 /** 1 回目だけ violations を返し 2 回目以降は空を返す scripted 版 (reindex で解消するケース用)。 */
@@ -39,6 +48,7 @@ function makeFakeDeps(opts: FakeOptions): {
 	const calls: string[] = [];
 	const indexed: Array<{ path: string; text: string; epoch: number }> = [];
 	const collectArgs: string[][] = [];
+	const epochCalls = new Map<string, number>();
 	let staleChecks = 0;
 	const deps: DarkAssertRetryDeps = {
 		collectViolations: (_q, _all, hits) => {
@@ -51,7 +61,11 @@ function makeFakeDeps(opts: FakeOptions): {
 		},
 		currentEpochOf: (p) => {
 			calls.push(`epoch:${p}`);
-			return 1;
+			const seq = opts.epochs?.get(p);
+			if (seq === undefined || seq.length === 0) return 1;
+			const i = epochCalls.get(p) ?? 0;
+			epochCalls.set(p, i + 1);
+			return seq[Math.min(i, seq.length - 1)];
 		},
 		readFile: async (p) => {
 			calls.push(`read:${p}`);
@@ -101,12 +115,15 @@ describe("resolveDarkAssertViolations", () => {
 	it("captures the epoch before reading the file (piggyback / idle-fill と同順序)", async () => {
 		// 逆順にすると bump 後の epoch で stale text が valid 化する race を assert 自身が作る
 		// (Phase D round 1 Fable W1)。順序を test で恒久 guard する。
+		// #410 で capture 位置を認可判定より前へ移した (drop する file にも検証済みマークを付けるため)。
+		// 本 test が守る不変条件は「epoch capture が read より前」であり、それは維持されている。
 		const { deps, calls } = makeFakeDeps({
 			violationsFromTruth: resolvedOnRetry(["/ws/a.md"]),
 			texts: new Map([["/ws/a.md", "foo"]]),
 		});
 		await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
-		expect(calls).toEqual(["auth:/ws/a.md", "epoch:/ws/a.md", "read:/ws/a.md", "index:/ws/a.md"]);
+		expect(calls).toEqual(["epoch:/ws/a.md", "auth:/ws/a.md", "read:/ws/a.md", "index:/ws/a.md"]);
+		expect(calls.indexOf("epoch:/ws/a.md")).toBeLessThan(calls.indexOf("read:/ws/a.md"));
 	});
 
 	it("drops a truth hit whose fresh text no longer contains the query (Finding 1 の FP)", async () => {
@@ -158,7 +175,8 @@ describe("resolveDarkAssertViolations", () => {
 			kind: "resolved",
 			dropped: { staleTruth: 0, unauthorized: 1, unreadable: 0 },
 		});
-		expect(calls).toEqual(["auth:/ws/a.md"]);
+		// epoch は認可判定より前に 1 度だけ capture される (drop 済み file の二重カウント防止マーク)。
+		expect(calls).toEqual(["epoch:/ws/a.md", "auth:/ws/a.md"]);
 		expect(indexed).toEqual([]);
 	});
 
@@ -270,20 +288,21 @@ describe("resolveDarkAssertViolations", () => {
 			dropped: { staleTruth: 1, unauthorized: 0, unreadable: 0 },
 		});
 		expect(calls).toEqual([
-			"auth:/ws/a.md",
 			"epoch:/ws/a.md",
+			"auth:/ws/a.md",
 			"read:/ws/a.md",
 			"index:/ws/a.md",
-			"auth:/ws/b.md",
 			"epoch:/ws/b.md",
+			"auth:/ws/b.md",
 			"read:/ws/b.md",
 			"index:/ws/b.md",
 		]);
 	});
 
-	it("verifies each file at most once (already-verified violations end the loop)", async () => {
-		// 同じ file が recheck でも violation のまま残る = fresh text が query を含むのに候補外。
-		// 再検証を繰り返さず violated で確定する (retry が真の破損を塗りつぶさない保証)。
+	it("verifies each file at most once while its epoch stays put", async () => {
+		// 同じ file が recheck でも violation のまま残り、epoch も動いていない = fresh text が
+		// query を含むのに候補外。再検証を繰り返さず violated で確定する
+		// (retry が真の破損を塗りつぶさない保証)。
 		const { deps, calls } = makeFakeDeps({
 			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
 			texts: new Map([["/ws/a.md", "foo"]]),
@@ -306,5 +325,182 @@ describe("resolveDarkAssertViolations", () => {
 		});
 		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
 		expect(verdict).toEqual({ kind: "ok" });
+	});
+});
+
+describe("resolveDarkAssertViolations: 検証済み file の epoch 追跡 (#410 Finding 1)", () => {
+	it("re-verifies a verified file whose epoch changed instead of declaring it violated", async () => {
+		// issue #410 のシナリオ: a を検証 (epoch 1、fresh text は query を含むので truth 保持)
+		// → b の readFile await 中に a が正当に書き換えられ watcher flush → idle fill が新内容で
+		// 再 index → a が再び violation 化。従来は「検証済みなので再検証しない」で violated (FP)。
+		// epoch を記録していれば差し戻して再検証でき、staleTruth drop として解消する。
+		let call = 0;
+		const texts = new Map([
+			["/ws/a.md", "contains foo"],
+			["/ws/b.md", "rewritten"],
+		]);
+		const { deps } = makeFakeDeps({
+			violationsFromTruth: () => {
+				call++;
+				if (call === 1) return ["/ws/a.md", "/ws/b.md"];
+				if (call === 2) {
+					// 2 回目の collect の直前に a が書き換わった体で fresh text を差し替える。
+					texts.set("/ws/a.md", "no longer matching");
+					return ["/ws/a.md"];
+				}
+				return [];
+			},
+			texts,
+			// a の epoch: 初回検証で 1 → 差し戻し判定で 2 (書き換え由来の bump) → 再検証以降は 2 のまま。
+			epochs: new Map([["/ws/a.md", [1, 2]]]),
+		});
+		const verdict = await resolveDarkAssertViolations(
+			"foo",
+			ALL_IO,
+			new Set(["/ws/a.md", "/ws/b.md"]),
+			deps,
+		);
+		expect(verdict).toEqual({
+			kind: "resolved",
+			// b は初回検証で staleTruth drop、a は再検証で staleTruth drop。二重カウントは無い。
+			dropped: { staleTruth: 2, unauthorized: 0, unreadable: 0 },
+		});
+	});
+
+	it("returns violated when the verified file's epoch is unchanged", async () => {
+		// epoch が動いていない = 検証に使った snapshot が現行。従来どおり真の破損として確定する。
+		const { deps } = makeFakeDeps({
+			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
+			texts: new Map([["/ws/a.md", "still contains foo"]]),
+			epochs: new Map([["/ws/a.md", [7]]]),
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
+	});
+
+	it("still returns violated when re-verification confirms the file is genuinely missing", async () => {
+		// epoch 変化 = 無条件で drop ではない。再検証しても fresh text が query を含み候補外のままなら
+		// 真の破損。差し戻しが「破損の塗りつぶし」に劣化しないことの guard。
+		const { deps, calls } = makeFakeDeps({
+			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
+			texts: new Map([["/ws/a.md", "still contains foo"]]),
+			epochs: new Map([["/ws/a.md", [1, 2]]]),
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
+		// 差し戻しで 2 回読んでいる (1 回目 = 初回検証、2 回目 = epoch 変化後の再検証)。
+		expect(calls.filter((c) => c.startsWith("read:"))).toEqual(["read:/ws/a.md", "read:/ws/a.md"]);
+	});
+
+	it("returns exhausted (not violated) when the epoch keeps churning", async () => {
+		// 持続的な書き換えで epoch が動き続けるケース。throw すると塞いだはずの FP を再導入するので
+		// 判定不能として打ち切る。上限が無いと無限ループになる。
+		const { deps, calls } = makeFakeDeps({
+			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
+			texts: new Map([["/ws/a.md", "still contains foo"]]),
+			epochs: new Map([["/ws/a.md", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]]),
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict).toEqual({
+			kind: "exhausted",
+			violations: ["/ws/a.md"],
+			rounds: 3,
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
+		// 実際の再検証回数も pin する: 初回検証 1 + 差し戻し 3 = 4 read。
+		expect(calls.filter((c) => c.startsWith("read:"))).toHaveLength(4);
+	});
+
+	it("still reports the epoch-stable violation when another file churns past the budget", async () => {
+		// churn する file が 1 つあるだけで同じ round の真の破損まで warn に丸めると、
+		// dev-monitor が本来検出すべき破損を見逃す。安定分は violated として報告する。
+		const { deps } = makeFakeDeps({
+			violationsFromTruth: (hits) => [...hits],
+			texts: new Map([
+				["/ws/a.md", "still contains foo"],
+				["/ws/b.md", "still contains foo"],
+			]),
+			// a は epoch 安定、b は毎回変化して budget を食い潰す。
+			epochs: new Map([
+				["/ws/a.md", [1]],
+				["/ws/b.md", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]],
+			]),
+		});
+		const verdict = await resolveDarkAssertViolations(
+			"foo",
+			ALL_IO,
+			new Set(["/ws/a.md", "/ws/b.md"]),
+			deps,
+		);
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
+	});
+
+	it("records the epoch captured before the read, not one re-read after indexFile", async () => {
+		// indexFile 後に取り直すと、capture→read 間の invalidate で indexFile が no-op になった
+		// ケースでも「現行 epoch で検証済み」に見えて差し戻しが効かなくなる。
+		// epoch 呼び出しを file あたり「検証時 1 回 + violated 確定判定 1 回」に固定して記録元を縛る。
+		const { deps, calls } = makeFakeDeps({
+			violationsFromTruth: (hits) => hits.filter((h) => h === "/ws/a.md"),
+			texts: new Map([["/ws/a.md", "still contains foo"]]),
+			epochs: new Map([["/ws/a.md", [1, 1]]]),
+		});
+		const verdict = await resolveDarkAssertViolations("foo", ALL_IO, new Set(["/ws/a.md"]), deps);
+		expect(verdict.kind).toBe("violated");
+		expect(calls.filter((c) => c === "epoch:/ws/a.md")).toHaveLength(2);
+	});
+});
+
+describe("formatDarkAssertReport (#410 Finding 2)", () => {
+	const DROPPED = { staleTruth: 1, unauthorized: 2, unreadable: 3 };
+
+	it("reports nothing for ok", () => {
+		expect(formatDarkAssertReport({ kind: "ok" }, "foo")).toBeNull();
+	});
+
+	it("reports nothing for stale", () => {
+		expect(formatDarkAssertReport({ kind: "stale" }, "foo")).toBeNull();
+	});
+
+	it("warns (never throws) for resolved", () => {
+		const report = formatDarkAssertReport({ kind: "resolved", dropped: DROPPED }, "foo");
+		expect(report?.level).toBe("warn");
+		// prefix は e2e (search-l3.electron.spec.ts) の stderr filter が拾う契約。
+		expect(report?.message).toContain("[dark-assert]");
+		expect(report?.message).toContain('query="foo"');
+		expect(report?.message).toContain("droppedTruth={stale:1,unauthorized:2,unreadable:3}");
+	});
+
+	it("warns for exhausted and carries the round count and churning file", () => {
+		const report = formatDarkAssertReport(
+			{ kind: "exhausted", violations: ["/ws/a.md"], dropped: DROPPED, rounds: 3 },
+			"foo",
+		);
+		expect(report?.level).toBe("warn");
+		expect(report?.message).toContain("[dark-assert]");
+		expect(report?.message).toContain("rounds=3");
+		expect(report?.message).toContain("/ws/a.md");
+	});
+
+	it("throws for violated and names the first offending file", () => {
+		const report = formatDarkAssertReport(
+			{ kind: "violated", violations: ["/ws/a.md", "/ws/b.md"], dropped: DROPPED },
+			"foo",
+		);
+		expect(report?.level).toBe("throw");
+		expect(report?.message).toContain("/ws/a.md");
+		expect(report?.message).toContain('query="foo"');
+		expect(report?.message).toContain("droppedTruth={stale:1,unauthorized:2,unreadable:3}");
 	});
 });
