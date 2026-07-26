@@ -267,7 +267,9 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   「検査対象 (T1 の realpath) と読み取り対象 (T2 の symlink target)」がズレ、
 //   検査通過後に workspace 内へ swap back された symlink 経由で外部内容が index に
 //   取り込まれる TOCTOU が成立する。assertPathAllowed が canonical を返して
-//   「判定に使った path で I/O する」契約と同型。
+//   「判定に使った path で I/O する」契約と同型。閉じられるのは **file 自身の symlink swap** まで:
+//   戻り値も path である以上、read 時に中間 dir 成分を差し替えられる窓は残る (fd ベースの
+//   traversal でないと閉じない。assertPathAllowed も同じ限界)。
 // - **realpathCache を通さない** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、
 //   retarget を change event として emit する保証がない) ため、index 取り込み時点で

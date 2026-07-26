@@ -109,11 +109,14 @@ async function processMdFilesParallel(
 					// realpath 再認可 (#394 Phase D / #399 Finding 2): symlink 経由で workspace 外の
 					// target を指す file を index に載せない。scan (process) は既存挙動と同じく通す。
 					// ゲートは毎回 fresh に realpath する (#406 Finding 1) が、text は L2 に載った時点の
-					// もの = 「ゲートは現在・内容は過去」の時間差が残る。悪用には「watcher batch を
-					// 取りこぼした外部内容が L2 に載る」+「その file が index 側では invalid」+「検査
-					// 時点で symlink が workspace 内へ swap back」の 3 条件同時成立が必要で、payoff は
-					// main process の in-memory bigram のみ。resolved path から読み直す案は検索 hot path に
-					// I/O を足すため見送り、受容する (#406)。
+					// もの = 「ゲートは現在・内容は過去」の時間差が残る。L2-miss 側で「ゲート reject 分は
+					// L2 に入れない」ようにしたので、外部内容が L2 経由でここに来る主経路は塞いである。
+					// 残る窓は「ゲートを評価しなかった read (= その時点で index が valid だった file) の
+					// 内容が L2 に載る」経路: watcher が拾えない retarget 中にその read が起きると外部内容が
+					// L2 に入り得る。ここに到達するにはさらに index 側が内部 evict (cutoff / tombstone clear)
+					// で invalid 化し、かつ検査時点で symlink が workspace 内へ swap back されている必要が
+					// あり、payoff は main process の in-memory bigram のみ。resolved path から読み直す案は
+					// 検索 hot path に I/O を足すため見送り、この窓は受容する (#406)。
 					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
 						const epoch = index.currentEpochOf(ioPath);
 						if (indexRoot === undefined || (await resolveInsideRoot(ioPath, indexRoot)) !== null) {
@@ -140,8 +143,15 @@ async function processMdFilesParallel(
 				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
 				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
 				let resolvedForIndex: string | null = shouldIndex ? ioPath : null;
+				// ゲートを実際に評価して reject された file (= workspace 外を指す symlink) は
+				// L2 にも入れない。入れてしまうと「外部内容が L2 に残る → attacker が symlink を
+				// workspace 内へ swap back → 次の検索で L2 hit + fresh ゲート pass → cache 中の
+				// 外部内容が index に入る」という経路で Finding 2 が L2 エントリの寿命ぶん persistent に
+				// 復活する。scan 結果は cache 有無に関わらず毎回 read するので影響しない。
+				let indexGateRejected = false;
 				if (shouldIndex && indexRoot !== undefined) {
 					resolvedForIndex = await resolveInsideRoot(ioPath, indexRoot);
+					indexGateRejected = resolvedForIndex === null;
 					if (shouldStop()) return;
 				}
 				let text: string;
@@ -157,7 +167,7 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				cache?.set(ioPath, text, genAtStart);
+				if (!indexGateRejected) cache?.set(ioPath, text, genAtStart);
 				if (resolvedForIndex !== null) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
@@ -579,7 +589,12 @@ export interface DarkAssertRetryDeps
 export interface DarkAssertDropCounts {
 	/** fresh text が query を含まなくなっていた (読取後の正当な書き換え)。 */
 	staleTruth: number;
-	/** realpath 認可外 (workspace 外 target への retarget 等)。 */
+	/**
+	 * realpath 認可外 (workspace 外 target への retarget 等)。
+	 * #406 でゲートが fail-closed になったため、**非実在 / dangling (resolve 不能) もここに落ちる**
+	 * (旧 realpathBestEffort 版では祖先 fall-through で認可 pass → unreadable に計上されていた)。
+	 * triage で「削除された file」を security signal と読み違えないこと。
+	 */
 	unauthorized: number;
 	/** 再読み込みできなかった (ENOENT / 一時的 I/O 失敗)。 */
 	unreadable: number;
