@@ -1168,9 +1168,12 @@ describe.skipIf(process.platform === "win32")(
 				const handle = getInvertedIndexHandle(canonical);
 				if (handle === undefined) throw new Error("index handle must exist after acquire");
 
-				// 1. workspace 内を指している間は index に取り込まれる (正常系)。
+				// 1. 実体 inside.md は index に取り込まれる (index 経路が生きていることの確認)。
+				//    link 自身は workspace 内を指している間も **alias なので載らない** (#413 Finding 2、
+				//    解決先の modify では invalidate が波及せず stale posting が残るため)。
 				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
-				expect(handle.isIndexedAndValid(link)).toBe(true);
+				expect(handle.isIndexedAndValid(inside)).toBe(true);
+				expect(handle.isIndexedAndValid(link)).toBe(false);
 
 				// 2. attacker が `ln -sf` 相当で外部 file へ付け替える。
 				await unlink(link);
@@ -1244,6 +1247,54 @@ describe.skipIf(process.platform === "win32")(
 				expect(readArgs).not.toContain(link);
 			} finally {
 				spy.mockRestore();
+				releaseFileListCache(canonical);
+			}
+		});
+
+		it("never indexes an in-root symlink alias (#413 Finding 2)", async () => {
+			// alias の index key は link.md 側に付くが、watcher (followSymlinks: false) の modify は
+			// 解決先 real.md でしか来ないため invalidate が波及しない。載せない方針で状態自体を作らない。
+			const canonical = await realpath(workspaceDir);
+			const real = join(canonical, "real.md");
+			await writeFile(real, "alphaword body");
+			const link = join(canonical, "link.md");
+			await symlink(real, link);
+
+			acquireFileListCache(canonical);
+			const handle = getInvertedIndexHandle(canonical);
+			if (handle === undefined) throw new Error("index handle must exist after acquire");
+			try {
+				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+				// 実体は従来どおり index される / alias は載らない。
+				expect(handle.isIndexedAndValid(real)).toBe(true);
+				expect(handle.isIndexedAndValid(link)).toBe(false);
+			} finally {
+				releaseFileListCache(canonical);
+			}
+		});
+
+		it("keeps alias hits after the resolved target is updated (#413 Finding 2)", async () => {
+			// issue #413 の再現手順そのもの。alias が index / L2 に載っていると、real.md の modify
+			// batch では invalidate されないため、alias 側の新内容 hit が candidates 絞り込みと
+			// L2 hit の両方で落ちる。
+			const canonical = await realpath(workspaceDir);
+			const real = join(canonical, "real.md");
+			await writeFile(real, "alphaword body");
+			const link = join(canonical, "link.md");
+			await symlink(real, link);
+
+			acquireFileListCache(canonical);
+			try {
+				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+
+				// 解決先を更新。watcher は symlink を追わないので batch は real.md でしか来ない。
+				await writeFile(real, "alphaword body betaword");
+				applyFsBatch(canonical, [{ kind: "modify", path: real }]);
+
+				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "betaword");
+				expect(res.results.some((r) => r.filePath.endsWith("real.md"))).toBe(true);
+				expect(res.results.some((r) => r.filePath.endsWith("link.md"))).toBe(true);
+			} finally {
 				releaseFileListCache(canonical);
 			}
 		});

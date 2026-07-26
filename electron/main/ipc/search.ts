@@ -119,9 +119,20 @@ async function processMdFilesParallel(
 					// 露出は「L2 に載った内容がそのまま返る」既存の L2 staleness 契約の範囲)。
 					// resolved path から読み直す案は
 					// 検索 hot path に I/O を足すため見送り、この窓は受容する (#406)。
-					if (index !== undefined && !index.isIndexedAndValid(ioPath)) {
+					// **disabled 時はゲートごと skip する (#413 Finding 1)**: index が gram 上限超過で
+					// 恒久 disabled になると indexedEpoch が clear されて isIndexedAndValid が全 file
+					// false を返すため、この分岐に全 file が流れ込んで非キャッシュ realpath が
+					// 検索ごとに全 file 分走る。indexFile 自体は disabled で no-op なので、
+					// ゲートを走らせる意味がない。index-fill.ts の tick 冒頭 bail と同方針。
+					// **alias は index に載せない (#413 Finding 2)**: 解決先が ioPath と異なる file
+					// (= workspace 内 symlink) は、real path 側の modify では invalidate されないため
+					// stale な posting が残る。indexFile を呼ばず未 index のままにする
+					// (未 index file は buildScanList が常に scan 対象に含めるので結果は落ちない)。
+					if (index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath)) {
 						const epoch = index.currentEpochOf(ioPath);
-						if (indexRoot === undefined || (await resolveInsideRoot(ioPath, indexRoot)) !== null) {
+						const resolved =
+							indexRoot === undefined ? ioPath : await resolveInsideRoot(ioPath, indexRoot);
+						if (resolved === ioPath) {
 							index.indexFile(ioPath, hit, epoch);
 						}
 					}
@@ -136,7 +147,10 @@ async function processMdFilesParallel(
 				// 来た場合、handle 側で不一致検出して indexFile を no-op にする (Phase B の姉妹罠)。
 				// currentEpochOf は path を pathToId に登録する副作用があるので、以降の invalidate
 				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
-				const shouldIndex = index !== undefined && !index.isIndexedAndValid(ioPath);
+				// disabled 時は index に載る余地がないので、以降の epoch capture と realpath ゲートを
+				// まとめて skip する (#413 Finding 1、L2-hit 側と同じ理由)。
+				const shouldIndex =
+					index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath);
 				const indexEpochAtStart = shouldIndex
 					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
 					: 0;
@@ -156,6 +170,15 @@ async function processMdFilesParallel(
 					indexGateRejected = resolvedForIndex === null;
 					if (shouldStop()) return;
 				}
+				// workspace 内 symlink (alias) の判定 (#413 Finding 2)。walk は canonical root から
+				// 始まり symlink dir へは降りない (readdir({withFileTypes}) が symlink→dir を
+				// isDirectory=false で返す) ため中間 dir は全て実体で、`resolved !== ioPath` は
+				// 「末端 file 自身が symlink」を意味する。alias は index / L2 の key が ioPath 側に
+				// 付く一方、watcher (followSymlinks: false) の modify は解決先の path でしか
+				// 来ないため invalidate が波及せず、stale な entry が valid のまま残る。
+				// 判定を誤って実体を alias 扱いしても帰結は「index / L2 に載せず毎回 read + scan」で、
+				// 結果の正しさではなくコスト側にしか倒れない (fail-safe)。
+				const isAliasPath = resolvedForIndex !== null && resolvedForIndex !== ioPath;
 				let text: string;
 				try {
 					// scan (process) は既存挙動どおり raw path を読む: workspace 外を指す symlink でも
@@ -169,8 +192,14 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				if (!indexGateRejected) cache?.set(ioPath, text, genAtStart);
-				if (resolvedForIndex !== null) {
+				// alias も L2 に入れない (#413 Finding 2): 解決先の modify では evict されないため、
+				// 入れると L2 hit 経由で stale な内容が検索結果に出る。
+				// **成立範囲**: この抑止が効くのは「ゲートを評価した read」= index が有効かつ当該 file が
+				// 未 index の場合のみ。index が disabled な workspace ではゲート自体を skip する
+				// (#413 Finding 1) ため alias が L2 に載る窓は残る。既に L2 にある alias entry の
+				// hit 時 stale 提供も同様に残る (follow-up 参照)。
+				if (!indexGateRejected && !isAliasPath) cache?.set(ioPath, text, genAtStart);
+				if (resolvedForIndex !== null && !isAliasPath) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
@@ -548,7 +577,11 @@ async function runDarkAssert(
 		// dark assert は dev-monitor 専用経路なので boolean 契約のまま
 		// (再検証は「index に渡したのと同一 snapshot」で行い、readFile は別途 raw path を読む
 		// #405 の設計を維持する)。認可判定だけ #406 の fresh resolve に揃える。
-		isRealPathAllowed: async (p) => (await resolveInsideRoot(p, canonicalRoot)) !== null,
+		// alias (`resolved !== p`) も false に倒す (#413 Finding 2): alias は未 index のまま
+		// 常に scan 対象なので violation として上がってくること自体が無いはずだが、
+		// 再 index は「alias を index に載せうる」唯一の残存経路なので到達不能の
+		// 論証に頼らずここで閉じる。
+		isRealPathAllowed: async (p) => (await resolveInsideRoot(p, canonicalRoot)) === p,
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		readFile: async (p) => {
 			try {
@@ -647,6 +680,8 @@ export interface DarkAssertRetryDeps
 	extends Pick<InvertedIndexHandle, "collectViolations" | "currentEpochOf" | "indexFile"> {
 	/**
 	 * workspace root 内 realpath 認可。false の file は index に取り込まない。
+	 * 呼び手 (runDarkAssert) の実装は「解決先が入力 path と一致する in-root 実体」のみ true に
+	 * する — workspace 内 symlink (alias) は index に載せない契約 (#413 Finding 2) のため。
 	 * dev-monitor 専用経路なので boolean 契約のまま維持する (IdleFillDeps は #406 で
 	 * 解決済み path を返す resolveAllowed に移行したが、この経路の再検証は「index に渡したのと
 	 * 同一 snapshot で行う」#405 の設計に従うため、readFile 側を resolve 結果に寄せていない)。
@@ -1114,6 +1149,7 @@ export function registerSearchIpc(): void {
 }
 
 export const __testing = {
+	processMdFilesParallel,
 	searchFilesImpl,
 	searchFilenamesImpl,
 	scanUnresolvedWikilinksImpl,

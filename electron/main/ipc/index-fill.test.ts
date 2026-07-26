@@ -184,27 +184,36 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
 	});
 
-	it("readFile は resolveAllowed が返した解決済み path で呼ばれる (#406 Finding 2)", async () => {
-		// workspace 内 symlink `link.md` が `real.md` を指すケース。認可判定に使った実体を
-		// そのまま読むことで、判定後に symlink が外へ swap されても外部内容を読まない。
-		const files = ["/ws/notes/link.md"];
-		const texts = new Map([["/ws/notes/real.md", "real content"]]);
+	it("resolveAllowed が別 path を返す (workspace 内 alias) → read も index もしない (#413 Finding 2)", async () => {
+		// workspace 内 symlink `link.md` が `real.md` を指すケース。index の key は link.md 側に
+		// 付く一方、watcher (followSymlinks: false) の modify は real.md でしか来ないため
+		// invalidate が波及しない。よって alias は index に載せず、未 index のまま毎回 scan させる。
+		// **#406 Finding 2 との関係**: 「解決済み path で readFile する」経路は、alias を read 前に
+		// skip するようになったことで index-fill からは到達不能になった (非 alias は resolved === p
+		// なので readFile の引数も p と一致する)。resolveAllowed の戻り値は alias 判定に使う。
+		// search.ts 側の piggyback は scan のために読む必要があるので resolved 読みを維持しており、
+		// #406 の pin は search.test.ts の "reads the resolved target ..." が引き続き担う。
+		const files = ["/ws/notes/link.md", "/ws/notes/ok.md"];
+		const texts = new Map([
+			["/ws/notes/real.md", "real content"],
+			["/ws/notes/ok.md", "ok content"],
+		]);
 		const { deps, indexed } = makeFakeDeps(files, texts);
 		const readPaths: string[] = [];
 		deps.resolveAllowed = async (p) => (p === "/ws/notes/link.md" ? "/ws/notes/real.md" : p);
 		deps.readFile = async (p: string) => {
 			readPaths.push(p);
-			const text = texts.get(p);
-			// 未解決 (raw symlink path) で読もうとしたら test が落ちるよう throw する。
-			if (text === undefined) throw new Error(`unexpected read: ${p}`);
-			return text;
+			return texts.get(p) ?? "";
 		};
 		kickIdleFill(ROOT, deps);
 		await waitUntil(() => !_isRunningForTest(ROOT));
-		expect(readPaths).toEqual(["/ws/notes/real.md"]);
-		// index の key は workspace 内 path (listIoFiles の並び) 側で持つ。
-		expect(indexed.has("/ws/notes/link.md")).toBe(true);
+		// alias は解決先も symlink path も読まない (index 目的の read しかしないため)。
+		expect(readPaths).toEqual(["/ws/notes/ok.md"]);
+		expect(indexed.has("/ws/notes/link.md")).toBe(false);
 		expect(indexed.has("/ws/notes/real.md")).toBe(false);
+		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
+		// skipUntilEpochChange に倒れているので、tick を回し切っても無限 retry しない。
+		expect(_isRunningForTest(ROOT)).toBe(false);
 	});
 
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {
