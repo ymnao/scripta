@@ -20,7 +20,7 @@
 // しないので、取り込み側 (search.ts の piggyback / index-fill.ts) がゲートで担保する。
 // **成立範囲**: この担保は symlink に限る。hard link は realpath が解決しない (両名前とも自分自身を
 // 返す) ため両方が index に載り、片方の名前で書かれた modify event はもう片方の posting を
-// invalidate しない — symlink alias と同型の stale posting が残る (follow-up 追跡)。
+// invalidate しない — symlink alias と同型の stale posting が残る (#416 で追跡)。
 
 import { sep } from "node:path";
 

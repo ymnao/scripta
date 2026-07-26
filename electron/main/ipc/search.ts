@@ -195,7 +195,7 @@ async function processMdFilesParallel(
 				// 未 index の場合のみ。index が disabled な workspace ではゲート自体を skip する
 				// (#413 Finding 1) ため、alias だけでなく **workspace 外を指す symlink の内容も**
 				// L2 に載る (#406 時点の disabled workspace 挙動からの変化)。既に L2 にある entry の
-				// hit 時 stale 提供も同様に残る。いずれも follow-up issue で追跡する。
+				// hit 時 stale 提供も同様に残る。いずれも #416 で追跡する。
 				// **なぜ受容できるか**: (1) scan 結果への露出は変わらない — workspace 外 symlink の
 				// 内容は cache 有無に関わらず毎回 raw read されて検索結果に出る既存挙動 (#399 の
 				// 境界は「index に載せない」であって「検索結果に出さない」ではない)。(2) #406 で
