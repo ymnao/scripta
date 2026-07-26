@@ -415,9 +415,36 @@ describe("resolveDarkAssertViolations: 検証済み file の epoch 追跡 (#410 
 			rounds: 3,
 			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
 		});
-		// 実際の再検証回数も pin する: 初回検証 1 + 差し戻し 3 = 4 read。rounds を定数で返しているため、
-		// 上限判定が off-by-one しても verdict だけでは検出できない (message が過大報告になる)。
+		// 実際の再検証回数も pin する: 初回検証 1 + 差し戻し 3 = 4 read。
 		expect(calls.filter((c) => c.startsWith("read:"))).toHaveLength(4);
+	});
+
+	it("still reports the epoch-stable violation when another file churns past the budget", async () => {
+		// churn する file が 1 つあるだけで同じ round の真の破損まで warn に丸めると、
+		// dev-monitor が本来検出すべき破損を見逃す。安定分は violated として報告する。
+		const { deps } = makeFakeDeps({
+			violationsFromTruth: (hits) => [...hits],
+			texts: new Map([
+				["/ws/a.md", "still contains foo"],
+				["/ws/b.md", "still contains foo"],
+			]),
+			// a は epoch 安定、b は毎回変化して budget を食い潰す。
+			epochs: new Map([
+				["/ws/a.md", [1]],
+				["/ws/b.md", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]],
+			]),
+		});
+		const verdict = await resolveDarkAssertViolations(
+			"foo",
+			ALL_IO,
+			new Set(["/ws/a.md", "/ws/b.md"]),
+			deps,
+		);
+		expect(verdict).toEqual({
+			kind: "violated",
+			violations: ["/ws/a.md"],
+			dropped: { staleTruth: 0, unauthorized: 0, unreadable: 0 },
+		});
 	});
 
 	it("records the epoch captured before the read, not one re-read after indexFile", async () => {

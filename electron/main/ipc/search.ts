@@ -593,7 +593,8 @@ export function formatDarkAssertReport(
 	query: string,
 ): DarkAssertReport | null {
 	switch (verdict.kind) {
-		// 成立 / 判定不能 / cancel はいずれも報告しない (dev のノイズにしない)。
+		// 成立 / fallback 由来の判定不能 / cancel はいずれも報告しない (dev のノイズにしない)。
+		// exhausted も判定不能だが、そちらは budget 到達の事実を残すため warn する。
 		case "ok":
 		case "stale":
 			return null;
@@ -682,7 +683,8 @@ export type DarkAssertVerdict =
 	 * 再検証の差し戻し上限に達した (warn 相当、#410 Finding 1)。
 	 * 書き換え churn が続いて epoch が動き続ける状態で、判定不能として打ち切ったことを表す。
 	 * violated ではないので throw しない (= その回の真の破損検出は保証しない)。
-	 * violations は打ち切り時点で残っていた file (dev で「どれが churn していたか」の triage 用)。
+	 * violations は打ち切り時点で **epoch が動き続けていた file** のみ (dev の triage 対象)。
+	 * epoch が安定したまま violation に残っていた file があれば、そちらは violated として報告される。
 	 */
 	| { kind: "exhausted"; violations: string[]; dropped: DarkAssertDropCounts; rounds: number }
 	/** 真の superset 破損 (throw 相当)。dropped は「何件落とした上で残ったか」の切り分け用。 */
@@ -724,9 +726,10 @@ const DARK_ASSERT_MAX_REVERIFY_ROUNDS = 3;
  * violated 確定の直前に epoch が変化した file を再検証へ差し戻す。これにより「retry 窓中の
  * 正当な書き換え → invalidate → idle fill 再 index」で検証済み file が再 violation 化する経路の
  * false positive は、**invalidate が epoch bump として観測できる範囲で**発生しなくなる。限界:
- * - 差し戻しは {@link DARK_ASSERT_MAX_REVERIFY_ROUNDS} 回まで。持続的な書き換え churn で上限に
- *   達した場合は判定不能として exhausted (warn) に倒し violated としない
- *   (= その回の真の破損検出は保証しない)。churn 下で throw すると塞いだはずの FP を再導入するため。
+ * - 差し戻しは {@link DARK_ASSERT_MAX_REVERIFY_ROUNDS} 回まで。上限到達時、**churn している file**
+ *   については判定不能として exhausted (warn) に倒し violated としない (= その file の真の破損検出は
+ *   保証しない)。churn 下で throw すると塞いだはずの FP を再導入するため。同じ round に epoch が
+ *   安定した violation が残っていれば、そちらは従来どおり violated (throw) として報告する。
  * - epoch bump を経ない状態破損 (fileEpoch 自体の不整合等) はこの機構の対象外。
  */
 export async function resolveDarkAssertViolations(
@@ -756,11 +759,20 @@ export async function resolveDarkAssertViolations(
 			if (changed.length === 0) return { kind: "violated", violations, dropped };
 			reverifyRounds++;
 			if (reverifyRounds > DARK_ASSERT_MAX_REVERIFY_ROUNDS) {
+				// budget 到達。ただし churn している file (changed) だけが判定不能なのであって、
+				// epoch が安定したまま violation に残っている file は violated の確定条件を既に
+				// 満たしている。両者を混ぜて warn に丸めると、churn する file が 1 つあるだけで
+				// 同じ round の真の破損まで見逃す。安定分があればそちらを violated として報告する。
+				const stable = violations.filter((p) => !changed.includes(p));
+				if (stable.length > 0) return { kind: "violated", violations: stable, dropped };
 				return {
 					kind: "exhausted",
-					violations,
+					// churn していた file のみを載せる (dev の triage 対象はそれ)。
+					violations: changed,
 					dropped,
-					rounds: DARK_ASSERT_MAX_REVERIFY_ROUNDS,
+					// 実行済み差し戻し回数の導出値。定数を直接返すと上限判定の off-by-one が verdict に
+					// 現れず、unit test で直接検出できなくなる。
+					rounds: reverifyRounds - 1,
 				};
 			}
 			for (const p of changed) verifiedEpoch.delete(p);
