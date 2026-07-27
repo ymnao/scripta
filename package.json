@@ -40,7 +40,7 @@
 		"@uiw/react-codemirror": "^4.25.11",
 		"chokidar": "^5.0.0",
 		"dompurify": "^3.4.12",
-		"js-yaml": "^5.2.1",
+		"js-yaml": "^5.2.2",
 		"katex": "^0.18.1",
 		"lucide-react": "^1.27.0",
 		"marked": "^18.0.7",
