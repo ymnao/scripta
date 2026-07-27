@@ -43,17 +43,12 @@ allowBuilds:
 # `brace-expansion` は DoS advisory 対応。transitive dep として minimatch 等から間接的に入る
 # ため、direct でない pin を override で強制する。selector を major ごとの
 # `brace-expansion@^N.0.0` に絞り、semver 互換性を破壊しない。
-# - GHSA-jxxr-4gwj-5jf2（DoS、>=5.0.0 <5.0.6）→ 5.x 行で対応
-# - GHSA-3jxr-9vmj-r5cp（high、連続する非展開 {} 群の指数時間展開 DoS。1.x/2.x/5.x 全系統が
-#   対象）→ 1.1.16 / 2.1.2 / 5.0.7 以上へ
 #
 # ここだけ `parent>child` ではなく child 側 range で絞るのは、親 minimatch が 3.1.5 / 5.1.9 /
 # 9.0.9 / 10.2.5 の 4 版共存で各々別 major の brace-expansion を要求するため。素の
 # `minimatch>brace-expansion` は 4 系統に同一 range を適用して semver を壊し、親側に range を
 # 書く形（`minimatch@9>brace-expansion`）は親が bump された時点で selector が外れて override が
-# 無言で失効する。
-# 実害評価: いずれも build-time devDependency（electron-builder / glob 系）の経路のみで、
-# 攻撃者制御のパターン展開は無い。alert closed 化が目的。
+# 無言で失効する。各 GHSA の range と実害評価は下記各行のインラインコメント参照。
 overrides:
   "@codemirror/autocomplete": $@codemirror/autocomplete
   "@codemirror/commands": $@codemirror/commands
@@ -64,9 +59,9 @@ overrides:
   "@codemirror/state": $@codemirror/state
   "@codemirror/view": $@codemirror/view
   "@lezer/common": ^1.5.2
-  "brace-expansion@^1.0.0": ^1.1.16
-  "brace-expansion@^2.0.0": ^2.1.2
-  "brace-expansion@^5.0.0": ^5.0.7
+  "brace-expansion@^1.0.0": ^1.1.16        # GHSA-3jxr-9vmj-r5cp (high, <1.1.16)。連続する非展開 {} 群の指数時間展開 DoS。minimatch@3 (glob@7 / @electron/asar / dir-compare 経由) の build-time 依存のみで、攻撃者制御のパターンを展開する経路は無し。
+  "brace-expansion@^2.0.0": ^2.1.2         # 同 GHSA-3jxr-9vmj-r5cp (high, >=2.0.0 <2.1.2)。minimatch@5 (filelist) / minimatch@9 (@electron/universal) 経由。実害評価は上記に同じ。
+  "brace-expansion@^5.0.0": ^5.0.7         # GHSA-jxxr-4gwj-5jf2 (DoS, >=5.0.0 <5.0.6) + GHSA-3jxr-9vmj-r5cp (high, >=3.0.0 <5.0.7)。minimatch@10 (app-builder-lib) 経由。実害評価は上記に同じ。後者の range は 3.x/4.x も含むが patched 版が同 major に存在しない (3.0.0-3.0.2 / 4.0.0-4.0.1 はすべて vulnerable) ため、この selector が覆うのは 5.x のみ。3.x/4.x を要求する transitive が将来現れたら別対応が要る。
   "tmp@<0.2.6": ">=0.2.6"          # GHSA: Path Traversal (Dep #7)。tmp-promise → tmp@0.2.5 を修正版へ強制
   # security advisory 対応の override は global ではなく `parent>child` syntax で
   # alert 入口に絞る。将来別 transitive が同名 package の旧 version を要求した
