@@ -330,7 +330,7 @@ describe("buildDecorations", () => {
 			(w) => !(w.value.spec as { widget: MathWidgetType }).widget.displayMode,
 		);
 		expect(display).toBeDefined();
-		assert(inline);
+		assert(inline, "inline math の widget decoration が生成されていない");
 		expect((inline.value.spec as { widget: MathWidgetType }).widget.tex).toBe("b");
 	});
 

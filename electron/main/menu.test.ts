@@ -85,7 +85,7 @@ describe("buildMenuTemplate", () => {
 		const newWindow = vi.fn();
 		const tpl = buildMenuTemplate({ newWindow });
 		const item = findItem(tpl, "File", "New Window");
-		assert(item);
+		assert(item, "File > New Window が template に見つからない");
 		expect(item.accelerator).toBe("CmdOrCtrl+Shift+N");
 		(item.click as () => void)();
 		expect(newWindow).toHaveBeenCalledTimes(1);
@@ -94,7 +94,7 @@ describe("buildMenuTemplate", () => {
 	it("File > エクスポート... emits menu:export to the focused window", () => {
 		const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 		const item = findItem(tpl, "File", "エクスポート...");
-		assert(item);
+		assert(item, "File > エクスポート... が template に見つからない");
 		expect(item.accelerator).toBe("CmdOrCtrl+Shift+E");
 		(item.click as () => void)();
 		expect(mockedSend).toHaveBeenCalledWith("menu:export");
@@ -105,7 +105,7 @@ describe("buildMenuTemplate", () => {
 		const helpEntry = tpl.find((t) => t.role === "help");
 		const items = helpEntry?.submenu as MenuItemConstructorOptions[] | undefined;
 		const help = items?.find((i) => i.label === "Keyboard Shortcuts");
-		assert(help);
+		assert(help, "Help > Keyboard Shortcuts が template に見つからない");
 		expect(help.accelerator).toBe("F1");
 		(help.click as () => void)();
 		expect(mockedSend).toHaveBeenCalledWith("menu:open-help");
@@ -115,7 +115,7 @@ describe("buildMenuTemplate", () => {
 		withPlatform("darwin", () => {
 			const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 			const item = findItem(tpl, app.name, "Settings...");
-			assert(item);
+			assert(item, "App > Settings... が template に見つからない");
 			expect(item.accelerator).toBe("CmdOrCtrl+,");
 			(item.click as () => void)();
 			expect(mockedSend).toHaveBeenCalledWith("menu:open-settings");
