@@ -1,6 +1,6 @@
 // @vitest-environment node
 import type { MenuItemConstructorOptions } from "electron";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock factory は hoist されるため top-level 変数を直接参照できない。
 // vi.hoisted で初期化を巻き上げて factory から参照する。
@@ -85,18 +85,18 @@ describe("buildMenuTemplate", () => {
 		const newWindow = vi.fn();
 		const tpl = buildMenuTemplate({ newWindow });
 		const item = findItem(tpl, "File", "New Window");
-		expect(item).toBeDefined();
-		expect(item?.accelerator).toBe("CmdOrCtrl+Shift+N");
-		(item?.click as () => void)();
+		assert(item);
+		expect(item.accelerator).toBe("CmdOrCtrl+Shift+N");
+		(item.click as () => void)();
 		expect(newWindow).toHaveBeenCalledTimes(1);
 	});
 
 	it("File > エクスポート... emits menu:export to the focused window", () => {
 		const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 		const item = findItem(tpl, "File", "エクスポート...");
-		expect(item).toBeDefined();
-		expect(item?.accelerator).toBe("CmdOrCtrl+Shift+E");
-		(item?.click as () => void)();
+		assert(item);
+		expect(item.accelerator).toBe("CmdOrCtrl+Shift+E");
+		(item.click as () => void)();
 		expect(mockedSend).toHaveBeenCalledWith("menu:export");
 	});
 
@@ -105,9 +105,9 @@ describe("buildMenuTemplate", () => {
 		const helpEntry = tpl.find((t) => t.role === "help");
 		const items = helpEntry?.submenu as MenuItemConstructorOptions[] | undefined;
 		const help = items?.find((i) => i.label === "Keyboard Shortcuts");
-		expect(help).toBeDefined();
-		expect(help?.accelerator).toBe("F1");
-		(help?.click as () => void)();
+		assert(help);
+		expect(help.accelerator).toBe("F1");
+		(help.click as () => void)();
 		expect(mockedSend).toHaveBeenCalledWith("menu:open-help");
 	});
 
@@ -115,9 +115,9 @@ describe("buildMenuTemplate", () => {
 		withPlatform("darwin", () => {
 			const tpl = buildMenuTemplate({ newWindow: vi.fn() });
 			const item = findItem(tpl, app.name, "Settings...");
-			expect(item).toBeDefined();
-			expect(item?.accelerator).toBe("CmdOrCtrl+,");
-			(item?.click as () => void)();
+			assert(item);
+			expect(item.accelerator).toBe("CmdOrCtrl+,");
+			(item.click as () => void)();
 			expect(mockedSend).toHaveBeenCalledWith("menu:open-settings");
 		});
 	});
