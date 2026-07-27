@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { assert, beforeAll, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
 const renderToStringMock = vi.fn(
@@ -330,8 +330,8 @@ describe("buildDecorations", () => {
 			(w) => !(w.value.spec as { widget: MathWidgetType }).widget.displayMode,
 		);
 		expect(display).toBeDefined();
-		expect(inline).toBeDefined();
-		expect((inline?.value.spec as { widget: MathWidgetType }).widget.tex).toBe("b");
+		assert(inline, "inline math の widget decoration が生成されていない");
+		expect((inline.value.spec as { widget: MathWidgetType }).widget.tex).toBe("b");
 	});
 
 	// 同上: viewport 制限撤去により旧仕様テストは意図が成立しない。
