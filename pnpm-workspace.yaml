@@ -40,10 +40,20 @@ allowBuilds:
 # 空 tree になって live-preview 系 224 assertion + electron-e2e (image / mermaid widget) が
 # 全滅した。以後 root direct dep の @codemirror 全 package を self-ref で単一化する。
 #
-# `brace-expansion` は GHSA-jxxr-4gwj-5jf2（DoS、>=5.0.0 <5.0.6）対応。transitive dep として
-# minimatch 等から間接的に入るため、direct でない pin を override で強制する。selector を
-# `brace-expansion@^5.0.0` に絞り、advisory 対象外の v1/v2 など旧 major が将来 transitive と
-# して入る余地を残す（semver 互換性を破壊しない）。
+# `brace-expansion` は DoS advisory 対応。transitive dep として minimatch 等から間接的に入る
+# ため、direct でない pin を override で強制する。selector を major ごとの
+# `brace-expansion@^N.0.0` に絞り、semver 互換性を破壊しない。
+# - GHSA-jxxr-4gwj-5jf2（DoS、>=5.0.0 <5.0.6）→ 5.x 行で対応
+# - GHSA-3jxr-9vmj-r5cp（high、連続する非展開 {} 群の指数時間展開 DoS。1.x/2.x/5.x 全系統が
+#   対象）→ 1.1.16 / 2.1.2 / 5.0.7 以上へ
+#
+# ここだけ `parent>child` ではなく child 側 range で絞るのは、親 minimatch が 3.1.5 / 5.1.9 /
+# 9.0.9 / 10.2.5 の 4 版共存で各々別 major の brace-expansion を要求するため。素の
+# `minimatch>brace-expansion` は 4 系統に同一 range を適用して semver を壊し、親側に range を
+# 書く形（`minimatch@9>brace-expansion`）は親が bump された時点で selector が外れて override が
+# 無言で失効する。
+# 実害評価: いずれも build-time devDependency（electron-builder / glob 系）の経路のみで、
+# 攻撃者制御のパターン展開は無い。alert closed 化が目的。
 overrides:
   "@codemirror/autocomplete": $@codemirror/autocomplete
   "@codemirror/commands": $@codemirror/commands
@@ -54,7 +64,9 @@ overrides:
   "@codemirror/state": $@codemirror/state
   "@codemirror/view": $@codemirror/view
   "@lezer/common": ^1.5.2
-  "brace-expansion@^5.0.0": ^5.0.6
+  "brace-expansion@^1.0.0": ^1.1.16
+  "brace-expansion@^2.0.0": ^2.1.2
+  "brace-expansion@^5.0.0": ^5.0.7
   "tmp@<0.2.6": ">=0.2.6"          # GHSA: Path Traversal (Dep #7)。tmp-promise → tmp@0.2.5 を修正版へ強制
   # security advisory 対応の override は global ではなく `parent>child` syntax で
   # alert 入口に絞る。将来別 transitive が同名 package の旧 version を要求した
@@ -63,8 +75,9 @@ overrides:
   "electron-vite>esbuild": ^0.28.1        # GHSA-gv7w-rqvm-qjhr (high, Dep #8)。electron-vite@5.0.0 の `^0.25.11` 固定を patched 版へ。脆弱性は Deno module 限定、本リポ Node path は binaryIntegrityCheck() 保護下。上流が ^0.28 許容したら削除可。
   "electron-vite>@babel/core": ^7.29.6    # GHSA-4x5r-pxfx-6jf8 (low)。electron-vite 経由の 7.29.0 を source map disclosure patched 版へ。self-contained build なので攻撃前提を満たさず。
   "electron-publish>form-data": ^4.0.6    # GHSA-hmw2-7cc7-3qxx (high)。electron-publish 経由の 4.0.5 を CRLF injection patched 版へ。build-time 自前入力のみで attacker-controlled な append() 引数は無し。
-  "app-builder-lib>tar": ^7.5.16          # GHSA-vmf3-w455-68vh (moderate)。app-builder-lib 経由の node-tar 7.5.13 を PAX header desync patched 版へ。自前 build 成果物 archive のみで攻撃者作成 tar の parse は無し。
-  "node-gyp>tar": ^7.5.16                 # 同 GHSA-vmf3-w455-68vh。node-gyp も独立して node-tar 7.5.13 を direct dep として持つため別行で対応。
+  "ajv>fast-uri": ^3.1.4                  # GHSA-4c8g-83qw-93j6 (high, >=3.0.0 <3.1.3), GHSA-v2hh-gcrm-f6hx (high, >=3.0.0 <=3.1.3)。literal backslash authority delimiter / IDN canonicalization 失敗による host confusion。ajv は app-builder-lib の JSON schema 検証専用で、URI format 検証に外部入力を通す経路は無い。後者の range が 3.1.3 を含むため下限は ^3.1.4。
+  "app-builder-lib>tar": ^7.5.18          # GHSA-vmf3-w455-68vh (moderate, PAX header desync), GHSA-w8wr-v893-vjvp (medium, PAX numeric path type confusion によるプロセスクラッシュ)。app-builder-lib 経由の node-tar を patched 版へ。自前 build 成果物 archive のみで攻撃者作成 tar の parse は無し。
+  "node-gyp>tar": ^7.5.18                 # 同 2 GHSA。node-gyp も独立して node-tar を direct dep として持つため別行で対応。
   "mermaid>dompurify": ^3.4.9             # GHSA-vxr8-fq34-vvx9 (low)。mermaid@11.15.0 が direct dep として持つ 3.4.8 を Trusted Types reset patched 版へ。direct dep の ^3.4.10 と同 minor なので mermaid 描画互換性は CI e2e で担保。
   "@electron/get>undici": ^7.28.0         # GHSA-pr7r-676h-xcf6 (medium, #10), GHSA-vmh5-mc38-953g (high, #11), GHSA-35p6-xmwp-9g52 (low, #13), GHSA-hm92-r4w5-c3mj (high, #14), GHSA-p88m-4jfj-68fv (medium, #18), GHSA-g8m3-5g58-fq7m (low, #20)。@electron/get@5.0.0 の optionalDependencies 7.25.0 を patched 版へ。SOCKS5/TLS bypass・Set-Cookie injection 等を含むが、本リポは electron バイナリ取得目的での透過利用のみで攻撃前提なし。
   "jsdom>undici": ^7.28.0                 # 同 7.x 系 6 件 (#10/#11/#13/#14/#18/#20)。jsdom@29.1.1 の 7.25.0 を patched 版へ。jsdom は Vitest の DOM 環境用 (devDep only) なので runtime 影響なし。
