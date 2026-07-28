@@ -1349,3 +1349,60 @@ describe("scanBacklinksImpl (Phase B: getCachedInputFileMap)", () => {
 		releaseFileListCache(canonical);
 	});
 });
+
+// #407 Finding 1/3 の code-reviewer 指摘: scan 系 2 impl の piggyback 配線 (index options を
+// processMdFilesParallel へ渡す行) を pin する test が無く、`index:` を落としても全 suite が
+// green で通っていた。結果 (wikilink / backlink) は buildScanList が未 index file を常に scan
+// 対象に含めるため index 供給が止まっても正しいままで、退行は「index が検索と idle fill から
+// しか養われなくなる」性能側に出る = 既存 assert では原理的に検出できない。
+// searchFilesImpl 側は #406 / #413 の suite が isIndexedAndValid を直接見ているので、
+// ここでは残る 2 impl に同じ粒度の pin を与える。
+describe("scan 系 impl の piggyback indexing 配線 (#407 Finding 1/3)", () => {
+	it("scanUnresolvedWikilinksImpl は走査した file を index に養う", async () => {
+		const canonical = await realpath(workspaceDir);
+		const note = join(canonical, "note.md");
+		await writeFile(note, "[[missing page]] への未解決リンク\n");
+
+		acquireFileListCache(canonical);
+		const handle = getInvertedIndexHandle(canonical);
+		if (handle === undefined) throw new Error("index handle must exist after acquire");
+		expect(handle.isIndexedAndValid(note)).toBe(false);
+
+		const unresolved = await scanUnresolvedWikilinksImpl(TEST_WIN, workspaceDir);
+
+		// 本来の返り値 (unresolved 検出) と index への副作用の両方を固定する。
+		expect(unresolved.map((u) => u.pageName)).toEqual(["missing page"]);
+		expect(handle.isIndexedAndValid(note)).toBe(true);
+
+		releaseFileListCache(canonical);
+	});
+
+	it("scanBacklinksImpl は走査した file を index に養う (target 自身は skipFile で除外)", async () => {
+		const canonical = await realpath(workspaceDir);
+		const target = join(canonical, "target.md");
+		const source = join(canonical, "source.md");
+		await writeFile(target, "target content\n");
+		await writeFile(source, "[[target]] link here\n");
+
+		acquireFileListCache(canonical);
+		const handle = getInvertedIndexHandle(canonical);
+		if (handle === undefined) throw new Error("index handle must exist after acquire");
+
+		// target 引数は renderer 表記 (input base) で渡す。index の key は canonical 側なので
+		// assert は canonical path で行う (両者は macOS の /var → /private/var で食い違う)。
+		const backlinks = await scanBacklinksImpl(
+			TEST_WIN,
+			workspaceDir,
+			join(workspaceDir, "target.md"),
+		);
+
+		expect(backlinks).toHaveLength(1);
+		// source は走査されるので index に載る。
+		expect(handle.isIndexedAndValid(source)).toBe(true);
+		// target は skipFile で readFile ごと skip されるため、この pass では養われない
+		// (「index に載らない」ではなく「この経路では触らない」— 検索側の pass が養う)。
+		expect(handle.isIndexedAndValid(target)).toBe(false);
+
+		releaseFileListCache(canonical);
+	});
+});

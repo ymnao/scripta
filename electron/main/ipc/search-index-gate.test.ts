@@ -251,7 +251,7 @@ describe.skipIf(process.platform === "win32")(
 				// plain read されて scan には出る (この swap 先は workspace 外なので alias ではなく
 				// resolveInsideRoot が null を返す分岐)。
 				// **範囲**: processMdFilesParallel は検索だけでなく unresolved-wikilink scan /
-				// backlink scan からも index + indexRoot 付きで呼ばれるため、窓中はそれらの結果からも
+				// backlink scan からも index options (handle + root) 付きで呼ばれるため、窓中はそれらの結果からも
 				// 同じ 1 file が落ちる。影響の質は同一 (1 pass × 1 file) なので受容は変わらない。
 				expect(scanned).toEqual([`${normal}:normalword body`]);
 				// 巻き添えで通常 file が落ちていないこと (退行検知)。
