@@ -82,10 +82,9 @@ interface IndexOptions {
 	suppress?: boolean;
 }
 
-// handle 未取得の workspace (watcher 非稼働 / index 未生成) では index options ごと省く。
-// 「root だけ渡して handle が無い」「handle だけ渡して root が無い」の半端な組み合わせを
-// 呼び出し側に書かせないための束ね (#407 Finding 1/3)。suppress を使う caller は
-// dark assert の 1 箇所だけなのでこの helper は通さず object literal を直接書く。
+// handle 未取得の workspace (watcher 非稼働 / index 未生成) では index options ごと省く
+// (束ねる理由は IndexOptions の doc 参照)。suppress を使う caller は dark assert の
+// 1 箇所だけなのでこの helper は通さず object literal を直接書く。
 function toIndexOptions(
 	handle: InvertedIndexHandle | undefined,
 	root: string,
@@ -125,18 +124,12 @@ async function processMdFilesParallel(
 ): Promise<void> {
 	const shouldStop = (): boolean => isStale() || options.shouldBail?.() === true;
 	const cache = options.cache;
-	// suppress 時は handle と root をまとめて undefined に潰す。root は index が defined の
-	// ときにしか参照されない (下記 shouldIndex 配下) ため、両方潰しても
-	// 「suppress 時は realpath ゲートを評価しない」現行挙動と同値
-	// (runDarkAssert がこの挙動に依存して L2 を read-only 化している。呼び出し側コメント参照)。
-	// **この 2 変数は常に同時に defined / undefined になる** (root が必須プロパティになったため)。
-	// 以降に残る `indexRoot === undefined` / `indexRoot !== undefined` の条件は、型で
-	// 到達不能になった fail-open 経路に対する残置の防御であり、live な分岐ではない。
-	// index を持ちながらゲート未評価という状態は表現できないので、`indexGateEvaluated === false`
-	// で到達するのは「index 未提供 / disabled / 既に index 済みで valid」の 3 ケースだけになる。
+	// suppress 時は options ごと undefined に潰す (index を養わないだけでなく realpath ゲートも
+	// 評価しない。runDarkAssert がこの挙動に依存して L2 を read-only 化している。呼び出し側参照)。
+	// handle と root を別変数へ分解せず object のまま持ち回るのは、**両者が必ず揃うことを
+	// 以降の narrowing に伝えるため**。分解すると TS が相関を追えず、root 必須化で到達不能に
+	// なったはずの `indexRoot === undefined` 分岐をコード上に残す羽目になる。
 	const indexOptions = options.index?.suppress === true ? undefined : options.index;
-	const index = indexOptions?.handle;
-	const indexRoot = indexOptions?.root;
 	await Promise.all(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
@@ -173,12 +166,15 @@ async function processMdFilesParallel(
 					// (null = workspace 外 / 解決先 !== ioPath = workspace 内 symlink を 1 つの述語で弾く)。
 					// alias を載せると解決先の modify で invalidate が波及せず stale posting が残る。
 					// 未 index file は buildScanList が常に scan 対象に含めるので結果は落ちない。
-					if (index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath)) {
-						const epoch = index.currentEpochOf(ioPath);
-						const resolved =
-							indexRoot === undefined ? ioPath : await resolveInsideRoot(ioPath, indexRoot);
+					if (
+						indexOptions !== undefined &&
+						!indexOptions.handle.isDisabled &&
+						!indexOptions.handle.isIndexedAndValid(ioPath)
+					) {
+						const epoch = indexOptions.handle.currentEpochOf(ioPath);
+						const resolved = await resolveInsideRoot(ioPath, indexOptions.root);
 						if (isIndexableResolution(resolved, ioPath)) {
-							index.indexFile(ioPath, hit, epoch);
+							indexOptions.handle.indexFile(ioPath, hit, epoch);
 						}
 					}
 					if (shouldStop()) return;
@@ -194,22 +190,27 @@ async function processMdFilesParallel(
 				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
 				// disabled 時は index に載る余地がないので、以降の epoch capture と realpath ゲートを
 				// まとめて skip する (#413 Finding 1、L2-hit 側と同じ理由)。
-				const shouldIndex =
-					index !== undefined && !index.isDisabled && !index.isIndexedAndValid(ioPath);
-				const indexEpochAtStart = shouldIndex
-					? (index as InvertedIndexHandle).currentEpochOf(ioPath)
-					: 0;
+				// 「この file を index に載せる候補か」を boolean ではなく options 自体で表す
+				// (#407 Finding 1/3)。非 undefined なら handle / root が揃っていることを型が保証するので、
+				// 以降の handle 参照から `as InvertedIndexHandle` の cast が消える。
+				const indexTarget =
+					indexOptions !== undefined &&
+					!indexOptions.handle.isDisabled &&
+					!indexOptions.handle.isIndexedAndValid(ioPath)
+						? indexOptions
+						: undefined;
+				const indexEpochAtStart = indexTarget?.handle.currentEpochOf(ioPath) ?? 0;
 				// realpath 再認可 (#394 Phase D / #399 Finding 2) を readFile の **前** に行い、
 				// 許可された file は解決済み path を読む (#406 Finding 2、契約は resolveInsideRoot の doc)。
 				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
 				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
-				let resolvedForIndex: string | null = shouldIndex ? ioPath : null;
+				let resolvedForIndex: string | null = null;
 				// ゲートを実際に評価したか。評価した上で弾かれた file (workspace 外を指す symlink /
 				// workspace 内 alias) だけが L2 抑止の対象で、そもそも評価していない file
 				// (既に valid / index 無効) は従来どおり L2 に載せる。
 				let indexGateEvaluated = false;
-				if (shouldIndex && indexRoot !== undefined) {
-					resolvedForIndex = await resolveInsideRoot(ioPath, indexRoot);
+				if (indexTarget !== undefined) {
+					resolvedForIndex = await resolveInsideRoot(ioPath, indexTarget.root);
 					indexGateEvaluated = true;
 					if (shouldStop()) return;
 				}
@@ -225,7 +226,7 @@ async function processMdFilesParallel(
 				// ioPath と一致しないため、indexable まで含めて初めてこの含意が立つ)。
 				// 発火する = 認可 (T1) から read (T2) の間に末端が symlink へ swap された瞬間で、
 				// 読める内容は認可した実体ではないため read 失敗として skip するのが正しい。
-				// ゲート未評価の file (index 無効 / 既に valid / indexRoot 未指定) はその前提を
+				// ゲート未評価の file (index 未提供 / index 無効 / 既に valid) はその前提を
 				// 持たないので従来どおり plain read。scan (process) の契約 = workspace 外を指す
 				// symlink の内容も検索結果に出す、は非 indexable 経路が plain read のままなので不変。
 				const useNoFollow = indexGateEvaluated && indexable;
@@ -277,7 +278,7 @@ async function processMdFilesParallel(
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
 				// **2 つの枝を使い分ける理由**: ゲート評価済みの枝は resolveInsideRoot が末端非 symlink
 				// まで確認済みなので追加の syscall なしで判定できる。未評価の枝 (index disabled /
-				// indexRoot 未指定 / 既に index 済みで valid / index handle 未提供) は read そのものを
+				// 既に index 済みで valid / index handle 未提供) は read そのものを
 				// O_NOFOLLOW open + 同一 fd read にして、判定と内容を同じ object に束ねる。
 				// **検査した対象そのもので I/O する** ので、lstat 等の別 syscall で検査する方式に残る
 				// 「検査と read の間に差し替えられる」窓は存在しない。syscall 数も plain read と同じ
@@ -292,7 +293,10 @@ async function processMdFilesParallel(
 				if (indexable) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
-					(index as InvertedIndexHandle).indexFile(ioPath, text, indexEpochAtStart);
+					// indexable = resolvedForIndex 非 null なので indexTarget は必ず非 undefined
+					// (null のままなら isIndexableResolution が false を返す)。optional chaining は
+					// その含意を TS に伝えられない分の受け皿で、実行時に skip されることはない。
+					indexTarget?.handle.indexFile(ioPath, text, indexEpochAtStart);
 				}
 				options.process(inFile, text);
 			}),
