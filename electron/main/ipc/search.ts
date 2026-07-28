@@ -49,6 +49,50 @@ import {
 // 全体の同時 fd 数を 16 に抑えるために module-level で 1 つ作って共有する。
 const ioLimit = pLimit(16);
 
+/**
+ * processMdFilesParallel の L3 piggyback indexing 設定 (#407 Finding 1/3)。
+ *
+ * handle / root / suppress を 1 object に束ねる理由は **root の指定漏れを型で封じる** ため。
+ * 旧 API は `index` と `indexRoot` を独立 optional field で受け取っており、
+ * `indexRoot` を書き忘れた caller が現れると realpath 再認可が無音で skip される
+ * fail-open だった (旧 4 caller は全て併記していたため実害は無かったが、
+ * 「書き忘れると防御が消える」構造そのものが窓)。root を必須プロパティにすることで
+ * 「index を養う caller は必ず認可 root を宣言する」を型検査時点で強制する。
+ */
+interface IndexOptions {
+	// L3 InvertedIndex handle (Phase C、dark-launch)。text 確定点で piggyback indexing を
+	// 行う (fire-and-forget、read 前に epoch を capture し handle 側で不一致検出時は no-op)。
+	// process の返り値には一切影響しない (Phase C dark-launch の境界:
+	// searchFilesImpl の結果を変えないため)。
+	handle: InvertedIndexHandle;
+	// L3 piggyback indexing 直前の realpath 再認可用 root。index を養う file の
+	// realpath が root 内側であることを確認する (#394 Phase D / #399 Finding 2)。
+	// ゲートに弾かれた file (workspace 外 symlink / alias) の内容は既存挙動どおり scan 結果に
+	// 反映される — 認可の境界は「index に載せない」であって「検索結果に出さない」ではない。
+	// **ただし scan に影響し得る** (#412): ゲートを通って index 対象と判定された file は
+	// 末端 symlink を拒否する fd read で読むため、認可 (T1) から read (T2) の間に末端を
+	// symlink へ差し替えられた file は read 失敗として skip され、その pass の scan 結果からも
+	// 落ちる。正常系では発火しない (ゲート通過 = 末端は非 symlink と確認済み) ので、
+	// 影響は実際に swap が起きた 1 pass × 1 file に限られる。
+	root: string;
+	// piggyback indexing を完全に抑止する。dual-run assert の全走査側で使い、
+	// index への副作用二重化を防ぐ (candidates 側で既に養った index を汚さない)。
+	// handle / root は「抑止対象の index はどれか」を示すため suppress 時も書く
+	// (どの index を養わないかが呼び出し側から読める)。
+	suppress?: boolean;
+}
+
+// handle 未取得の workspace (watcher 非稼働 / index 未生成) では index options ごと省く。
+// 「root だけ渡して handle が無い」「handle だけ渡して root が無い」の半端な組み合わせを
+// 呼び出し側に書かせないための束ね (#407 Finding 1/3)。suppress を使う caller は
+// dark assert の 1 箇所だけなのでこの helper は通さず object literal を直接書く。
+function toIndexOptions(
+	handle: InvertedIndexHandle | undefined,
+	root: string,
+): IndexOptions | undefined {
+	return handle === undefined ? undefined : { handle, root };
+}
+
 // 全 .md を ioLimit 下で並列に読み込んで per-file callback を呼ぶ scan 系 helper。
 // searchFilesImpl / scanUnresolvedWikilinksImpl / scanBacklinksImpl が共有する
 // boilerplate (Promise.all + ioLimit + isStale 2 重 check + try/catch readFile) を集約する。
@@ -74,30 +118,25 @@ async function processMdFilesParallel(
 		// hit なら readFile を skip、miss なら readFile 後に admission cutoff 通過分のみ set。
 		// set は capture した generation を渡し、stale-insert race を防ぐ。
 		cache?: ContentCacheHandle;
-		// L3 InvertedIndex handle (Phase C、dark-launch)。渡された場合、text 確定点で
-		// piggyback indexing を行う (fire-and-forget、read 前に epoch を capture し handle 側で
-		// 不一致検出時は no-op)。process の返り値には一切影響しない (Phase C dark-launch の
-		// 境界: searchFilesImpl の結果を変えないため)。
-		index?: InvertedIndexHandle;
-		// L3 piggyback indexing 直前の realpath 再認可用 root。指定時のみ index を養う file の
-		// realpath が root 内側であることを確認する (#394 Phase D / #399 Finding 2)。
-		// ゲートに弾かれた file (workspace 外 symlink / alias) の内容は既存挙動どおり scan 結果に
-		// 反映される — 認可の境界は「index に載せない」であって「検索結果に出さない」ではない。
-		// **ただし指定時は scan に影響し得る** (#412): ゲートを通って index 対象と判定された file は
-		// 末端 symlink を拒否する fd read で読むため、認可 (T1) から read (T2) の間に末端を
-		// symlink へ差し替えられた file は read 失敗として skip され、その pass の scan 結果からも
-		// 落ちる。正常系では発火しない (ゲート通過 = 末端は非 symlink と確認済み) ので、
-		// 影響は実際に swap が起きた 1 pass × 1 file に限られる。
-		indexRoot?: string;
-		// piggyback indexing を完全に抑止する。dual-run assert の全走査側で使い、
-		// index への副作用二重化を防ぐ (candidates 側で既に養った index を汚さない)。
-		suppressIndex?: boolean;
+		// L3 piggyback indexing の設定一式 (#407 Finding 1/3)。handle / root / suppress は
+		// 常にワンセットで扱われるため 1 object に束ねる。
+		index?: IndexOptions;
 	},
 ): Promise<void> {
 	const shouldStop = (): boolean => isStale() || options.shouldBail?.() === true;
 	const cache = options.cache;
-	const index = options.suppressIndex === true ? undefined : options.index;
-	const indexRoot = options.indexRoot;
+	// suppress 時は handle と root をまとめて undefined に潰す。root は index が defined の
+	// ときにしか参照されない (下記 shouldIndex 配下) ため、両方潰しても
+	// 「suppress 時は realpath ゲートを評価しない」現行挙動と同値
+	// (runDarkAssert がこの挙動に依存して L2 を read-only 化している。呼び出し側コメント参照)。
+	// **この 2 変数は常に同時に defined / undefined になる** (root が必須プロパティになったため)。
+	// 以降に残る `indexRoot === undefined` / `indexRoot !== undefined` の条件は、型で
+	// 到達不能になった fail-open 経路に対する残置の防御であり、live な分岐ではない。
+	// index を持ちながらゲート未評価という状態は表現できないので、`indexGateEvaluated === false`
+	// で到達するのは「index 未提供 / disabled / 既に index 済みで valid」の 3 ケースだけになる。
+	const indexOptions = options.index?.suppress === true ? undefined : options.index;
+	const index = indexOptions?.handle;
+	const indexRoot = indexOptions?.root;
 	await Promise.all(
 		ioFiles.map((ioPath, idx) =>
 			ioLimit(async () => {
@@ -484,8 +523,7 @@ async function searchFilesImpl(
 	await processMdFilesParallel(ioScan, inScan, isStale, {
 		shouldBail: () => truncated,
 		cache: getContentCacheHandle(canonicalRoot),
-		index: indexHandle,
-		indexRoot: canonicalRoot,
+		index: toIndexOptions(indexHandle, canonicalRoot),
 		process: (inputPath, content) => {
 			// `content.lines()` 互換（\r\n / \n 両対応で改行除去）
 			const lines = content.split(/\r?\n/);
@@ -620,19 +658,17 @@ async function runDarkAssert(
 	isStale: () => boolean,
 ): Promise<void> {
 	const queryLower = query.toLowerCase();
-	// 全走査 (truth) を実行し hit file 集合を得る。piggyback / index 副作用は suppressIndex で止める。
+	// 全走査 (truth) を実行し hit file 集合を得る。piggyback / index 副作用は index.suppress で止める。
 	const truthHitIo = new Set<string>();
 	const inputToIo = new Map<string, string>();
 	for (let i = 0; i < input.length; i++) inputToIo.set(input[i], io[i]);
 	await processMdFilesParallel(io, input, isStale, {
-		// suppressIndex の pass では index が undefined 扱いになり realpath ゲートが評価されない。
+		// suppress の pass では index が undefined 扱いになり realpath ゲートが評価されない。
 		// そのまま L2 に書き戻すと「ゲート未評価で読んだ外部内容が L2 に載る」= #406 round 1 で
 		// 塞いだ swap-back 汚染の再現経路になるため、read-only handle にして set を落とす
 		// (truth pass は dev-monitor 用の全走査で、L2 を養う責務は本 pass 側が持つ)。
 		cache: toReadOnlyCacheHandle(getContentCacheHandle(canonicalRoot)),
-		index: indexHandle,
-		indexRoot: canonicalRoot,
-		suppressIndex: true,
+		index: { handle: indexHandle, root: canonicalRoot, suppress: true },
 		process: (inputPath, content) => {
 			// truth = 「その file 内で query が 1 度でも substring match するか」の file 単位 hit。
 			// 行分割せず全 content に対して 1 発の toLowerCase().includes(queryLower) で判定する
@@ -1069,8 +1105,7 @@ async function scanUnresolvedWikilinksImpl(
 	// 並列 task 間で map への push は race しない（await の境界でのみ task が切り替わる）。
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		cache: getContentCacheHandle(canonicalRoot),
-		index: getInvertedIndexHandle(canonicalRoot),
-		indexRoot: canonicalRoot,
+		index: toIndexOptions(getInvertedIndexHandle(canonicalRoot), canonicalRoot),
 		process: (inFile, text) => {
 			// inFile は走査中 fix なので displayPath を file 単位で 1 度だけ算出する
 			// (BacklinkSource 側 PR #252 と同 pattern、UnresolvedLinksPanel の毎-render
@@ -1155,8 +1190,7 @@ async function scanBacklinksImpl(
 	const map = new Map<string, WikilinkReference[]>();
 	await processMdFilesParallel(ioFiles, inFiles, isStale, {
 		cache: getContentCacheHandle(canonicalRoot),
-		index: getInvertedIndexHandle(canonicalRoot),
-		indexRoot: canonicalRoot,
+		index: toIndexOptions(getInvertedIndexHandle(canonicalRoot), canonicalRoot),
 		// 自分自身からのリンクは backlink としては表示しない。readFile 前に skip して
 		// 不要な fd 消費を避ける。input 表記で判定する (fileMap / targetInput と揃える)。
 		skipFile: (inFile) => inFile === targetInput,

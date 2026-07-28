@@ -57,8 +57,7 @@ describe.skipIf(process.platform === "win32")(
 			const scanned: string[] = [];
 
 			await processMdFilesParallel([real, link], [real, link], never, {
-				index: handle,
-				indexRoot: root,
+				index: { handle, root },
 				cache,
 				process: (inFile, text) => {
 					scanned.push(`${inFile}:${text}`);
@@ -88,8 +87,7 @@ describe.skipIf(process.platform === "win32")(
 			const scanned: string[] = [];
 
 			await processMdFilesParallel([link], [link], never, {
-				index: handle,
-				indexRoot: root,
+				index: { handle, root },
 				cache,
 				process: (_inFile, text) => {
 					scanned.push(text);
@@ -106,6 +104,9 @@ describe.skipIf(process.platform === "win32")(
 			// production では cache / index は同じ watcher entry 由来で必ず揃うが、
 			// 内部 helper としては index だけ欠けた呼び出しもあり得る。抑止は
 			// 「ゲートを評価しなかった」という条件だけで効くことを固定する。
+			// #407 Finding 1/3 以前は「index はあるが indexRoot 未指定」でも同じ経路に落ちるため
+			// 専用 case を別に持っていたが、root が IndexOptions の必須プロパティになり
+			// その状態が型上表現できなくなったので、ゲート未評価経路の pin はこの case に一本化した。
 			const real = join(root, "real.md");
 			const link = join(root, "link.md");
 			await writeFile(real, "alphaword body");
@@ -113,26 +114,6 @@ describe.skipIf(process.platform === "win32")(
 			const { cache, stored } = makeFakeCache();
 
 			await processMdFilesParallel([real, link], [real, link], never, {
-				cache,
-				process: () => {},
-			});
-
-			expect(stored.has(link)).toBe(false);
-			expect(stored.get(real)).toBe("alphaword body");
-		});
-
-		it("indexRoot 未指定 (ゲート未評価) でも symlink は L2 に載らない", async () => {
-			// indexRoot を渡さない caller が将来増えても admission が fail-open しないことを固定する
-			// (#407 で追跡している fail-open の被害範囲を L2 側だけでも狭めておく)。
-			const real = join(root, "real.md");
-			const link = join(root, "link.md");
-			await writeFile(real, "alphaword body");
-			await symlink(real, link);
-			const { handle } = makeFakeIndex();
-			const { cache, stored } = makeFakeCache();
-
-			await processMdFilesParallel([real, link], [real, link], never, {
-				index: handle,
 				cache,
 				process: () => {},
 			});
@@ -160,15 +141,13 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 
 		const first = makeFakeCache();
 		await processMdFilesParallel([a], [a], never, {
-			index: gated.handle,
-			indexRoot: root,
+			index: { handle: gated.handle, root },
 			cache: first.cache,
 			process: () => {},
 		});
 		const second = makeFakeCache();
 		await processMdFilesParallel([b], [b], never, {
-			index: ungated.handle,
-			indexRoot: root,
+			index: { handle: ungated.handle, root },
 			cache: second.cache,
 			process: () => {},
 		});
@@ -195,8 +174,7 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		const { cache, stored } = makeFakeCache();
 
 		await processMdFilesParallel([a, b], [a, b], never, {
-			index: handle,
-			indexRoot: root,
+			index: { handle, root },
 			cache,
 			process: () => {},
 		});
@@ -217,8 +195,7 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		vi.spyOn(fsp, "open").mockRejectedValue(new Error("EMFILE"));
 
 		await processMdFilesParallel([a], [a], never, {
-			index: handle,
-			indexRoot: root,
+			index: { handle, root },
 			cache,
 			process: (_inFile, text) => {
 				scanned.push(text);

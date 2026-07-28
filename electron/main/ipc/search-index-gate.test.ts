@@ -62,8 +62,7 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const scanned: string[] = [];
 
 		await processMdFilesParallel([a, b], [a, b], never, {
-			index: handle,
-			indexRoot: root,
+			index: { handle, root },
 			cache,
 			process: (inFile, text) => {
 				scanned.push(`${inFile}:${text}`);
@@ -91,8 +90,7 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const scanned: string[] = [];
 
 		await processMdFilesParallel([a], [a], never, {
-			index: handle,
-			indexRoot: root,
+			index: { handle, root },
 			cache,
 			process: (_inFile, text) => {
 				scanned.push(text);
@@ -113,8 +111,7 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const { cache } = makeFakeCache(new Map([[b, "beta cached"]]));
 
 		await processMdFilesParallel([a, b], [a, b], never, {
-			index: handle,
-			indexRoot: root,
+			index: { handle, root },
 			cache,
 			process: () => {},
 		});
@@ -122,6 +119,37 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		expect(vi.mocked(resolveInsideRoot)).toHaveBeenCalledTimes(2);
 		expect(indexed.get(a)).toBe("alpha"); // L2-miss 経路
 		expect(indexed.get(b)).toBe("beta cached"); // L2-hit 経路
+	});
+
+	it("index.suppress: handle / root を渡しても index にもゲートにも触れない (#407 Finding 1/3)", async () => {
+		// runDarkAssert の truth pass 用の抑止。`suppress` を無視する退行が入ると
+		// (a) candidates 側で既に養った index を全走査側がもう一度養う二重化と
+		// (b) ゲート未評価前提で read-only 化している L2 の扱い (search.ts の呼び出し側コメント)
+		// の両方が崩れる。**旧 `suppressIndex` 時代からこの契約を固定する test は無く**
+		// (#407 の refactor 中に mutation で survive したため追加)、
+		// 型統合で `handle` / `root` を必ず併記する形になった今も挙動が同じことを併せて pin する。
+		const a = join(root, "a.md");
+		const b = join(root, "b.md");
+		await writeFile(a, "alpha");
+		await writeFile(b, "beta");
+		const { handle, indexed } = makeFakeIndex();
+		const { cache } = makeFakeCache(new Map([[b, "beta cached"]]));
+		const scanned: string[] = [];
+
+		await processMdFilesParallel([a, b], [a, b], never, {
+			index: { handle, root, suppress: true },
+			cache,
+			process: (inFile, text) => {
+				scanned.push(`${inFile}:${text}`);
+			},
+		});
+
+		// index への副作用は L2-miss / L2-hit のどちらの経路からも起きない。
+		expect(indexed.size).toBe(0);
+		// suppress は「index を養わない」だけでなく「realpath ゲートも評価しない」を含む。
+		expect(vi.mocked(resolveInsideRoot)).not.toHaveBeenCalled();
+		// scan (truth pass の本来の目的) は従来どおり全 file 分行われる。
+		expect(scanned.sort()).toEqual([`${a}:alpha`, `${b}:beta cached`]);
 	});
 });
 
@@ -139,8 +167,7 @@ describe.skipIf(process.platform === "win32")(
 			const scanned: string[] = [];
 
 			await processMdFilesParallel([real, link], [real, link], never, {
-				index: handle,
-				indexRoot: root,
+				index: { handle, root },
 				cache,
 				process: (inFile, text) => {
 					scanned.push(`${inFile}:${text}`);
@@ -167,8 +194,7 @@ describe.skipIf(process.platform === "win32")(
 			const scanned: string[] = [];
 
 			await processMdFilesParallel([link], [link], never, {
-				index: handle,
-				indexRoot: root,
+				index: { handle, root },
 				cache,
 				process: (_inFile, text) => {
 					scanned.push(text);
@@ -207,8 +233,7 @@ describe.skipIf(process.platform === "win32")(
 				const scanned: string[] = [];
 
 				await processMdFilesParallel([normal, swapped], [normal, swapped], never, {
-					index: handle,
-					indexRoot: root,
+					index: { handle, root },
 					cache,
 					process: (inFile, text) => {
 						scanned.push(`${inFile}:${text}`);
@@ -237,39 +262,17 @@ describe.skipIf(process.platform === "win32")(
 			}
 		});
 
-		it("index はあるが indexRoot 未指定なら、ゲート未評価なので plain read のまま", async () => {
-			// `useNoFollow` から `indexGateEvaluated` を落とす mutation を殺すための pin。
-			// index があっても indexRoot が無ければゲートは評価されず (search.ts の
-			// `shouldIndex && indexRoot !== undefined`)、末端 symlink が非 symlink である保証も
-			// 無いので fd read を強制してはいけない。production の呼び出しは 4 箇所とも indexRoot を
-			// 併記するため現状差は出ないが、indexRoot なしの caller が増えたとき (#407 が追う
-			// fail-open) に scan 結果が静かに落ちる退行を防ぐ。
-			const outside = await createTempWorkspace("scripta-index-gate-outside3-");
-			try {
-				const target = join(outside.dir, "target.txt");
-				await writeFile(target, "NOROOTWORD body");
-				const link = join(root, "link.md");
-				await symlink(target, link);
-				const { handle } = makeFakeIndex();
-				const scanned: string[] = [];
-
-				await processMdFilesParallel([link], [link], never, {
-					index: handle,
-					process: (inFile, text) => {
-						scanned.push(`${inFile}:${text}`);
-					},
-				});
-
-				expect(scanned).toEqual([`${link}:NOROOTWORD body`]);
-			} finally {
-				await outside.cleanup();
-			}
-		});
-
 		it("ゲートを評価していない file (index 無効) は従来どおり plain read で scan に出る", async () => {
 			// #412 の fd read は「ゲート評価済み」を前提にした強制なので、前提が無い経路
-			// (index 無効 / 既に valid / indexRoot 未指定) の scan 契約は変えない。
+			// (index 未提供 / index 無効 / 既に valid) の scan 契約は変えない。
 			// workspace 外を指す symlink の内容が検索結果に出るのは #399 で確立した境界。
+			// **#407 Finding 1/3 で削除した pin について**: 以前はここに「index はあるが indexRoot
+			// 未指定」の case を置き、`useNoFollow` から `indexGateEvaluated` を落とす mutation を
+			// 殺していた。root が IndexOptions の必須プロパティになった今、index を持ちながら
+			// ゲート未評価という状態は型上表現できず、その mutation は挙動を変えない
+			// (index が無い ⇒ indexable === false ⇒ useNoFollow は元から false)。
+			// runtime の pin が消えた分の保証は「root を省いた呼び出しは compile しない」= 型検査が
+			// 担っており、それは search-index-options.test.ts の @ts-expect-error が固定している。
 			const outside = await createTempWorkspace("scripta-index-gate-outside2-");
 			try {
 				const target = join(outside.dir, "target.txt");
