@@ -1387,6 +1387,9 @@ describe("scan 系 impl の piggyback indexing 配線 (#407 Finding 1/3)", () =>
 		acquireFileListCache(canonical);
 		const handle = getInvertedIndexHandle(canonical);
 		if (handle === undefined) throw new Error("index handle must exist after acquire");
+		// 事前状態の pin。将来 acquire / populate が eager に index を養う変更が入っても
+		// 「この呼び出しで載った」と言える形にしておく (wikilink 側と対称)。
+		expect(handle.isIndexedAndValid(source)).toBe(false);
 
 		// target 引数は renderer 表記 (input base) で渡す。index の key は canonical 側なので
 		// assert は canonical path で行う (両者は macOS の /var → /private/var で食い違う)。

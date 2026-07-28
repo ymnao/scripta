@@ -63,9 +63,11 @@ describe("processMdFilesParallel: index options の型契約 (#407 Finding 1/3)"
 			process: () => {},
 		});
 
-		// 上記が全て「空 file 集合の走査」として no-op で完走することも確認しておく
-		// (型 pin だけの file にして runtime assert を 0 にすると、file 自体が
-		// vitest から実行されなくなった退行に気付けないため)。
+		// 上記 4 つの await が「空 file 集合の走査」として throw せず完走したことが、この case の
+		// runtime 側の確認内容 (malformed options でも per-file ループに入らなければ無害)。
+		// 末尾の assert は vitest が「assert を持たない it」を警告しないようにするための形式的な
+		// もので、file 自体が収集対象から外れた退行はこの assert では検出できない
+		// (実行されない assert は自身の非実行を検出できない)。その保証は typecheck 側が持つ。
 		expect(true).toBe(true);
 	});
 });
