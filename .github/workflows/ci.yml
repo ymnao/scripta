@@ -157,3 +157,19 @@ jobs:
         with:
           # high 以上のみ fail。moderate/low はノイズが多くなるため report のみ。
           fail-on-severity: high
+          # 例外的に fail させない advisory。patched 版が存在しない等で「直せないのに
+          # 落ち続ける」ものだけを、実害評価と解消条件つきで個別に登録する。
+          # severity 閾値自体は緩めない (ここに載っていない high は従来どおり fail)。
+          #
+          # GHSA-mh99-v99m-4gvg (high, brace-expansion <=5.0.7): 無制限な展開長による
+          # OOM クラッシュ。fixed は 5.0.8 のみで 1.x/2.x に patched 版が無い
+          # (緩和策の EXPANSION_MAX は 5.x にしか入っていない)。1.x/2.x を要求するのは
+          # minimatch@3/5/9 (glob@7 / @electron/asar / dir-compare / filelist /
+          # @electron/universal 経由) で、5.x は CJS export 形状が
+          # `module.exports = expand` から `exports.expand` へ変わっており override 強制は
+          # 実行時に `expand is not a function` で壊れる。
+          # 実害評価: いずれも electron-builder の build-time 経路のみ。展開対象の brace
+          # pattern は自前の glob (package.json の files 等) で攻撃者制御の入力は入らない。
+          # 解消条件: 上流が minimatch を 10.x 系 (brace-expansion 5.x 依存) に寄せた時点で
+          # この行を削除する。追跡: #439
+          allow-ghsas: GHSA-mh99-v99m-4gvg
