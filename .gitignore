@@ -53,3 +53,10 @@ src/generated/
 # AI agent / MCP local cache (project ごとにユーザー側で生成されるメタ、commit しない)
 .serena/
 AGENTS.md
+
+# AI agent の作業用スクラッチ (mutation 用 patch script / 検証ログ / PR 下書き等)。
+# sandbox から書ける project 配下の temp 置き場として使うため、project node_modules を
+# 参照するワンショット script はここに置かれる。`pnpm up --store-dir` の退避先にもなり
+# 数十 MB の pnpm store が生えることがあるので、未 track のまま放置すると
+# `git add -A` の誤混入と working tree diff の肥大を招く。
+scratchpad/
