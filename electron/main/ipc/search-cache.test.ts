@@ -282,14 +282,18 @@ describe("search-cache: populateFileListCache", () => {
 		// walk は unsorted な順序で返してくる (fs 走査順を模す)
 		resolveWalk([p("z.md"), p("a.md"), p("m.md")]);
 		const result = await pending;
-		// walk 結果は caller に返る (query は成功) が、collectMdFilesForWorkspace の
-		// 「常に sort 済み」不変条件を維持するため populate 側で byteCmp 済みにして返す。
+		// entry は生存しており walk は完走している (isStale は entry 生存のみを見る) ので、
+		// 完全な list として caller に返る。null にすると完全な walk 結果を捨てて再 walk になる
+		// ため、entry drop 分岐 (下の test) と取り違えていないことをここで明示 pin する。
+		expect(result).not.toBeNull();
+		// collectMdFilesForWorkspace の「常に sort 済み」不変条件を維持するため
+		// populate 側で byteCmp 済みにして返す。
 		expect(result).toEqual([p("a.md"), p("m.md"), p("z.md")]);
 		// cache には格納されない (次回 lookup は null で再 populate 必要)
 		expect(getCachedMdFiles(ROOT)).toBeNull();
 	});
 
-	it("does not resurrect a released entry when in-flight walk resolves after release", async () => {
+	it("returns null (partial-walk contract) when the entry is dropped mid-populate", async () => {
 		acquireFileListCache(ROOT);
 		let resolveWalk!: (files: string[]) => void;
 		const walkPromise = new Promise<string[]>((resolve) => {
@@ -300,11 +304,30 @@ describe("search-cache: populateFileListCache", () => {
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
 		resolveWalk([p("a.md")]);
 		const result = await pending;
-		// walk 結果は caller に返る
-		expect(result).toEqual([p("a.md")]);
+		// #407 Finding 2: caller の walk は entry 生存を isStale の baseline にしているため、
+		// entry drop 後の結果は部分 list かもしれない。配列で返すと不完全な list が
+		// truncated=false のまま下流に流れるので null で破棄させる。
+		expect(result).toBeNull();
 		// entry は復活しない
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
 		expect(getCachedMdFiles(ROOT)).toBeNull();
+	});
+
+	it("returns null to ride-along callers too when the entry is dropped mid-populate", async () => {
+		acquireFileListCache(ROOT);
+		let resolveWalk!: (files: string[]) => void;
+		const walkPromise = new Promise<string[]>((resolve) => {
+			resolveWalk = resolve;
+		});
+		// 2 caller が同 tick で populate → 後発は in-flight に相乗りする。
+		const p1 = populateFileListCache(ROOT, async () => await walkPromise);
+		const p2 = populateFileListCache(ROOT, async () => await walkPromise);
+		releaseFileListCache(ROOT);
+		resolveWalk([p("a.md")]);
+		const [r1, r2] = await Promise.all([p1, p2]);
+		// 相乗り側も先発と同じ walk を見ているので、破棄判断も共有される。
+		expect(r1).toBeNull();
+		expect(r2).toBeNull();
 	});
 
 	it("returns cached sorted array on subsequent populate without re-walk", async () => {

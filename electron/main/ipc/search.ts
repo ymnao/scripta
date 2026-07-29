@@ -348,11 +348,13 @@ async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean
 // isStale は entry なし経路の walk にのみ伝播する (populate は shared resource として完走させる)。
 // 認可は cache hit/miss を問わず冒頭で毎回実行する。cache key を認可済み canonical で
 // 生成することで検証スキップの構造を作らない。
+// #407 Finding 2: populate が null (walk 部分的の可能性) を返したら null を伝播する。
+// caller は既存の isStale bail と同じ空応答を返すこと。
 async function collectMdFilesForWorkspace(
 	senderId: number,
 	workspacePath: string,
 	isStale?: () => boolean,
-): Promise<MdFiles> {
+): Promise<MdFiles | null> {
 	const canonical = await assertPathAllowed(senderId, workspacePath);
 	const inputBase = resolve(workspacePath);
 	// 2 分岐: watcher 稼働中 (entry あり) は populate 経由、非稼働は直接 walk。
@@ -367,11 +369,15 @@ async function collectMdFilesForWorkspace(
 		// entry が drop された時点で walk を早期 return させる (旧 workspace の walk が完走する
 		// 反応性の穴を塞ぐ)。個別 caller の isStale ではなく entry-alive を条件にすることで、
 		// dedupe 相手を巻き込まない (entry drop = 全 caller が用済み)。
-		ioFiles = await populateFileListCache(canonical, async () => {
+		const populated = await populateFileListCache(canonical, async () => {
 			const arr: string[] = [];
 			await walkMdFiles(canonical, arr, () => !hasFileListCacheEntry(canonical));
 			return arr;
 		});
+		// entry が walk 中に drop された → walk が途中で打ち切られた可能性がある。
+		// 部分 list を完全な list として下流に流さない。
+		if (populated === null) return null;
+		ioFiles = populated;
 	} else {
 		// watcher 非稼働: cache しない直接 walk 経路。caller の isStale を反映して #7 の暫定手当。
 		const arr: string[] = [];
@@ -497,12 +503,11 @@ async function searchFilesImpl(
 	const emptyResponse: SearchFilesResponse = { results: [], truncated: false };
 	if (query === "") return emptyResponse;
 
-	const { io, input, canonicalRoot } = await collectMdFilesForWorkspace(
-		senderId,
-		workspacePath,
-		isStale,
-	);
-	if (isStale()) return emptyResponse;
+	const collected = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
+	// collected === null は「file list が部分的かもしれない」(#407 Finding 2)。
+	// stale と同じく結果を破棄する。
+	if (collected === null || isStale()) return emptyResponse;
+	const { io, input, canonicalRoot } = collected;
 
 	const querySearch = caseSensitive ? query : query.toLowerCase();
 	const results: SearchResult[] = [];
@@ -981,8 +986,9 @@ async function searchFilenamesImpl(
 	// 破棄のみを行う（walkMdFiles 自体の中断は #7 と併せた walk 側の対応が必要）。
 	const isStale = makeExplicitStaleChecker(filenameGeneration, senderId);
 
-	const { input } = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
-	if (isStale()) return [];
+	const collected = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
+	if (collected === null || isStale()) return [];
+	const { input } = collected;
 	// collectMdFilesForWorkspace は cache 経路・直接 walk 経路の両方で byteCmp 昇順に揃えて返す
 	// (canonical prefix は全要素共通なので prefix substitution 後も順序保存)。
 	// localeCompare は使わない — locale 依存ソートで挙動が変わるため。
@@ -1092,12 +1098,9 @@ async function scanUnresolvedWikilinksImpl(
 ): Promise<UnresolvedWikilink[]> {
 	const isStale = makeStaleChecker(wikilinkGeneration, senderId);
 
-	const {
-		io: ioFiles,
-		input: inFiles,
-		canonicalRoot,
-	} = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
-	if (isStale()) return [];
+	const collected = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
+	if (collected === null || isStale()) return [];
+	const { io: ioFiles, input: inFiles, canonicalRoot } = collected;
 
 	// existing_pages は basename から `.md`（小文字一致のみ）を剥いで NFC 正規化した Set。
 	// canonical と input で basename は同一なので、cache 経路 (canonical 集計) と
@@ -1171,12 +1174,9 @@ async function scanBacklinksImpl(
 	// symlink workspace の prefix 差 (`/tmp` vs `/private/tmp`) は resolve() で解消される。
 	const targetInput = resolve(targetFilePath);
 
-	const {
-		io: ioFiles,
-		input: inFiles,
-		canonicalRoot,
-	} = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
-	if (isStale()) return [];
+	const collected = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
+	if (collected === null || isStale()) return [];
+	const { io: ioFiles, input: inFiles, canonicalRoot } = collected;
 
 	// 同名 basename がワークスペース内に複数ある場合、live-preview の buildFileMap
 	// (src/components/editor/live-preview/wikilinks.ts:45) と同じく
