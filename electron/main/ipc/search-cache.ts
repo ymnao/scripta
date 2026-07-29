@@ -214,10 +214,9 @@ export async function populateFileListCache(
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) {
 		// watcher 非稼働 → cache しないで直接 walk。
-		// この分岐に「entry 生存を baseline にした isStale」を持つ walk は渡ってこない:
 		// collectMdFilesForWorkspace は hasFileListCacheEntry(canonical) が true の同 tick 内で
-		// populate を呼ぶため、その間に entry が消えることはない。よって部分 walk になり得ず、
-		// 戻り値契約の null 対象外 (epoch 自体も存在しないので guard の対象外)。
+		// populate を呼ぶため、entry-alive を baseline にした walk はこの分岐に来ない
+		// (= 部分 walk になり得ないので上記 null 契約の対象外)。
 		return await walk();
 	}
 	// 既に populated (batch 適用のみで invalidate されていない場合) はそのまま返す。
@@ -236,20 +235,17 @@ export async function populateFileListCache(
 		try {
 			const result = await walk();
 			const current = entries.get(canonicalRoot);
-			if (current !== e) {
-				// entry drop / 入れ替わり: walk の isStale (entry 生存) が途中で true になった
-				// 可能性があり、result が部分 list かどうかを区別できない。破棄させる。
-				return null;
-			}
+			// entry drop / 入れ替わり: result が部分 list かどうかを区別できない (上記 null 契約)。
+			if (current !== e) return null;
 			if (current.state.epoch === epochAtStart) {
 				setCacheFiles(current.state, result);
 				// setCacheFiles で state.files を非 null にした直後なので getSortedFiles は必ず配列を返す。
 				return getSortedFiles(current.state) as readonly string[];
 			}
-			// entry 生存 + epoch bump: batch が来たので格納は見送るが、walk 自体は完走している
+			// entry 生存 + epoch bump: batch が来たので格納は見送るが、walk は完走している
 			// (isStale は entry 生存のみを見ており epoch bump では止まらない)。完全な list なので
-			// caller には byteCmp 済みで返す (collectMdFilesForWorkspace の「常に sort 済み」
-			// 不変条件を維持するため)。ここを null にすると完全な walk 結果を捨てて再 walk になる。
+			// null にせず、byteCmp 済みで返す (collectMdFilesForWorkspace の「常に sort 済み」
+			// 不変条件を維持するため)。null にすると完走した walk を捨てて再 walk になる。
 			return sortWalkResult(result);
 		} finally {
 			if (e.inFlight === promise) e.inFlight = null;

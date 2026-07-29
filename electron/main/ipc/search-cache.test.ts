@@ -282,12 +282,10 @@ describe("search-cache: populateFileListCache", () => {
 		// walk は unsorted な順序で返してくる (fs 走査順を模す)
 		resolveWalk([p("z.md"), p("a.md"), p("m.md")]);
 		const result = await pending;
-		// entry は生存しており walk は完走している (isStale は entry 生存のみを見る) ので、
-		// 完全な list として caller に返る。null にすると完全な walk 結果を捨てて再 walk になる
-		// ため、entry drop 分岐 (下の test) と取り違えていないことをここで明示 pin する。
+		// entry 生存 + epoch bump なので walk は完走しており、null 破棄はしない
+		// (entry drop 分岐と取り違えていないことの明示 pin)。
 		expect(result).not.toBeNull();
-		// collectMdFilesForWorkspace の「常に sort 済み」不変条件を維持するため
-		// populate 側で byteCmp 済みにして返す。
+		// 「常に sort 済み」不変条件を維持するため populate 側で byteCmp 済みにして返す。
 		expect(result).toEqual([p("a.md"), p("m.md"), p("z.md")]);
 		// cache には格納されない (次回 lookup は null で再 populate 必要)
 		expect(getCachedMdFiles(ROOT)).toBeNull();
@@ -310,6 +308,24 @@ describe("search-cache: populateFileListCache", () => {
 		expect(result).toBeNull();
 		// entry は復活しない
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
+		expect(getCachedMdFiles(ROOT)).toBeNull();
+	});
+
+	it("returns null when the entry is swapped (drop → re-acquire) mid-populate", async () => {
+		acquireFileListCache(ROOT);
+		let resolveWalk!: (files: string[]) => void;
+		const walkPromise = new Promise<string[]>((resolve) => {
+			resolveWalk = resolve;
+		});
+		const pending = populateFileListCache(ROOT, async () => await walkPromise);
+		// drop → 再 acquire。新 entry は epoch 0 なので epochAtStart と一致してしまう:
+		// entry identity (`current !== e`) で判定していないと guard を素通りする。
+		releaseFileListCache(ROOT);
+		acquireFileListCache(ROOT);
+		expect(hasFileListCacheEntry(ROOT)).toBe(true);
+		resolveWalk([p("a.md")]);
+		expect(await pending).toBeNull();
+		// 旧 entry 向けの (部分的かもしれない) walk 結果が新 entry の cache を汚さない。
 		expect(getCachedMdFiles(ROOT)).toBeNull();
 	});
 
