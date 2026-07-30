@@ -240,17 +240,16 @@ export async function populateFileListCache(
 			if (result === null) return null;
 			// ここから先の result は完走した walk の全件。あとは「格納するか」だけの判定。
 			const current = entries.get(canonicalRoot);
-			// entry drop / 入れ替わり: 格納すると drop 済み entry を復活させる / 新 entry の
-			// cache を旧 workspace の内容で汚すので見送る。ただし walk は完走しているため
-			// 結果自体は捨てない (#442)。
-			if (current !== e) return sortWalkResult(result);
-			if (current.state.epoch === epochAtStart) {
+			if (current === e && current.state.epoch === epochAtStart) {
 				setCacheFiles(current.state, result);
 				// setCacheFiles で state.files を非 null にした直後なので getSortedFiles は必ず配列を返す。
 				return getSortedFiles(current.state) as readonly string[];
 			}
-			// entry 生存 + epoch bump: batch が来たので格納は見送る。byteCmp 済みで返すのは
-			// collectMdFilesForWorkspace の「常に sort 済み」不変条件を維持するため。
+			// 格納を見送る 2 ケース。どちらも walk は完走しているので結果自体は捨てない (#442)。
+			//   entry drop / 入れ替わり: 格納すると drop 済み entry の復活 / 新 entry の cache を
+			//     旧 workspace の内容で汚すことになる。
+			//   entry 生存 + epoch bump: populate 中に batch が来たので result はもう古い。
+			// byteCmp 済みで返すのは collectMdFilesForWorkspace の「常に sort 済み」不変条件のため。
 			return sortWalkResult(result);
 		} finally {
 			if (e.inFlight === promise) e.inFlight = null;

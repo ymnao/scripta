@@ -1415,17 +1415,15 @@ describe("search: walk abort reporting (#442)", () => {
 	// 最初の readdir 完了までの間に cache entry を差し替える。watcher:start が
 	// stopWatcherForWindow → acquireFileListCache を同期区間で実行する現実装を模す
 	// (同期なので walk の isStale には観測窓が無く、walk は必ず完走する)。
+	// mockImplementationOnce は 1 回消費されると元実装への call-through に戻るため、
+	// 「初回だけ effect」を自前のフラグで管理しなくてよい。
 	function spyReaddirWith(effect: () => void): ReturnType<typeof vi.spyOn> {
 		const original = fsp.readdir.bind(fsp);
-		let fired = false;
 		return vi
 			.spyOn(fsp, "readdir")
-			.mockImplementation((...args: Parameters<typeof fsp.readdir>) => {
-				if (!fired) {
-					fired = true;
-					effect();
-				}
-				return original(...(args as Parameters<typeof original>));
+			.mockImplementationOnce((...args: Parameters<typeof original>) => {
+				effect();
+				return original(...args);
 			});
 	}
 
