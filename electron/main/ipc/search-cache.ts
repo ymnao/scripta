@@ -37,7 +37,8 @@ interface InputFileMapMemo {
 interface CacheEntry {
 	refCount: number;
 	state: FileListCacheState;
-	inFlight: Promise<readonly string[]> | null;
+	// null 解決は populateFileListCache の「walk が部分的な可能性あり」契約 (同関数の JSDoc 参照)。
+	inFlight: Promise<readonly string[] | null> | null;
 	// L2 ContentCache: canonical ioPath → readFile 済み string の byte 予算 LRU。
 	// entry のライフサイクルに便乗して、release (refCount 0) で自然に drop される。
 	l2: ByteLruCache;
@@ -198,18 +199,28 @@ export function getCachedMdFiles(canonicalRoot: string): readonly string[] | nul
 // - entry あり + in-flight: 進行中の promise に相乗り (walk 1 回に集約)。
 // - entry あり + 未 populate: walk 実行。完了時に epoch guard で
 //   「populate 中に batch が来ていない」ことを確認してから格納する。
-//   guard 失敗時も walk 結果は呼び出し元へ返す (query は成功、cache だけ見送り)。
+//
+// 戻り値契約 (#407 Finding 2):
+//   `null` = walk が部分的な可能性がある。caller は結果を破棄して空応答を返すこと。
+//   caller が渡す walk は entry 生存を isStale の baseline にしているため、populate 中に
+//   entry が drop / 入れ替わると walk が途中で打ち切られ、部分 list が「完全な list」として
+//   下流に流れる (truncated=false のまま不完全な検索結果になる)。これを型で遮断する。
+//   cache 内部の getSortedFiles が返す `null` (= 未 populate) とは別概念である点に注意。
 // release 後に in-flight が解決した場合、entry は Map から消えているため復活しない。
 export async function populateFileListCache(
 	canonicalRoot: string,
 	walk: () => Promise<readonly string[]>,
-): Promise<readonly string[]> {
+): Promise<readonly string[] | null> {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) {
-		// watcher 非稼働 → cache しないで直接 walk
+		// watcher 非稼働 → cache しないで直接 walk。
+		// collectMdFilesForWorkspace は hasFileListCacheEntry(canonical) が true の同 tick 内で
+		// populate を呼ぶため、entry-alive を baseline にした walk はこの分岐に来ない
+		// (= 部分 walk になり得ないので上記 null 契約の対象外)。
 		return await walk();
 	}
-	// 既に populated (batch 適用のみで invalidate されていない場合) はそのまま返す
+	// 既に populated (batch 適用のみで invalidate されていない場合) はそのまま返す。
+	// ここの null は「未 populate」の意味であり、本関数の戻り値契約の null とは無関係。
 	const already = getSortedFiles(e.state);
 	if (already !== null) return already;
 	if (e.inFlight !== null) return e.inFlight;
@@ -219,18 +230,22 @@ export async function populateFileListCache(
 	// 参照する」ため let!: T (definite assignment) を使う。IIFE 実行順序上 promise は
 	// finally 到達前に必ず代入されているが、TS の CFA は nested function 内の代入前参照を
 	// TS2454 として返すためこの workaround が必要。
-	let promise!: Promise<readonly string[]>;
-	promise = (async (): Promise<readonly string[]> => {
+	let promise!: Promise<readonly string[] | null>;
+	promise = (async (): Promise<readonly string[] | null> => {
 		try {
 			const result = await walk();
 			const current = entries.get(canonicalRoot);
-			if (current === e && current.state.epoch === epochAtStart) {
+			// entry drop / 入れ替わり: result が部分 list かどうかを区別できない (上記 null 契約)。
+			if (current !== e) return null;
+			if (current.state.epoch === epochAtStart) {
 				setCacheFiles(current.state, result);
 				// setCacheFiles で state.files を非 null にした直後なので getSortedFiles は必ず配列を返す。
 				return getSortedFiles(current.state) as readonly string[];
 			}
-			// epoch guard 失敗: 格納しないが caller には byteCmp 済みで返す
-			// (collectMdFilesForWorkspace の「常に sort 済み」不変条件を維持するため)。
+			// entry 生存 + epoch bump: batch が来たので格納は見送るが、walk は完走している
+			// (isStale は entry 生存のみを見ており epoch bump では止まらない)。完全な list なので
+			// null にせず、byteCmp 済みで返す (collectMdFilesForWorkspace の「常に sort 済み」
+			// 不変条件を維持するため)。null にすると完走した walk を捨てて再 walk になる。
 			return sortWalkResult(result);
 		} finally {
 			if (e.inFlight === promise) e.inFlight = null;
