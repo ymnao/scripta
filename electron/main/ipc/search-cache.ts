@@ -200,23 +200,24 @@ export function getCachedMdFiles(canonicalRoot: string): readonly string[] | nul
 // - entry あり + 未 populate: walk 実行。完了時に epoch guard で
 //   「populate 中に batch が来ていない」ことを確認してから格納する。
 //
-// 戻り値契約 (#407 Finding 2):
-//   `null` = walk が部分的な可能性がある。caller は結果を破棄して空応答を返すこと。
-//   caller が渡す walk は entry 生存を isStale の baseline にしているため、populate 中に
-//   entry が drop / 入れ替わると walk が途中で打ち切られ、部分 list が「完全な list」として
-//   下流に流れる (truncated=false のまま不完全な検索結果になる)。これを型で遮断する。
+// walk / 戻り値契約 (#407 Finding 2 → #442 で「推測」から「事実」へ):
+//   walk が返す `null` = walk 自身が「isStale で打ち切った」と報告した状態。
+//   本関数の戻り値 `null` はそれをそのまま伝播したもので、caller は結果を破棄して
+//   空応答を返すこと (部分 list が truncated=false のまま下流に流れるのを型で遮断する)。
+//   打ち切りは walk だけが知る事実なので、entry identity (`current !== e`) から推測しない。
+//   推測に頼っていた頃は walk が完走していても entry が入れ替わっただけで捨てており、
+//   watcher restart (release → acquire が同期区間) と populate が重なると renderer 側の
+//   fileMap が空のまま残留していた (#442)。identity 判定は「cache に格納するか」だけに使う。
 //   cache 内部の getSortedFiles が返す `null` (= 未 populate) とは別概念である点に注意。
 // release 後に in-flight が解決した場合、entry は Map から消えているため復活しない。
 export async function populateFileListCache(
 	canonicalRoot: string,
-	walk: () => Promise<readonly string[]>,
+	walk: () => Promise<readonly string[] | null>,
 ): Promise<readonly string[] | null> {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) {
 		// watcher 非稼働 → cache しないで直接 walk。
-		// collectMdFilesForWorkspace は hasFileListCacheEntry(canonical) が true の同 tick 内で
-		// populate を呼ぶため、entry-alive を baseline にした walk はこの分岐に来ない
-		// (= 部分 walk になり得ないので上記 null 契約の対象外)。
+		// walk が打ち切りを報告した場合はそのまま透過する (caller の空応答へ合流)。
 		return await walk();
 	}
 	// 既に populated (batch 適用のみで invalidate されていない場合) はそのまま返す。
@@ -234,18 +235,22 @@ export async function populateFileListCache(
 	promise = (async (): Promise<readonly string[] | null> => {
 		try {
 			const result = await walk();
+			// 打ち切り報告は最上部で弾く。以降の格納パスに部分 list が到達する経路を
+			// 条件分岐ではなく制御フローで消しておく (上記 walk 契約)。
+			if (result === null) return null;
+			// ここから先の result は完走した walk の全件。あとは「格納するか」だけの判定。
 			const current = entries.get(canonicalRoot);
-			// entry drop / 入れ替わり: result が部分 list かどうかを区別できない (上記 null 契約)。
-			if (current !== e) return null;
+			// entry drop / 入れ替わり: 格納すると drop 済み entry を復活させる / 新 entry の
+			// cache を旧 workspace の内容で汚すので見送る。ただし walk は完走しているため
+			// 結果自体は捨てない (#442)。
+			if (current !== e) return sortWalkResult(result);
 			if (current.state.epoch === epochAtStart) {
 				setCacheFiles(current.state, result);
 				// setCacheFiles で state.files を非 null にした直後なので getSortedFiles は必ず配列を返す。
 				return getSortedFiles(current.state) as readonly string[];
 			}
-			// entry 生存 + epoch bump: batch が来たので格納は見送るが、walk は完走している
-			// (isStale は entry 生存のみを見ており epoch bump では止まらない)。完全な list なので
-			// null にせず、byteCmp 済みで返す (collectMdFilesForWorkspace の「常に sort 済み」
-			// 不変条件を維持するため)。null にすると完走した walk を捨てて再 walk になる。
+			// entry 生存 + epoch bump: batch が来たので格納は見送る。byteCmp 済みで返すのは
+			// collectMdFilesForWorkspace の「常に sort 済み」不変条件を維持するため。
 			return sortWalkResult(result);
 		} finally {
 			if (e.inFlight === promise) e.inFlight = null;

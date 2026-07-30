@@ -1409,3 +1409,87 @@ describe("scan 系 impl の piggyback indexing 配線 (#407 Finding 1/3)", () =>
 		releaseFileListCache(canonical);
 	});
 });
+
+// #442: walk の打ち切りは entry identity からの推測ではなく walk 自身の報告で決める。
+describe("search: walk abort reporting (#442)", () => {
+	// 最初の readdir 完了までの間に cache entry を差し替える。watcher:start が
+	// stopWatcherForWindow → acquireFileListCache を同期区間で実行する現実装を模す
+	// (同期なので walk の isStale には観測窓が無く、walk は必ず完走する)。
+	function spyReaddirWith(effect: () => void): ReturnType<typeof vi.spyOn> {
+		const original = fsp.readdir.bind(fsp);
+		let fired = false;
+		return vi
+			.spyOn(fsp, "readdir")
+			.mockImplementation((...args: Parameters<typeof fsp.readdir>) => {
+				if (!fired) {
+					fired = true;
+					effect();
+				}
+				return original(...(args as Parameters<typeof original>));
+			});
+	}
+
+	it("keeps a completed walk when the cache entry is swapped mid-populate (watcher restart)", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		await writeFile(join(workspaceDir, "b.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		acquireFileListCache(canonical);
+		const spy = spyReaddirWith(() => {
+			releaseFileListCache(canonical);
+			acquireFileListCache(canonical);
+		});
+		try {
+			const files = await searchFilenamesImpl(TEST_WIN, workspaceDir, "");
+			// 完走した walk を entry 入れ替わりだけで捨てると `[]` になり、renderer 側の
+			// fileMap が空のまま残留して全 wikilink が未解決表示になる (#442 の実害)。
+			expect(files.map((f) => basename(f))).toEqual(["a.md", "b.md"]);
+		} finally {
+			spy.mockRestore();
+			releaseFileListCache(canonical);
+		}
+	});
+
+	it("returns an empty result when the walk is actually aborted mid-populate", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		acquireFileListCache(canonical);
+		// 再 acquire しない = entry が消えたまま → walk は打ち切りを報告する。
+		const spy = spyReaddirWith(() => {
+			releaseFileListCache(canonical);
+		});
+		try {
+			// 部分 list を完全な list として下流に流さない (空応答へ合流)。
+			expect(await searchFilenamesImpl(TEST_WIN, workspaceDir, "")).toEqual([]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("propagates an abort from a nested directory up to the top level", async () => {
+		const deep = join(workspaceDir, "l1", "l2");
+		await mkdir(deep, { recursive: true });
+		await writeFile(join(workspaceDir, "top.md"), "body");
+		await writeFile(join(deep, "deep.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		// isStale は各段の readdir 前後で呼ばれる。3 回目以降を stale にすると root は
+		// 完走し、l1 へ降りた入口で打ち切られる (= 再帰の深い段での abort)。
+		let staleChecks = 0;
+		const isStale = (): boolean => {
+			staleChecks++;
+			return staleChecks >= 3;
+		};
+		const out: string[] = [];
+		expect(await __testing.walkMdFiles(canonical, out, isStale)).toBe("aborted");
+		// 打ち切り時点までの部分 list が out に残る (だから caller は捨てる必要がある)。
+		// 深い段の abort を握り潰すと deep.md まで入ってしまう。
+		expect(out.map((f) => basename(f))).not.toContain("deep.md");
+
+		// isStale なし = 完走。全件が集まる。
+		const all: string[] = [];
+		expect(await __testing.walkMdFiles(canonical, all)).toBe("completed");
+		expect(all.map((f) => basename(f)).sort()).toEqual(["deep.md", "top.md"]);
+	});
+});

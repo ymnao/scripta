@@ -313,15 +313,23 @@ async function processMdFilesParallel(
 // isStale は #7 の walk cancel 穴の暫定手当。各ディレクトリの readdir 完了直後 1 回
 // チェックして stale なら early return する (エントリループ内の await は再帰 walk であり、
 // 再帰先の入口チェックで同粒度を得るためループ内チェックは省く)。
-// populate 経路 (cache 共有資産) からは isStale を渡さない — walk 自体は完走させる。
+// populate 経路 (cache 共有資産) には caller 個別ではなく entry 生存を baseline にした
+// isStale を渡す (#394 Phase D。詳細は collectMdFilesForWorkspace 内のコメント)。
 // io は cache 経路で共有される readonly array の可能性がある (mutation 禁止)。
 // input は canonicalToInputPaths で毎回新規に確保するため mutable でよい。
 type MdFiles = { io: readonly string[]; input: string[]; canonicalRoot: string };
 
-async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean): Promise<void> {
-	if (isStale?.() === true) return;
+// 戻り値は「out が全件か (completed) / isStale で打ち切った部分 list か (aborted)」の報告。
+// 呼び出し側 (populate 経路) はこれを null 変換して部分 list の流出を遮断する (#442)。
+// 再帰段でも aborted を即座に上へ返す (深い階層での打ち切りが最上段まで伝播する)。
+async function walkMdFiles(
+	ioDir: string,
+	out: string[],
+	isStale?: () => boolean,
+): Promise<"completed" | "aborted"> {
+	if (isStale?.() === true) return "aborted";
 	const entries = await fsp.readdir(ioDir, { withFileTypes: true });
-	if (isStale?.() === true) return;
+	if (isStale?.() === true) return "aborted";
 	for (const ent of entries) {
 		if (ent.name.startsWith(".") || ent.name === "node_modules") continue;
 		const ioPath = join(ioDir, ent.name);
@@ -333,11 +341,12 @@ async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean
 		// 個別 file の realpath 再認可は piggyback / idle-fill 側で行う (index 取り込み
 		// 境界を workspace 内に閉じる)。
 		if (ent.isDirectory()) {
-			await walkMdFiles(ioPath, out, isStale);
+			if ((await walkMdFiles(ioPath, out, isStale)) === "aborted") return "aborted";
 		} else if (ent.name.endsWith(".md")) {
 			out.push(ioPath);
 		}
 	}
+	return "completed";
 }
 
 // 各 IPC ハンドラ冒頭の「path-guard 通過 → ワークスペース全 .md 収集」を集約。
@@ -345,10 +354,11 @@ async function walkMdFiles(ioDir: string, out: string[], isStale?: () => boolean
 //   - hit (watcher 稼働中 + populated): 保持中の canonical sorted 配列をそのまま使う。
 //   - miss (watcher 稼働中 + 未 populate): populateFileListCache 経由で walk 実行 + 結果格納。
 //   - entry なし (watcher 非稼働): 直接 walk 実行 (cache しない)。
-// isStale は entry なし経路の walk にのみ伝播する (populate は shared resource として完走させる)。
+// caller 個別の isStale は entry なし経路の walk にのみ伝播する (populate 経路は dedupe される
+// 共有資産なので entry 生存を baseline にした isStale を別途渡す)。
 // 認可は cache hit/miss を問わず冒頭で毎回実行する。cache key を認可済み canonical で
 // 生成することで検証スキップの構造を作らない。
-// #407 Finding 2: populate が null (walk 部分的の可能性) を返したら null を伝播する。
+// 両経路とも walk が打ち切りを報告したら null を返す (#407 Finding 2 → #442)。
 // caller は既存の isStale bail と同じ空応答を返すこと。
 async function collectMdFilesForWorkspace(
 	senderId: number,
@@ -371,17 +381,19 @@ async function collectMdFilesForWorkspace(
 		// dedupe 相手を巻き込まない (entry drop = 全 caller が用済み)。
 		const populated = await populateFileListCache(canonical, async () => {
 			const arr: string[] = [];
-			await walkMdFiles(canonical, arr, () => !hasFileListCacheEntry(canonical));
-			return arr;
+			const outcome = await walkMdFiles(canonical, arr, () => !hasFileListCacheEntry(canonical));
+			// 打ち切りを walk 自身の報告として populate に渡す (#442)。entry identity からの
+			// 推測ではないので、完走した walk は entry が入れ替わっていても破棄されない。
+			return outcome === "aborted" ? null : arr;
 		});
-		// entry が walk 中に drop された → walk が途中で打ち切られた可能性がある。
-		// 部分 list を完全な list として下流に流さない。
+		// walk が途中で打ち切られた → 部分 list を完全な list として下流に流さない。
 		if (populated === null) return null;
 		ioFiles = populated;
 	} else {
 		// watcher 非稼働: cache しない直接 walk 経路。caller の isStale を反映して #7 の暫定手当。
 		const arr: string[] = [];
-		await walkMdFiles(canonical, arr, isStale);
+		// 打ち切り時は populate 経路と同じく部分 list を返さない (caller は空応答へ合流)。
+		if ((await walkMdFiles(canonical, arr, isStale)) === "aborted") return null;
 		// callers (searchFilenamesImpl 等) が sort 済みを前提にできるよう cache 経路
 		// (getSortedFiles) と同じ byteCmp 順序に揃える。
 		arr.sort(byteCmp);
@@ -1266,6 +1278,9 @@ export function registerSearchIpc(): void {
 
 export const __testing = {
 	processMdFilesParallel,
+	// 打ち切り報告の再帰伝播 (#442) を直接 pin するため。統合経路 (readdir spy) だけでは
+	// 「深い階層の aborted が最上段まで返る」性質が壊れても検出しづらい。
+	walkMdFiles,
 	buildIdleFillDeps,
 	readForReindex,
 	searchFilesImpl,
