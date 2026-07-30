@@ -242,6 +242,12 @@ describe("search-cache: populateFileListCache", () => {
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
 	});
 
+	it("passes through the walk's abort report when no entry (watcher 非稼働)", async () => {
+		// entry なし経路も打ち切りを握り潰さない (caller は空応答へ合流する)。
+		expect(await populateFileListCache(ROOT, async () => null)).toBeNull();
+		expect(hasFileListCacheEntry(ROOT)).toBe(false);
+	});
+
 	it("stores result on entry when clean populate (no concurrent batch)", async () => {
 		acquireFileListCache(ROOT);
 		await populateFileListCache(ROOT, async () => [p("a.md")]);

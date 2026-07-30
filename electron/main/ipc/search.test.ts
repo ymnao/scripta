@@ -1,7 +1,7 @@
 // @vitest-environment node
 // search.ts が読む実体と同じ object を spy するため `node:fs` の promises を使う
 // (node:fs/promises の ESM namespace は frozen で spy できない)。
-import { promises as fsp } from "node:fs";
+import { type Dirent, promises as fsp } from "node:fs";
 import { mkdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1449,16 +1449,35 @@ describe("search: walk abort reporting (#442)", () => {
 	});
 
 	it("returns an empty result when the walk is actually aborted mid-populate", async () => {
+		// 打ち切り時点の out を**非空**にする構成にする。空のままだと「部分 list を返す」
+		// regression を入れても結果が [] で一致してしまい、pin が vacuous になる。
 		await writeFile(join(workspaceDir, "a.md"), "body");
+		await writeFile(join(workspaceDir, "b.md"), "body");
+		const sub = join(workspaceDir, "sub");
+		await mkdir(sub);
+		await writeFile(join(sub, "c.md"), "body");
 		const canonical = await realpath(workspaceDir);
 
 		acquireFileListCache(canonical);
-		// 再 acquire しない = entry が消えたまま → walk は打ち切りを報告する。
-		const spy = spyReaddirWith(() => {
-			releaseFileListCache(canonical);
-		});
+		const original = fsp.readdir as unknown as (
+			dir: string,
+			opts: { withFileTypes: true },
+		) => Promise<Dirent[]>;
+		let readdirCalls = 0;
+		const impl = async (dir: string, opts: { withFileTypes: true }): Promise<Dirent[]> => {
+			readdirCalls++;
+			const entries = await original(dir, opts);
+			// file → dir の順に並べ替えて fs の返却順への依存を消す (root の .md 2 件が
+			// sub へ降りる前に out へ積まれることを保証する)。
+			entries.sort((x, y) => Number(x.isDirectory()) - Number(y.isDirectory()));
+			// 2 回目 = sub の readdir。ここで entry を落とす → 再 acquire しないので
+			// walk は打ち切りを報告し、out には root の 2 件だけが残る。
+			if (readdirCalls === 2) releaseFileListCache(canonical);
+			return entries;
+		};
+		const spy = vi.spyOn(fsp, "readdir").mockImplementation(impl as typeof fsp.readdir);
 		try {
-			// 部分 list を完全な list として下流に流さない (空応答へ合流)。
+			// 部分 list (a.md / b.md) を完全な list として下流に流さない (空応答へ合流)。
 			expect(await searchFilenamesImpl(TEST_WIN, workspaceDir, "")).toEqual([]);
 		} finally {
 			spy.mockRestore();

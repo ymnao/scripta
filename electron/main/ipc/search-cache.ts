@@ -37,7 +37,7 @@ interface InputFileMapMemo {
 interface CacheEntry {
 	refCount: number;
 	state: FileListCacheState;
-	// null 解決は populateFileListCache の「walk が部分的な可能性あり」契約 (同関数の JSDoc 参照)。
+	// null 解決は populateFileListCache の「walk が打ち切りを報告した」契約 (同関数の JSDoc 参照)。
 	inFlight: Promise<readonly string[] | null> | null;
 	// L2 ContentCache: canonical ioPath → readFile 済み string の byte 予算 LRU。
 	// entry のライフサイクルに便乗して、release (refCount 0) で自然に drop される。
