@@ -1,7 +1,7 @@
 // @vitest-environment node
 // search.ts が読む実体と同じ object を spy するため `node:fs` の promises を使う
 // (node:fs/promises の ESM namespace は frozen で spy できない)。
-import { promises as fsp } from "node:fs";
+import { type Dirent, promises as fsp } from "node:fs";
 import { mkdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1407,5 +1407,124 @@ describe("scan 系 impl の piggyback indexing 配線 (#407 Finding 1/3)", () =>
 		expect(handle.isIndexedAndValid(target)).toBe(false);
 
 		releaseFileListCache(canonical);
+	});
+});
+
+// #442: walk の打ち切りは entry identity からの推測ではなく walk 自身の報告で決める。
+describe("search: walk abort reporting (#442)", () => {
+	// 最初の readdir 完了までの間に cache entry を差し替える。watcher:start が
+	// stopWatcherForWindow → acquireFileListCache を同期区間で実行する現実装を模す
+	// (同期なので walk の isStale には観測窓が無く、walk は必ず完走する)。
+	// mockImplementationOnce は 1 回消費されると元実装への call-through に戻るため、
+	// 「初回だけ effect」を自前のフラグで管理しなくてよい。
+	function spyReaddirWith(effect: () => void): ReturnType<typeof vi.spyOn> {
+		const original = fsp.readdir.bind(fsp);
+		return vi
+			.spyOn(fsp, "readdir")
+			.mockImplementationOnce((...args: Parameters<typeof original>) => {
+				effect();
+				return original(...args);
+			});
+	}
+
+	it("keeps a completed walk when the cache entry is swapped mid-populate (watcher restart)", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		await writeFile(join(workspaceDir, "b.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		acquireFileListCache(canonical);
+		const spy = spyReaddirWith(() => {
+			releaseFileListCache(canonical);
+			acquireFileListCache(canonical);
+		});
+		try {
+			const files = await searchFilenamesImpl(TEST_WIN, workspaceDir, "");
+			// 完走した walk を entry 入れ替わりだけで捨てると `[]` になり、renderer 側の
+			// fileMap が空のまま残留して全 wikilink が未解決表示になる (#442 の実害)。
+			expect(files.map((f) => basename(f))).toEqual(["a.md", "b.md"]);
+		} finally {
+			spy.mockRestore();
+			releaseFileListCache(canonical);
+		}
+	});
+
+	it("returns an empty result when the walk is actually aborted mid-populate", async () => {
+		// 打ち切り時点の out を**非空**にする構成にする。空のままだと「部分 list を返す」
+		// regression を入れても結果が [] で一致してしまい、pin が vacuous になる。
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		await writeFile(join(workspaceDir, "b.md"), "body");
+		const sub = join(workspaceDir, "sub");
+		await mkdir(sub);
+		await writeFile(join(sub, "c.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		acquireFileListCache(canonical);
+		const original = fsp.readdir as unknown as (
+			dir: string,
+			opts: { withFileTypes: true },
+		) => Promise<Dirent[]>;
+		let readdirCalls = 0;
+		const impl = async (dir: string, opts: { withFileTypes: true }): Promise<Dirent[]> => {
+			readdirCalls++;
+			const entries = await original(dir, opts);
+			// file → dir の順に並べ替えて fs の返却順への依存を消す (root の .md 2 件が
+			// sub へ降りる前に out へ積まれることを保証する)。
+			entries.sort((x, y) => Number(x.isDirectory()) - Number(y.isDirectory()));
+			// 2 回目 = sub の readdir。ここで entry を落とす → 再 acquire しないので
+			// walk は打ち切りを報告し、out には root の 2 件だけが残る。
+			if (readdirCalls === 2) releaseFileListCache(canonical);
+			return entries;
+		};
+		const spy = vi.spyOn(fsp, "readdir").mockImplementation(impl as typeof fsp.readdir);
+		try {
+			// 部分 list (a.md / b.md) を完全な list として下流に流さない (空応答へ合流)。
+			expect(await searchFilenamesImpl(TEST_WIN, workspaceDir, "")).toEqual([]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("propagates an abort from a nested directory up to the top level", async () => {
+		const deep = join(workspaceDir, "l1", "l2");
+		await mkdir(deep, { recursive: true });
+		await writeFile(join(workspaceDir, "top.md"), "body");
+		await writeFile(join(deep, "deep.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		// isStale は各段の readdir 前後で呼ばれる。3 回目以降を stale にすると root の
+		// readdir 前後 (#1 / #2) は通り、l1 以降のどこかで打ち切られる。
+		// 再帰段の `return "aborted"` を握り潰すと、l1 の abort が root に伝播せず
+		// 最上段の戻り値が "completed" になるため、この assert が落ちる。
+		let staleChecks = 0;
+		const isStale = (): boolean => {
+			staleChecks++;
+			return staleChecks >= 3;
+		};
+		const out: string[] = [];
+		expect(await __testing.walkMdFiles(canonical, out, isStale)).toBe("aborted");
+		// 打ち切り時点までの部分 list が out に残る = 完走時と一致しない (だから caller は捨てる)。
+		expect(out.map((f) => basename(f))).not.toContain("deep.md");
+
+		// isStale なし = 完走。全件が集まる。
+		const all: string[] = [];
+		expect(await __testing.walkMdFiles(canonical, all)).toBe("completed");
+		expect(all.map((f) => basename(f)).sort()).toEqual(["deep.md", "top.md"]);
+	});
+
+	it("skips the readdir entirely when already stale at the entry check", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		// 入口 check (readdir 前) の存在 pin。post-readdir check だけでも結果 (aborted /
+		// 部分 list) は同じになるため、区別できるのは「readdir を 1 回も撃たない」ことだけ。
+		const spy = vi.spyOn(fsp, "readdir");
+		try {
+			const out: string[] = [];
+			expect(await __testing.walkMdFiles(canonical, out, () => true)).toBe("aborted");
+			expect(spy).not.toHaveBeenCalled();
+			expect(out).toEqual([]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });

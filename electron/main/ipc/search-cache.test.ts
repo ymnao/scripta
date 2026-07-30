@@ -242,6 +242,12 @@ describe("search-cache: populateFileListCache", () => {
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
 	});
 
+	it("passes through the walk's abort report when no entry (watcher 非稼働)", async () => {
+		// entry なし経路も打ち切りを握り潰さない (caller は空応答へ合流する)。
+		expect(await populateFileListCache(ROOT, async () => null)).toBeNull();
+		expect(hasFileListCacheEntry(ROOT)).toBe(false);
+	});
+
 	it("stores result on entry when clean populate (no concurrent batch)", async () => {
 		acquireFileListCache(ROOT);
 		await populateFileListCache(ROOT, async () => [p("a.md")]);
@@ -291,55 +297,83 @@ describe("search-cache: populateFileListCache", () => {
 		expect(getCachedMdFiles(ROOT)).toBeNull();
 	});
 
-	it("returns null (partial-walk contract) when the entry is dropped mid-populate", async () => {
+	it("returns null when the walk itself reports an abort (partial-walk contract)", async () => {
 		acquireFileListCache(ROOT);
-		let resolveWalk!: (files: string[]) => void;
-		const walkPromise = new Promise<string[]>((resolve) => {
+		// #442: 破棄の根拠は entry identity ではなく walk 自身の報告 (null)。ここでは
+		// entry 生存 + epoch 一致 (= 格納条件が揃っている状態) でも捨てられることを pin する。
+		const result = await populateFileListCache(ROOT, async () => null);
+		expect(result).toBeNull();
+		// 部分 list が格納されない (次回 lookup は再 populate に落ちる)。
+		expect(getCachedMdFiles(ROOT)).toBeNull();
+		// in-flight は clear されているので次の populate が walk を実行できる。
+		const re = await populateFileListCache(ROOT, async () => [p("a.md")]);
+		expect(re).toEqual([p("a.md")]);
+	});
+
+	it("returns null when the walk aborts and the entry was dropped mid-populate", async () => {
+		acquireFileListCache(ROOT);
+		let resolveWalk!: (files: string[] | null) => void;
+		const walkPromise = new Promise<string[] | null>((resolve) => {
 			resolveWalk = resolve;
 		});
 		const pending = populateFileListCache(ROOT, async () => await walkPromise);
 		releaseFileListCache(ROOT);
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
-		resolveWalk([p("a.md")]);
-		const result = await pending;
-		// #407 Finding 2: caller の walk は entry 生存を isStale の baseline にしているため、
-		// entry drop 後の結果は部分 list かもしれない。配列で返すと不完全な list が
-		// truncated=false のまま下流に流れるので null で破棄させる。
-		expect(result).toBeNull();
+		// entry drop を isStale の baseline にした walk は打ち切りを報告する。
+		resolveWalk(null);
+		expect(await pending).toBeNull();
 		// entry は復活しない
 		expect(hasFileListCacheEntry(ROOT)).toBe(false);
 		expect(getCachedMdFiles(ROOT)).toBeNull();
 	});
 
-	it("returns null when the entry is swapped (drop → re-acquire) mid-populate", async () => {
+	it("returns the completed walk result (uncached) when the entry is dropped mid-populate", async () => {
 		acquireFileListCache(ROOT);
 		let resolveWalk!: (files: string[]) => void;
 		const walkPromise = new Promise<string[]>((resolve) => {
 			resolveWalk = resolve;
 		});
 		const pending = populateFileListCache(ROOT, async () => await walkPromise);
-		// drop → 再 acquire。新 entry は epoch 0 なので epochAtStart と一致してしまう:
-		// entry identity (`current !== e`) で判定していないと guard を素通りする。
+		releaseFileListCache(ROOT);
+		expect(hasFileListCacheEntry(ROOT)).toBe(false);
+		// walk は完走を報告している (配列 = 全件)。entry が消えていても捨てない (#442)。
+		resolveWalk([p("b.md"), p("a.md")]);
+		expect(await pending).toEqual([p("a.md"), p("b.md")]);
+		// 格納はしない = drop 済み entry を復活させない。
+		expect(hasFileListCacheEntry(ROOT)).toBe(false);
+		expect(getCachedMdFiles(ROOT)).toBeNull();
+	});
+
+	it("returns the completed walk result when the entry is swapped (drop → re-acquire) mid-populate", async () => {
+		acquireFileListCache(ROOT);
+		let resolveWalk!: (files: string[]) => void;
+		const walkPromise = new Promise<string[]>((resolve) => {
+			resolveWalk = resolve;
+		});
+		const pending = populateFileListCache(ROOT, async () => await walkPromise);
+		// #442 の実害シナリオ: watcher restart は release → acquire を同期区間で実行するため
+		// entry 生存を見る isStale には観測窓が無く、walk は必ず完走する。identity が変わった
+		// ことを理由に捨てると renderer の fileMap が空のまま残留する。
 		releaseFileListCache(ROOT);
 		acquireFileListCache(ROOT);
 		expect(hasFileListCacheEntry(ROOT)).toBe(true);
 		resolveWalk([p("a.md")]);
-		expect(await pending).toBeNull();
-		// 旧 entry 向けの (部分的かもしれない) walk 結果が新 entry の cache を汚さない。
+		expect(await pending).toEqual([p("a.md")]);
+		// 旧 entry 向けの walk 結果で新 entry の cache は汚さない (格納は identity で見送る)。
 		expect(getCachedMdFiles(ROOT)).toBeNull();
 	});
 
-	it("returns null to ride-along callers too when the entry is dropped mid-populate", async () => {
+	it("shares the abort verdict with ride-along callers", async () => {
 		acquireFileListCache(ROOT);
-		let resolveWalk!: (files: string[]) => void;
-		const walkPromise = new Promise<string[]>((resolve) => {
+		let resolveWalk!: (files: string[] | null) => void;
+		const walkPromise = new Promise<string[] | null>((resolve) => {
 			resolveWalk = resolve;
 		});
 		// 2 caller が同 tick で populate → 後発は in-flight に相乗りする。
 		const p1 = populateFileListCache(ROOT, async () => await walkPromise);
 		const p2 = populateFileListCache(ROOT, async () => await walkPromise);
 		releaseFileListCache(ROOT);
-		resolveWalk([p("a.md")]);
+		resolveWalk(null);
 		const [r1, r2] = await Promise.all([p1, p2]);
 		// 相乗り側も先発と同じ walk を見ているので、破棄判断も共有される。
 		expect(r1).toBeNull();
