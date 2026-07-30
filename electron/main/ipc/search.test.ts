@@ -1491,8 +1491,10 @@ describe("search: walk abort reporting (#442)", () => {
 		await writeFile(join(deep, "deep.md"), "body");
 		const canonical = await realpath(workspaceDir);
 
-		// isStale は各段の readdir 前後で呼ばれる。3 回目以降を stale にすると root は
-		// 完走し、l1 へ降りた入口で打ち切られる (= 再帰の深い段での abort)。
+		// isStale は各段の readdir 前後で呼ばれる。3 回目以降を stale にすると root の
+		// readdir 前後 (#1 / #2) は通り、l1 以降のどこかで打ち切られる。
+		// 再帰段の `return "aborted"` を握り潰すと、l1 の abort が root に伝播せず
+		// 最上段の戻り値が "completed" になるため、この assert が落ちる。
 		let staleChecks = 0;
 		const isStale = (): boolean => {
 			staleChecks++;
@@ -1500,13 +1502,29 @@ describe("search: walk abort reporting (#442)", () => {
 		};
 		const out: string[] = [];
 		expect(await __testing.walkMdFiles(canonical, out, isStale)).toBe("aborted");
-		// 打ち切り時点までの部分 list が out に残る (だから caller は捨てる必要がある)。
-		// 深い段の abort を握り潰すと deep.md まで入ってしまう。
+		// 打ち切り時点までの部分 list が out に残る = 完走時と一致しない (だから caller は捨てる)。
 		expect(out.map((f) => basename(f))).not.toContain("deep.md");
 
 		// isStale なし = 完走。全件が集まる。
 		const all: string[] = [];
 		expect(await __testing.walkMdFiles(canonical, all)).toBe("completed");
 		expect(all.map((f) => basename(f)).sort()).toEqual(["deep.md", "top.md"]);
+	});
+
+	it("skips the readdir entirely when already stale at the entry check", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		// 入口 check (readdir 前) の存在 pin。post-readdir check だけでも結果 (aborted /
+		// 部分 list) は同じになるため、区別できるのは「readdir を 1 回も撃たない」ことだけ。
+		const spy = vi.spyOn(fsp, "readdir");
+		try {
+			const out: string[] = [];
+			expect(await __testing.walkMdFiles(canonical, out, () => true)).toBe("aborted");
+			expect(spy).not.toHaveBeenCalled();
+			expect(out).toEqual([]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });

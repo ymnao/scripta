@@ -516,8 +516,8 @@ async function searchFilesImpl(
 	if (query === "") return emptyResponse;
 
 	const collected = await collectMdFilesForWorkspace(senderId, workspacePath, isStale);
-	// collected === null は「file list が部分的かもしれない」(#407 Finding 2)。
-	// stale と同じく結果を破棄する。
+	// collected === null は「walk が打ち切りを報告した = file list が部分的」
+	// (#407 Finding 2 → #442)。stale と同じく結果を破棄する。
 	if (collected === null || isStale()) return emptyResponse;
 	const { io, input, canonicalRoot } = collected;
 
