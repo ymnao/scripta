@@ -171,9 +171,9 @@ export async function loadSettings(): Promise<AppSettings> {
 // 1 打鍵 1 save) に同じ toast が積み上がるのを防ぐ。窓は toast の自動消滅時間に
 // 揃えるので、定数は stores/toast.ts のものを直接使う。
 //
-// 窓は **文言ごとに独立**に持つ。単一の窓にすると「値が適用されなかった」通知が
-// 直後の「次回起動時に戻る」通知を黙らせ (逆順も同様)、#446 で可視化したかった
-// 巻き戻り自体が無通知に戻る経路ができる。
+// 窓は **失敗の種別ごとに独立**に持つ。単一の窓にすると set 失敗の通知が直後の
+// save 失敗の通知を黙らせ (逆順も同様)、#446 で可視化したかった巻き戻りが片方の
+// 経路で無通知に戻る。
 type SaveFailureKind = "set" | "save";
 
 const lastSaveFailureToastAt: Record<SaveFailureKind, number> = { set: 0, save: 0 };
@@ -200,10 +200,15 @@ export async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
 		await settingsSet(key, value);
 	} catch (err) {
-		// 値が main 側 cache にも入っていない = そのセッションでも適用されていない。
-		// caller (createPersistedSetter) は save の完了を待たず zustand を更新済みなので、
-		// UI 表示だけが新値になる。「保存」ではなく「適用」できていないと伝える。
-		notifySaveFailure("set", `設定を適用できませんでした: ${translateError(err)}`);
+		// 値が main へ渡っていないケース。renderer 側の設定 (fontSize / theme 等) は
+		// caller が save の完了を待たず適用済みなので画面上は効いて見えるが、main が
+		// 強制する設定 (loadRemoteImages の CSP / webRequest、fileTree フィルタ) は
+		// 今回の起動中も効かない。全 key に共通して言えるのは disk に載らないこと =
+		// 次回起動で戻ることなので、文言はそこを伝える。
+		notifySaveFailure(
+			"set",
+			`設定を保存できませんでした。次回起動時に元の値へ戻ります: ${translateError(err)}`,
+		);
 		return;
 	}
 	try {

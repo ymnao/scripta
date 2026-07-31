@@ -285,7 +285,7 @@ describe("store", () => {
 			const toasts = useToastStore.getState().toasts;
 			expect(toasts).toHaveLength(1);
 			expect(toasts[0].type).toBe("error");
-			expect(toasts[0].message).toContain("設定を適用できませんでした");
+			expect(toasts[0].message).toContain("設定を保存できませんでした");
 			// set が失敗した時点で値は一切適用されていないので save は試みない
 			expect(window.api.settingsSave).not.toHaveBeenCalled();
 		});
@@ -316,10 +316,26 @@ describe("store", () => {
 
 			const toasts = useToastStore.getState().toasts;
 			expect(toasts).toHaveLength(2);
-			expect(toasts[1].message).toContain("次回起動時に元の値へ戻ります");
+			// 2 件は別種別。set 側は「設定を保存できませんでした」、save 側は
+			// 「設定をファイルに保存できませんでした」で始まる。
+			expect(toasts[0].message).toContain("設定を保存できませんでした");
+			expect(toasts[1].message).toContain("設定をファイルに保存できませんでした");
 		});
 
-		it("throttles repeated failure toasts within the dismiss window", async () => {
+		it("throttles repeated settingsSet failure toasts within the dismiss window", async () => {
+			(window.api.settingsSet as Mock).mockRejectedValue(new Error("EIO"));
+
+			await saveSetting("fontSize", 20);
+			vi.setSystemTime(baseTime + TOAST_AUTO_DISMISS_MS - 1);
+			await saveSetting("fontSize", 21);
+			expect(useToastStore.getState().toasts).toHaveLength(1);
+
+			vi.setSystemTime(baseTime + TOAST_AUTO_DISMISS_MS);
+			await saveSetting("fontSize", 22);
+			expect(useToastStore.getState().toasts).toHaveLength(2);
+		});
+
+		it("throttles repeated settingsSave failure toasts within the dismiss window", async () => {
 			(window.api.settingsSave as Mock).mockRejectedValue(new Error("ENOSPC"));
 
 			await saveSetting("fontSize", 20);
