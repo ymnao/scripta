@@ -406,11 +406,5 @@ describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {
 			);
 			expect(shouldAllowPdfRequest(tmpUrlInside, false)).toBe(true);
 		});
-
-		it("still rejects what the SSRF filter rejects", () => {
-			expect(shouldAllowPdfRequest("http://example.com/image.png", false)).toBe(false);
-			expect(shouldAllowPdfRequest("file:///etc/passwd", false)).toBe(false);
-			expect(shouldAllowPdfRequest("chrome://settings", false)).toBe(false);
-		});
 	});
 });

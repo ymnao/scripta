@@ -221,6 +221,12 @@ export function getFileTreeFilterOptions(): EntryFilterOptions {
 // 既定は true（従来どおりリモート画像を許可）。読めない場合も true に倒すのは、
 // settings.json が EACCES 等で読めないだけで画像が黙って表示されなくなる方が
 // ユーザーには不可解なため（プライバシー保護は明示的に OFF にした人にだけ効かせる）。
+//
+// この fail-open が起きうるのは **初回読み取りが失敗したときだけ**である点に注意。
+// load() は成功した時点で cache を張り、以降 disk を読まないので、セッション途中で
+// permission が壊れても「OFF にしていたのに ON に戻る」ことは起きない。初回失敗時は
+// そもそもユーザーの設定値を知る手段が無く（同じ状況では workspacePath も読めず
+// workspace 復元自体が失敗するので異常は表に出る）、既定値に倒すほかない。
 export function getLoadRemoteImages(): boolean {
 	try {
 		const data = load(getMainStore());

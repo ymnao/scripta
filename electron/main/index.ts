@@ -6,7 +6,8 @@ import { getLoadRemoteImages, getWindowState, persistWindowState } from "./ipc/s
 import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
 import { installMainSessionPermissionHandlers } from "./utils/permission-handler";
-import { buildCsp, resolveDevOrigin, shouldBlockImageRequest } from "./utils/remote-image-policy";
+import { buildCsp, shouldBlockImageRequest } from "./utils/remote-image-policy";
+import { resolveDevOrigin } from "./utils/renderer-url";
 import { registerScriptaAssetProtocol, SCRIPTA_ASSET_SCHEME } from "./utils/scripta-asset-protocol";
 import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachNavigationGuards } from "./utils/window-guards";
@@ -156,32 +157,29 @@ app.whenReady().then(async () => {
 				responseHeaders: {
 					...cleaned,
 					// 設定は document ロードのたびに読み直す（`getLoadRemoteImages` は
-					// メモリ cache 参照なので毎回呼んで良い）。CSP は document 単位で
-					// しか効かないため、即時性は下の onBeforeRequest が担保する。
+					// メモリ cache 参照なので毎回呼んで良い）。2 層構成の意図は
+					// utils/remote-image-policy.ts の冒頭コメントに集約。
 					"Content-Security-Policy": [buildCsp(is.dev, getLoadRemoteImages())],
 				},
 			});
 		},
 	);
 	// 「リモート画像を読み込む」が OFF のとき、renderer からの image リクエストを
-	// ネットワーク到達前に cancel する。CSP と違い document 単位ではないので、
-	// 設定を切り替えた瞬間から（reload なしで）効く。
+	// ネットワーク到達前に cancel する（上の CSP と 2 層構成。役割分担は
+	// utils/remote-image-policy.ts の冒頭コメント参照）。
 	//
 	// defaultSession の onBeforeRequest は **session につき 1 つ**しか登録できず、
 	// 後から登録すると黙って上書きされる。他機能でフィルタが要るようになったら
 	// ここに条件を足す形で合流させること（PDF export 用は別 partition なので
 	// 衝突しない: ipc/pdf.ts の installPdfWebRequestFilter を参照）。
-	const devOrigin = resolveDevOrigin(process.env.ELECTRON_RENDERER_URL);
+	// `is.dev` で gate して、packaged では env が立っていても除外 origin が開かない
+	// ようにする（prod のポリシーを環境変数非依存にする）。
+	const devOrigin = is.dev ? resolveDevOrigin(process.env.ELECTRON_RENDERER_URL) : null;
 	session.defaultSession.webRequest.onBeforeRequest(
 		{ urls: ["http://*/*", "https://*/*"] },
 		(details, callback) => {
 			callback({
-				cancel: shouldBlockImageRequest(
-					details.url,
-					details.resourceType,
-					getLoadRemoteImages(),
-					devOrigin,
-				),
+				cancel: shouldBlockImageRequest(details, getLoadRemoteImages(), devOrigin),
 			});
 		},
 	);
