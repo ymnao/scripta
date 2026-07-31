@@ -1238,7 +1238,9 @@ describe.skipIf(process.platform === "win32")(
 
 		it("reads the resolved target (not the symlink path) for an in-root symlink", async () => {
 			// #406 Finding 2 の本体: index 対象 file は検査に使った実体から読む。
-			// raw path read に戻すと readFile の引数が link.md になり、この assert が落ちる。
+			// raw path read に戻すと open の引数が link.md になり、この assert が落ちる。
+			// alias の read は #434 で O_NOFOLLOW fd 経由になったため、観測点は fsp.readFile
+			// ではなく fsp.open 側にある (どちらの実体を開いたかは open の引数に出る)。
 			const canonical = await realpath(workspaceDir);
 			const real = join(canonical, "real.md");
 			await writeFile(real, "alphaword body");
@@ -1246,12 +1248,12 @@ describe.skipIf(process.platform === "win32")(
 			await symlink(real, link);
 
 			acquireFileListCache(canonical);
-			const spy = vi.spyOn(fsp, "readFile");
+			const spy = vi.spyOn(fsp, "open");
 			try {
 				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
-				const readArgs = spy.mock.calls.map((c) => c[0]);
-				expect(readArgs).toContain(real);
-				expect(readArgs).not.toContain(link);
+				const openArgs = spy.mock.calls.map((c) => c[0]);
+				expect(openArgs).toContain(real);
+				expect(openArgs).not.toContain(link);
 			} finally {
 				spy.mockRestore();
 				releaseFileListCache(canonical);

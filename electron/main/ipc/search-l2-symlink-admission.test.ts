@@ -305,11 +305,12 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		expect(stored.get(b)).toBe("beta");
 	});
 
-	it("O_NOFOLLOW open が失敗した通常 file は L2 に載せず解決先 read で scan だけ続ける", async () => {
-		// symlink 以外の理由 (EMFILE 等) で fd 経路が落ちても「検査済みの fd から読めていない」
-		// ことに変わりはないので L2 は fail-closed に倒す。一方 scan は #434 の fallback
-		// (resolveInsideRoot → 非 null なら解決先 read) で従来どおり続く。通常 file の realpath は
-		// 恒等なので、落ちるのは workspace 外 / 解決不能だけであることをここで固定する。
+	it("open が全て失敗する file は L2 にも scan 結果にも出ない (fail-closed)", async () => {
+		// symlink 以外の理由 (EMFILE 等) で fd 経路が落ちた場合、#434 の fallback は
+		// resolveInsideRoot で解決先を出してから **その canonical を再び O_NOFOLLOW で** 読む。
+		// open 自体が落ちている状況では 2 回目も失敗するので file は skip される。
+		// 「読めなかった file は結果に出ない」という既存契約どおりで、検査していない内容が
+		// 結果や L2 に混ざる経路は残らない (fail-closed) ことをここで固定する。
 		const a = join(root, "a.md");
 		await writeFile(a, "alpha");
 		const { handle, disabled } = makeFakeIndex();
@@ -328,6 +329,6 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		});
 
 		expect(stored.size).toBe(0);
-		expect(scanned).toEqual(["alpha"]);
+		expect(scanned).toEqual([]);
 	});
 });

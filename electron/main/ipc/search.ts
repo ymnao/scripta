@@ -245,8 +245,12 @@ async function processMdFilesParallel(
 						// ゲートが既に realpath 済みなので、追加 syscall なしで両者を判別できる (#434)。
 						// null (= workspace 外 / 解決不能) は検索結果からも落とす。非 null は in-root alias で、
 						// 解決先 (canonical) から読んで結果に出す — この file は fs:read でも開けるため。
+						// 解決先も **O_NOFOLLOW fd から読む**: canonical の末端は realpath 済みで非 symlink
+						// なので正常系では発火せず、発火する = 検査 (T1) から read (T2) の間に末端を
+						// symlink へ差し替えられた瞬間。読める実体が検査した実体と違う以上 skip が正しい
+						// (分岐 1 = #412 と同じ判断を alias 側にも揃える)。
 						if (resolvedForIndex === null) return;
-						text = await fsp.readFile(resolvedForIndex, "utf8");
+						text = await readFileUtf8NoFollow(resolvedForIndex);
 					} else {
 						// ゲート未評価 (index 未提供 / index 無効 / 既に valid)。まず O_NOFOLLOW open を
 						// 試して **その fd から読む**。成功 = 「開いた対象は symlink ではない」と「読んだ
@@ -265,17 +269,18 @@ async function processMdFilesParallel(
 							// 違いは解決先が既に手元にあるか、ここで初めて払うかだけなので、片方を変える
 							// ときは必ず両方を直すこと (2 行なので関数抽出はせず相互参照で束ねている)。
 							// **errno を見分けない**: ELOOP 以外の失敗 (EACCES / ENOENT 等) も同じ経路に倒れる。
-							// 解決先が null なら skip、非 null なら plain read を試す。ここで
-							// 「symlink かどうか」の判定は誤らない (realpath が答えるため) 一方、
-							// transient な失敗 (EMFILE 等) は plain read が成功して自然回復する
-							// = 結果に残る。ELOOP だけを fallback させる実装より **ユーザー有利側に
-							// ズレるだけ** で、境界判定そのものは errno に依存しない。
+							// 解決先が null なら skip、非 null ならその canonical を O_NOFOLLOW で読み直す。
+							// 「symlink かどうか」の判定は realpath が答えるので errno に依存せず、
+							// transient な失敗 (EMFILE 等) は 2 回目の open も失敗して skip に倒れる
+							// (= 読めなかった file は結果に出ない、という既存契約と同じ)。
+							// **この null 判定は 1 つ上の分岐および L2 hit 側 (ゲート評価済みの
+							// resolveInsideRoot === null) と同じ規則**。境界の意味を変えるときは 3 箇所とも直す。
 							// realpath は実際に open に失敗した file にしか乗らない = #413 Finding 1 で削った
 							// 「全 file への realpath」は復活しない。
 							// readFromVerifiedFd は false のままなので、この経路の内容は L2 に載らない。
 							const resolved = await resolveInsideRoot(ioPath, options.root);
 							if (resolved === null) return;
-							text = await fsp.readFile(resolved, "utf8");
+							text = await readFileUtf8NoFollow(resolved);
 						}
 					}
 				} catch {
