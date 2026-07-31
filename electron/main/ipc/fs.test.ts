@@ -649,6 +649,21 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await symlink(join(outside.dir, "nope.png"), link);
 			await expect(readFileBase64Impl(TEST_WIN, link)).rejects.toThrow();
 		});
+
+		it("read-base64 も swap 後に外部内容を返さない", async () => {
+			// readFileImpl と同じ終状態を data URI 埋め込み経路 (#314) でも pin する。
+			const secret = join(outside.dir, "secret.png");
+			await writeFile(secret, Buffer.from([0xde, 0xad]));
+			const path = join(workspaceDir, "hero.png");
+			await writeFile(path, Buffer.from([0x89, 0x50]));
+			await readFileBase64Impl(TEST_WIN, path);
+
+			await rm(path);
+			await symlink(secret, path);
+
+			const err = await readFileBase64Impl(TEST_WIN, path).catch((e: NodeJS.ErrnoException) => e);
+			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+		});
 	});
 
 	describe("write", () => {

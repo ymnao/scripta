@@ -229,10 +229,13 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
 // **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に
 // なる (#451 で追跡)。
-// **realpathCache 由来の鮮度差は別問題**: 本 API は cache 済みの realpath 結果を使うため、
-// symlink の retarget 直後は canonical が stale になり得る。その場合でも I/O 対象は「cache 時点で
-// root 内と確認済みの実体 path」なので境界は破れないが、ユーザーから見た解決先とはズレる。
-// この鮮度差は #418 のスコープ外として受容しており、判断は #453 で追跡する。
+// **realpathCache 由来の鮮度差**: 本 API は cache 済みの realpath 結果を使うため、symlink の
+// retarget 直後は canonical が stale になり得る。stale な canonical は「cache 時点で root 内と
+// 確認済みだった path」だが、その path 自身が今は symlink になっている可能性があり、**上の
+// O_NOFOLLOW があって初めて**外部内容の read / 外部 file の上書きが防がれる (cache hit は
+// swap 窓を再現可能にするので、fs.test.ts の #418 test はこの経路を fixture に使っている)。
+// 残る劣化は「ユーザーから見た解決先とのズレ」で、これは #418 のスコープ外として受容し、
+// 判断は #453 で追跡する。
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
