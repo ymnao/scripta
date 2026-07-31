@@ -285,7 +285,7 @@ describe("store", () => {
 			const toasts = useToastStore.getState().toasts;
 			expect(toasts).toHaveLength(1);
 			expect(toasts[0].type).toBe("error");
-			expect(toasts[0].message).toContain("設定の保存に失敗しました");
+			expect(toasts[0].message).toContain("設定を適用できませんでした");
 			// set が失敗した時点で値は一切適用されていないので save は試みない
 			expect(window.api.settingsSave).not.toHaveBeenCalled();
 		});
@@ -302,6 +302,21 @@ describe("store", () => {
 			expect(toasts[0].type).toBe("error");
 			expect(toasts[0].message).toContain("次回起動時に元の値へ戻ります");
 			expect(window.api.settingsSet).toHaveBeenCalledWith("loadRemoteImages", false);
+		});
+
+		// スロットルの窓を文言ごとに分けている理由の pin。単一窓だと set 失敗の通知が
+		// 直後の save 失敗（＝ #446 の巻き戻り警告）を黙らせてしまう。
+		it("does not let a settingsSet failure suppress a settingsSave failure", async () => {
+			(window.api.settingsSet as Mock).mockRejectedValueOnce(new Error("EIO"));
+			await saveSetting("fontSize", 20);
+
+			vi.setSystemTime(baseTime + 1);
+			(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
+			await saveSetting("loadRemoteImages", false);
+
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(2);
+			expect(toasts[1].message).toContain("次回起動時に元の値へ戻ります");
 		});
 
 		it("throttles repeated failure toasts within the dismiss window", async () => {

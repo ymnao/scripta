@@ -168,15 +168,20 @@ export async function loadSettings(): Promise<AppSettings> {
 // settings:set は reserved key として拒否される)。
 //
 // 恒常的な disk 障害下で設定変更が連続した場合 (slide separator のキーリピートは
-// 1 打鍵 1 save) に同じ toast が積み上がるのを防ぎ、「表示中の失敗 toast は常に
-// 高々 1 件」にする。窓は toast の自動消滅時間と同値である必要があるので、定数は
-// stores/toast.ts のものを直接使う (両者がずれると上記の保証が黙って崩れる)。
-let lastSaveFailureToastAt = 0;
+// 1 打鍵 1 save) に同じ toast が積み上がるのを防ぐ。窓は toast の自動消滅時間に
+// 揃えるので、定数は stores/toast.ts のものを直接使う。
+//
+// 窓は **文言ごとに独立**に持つ。単一の窓にすると「値が適用されなかった」通知が
+// 直後の「次回起動時に戻る」通知を黙らせ (逆順も同様)、#446 で可視化したかった
+// 巻き戻り自体が無通知に戻る経路ができる。
+type SaveFailureKind = "set" | "save";
 
-function notifySaveFailure(message: string): void {
+const lastSaveFailureToastAt: Record<SaveFailureKind, number> = { set: 0, save: 0 };
+
+function notifySaveFailure(kind: SaveFailureKind, message: string): void {
 	const now = Date.now();
-	if (now - lastSaveFailureToastAt < TOAST_AUTO_DISMISS_MS) return;
-	lastSaveFailureToastAt = now;
+	if (now - lastSaveFailureToastAt[kind] < TOAST_AUTO_DISMISS_MS) return;
+	lastSaveFailureToastAt[kind] = now;
 	useToastStore.getState().addToast("error", message);
 }
 
@@ -195,14 +200,17 @@ export async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
 		await settingsSet(key, value);
 	} catch (err) {
-		// 値が一切適用されていない（main の cache も未更新）ケース。
-		notifySaveFailure(`設定の保存に失敗しました: ${translateError(err)}`);
+		// 値が main 側 cache にも入っていない = そのセッションでも適用されていない。
+		// caller (createPersistedSetter) は save の完了を待たず zustand を更新済みなので、
+		// UI 表示だけが新値になる。「保存」ではなく「適用」できていないと伝える。
+		notifySaveFailure("set", `設定を適用できませんでした: ${translateError(err)}`);
 		return;
 	}
 	try {
 		await settingsSave();
 	} catch (err) {
 		notifySaveFailure(
+			"save",
 			`設定をファイルに保存できませんでした。次回起動時に元の値へ戻ります: ${translateError(err)}`,
 		);
 	}
