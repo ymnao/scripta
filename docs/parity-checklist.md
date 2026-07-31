@@ -223,7 +223,7 @@
 | 旧 Tauri | 新 Electron |
 |---|---|
 | `convertFileSrc(path)` → `asset://localhost/<path>` | `buildAssetUrl(path)` → `scripta-asset://localhost/<encoded path>`（per-segment `encodeURIComponent` + Windows `\` → `/` 正規化 + leading `/` 付与で `new URL()` パース可能を保証） |
-| CSP `img-src 'self' asset: https://asset.localhost https:` | CSP `img-src 'self' https: data: blob: scripta-asset:` |
+| CSP `img-src 'self' asset: https://asset.localhost https:` | CSP `img-src 'self' https: data: blob: scripta-asset:`（`https:` は設定 `loadRemoteImages`（既定 true）が OFF のとき外れる。`electron/main/utils/remote-image-policy.ts` の `buildCsp` を参照） |
 | Tauri が `asset:` プロトコルハンドラを内蔵 | `scripta-asset://` をカスタムプロトコルとして main 側で登録（`protocol.handle` + `net.fetch`） |
 
 ### 実装

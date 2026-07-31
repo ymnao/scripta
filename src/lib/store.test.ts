@@ -20,6 +20,7 @@ describe("store", () => {
 				fontFamily: "monospace",
 				trimTrailingWhitespace: true,
 				showLinkCards: true,
+				loadRemoteImages: true,
 				gitSyncEnabled: false,
 				autoCommitInterval: 10,
 				autoPullInterval: 10,
@@ -53,6 +54,7 @@ describe("store", () => {
 					fontFamily: "serif",
 					trimTrailingWhitespace: false,
 					showLinkCards: false,
+					loadRemoteImages: false,
 				};
 				return values[key];
 			});
@@ -69,6 +71,7 @@ describe("store", () => {
 				fontFamily: "serif",
 				trimTrailingWhitespace: false,
 				showLinkCards: false,
+				loadRemoteImages: false,
 				gitSyncEnabled: false,
 				autoCommitInterval: 10,
 				autoPullInterval: 10,

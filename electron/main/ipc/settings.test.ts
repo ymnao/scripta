@@ -9,8 +9,13 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
-import { ipcMain } from "electron";
-import { __testing, onFileTreeFilterChange, registerSettingsIpc } from "./settings";
+import { app, ipcMain } from "electron";
+import {
+	__testing,
+	getLoadRemoteImages,
+	onFileTreeFilterChange,
+	registerSettingsIpc,
+} from "./settings";
 
 const {
 	createStore,
@@ -444,4 +449,55 @@ describe("file-tree filter listener emission via settings:set / settings:delete"
 		await set(fakeEvent, "fileTreeShowHidden", false);
 		expect(listener).toHaveBeenCalledTimes(1);
 	});
+});
+
+describe("getLoadRemoteImages", () => {
+	// getMainStore() は app.getPath("userData") 配下の settings.json を見るので、
+	// memo 済み store を捨ててから temp dir を指すように差し替える。
+	beforeEach(() => {
+		resetForTests();
+		vi.mocked(app.getPath).mockReturnValue(dir);
+	});
+
+	afterEach(() => {
+		resetForTests();
+		vi.mocked(app.getPath).mockReturnValue("/should-not-be-used");
+	});
+
+	it("defaults to true when settings.json does not exist", () => {
+		expect(getLoadRemoteImages()).toBe(true);
+	});
+
+	it("reads the persisted boolean", async () => {
+		await writeFile(storePath, JSON.stringify({ loadRemoteImages: false }), "utf8");
+		expect(getLoadRemoteImages()).toBe(false);
+		resetForTests();
+		await writeFile(storePath, JSON.stringify({ loadRemoteImages: true }), "utf8");
+		expect(getLoadRemoteImages()).toBe(true);
+	});
+
+	it("falls back to true for non-boolean values", async () => {
+		// settings.json を手で壊された / 別バージョンが書いた場合。ここで false 側に
+		// 倒すと、壊れた値のせいで画像が黙って消える。
+		for (const bogus of ["false", 0, null, {}]) {
+			resetForTests();
+			await writeFile(storePath, JSON.stringify({ loadRemoteImages: bogus }), "utf8");
+			expect(getLoadRemoteImages()).toBe(true);
+		}
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"falls back to true when the file is unreadable",
+		async () => {
+			await writeFile(storePath, JSON.stringify({ loadRemoteImages: false }), "utf8");
+			await chmod(storePath, 0o000);
+			try {
+				// load() は EACCES を throw するが、getLoadRemoteImages は catch して既定へ倒す
+				// （I/O 異常で画像が黙って表示されなくなる方がユーザーには不可解なため）。
+				expect(getLoadRemoteImages()).toBe(true);
+			} finally {
+				await chmod(storePath, 0o644).catch(() => {});
+			}
+		},
+	);
 });

@@ -211,6 +211,25 @@ export function getFileTreeFilterOptions(): EntryFilterOptions {
 	}
 }
 
+// 「リモート画像を読み込む」設定。CSP の img-src 構築（index.ts）と
+// webRequest の image 遮断（index.ts / ipc/pdf.ts）から参照する。
+//
+// listener / cache を挟まずに毎回呼んでよい: load() は store.cache をメモリ保持し
+// （setValue も同じ cache を直接書き換える）、fs 読みが走るのは初回だけなので、
+// 本関数は実質プロパティ 1 参照で済む。
+//
+// 既定は true（従来どおりリモート画像を許可）。読めない場合も true に倒すのは、
+// settings.json が EACCES 等で読めないだけで画像が黙って表示されなくなる方が
+// ユーザーには不可解なため（プライバシー保護は明示的に OFF にした人にだけ効かせる）。
+export function getLoadRemoteImages(): boolean {
+	try {
+		const data = load(getMainStore());
+		return typeof data.loadRemoteImages === "boolean" ? data.loadRemoteImages : true;
+	} catch {
+		return true;
+	}
+}
+
 // FileTree フィルタ設定（showHidden / excludePatterns）変更時に発火する。watcher.ts が
 // 全 window への `workspace:reload-tree` broadcast を購読する（chokidar の再起動は伴わない —
 // watcher は user 設定から切り離されており、設定変更で監視範囲は変わらないため）。

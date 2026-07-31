@@ -29,6 +29,7 @@ interface AppSettings {
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
 	showLinkCards: boolean;
+	loadRemoteImages: boolean;
 	gitSyncEnabled: boolean;
 	autoCommitInterval: number;
 	autoPullInterval: number;
@@ -56,6 +57,8 @@ const DEFAULTS: AppSettings = {
 	fontFamily: "monospace",
 	trimTrailingWhitespace: true,
 	showLinkCards: true,
+	// 既定は true（従来の挙動を維持）。OFF にしたユーザーだけリモート画像が止まる。
+	loadRemoteImages: true,
 	gitSyncEnabled: GIT_SYNC_DEFAULTS.gitSyncEnabled,
 	autoCommitInterval: GIT_SYNC_DEFAULTS.autoCommitInterval,
 	autoPullInterval: GIT_SYNC_DEFAULTS.autoPullInterval,
@@ -106,6 +109,7 @@ const PARSERS: { [K in keyof AppSettings]: Parser<AppSettings[K]> } = {
 	fontFamily: asLiteralUnion(["monospace", "sans-serif", "serif"] as const),
 	trimTrailingWhitespace: asBoolean,
 	showLinkCards: asBoolean,
+	loadRemoteImages: asBoolean,
 	gitSyncEnabled: asBoolean,
 	autoCommitInterval: asNumberInRange(0, 1440),
 	autoPullInterval: asNumberInRange(0, 1440),

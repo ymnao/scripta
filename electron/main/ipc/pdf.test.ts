@@ -336,44 +336,44 @@ describe("exportPdfImpl", () => {
 
 describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {
 	it("allows about:blank", () => {
-		expect(shouldAllowPdfRequest("about:blank")).toBe(true);
+		expect(shouldAllowPdfRequest("about:blank", true)).toBe(true);
 	});
 	it("allows data: URIs", () => {
-		expect(shouldAllowPdfRequest("data:image/png;base64,iVBORw0K")).toBe(true);
+		expect(shouldAllowPdfRequest("data:image/png;base64,iVBORw0K", true)).toBe(true);
 	});
 	it("allows scripta-asset: (workspace-guarded by handler)", () => {
 		// pdfSession 側にも protocol handler が registered され、handler 内で
 		// workspace 内 path のみ配信することで安全性を担保している。
-		expect(shouldAllowPdfRequest("scripta-asset://localhost/workspace/img.png")).toBe(true);
+		expect(shouldAllowPdfRequest("scripta-asset://localhost/workspace/img.png", true)).toBe(true);
 	});
 	it("allows https: to public hostname", () => {
-		expect(shouldAllowPdfRequest("https://example.com/image.png")).toBe(true);
+		expect(shouldAllowPdfRequest("https://example.com/image.png", true)).toBe(true);
 	});
 	it("blocks http: to public hostname (force https)", () => {
-		expect(shouldAllowPdfRequest("http://example.com/image.png")).toBe(false);
+		expect(shouldAllowPdfRequest("http://example.com/image.png", true)).toBe(false);
 	});
 	it("blocks https: to private IP literal (RFC 1918)", () => {
-		expect(shouldAllowPdfRequest("https://10.0.0.1/")).toBe(false);
-		expect(shouldAllowPdfRequest("https://192.168.1.1/")).toBe(false);
+		expect(shouldAllowPdfRequest("https://10.0.0.1/", true)).toBe(false);
+		expect(shouldAllowPdfRequest("https://192.168.1.1/", true)).toBe(false);
 	});
 	it("blocks https: to loopback IPv4", () => {
-		expect(shouldAllowPdfRequest("https://127.0.0.1/")).toBe(false);
+		expect(shouldAllowPdfRequest("https://127.0.0.1/", true)).toBe(false);
 	});
 	it("blocks https: to cloud metadata service (169.254.169.254)", () => {
-		expect(shouldAllowPdfRequest("https://169.254.169.254/latest/meta-data/")).toBe(false);
+		expect(shouldAllowPdfRequest("https://169.254.169.254/latest/meta-data/", true)).toBe(false);
 	});
 	it("blocks https: to IPv6 loopback", () => {
-		expect(shouldAllowPdfRequest("https://[::1]/")).toBe(false);
+		expect(shouldAllowPdfRequest("https://[::1]/", true)).toBe(false);
 	});
 	it("allows https: to global IP literal", () => {
-		expect(shouldAllowPdfRequest("https://1.1.1.1/")).toBe(true);
+		expect(shouldAllowPdfRequest("https://1.1.1.1/", true)).toBe(true);
 	});
 	it("blocks chrome:// and other special schemes", () => {
-		expect(shouldAllowPdfRequest("chrome://settings")).toBe(false);
-		expect(shouldAllowPdfRequest("chrome-extension://abcd/")).toBe(false);
+		expect(shouldAllowPdfRequest("chrome://settings", true)).toBe(false);
+		expect(shouldAllowPdfRequest("chrome-extension://abcd/", true)).toBe(false);
 	});
 	it("rejects unparseable URLs", () => {
-		expect(shouldAllowPdfRequest("not-a-url")).toBe(false);
+		expect(shouldAllowPdfRequest("not-a-url", true)).toBe(false);
 	});
 	it("file: only allowed under OS tmpdir", () => {
 		const tmp = tmpdir();
@@ -383,7 +383,34 @@ describe("shouldAllowPdfRequest (PDF subresource SSRF filter)", () => {
 		// 戻してから tmpdir prefix と比較するので、現在 OS のフォーマットの URL を
 		// pathToFileURL 経由で組んで test する。
 		const tmpUrlInside = pathToFileURL(join(tmp, "scripta-pdf-x", "export.html")).toString();
-		expect(shouldAllowPdfRequest(tmpUrlInside)).toBe(true);
-		expect(shouldAllowPdfRequest("file:///etc/passwd")).toBe(false);
+		expect(shouldAllowPdfRequest(tmpUrlInside, true)).toBe(true);
+		expect(shouldAllowPdfRequest("file:///etc/passwd", true)).toBe(false);
+	});
+
+	describe("loadRemoteImages = false", () => {
+		it("rejects https regardless of the SSRF verdict", () => {
+			// allowRemoteImages=true なら通る URL（global IP / 正当なドメイン）が
+			// OFF では一律拒否されること。PDF window で https が要る理由は remote
+			// 画像だけなので、image に絞らず https を丸ごと閉じる。
+			expect(shouldAllowPdfRequest("https://example.com/image.png", false)).toBe(false);
+			expect(shouldAllowPdfRequest("https://1.1.1.1/", false)).toBe(false);
+		});
+
+		it("keeps local schemes working so export itself does not break", () => {
+			const tmp = tmpdir();
+			const tmpUrlInside = pathToFileURL(join(tmp, "scripta-pdf-x", "export.html")).toString();
+			expect(shouldAllowPdfRequest("about:blank", false)).toBe(true);
+			expect(shouldAllowPdfRequest("data:image/png;base64,iVBORw0K", false)).toBe(true);
+			expect(shouldAllowPdfRequest("scripta-asset://localhost/workspace/img.png", false)).toBe(
+				true,
+			);
+			expect(shouldAllowPdfRequest(tmpUrlInside, false)).toBe(true);
+		});
+
+		it("still rejects what the SSRF filter rejects", () => {
+			expect(shouldAllowPdfRequest("http://example.com/image.png", false)).toBe(false);
+			expect(shouldAllowPdfRequest("file:///etc/passwd", false)).toBe(false);
+			expect(shouldAllowPdfRequest("chrome://settings", false)).toBe(false);
+		});
 	});
 });
