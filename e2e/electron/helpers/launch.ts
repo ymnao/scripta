@@ -31,8 +31,9 @@ export interface LaunchResult {
 }
 
 export interface LaunchOptions {
-	// main process へ追加で渡す環境変数。`process.env` を **上書きマージ**するため、
-	// 呼び手は差分だけを書けばよい（`{ ...process.env }` を自前で展開しない）。
+	// main process へ追加で渡す環境変数。Playwright は env を渡すと **置換**扱いにするが、
+	// ここでは `process.env` へ上書きマージするので呼び手は差分だけを書けばよい
+	// （`{ ...process.env }` を自前で展開しない）。
 	// dark assert (`SCRIPTA_DARK_ASSERT`) / PDF 診断 (`SCRIPTA_PDF_DEBUG`) のように
 	// main 側の挙動を切り替えるフラグ用。
 	env?: NodeJS.ProcessEnv;
@@ -43,8 +44,8 @@ export interface LaunchOptions {
 // を渡すと `app.getPath("userData")` はこの temp dir に固定されるため、実機 userData
 // を汚さず、Settings migration テストは temp 内へ legacy `settings.json` を seed できる。
 // `process.env` に overrides を重ねて Playwright の env 型（`Record<string, string>`）へ
-// 落とす。`NodeJS.ProcessEnv` は値が `string | undefined` なので、undefined の key は
-// 「未設定」として落とす（そのまま渡すと型が合わないうえ、"undefined" 文字列化の危険もある）。
+// 落とす。値が undefined の key は「未設定」として落とす（`{ FOO: process.env.FOO }` の
+// ように未設定の値を転送した呼び出しが `"undefined"` 文字列に化けるのを防ぐ）。
 function mergeEnv(overrides: NodeJS.ProcessEnv): Record<string, string> {
 	const merged: Record<string, string> = {};
 	for (const [key, value] of Object.entries({ ...process.env, ...overrides })) {
@@ -60,8 +61,7 @@ export async function launchScripta(
 	const app = await electron.launch({
 		args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
 		// env 未指定時は `electron.launch` の既定（親プロセスの env をそのまま継承）に
-		// 委ねる。指定時のみ明示マージした env を渡す（Playwright は env を渡すと
-		// **置換**扱いにするため、process.env を必ず土台に敷く）。
+		// 委ねる。指定時のみ mergeEnv 済みの env を渡す。
 		...(options.env ? { env: mergeEnv(options.env) } : {}),
 	});
 	const stderr: string[] = [];
