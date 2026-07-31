@@ -610,10 +610,13 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			expect(await readFileImpl(TEST_WIN, alias)).toBe("real body");
 		});
 
-		it("dangling symlink の read は失敗する", async () => {
+		it("dangling symlink の read は ELOOP で失敗する", async () => {
+			// 再認可しても realpath は解決できず同じ canonical に戻るため、2 度目の ELOOP が
+			// そのまま出る。plain open だと ENOENT になるので errno まで pin する。
 			const link = join(workspaceDir, "dangling.md");
 			await symlink(join(outside.dir, "nope.md"), link);
-			await expect(readFileImpl(TEST_WIN, link)).rejects.toThrow();
+			const err = await readFileImpl(TEST_WIN, link).catch((e: NodeJS.ErrnoException) => e);
+			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
 		});
 
 		it("workspace 外の実体を指す symlink はガードが拒否する", async () => {
@@ -625,7 +628,7 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await expect(readFileImpl(TEST_WIN, link)).rejects.toThrow(/outside workspace/);
 		});
 
-		it("認可後に末端を symlink へ swap されたら外部内容を返さない", async () => {
+		it("認可後に workspace 外を指す symlink へ swap されたら外部内容を返さない", async () => {
 			// swap 窓 (T1 認可 → T2 I/O) を決定的に再現する。realpathCache は invalidation を
 			// 持たない (#453) ので、1 度読んで cache に載せた path を symlink へ差し替えると
 			// 「ガードは古い canonical を通すが、その canonical の末端は今 symlink」という
@@ -639,15 +642,34 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await rm(path);
 			await symlink(secret, path);
 
-			const err = await readFileImpl(TEST_WIN, path).catch((e: NodeJS.ErrnoException) => e);
+			// 主 assert は「外部内容を返さないこと」。ELOOP を受けて cache を捨てて再認可するので、
+			// 表に出るのは errno ではなく認可エラーになる。
+			const err = await readFileImpl(TEST_WIN, path).catch((e: unknown) => e);
 			expect(err).toBeInstanceOf(Error);
-			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+			expect((err as Error).message).not.toContain("SECRET");
+			expect(err).toMatchObject({ kind: "PATH_OUTSIDE_WORKSPACE" });
 		});
 
-		it("dangling symlink の read-base64 も失敗する", async () => {
+		it("認可後に workspace 内の実体を指す alias へ swap されたら解決先を読む", async () => {
+			// 同じ swap 窓でも、解決先が workspace 内なら**正当な alias 化**。cache の温度で
+			// 成否が変わらないよう、ELOOP から cache を捨てて再認可する経路が拾う。
+			const real = join(workspaceDir, "real.md");
+			await writeFile(real, "real body", "utf8");
+			const path = join(workspaceDir, "note.md");
+			await writeFile(path, "innocent", "utf8");
+			expect(await readFileImpl(TEST_WIN, path)).toBe("innocent");
+
+			await rm(path);
+			await symlink(real, path);
+
+			expect(await readFileImpl(TEST_WIN, path)).toBe("real body");
+		});
+
+		it("dangling symlink の read-base64 も ELOOP で失敗する", async () => {
 			const link = join(workspaceDir, "dangling.png");
 			await symlink(join(outside.dir, "nope.png"), link);
-			await expect(readFileBase64Impl(TEST_WIN, link)).rejects.toThrow();
+			const err = await readFileBase64Impl(TEST_WIN, link).catch((e: NodeJS.ErrnoException) => e);
+			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
 		});
 
 		it("read-base64 も swap 後に外部内容を返さない", async () => {
@@ -661,8 +683,8 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await rm(path);
 			await symlink(secret, path);
 
-			const err = await readFileBase64Impl(TEST_WIN, path).catch((e: NodeJS.ErrnoException) => e);
-			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+			const err = await readFileBase64Impl(TEST_WIN, path).catch((e: unknown) => e);
+			expect(err).toMatchObject({ kind: "PATH_OUTSIDE_WORKSPACE" });
 		});
 	});
 
@@ -695,12 +717,24 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await rm(path);
 			await symlink(victim, path);
 
-			const err = await writeFileImpl(TEST_WIN, path, "overwritten").catch(
-				(e: NodeJS.ErrnoException) => e,
-			);
+			const err = await writeFileImpl(TEST_WIN, path, "overwritten").catch((e: unknown) => e);
 			expect(err).toBeInstanceOf(Error);
-			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+			expect(err).toMatchObject({ kind: "PATH_OUTSIDE_WORKSPACE" });
 			expect(await readFile(victim, "utf8")).toBe("original");
+		});
+
+		it("認可後に workspace 内の実体を指す alias へ swap されたら解決先へ書く", async () => {
+			const real = join(workspaceDir, "real.md");
+			await writeFile(real, "before", "utf8");
+			const path = join(workspaceDir, "note.md");
+			await writeFile(path, "innocent", "utf8");
+			await writeFileImpl(TEST_WIN, path, "innocent2");
+
+			await rm(path);
+			await symlink(real, path);
+
+			await writeFileImpl(TEST_WIN, path, "after");
+			expect(await readFile(real, "utf8")).toBe("after");
 		});
 
 		it("workspace 内の実体を指す alias への write は実体を更新する", async () => {
@@ -778,9 +812,9 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			const link = join(workspaceDir, "dst.md");
 			await symlink(escapeTarget, link);
 
-			// target 側は「解決先は無いが link は実在する」。rename(2) は末端 symlink を辿らず
-			// link 自体を置き換えるため、ここで通しても escape はしない。ただし pathExistsAt が
-			// follow して false を返すので、実際には rename まで到達せず上書き防止にも掛からない。
+			// target 側は「解決先は無いが link は実在する」。pathExistsAt が follow して false を
+			// 返すため targetAlreadyExists の早期 return には掛からず rename まで到達するが、
+			// rename(2) は末端 symlink を辿らず link 自体を置き換えるので escape はしない。
 			await renameEntryImpl(TEST_WIN, src, link);
 			// 置き換わったのは workspace 内の link であって、解決先ではない
 			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });

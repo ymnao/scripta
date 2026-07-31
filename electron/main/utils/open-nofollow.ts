@@ -31,12 +31,13 @@ import { constants as fsConstants, promises as fsp } from "node:fs";
 // 既定で管理者特権 (または開発者モード) を要するため、攻撃前提そのものが成立しにくい。
 // **Windows でこの flag が無効になる帰結**は #451 で追跡している。
 //
-// 呼び手が O_RDONLY / O_WRONLY|O_CREAT|O_TRUNC 等の access mode と OR して使う。`?? 0` の
-// fallback 知識をこの 1 箇所に閉じ込めるため、各呼び手は `fsConstants.O_NOFOLLOW` を直接
-// 参照しないこと。
-export const NOFOLLOW_FLAG = fsConstants.O_NOFOLLOW ?? 0;
+// `?? 0` の fallback 知識と access mode との合成をこの module に閉じ込める。呼び手は
+// `fsConstants.O_NOFOLLOW` を直接参照せず、下の helper か `NOFOLLOW_READ_FLAGS` を使う。
+const NOFOLLOW_FLAG = fsConstants.O_NOFOLLOW ?? 0;
 
-const NOFOLLOW_READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
+// `fsp.open(path, "r")` と同じ access mode に O_NOFOLLOW を足したもの。fd 自体を必要とする
+// 呼び手 (fs.ts の bounded read / base64 変換) が open flag として使う。
+export const NOFOLLOW_READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
 // `fsp.writeFile` の既定 flag `"w"` と同じ access mode に O_NOFOLLOW を足したもの。
 const NOFOLLOW_OVERWRITE_FLAGS =
 	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;

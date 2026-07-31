@@ -121,6 +121,20 @@ export function clearWorkspaceRootsForWindow(windowId: number): void {
 	transientWritePaths.delete(windowId);
 }
 
+// realpathCache から `p` 自身の entry を落とす (#418)。
+//
+// 用途は 1 つだけ: 認可済み canonical への `O_NOFOLLOW` open が ELOOP を返した呼び手が、
+// 「cache が stale だっただけ」と「認可後に末端を swap された」を切り分けるために使う。
+// 落としたうえで assert 系を呼び直すと、fresh な realpath で両者が分かれる（fs.ts の
+// `withStaleCacheRetry` を参照）。
+//
+// 祖先 entry は触らない: ELOOP が知らせるのは末端 component の状態だけで、祖先の解決結果は
+// 依然有効。cache 全体の鮮度問題そのものは #453 で追跡している。
+export function invalidateRealpathCacheEntry(p: string): void {
+	if (typeof p !== "string" || p.length === 0) return;
+	realpathCache.delete(resolve(p));
+}
+
 export function clearWorkspaceRoots(): void {
 	windowAllowedRoots.clear();
 	transientWritePaths.clear();
@@ -220,10 +234,13 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 // **TOCTOU の限界 (#412 / #418)**: 戻り値が path である以上、呼び出し側の I/O は再度 traversal
 // するため、認可 (T1) と I/O (T2) の間に構成要素を symlink へ差し替えられる窓が残る。窓は
 // 末端 component と中間 dir の 2 つに分かれ、**末端側だけが閉じている**:
-//   - **末端 component: 閉じた**。index 取り込み経路 (resolveInsideRoot) は #412 で、
-//     user-IPC 経路 (fs.ts) は #418 で `O_NOFOLLOW` 付き fd の I/O に揃えた。残りの fs IPC は
-//     `wx` / 非 recursive mkdir / rename(2) の semantics で元から閉じている (経路ごとの根拠は
-//     fs.ts 冒頭の doc ブロックに一覧がある)。
+//   - **末端 component: 内容を返す / 書く経路では閉じた**。index 取り込み経路
+//     (resolveInsideRoot) は #412 で、user-IPC の fs:read / fs:read-base64 / fs:write は #418 で
+//     `O_NOFOLLOW` 付き fd の I/O に揃えた。**内容に届かない経路 (fs:list / fs:path-exists /
+//     fs:file-exists) は窓が残る** (entry 名と存在の有無のみ露出。fd 版 readdir/stat が無いため
+//     受容)。経路ごとの根拠は fs.ts 冒頭の doc ブロックを参照。**この doc が扱うのは fs IPC
+//     だけ**で、同じ assert を使う他の write 経路 (pdf.ts の writeFileAtomic / git.ts の
+//     resolveConflict) には同種の窓が残っている (追跡: #455)。
 //   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
 // **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に

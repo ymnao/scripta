@@ -2,7 +2,7 @@ import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
-import { NOFOLLOW_FLAG, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
+import { NOFOLLOW_READ_FLAGS, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
 
 // #412: index 取り込み read の末端 swap 窓。
 // TOCTOU の race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って
@@ -70,10 +70,10 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 		await ws.cleanup();
 	});
 
-	it("NOFOLLOW_FLAG は win32 以外で 0 に落ちない (read 側が合成して使う)", () => {
-		expect(NOFOLLOW_FLAG).not.toBe(0);
-		// O_RDONLY は 0 なので、合成した値が flag そのものになることまで確認する
-		expect(fsConstants.O_RDONLY | NOFOLLOW_FLAG).toBe(NOFOLLOW_FLAG);
+	it("NOFOLLOW_READ_FLAGS は win32 以外で O_RDONLY 相当に落ちない", () => {
+		// win32 fallback (`?? 0`) が効いた状態と区別する。O_RDONLY は 0 なので、
+		// flag が落ちると読み取り専用 open と見分けが付かなくなる。
+		expect(NOFOLLOW_READ_FLAGS).not.toBe(fsConstants.O_RDONLY);
 	});
 
 	it("末端 symlink への書き込みを拒否し、解決先を truncate もしない", async () => {
@@ -87,14 +87,16 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 		expect(await fsp.readFile(real, "utf8")).toBe("before");
 	});
 
-	it("通常 file は fsp.writeFile と同じく inode を保って上書きする", async () => {
+	it("通常 file は fsp.writeFile と同じく truncate + inode 保持で上書きする", async () => {
 		const p = join(ws.dir, "note.md");
-		await fsp.writeFile(p, "before", "utf8");
+		// 長い内容 → 短い内容。O_TRUNC が抜けると旧内容の残骸が末尾に残るので、
+		// この長さ関係でないと truncate の欠落を検出できない。
+		await fsp.writeFile(p, "before マルチバイトの長い内容", "utf8");
 		const before = await fsp.stat(p);
 
-		await writeFileUtf8NoFollow(p, "after マルチバイト");
+		await writeFileUtf8NoFollow(p, "after");
 
-		expect(await fsp.readFile(p, "utf8")).toBe("after マルチバイト");
+		expect(await fsp.readFile(p, "utf8")).toBe("after");
 		expect((await fsp.stat(p)).ino).toBe(before.ino);
 	});
 
