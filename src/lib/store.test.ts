@@ -267,9 +267,11 @@ describe("store", () => {
 				expect(window.api.settingsSave).toHaveBeenCalled();
 			});
 
-			// 文言の pin。この経路では _schemaVersion も disk に載らないため次回起動で
-			// migration が再実行される（= saveSetting の「元の値へ戻ります」は成立しない）。
-			it("notifies that the migration will be retried when the migration save fails", async () => {
+			// 文言の pin。この経路の移行結果は、後続 persist の成功で disk に載るか、
+			// 一度も成功しなければ次回起動で再実行されるかのどちらかで、いずれにせよ
+			// 失われない。「次回起動時に再試行します」は前者では偽になるので使わない
+			// （saveSetting の「元の値へ戻ります」も同様に成立しない）。
+			it("notifies that the migration result is not lost when the migration save fails", async () => {
 				mockStatefulStore({ theme: "dark" });
 				(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
 
@@ -310,13 +312,16 @@ describe("store", () => {
 				expect(settings.themePreference).toBe("system");
 				expect(settings.loadRemoteImages).toBe(true);
 				expect(settings.fontSize).toBe(14);
-				// 既定値を disk へ書き戻さない（settings.json は無傷のまま）。
+				// 既定値を disk へ書き戻さない（ユーザーの設定値をこの経路で潰さない）。
 				expect(window.api.settingsSave).not.toHaveBeenCalled();
 
 				const toasts = useToastStore.getState().toasts;
 				expect(toasts).toHaveLength(1);
 				expect(toasts[0].type).toBe("error");
 				expect(toasts[0].message).toContain("設定を読み込めませんでした");
+				// 「設定ファイルは変更されません」への回帰を防ぐ。段 2 の migration 保存が
+				// 成功した直後にこの経路へ入る世界ではファイルは変更済みで、その表現は偽。
+				expect(toasts[0].message).toContain("既定値をファイルへ書き戻すことはありません");
 			});
 
 			it("does not toast when loading succeeds", async () => {

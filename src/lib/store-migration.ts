@@ -16,7 +16,7 @@ export interface Migration {
 	version: number;
 	// run は **部分適用済みの状態からの再実行に耐える冪等な実装**にすること。途中で
 	// throw すると成功済みの ctx.set は残る一方 _schemaVersion は bump されないため、
-	// 次回起動で同じ migration が半分適用済みの状態に対して再実行される (#448 で
+	// 次回起動で同じ migration が半分適用済みの状態に対して再実行され得る (#448 で
 	// loadSettings が migration 失敗時も読み出しを継続するようになり、この再実行が
 	// 正式な回復経路になった)。v1 の alreadyMigrated ガードがその形。
 	run: (ctx: MigrationContext) => Promise<void>;

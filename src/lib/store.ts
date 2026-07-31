@@ -190,8 +190,10 @@ export async function loadSettings(): Promise<AppSettings> {
 	}
 
 	// 3) 読み出し本体。ここが失敗するのは settings IPC 自体が機能していない状況なので
-	//    従来どおり全既定値へ倒すが、無通知にはしない。defaults を disk へ書き戻しは
-	//    しないので settings.json は無傷のまま（次回起動で復旧し得る）。
+	//    従来どおり全既定値へ倒すが、無通知にはしない。既定値を disk へ書き戻すことは
+	//    しないので、ユーザーの設定値がこの経路で上書きされることはない（同じ起動内で
+	//    段 2 の migration 保存が成功していれば settings.json 自体は既に更新済みなので、
+	//    「ファイルは無変更」とまでは言えない）。
 	try {
 		const result = {} as AppSettings;
 		for (const key of Object.keys(PARSERS) as (keyof AppSettings)[]) {
