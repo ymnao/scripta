@@ -4,7 +4,12 @@ import * as posix from "node:path/posix";
 import * as win32 from "node:path/win32";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isAllowedRendererUrl, isFileUrlInsideDir, type PathOps } from "./renderer-url";
+import {
+	isAllowedRendererUrl,
+	isFileUrlInsideDir,
+	type PathOps,
+	resolveDevOrigin,
+} from "./renderer-url";
 
 // 本ファイルから見て `../renderer` が prod モードでの RENDERER_FILE_DIR と一致する。
 // renderer-url.ts と同 dir に置いてあるので __dirname は同じ。
@@ -206,5 +211,18 @@ describe("isAllowedRendererUrl (uses host OS path ops)", () => {
 			expect(isAllowedRendererUrl("not-a-url")).toBe(false);
 			expect(isAllowedRendererUrl("")).toBe(false);
 		});
+	});
+});
+
+describe("resolveDevOrigin", () => {
+	it("extracts the origin from ELECTRON_RENDERER_URL", () => {
+		expect(resolveDevOrigin("http://localhost:5173/")).toBe("http://localhost:5173");
+		expect(resolveDevOrigin("http://localhost:5173/index.html")).toBe("http://localhost:5173");
+	});
+
+	it("returns null when unset or unparsable (prod: renderer is file:)", () => {
+		expect(resolveDevOrigin(undefined)).toBe(null);
+		expect(resolveDevOrigin("")).toBe(null);
+		expect(resolveDevOrigin("not-a-url")).toBe(null);
 	});
 });

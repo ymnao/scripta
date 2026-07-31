@@ -60,6 +60,20 @@ export function isFileUrlInsideDir(
 	}
 }
 
+// `ELECTRON_RENDERER_URL` から dev server の origin を取り出す。未設定 (prod は
+// renderer が file:) や parse 不能なら null。
+//
+// `ELECTRON_RENDERER_URL` の解釈はこのモジュールに集約する（下の
+// `isAllowedRendererUrl` が同じ env を origin + pathname で読んでいる）。
+export function resolveDevOrigin(rendererUrl: string | undefined): string | null {
+	if (!rendererUrl) return null;
+	try {
+		return new URL(rendererUrl).origin;
+	} catch {
+		return null;
+	}
+}
+
 export function isAllowedRendererUrl(url: string): boolean {
 	const devUrl = process.env.ELECTRON_RENDERER_URL;
 	if (devUrl) {

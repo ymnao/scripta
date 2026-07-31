@@ -16,6 +16,7 @@ interface SettingsValues {
 	fontFamily: FontFamily;
 	trimTrailingWhitespace: boolean;
 	showLinkCards: boolean;
+	loadRemoteImages: boolean;
 	scratchpadVolatile: boolean;
 	autoUpdateCheck: boolean;
 	fileTreeShowHidden: boolean;
@@ -32,6 +33,7 @@ interface SettingsState extends SettingsValues {
 	setFontFamily: (family: FontFamily) => void;
 	setTrimTrailingWhitespace: (trim: boolean) => void;
 	setShowLinkCards: (show: boolean) => void;
+	setLoadRemoteImages: (load: boolean) => void;
 	setScratchpadVolatile: (volatile: boolean) => void;
 	setAutoUpdateCheck: (enabled: boolean) => void;
 	setFileTreeShowHidden: (show: boolean) => void;
@@ -52,6 +54,7 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		fontFamily: "monospace",
 		trimTrailingWhitespace: true,
 		showLinkCards: true,
+		loadRemoteImages: true,
 		scratchpadVolatile: true,
 		autoUpdateCheck: true,
 		fileTreeShowHidden: false,
@@ -65,6 +68,7 @@ export const useSettingsStore = create<SettingsState>()((set) => {
 		setFontFamily: persist("fontFamily"),
 		setTrimTrailingWhitespace: persist("trimTrailingWhitespace"),
 		setShowLinkCards: persist("showLinkCards"),
+		setLoadRemoteImages: persist("loadRemoteImages"),
 		setScratchpadVolatile: persist("scratchpadVolatile"),
 		setAutoUpdateCheck: persist("autoUpdateCheck"),
 		setFileTreeShowHidden: persist("fileTreeShowHidden"),

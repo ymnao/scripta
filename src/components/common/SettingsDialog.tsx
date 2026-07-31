@@ -247,6 +247,8 @@ export function SettingsDialog({
 	const setTrimTrailingWhitespace = useSettingsStore((s) => s.setTrimTrailingWhitespace);
 	const showLinkCards = useSettingsStore((s) => s.showLinkCards);
 	const setShowLinkCards = useSettingsStore((s) => s.setShowLinkCards);
+	const loadRemoteImages = useSettingsStore((s) => s.loadRemoteImages);
+	const setLoadRemoteImages = useSettingsStore((s) => s.setLoadRemoteImages);
 	const slideThumbnailsVisible = useSettingsStore((s) => s.slideThumbnailsVisible);
 	const setSlideThumbnailsVisible = useSettingsStore((s) => s.setSlideThumbnailsVisible);
 	const scratchpadVolatile = useSettingsStore((s) => s.scratchpadVolatile);
@@ -346,6 +348,14 @@ export function SettingsDialog({
 							label="URLリンクカードを表示"
 							checked={showLinkCards}
 							onChange={setShowLinkCards}
+						/>
+						{/* オフにすると markdown 内の https 画像とリンクカードのサムネイルを
+						    読み込まない（ローカル画像は従来どおり表示される）。 */}
+						<Toggle
+							id="load-remote-images-toggle"
+							label="リモート画像を読み込む"
+							checked={loadRemoteImages}
+							onChange={setLoadRemoteImages}
 						/>
 						<Toggle
 							id="slide-thumbnails-visible-toggle"

@@ -353,6 +353,7 @@ export function AppLayout() {
 				fontFamily: settings.fontFamily,
 				trimTrailingWhitespace: settings.trimTrailingWhitespace,
 				showLinkCards: settings.showLinkCards,
+				loadRemoteImages: settings.loadRemoteImages,
 				scratchpadVolatile: settings.scratchpadVolatile,
 				autoUpdateCheck: settings.autoUpdateCheck,
 				fileTreeShowHidden: settings.fileTreeShowHidden,

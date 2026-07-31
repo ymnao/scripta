@@ -15,6 +15,7 @@ import {
 	SCRIPTA_ASSET_SCHEME,
 } from "../utils/scripta-asset-protocol";
 import { isGlobalIp } from "../utils/ssrf-guard";
+import { getLoadRemoteImages } from "./settings";
 
 // Electron `webContents.printToPDF`（Chromium）で PDF を生成する。OS 依存の
 // native API は使わない。
@@ -57,7 +58,15 @@ let pdfWebRequestFilterInstalled = false;
 // PDF レンダリング window から発生する subresource fetch をフィルタする。
 // fast-path で典型的な SSRF / 危険スキームを弾く設計（DNS レベル防御は Chromium
 // 内部に届かないため不可、ここではあくまで URL 文字列ベースの best effort）。
-function shouldAllowPdfRequest(rawUrl: string): boolean {
+//
+// `allowRemoteImages` は「リモート画像を読み込む」設定。PDF export 用の隔離
+// partition には defaultSession の webRequest フィルタが効かないため、ここでも
+// 参照しないと「設定は OFF なのに export のときだけリモートへ取りに行く」漏れが
+// 残る。OFF のときは image に限らず `https:` を丸ごと拒否する — この window で
+// https の subresource が要る理由は remote 画像だけで（HTML は自己完結、フォント
+// は KaTeX を inline CSS で同梱）、細く絞るより「OFF なら外部へ出ない」を守る方が
+// 設定の意味に忠実なため。
+function shouldAllowPdfRequest(rawUrl: string, allowRemoteImages: boolean): boolean {
 	// devtools / about:blank 等は許可（renderer の正常動作に必要なケースがある）。
 	if (rawUrl === "about:blank") return true;
 	let parsed: URL;
@@ -93,6 +102,8 @@ function shouldAllowPdfRequest(rawUrl: string): boolean {
 		// `chrome:` / `chrome-extension:` 等の特殊 scheme もここで弾く。
 		return false;
 	}
+	// 設定が OFF なら以降の SSRF 判定に進むまでもなく拒否。
+	if (!allowRemoteImages) return false;
 	// hostname が IP literal の場合は global のみ許可。`new URL` は IPv6 リテラルを
 	// `[...]` で囲んだ表記で hostname を返す（zone id は drop）ので前後の `[]` を外す。
 	let host = parsed.hostname;
@@ -114,7 +125,9 @@ function installPdfWebRequestFilter(): void {
 	if (pdfWebRequestFilterInstalled) return;
 	const pdfSession = session.fromPartition(PDF_PARTITION);
 	pdfSession.webRequest.onBeforeRequest((details, callback) => {
-		callback({ cancel: !shouldAllowPdfRequest(details.url) });
+		// フィルタ登録は process 寿命中 1 回だが、設定値は request のたびに読む
+		// （export 実行時点の設定が効く）。
+		callback({ cancel: !shouldAllowPdfRequest(details.url, getLoadRemoteImages()) });
 	});
 	// PDF export 用の隔離 session は任意 HTML をロードしうるため、defaultSession の
 	// permission policy（clipboard 許可）を共有させない。clipboard 等の web permission
