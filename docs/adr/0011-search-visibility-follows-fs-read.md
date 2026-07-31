@@ -59,6 +59,7 @@ errno は**見分けない**。ELOOP 以外の失敗（EACCES / ENOENT 等）も
 - **FileTree との非対称は残る**。`listDirectory` は readdir の結果をそのまま返すので、workspace 外を指す symlink は**一覧には出る**（クリックすると従来どおり開けない）。揃えるには entry ごとの realpath コストを新規に背負うことになるため、本 ADR のスコープ外とし別判断とする
 - **Windows では境界が効かない**。`fs.constants.O_NOFOLLOW` が無く flag が 0 に落ちるため、末端 symlink が検出されず従来どおり内容が結果に出る。#412 で受容済みの posture と同じ（Windows の symlink 作成は既定で管理者特権または開発者モードを要するため、攻撃前提が成立しにくい）
 - **hard link alias は検出できない**（#416 Finding 2 / [#416](https://github.com/ymnao/scripta/issues/416)）。hard link は O_NOFOLLOW でも realpath でも素通りするため、本 ADR の境界の対象外
+- **retarget 直後は両者が一時的にズレる**。scan 側の `resolveInsideRoot` は realpath cache を通さず毎回 fresh に解決する（#406 Finding 1）のに対し、fs:read 側の `assertPathAllowed` は `realpathBestEffort` 経由で **LRU 256 件の `realpathCache`** を使い、symlink の retarget に対する明示的な invalidation を持たない（`path-guard.ts` の cache doc に受容として記載済み）。したがって symlink を張り替えた直後、その path が cache に載っていると「scan は新しい解決先で判定し、fs:read は古い判定を返す」窓が開く。本 ADR の不変条件は **fs:read 側の cache が fresh な範囲で** 成立する。窓を閉じるには user-IPC 側の realpath 鮮度を見直す必要があり、これは [#418](https://github.com/ymnao/scripta/issues/418) の判断対象（`assertPathAllowed` の O_NOFOLLOW 整合）と同じ層の話なのでそちらに委ねる
 - #412 で受容した「認可後に末端を swap された file はその pass の結果から落ちる」の影響範囲が広がる。従来は次の pass で plain read されて結果に戻っていたが、本 ADR 以降は **swap が戻されるまで結果に出ない**（fs:read も同じ理由で拒否するので一貫している）
 
 ### 関連する将来の検討事項

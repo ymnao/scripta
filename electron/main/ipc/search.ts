@@ -200,13 +200,13 @@ async function processMdFilesParallel(
 				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
 				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
 				let resolvedForIndex: string | null = null;
-				// ゲートを実際に評価したか。評価した上で弾かれた file (workspace 外を指す symlink /
-				// workspace 内 alias) だけが L2 抑止の対象で、そもそも評価していない file
-				// (既に valid / index 無効) は従来どおり L2 に載せる。
-				let indexGateEvaluated = false;
+				// ゲートを実際に評価したか = index 対象候補だったか。評価した上で弾かれた file
+				// (workspace 外を指す symlink / workspace 内 alias) だけが L2 抑止の対象で、
+				// そもそも評価していない file (既に valid / index 無効) は従来どおり L2 に載せる。
+				// indexTarget から導出できるので別の可変 state は持たない (両者がズレる状態を作らない)。
+				const indexGateEvaluated = indexTarget !== undefined;
 				if (indexTarget !== undefined) {
 					resolvedForIndex = await resolveInsideRoot(ioPath, options.root);
-					indexGateEvaluated = true;
 					if (shouldStop()) return;
 				}
 				// 「index に載せてよい」判定 (#413 Finding 2)。ゲート未評価時は resolvedForIndex に
@@ -253,6 +253,9 @@ async function processMdFilesParallel(
 							// 失敗の主因は ELOOP = 末端が symlink。**ここで初めて** realpath を払って解決先を
 							// 判定する (#434)。root 内なら in-root alias なので解決先から読んで結果に出し、
 							// null (workspace 外 / 解決不能) なら結果からも落とす。
+							// **判定規則は 1 つ上の分岐 (ゲート評価済み ∧ 非 indexable) と同一**。
+							// 違いは解決先が既に手元にあるか、ここで初めて払うかだけなので、片方を変える
+							// ときは必ず両方を直すこと (2 行なので関数抽出はせず相互参照で束ねている)。
 							// **errno を見分けない**: ELOOP 以外の失敗 (EACCES / ENOENT 等) も同じ経路に倒れるが、
 							// 解決先が null なら skip、非 null でも直後の read が同じ理由で失敗して外側の catch で
 							// skip されるため、結果は errno で分岐した場合と同じになる。

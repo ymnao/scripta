@@ -141,23 +141,11 @@ describe.skipIf(process.platform === "win32")(
 		// cache も index も渡さない純 scan 経路 (watcher 非稼働 workspace 相当)。
 		// #434 以前はこの経路だけが plain read のままで、O_NOFOLLOW を通らず
 		// workspace 外の内容が無条件に結果へ出ていた。
-		it("cache / index 無しの純 scan でも workspace 外を指す symlink は結果に出ない", async () => {
-			const target = join(outside.dir, "secret.md");
-			const link = join(root, "outside-link.md");
-			await writeFile(target, "outside body");
-			await symlink(target, link);
-			const scanned: string[] = [];
-
-			await processMdFilesParallel([link], [link], never, {
-				root,
-				process: (_inFile, text) => {
-					scanned.push(text);
-				},
-			});
-
-			expect(scanned).toEqual([]);
-		});
-
+		// **この経路で workspace 外 symlink が落ちること自体の pin は
+		// search-index-gate.test.ts の「ゲート未評価経路でも workspace 外 symlink は落ち、
+		// realpath は symlink にしか乗らない」に一本化してある** (あちらは realpath の
+		// 呼び出し回数まで assert してコスト特性も同時に固定するため上位互換)。
+		// ここでは同経路で **落ちない側** (in-root alias / 通常 file) を固定する。
 		it("cache / index 無しの純 scan でも in-root alias は alias の path で結果に出る", async () => {
 			// alias が結果から落ちないこと (= #434 が落とすのは workspace 外だけ) と、
 			// 報告される path が解決先ではなく **入力の alias path** であることを固定する
