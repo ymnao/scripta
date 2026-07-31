@@ -1,4 +1,4 @@
-import { useToastStore } from "../stores/toast";
+import { TOAST_AUTO_DISMISS_MS, useToastStore } from "../stores/toast";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
@@ -167,21 +167,21 @@ export async function loadSettings(): Promise<AppSettings> {
 // workspacePath の永続化だけは main 側 workspace:set ハンドラが担う (renderer からの
 // settings:set は reserved key として拒否される)。
 //
-// Toast.tsx の AUTO_DISMISS_MS と同値。恒常的な disk 障害下で設定変更が連続した場合
-// (slide separator のキーリピートは 1 打鍵 1 save) に同じ toast が積み上がるのを防ぎ、
-// 「表示中の失敗 toast は常に高々 1 件」にする。
-const SAVE_FAILURE_TOAST_THROTTLE_MS = 5000;
+// 恒常的な disk 障害下で設定変更が連続した場合 (slide separator のキーリピートは
+// 1 打鍵 1 save) に同じ toast が積み上がるのを防ぎ、「表示中の失敗 toast は常に
+// 高々 1 件」にする。窓は toast の自動消滅時間と同値である必要があるので、定数は
+// stores/toast.ts のものを直接使う (両者がずれると上記の保証が黙って崩れる)。
 let lastSaveFailureToastAt = 0;
 
 function notifySaveFailure(message: string): void {
 	const now = Date.now();
-	if (now - lastSaveFailureToastAt < SAVE_FAILURE_TOAST_THROTTLE_MS) return;
+	if (now - lastSaveFailureToastAt < TOAST_AUTO_DISMISS_MS) return;
 	lastSaveFailureToastAt = now;
 	useToastStore.getState().addToast("error", message);
 }
 
-// 失敗は caller へ伝播させず（caller 6 箇所は全て戻り値を見ておらず、useUpdateCheck は
-// catch なしで await するため throw 化は即座に caller を壊す）toast で通知する。#446 の
+// 失敗は caller へ伝播させず（caller は戻り値を見ない前提で書かれており、await を
+// catch なしで呼ぶ caller もあるため throw 化は即座に壊す）toast で通知する。#446 の
 // 核心は「settings:set は成功したが settings:save だけ失敗した」ケースで、main 側 cache は
 // settings:set 時点で更新済みのため **UI もそのセッションの挙動も新しい値・disk だけ旧値**
 // が成立する。プライバシー設定 (loadRemoteImages) では「OFF にしたはずが次回起動で ON」

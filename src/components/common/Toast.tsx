@@ -1,9 +1,12 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { type ToastItem, type ToastType, useToastStore } from "../../stores/toast";
-
-const AUTO_DISMISS_MS = 5000;
+import {
+	TOAST_AUTO_DISMISS_MS,
+	type ToastItem,
+	type ToastType,
+	useToastStore,
+} from "../../stores/toast";
 
 const TOAST_STYLES: Record<
 	ToastType,
@@ -56,7 +59,7 @@ function ToastMessage({ toast }: { toast: ToastItem }) {
 	}, [toast.id, removeToast]);
 
 	useEffect(() => {
-		const timer = setTimeout(dismiss, AUTO_DISMISS_MS);
+		const timer = setTimeout(dismiss, TOAST_AUTO_DISMISS_MS);
 		return () => clearTimeout(timer);
 	}, [dismiss]);
 

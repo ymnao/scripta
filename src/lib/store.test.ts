@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { useToastStore } from "../stores/toast";
+import { TOAST_AUTO_DISMISS_MS, useToastStore } from "../stores/toast";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, loadSettings, saveSetting } from "./store";
 
 // test-setup.ts の beforeEach が `window.api` を毎回新しい `createApiMock()` で置き換えるので、
@@ -308,12 +308,12 @@ describe("store", () => {
 			(window.api.settingsSave as Mock).mockRejectedValue(new Error("ENOSPC"));
 
 			await saveSetting("fontSize", 20);
-			vi.setSystemTime(baseTime + 4999);
+			vi.setSystemTime(baseTime + TOAST_AUTO_DISMISS_MS - 1);
 			await saveSetting("fontSize", 21);
 			expect(useToastStore.getState().toasts).toHaveLength(1);
 
 			// 窓を抜けたら次の失敗は改めて通知される（恒常的な障害を黙らせない）
-			vi.setSystemTime(baseTime + 5000);
+			vi.setSystemTime(baseTime + TOAST_AUTO_DISMISS_MS);
 			await saveSetting("fontSize", 22);
 			expect(useToastStore.getState().toasts).toHaveLength(2);
 		});
