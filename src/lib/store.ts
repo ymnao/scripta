@@ -1,3 +1,4 @@
+import { TOAST_AUTO_DISMISS_MS, useToastStore } from "../stores/toast";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
@@ -8,6 +9,7 @@ import {
 	SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 } from "../types/slide";
 import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
+import { translateError } from "./errors";
 import { applyMigrations } from "./store-migration";
 
 export { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS };
@@ -164,12 +166,58 @@ export async function loadSettings(): Promise<AppSettings> {
 // これを渡し、その他 caller (theme / AppLayout / useUpdateCheck) は直接呼ぶ。
 // workspacePath の永続化だけは main 側 workspace:set ハンドラが担う (renderer からの
 // settings:set は reserved key として拒否される)。
+//
+// 恒常的な disk 障害下で設定変更が連続した場合 (slide separator のキーリピートは
+// 1 打鍵 1 save) に同じ toast が積み上がるのを防ぐ。窓は toast の自動消滅時間に
+// 揃えるので、定数は stores/toast.ts のものを直接使う。
+//
+// 窓は **失敗の種別ごとに独立**に持つ。単一の窓にすると set 失敗の通知が直後の
+// save 失敗の通知を黙らせ (逆順も同様)、#446 で可視化したかった巻き戻りが片方の
+// 経路で無通知に戻る。
+type SaveFailureKind = "set" | "save";
+
+const lastSaveFailureToastAt: Record<SaveFailureKind, number> = { set: 0, save: 0 };
+
+function notifySaveFailure(kind: SaveFailureKind, message: string): void {
+	const now = Date.now();
+	if (now - lastSaveFailureToastAt[kind] < TOAST_AUTO_DISMISS_MS) return;
+	lastSaveFailureToastAt[kind] = now;
+	useToastStore.getState().addToast("error", message);
+}
+
+// 失敗は caller へ伝播させず（caller は戻り値を見ない前提で書かれており、await を
+// catch なしで呼ぶ caller もあるため throw 化は即座に壊す）toast で通知する。#446 の
+// 核心は「settings:set は成功したが settings:save だけ失敗した」ケースで、main 側 cache は
+// settings:set 時点で更新済みのため **UI もそのセッションの挙動も新しい値・disk だけ旧値**
+// が成立する。プライバシー設定 (loadRemoteImages) では「OFF にしたはずが次回起動で ON」
+// という気付けない露出になるので、この 2 つの失敗は文言を分けて区別する。
+//
+// main 側 cache の巻き戻しは行わない: persist() は cache 全体を書き出すため、後続の設定
+// 変更が 1 回でも成功すれば失敗した値も一緒に disk へ乗って自然治癒する。巻き戻すと
+// 「UI は新値・cache は旧値」の逆向き不整合ができ、次の成功 save が UI と異なる値を
+// 永続化してしまう。
 export async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
 		await settingsSet(key, value);
+	} catch (err) {
+		// 値が main へ渡っていないケース。renderer 側の設定 (fontSize / theme 等) は
+		// caller が save の完了を待たず適用済みなので画面上は効いて見えるが、main が
+		// 強制する設定 (loadRemoteImages の CSP / webRequest、fileTree フィルタ) は
+		// 今回の起動中も効かない。全 key に共通して言えるのは disk に載らないこと =
+		// 次回起動で戻ることなので、文言はそこを伝える。
+		notifySaveFailure(
+			"set",
+			`設定を保存できませんでした。次回起動時に元の値へ戻ります: ${translateError(err)}`,
+		);
+		return;
+	}
+	try {
 		await settingsSave();
-	} catch {
-		// Ignore save errors — app should continue working
+	} catch (err) {
+		notifySaveFailure(
+			"save",
+			`設定をファイルに保存できませんでした。次回起動時に元の値へ戻ります: ${translateError(err)}`,
+		);
 	}
 }
 
