@@ -27,9 +27,11 @@
 
 **検索結果の可視範囲を fs:read の認可境界に揃える。** 不変条件を
 
-> **検索結果に出る file 集合 = fs:read で開ける file 集合**
+> **本文 scan の結果に出る file 集合 = fs:read で開ける file 集合**
 
 と定め、`processMdFilesParallel` の read を次の 3 分岐に統一した。
+
+**適用範囲は `processMdFilesParallel` を通る本文 scan 系 IPC**（`search:files` / unresolved-wikilink scan / backlink scan）に限る。file を読まない経路 — コマンドパレットのファイル名検索（SR-4、`searchFilenamesImpl`）と wikilink の解決先 stem 集合 — は file list を名前で filter するだけで realpath を払わないため、workspace 外を指す symlink も従来どおり候補に残る（開こうとすると fs:read が拒否する）。これらに同じ境界を効かせるには file list 構築時に全 entry の realpath を払う必要があり、本 ADR が避けたコストそのものになるため対象外とする。
 
 1. **ゲート評価済み ∧ indexable** — 従来どおり `readFileUtf8NoFollow`。失敗（= 認可後に末端を swap された）は skip（#412）
 2. **ゲート評価済み ∧ 非 indexable** — ゲートが既に realpath 済みなので追加 syscall なしで判別できる。`resolveInsideRoot` が null（workspace 外 / 解決不能）なら **結果からも落とす**、非 null なら in-root alias として解決先から読んで結果に出す
@@ -43,7 +45,7 @@
 
 当初 C は「realpath コストを scan 全 file に払う」案と理解されていた（#434 issue 本文）が、上記のとおり **O_NOFOLLOW 失敗を検出トリガにすることで通常 file の追加コストはゼロ**になる。この点が判明したことで C の Cons が消え、採用に至った。
 
-errno は**見分けない**。ELOOP 以外の失敗（EACCES / ENOENT 等）も同じ fallback に倒れるが、解決先が null なら skip、非 null でも直後の read が同じ理由で失敗して skip されるため、結果は errno で分岐した場合と一致する。プラットフォーム差（Linux は ELOOP、BSD 系は EMLINK を返し得る）に実装が依存しない利点もある。
+errno は**見分けない**。ELOOP 以外の失敗（EACCES / ENOENT 等）も同じ fallback に倒れ、解決先が null なら skip、非 null なら plain read を試す。**境界判定そのものは errno に依存しない**（symlink かどうかは realpath が答える）。ELOOP だけを fallback させる実装との差は transient な失敗（EMFILE 等）の扱いに出て、その場合 plain read が成功して file は結果に残る = ユーザー有利側にズレるだけで、境界は破れない。プラットフォーム差（Linux は ELOOP、BSD 系は EMLINK を返し得る）に実装が依存しない利点もある。
 
 ## Consequences
 
@@ -57,14 +59,15 @@ errno は**見分けない**。ELOOP 以外の失敗（EACCES / ENOENT 等）も
 ### 注意すべき影響
 
 - **FileTree との非対称は残る**。`listDirectory` は readdir の結果をそのまま返すので、workspace 外を指す symlink は**一覧には出る**（クリックすると従来どおり開けない）。揃えるには entry ごとの realpath コストを新規に背負うことになるため、本 ADR のスコープ外とし別判断とする
-- **Windows では境界が効かない**。`fs.constants.O_NOFOLLOW` が無く flag が 0 に落ちるため、末端 symlink が検出されず従来どおり内容が結果に出る。#412 で受容済みの posture と同じ（Windows の symlink 作成は既定で管理者特権または開発者モードを要するため、攻撃前提が成立しにくい）
+- **Windows ではゲート未評価経路の境界が効かない**。`fs.constants.O_NOFOLLOW` が無く flag が 0 に落ちるため、分岐 3（index 未提供 / index 無効 / 既に index 済みで valid）では末端 symlink が検出されず、従来どおり内容が結果に出る。一方 **分岐 2 は realpath ベースの判定なので Windows でも効く**（index 稼働中の未 index file は外部 symlink が落ちる）。結果として Windows では index の状態によって結果集合が変わる非一貫性が残る。#412 で受容済みの posture と同じ（Windows の symlink 作成は既定で管理者特権または開発者モードを要するため、攻撃前提が成立しにくい）
 - **hard link alias は検出できない**（#416 Finding 2 / [#416](https://github.com/ymnao/scripta/issues/416)）。hard link は O_NOFOLLOW でも realpath でも素通りするため、本 ADR の境界の対象外
 - **retarget 直後は両者が一時的にズレる**。scan 側の `resolveInsideRoot` は realpath cache を通さず毎回 fresh に解決する（#406 Finding 1）のに対し、fs:read 側の `assertPathAllowed` は `realpathBestEffort` 経由で **LRU 256 件の `realpathCache`** を使い、symlink の retarget に対する明示的な invalidation を持たない（`path-guard.ts` の cache doc に受容として記載済み）。したがって symlink を張り替えた直後、その path が cache に載っていると「scan は新しい解決先で判定し、fs:read は古い判定を返す」窓が開く。本 ADR の不変条件は **fs:read 側の cache が fresh な範囲で** 成立する。窓を閉じるには user-IPC 側の realpath 鮮度を見直す必要があり、これは [#418](https://github.com/ymnao/scripta/issues/418) の判断対象（`assertPathAllowed` の O_NOFOLLOW 整合）と同じ層の話なのでそちらに委ねる
+- **L2 hit 経路はゲートを評価した pass でしか可視範囲を判定できない**。「通常 file として L2 に載った後、watcher が拾えない retarget で workspace 外 symlink 化した」path は、その pass で index ゲートが走れば（既に払った realpath の再利用で）結果から落ちるが、ゲートを評価しない pass（index 無効 / 既に valid / index 未提供）では L2 の内容がそのまま返る。返るのは認可済みだった過去の実体の内容なので**外部内容の漏洩ではない**が、「結果に出るのにクリックすると開けない」状態は L2 entry が evict されるまで残る。判定材料を得るには L2 hit ごとに realpath を払うことになり、L2 hit の存在意義（read を省く）を打ち消すため受容する
 - #412 で受容した「認可後に末端を swap された file はその pass の結果から落ちる」の影響範囲が広がる。従来は次の pass で plain read されて結果に戻っていたが、本 ADR 以降は **swap が戻されるまで結果に出ない**（fs:read も同じ理由で拒否するので一貫している）
 
 ### 関連する将来の検討事項
 
-- FileTree 側で workspace 外を指す symlink をどう扱うか（非表示にする / 開けない旨を表示する / 現状維持）
+- FileTree（`listDirectory`）/ コマンドパレットのファイル名検索（SR-4）/ wikilink の解決先 stem 集合で、workspace 外を指す symlink をどう扱うか。いずれも file を読まない経路なので、揃えるには file list 構築時の realpath コストをどう払うかの判断が要る
 - hard link alias の検出（ino/dev 突合）を入れるかどうか — stat コストが全 file に乗るため #416 Finding 2 で保留中
 
 ## References

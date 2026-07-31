@@ -191,6 +191,36 @@ describe.skipIf(process.platform === "win32")(
 			expect(scanned).toEqual([]);
 		});
 
+		it("L2 hit でもゲートを評価した pass なら workspace 外 symlink は結果に出ない", async () => {
+			// 「通常 file として L2 に載った後、watcher が拾えない retarget で workspace 外
+			// symlink 化した」状態。L2 hit なので read は起きず、内容は認可済みだった過去の実体
+			// (= 情報漏洩ではない) だが、その path は今 fs:read が拒否するので結果に出しても
+			// 開けない。ゲートが払った realpath を可視範囲判定にも使って落とす。
+			const target = join(outside.dir, "secret.md");
+			const link = join(root, "was-normal.md");
+			await writeFile(target, "outside body");
+			await symlink(target, link);
+			const { handle, indexed } = makeFakeIndex();
+			// retarget 前に載った L2 entry を模す (内容は workspace 内だった頃のもの)。
+			const { cache, stored } = makeFakeCache(new Map([[link, "alphaword old inside body"]]));
+			const scanned: string[] = [];
+
+			await processMdFilesParallel([link], [link], never, {
+				root,
+				index: { handle },
+				cache,
+				process: (_inFile, text) => {
+					scanned.push(text);
+				},
+			});
+
+			expect(scanned).toEqual([]);
+			// index にも入らない (ゲートが null を返す従来どおりの抑止)。
+			expect(indexed.size).toBe(0);
+			// L2 hit 経路なので set は呼ばれない (退行検知: 落とす実装が set を挟んでいないこと)。
+			expect(stored.size).toBe(0);
+		});
+
 		it("dangling symlink は結果に出ず throw もしない", async () => {
 			// realpath が解決できない = resolveInsideRoot が null。workspace 外と同じ skip に倒れる
 			// (旧経路では plain read が ENOENT で失敗して skip されており、結果は変わらない)。

@@ -168,6 +168,14 @@ async function processMdFilesParallel(
 					) {
 						const epoch = indexOptions.handle.currentEpochOf(ioPath);
 						const resolved = await resolveInsideRoot(ioPath, options.root);
+						// **ゲートを評価した pass では、その結果を可視範囲判定にも使う** (#434)。
+						// null = この path は今 workspace 外を指す symlink なので、L2 に残る過去の
+						// (認可済み実体の) 内容ごと結果から落とす。fs:read も同じ理由で拒否するため、
+						// 出しても開けない。判定は既に払った realpath の再利用で追加 syscall はゼロ。
+						// alias (resolved !== ioPath かつ非 null) は fs:read で開けるので落とさない。
+						// ゲートを評価しない pass (index 無効 / 既に valid / index 未提供) には判定材料が
+						// 無いため従来どおり L2 の内容を返す (この窓は ADR-0011 に受容として記載)。
+						if (resolved === null) return;
 						if (isIndexableResolution(resolved, ioPath)) {
 							indexOptions.handle.indexFile(ioPath, hit, epoch);
 						}
@@ -256,9 +264,12 @@ async function processMdFilesParallel(
 							// **判定規則は 1 つ上の分岐 (ゲート評価済み ∧ 非 indexable) と同一**。
 							// 違いは解決先が既に手元にあるか、ここで初めて払うかだけなので、片方を変える
 							// ときは必ず両方を直すこと (2 行なので関数抽出はせず相互参照で束ねている)。
-							// **errno を見分けない**: ELOOP 以外の失敗 (EACCES / ENOENT 等) も同じ経路に倒れるが、
-							// 解決先が null なら skip、非 null でも直後の read が同じ理由で失敗して外側の catch で
-							// skip されるため、結果は errno で分岐した場合と同じになる。
+							// **errno を見分けない**: ELOOP 以外の失敗 (EACCES / ENOENT 等) も同じ経路に倒れる。
+							// 解決先が null なら skip、非 null なら plain read を試す。ここで
+							// 「symlink かどうか」の判定は誤らない (realpath が答えるため) 一方、
+							// transient な失敗 (EMFILE 等) は plain read が成功して自然回復する
+							// = 結果に残る。ELOOP だけを fallback させる実装より **ユーザー有利側に
+							// ズレるだけ** で、境界判定そのものは errno に依存しない。
 							// realpath は実際に open に失敗した file にしか乗らない = #413 Finding 1 で削った
 							// 「全 file への realpath」は復活しない。
 							// readFromVerifiedFd は false のままなので、この経路の内容は L2 に載らない。
