@@ -2,7 +2,7 @@ import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
-import { NOFOLLOW_FLAG, readFileUtf8NoFollow } from "./open-nofollow";
+import { NOFOLLOW_FLAG, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
 
 // #412: index 取り込み read の末端 swap 窓。
 // TOCTOU の race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って
@@ -58,9 +58,8 @@ describe.skipIf(process.platform === "win32")("readFileUtf8NoFollow", () => {
 	});
 });
 
-// #418: read 以外 (fs.ts の上書き write) でも同じ flag を合成して使うため、
-// export された flag 単体の契約を pin する。
-describe.skipIf(process.platform === "win32")("NOFOLLOW_FLAG", () => {
+// #418: 上書き write 版の helper と、read が flag だけ借りるための export 契約。
+describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_FLAG", () => {
 	let ws: TempWorkspace;
 
 	beforeEach(async () => {
@@ -71,22 +70,37 @@ describe.skipIf(process.platform === "win32")("NOFOLLOW_FLAG", () => {
 		await ws.cleanup();
 	});
 
-	it("は win32 以外で 0 に落ちない (合成しても access mode を変えない)", () => {
+	it("NOFOLLOW_FLAG は win32 以外で 0 に落ちない (read 側が合成して使う)", () => {
 		expect(NOFOLLOW_FLAG).not.toBe(0);
 		// O_RDONLY は 0 なので、合成した値が flag そのものになることまで確認する
 		expect(fsConstants.O_RDONLY | NOFOLLOW_FLAG).toBe(NOFOLLOW_FLAG);
 	});
 
-	it("write 用 flag に合成すると末端 symlink への書き込みを拒否する", async () => {
+	it("末端 symlink への書き込みを拒否し、解決先を truncate もしない", async () => {
 		const real = join(ws.dir, "real.md");
 		await fsp.writeFile(real, "before", "utf8");
 		const alias = join(ws.dir, "alias.md");
 		await fsp.symlink(real, alias);
 
-		const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
-		const err = await fsp.open(alias, flags).catch((e: NodeJS.ErrnoException) => e);
+		const err = await writeFileUtf8NoFollow(alias, "after").catch((e: NodeJS.ErrnoException) => e);
 		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
-		// 解決先は truncate すらされていない
 		expect(await fsp.readFile(real, "utf8")).toBe("before");
+	});
+
+	it("通常 file は fsp.writeFile と同じく inode を保って上書きする", async () => {
+		const p = join(ws.dir, "note.md");
+		await fsp.writeFile(p, "before", "utf8");
+		const before = await fsp.stat(p);
+
+		await writeFileUtf8NoFollow(p, "after マルチバイト");
+
+		expect(await fsp.readFile(p, "utf8")).toBe("after マルチバイト");
+		expect((await fsp.stat(p)).ino).toBe(before.ino);
+	});
+
+	it("未存在の path は新規作成する", async () => {
+		const p = join(ws.dir, "new.md");
+		await writeFileUtf8NoFollow(p, "created");
+		expect(await fsp.readFile(p, "utf8")).toBe("created");
 	});
 });

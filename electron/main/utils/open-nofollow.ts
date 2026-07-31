@@ -1,4 +1,4 @@
-// 末端 component の symlink follow を閉じる open flag と、その flag を使う read helper (#412 / #418)。
+// 末端 component の symlink follow を閉じる open flag と、その flag を使う I/O helper (#412 / #418)。
 //
 // **何を閉じるか**: 認可 (`resolveInsideRoot` / `assertPathAllowed`) が返した path を後段の
 // `fsp.readFile` / `fsp.writeFile` に渡すと、その API が path を再 traversal するため
@@ -15,15 +15,11 @@
 // `resolveInsideRoot` doc を参照。
 //
 // **正常系の挙動は変わらない**: どの呼び手も「末端が symlink でない」ことを確認済みの path
-// しか渡さない。
-//   - index 取り込み経路は `isIndexableResolution(resolved, ioPath) === true`、すなわち
-//     `realpath(ioPath) === ioPath` を確認した path を渡す
-//   - user-IPC 経路 (fs.ts, #418) は `assertPathAllowed` / `assertWritePathAllowed` が返す
-//     canonical を渡す。realpath が成功した場合その末端は定義上 symlink ではなく、失敗して
-//     祖先 fall-through した場合の末端は dangling symlink か未存在名なので、`O_NOFOLLOW`
-//     の有無に関わらず open は失敗する (詳細は fs.ts の doc)
-// したがって発火する = 認可後に実際に swap が起きた瞬間であり、その file はもはや認可した
-// 実体と一致しないので **読み書きせずに reject するのが正しい**。
+// しか渡さない (index 取り込み経路は `isIndexableResolution(resolved, ioPath) === true`、
+// すなわち `realpath(ioPath) === ioPath` を確認した path。user-IPC 経路は path-guard の
+// assert 系が返す canonical で、根拠は fs.ts の doc を参照)。したがって発火する = 認可後に
+// 実際に swap が起きた瞬間であり、その file はもはや認可した実体と一致しないので
+// **読み書きせずに reject するのが正しい**。
 //
 // **syscall は増えない**: `fsp.readFile(path)` / `fsp.writeFile(path)` も内部で
 // open/read(write)/close するため、open flag を足して明示的に書き下しただけ。検索 hot path
@@ -41,6 +37,9 @@ import { constants as fsConstants, promises as fsp } from "node:fs";
 export const NOFOLLOW_FLAG = fsConstants.O_NOFOLLOW ?? 0;
 
 const NOFOLLOW_READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
+// `fsp.writeFile` の既定 flag `"w"` と同じ access mode に O_NOFOLLOW を足したもの。
+const NOFOLLOW_OVERWRITE_FLAGS =
+	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
 
 /**
  * 末端 component が symlink なら reject する utf8 read (#412)。
@@ -58,6 +57,24 @@ export async function readFileUtf8NoFollow(path: string): Promise<string> {
 	const fh = await fsp.open(path, NOFOLLOW_READ_FLAGS);
 	try {
 		return await fh.readFile({ encoding: "utf8" });
+	} finally {
+		await fh.close();
+	}
+}
+
+/**
+ * 末端 component が symlink なら reject する utf8 上書き write (#418)。`readFileUtf8NoFollow` の
+ * write 版で、user-IPC の `fs:write` が使う。
+ *
+ * **`fsp.writeFile(path, content, "utf8")` と等価**（access mode / 既定 mode 0o666 / syscall 列とも
+ * 同じ）で、違いは末端が symlink のとき ELOOP で拒否する点だけ。既存 file は同一 inode のまま
+ * truncate して書くので、tmp + rename の atomic write に倒れていない（inode 安定性を要求する
+ * 呼び手の契約は fs.ts の #100 コメントを参照）。
+ */
+export async function writeFileUtf8NoFollow(path: string, content: string): Promise<void> {
+	const fh = await fsp.open(path, NOFOLLOW_OVERWRITE_FLAGS);
+	try {
+		await fh.writeFile(content, "utf8");
 	} finally {
 		await fh.close();
 	}

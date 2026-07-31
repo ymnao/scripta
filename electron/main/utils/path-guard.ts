@@ -221,10 +221,9 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 // するため、認可 (T1) と I/O (T2) の間に構成要素を symlink へ差し替えられる窓が残る。窓は
 // 末端 component と中間 dir の 2 つに分かれ、**末端側だけが閉じている**:
 //   - **末端 component: 閉じた**。index 取り込み経路 (resolveInsideRoot) は #412 で、
-//     user-IPC 経路 (fs.ts) は #418 で `O_NOFOLLOW` 付き fd の I/O に揃えた。本 API の戻り値を
-//     読む fs:read / fs:read-base64 と、assertWritePathAllowed の戻り値を上書きする fs:write が
-//     対象。fs:write-new / fs:create-file の `wx`、fs:create-directory の非 recursive mkdir、
-//     fs:rename の rename(2) はいずれも末端 symlink を辿らない semantics なので元から閉じている。
+//     user-IPC 経路 (fs.ts) は #418 で `O_NOFOLLOW` 付き fd の I/O に揃えた。残りの fs IPC は
+//     `wx` / 非 recursive mkdir / rename(2) の semantics で元から閉じている (経路ごとの根拠は
+//     fs.ts 冒頭の doc ブロックに一覧がある)。
 //   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
 // **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に

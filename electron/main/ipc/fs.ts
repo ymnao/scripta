@@ -6,7 +6,7 @@ import type { FileEntry } from "../../../src/types/workspace";
 import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
 import { handle } from "../utils/ipc-handle";
-import { NOFOLLOW_FLAG } from "../utils/open-nofollow";
+import { NOFOLLOW_FLAG, writeFileUtf8NoFollow } from "../utils/open-nofollow";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
@@ -22,11 +22,10 @@ import { getFileTreeFilterOptions } from "./settings";
 // 同じ「明示的な上限を持つ」思想で揃える。
 export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
 
-// 末端 symlink を拒否する open flag (#418)。詳細は下の doc ブロックと open-nofollow.ts 参照。
+// 末端 symlink を拒否する read flag (#418)。詳細は下の doc ブロックと open-nofollow.ts 参照。
+// read だけ helper ではなく flag を借りているのは、bounded read (`readFileBoundedFromHandle`)
+// と base64 変換が fd 自体を必要とするため。
 const READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
-// `fsp.writeFile(path, ...)` の既定 flag `"w"` と同じ access mode に O_NOFOLLOW を足したもの。
-const OVERWRITE_FLAGS =
-	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
 
 async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
@@ -169,16 +168,9 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	// app 内部 data (settings.ts / pdf.ts) は inode 安定性が問題にならないため、
 	// そちらは引き続き write-file-atomic を使用している。
 	//
-	// `fsp.writeFile(canonical, ...)` ではなく O_NOFOLLOW 付き fd への write にしているのは
-	// #418 の escape 封鎖（上の doc ブロック参照）。access mode は writeFile の既定 flag `"w"`
-	// と同一なので、**既存 file への同一 inode 上書きという性質は変わらない**（tmp + rename
-	// 化ではない）。mode も `fsp.open` の既定 0o666 で writeFile と揃う。
-	const fh = await fsp.open(canonical, OVERWRITE_FLAGS);
-	try {
-		await fh.writeFile(content, "utf8");
-	} finally {
-		await fh.close();
-	}
+	// `fsp.writeFile` ではなく `writeFileUtf8NoFollow` を使うのは #418 の escape 封鎖（上の
+	// doc ブロック参照）。同一 inode 上書きという性質は変わらない。
+	await writeFileUtf8NoFollow(canonical, content);
 	// 書き込み成功後にだけ transient capability を消費する。
 	// 失敗時は残り、renderer 側 withRetry で再試行できる。
 	consumeTransientWritePath(senderId, canonical);
