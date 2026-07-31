@@ -1153,7 +1153,7 @@ describe("searchFilesImpl (Phase B: ContentCache integration)", () => {
 describe.skipIf(process.platform === "win32")(
 	"searchFilesImpl (#406: symlink retarget と index 取り込み境界)",
 	() => {
-		it("does not index a symlink retargeted outside the workspace, but still scans it", async () => {
+		it("drops a symlink retargeted outside the workspace from index and results", async () => {
 			const canonical = await realpath(workspaceDir);
 			const inside = join(canonical, "inside.md");
 			await writeFile(inside, "alphaword inside");
@@ -1188,9 +1188,10 @@ describe.skipIf(process.platform === "win32")(
 				applyFsBatch(canonical, [{ kind: "modify", path: link }]);
 				expect(handle.isIndexedAndValid(link)).toBe(false);
 
-				// 3. 再検索: scan 結果には出る (既存挙動、workspace 外 symlink も検索対象)。
+				// 3. 再検索: scan 結果からも落ちる (#434)。retarget 先は workspace 外で fs:read が
+				//    拒否する file なので、結果に出しても開けない。
 				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
-				expect(res.results.some((r) => r.filePath.endsWith("evil.md"))).toBe(true);
+				expect(res.results).toHaveLength(0);
 				// index には取り込まれない (境界が retarget 後も維持されている)。
 				expect(handle.isIndexedAndValid(link)).toBe(false);
 
@@ -1214,9 +1215,11 @@ describe.skipIf(process.platform === "win32")(
 				await symlink(secret, link);
 
 				acquireFileListCache(canonical);
-				// 1 回目: 外部を指しているので index には入らないが、scan 結果には出る。
+				// 1 回目: 外部を指しているので index にも scan 結果にも出ない (#434)。
+				// この assert と 2 回目の assert は独立した保証を持つ: #434 の read 境界だけを
+				// 戻すと 1 回目が非空になり、L2 admission (#406) だけを戻すと 2 回目が非空になる。
 				const first = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
-				expect(first.results.some((r) => r.filePath.endsWith("evil.md"))).toBe(true);
+				expect(first.results).toHaveLength(0);
 
 				// attacker が workspace 内へ戻す。watcher が retarget を拾えなかったケースを模して
 				// applyFsBatch は **呼ばない** (L2 は evict されない)。
@@ -1303,7 +1306,7 @@ describe.skipIf(process.platform === "win32")(
 			}
 		});
 
-		it("never indexes a symlink that points outside the workspace from the start", async () => {
+		it("never indexes or returns a symlink that points outside the workspace from the start", async () => {
 			const canonical = await realpath(workspaceDir);
 			const outside = await createTempWorkspace("scripta-search-outside2-");
 			try {
@@ -1317,7 +1320,9 @@ describe.skipIf(process.platform === "win32")(
 				if (handle === undefined) throw new Error("index handle must exist after acquire");
 
 				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "zzsecretword");
-				expect(res.results.some((r) => r.filePath.endsWith("evil.md"))).toBe(true);
+				// #434: 検索結果に出る集合 = fs:read で開ける集合。この link は fs:read が
+				// realpath 解決して拒否するため、結果からも落とす。
+				expect(res.results).toHaveLength(0);
 				expect(handle.isIndexedAndValid(link)).toBe(false);
 
 				releaseFileListCache(canonical);

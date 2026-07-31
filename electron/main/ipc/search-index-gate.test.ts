@@ -62,7 +62,8 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const scanned: string[] = [];
 
 		await processMdFilesParallel([a, b], [a, b], never, {
-			index: { handle, root },
+			root,
+			index: { handle },
 			cache,
 			process: (inFile, text) => {
 				scanned.push(`${inFile}:${text}`);
@@ -90,7 +91,8 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const scanned: string[] = [];
 
 		await processMdFilesParallel([a], [a], never, {
-			index: { handle, root },
+			root,
+			index: { handle },
 			cache,
 			process: (_inFile, text) => {
 				scanned.push(text);
@@ -111,7 +113,8 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const { cache } = makeFakeCache(new Map([[b, "beta cached"]]));
 
 		await processMdFilesParallel([a, b], [a, b], never, {
-			index: { handle, root },
+			root,
+			index: { handle },
 			cache,
 			process: () => {},
 		});
@@ -137,7 +140,8 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		const scanned: string[] = [];
 
 		await processMdFilesParallel([a, b], [a, b], never, {
-			index: { handle, root, suppress: true },
+			root,
+			index: { handle, suppress: true },
 			cache,
 			process: (inFile, text) => {
 				scanned.push(`${inFile}:${text}`);
@@ -167,7 +171,8 @@ describe.skipIf(process.platform === "win32")(
 			const scanned: string[] = [];
 
 			await processMdFilesParallel([real, link], [real, link], never, {
-				index: { handle, root },
+				root,
+				index: { handle },
 				cache,
 				process: (inFile, text) => {
 					scanned.push(`${inFile}:${text}`);
@@ -194,7 +199,8 @@ describe.skipIf(process.platform === "win32")(
 			const scanned: string[] = [];
 
 			await processMdFilesParallel([link], [link], never, {
-				index: { handle, root },
+				root,
+				index: { handle },
 				cache,
 				process: (_inFile, text) => {
 					scanned.push(text);
@@ -233,7 +239,8 @@ describe.skipIf(process.platform === "win32")(
 				const scanned: string[] = [];
 
 				await processMdFilesParallel([normal, swapped], [normal, swapped], never, {
-					index: { handle, root },
+					root,
+					index: { handle },
 					cache,
 					process: (inFile, text) => {
 						scanned.push(`${inFile}:${text}`);
@@ -246,10 +253,11 @@ describe.skipIf(process.platform === "win32")(
 				expect(scanned.join("\n")).not.toContain("SECRETWORD");
 				// swap された file は read 失敗扱いで skip される (scan 結果からも落ちる)。
 				// これは #412 で受け入れた挙動変化: 認可した実体と読める実体が一致しない以上、
-				// 読まないのが正しい。損失は「窓に重なった 1 pass × 1 file」に限られ、次の pass では
-				// ゲートが workspace 外と判定して非 indexable 経路に落ちるため、従来どおり
-				// plain read されて scan には出る (この swap 先は workspace 外なので alias ではなく
-				// resolveInsideRoot が null を返す分岐)。
+				// 読まないのが正しい。**#434 以降は次の pass でも scan に出ない**: ゲートが
+				// workspace 外 (resolveInsideRoot が null) と判定した file は非 indexable 経路で
+				// skip されるため。つまりこの file の scan からの脱落は 1 pass 限りではなく、
+				// swap が戻されるまで続く (#434 の「検索結果に出る = fs:read で開ける」の帰結で、
+				// fs:read 側も同じ理由で拒否するため一貫している)。
 				// **範囲**: processMdFilesParallel は検索だけでなく unresolved-wikilink scan /
 				// backlink scan からも index options (handle + root) 付きで呼ばれるため、窓中はそれらの結果からも
 				// 同じ 1 file が落ちる。影響の質は同一 (1 pass × 1 file) なので受容は変わらない。
@@ -262,14 +270,16 @@ describe.skipIf(process.platform === "win32")(
 			}
 		});
 
-		it("ゲートを評価していない file (index 無効) は従来どおり plain read で scan に出る", async () => {
-			// #412 の fd read は「ゲート評価済み」を前提にした強制なので、前提が無い経路
-			// (index 未提供 / index 無効 / 既に valid) の scan 契約は変えない。
-			// workspace 外を指す symlink の内容が検索結果に出るのは #399 で確立した境界。
+		it("ゲート未評価経路でも workspace 外 symlink は落ち、realpath は symlink にしか乗らない", async () => {
+			// ゲートが無い経路 (index 未提供 / index 無効 / 既に valid) でも #434 の境界は効く:
+			// O_NOFOLLOW open の失敗で末端 symlink を検出し、そこで初めて realpath して
+			// workspace 外なら scan からも落とす (旧契約では plain read で内容が結果に出ていた)。
+			// **コストの pin も兼ねる**: 通常 file は O_NOFOLLOW open に成功するので realpath は
+			// 呼ばれず、#413 Finding 1 で削った「全 file への realpath」は復活しない。
 			// **#407 Finding 1/3 で削除した pin について**: 以前はここに「index はあるが indexRoot
 			// 未指定」の case を置き、`useNoFollow` から `indexGateEvaluated` を落とす mutation を
-			// 殺していた。root が IndexOptions の必須プロパティになった今、index を持ちながら
-			// ゲート未評価という状態は型上表現できず、その mutation は挙動を変えない
+			// 殺していた。root が必須プロパティになった今、index を持ちながらゲート未評価という
+			// 状態は型上表現できず、その mutation は挙動を変えない
 			// (index が無い ⇒ indexable === false ⇒ useNoFollow は元から false)。
 			// runtime の pin が消えた分の保証は「root を省いた呼び出しは compile しない」= 型検査が
 			// 担っており、それは search-index-options.test.ts の @ts-expect-error が固定している。
@@ -279,15 +289,21 @@ describe.skipIf(process.platform === "win32")(
 				await writeFile(target, "OUTSIDEWORD body");
 				const link = join(root, "link.md");
 				await symlink(target, link);
+				const normal = join(root, "normal.md");
+				await writeFile(normal, "normalword body");
 				const scanned: string[] = [];
 
-				await processMdFilesParallel([link], [link], never, {
+				await processMdFilesParallel([link, normal], [link, normal], never, {
+					root,
 					process: (inFile, text) => {
 						scanned.push(`${inFile}:${text}`);
 					},
 				});
 
-				expect(scanned).toEqual([`${link}:OUTSIDEWORD body`]);
+				expect(scanned).toEqual([`${normal}:normalword body`]);
+				// symlink の 1 件だけが realpath を払う (通常 file は 0 回)。
+				expect(vi.mocked(resolveInsideRoot)).toHaveBeenCalledTimes(1);
+				expect(vi.mocked(resolveInsideRoot)).toHaveBeenCalledWith(link, root);
 			} finally {
 				await outside.cleanup();
 			}

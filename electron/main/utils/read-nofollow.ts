@@ -32,12 +32,14 @@ const NOFOLLOW_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
 /**
  * 末端 component が symlink なら reject する utf8 read (#412)。
  *
- * index 取り込みに繋がる read 経路 (piggyback / idle fill / dark assert の再 index) 専用。
- * scan (検索結果) 用の read には使わないこと — workspace 外を指す symlink の内容も検索結果に
- * 出すのが確立した契約 (#399 の境界は「index に載せない」であって「検索結果に出さない」ではない)。
+ * index 取り込みに繋がる read 経路 (piggyback / idle fill / dark assert の再 index) に加え、
+ * **scan (検索結果) 用の read も #434 でこの helper に統一した**。scan 側は失敗を即 skip には
+ * せず、`resolveInsideRoot` で解決し直して「workspace 内なら解決先を読む / 外なら落とす」に
+ * 倒す (検索結果に出る集合を fs:read で開ける集合に揃えるため。詳細は
+ * docs/adr/0011-search-visibility-follows-fs-read.md)。
  *
- * 失敗時は throw する (ELOOP / ENOENT / 権限エラー等を区別しない)。呼び手はいずれも
- * 「読み取り失敗 file は skip」の既存契約に倒せばよい。
+ * 失敗時は throw する (ELOOP / ENOENT / 権限エラー等を区別しない)。呼び手は「読み取り失敗
+ * file は skip」か、上記 scan 側の解決し直しのどちらかに倒せばよい。
  */
 export async function readFileUtf8NoFollow(path: string): Promise<string> {
 	const fh = await fsp.open(path, NOFOLLOW_FLAGS);
