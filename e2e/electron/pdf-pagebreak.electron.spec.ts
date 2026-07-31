@@ -1,6 +1,6 @@
 import { promises as fsp } from "node:fs";
-import { join, resolve } from "node:path";
-import { _electron as electron, expect as pwExpect } from "@playwright/test";
+import { join } from "node:path";
+import { expect as pwExpect } from "@playwright/test";
 import { readWorkspaceFile, seedSettings, workspaceFileSize } from "./helpers/fixtures";
 import { expect, test } from "./helpers/launch";
 
@@ -86,64 +86,48 @@ hr.pdf-pagebreak { border: 0; margin: 0; height: 0; visibility: hidden; }
 	});
 
 	test("meta tag を持たない HTML では script が no-op に保たれる (SCRIPTA_PDF_DEBUG で診断 capture)", async ({
+		launch,
 		userDataDir,
 		workspaceDir,
 	}) => {
-		// 通常の launch fixture は env を渡せないので、ここでは _electron.launch を直接呼んで
-		// `SCRIPTA_PDF_DEBUG=1` を注入し、stderr 経由で script の診断 JSON を捕まえる。
+		// `SCRIPTA_PDF_DEBUG=1` で起動し、stderr 経由で script の診断 JSON を捕まえる。
 		// この経路だと page count proxy ではなく **script の result そのもの** で「smart-level
 		// meta が無い時に no-op か」を直接 assert できる。
 		seedSettings(userDataDir, { workspacePath: workspaceDir });
-		const stderrLines: string[] = [];
-		const app = await electron.launch({
-			args: [resolve(process.cwd(), "out/main/index.js"), `--user-data-dir=${userDataDir}`],
-			env: { ...process.env, SCRIPTA_PDF_DEBUG: "1" },
-		});
-		try {
-			const stderr = app.process().stderr;
-			if (stderr) {
-				stderr.on("data", (chunk: Buffer | string) => {
-					stderrLines.push(chunk.toString());
-				});
-			}
+		const { page, stderr } = await launch(undefined, { env: { SCRIPTA_PDF_DEBUG: "1" } });
 
-			const page = await app.firstWindow();
-			await page.waitForLoadState("domcontentloaded");
-			await expect(page.getByRole("button", { name: "ワークスペース検索" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "ワークスペース検索" })).toBeVisible();
 
-			const outputPath = join(workspaceDir, "no-meta.pdf");
-			// meta tag を意図的に省略
-			const html = `<!DOCTYPE html><html><body>
+		const outputPath = join(workspaceDir, "no-meta.pdf");
+		// meta tag を意図的に省略
+		const html = `<!DOCTYPE html><html><body>
 <h1>章</h1><p>本文</p>
 <h2>節 A</h2><p>本文 A</p>
 <h2>節 B</h2><p>本文 B</p>
 </body></html>`;
-			await page.evaluate(({ html, out }) => window.api.exportPdf(html, out), {
-				html,
-				out: outputPath,
-			});
+		await page.evaluate(({ html, out }) => window.api.exportPdf(html, out), {
+			html,
+			out: outputPath,
+		});
 
-			await pwExpect.poll(() => workspaceFileSize(workspaceDir, "no-meta.pdf")).toBeGreaterThan(0);
+		await pwExpect.poll(() => workspaceFileSize(workspaceDir, "no-meta.pdf")).toBeGreaterThan(0);
 
-			// stderr に script の result JSON が出ているはず。
-			// 形式: `[scripta:#93] break-before script: { ... } (html N bytes)`
-			// JSON は `{"headingCounts":{"h1":0,...},...}` の様にネストするので、
-			// 単純な `{[^}]+}` regex では最初の内側 `}` で切れて不完全な JSON になる。
-			// 末尾の ` (html N bytes)` を anchor に使って **greedy** に最後の `}` まで拾う。
-			const joined = stderrLines.join("");
-			const m = joined.match(/\[scripta:#93\] break-before script: (\{.*\}) \(html \d+ bytes\)/);
-			expect(m, "diagnostic line should appear in stderr").not.toBeNull();
-			const diag = JSON.parse(m?.[1] ?? "{}") as {
-				sectionsTotal: number;
-				sectionsBroken: number;
-				smartLevelUsed: number | null;
-			};
-			// meta 不在なので script は早期 return: smartLevelUsed=null, sectionsTotal=0
-			expect(diag.smartLevelUsed).toBeNull();
-			expect(diag.sectionsTotal).toBe(0);
-			expect(diag.sectionsBroken).toBe(0);
-		} finally {
-			await app.close();
-		}
+		// stderr に script の result JSON が出ているはず。
+		// 形式: `[scripta:#93] break-before script: { ... } (html N bytes)`
+		// JSON は `{"headingCounts":{"h1":0,...},...}` の様にネストするので、
+		// 単純な `{[^}]+}` regex では最初の内側 `}` で切れて不完全な JSON になる。
+		// 末尾の ` (html N bytes)` を anchor に使って **greedy** に最後の `}` まで拾う。
+		const joined = stderr.join("");
+		const m = joined.match(/\[scripta:#93\] break-before script: (\{.*\}) \(html \d+ bytes\)/);
+		expect(m, "diagnostic line should appear in stderr").not.toBeNull();
+		const diag = JSON.parse(m?.[1] ?? "{}") as {
+			sectionsTotal: number;
+			sectionsBroken: number;
+			smartLevelUsed: number | null;
+		};
+		// meta 不在なので script は早期 return: smartLevelUsed=null, sectionsTotal=0
+		expect(diag.smartLevelUsed).toBeNull();
+		expect(diag.sectionsTotal).toBe(0);
+		expect(diag.sectionsBroken).toBe(0);
 	});
 });

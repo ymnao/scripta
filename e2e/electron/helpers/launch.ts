@@ -23,19 +23,57 @@ export interface LaunchResult {
 	app: ElectronApplication;
 	page: Page;
 	userDataDir: string;
+	// main process の stderr chunk を到着順に溜めたもの。listener は firstWindow を
+	// 待つ前に張るため、起動直後の出力も取りこぼさない（spec 側で後から張ると
+	// launch 完了までの窓が空く）。診断ログ / dark assert の warn を assert する
+	// spec が join して使う。
+	stderr: string[];
+}
+
+export interface LaunchOptions {
+	// main process へ追加で渡す環境変数。Playwright は env を渡すと **置換**扱いにするが、
+	// ここでは `process.env` へ上書きマージするので呼び手は差分だけを書けばよい
+	// （`{ ...process.env }` を自前で展開しない）。
+	// dark assert (`SCRIPTA_DARK_ASSERT`) / PDF 診断 (`SCRIPTA_PDF_DEBUG`) のように
+	// main 側の挙動を切り替えるフラグ用。
+	env?: NodeJS.ProcessEnv;
 }
 
 // 起動毎に temp userData を切る。`app.setName("scripta")` は `app.isPackaged` 時のみ
 // 発火し、unpackaged 起動（本 e2e）では "scripta-next" になる。だが `--user-data-dir`
 // を渡すと `app.getPath("userData")` はこの temp dir に固定されるため、実機 userData
 // を汚さず、Settings migration テストは temp 内へ legacy `settings.json` を seed できる。
-export async function launchScripta(userDataDir: string): Promise<LaunchResult> {
+// `process.env` に overrides を重ねて Playwright の env 型（`Record<string, string>`）へ
+// 落とす。値が undefined の key は「未設定」として落とす（`{ FOO: process.env.FOO }` の
+// ように未設定の値を転送した呼び出しが `"undefined"` 文字列に化けるのを防ぐ）。
+function mergeEnv(overrides: NodeJS.ProcessEnv): Record<string, string> {
+	const merged: Record<string, string> = {};
+	for (const [key, value] of Object.entries({ ...process.env, ...overrides })) {
+		if (value !== undefined) merged[key] = value;
+	}
+	return merged;
+}
+
+export async function launchScripta(
+	userDataDir: string,
+	options: LaunchOptions = {},
+): Promise<LaunchResult> {
 	const app = await electron.launch({
 		args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
+		// env 未指定時は `electron.launch` の既定（親プロセスの env をそのまま継承）に
+		// 委ねる。指定時のみ mergeEnv 済みの env を渡す。
+		...(options.env ? { env: mergeEnv(options.env) } : {}),
 	});
+	const stderr: string[] = [];
+	const stderrStream = app.process().stderr;
+	if (stderrStream) {
+		stderrStream.on("data", (chunk: Buffer | string) => {
+			stderr.push(chunk.toString());
+		});
+	}
 	const page = await app.firstWindow();
 	await page.waitForLoadState("domcontentloaded");
-	return { app, page, userDataDir };
+	return { app, page, userDataDir, stderr };
 }
 
 interface ScriptaFixtures {
@@ -45,10 +83,11 @@ interface ScriptaFixtures {
 	// userData とは別の temp workspace ディレクトリ。画像・markdown 等を配置して
 	// asset protocol / 画像描画 / workspace 復元のテスト対象にする。
 	workspaceDir: string;
-	// 実 Electron を起動する。引数省略時は fixture の userDataDir を使う。
+	// 実 Electron を起動する。第 1 引数省略時は fixture の userDataDir を使う。
 	// fixture が生成した全 app を teardown で close するため、テスト側は
 	// 再起動時も close を意識しなくてよい（明示 close したい場合は app.close()）。
-	launch: (userDataDir?: string) => Promise<LaunchResult>;
+	// 第 2 引数で env を上書きできる（main 側フラグを踏む spec 用、LaunchOptions 参照）。
+	launch: (userDataDir?: string, options?: LaunchOptions) => Promise<LaunchResult>;
 }
 
 export const test = base.extend<ScriptaFixtures>({
@@ -72,8 +111,11 @@ export const test = base.extend<ScriptaFixtures>({
 	launch: [
 		async ({ userDataDir }, use) => {
 			const launched: ElectronApplication[] = [];
-			const launch = async (dir: string = userDataDir): Promise<LaunchResult> => {
-				const result = await launchScripta(dir);
+			const launch = async (
+				dir: string = userDataDir,
+				options: LaunchOptions = {},
+			): Promise<LaunchResult> => {
+				const result = await launchScripta(dir, options);
 				launched.push(result.app);
 				return result;
 			};

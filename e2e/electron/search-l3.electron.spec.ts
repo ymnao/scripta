@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { _electron as electron, expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { markInitialized, seedSettings, writeWorkspaceFiles } from "./helpers/fixtures";
+import { expect, test } from "./helpers/launch";
 
 // #394 Phase D safety net: chokidar → L3 InvertedIndex 本配線 → 検索結果の end-to-end。
 // SCRIPTA_DARK_ASSERT=1 の dual-run で「candidates 経路 と 全走査 の hit file 集合突合」も
@@ -44,101 +44,79 @@ async function pollSearchUntil(
 }
 
 test.describe("search L3 candidates end-to-end (electron)", () => {
-	test("chokidar watcher → InvertedIndex invalidate → 検索結果が新内容を返す + dark assert 突合が通る", async () => {
-		const userDataDir = mkdtempSync(join(tmpdir(), "scripta-e2e-userdata-l3-"));
-		const workspaceDir = mkdtempSync(join(tmpdir(), "scripta-e2e-workspace-l3-"));
-		try {
-			writeWorkspaceFiles(workspaceDir, {
-				"alpha.md": "# Alpha\nquickbrownfoxjumps over the lazy dog\n",
-				"beta.md": "# Beta\nunrelated content\n",
-			});
-			markInitialized(workspaceDir);
-			seedSettings(userDataDir, { workspacePath: workspaceDir, sidebarVisible: true });
+	test("chokidar watcher → InvertedIndex invalidate → 検索結果が新内容を返す + dark assert 突合が通る", async ({
+		launch,
+		userDataDir,
+		workspaceDir,
+	}) => {
+		writeWorkspaceFiles(workspaceDir, {
+			"alpha.md": "# Alpha\nquickbrownfoxjumps over the lazy dog\n",
+			"beta.md": "# Beta\nunrelated content\n",
+		});
+		markInitialized(workspaceDir);
+		seedSettings(userDataDir, { workspacePath: workspaceDir, sidebarVisible: true });
 
-			// dark assert を有効にして起動 (dual-run 実行、突合違反時に main が例外を throw)。
-			// main の stderr / console.error に `[dark-assert]` warn が乗る (dev-monitor safety net)。
-			const mainEntry = join(process.cwd(), "out/main/index.js");
-			const app = await electron.launch({
-				args: [mainEntry, `--user-data-dir=${userDataDir}`],
-				env: { ...process.env, SCRIPTA_DARK_ASSERT: "1" },
-			});
-			try {
-				// main process の stderr を監視 (dark assert throw の Error stack や
-				// runDarkAssert の warn がここに載る)。process().stderr / stdout を Buffer 化。
-				const mainStderr: string[] = [];
-				const stderrStream = app.process().stderr;
-				if (stderrStream) {
-					stderrStream.on("data", (chunk: Buffer) => {
-						mainStderr.push(chunk.toString("utf8"));
-					});
-				}
+		// dark assert を有効にして起動 (dual-run 実行、突合違反時に main が例外を throw)。
+		// main の stderr / console.error に `[dark-assert]` warn が乗る (dev-monitor safety net)。
+		// stderr は fixture が launch 直後から収集している (dark assert throw の Error stack や
+		// runDarkAssert の warn がここに載る)。
+		const { page, stderr: mainStderr } = await launch(undefined, {
+			env: { SCRIPTA_DARK_ASSERT: "1" },
+		});
 
-				const page = await app.firstWindow();
-				await page.waitForLoadState("domcontentloaded");
-				// renderer 側 unhandled error / console.error を集める。SearchPanel の catch で
-				// 化けた rejection は console.error に出るのでこちらで捕捉する
-				// (Fable round 2 W4: pageerror だけでは SearchPanel の catch を検出できない)。
-				const pageErrors: string[] = [];
-				const consoleErrors: string[] = [];
-				page.on("pageerror", (e) => pageErrors.push(String(e)));
-				page.on("console", (msg) => {
-					if (msg.type() === "error") consoleErrors.push(msg.text());
-				});
+		// renderer 側 unhandled error / console.error を集める。SearchPanel の catch で
+		// 化けた rejection は console.error に出るのでこちらで捕捉する
+		// (Fable round 2 W4: pageerror だけでは SearchPanel の catch を検出できない)。
+		const pageErrors: string[] = [];
+		const consoleErrors: string[] = [];
+		page.on("pageerror", (e) => pageErrors.push(String(e)));
+		page.on("console", (msg) => {
+			if (msg.type() === "error") consoleErrors.push(msg.text());
+		});
 
-				// 検索パネルを開く。
-				await page.getByRole("button", { name: "ワークスペース検索" }).click();
-				const input = page.getByPlaceholder("ファイル内を検索…");
+		// 検索パネルを開く。
+		await page.getByRole("button", { name: "ワークスペース検索" }).click();
+		const input = page.getByPlaceholder("ファイル内を検索…");
 
-				// (1) 既存語 "quickbrownfoxjumps" が alpha.md にヒットすること。
-				//     debounce 300ms + walk / index を待つ。初期状態は L1 populate 前なので単発 fill で OK。
-				await input.fill("quickbrownfoxjumps");
-				await expect(page.getByText("alpha.md", { exact: false })).toBeVisible({ timeout: 5000 });
+		// (1) 既存語 "quickbrownfoxjumps" が alpha.md にヒットすること。
+		//     debounce 300ms + walk / index を待つ。初期状態は L1 populate 前なので単発 fill で OK。
+		await input.fill("quickbrownfoxjumps");
+		await expect(page.getByText("alpha.md", { exact: false })).toBeVisible({ timeout: 5000 });
 
-				// (2) 新 file を追加して chokidar → L1 invalidate → 検索が新内容を返すこと。
-				//     SearchPanel は fs-change で自動再検索しないため、toggle polling で
-				//     watcher batch 反映後の再検索を確実に踏む。
-				writeFileSync(
-					join(workspaceDir, "gamma.md"),
-					"# Gamma\nsupercalifragilisticnovel\n",
-					"utf8",
-				);
-				await pollSearchUntil(page, input, "supercalifragilisticnovel", async () => {
-					return page.getByText("gamma.md", { exact: false }).isVisible();
-				});
+		// (2) 新 file を追加して chokidar → L1 invalidate → 検索が新内容を返すこと。
+		//     SearchPanel は fs-change で自動再検索しないため、toggle polling で
+		//     watcher batch 反映後の再検索を確実に踏む。
+		writeFileSync(join(workspaceDir, "gamma.md"), "# Gamma\nsupercalifragilisticnovel\n", "utf8");
+		await pollSearchUntil(page, input, "supercalifragilisticnovel", async () => {
+			return page.getByText("gamma.md", { exact: false }).isVisible();
+		});
 
-				// (3) 既存 file の書換で語を除去 → 検索から消えること (invalidate → 再 index / fallback の負方向)。
-				writeFileSync(join(workspaceDir, "alpha.md"), "# Alpha\n(removed)\n", "utf8");
-				await pollSearchUntil(page, input, "quickbrownfoxjumps", async () => {
-					// 「結果なし」が表示されている & alpha.md が結果に無いこと。
-					return page.getByText("結果なし").isVisible();
-				});
+		// (3) 既存 file の書換で語を除去 → 検索から消えること (invalidate → 再 index / fallback の負方向)。
+		writeFileSync(join(workspaceDir, "alpha.md"), "# Alpha\n(removed)\n", "utf8");
+		await pollSearchUntil(page, input, "quickbrownfoxjumps", async () => {
+			// 「結果なし」が表示されている & alpha.md が結果に無いこと。
+			return page.getByText("結果なし").isVisible();
+		});
 
-				// (4) dark assert throw の副作用検出用の post-check。
-				//     SearchPanel の catch は throw を「結果なし」に置換するため step (3) 単独では
-				//     assert 違反を green で通してしまう。ここでヒットする正方向 query で再検索し、
-				//     violation なら「結果なし」が返る (throw から SearchPanel が rescue) ことを利用。
-				await pollSearchUntil(page, input, "supercalifragilisticnovel", async () => {
-					return page.getByText("gamma.md", { exact: false }).isVisible();
-				});
+		// (4) dark assert throw の副作用検出用の post-check。
+		//     SearchPanel の catch は throw を「結果なし」に置換するため step (3) 単独では
+		//     assert 違反を green で通してしまう。ここでヒットする正方向 query で再検索し、
+		//     violation なら「結果なし」が返る (throw から SearchPanel が rescue) ことを利用。
+		await pollSearchUntil(page, input, "supercalifragilisticnovel", async () => {
+			return page.getByText("gamma.md", { exact: false }).isVisible();
+		});
 
-				// unhandled error / console.error / main stderr の `[dark-assert]` 系メッセージが
-				// 0 件であることを確認。dark assert throw の Error stack や runDarkAssert warn を検出。
-				expect(pageErrors).toEqual([]);
-				const darkAssertMessages = [
-					...consoleErrors.filter(
-						(s) => s.includes("dark-assert") || s.includes("InvertedIndex superset invariant"),
-					),
-					...mainStderr.filter(
-						(s) => s.includes("dark-assert") || s.includes("InvertedIndex superset invariant"),
-					),
-				];
-				expect(darkAssertMessages).toEqual([]);
-			} finally {
-				await app.close();
-			}
-		} finally {
-			rmSync(userDataDir, { recursive: true, force: true });
-			rmSync(workspaceDir, { recursive: true, force: true });
-		}
+		// unhandled error / console.error / main stderr の `[dark-assert]` 系メッセージが
+		// 0 件であることを確認。dark assert throw の Error stack や runDarkAssert warn を検出。
+		expect(pageErrors).toEqual([]);
+		const darkAssertMessages = [
+			...consoleErrors.filter(
+				(s) => s.includes("dark-assert") || s.includes("InvertedIndex superset invariant"),
+			),
+			...mainStderr.filter(
+				(s) => s.includes("dark-assert") || s.includes("InvertedIndex superset invariant"),
+			),
+		];
+		expect(darkAssertMessages).toEqual([]);
 	});
 });
