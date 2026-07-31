@@ -723,6 +723,28 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			expect(await readFile(victim, "utf8")).toBe("original");
 		});
 
+		it("transient write path が swap されたら再認可が拒否し、capability も消費しない", async () => {
+			// SaveDialog 由来の transient は canonical 一致でしか通らない。ELOOP 起点の再認可は
+			// fresh な realpath を使うので、swap 後の解決先は登録済み canonical と一致せず拒否される。
+			// consume は write 成功後だけなので capability は残る（renderer の withRetry 契約）。
+			const target = join(outside.dir, "exported.md");
+			await writeFile(target, "original", "utf8");
+			await registerTransientWritePath(TEST_WIN, target);
+			// cache を warm にしてから、target を別の外部 file への alias へ差し替える
+			await writeFileImpl(TEST_WIN, target, "exported");
+			await registerTransientWritePath(TEST_WIN, target);
+			const other = join(outside.dir, "other.md");
+			await writeFile(other, "other", "utf8");
+			await rm(target);
+			await symlink(other, target);
+
+			await expect(writeFileImpl(TEST_WIN, target, "overwritten")).rejects.toMatchObject({
+				kind: "PATH_OUTSIDE_WORKSPACE",
+			});
+			expect(await readFile(other, "utf8")).toBe("other");
+			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
+		});
+
 		it("認可後に workspace 内の実体を指す alias へ swap されたら解決先へ書く", async () => {
 			const real = join(workspaceDir, "real.md");
 			await writeFile(real, "before", "utf8");

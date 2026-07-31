@@ -128,8 +128,10 @@ export function clearWorkspaceRootsForWindow(windowId: number): void {
 // 落としたうえで assert 系を呼び直すと、fresh な realpath で両者が分かれる（fs.ts の
 // `withStaleCacheRetry` を参照）。
 //
-// 祖先 entry は触らない: ELOOP が知らせるのは末端 component の状態だけで、祖先の解決結果は
-// 依然有効。cache 全体の鮮度問題そのものは #453 で追跡している。
+// 祖先 entry は触らない: ELOOP が知らせるのは末端 component の状態だけで、祖先を無効化する根拠が
+// 無いため（祖先が stale でないことの保証ではない）。祖先が stale なまま fall-through した場合は
+// 再認可後も同じ末端に戻り、2 度目の ELOOP が伝播して fail-closed になる。cache 全体の鮮度問題
+// そのものは #453 で追跡している。
 export function invalidateRealpathCacheEntry(p: string): void {
 	if (typeof p !== "string" || p.length === 0) return;
 	realpathCache.delete(resolve(p));

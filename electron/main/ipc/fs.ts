@@ -48,8 +48,9 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 // fd に対して I/O し、この窓を閉じる（win32 は flag が 0 に落ちるため従来挙動、#451 で追跡）。
 //
 // canonical の末端が symlink であり得るのは 2 通り:
-//   1. `realpathBestEffort` が祖先 fall-through した（= dangling symlink）。この場合の末端は
-//      解決先を持たないので、`O_NOFOLLOW` の有無に関わらず open は失敗する（ELOOP / ENOENT）
+//   1. `realpathBestEffort` が祖先 fall-through した（= dangling symlink）。read open は解決先が
+//      無いので `O_NOFOLLOW` の有無に関わらず失敗する（ELOOP / ENOENT）が、**O_CREAT を含む
+//      write open は成功して解決先を新規作成してしまう**（次段落の escape がこれ）
 //   2. `realpathCache` が stale で、cache に載った後に実体が symlink へ置き換わった。ここは
 //      正当な alias 化（ユーザーの操作）と swap 攻撃の両方を含むので、ELOOP を受けた側で
 //      cache を捨てて再認可し、fresh な realpath で切り分ける（`withStaleCacheRetry`）
@@ -77,9 +78,10 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //   - `fs:path-exists` / `fs:file-exists`: `access` / `stat` は末端 symlink を辿るため、
 //     workspace 外 path の存在オラクルになり得る
 //
-// **`fs:delete` は「解決先を消す」**: canonical は realpath 済みなので、workspace 内の live な
-// alias を削除すると `shell.trashItem` に渡るのは alias ではなく**実体**の path になる。
-// 境界は破らない（実体も root 内）が、直感には反する。source が dangling symlink なら rename と
+// **`fs:delete` は「解決先を消す」**: canonical は realpath 済みなので、cache が fresh な限り、
+// workspace 内の live な alias を削除すると `shell.trashItem` に渡るのは alias ではなく**実体**の
+// path になる。境界は破らない（実体も root 内）が、直感には反する。cache が stale なら逆に alias
+// 自身が trash へ行く（delete は ELOOP を出さないので `withStaleCacheRetry` の自己修復も働かない）。source が dangling symlink なら rename と
 // 同じ理由で Not found になり削除できない（UX 側の帰結は #454）。
 
 // bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
