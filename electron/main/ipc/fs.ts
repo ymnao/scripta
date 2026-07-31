@@ -1,4 +1,4 @@
-import { promises as fsp } from "node:fs";
+import { constants as fsConstants, promises as fsp } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { shell } from "electron";
 import { mimeForImageExt } from "../../../src/types/image";
@@ -6,6 +6,7 @@ import type { FileEntry } from "../../../src/types/workspace";
 import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
 import { handle } from "../utils/ipc-handle";
+import { NOFOLLOW_FLAG } from "../utils/open-nofollow";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
@@ -20,6 +21,12 @@ import { getFileTreeFilterOptions } from "./settings";
 // 他 handler の上限（OGP body 100KB / git conflict 10MB / GitHub release 100KB）と
 // 同じ「明示的な上限を持つ」思想で揃える。
 export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
+
+// 末端 symlink を拒否する open flag (#418)。詳細は下の doc ブロックと open-nofollow.ts 参照。
+const READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
+// `fsp.writeFile(path, ...)` の既定 flag `"w"` と同じ access mode に O_NOFOLLOW を足したもの。
+const OVERWRITE_FLAGS =
+	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
 
 async function pathExistsAt(absolute: string): Promise<boolean> {
 	try {
@@ -39,6 +46,32 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //   1. 判定と実 I/O が同一パスになるため TOCTOU で symlink を差し替えられても
 //      workspace 外アクセスが成立しない
 //   2. validate + realpath が impl 内で 1 回だけになり、二重正規化のオーバーヘッドが消える
+//
+// **末端 component の pin (#418)**: canonical を渡しても I/O 側 API は path を再 traversal
+// するため、認可 (T1) と I/O (T2) の間に末端を symlink へ差し替えられる窓が残る。read
+// (`fs:read` / `fs:read-base64`) と上書き write (`fs:write`) は `O_NOFOLLOW` 付きで open した
+// fd に対して I/O し、この窓を閉じる（win32 は flag が 0 に落ちるため従来挙動、#451 で追跡）。
+//
+// 正常系が壊れない理由: `assertPathAllowed` / `assertWritePathAllowed` が返す canonical の
+// 末端が symlink であり得るのは `realpathBestEffort` が祖先 fall-through した場合だけで、
+// そのとき末端は dangling symlink か未存在名。どちらも `O_NOFOLLOW` の有無に関わらず open は
+// 失敗する（ELOOP / ENOENT）。workspace 内の正当な symlink note は realpath が実体まで
+// 解決するので、canonical は非 symlink になり flag は発火しない。
+//
+// **`fsp.writeFile` のままでは workspace 外へ escape する**: dangling symlink（workspace 外の
+// **未存在** path を指す）は realpath が ENOENT で throw し、canonical が symlink 自身の path
+// になる。この path は root 内なのでガードを通り、`fsp.writeFile` は symlink を辿って
+// workspace 外に file を**新規作成**してしまう。`O_NOFOLLOW` はこれを ELOOP で拒否する。
+//
+// 変更が要らない経路とその根拠:
+//   - `fs:write-new` / `fs:create-file`: `wx`（O_CREAT|O_EXCL）は末端が symlink なら
+//     dangling でも EEXIST になり、解決先を作らない
+//   - `fs:create-directory`: 対象自体は非 recursive な `mkdir` なので同様に EEXIST
+//   - `fs:rename`: `rename(2)` は末端 symlink を辿らず link 自体を張り替える。source 側が
+//     dangling symlink の場合はそもそも `pathExistsAt`（access は follow する）が false を
+//     返して Source not found で止まる
+//   - `fs:delete`: `shell.trashItem` に canonical を渡すだけで、解決先には触れない。source が
+//     dangling symlink なら rename と同じ理由で Not found（削除できない UX 側の帰結は #454）
 
 // bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
 // 二段防御で size 上限を強制する:
@@ -81,7 +114,7 @@ async function readFileBoundedFromHandle(
 async function readFileImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
 	// 1 回の open で stat と read を済ませて syscall を半減（fs:read は editor の hot path）。
-	const fh = await fsp.open(canonical, "r");
+	const fh = await fsp.open(canonical, READ_FLAGS);
 	try {
 		return await readFileBoundedFromHandle(fh, canonical, MAX_READ_FILE_BYTES);
 	} finally {
@@ -104,7 +137,7 @@ async function readFileBase64Impl(senderId: number, path: string): Promise<strin
 			{ path: canonical },
 		);
 	}
-	const fh = await fsp.open(canonical, "r");
+	const fh = await fsp.open(canonical, READ_FLAGS);
 	try {
 		const stat = await fh.stat();
 		if (stat.size > MAX_READ_FILE_BYTES) {
@@ -135,7 +168,17 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	// ファイルでは metadata 保存と inode 安定性のほうが優先（#100 で wontfix 判断）。
 	// app 内部 data (settings.ts / pdf.ts) は inode 安定性が問題にならないため、
 	// そちらは引き続き write-file-atomic を使用している。
-	await fsp.writeFile(canonical, content, "utf8");
+	//
+	// `fsp.writeFile(canonical, ...)` ではなく O_NOFOLLOW 付き fd への write にしているのは
+	// #418 の escape 封鎖（上の doc ブロック参照）。access mode は writeFile の既定 flag `"w"`
+	// と同一なので、**既存 file への同一 inode 上書きという性質は変わらない**（tmp + rename
+	// 化ではない）。mode も `fsp.open` の既定 0o666 で writeFile と揃う。
+	const fh = await fsp.open(canonical, OVERWRITE_FLAGS);
+	try {
+		await fh.writeFile(content, "utf8");
+	} finally {
+		await fh.close();
+	}
 	// 書き込み成功後にだけ transient capability を消費する。
 	// 失敗時は残り、renderer 側 withRetry で再試行できる。
 	consumeTransientWritePath(senderId, canonical);

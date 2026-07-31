@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -578,5 +578,198 @@ describe("deleteEntryImpl", () => {
 		const path = join(workspaceDir, "f.md");
 		await writeFile(path, "", "utf8");
 		await expect(deleteEntryImpl(OTHER_WIN, path)).rejects.toThrow(/Permission denied/);
+	});
+});
+
+// #418: 認可 (assertPathAllowed / assertWritePathAllowed) から実 I/O までの間に末端 component を
+// symlink へ差し替えられる窓を O_NOFOLLOW で閉じたことの pin。
+//
+// race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って決定的に検証する
+// (open-nofollow.test.ts と同方針)。canonical の末端が symlink のまま残るのは realpathBestEffort が
+// 祖先 fall-through した場合、すなわち **dangling symlink** のときだけなので、それを fixture にする。
+//
+// win32 は O_NOFOLLOW が無く flag が 0 に落ちるため拒否 assert が成立しない (#451 で追跡)。
+describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)", () => {
+	let outside: TempWorkspace;
+
+	beforeEach(async () => {
+		outside = await createTempWorkspace("scripta-fs-outside-");
+	});
+
+	afterEach(async () => {
+		await outside.cleanup();
+	});
+
+	describe("read", () => {
+		it("workspace 内の実体を指す alias は従来どおり読める (O_NOFOLLOW を発火させない)", async () => {
+			const real = join(workspaceDir, "real.md");
+			await writeFile(real, "real body", "utf8");
+			const alias = join(workspaceDir, "alias.md");
+			await symlink(real, alias);
+			// canonical が実体側 (非 symlink) に解決されるため、正当な symlink note は壊れない
+			expect(await readFileImpl(TEST_WIN, alias)).toBe("real body");
+		});
+
+		it("dangling symlink の read は失敗する", async () => {
+			const link = join(workspaceDir, "dangling.md");
+			await symlink(join(outside.dir, "nope.md"), link);
+			await expect(readFileImpl(TEST_WIN, link)).rejects.toThrow();
+		});
+
+		it("workspace 外の実体を指す symlink はガードが拒否する", async () => {
+			const secret = join(outside.dir, "secret.md");
+			await writeFile(secret, "SECRET", "utf8");
+			const link = join(workspaceDir, "evil.md");
+			await symlink(secret, link);
+			// realpath が成功して外部を指すので、O_NOFOLLOW ではなく path-guard が落とす
+			await expect(readFileImpl(TEST_WIN, link)).rejects.toThrow(/outside workspace/);
+		});
+
+		it("認可後に末端を symlink へ swap されたら外部内容を返さない", async () => {
+			// swap 窓 (T1 認可 → T2 I/O) を決定的に再現する。realpathCache は invalidation を
+			// 持たない (#453) ので、1 度読んで cache に載せた path を symlink へ差し替えると
+			// 「ガードは古い canonical を通すが、その canonical の末端は今 symlink」という
+			// 終状態を作れる。plain open ではここで外部内容が返る。
+			const secret = join(outside.dir, "secret.md");
+			await writeFile(secret, "SECRET", "utf8");
+			const path = join(workspaceDir, "note.md");
+			await writeFile(path, "innocent", "utf8");
+			expect(await readFileImpl(TEST_WIN, path)).toBe("innocent");
+
+			await rm(path);
+			await symlink(secret, path);
+
+			const err = await readFileImpl(TEST_WIN, path).catch((e: NodeJS.ErrnoException) => e);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+		});
+
+		it("dangling symlink の read-base64 も失敗する", async () => {
+			const link = join(workspaceDir, "dangling.png");
+			await symlink(join(outside.dir, "nope.png"), link);
+			await expect(readFileBase64Impl(TEST_WIN, link)).rejects.toThrow();
+		});
+	});
+
+	describe("write", () => {
+		it("dangling symlink 経由で workspace 外に file を作らせない", async () => {
+			// #418 の本命 regression test。plain な fsp.writeFile 実装ではこの write が成功し、
+			// symlink の解決先 (workspace 外) に file が新規作成される。
+			const escapeTarget = join(outside.dir, "created-by-escape.md");
+			const link = join(workspaceDir, "note.md");
+			await symlink(escapeTarget, link);
+
+			const err = await writeFileImpl(TEST_WIN, link, "escaped").catch(
+				(e: NodeJS.ErrnoException) => e,
+			);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+			// 主 assert: workspace 外に file が作られていないこと
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("認可後に末端を symlink へ swap されたら外部 file を上書きしない", async () => {
+			// read 側と同じ終状態を write で作る。dangling symlink 経由の escape が「新規作成」
+			// だけなのに対し、この経路は **既存の外部 file の上書き**まで届く。
+			const victim = join(outside.dir, "victim.md");
+			await writeFile(victim, "original", "utf8");
+			const path = join(workspaceDir, "note.md");
+			await writeFile(path, "innocent", "utf8");
+			await writeFileImpl(TEST_WIN, path, "innocent2");
+
+			await rm(path);
+			await symlink(victim, path);
+
+			const err = await writeFileImpl(TEST_WIN, path, "overwritten").catch(
+				(e: NodeJS.ErrnoException) => e,
+			);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+			expect(await readFile(victim, "utf8")).toBe("original");
+		});
+
+		it("workspace 内の実体を指す alias への write は実体を更新する", async () => {
+			const real = join(workspaceDir, "real.md");
+			await writeFile(real, "before", "utf8");
+			const alias = join(workspaceDir, "alias.md");
+			await symlink(real, alias);
+
+			await writeFileImpl(TEST_WIN, alias, "after");
+			expect(await readFile(real, "utf8")).toBe("after");
+		});
+
+		it("上書き write は inode を保つ (#100 の直接書き込み契約)", async () => {
+			// O_NOFOLLOW 化で tmp + rename に倒れていないことの pin。inode が変わると
+			// symlink / hardlink / macOS xattr / 外部 watcher の前提が崩れる。
+			const path = join(workspaceDir, "stable.md");
+			await writeFile(path, "before", "utf8");
+			const before = await stat(path);
+			await writeFileImpl(TEST_WIN, path, "after");
+			const after = await stat(path);
+			expect(after.ino).toBe(before.ino);
+			expect(await readFile(path, "utf8")).toBe("after");
+		});
+	});
+
+	// 以下は O_NOFOLLOW を足さずに閉じている経路。「触っていないから安全」ではなく
+	// open flag / syscall の semantics で閉じていることを pin する (fs.ts の doc と対応)。
+	describe("O_NOFOLLOW 無しで閉じている経路", () => {
+		it("create-file は dangling symlink 上で alreadyExists になる (wx = O_CREAT|O_EXCL)", async () => {
+			const escapeTarget = join(outside.dir, "created-by-create.md");
+			const link = join(workspaceDir, "new.md");
+			await symlink(escapeTarget, link);
+
+			await expect(createFileImpl(TEST_WIN, link)).rejects.toThrow(/already exists/i);
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("write-new は dangling symlink 上で EEXIST になる", async () => {
+			const escapeTarget = join(outside.dir, "created-by-write-new.md");
+			const link = join(workspaceDir, "new2.md");
+			await symlink(escapeTarget, link);
+
+			await expect(writeNewFileImpl(TEST_WIN, link, "x")).rejects.toMatchObject({
+				code: "EEXIST",
+			});
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("create-directory は dangling symlink 上で alreadyExists になる", async () => {
+			const escapeTarget = join(outside.dir, "created-dir");
+			const link = join(workspaceDir, "newdir");
+			await symlink(escapeTarget, link);
+
+			await expect(createDirectoryImpl(TEST_WIN, link)).rejects.toThrow(/already exists/i);
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("rename の source が dangling symlink なら Source not found で止まる", async () => {
+			const escapeTarget = join(outside.dir, "rename-source-target.md");
+			const link = join(workspaceDir, "old.md");
+			await symlink(escapeTarget, link);
+
+			// pathExistsAt (access) が symlink を辿るため、解決先が無い時点で早期 return する。
+			// escape はしないが symlink 自体を rename する手段も無い（UX 側の帰結は #454）。
+			await expect(
+				renameEntryImpl(TEST_WIN, link, join(workspaceDir, "renamed.md")),
+			).rejects.toThrow(/^Source not found:/);
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("rename の target が dangling symlink なら link 自体が置き換わり、解決先は作られない", async () => {
+			const src = join(workspaceDir, "src.md");
+			await writeFile(src, "body", "utf8");
+			const escapeTarget = join(outside.dir, "rename-target.md");
+			const link = join(workspaceDir, "dst.md");
+			await symlink(escapeTarget, link);
+
+			// target 側は「解決先は無いが link は実在する」。rename(2) は末端 symlink を辿らず
+			// link 自体を置き換えるため、ここで通しても escape はしない。ただし pathExistsAt が
+			// follow して false を返すので、実際には rename まで到達せず上書き防止にも掛からない。
+			await renameEntryImpl(TEST_WIN, src, link);
+			// 置き換わったのは workspace 内の link であって、解決先ではない
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+			expect(await readFile(link, "utf8")).toBe("body");
+		});
 	});
 });

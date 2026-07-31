@@ -1,8 +1,8 @@
-import { promises as fsp } from "node:fs";
+import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
-import { readFileUtf8NoFollow } from "./read-nofollow";
+import { NOFOLLOW_FLAG, readFileUtf8NoFollow } from "./open-nofollow";
 
 // #412: index 取り込み read の末端 swap 窓。
 // TOCTOU の race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って
@@ -55,5 +55,38 @@ describe.skipIf(process.platform === "win32")("readFileUtf8NoFollow", () => {
 
 	it("rejects a missing file (呼び手の skip 契約に乗る)", async () => {
 		await expect(readFileUtf8NoFollow(join(ws.dir, "nope.md"))).rejects.toThrow();
+	});
+});
+
+// #418: read 以外 (fs.ts の上書き write) でも同じ flag を合成して使うため、
+// export された flag 単体の契約を pin する。
+describe.skipIf(process.platform === "win32")("NOFOLLOW_FLAG", () => {
+	let ws: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-nofollow-flag-");
+	});
+
+	afterEach(async () => {
+		await ws.cleanup();
+	});
+
+	it("は win32 以外で 0 に落ちない (合成しても access mode を変えない)", () => {
+		expect(NOFOLLOW_FLAG).not.toBe(0);
+		// O_RDONLY は 0 なので、合成した値が flag そのものになることまで確認する
+		expect(fsConstants.O_RDONLY | NOFOLLOW_FLAG).toBe(NOFOLLOW_FLAG);
+	});
+
+	it("write 用 flag に合成すると末端 symlink への書き込みを拒否する", async () => {
+		const real = join(ws.dir, "real.md");
+		await fsp.writeFile(real, "before", "utf8");
+		const alias = join(ws.dir, "alias.md");
+		await fsp.symlink(real, alias);
+
+		const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
+		const err = await fsp.open(alias, flags).catch((e: NodeJS.ErrnoException) => e);
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+		// 解決先は truncate すらされていない
+		expect(await fsp.readFile(real, "utf8")).toBe("before");
 	});
 });

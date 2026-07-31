@@ -14,8 +14,8 @@ import type {
 } from "../../../src/types/wikilink";
 import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
+import { readFileUtf8NoFollow } from "../utils/open-nofollow";
 import { assertPathAllowed, isIndexableResolution, resolveInsideRoot } from "../utils/path-guard";
-import { readFileUtf8NoFollow } from "../utils/read-nofollow";
 import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
@@ -656,7 +656,7 @@ async function searchFilesImpl(
 // idle fill の deps 構築。**inline literal ではなく named function にしてある**のは、
 // #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollow) を
 // 注入する」契約が型では強制できず wiring 側にしか載らないため、test から直接 pin できる
-// ようにするため (plain readFile への退行を殺す)。契約の詳細は read-nofollow.ts の doc。
+// ようにするため (plain readFile への退行を殺す)。契約の詳細は open-nofollow.ts の doc。
 function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHandle): IdleFillDeps {
 	return {
 		listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,

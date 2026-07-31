@@ -217,11 +217,22 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //   - assert 内で realpath を 1 回だけ計算し、その結果を返すことで重複正規化も
 //     避けられる（hot path の syscall 削減）
 //
-// **TOCTOU の限界 (#412)**: 戻り値が path である以上、呼び出し側の I/O は再度 traversal する。
-// user-IPC 系の read (fs.ts の readFileImpl / readFileBase64Impl) は canonical を fd で開くが
-// O_NOFOLLOW は指定していないため、末端 / 中間 dir いずれの swap 窓も残る。index 取り込み経路
-// (resolveInsideRoot) は #412 で末端側を閉じたが、user-IPC 側は脅威モデルが異なる
-// (内容は元々 renderer に返すもの) ため別途判断する — 追跡は #418。
+// **TOCTOU の限界 (#412 / #418)**: 戻り値が path である以上、呼び出し側の I/O は再度 traversal
+// するため、認可 (T1) と I/O (T2) の間に構成要素を symlink へ差し替えられる窓が残る。窓は
+// 末端 component と中間 dir の 2 つに分かれ、**末端側だけが閉じている**:
+//   - **末端 component: 閉じた**。index 取り込み経路 (resolveInsideRoot) は #412 で、
+//     user-IPC 経路 (fs.ts) は #418 で `O_NOFOLLOW` 付き fd の I/O に揃えた。本 API の戻り値を
+//     読む fs:read / fs:read-base64 と、assertWritePathAllowed の戻り値を上書きする fs:write が
+//     対象。fs:write-new / fs:create-file の `wx`、fs:create-directory の非 recursive mkdir、
+//     fs:rename の rename(2) はいずれも末端 symlink を辿らない semantics なので元から閉じている。
+//   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
+//     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
+// **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に
+// なる (#451 で追跡)。
+// **realpathCache 由来の鮮度差は別問題**: 本 API は cache 済みの realpath 結果を使うため、
+// symlink の retarget 直後は canonical が stale になり得る。その場合でも I/O 対象は「cache 時点で
+// root 内と確認済みの実体 path」なので境界は破れないが、ユーザーから見た解決先とはズレる。
+// この鮮度差は #418 のスコープ外として受容しており、判断は #453 で追跡する。
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
@@ -285,7 +296,7 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない。macOS の
 //     `O_NOFOLLOW_ANY` は `fs.constants` に無く magic number 直書き + darwin 限定になるため
-//     採らない (詳細と再検討条件は read-nofollow.ts の doc)。成立には workspace 書込権限と
+//     採らない (詳細と再検討条件は open-nofollow.ts の doc)。成立には workspace 書込権限と
 //     精密なタイミングが要り、payoff は main process の in-memory bigram に限られる
 //     (candidates は renderer に非露出)。
 //   - **hard link 置換は「末端が閉じた」の範囲外**: 同一 filesystem 内で外部 file への
