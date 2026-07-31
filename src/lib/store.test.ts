@@ -240,6 +240,128 @@ describe("store", () => {
 			const settings = await loadSettings();
 			expect(settings.commitMessage).toBe("backup: {{date}}");
 		});
+
+		// #448。migration の disk 書き込みが失敗しただけで全設定が既定値に倒れていた経路。
+		// migration は未適用の状態から始めたいので _schemaVersion を seed せず、legacy theme
+		// key を置いて migration を発火させる。
+		describe("failure handling", () => {
+			// migration の settingsSet が直後の settingsGet に反映されるよう stateful に mock する。
+			function mockStatefulStore(initial: Record<string, unknown>): Record<string, unknown> {
+				const store: Record<string, unknown> = { ...initial };
+				(window.api.settingsGet as Mock).mockImplementation(async (key: string) =>
+					Object.hasOwn(store, key) ? store[key] : undefined,
+				);
+				(window.api.settingsSet as Mock).mockImplementation(async (key: string, value: unknown) => {
+					store[key] = value;
+				});
+				(window.api.settingsDelete as Mock).mockImplementation(async (key: string) => {
+					delete store[key];
+				});
+				return store;
+			}
+
+			beforeEach(() => {
+				useToastStore.setState({ toasts: [] });
+			});
+
+			it("keeps the loaded values when only the migration save fails", async () => {
+				mockStatefulStore({ theme: "dark", loadRemoteImages: false, fontSize: 18 });
+				(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
+
+				const settings = await loadSettings();
+				// disk に載らないだけで settings:set 済みの migration 結果も読み出しも有効。
+				expect(settings.themePreference).toBe("dark");
+				expect(settings.loadRemoteImages).toBe(false);
+				expect(settings.fontSize).toBe(18);
+				expect(window.api.settingsSave).toHaveBeenCalled();
+			});
+
+			// 文言の pin。この経路では _schemaVersion も disk に載らないため次回起動で
+			// migration が再実行される（= saveSetting の「元の値へ戻ります」は成立しない）。
+			it("notifies that the migration will be retried when the migration save fails", async () => {
+				mockStatefulStore({ theme: "dark" });
+				(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
+
+				await loadSettings();
+
+				const toasts = useToastStore.getState().toasts;
+				expect(toasts).toHaveLength(1);
+				expect(toasts[0].type).toBe("error");
+				expect(toasts[0].message).toContain("次回起動時に移行を再試行します");
+			});
+
+			it("still loads settings and skips the save when applyMigrations itself fails", async () => {
+				mockStatefulStore({ theme: "dark", loadRemoteImages: false });
+				(window.api.settingsSet as Mock).mockRejectedValue(new Error("EIO"));
+
+				const settings = await loadSettings();
+				// 移行できなかった key だけが PARSERS 経由で既定値になり、他は読めた値のまま。
+				expect(settings.themePreference).toBe("system");
+				expect(settings.loadRemoteImages).toBe(false);
+				// migration が完了していないので disk write は kick しない。
+				expect(window.api.settingsSave).not.toHaveBeenCalled();
+
+				const toasts = useToastStore.getState().toasts;
+				expect(toasts).toHaveLength(1);
+				expect(toasts[0].message).toContain("設定の移行に失敗しました");
+			});
+
+			it("falls back to defaults with a toast when reading settings fails", async () => {
+				// _schemaVersion だけ読めるようにして migration を skip し、読み出しループ
+				// だけを失敗させる（migration 側の通知と混ざらないようにする）。
+				(window.api.settingsGet as Mock).mockImplementation(async (key: string) => {
+					if (key === "_schemaVersion") return 1;
+					throw new Error("EIO");
+				});
+
+				// 例外を caller へ伝播させない契約は維持する（AppLayout は catch していない）。
+				const settings = await loadSettings();
+				expect(settings.themePreference).toBe("system");
+				expect(settings.loadRemoteImages).toBe(true);
+				expect(settings.fontSize).toBe(14);
+				// 既定値を disk へ書き戻さない（settings.json は無傷のまま）。
+				expect(window.api.settingsSave).not.toHaveBeenCalled();
+
+				const toasts = useToastStore.getState().toasts;
+				expect(toasts).toHaveLength(1);
+				expect(toasts[0].type).toBe("error");
+				expect(toasts[0].message).toContain("設定を読み込めませんでした");
+			});
+
+			it("does not toast when loading succeeds", async () => {
+				mockStatefulStore({ theme: "dark" });
+
+				await loadSettings();
+
+				expect(useToastStore.getState().toasts).toEqual([]);
+			});
+
+			// load 側の通知は saveSetting のスロットル窓を消費しない。共有すると起動時の
+			// 通知が直後のユーザー操作起因の save 失敗通知を黙らせる（#446 の巻き戻り警告が
+			// 再び無通知になる）。
+			it("does not let a load failure suppress a subsequent saveSetting failure", async () => {
+				vi.useFakeTimers();
+				// saveSetting describe が使う基準時刻 (2026-01-01) より前に置く。後続の
+				// describe が過去へ時刻を戻すと now - last が負になり、スロットルが
+				// 「窓の内側」と誤判定して既存 test を巻き添えにするため。
+				vi.setSystemTime(Date.UTC(2025, 0, 1));
+
+				mockStatefulStore({ theme: "dark" });
+				(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
+				await loadSettings();
+				expect(useToastStore.getState().toasts).toHaveLength(1);
+
+				// 同一時刻に save 側の失敗を起こす。窓を共有していると抑止されて 1 件のまま。
+				(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
+				await saveSetting("loadRemoteImages", false);
+
+				const toasts = useToastStore.getState().toasts;
+				expect(toasts).toHaveLength(2);
+				expect(toasts[1].message).toContain("設定をファイルに保存できませんでした");
+
+				vi.useRealTimers();
+			});
+		});
 	});
 
 	describe("saveSetting", () => {

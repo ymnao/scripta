@@ -137,25 +137,65 @@ async function loadOne<K extends keyof AppSettings>(result: AppSettings, key: K)
 	result[key] = PARSERS[key](raw) ?? DEFAULTS[key];
 }
 
+// 起動時 load 経路の失敗通知。startup に 1 回しか走らない経路なのでスロットル窓は持たず、
+// saveSetting 側の窓 (notifySaveFailure) にも相乗りさせない。共有すると起動直後の通知が
+// 続くユーザー操作起因の save 失敗通知を黙らせ、#446 で可視化した巻き戻りが再び
+// 無通知になる（窓を種別ごとに独立させたのと同じ理由）。
+function notifyLoadFailure(message: string): void {
+	useToastStore.getState().addToast("error", message);
+}
+
+// 失敗の粒度を 3 段に分ける。以前は全体を 1 つの try/catch で包んでいたため、migration の
+// disk 書き込みが失敗しただけで **settings.json は読めているのにセッション全体が全設定
+// 既定値** になっていた（#448）。loadRemoteImages も既定 (true = リモート画像許可) へ
+// 戻るが通知は無く、ユーザーには気付けない。
 export async function loadSettings(): Promise<AppSettings> {
+	// 1) 旧 → 新 schema の段階的変換。store-migration.ts の MIGRATIONS に entry を
+	//    追加するだけで新規 migration を組み込める。
+	//    失敗しても読み出しへ進む: 未移行のまま残った key は PARSERS が invalid 判定して
+	//    その key だけ既定値になるため、読めている他の key まで倒す理由がない。
+	let migrated = false;
 	try {
-		// 旧 → 新 schema の段階的変換。store-migration.ts の MIGRATIONS に entry を
-		// 追加するだけで新規 migration を組み込める。何か適用された時のみ disk write を kick。
-		const migrated = await applyMigrations({
+		migrated = await applyMigrations({
 			get: settingsGet,
 			set: settingsSet,
 			delete: settingsDelete,
 		});
-		if (migrated) {
-			await settingsSave();
-		}
+	} catch (err) {
+		notifyLoadFailure(
+			`設定の移行に失敗しました。旧形式のまま残った設定は既定値で読み込まれます: ${translateError(err)}`,
+		);
+	}
 
+	// 2) migration 結果の disk 永続化。何か適用された時のみ kick する。
+	//    ここだけが失敗した場合、migration の settings:set は成功しているので main 側
+	//    cache は移行後の値を持ち **今回の起動中は移行結果が有効**。disk に載らないのは
+	//    _schemaVersion も同じなので、次回起動では migration が再実行される（＝ 値が
+	//    巻き戻るのではなく再試行される）。saveSetting の「次回起動時に元の値へ戻ります」
+	//    はこの経路では成立しないため文言を分ける。
+	if (migrated) {
+		try {
+			await settingsSave();
+		} catch (err) {
+			notifyLoadFailure(
+				`設定の移行結果をファイルに保存できませんでした。今回の起動では有効ですが、次回起動時に移行を再試行します: ${translateError(err)}`,
+			);
+		}
+	}
+
+	// 3) 読み出し本体。ここが失敗するのは settings IPC 自体が機能していない状況なので
+	//    従来どおり全既定値へ倒すが、無通知にはしない。defaults を disk へ書き戻しは
+	//    しないので settings.json は無傷のまま（次回起動で復旧し得る）。
+	try {
 		const result = {} as AppSettings;
 		for (const key of Object.keys(PARSERS) as (keyof AppSettings)[]) {
 			await loadOne(result, key);
 		}
 		return result;
-	} catch {
+	} catch (err) {
+		notifyLoadFailure(
+			`設定を読み込めませんでした。今回は既定値で起動します（設定ファイルは変更されません）: ${translateError(err)}`,
+		);
 		return { ...DEFAULTS };
 	}
 }
