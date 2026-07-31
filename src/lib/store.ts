@@ -169,16 +169,22 @@ export async function loadSettings(): Promise<AppSettings> {
 
 	// 2) migration 結果の disk 永続化。何か適用された時のみ kick する。
 	//    ここだけが失敗した場合、migration の settings:set は成功しているので main 側
-	//    cache は移行後の値を持ち **今回の起動中は移行結果が有効**。disk に載らないのは
-	//    _schemaVersion も同じなので、次回起動では migration が再実行される（＝ 値が
-	//    巻き戻るのではなく再試行される）。saveSetting の「次回起動時に元の値へ戻ります」
-	//    はこの経路では成立しないため文言を分ける。
+	//    cache は移行後の値を持ち **今回の起動中は移行結果が有効**。以降の復旧経路は 2 つ
+	//    あり、どちらに転んでも移行結果は失われない:
+	//      - 後続の persist が 1 回でも成功すれば cache 全体（_schemaVersion 含む）が
+	//        disk に載る。settings:save だけでなく window state の保存 (resize/move の
+	//        debounce) も同じ cache を書き出すので、これは十分起こりやすい
+	//      - 一度も成功しなければ _schemaVersion も disk に無いままなので、次回起動で
+	//        migration が再実行される
+	//    したがって「次回起動時に再試行します」は全ケースで真にならない（前者では
+	//    再実行されない）。saveSetting の「元の値へ戻ります」もこの経路では成立しない。
+	//    文言は両ケースで真な「今回の起動では有効・移行結果は失われない」に絞る。
 	if (migrated) {
 		try {
 			await settingsSave();
 		} catch (err) {
 			notifyLoadFailure(
-				`設定の移行結果をファイルに保存できませんでした。今回の起動では有効ですが、次回起動時に移行を再試行します: ${translateError(err)}`,
+				`設定の移行結果を今はファイルに保存できませんでした。移行結果は今回の起動では有効で、失われることはありません: ${translateError(err)}`,
 			);
 		}
 	}
@@ -194,7 +200,7 @@ export async function loadSettings(): Promise<AppSettings> {
 		return result;
 	} catch (err) {
 		notifyLoadFailure(
-			`設定を読み込めませんでした。今回は既定値で起動します（設定ファイルは変更されません）: ${translateError(err)}`,
+			`設定を読み込めませんでした。今回は既定値で起動します（既定値をファイルへ書き戻すことはありません）: ${translateError(err)}`,
 		);
 		return { ...DEFAULTS };
 	}

@@ -454,7 +454,7 @@ new BrowserWindow({
 
 1. **型の更新** — `src/lib/store.ts` の `AppSettings` interface に新フィールドを追加し、必要に応じて union 型 alias も export
 2. **DEFAULTS の更新** — `DEFAULTS` オブジェクトに既定値を追加
-3. **migration の追加（必要な場合のみ）** — `src/lib/store-migration.ts` の `MIGRATIONS` に 1 entry を追加し `version` を +1。`run(ctx)` 内で `ctx.get` / `ctx.set` / `ctx.delete` を使い旧キーを新キーへ変換する
+3. **migration の追加（必要な場合のみ）** — `src/lib/store-migration.ts` の `MIGRATIONS` に 1 entry を追加し `version` を +1。`run(ctx)` 内で `ctx.get` / `ctx.set` / `ctx.delete` を使い旧キーを新キーへ変換する。**`run` は「部分適用済みの状態からの再実行」に耐える冪等な実装にすること** — `run` が途中で throw した場合、成功済みの `ctx.set` は main 側 cache に残る一方で `_schemaVersion` は bump されないため、次回起動で同じ migration が半分適用済みの状態に対して再実行される（`loadSettings` は migration の失敗で全設定を既定値に倒さず読み出しを継続する。#448）。v1 の「変換済みなら skip する」ガードがその形
 4. **テストの追加** — `loadSettings()` の defaults / stored value テスト（`src/lib/store.test.ts`）に新フィールドを追加。migration を入れた場合は `src/lib/store-migration.test.ts` に変換ケースを追加し、`e2e/electron/settings-migration.electron.spec.ts` で実 IPC 越しのシナリオを 1 件 verify
 
 `_schemaVersion` は migration の連鎖を成立させるための**内部フィールド**で、`settings.json` 上のみに書かれ、`AppSettings` には surface しない。`MIGRATIONS` 配列に `version: N` の entry が追加されるたびに `LATEST_SCHEMA_VERSION` が +1 され、起動時の `applyMigrations()` が「現在の `_schemaVersion` 〜 LATEST」の pending 分のみ順次適用する。

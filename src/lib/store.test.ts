@@ -8,6 +8,24 @@ import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, loadSettings, saveSetting } from ".
 
 describe("store", () => {
 	describe("loadSettings", () => {
+		// migration の効果 (settingsSet) が直後の settingsGet に反映されるよう stateful に
+		// mock する。default mock は stateless で、migration が書き込んだ
+		// themePreference="dark" を次の get が拾えない。戻り値の store をそのまま覗けば
+		// settings.json 側の最終状態も検証できる。
+		function mockStatefulStore(initial: Record<string, unknown>): Record<string, unknown> {
+			const store: Record<string, unknown> = { ...initial };
+			(window.api.settingsGet as Mock).mockImplementation(async (key: string) =>
+				Object.hasOwn(store, key) ? store[key] : undefined,
+			);
+			(window.api.settingsSet as Mock).mockImplementation(async (key: string, value: unknown) => {
+				store[key] = value;
+			});
+			(window.api.settingsDelete as Mock).mockImplementation(async (key: string) => {
+				delete store[key];
+			});
+			return store;
+		}
+
 		it("returns defaults when store has no values", async () => {
 			const settings = await loadSettings();
 			expect(settings).toEqual({
@@ -91,19 +109,7 @@ describe("store", () => {
 		});
 
 		it("migrates legacy theme key to themePreference and bumps _schemaVersion on disk", async () => {
-			// migration の効果 (settingsSet) が直後の settingsGet に反映されるよう
-			// stateful な store を mock する。default mock は stateless で、
-			// migration が書き込んだ themePreference="dark" を次の get が拾えない。
-			const store: Record<string, unknown> = { theme: "dark" };
-			(window.api.settingsGet as Mock).mockImplementation(async (key: string) =>
-				Object.hasOwn(store, key) ? store[key] : undefined,
-			);
-			(window.api.settingsSet as Mock).mockImplementation(async (key: string, value: unknown) => {
-				store[key] = value;
-			});
-			(window.api.settingsDelete as Mock).mockImplementation(async (key: string) => {
-				delete store[key];
-			});
+			const store = mockStatefulStore({ theme: "dark" });
 
 			const settings = await loadSettings();
 			expect(settings.themePreference).toBe("dark");
@@ -245,21 +251,6 @@ describe("store", () => {
 		// migration は未適用の状態から始めたいので _schemaVersion を seed せず、legacy theme
 		// key を置いて migration を発火させる。
 		describe("failure handling", () => {
-			// migration の settingsSet が直後の settingsGet に反映されるよう stateful に mock する。
-			function mockStatefulStore(initial: Record<string, unknown>): Record<string, unknown> {
-				const store: Record<string, unknown> = { ...initial };
-				(window.api.settingsGet as Mock).mockImplementation(async (key: string) =>
-					Object.hasOwn(store, key) ? store[key] : undefined,
-				);
-				(window.api.settingsSet as Mock).mockImplementation(async (key: string, value: unknown) => {
-					store[key] = value;
-				});
-				(window.api.settingsDelete as Mock).mockImplementation(async (key: string) => {
-					delete store[key];
-				});
-				return store;
-			}
-
 			beforeEach(() => {
 				useToastStore.setState({ toasts: [] });
 			});
@@ -287,7 +278,7 @@ describe("store", () => {
 				const toasts = useToastStore.getState().toasts;
 				expect(toasts).toHaveLength(1);
 				expect(toasts[0].type).toBe("error");
-				expect(toasts[0].message).toContain("次回起動時に移行を再試行します");
+				expect(toasts[0].message).toContain("失われることはありません");
 			});
 
 			it("still loads settings and skips the save when applyMigrations itself fails", async () => {
