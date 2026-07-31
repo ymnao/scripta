@@ -1,3 +1,4 @@
+import { useToastStore } from "../stores/toast";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../types/file-tree";
 import type { SyncMethod } from "../types/git-sync";
 import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
@@ -8,6 +9,7 @@ import {
 	SLIDE_THUMBNAILS_VISIBLE_DEFAULT,
 } from "../types/slide";
 import { settingsDelete, settingsGet, settingsSave, settingsSet } from "./commands";
+import { translateError } from "./errors";
 import { applyMigrations } from "./store-migration";
 
 export { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS };
@@ -164,12 +166,45 @@ export async function loadSettings(): Promise<AppSettings> {
 // これを渡し、その他 caller (theme / AppLayout / useUpdateCheck) は直接呼ぶ。
 // workspacePath の永続化だけは main 側 workspace:set ハンドラが担う (renderer からの
 // settings:set は reserved key として拒否される)。
+//
+// Toast.tsx の AUTO_DISMISS_MS と同値。恒常的な disk 障害下で設定変更が連続した場合
+// (slide separator のキーリピートは 1 打鍵 1 save) に同じ toast が積み上がるのを防ぎ、
+// 「表示中の失敗 toast は常に高々 1 件」にする。
+const SAVE_FAILURE_TOAST_THROTTLE_MS = 5000;
+let lastSaveFailureToastAt = 0;
+
+function notifySaveFailure(message: string): void {
+	const now = Date.now();
+	if (now - lastSaveFailureToastAt < SAVE_FAILURE_TOAST_THROTTLE_MS) return;
+	lastSaveFailureToastAt = now;
+	useToastStore.getState().addToast("error", message);
+}
+
+// 失敗は caller へ伝播させず（caller 6 箇所は全て戻り値を見ておらず、useUpdateCheck は
+// catch なしで await するため throw 化は即座に caller を壊す）toast で通知する。#446 の
+// 核心は「settings:set は成功したが settings:save だけ失敗した」ケースで、main 側 cache は
+// settings:set 時点で更新済みのため **UI もそのセッションの挙動も新しい値・disk だけ旧値**
+// が成立する。プライバシー設定 (loadRemoteImages) では「OFF にしたはずが次回起動で ON」
+// という気付けない露出になるので、この 2 つの失敗は文言を分けて区別する。
+//
+// main 側 cache の巻き戻しは行わない: persist() は cache 全体を書き出すため、後続の設定
+// 変更が 1 回でも成功すれば失敗した値も一緒に disk へ乗って自然治癒する。巻き戻すと
+// 「UI は新値・cache は旧値」の逆向き不整合ができ、次の成功 save が UI と異なる値を
+// 永続化してしまう。
 export async function saveSetting(key: string, value: unknown): Promise<void> {
 	try {
 		await settingsSet(key, value);
+	} catch (err) {
+		// 値が一切適用されていない（main の cache も未更新）ケース。
+		notifySaveFailure(`設定の保存に失敗しました: ${translateError(err)}`);
+		return;
+	}
+	try {
 		await settingsSave();
-	} catch {
-		// Ignore save errors — app should continue working
+	} catch (err) {
+		notifySaveFailure(
+			`設定をファイルに保存できませんでした。次回起動時に元の値へ戻ります: ${translateError(err)}`,
+		);
 	}
 }
 

@@ -1,4 +1,5 @@
-import { describe, expect, it, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { useToastStore } from "../stores/toast";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS, loadSettings, saveSetting } from "./store";
 
 // test-setup.ts の beforeEach が `window.api` を毎回新しい `createApiMock()` で置き換えるので、
@@ -242,6 +243,22 @@ describe("store", () => {
 	});
 
 	describe("saveSetting", () => {
+		// notifySaveFailure のスロットルはモジュールスコープの timestamp を持つため、
+		// test 間で状態がリークする。各 test の開始時刻を前の test から十分離すことで
+		// 「前の test が出した toast に抑止される」干渉を防ぐ。
+		let baseTime = Date.UTC(2026, 0, 1);
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+			baseTime += 60_000;
+			vi.setSystemTime(baseTime);
+			useToastStore.setState({ toasts: [] });
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
 		it("persists key/value to settings store", async () => {
 			await saveSetting("themePreference", "dark");
 			expect(window.api.settingsSet).toHaveBeenCalledWith("themePreference", "dark");
@@ -255,10 +272,50 @@ describe("store", () => {
 			expect(window.api.settingsSet).toHaveBeenCalledWith("sidebarVisible", false);
 		});
 
-		it("silently ignores errors from underlying settingsSet", async () => {
+		it("does not toast on success", async () => {
+			await saveSetting("fontSize", 20);
+			expect(useToastStore.getState().toasts).toEqual([]);
+		});
+
+		it("notifies via toast and skips settingsSave when settingsSet fails", async () => {
 			(window.api.settingsSet as Mock).mockRejectedValueOnce(new Error("EIO"));
-			// 例外が伝播しないことだけ確認 (アプリの継続動作を担保)
+			// 例外が伝播しないこと (アプリの継続動作を担保) は #446 以降も維持する契約
 			await expect(saveSetting("fontSize", 20)).resolves.toBeUndefined();
+
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0].type).toBe("error");
+			expect(toasts[0].message).toContain("設定の保存に失敗しました");
+			// set が失敗した時点で値は一切適用されていないので save は試みない
+			expect(window.api.settingsSave).not.toHaveBeenCalled();
+		});
+
+		// #446 の核心。settingsSet は成功しているので main 側 cache（= そのセッションの
+		// 挙動）と UI は新値、disk だけ旧値。次回起動で無通知に巻き戻るのを防ぐため、
+		// set 失敗とは文言を変えて巻き戻りを明示する。
+		it("notifies that the value will revert when only settingsSave fails", async () => {
+			(window.api.settingsSave as Mock).mockRejectedValueOnce(new Error("ENOSPC"));
+			await expect(saveSetting("loadRemoteImages", false)).resolves.toBeUndefined();
+
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0].type).toBe("error");
+			expect(toasts[0].message).toContain("次回起動時に元の値へ戻ります");
+			expect(window.api.settingsSet).toHaveBeenCalledWith("loadRemoteImages", false);
+		});
+
+		it("throttles repeated failure toasts within the dismiss window", async () => {
+			(window.api.settingsSave as Mock).mockRejectedValue(new Error("ENOSPC"));
+
+			await saveSetting("fontSize", 20);
+			vi.setSystemTime(baseTime + 4999);
+			await saveSetting("fontSize", 21);
+			expect(useToastStore.getState().toasts).toHaveLength(1);
+
+			// 窓を抜けたら次の失敗は改めて通知される（恒常的な障害を黙らせない）
+			vi.setSystemTime(baseTime + 5000);
+			await saveSetting("fontSize", 22);
+			expect(useToastStore.getState().toasts).toHaveLength(2);
 		});
 	});
 });
