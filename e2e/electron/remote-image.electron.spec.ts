@@ -101,15 +101,23 @@ test.describe("remote image policy (electron)", () => {
 		// loadRemoteImages は seed しない = 未設定。既定 true が効くこと自体の pin。
 		seedSettings(userDataDir, { workspacePath: workspaceDir, sidebarVisible: true });
 
+		const failures = new Map<string, string>();
 		const { page } = await launch();
+		page.on("requestfailed", (req) => {
+			failures.set(req.url(), req.failure()?.errorText ?? "");
+		});
 		await recordCspViolations(page);
 		await page.getByLabel("note.md file").click();
 
-		// 名前解決に失敗して fallback にはなるが、それは CSP による遮断ではない。
-		// 「ポリシー上は許可されている」ことを violation の不在で pin する
-		// （実際にロードされるかは外部疎通に依存するので assert しない）。
+		// 同期点は **request が renderer を出たこと**（positive な成功状態）で取る。
+		// violation 配列が空であることを poll しても、記録前の初回評価で即 pass して
+		// しまい待ちにならない。到達先は解決されないので失敗するが、ここで見たいのは
+		// 「CSP が通した」ことなので errorText の中身ではなく発生自体を待つ。
+		await expect.poll(() => failures.get(REMOTE_IMAGE_URL)).toEqual(expect.any(String));
+
+		// request が出た後で violation が無い = CSP は許可していた。
+		expect(await readCspViolations(page)).toEqual([]);
 		await expect(page.locator(".cm-image-fallback")).toHaveCount(1);
-		await expect.poll(() => readCspViolations(page)).toEqual([]);
 	});
 
 	test("起動後に OFF へ切り替えると reload なしで webRequest が遮断する", async ({
@@ -152,7 +160,8 @@ test.describe("remote image policy (electron)", () => {
 			.toContain(BLOCKED_BY_CLIENT);
 
 		// この document の CSP は起動時の（https: を許可した）ままなので、
-		// 遮断したのは webRequest 層だけだと言い切れる。
+		// 遮断したのは webRequest 層だけだと言い切れる。上の poll が
+		// requestfailed の到着まで待っているので、ここは待ちではなく確定した読み取り。
 		expect(await readCspViolations(page)).toEqual([]);
 	});
 });
