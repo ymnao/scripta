@@ -18,8 +18,8 @@ export interface ExternalConflict {
 export type ExternalFileConflictTabApi = Pick<
 	TabContentManager,
 	| "getLastSavedContent"
+	| "applyExternalReload"
 	| "applyCacheReload"
-	| "applyActiveReload"
 	| "applyConflictReload"
 	| "dropTab"
 	| "isCachedTabClean"
@@ -48,8 +48,8 @@ export interface ExternalFileConflictState {
 export function useExternalFileConflict({
 	onTreeChange,
 	getLastSavedContent,
+	applyExternalReload,
 	applyCacheReload,
-	applyActiveReload,
 	applyConflictReload,
 	dropTab,
 	isCachedTabClean,
@@ -123,8 +123,7 @@ export function useExternalFileConflict({
 				} else {
 					readFile(path)
 						.then((loaded) => {
-							applyCacheReload(path, loaded);
-							applyActiveReload(path, loaded);
+							applyExternalReload(path, loaded);
 						})
 						.catch((err) => {
 							console.error("Failed to reload file:", err);
@@ -146,7 +145,7 @@ export function useExternalFileConflict({
 				}
 			}
 		},
-		[applyCacheReload, applyActiveReload, isCachedTabClean],
+		[applyExternalReload, applyCacheReload, isCachedTabClean],
 	);
 
 	useFileWatcher({

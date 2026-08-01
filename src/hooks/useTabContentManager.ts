@@ -63,10 +63,18 @@ export interface TabContentManager {
 	getCachedContent: (path: string) => string | null;
 	/** 次にそのファイルが開かれたときに適用する go-to-line 要求を積む。 */
 	queueGoToLine: (request: GoToLineRequest) => void;
-	/** watcher が観測した外部変更を cache にだけ反映する (エディタは触らない)。 */
+	/**
+	 * active タブが外部で書き換えられたときの反映。cache を更新し、
+	 * まだ active なら エディタにも反映する (自分の write なら何もしない)。
+	 */
+	applyExternalReload: (path: string, loaded: string) => void;
+	/**
+	 * **非 active** タブの外部変更を cache にだけ反映する。エディタを触らないのは意図的:
+	 * readFile の解決を待つ間にそのタブが active になっていても、ユーザーが今編集している
+	 * 画面を勝手に書き換えないという方針 (dirty な内容は cache に残り、タブ切替時に解決する)。
+	 * active タブには applyExternalReload を使うこと。
+	 */
 	applyCacheReload: (path: string, loaded: string) => void;
-	/** 外部変更を active タブのエディタへ反映する。自分の write なら何もしない。 */
-	applyActiveReload: (path: string, loaded: string) => void;
 	/** コンフリクトダイアログの「再読み込み」。cache を全置換して dirty を落とす。 */
 	applyConflictReload: (path: string, loaded: string) => void;
 	/** cache からタブの内容を捨てる (タブ自体の close は呼び出し側の責務)。 */
@@ -80,7 +88,7 @@ export interface TabContentManager {
  *
  * 外部からの書き換え (file watcher / コンフリクト解決) は cache と savedContent の内部表現に
  * 触れる必要があるが、それらを ref のまま外へ配ると内部表現がそのまま契約になってしまう。
- * そのため applyCacheReload / applyActiveReload / applyConflictReload / dropTab という
+ * そのため applyExternalReload / applyCacheReload / applyConflictReload / dropTab という
  * 命令的 API だけを公開し、useExternalFileConflict はそれを呼ぶ。
  */
 export function useTabContentManager({
@@ -494,7 +502,10 @@ export function useTabContentManager({
 	);
 
 	// unmount 後に window close の保存処理を続行しないためのフラグ。
-	// 旧実装で onWindowCloseRequested effect が持っていた `cancelled` に対応する。
+	// 旧実装で onWindowCloseRequested effect が持っていた `cancelled` に対応し、
+	// await を跨いだ後の store 書き込みを止める役割はここにしかない
+	// (呼び出し側の cancelled は throw と scratchpad 保存を止めるだけで、
+	// saveAllTabs の内部には届かないため両方が要る)。
 	const mountedRef = useRef(true);
 	useEffect(() => {
 		mountedRef.current = true;
@@ -568,8 +579,9 @@ export function useTabContentManager({
 		pendingGoToLineRef.current = request;
 	}, []);
 
-	const applyActiveReload = useCallback(
+	const applyExternalReload = useCallback(
 		(path: string, loaded: string) => {
+			setCacheFromReload(path, loaded);
 			// Only update editor state if this file is still the active tab
 			if (useWorkspaceStore.getState().activeTabPath !== path) return;
 			// Compare with last written content (processed) to detect our own saves
@@ -579,7 +591,7 @@ export function useTabContentManager({
 			setLoadedDoc(loaded);
 			setEditorKey((k) => k + 1);
 		},
-		[markSaved],
+		[markSaved, setCacheFromReload],
 	);
 
 	const applyConflictReload = useCallback(
@@ -625,8 +637,8 @@ export function useTabContentManager({
 		saveAllTabs,
 		getCachedContent,
 		queueGoToLine,
+		applyExternalReload,
 		applyCacheReload: setCacheFromReload,
-		applyActiveReload,
 		applyConflictReload,
 		dropTab,
 		isCachedTabClean,
