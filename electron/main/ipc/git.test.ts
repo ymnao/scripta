@@ -429,7 +429,8 @@ describe("resolveConflictImpl", () => {
 
 	// `/symbolic link/` の正規表現では **ELOOP の生メッセージ** (`too many symbolic links
 	// encountered`) にも一致してしまい、「main 側で文言に正規化している」ことを pin できない
-	// (mutation 検証で実際に生き残った)。#455 の test は完全一致で固定する。
+	// (mutation 検証で実際に生き残った)。#455 の test は全文で固定する (`toThrow(string)` は
+	// 部分一致だが、生 ELOOP message はこの全文を含まないので判別力がある)。
 	const SYMLINK_REFUSAL = "file_path is a symbolic link; refusing to write";
 
 	// #455: 末端が workspace 外を指す symlink のケース。上の test は「拒否されること」しか
@@ -439,6 +440,7 @@ describe("resolveConflictImpl", () => {
 		async () => {
 			const dir = await newWorkspace();
 			const outside = await makeCanonicalTempDir("scripta-git-victim-");
+			dirsToCleanup.push(outside);
 			const victim = join(outside, "victim.md");
 			await fsp.writeFile(victim, "ORIGINAL", "utf8");
 			await fsp.symlink(victim, join(dir, "link.md"));
@@ -459,6 +461,7 @@ describe("resolveConflictImpl", () => {
 		async () => {
 			const dir = await newWorkspace();
 			const outside = await makeCanonicalTempDir("scripta-git-victim-swap-");
+			dirsToCleanup.push(outside);
 			const victim = join(outside, "victim.md");
 			await fsp.writeFile(victim, "ORIGINAL", "utf8");
 			const target = join(dir, "swapped.md");

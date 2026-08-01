@@ -117,26 +117,41 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
  * **末端 symlink を ELOOP で拒否しない**点が `writeFileUtf8NoFollow` との差になるが、
  * 経路の意味論は割れない: 呼び手が渡す canonical は認可時に realpath 済みで、ユーザーが
  * 張った正当な alias は **その時点で実体へ解決されている**。canonical の末端が symlink で
- * ありうるのは swap か realpath cache の stale だけ (#453) で、そのとき symlink を置き換える
- * のは escape ではない (外部には届かない)。
+ * ありうるのは (a) 認可後の swap、(b) realpath cache の stale (#453)、(c) 認可時点で既に
+ * dangling だった symlink (`realpathBestEffort` が祖先 fall-through して symlink 自身の path を
+ * 返す) の 3 つで、いずれも symlink を置き換えるのは escape ではない (外部には届かない)。
  *
  * tmp は destination と同じ dir に作る (rename は同一 filesystem 内でしか原子的でないため)。
- * 既存 file があれば mode を引き継ぐ (`write-file-atomic` と同じ挙動)。
+ * destination が既存の**通常 file** なら permission bit (`& 0o777`) を引き継ぐ。
+ * `write-file-atomic` は mask せず setuid/setgid/sticky まで引き継ぐが、ここは落とす
+ * (PDF 出力に特殊 bit を残す理由が無く、落とす方が安全側)。destination が symlink の場合は
+ * **引き継がない**: `stat` は symlink を follow するので、swap 時に攻撃者が指した外部 file の
+ * mode を着地 file に持ち込めてしまう。`lstat` + `isFile()` で判定する。
+ *
+ * **失った保証**: `write-file-atomic` の signal-exit hook が無いので、open 〜 rename の間 (ms
+ * 単位) に SIGTERM / SIGINT で死ぬと tmp が出力先 dir に残る。名前は dot prefix なので
+ * `showHidden` が既定 (false) の file tree には出ないが、OS の file manager では見える。
  */
 export async function writeFileAtomicNoFollow(path: string, data: Buffer): Promise<void> {
-	// dot prefix で file tree UI から隠し、`.tmp` suffix と乱数で衝突を避ける。衝突しても
+	// dot prefix で既定の file tree から隠し、`.tmp` suffix と乱数で衝突を避ける。衝突しても
 	// `O_EXCL` が EEXIST で落とすので、既存 entry を掴んで壊すことはない。
 	const tmpPath = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
-	// 既存 file の permission を引き継ぐ。stat 失敗 (未存在 / dangling) なら open の既定
-	// mode (0o666 & ~umask) のままにする。
-	const inheritedMode = await fsp.stat(path).then(
-		(st) => st.mode & 0o777,
+	// destination が既存の通常 file なら permission を引き継ぐ。symlink / dir / 未存在なら
+	// 引き継がず、既定 mode (0o666 & ~umask) にする (doc の「mode 継承」節を参照)。
+	const inheritedMode = await fsp.lstat(path).then(
+		(st) => (st.isFile() ? st.mode & 0o777 : null),
 		() => null,
 	);
+	// **open 時点で** 継承 mode を渡す。書いてから chmod で狭めると、内容入りの tmp が一瞬
+	// 広い mode で存在する窓ができる (0o600 の file を置き換えるケース)。open の mode は
+	// umask で削られるだけなので、広げ直しは書き込み後の chmod が担う。
+	const fh = await fsp.open(tmpPath, NOFOLLOW_CREATE_EXCLUSIVE_FLAGS, inheritedMode ?? 0o666);
+	// open が成功した = tmp は自分が作ったものなので、以降の失敗では消してよい。EEXIST 等で
+	// open 自体が落ちた場合はここに来ないため、他者の entry を巻き込むことはない。
 	try {
-		const fh = await fsp.open(tmpPath, NOFOLLOW_CREATE_EXCLUSIVE_FLAGS);
 		try {
 			await fh.writeFile(data);
+			// umask に削られた bit を戻す。
 			if (inheritedMode !== null) await fh.chmod(inheritedMode);
 			// rename 前に data を disk へ落とす。ここを抜くと「rename は済んだが中身が
 			// 空」という電源断時の壊れ方が残り、atomic write の意味が薄れる。

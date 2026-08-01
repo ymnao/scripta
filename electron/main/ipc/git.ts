@@ -30,6 +30,13 @@ import { gitError } from "../utils/structured-error";
 // `git status --porcelain` の prefix で conflict（unmerged stage）を判定する。
 const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD "]);
 
+// resolveConflict の modify 分岐が symlink 由来の書き込みを拒否するときの文言。lstat 検査
+// (事前) と `O_NOFOLLOW` write の ELOOP (原子的) の 2 経路が拒否しうるため、renderer からは
+// 1 種類の失敗に見えるよう定数で揃える (#455)。ELOOP は末端 symlink 以外 (中間 dir の
+// symlink loop) でも起きるので、文言はその corner も含めて「symlink 由来の拒否」に丸める
+// (fail-closed であることは変わらない)。
+const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
+
 async function checkAvailableImpl(): Promise<boolean> {
 	try {
 		await createGitNoCwd().version();
@@ -232,7 +239,7 @@ async function resolveConflictImpl(
 	try {
 		const st = await fsp.lstat(target);
 		if (st.isSymbolicLink()) {
-			throw new Error("file_path is a symbolic link; refusing to write");
+			throw new Error(SYMLINK_WRITE_REFUSED);
 		}
 	} catch (e) {
 		if (!isErrnoCode(e, "ENOENT")) throw e;
@@ -246,13 +253,11 @@ async function resolveConflictImpl(
 	// `fsp.writeFile` は path を再 traversal するため、上の lstat 後に末端を symlink へ
 	// 差し替えられると解決先（workspace 外を含む）へ書けてしまう。`O_NOFOLLOW` 付き fd への
 	// write に畳んで検査と I/O を 1 syscall にする（#455、fs:write と同じ機構）。
-	// ELOOP は「末端が symlink だった」ことしか意味しないので、lstat 側と同じ文言に揃えて
-	// renderer からは 1 種類の失敗に見えるようにする。
 	try {
 		await writeFileUtf8NoFollow(canonicalTarget, content);
 	} catch (e) {
 		if (isErrnoCode(e, "ELOOP")) {
-			throw new Error("file_path is a symbolic link; refusing to write");
+			throw new Error(SYMLINK_WRITE_REFUSED);
 		}
 		throw e;
 	}

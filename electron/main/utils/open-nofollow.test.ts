@@ -155,7 +155,7 @@ describe.skipIf(process.platform === "win32")("writeFileAtomicNoFollow", () => {
 		expect((await fsp.stat(p)).ino).not.toBe(before.ino);
 	});
 
-	it("既存 file の permission を引き継ぐ", async () => {
+	it("既存 file の permission を引き継ぐ (狭い側)", async () => {
 		const p = join(ws.dir, "mode.pdf");
 		await fsp.writeFile(p, "before");
 		await fsp.chmod(p, 0o600);
@@ -163,6 +163,45 @@ describe.skipIf(process.platform === "win32")("writeFileAtomicNoFollow", () => {
 		await writeFileAtomicNoFollow(p, Buffer.from("after"));
 
 		expect((await fsp.stat(p)).mode & 0o777).toBe(0o600);
+	});
+
+	it("既存 file の permission を引き継ぐ (umask に削られる広い側)", async () => {
+		// 0o600 側だけだと open の mode 引数で足りてしまい、書き込み後の chmod が
+		// 消えても気付けない。既定 umask (022) に削られる 0o666 を使うと、chmod が
+		// 無いと 0o644 になるので継承の両方向を pin できる。
+		const p = join(ws.dir, "mode-wide.pdf");
+		await fsp.writeFile(p, "before");
+		await fsp.chmod(p, 0o666);
+
+		await writeFileAtomicNoFollow(p, Buffer.from("after"));
+
+		expect((await fsp.stat(p)).mode & 0o777).toBe(0o666);
+	});
+
+	it("末端が symlink なら mode を引き継がない (攻撃者に着地 file の mode を選ばせない)", async () => {
+		const victim = join(outside.dir, "victim.pdf");
+		await fsp.writeFile(victim, "ORIGINAL");
+		await fsp.chmod(victim, 0o777);
+		const dest = join(ws.dir, "wide.pdf");
+		await fsp.symlink(victim, dest);
+
+		await writeFileAtomicNoFollow(dest, Buffer.from("NEW"));
+
+		expect((await fsp.stat(dest)).mode & 0o777).not.toBe(0o777);
+		expect((await fsp.stat(victim)).mode & 0o777).toBe(0o777);
+	});
+
+	it("末端が dangling symlink でも symlink 自身を置き換える", async () => {
+		// 認可時点で既に dangling だったケース (realpathBestEffort が祖先 fall-through して
+		// symlink 自身の path を canonical として返す) の pin。
+		const dest = join(ws.dir, "dangling.pdf");
+		await fsp.symlink(join(outside.dir, "nope.pdf"), dest);
+
+		await writeFileAtomicNoFollow(dest, Buffer.from("NEW"));
+
+		expect((await fsp.lstat(dest)).isSymbolicLink()).toBe(false);
+		expect(await fsp.readFile(dest, "utf8")).toBe("NEW");
+		expect(await fsp.readdir(outside.dir)).toEqual([]);
 	});
 
 	it("未存在の path は新規作成し、tmp file を残さない", async () => {
