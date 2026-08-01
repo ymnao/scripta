@@ -117,6 +117,9 @@ const KEYS = [
 	"F5",
 ];
 
+/** slide-show が F5 を横取りしない条件になる modal の open flag。 */
+const MODAL_FLAGS = ["commandPaletteOpen", "exportOpen", "settingsOpen", "helpOpen"] as const;
+
 describe("buildAppShortcuts", () => {
 	it("同一イベントに複数のエントリがマッチしない (配列順に依存しない)", () => {
 		const shortcuts = buildAppShortcuts(makeDeps());
@@ -182,14 +185,12 @@ describe("buildAppShortcuts", () => {
 		expect(matchingIds(shortcuts, makeEvent(key, mods))).toEqual([id]);
 	});
 
-	it.each([
-		["commandPaletteOpen"],
-		["exportOpen"],
-		["settingsOpen"],
-		["helpOpen"],
-	] as const)("slide-show は %s の間は F5 を横取りしない", (flag) => {
-		const shortcuts = buildAppShortcuts(makeDeps({ [flag]: true }));
-		expect(matchingIds(shortcuts, makeEvent("F5"))).toEqual([]);
+	it("slide-show は他の modal が開いている間は F5 を横取りしない", () => {
+		for (const flag of MODAL_FLAGS) {
+			const shortcuts = buildAppShortcuts(makeDeps({ [flag]: true }));
+			// どの flag で落ちたか分かるよう flag を assert 対象に含める
+			expect({ flag, ids: matchingIds(shortcuts, makeEvent("F5")) }).toEqual({ flag, ids: [] });
+		}
 	});
 
 	it("slide-show は既に開いている間 / IME 合成中は F5 を横取りしない", () => {
