@@ -9,7 +9,7 @@ import {
 	useState,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useFileWatcher } from "../../hooks/useFileWatcher";
+import { useExternalFileConflict } from "../../hooks/useExternalFileConflict";
 import { useGitSync } from "../../hooks/useGitSync";
 import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
 import { useShortcuts } from "../../hooks/useShortcuts";
@@ -79,7 +79,6 @@ export function AppLayout() {
 		activeTabId,
 		workspacePath,
 		setWorkspacePath,
-		closeTab,
 		setActiveTabById,
 		openTab,
 		navigateInTab,
@@ -96,7 +95,6 @@ export function AppLayout() {
 			activeTabId: s.activeTabId,
 			workspacePath: s.workspacePath,
 			setWorkspacePath: s.setWorkspacePath,
-			closeTab: s.closeTab,
 			setActiveTabById: s.setActiveTabById,
 			openTab: s.openTab,
 			navigateInTab: s.navigateInTab,
@@ -480,138 +478,25 @@ export function AppLayout() {
 		};
 	}, [saveAllTabs]);
 
-	// Single state ensures only one dialog is shown at a time. When multiple
-	// files have conflicts, the latest event wins; earlier conflicts are dropped
-	// but dirty content is preserved in memory so no data is lost.
-	const [externalConflict, setExternalConflict] = useState<{
-		path: string;
-		type: "modified" | "deleted";
-	} | null>(null);
-
-	// Clear stale conflict dialog when workspace changes.
-	// workspacePath is read only to satisfy the exhaustive-deps rule;
-	// the real purpose is to trigger on workspace switches.
-	const prevWorkspaceRef = useRef(workspacePath);
-	useEffect(() => {
-		if (prevWorkspaceRef.current !== workspacePath) {
-			prevWorkspaceRef.current = workspacePath;
-			setExternalConflict(null);
-		}
-	}, [workspacePath]);
-
 	const handleTreeChange = useCallback(() => {
 		bumpFileTreeVersion();
 	}, [bumpFileTreeVersion]);
 
-	const handleExternalFileDeleted = useCallback(
-		(path: string) => {
-			const tab = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
-			if (!tab) return;
-
-			if (tab.dirty) {
-				// Deletion supersedes any pending conflict (modified) dialog
-				setExternalConflict({ path, type: "deleted" });
-			} else {
-				dropTab(path);
-				closeTab(path);
-			}
-		},
-		[closeTab, dropTab],
-	);
-
-	const getLastSavedContentRef = useRef(getLastSavedContent);
-	getLastSavedContentRef.current = getLastSavedContent;
-
-	const handleExternalFileModified = useCallback(
-		(path: string) => {
-			const state = useWorkspaceStore.getState();
-			const tab = state.tabs.find((t) => t.path === path);
-			if (!tab) return;
-
-			if (path === state.activeTabPath) {
-				if (tab.dirty) {
-					// Read file to check if this is our own save or genuine external change
-					readFile(path)
-						.then((loaded) => {
-							if (useWorkspaceStore.getState().activeTabPath !== path) return;
-							if (loaded === getLastSavedContentRef.current()) {
-								// File matches what we last saved — this was our own write
-								return;
-							}
-							// Don't overwrite a pending delete dialog (delete is more severe)
-							setExternalConflict((prev) =>
-								prev?.type === "deleted" ? prev : { path, type: "modified" },
-							);
-						})
-						.catch((err) => {
-							console.error("Failed to read file for conflict check:", err);
-						});
-				} else {
-					readFile(path)
-						.then((loaded) => {
-							applyCacheReload(path, loaded);
-							applyActiveReload(path, loaded);
-						})
-						.catch((err) => {
-							console.error("Failed to reload file:", err);
-						});
-				}
-			} else {
-				// Non-active dirty tabs: intentionally no dialog shown here.
-				// Showing a dialog would interrupt the user's current editing.
-				// The dirty content stays in cache; the user can reconcile when
-				// they switch to that tab.
-				if (isCachedTabClean(path)) {
-					readFile(path)
-						.then((loaded) => {
-							applyCacheReload(path, loaded);
-						})
-						.catch((err) => {
-							console.error("Failed to reload cached file:", err);
-						});
-				}
-			}
-		},
-		[applyCacheReload, applyActiveReload, isCachedTabClean],
-	);
-
-	useFileWatcher({
-		workspacePath,
+	const {
+		externalConflict,
+		handleConflictReload,
+		handleConflictKeep,
+		handleDeletedDirtyDiscard,
+		handleDeletedDirtyKeep,
+	} = useExternalFileConflict({
 		onTreeChange: handleTreeChange,
-		onFileModified: handleExternalFileModified,
-		onFileDeleted: handleExternalFileDeleted,
+		getLastSavedContent,
+		applyCacheReload,
+		applyActiveReload,
+		applyConflictReload,
+		dropTab,
+		isCachedTabClean,
 	});
-
-	const handleConflictReload = useCallback(() => {
-		if (externalConflict?.type !== "modified") return;
-		const path = externalConflict.path;
-		setExternalConflict(null);
-		readFile(path)
-			.then((loaded) => {
-				applyConflictReload(path, loaded);
-			})
-			.catch((err) => {
-				console.error("Failed to reload file on conflict resolve:", err);
-				// File may have been deleted — notify user via the deleted dialog
-				setExternalConflict({ path, type: "deleted" });
-			});
-	}, [externalConflict, applyConflictReload]);
-
-	const handleConflictKeep = useCallback(() => {
-		setExternalConflict(null);
-	}, []);
-
-	const handleDeletedDirtyDiscard = useCallback(() => {
-		if (externalConflict?.type !== "deleted") return;
-		const path = externalConflict.path;
-		setExternalConflict(null);
-		dropTab(path);
-		closeTab(path);
-	}, [externalConflict, closeTab, dropTab]);
-
-	const handleDeletedDirtyKeep = useCallback(() => {
-		setExternalConflict(null);
-	}, []);
 
 	const handleEditorView = useCallback((view: EditorView | null) => {
 		editorViewRef.current = view;
