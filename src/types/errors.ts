@@ -29,8 +29,9 @@ export type ErrorKind =
 	| "ENAMETOOLONG"
 	| "ENOTEMPTY"
 	| "EMFILE"
-	// 末端が symlink の path を O_NOFOLLOW で開こうとした (#418)。symlink loop ではなく
-	// 「認可した実体と一致しないので開かない」の意味で出る。
+	// 末端が symlink の path を O_NOFOLLOW で開こうとした (#418)。「認可した実体と一致しないので
+	// 開かない」の意味で出るケースが支配的だが、文字通りの symlink loop (循環 symlink) や
+	// 中間 dir の loop でも同じ errno になる (#453)。
 	| "ELOOP"
 	// 意味的なファイル操作エラー（fs ハンドラが文脈付きで投げる）
 	| "ALREADY_EXISTS"

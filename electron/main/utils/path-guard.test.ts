@@ -336,8 +336,9 @@ describe("resolveInsideRoot (index ingestion gate)", () => {
 		},
 	);
 
-	// #406 Finding 1 の回帰テスト: realpathCache 経由で判定すると 2 回目も stale な
+	// #406 Finding 1 の回帰テスト: realpath 結果を cache して判定すると 2 回目も stale な
 	// 「root 内」判定を返してしまう (watcher batch はこの retarget を確実には emit しない)。
+	// user-IPC 認可側の同じ性質は #453 で揃えた (下の describe を参照)。
 	it.skipIf(process.platform === "win32")(
 		"reflects a symlink retarget without any explicit invalidation",
 		async () => {
@@ -357,6 +358,107 @@ describe("resolveInsideRoot (index ingestion gate)", () => {
 			expect(await resolveInsideRoot(link, root)).toBeNull();
 		},
 	);
+});
+
+// #453: user-IPC 認可 (assertPathAllowed / assertWritePathAllowed / isPathAllowed /
+// isPathWithinAnyAllowedRoot) も realpath cache を持たないことの pin。上の resolveInsideRoot 版と
+// 対になる性質で、cache を再導入すると 2 回目の判定が 1 回目を引きずってこの describe が落ちる。
+// 判定が「その path を過去に認可したか」に依存しないので、認可の結果は毎回 disk の現状と一致する。
+describe.skipIf(process.platform === "win32")("認可の realpath 鮮度 (#453)", () => {
+	it("assertPathAllowed は symlink retarget を明示 invalidation 無しで反映する", async () => {
+		await registerWorkspaceRoot(WIN_A, workspaceDir);
+		const root = await canonicalize(workspaceDir);
+		const inside = join(root, "inside.md");
+		await writeFile(inside, "inside", "utf8");
+		const outsideFile = join(await canonicalize(outsideDir), "id_rsa");
+		await writeFile(outsideFile, "secret", "utf8");
+		const link = join(root, "note.md");
+		await symlink(inside, link);
+		// 1 回目: root 内を指しているので許可され、canonical は実体側になる。
+		expect(await assertPathAllowed(WIN_A, link)).toBe(inside);
+
+		await unlink(link);
+		await symlink(outsideFile, link);
+
+		// 2 回目: 旧判定を引きずらず、fresh な realpath が外部を検出して拒否する。
+		await expect(assertPathAllowed(WIN_A, link)).rejects.toThrow(/outside workspace/);
+	});
+
+	it("外へ retarget した symlink を root 内へ戻すと再び許可される (双方向)", async () => {
+		await registerWorkspaceRoot(WIN_A, workspaceDir);
+		const root = await canonicalize(workspaceDir);
+		const inside = join(root, "inside.md");
+		await writeFile(inside, "inside", "utf8");
+		const outsideFile = join(await canonicalize(outsideDir), "id_rsa");
+		await writeFile(outsideFile, "secret", "utf8");
+		const link = join(root, "note.md");
+
+		// 拒否判定も持ち越さない: 外 → 内 の retarget も次の認可で反映される。
+		await symlink(outsideFile, link);
+		expect(await isPathAllowed(WIN_A, link)).toBe(false);
+		await unlink(link);
+		await symlink(inside, link);
+		expect(await isPathAllowed(WIN_A, link)).toBe(true);
+		expect(await assertPathAllowed(WIN_A, link)).toBe(inside);
+	});
+
+	it("assertWritePathAllowed も retarget を反映する", async () => {
+		await registerWorkspaceRoot(WIN_A, workspaceDir);
+		const root = await canonicalize(workspaceDir);
+		const inside = join(root, "inside.md");
+		await writeFile(inside, "inside", "utf8");
+		const outsideFile = join(await canonicalize(outsideDir), "victim.md");
+		await writeFile(outsideFile, "victim", "utf8");
+		const link = join(root, "note.md");
+		await symlink(inside, link);
+		expect(await assertWritePathAllowed(WIN_A, link)).toBe(inside);
+
+		await unlink(link);
+		await symlink(outsideFile, link);
+
+		await expect(assertWritePathAllowed(WIN_A, link)).rejects.toThrow(/outside workspace/);
+	});
+
+	// 他の 4 本は末端 component の鮮度しか押さえていない。realpathBestEffort は未存在 path で
+	// 祖先を 1 段ずつ realpath して fall-through するため、**祖先の解決結果だけを cache する**
+	// 部分的な再導入 (深い未存在 path の syscall 削減が動機になりやすい) は末端側の pin を
+	// すり抜ける。この 1 本が中間 dir symlink の鮮度を押さえる。
+	// 未存在 suffix を 2 段にしてあるのは、「深さ N 段以上の fall-through だけ cache する」型の
+	// 再導入も同じ 1 本で落とすため (1 段だと直近親しか cache されない実装をすり抜ける)。
+	it("未存在 path の祖先 (中間 dir symlink) の retarget も反映する", async () => {
+		await registerWorkspaceRoot(WIN_A, workspaceDir);
+		const root = await canonicalize(workspaceDir);
+		const realSub = join(root, "sub");
+		await mkdir(realSub);
+		const subLink = join(root, "link-sub");
+		await symlink(realSub, subLink);
+		// 末端も中間 (draft/) も未存在なので、realpath は 2 段 fall-through して link-sub で解決する。
+		const target = join(subLink, "draft", "new.md");
+		expect(await assertWritePathAllowed(WIN_A, target)).toBe(join(realSub, "draft", "new.md"));
+
+		// 中間 dir symlink を workspace 外へ付け替える。末端 component は触っていない。
+		await unlink(subLink);
+		await symlink(outsideDir, subLink);
+
+		await expect(assertWritePathAllowed(WIN_A, target)).rejects.toThrow(/outside workspace/);
+	});
+
+	it("isPathWithinAnyAllowedRoot も retarget を反映する", async () => {
+		await registerWorkspaceRoot(WIN_A, workspaceDir);
+		const root = await canonicalize(workspaceDir);
+		const inside = join(root, "inside.md");
+		await writeFile(inside, "inside", "utf8");
+		const outsideFile = join(await canonicalize(outsideDir), "hero.png");
+		await writeFile(outsideFile, "png", "utf8");
+		const link = join(root, "hero.png");
+		await symlink(inside, link);
+		expect(await isPathWithinAnyAllowedRoot(link)).toBe(true);
+
+		await unlink(link);
+		await symlink(outsideFile, link);
+
+		expect(await isPathWithinAnyAllowedRoot(link)).toBe(false);
+	});
 });
 
 describe("assertPathAllowed (window-scoped)", () => {

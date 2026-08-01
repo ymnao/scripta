@@ -581,15 +581,26 @@ describe("deleteEntryImpl", () => {
 	});
 });
 
-// #418: 認可 (assertPathAllowed / assertWritePathAllowed) から実 I/O までの間に末端 component を
-// symlink へ差し替えられる窓を O_NOFOLLOW で閉じたことの pin。
+// #418 / #453: 末端 component が symlink である path を fs IPC がどう扱うかの pin。2 つの性質を
+// 分けて押さえる:
 //
-// race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って決定的に検証する
-// (open-nofollow.test.ts と同方針)。canonical の末端が symlink のまま残るのは realpathBestEffort が
-// 祖先 fall-through した場合、すなわち **dangling symlink** のときだけなので、それを fixture にする。
+//  1. **realpath で解決できない symlink は O_NOFOLLOW が拒否する (#418)**。認可時点で canonical の
+//     末端が symlink のまま残るのは realpathBestEffort が祖先 fall-through した場合、すなわち
+//     realpath がその path を解決できなかったとき (dangling / 循環 symlink 等)。以下の fixture は
+//     dangling を使う。plain な open だと write が解決先 (workspace 外) を新規作成してしまう
+//  2. **前回の認可を持ち越さない (#453)**。realpath cache を撤去したので、一度 read / write を
+//     通した path でも、その後 symlink へ retarget されれば次の認可は新しい解決先で判定する。
+//     cache があった頃はここが「ガードは古い canonical を通すが末端は今 symlink」という
+//     swap 窓の終状態になり、O_NOFOLLOW + 再認可で受け止めていた
+//
+// race そのものは再現せず、終状態を disk 上に作って決定的に検証する (open-nofollow.test.ts と
+// 同方針)。2 の test が「一度呼んでから retarget する」形なのは、**前回の認可結果が残らないこと**
+// 自体を pin するため (cache を再導入すると、stale な canonical の末端が今は symlink なので
+// O_NOFOLLOW open が ELOOP を返し、期待している PATH_OUTSIDE_WORKSPACE / 解決先の内容に届かない
+// = 実測で 6 本とも落ちる)。
 //
 // win32 は O_NOFOLLOW が無く flag が 0 に落ちるため拒否 assert が成立しない (#451 で追跡)。
-describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)", () => {
+describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / #453)", () => {
 	let outside: TempWorkspace;
 
 	beforeEach(async () => {
@@ -611,8 +622,8 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 		});
 
 		it("dangling symlink の read は ELOOP で失敗する", async () => {
-			// 再認可しても realpath は解決できず同じ canonical に戻るため、2 度目の ELOOP が
-			// そのまま出る。plain open だと ENOENT になるので errno まで pin する。
+			// realpath が解決できず canonical が symlink 自身の path になるため O_NOFOLLOW が
+			// 発火する。plain open だと ENOENT になるので errno まで pin する。
 			const link = join(workspaceDir, "dangling.md");
 			await symlink(join(outside.dir, "nope.md"), link);
 			const err = await readFileImpl(TEST_WIN, link).catch((e: NodeJS.ErrnoException) => e);
@@ -628,11 +639,13 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await expect(readFileImpl(TEST_WIN, link)).rejects.toThrow(/outside workspace/);
 		});
 
-		it("認可後に workspace 外を指す symlink へ swap されたら外部内容を返さない", async () => {
-			// swap 窓 (T1 認可 → T2 I/O) を決定的に再現する。realpathCache は invalidation を
-			// 持たない (#453) ので、1 度読んで cache に載せた path を symlink へ差し替えると
-			// 「ガードは古い canonical を通すが、その canonical の末端は今 symlink」という
-			// 終状態を作れる。plain open ではここで外部内容が返る。
+		it("一度 read した path が workspace 外への symlink へ retarget されたら外部内容を返さない", async () => {
+			// **前回の認可を持ち越さないこと**の pin (#453)。realpath cache があった頃は、1 度読んで
+			// cache に載せた path を symlink へ差し替えると「ガードは古い canonical を通すが、その
+			// canonical の末端は今 symlink」という swap 窓の終状態になり、O_NOFOLLOW の ELOOP →
+			// cache 破棄 → 再認可でようやく拒否に届いていた。cache 撤去後は 2 度目の認可が fresh に
+			// 解決するので、ガード自身が外部を検出して落とす。cache を再導入すると canonical が
+			// stale になり、ELOOP (≠ PATH_OUTSIDE_WORKSPACE) が出てこの test は落ちる。
 			const secret = join(outside.dir, "secret.md");
 			await writeFile(secret, "SECRET", "utf8");
 			const path = join(workspaceDir, "note.md");
@@ -642,17 +655,18 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await rm(path);
 			await symlink(secret, path);
 
-			// 主 assert は「外部内容を返さないこと」。ELOOP を受けて cache を捨てて再認可するので、
-			// 表に出るのは errno ではなく認可エラーになる。
+			// 主 assert は「外部内容を返さないこと」。表に出るのは errno ではなく認可エラーになる。
 			const err = await readFileImpl(TEST_WIN, path).catch((e: unknown) => e);
 			expect(err).toBeInstanceOf(Error);
 			expect((err as Error).message).not.toContain("SECRET");
 			expect(err).toMatchObject({ kind: "PATH_OUTSIDE_WORKSPACE" });
 		});
 
-		it("認可後に workspace 内の実体を指す alias へ swap されたら解決先を読む", async () => {
-			// 同じ swap 窓でも、解決先が workspace 内なら**正当な alias 化**。cache の温度で
-			// 成否が変わらないよう、ELOOP から cache を捨てて再認可する経路が拾う。
+		it("一度 read した path が workspace 内の alias へ retarget されたら解決先を読む", async () => {
+			// 同じ retarget でも、解決先が workspace 内なら**正当な alias 化** (git checkout /
+			// 同期クライアント等)。成否が「その path を過去に読んだか」で変わらないことを pin する。
+			// cache を再導入すると canonical は cache 時点の note.md のままで、その末端が今は
+			// symlink なので O_NOFOLLOW open が ELOOP を返して落ちる。
 			const real = join(workspaceDir, "real.md");
 			await writeFile(real, "real body", "utf8");
 			const path = join(workspaceDir, "note.md");
@@ -672,7 +686,7 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
 		});
 
-		it("read-base64 も swap 後に外部内容を返さない", async () => {
+		it("read-base64 も retarget 後に外部内容を返さない", async () => {
 			// readFileImpl と同じ終状態を data URI 埋め込み経路 (#314) でも pin する。
 			const secret = join(outside.dir, "secret.png");
 			await writeFile(secret, Buffer.from([0xde, 0xad]));
@@ -705,7 +719,7 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
 		});
 
-		it("認可後に末端を symlink へ swap されたら外部 file を上書きしない", async () => {
+		it("一度 write した path が外部 file への symlink へ retarget されたら上書きしない", async () => {
 			// read 側と同じ終状態を write で作る。dangling symlink 経由の escape が「新規作成」
 			// だけなのに対し、この経路は **既存の外部 file の上書き**まで届く。
 			const victim = join(outside.dir, "victim.md");
@@ -723,14 +737,14 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			expect(await readFile(victim, "utf8")).toBe("original");
 		});
 
-		it("transient write path が swap されたら再認可が拒否し、capability も消費しない", async () => {
-			// SaveDialog 由来の transient は canonical 一致でしか通らない。ELOOP 起点の再認可は
-			// fresh な realpath を使うので、swap 後の解決先は登録済み canonical と一致せず拒否される。
+		it("transient write path が retarget されたら次の認可が拒否し、capability も消費しない", async () => {
+			// SaveDialog 由来の transient は canonical 一致でしか通らない。認可は毎回 fresh に
+			// realpath するので、retarget 後の解決先は登録済み canonical と一致せず拒否される。
 			// consume は write 成功後だけなので capability は残る（renderer の withRetry 契約）。
 			const target = join(outside.dir, "exported.md");
 			await writeFile(target, "original", "utf8");
 			await registerTransientWritePath(TEST_WIN, target);
-			// cache を warm にしてから、target を別の外部 file への alias へ差し替える
+			// 一度 write を通してから、target を別の外部 file への alias へ差し替える
 			await writeFileImpl(TEST_WIN, target, "exported");
 			await registerTransientWritePath(TEST_WIN, target);
 			const other = join(outside.dir, "other.md");
@@ -745,7 +759,7 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418)",
 			expect(getTransientWritePathsForWindow(TEST_WIN)).toHaveLength(1);
 		});
 
-		it("認可後に workspace 内の実体を指す alias へ swap されたら解決先へ書く", async () => {
+		it("一度 write した path が workspace 内の alias へ retarget されたら解決先へ書く", async () => {
 			const real = join(workspaceDir, "real.md");
 			await writeFile(real, "before", "utf8");
 			const path = join(workspaceDir, "note.md");

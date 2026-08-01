@@ -27,7 +27,9 @@ describe("translateError", () => {
 		["ENAMETOOLONG", "ファイル名が長すぎます"],
 		["ENOTEMPTY", "フォルダが空ではありません"],
 		["EMFILE", "開いているファイルが多すぎます"],
-		["ELOOP", "リンク先が変わったため開けませんでした"],
+		// #453: 支配的な原因は dangling / 循環 symlink で「リンク先が変わった」わけではないため、
+		// 全ケースで真な「参照先を解決できない」に寄せた文言を pin する
+		["ELOOP", "リンクの参照先を解決できないため開けませんでした"],
 		["ALREADY_EXISTS", "同名のファイルが既に存在します"],
 		["SOURCE_NOT_FOUND", "元のファイルが見つかりません"],
 		["TARGET_ALREADY_EXISTS", "移動先に同名のファイルが既に存在します"],
@@ -116,7 +118,7 @@ describe("isTransientError", () => {
 		"ENAMETOOLONG",
 		"ENOTEMPTY",
 		"EMFILE",
-		// #418: main 側で cache 破棄 + 再認可まで済ませた上での失敗なので再試行しない
+		// #418 / #453: 支配的な原因 (realpath 不能な symlink) が再試行で変わらないため transient にしない
 		"ELOOP",
 		"INVALID_PATH",
 		"PATH_OUTSIDE_WORKSPACE",

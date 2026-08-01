@@ -1148,8 +1148,8 @@ describe("searchFilesImpl (Phase B: ContentCache integration)", () => {
 });
 
 // #406: workspace 内 symlink の retarget と L3 index 取り込み境界。
-// index ゲートは realpath cache を通さず毎回 fresh に解決するため、
-// watcher batch が retarget を emit しなくても外部内容は取り込まれない。
+// index ゲートは毎回 fresh に realpath するため、watcher batch が retarget を emit しなくても
+// 外部内容は取り込まれない（user-IPC 認可も #453 で同じ鮮度に揃った）。
 describe.skipIf(process.platform === "win32")(
 	"searchFilesImpl (#406: symlink retarget と index 取り込み境界)",
 	() => {
