@@ -182,6 +182,25 @@ describe("buildAppShortcuts", () => {
 		expect(matchingIds(shortcuts, makeEvent(key, mods))).toEqual([id]);
 	});
 
+	it.each([
+		["commandPaletteOpen"],
+		["exportOpen"],
+		["settingsOpen"],
+		["helpOpen"],
+	] as const)("slide-show は %s の間は F5 を横取りしない", (flag) => {
+		const shortcuts = buildAppShortcuts(makeDeps({ [flag]: true }));
+		expect(matchingIds(shortcuts, makeEvent("F5"))).toEqual([]);
+	});
+
+	it("slide-show は既に開いている間 / IME 合成中は F5 を横取りしない", () => {
+		expect(
+			matchingIds(buildAppShortcuts(makeDeps({ slideShowOpen: true })), makeEvent("F5")),
+		).toEqual([]);
+		expect(
+			matchingIds(buildAppShortcuts(makeDeps()), makeEvent("F5", { isComposing: true })),
+		).toEqual([]);
+	});
+
 	it("Ctrl でも Cmd と同じエントリにマッチする", () => {
 		const shortcuts = buildAppShortcuts(makeDeps());
 		expect(matchingIds(shortcuts, makeEvent("p", { ctrlKey: true }))).toEqual(["command-palette"]);
@@ -287,6 +306,29 @@ describe("buildAppShortcuts の run 配線", () => {
 		expect(deps.setSidebarPanel).toHaveBeenCalledWith(panel);
 	});
 
+	it("sidebar-search は次フレームで検索入力へ focus する", () => {
+		const raf = vi
+			.spyOn(globalThis, "requestAnimationFrame")
+			.mockImplementation((cb: FrameRequestCallback) => {
+				cb(0);
+				return 0;
+			});
+		try {
+			const focus = vi.fn();
+			const deps = makeDeps({
+				searchInputRef: { current: { focus } as unknown as HTMLInputElement },
+			});
+			run(deps, "sidebar-search");
+			expect(focus).toHaveBeenCalledTimes(1);
+
+			// ref 未設定でも throw しない (パネル未 mount のタイミング)
+			const noInput = makeDeps();
+			expect(() => run(noInput, "sidebar-search")).not.toThrow();
+		} finally {
+			raf.mockRestore();
+		}
+	});
+
 	it.each([
 		["sidebar-unresolved", "unresolved"],
 		["sidebar-backlink", "backlink"],
@@ -307,6 +349,11 @@ describe("buildAppShortcuts の run 配線", () => {
 		const onNewTab = makeDeps();
 		run(onNewTab, "toggle-slide-view");
 		expect(onNewTab.setSlideViewActive).not.toHaveBeenCalled();
+
+		useWorkspaceStore.setState({ activeTabPath: null });
+		const noTab = makeDeps();
+		run(noTab, "toggle-slide-view");
+		expect(noTab.setSlideViewActive).not.toHaveBeenCalled();
 	});
 
 	it("export は active タブのパスを渡す (newtab では呼ばない)", () => {
@@ -318,6 +365,11 @@ describe("buildAppShortcuts の run 配線", () => {
 		const onNewTab = makeDeps();
 		run(onNewTab, "export");
 		expect(onNewTab.handleExport).not.toHaveBeenCalled();
+
+		useWorkspaceStore.setState({ activeTabPath: null });
+		const noTab = makeDeps();
+		run(noTab, "export");
+		expect(noTab.handleExport).not.toHaveBeenCalled();
 	});
 
 	it("editor-search-bar は閉じていれば選択文字列を初期値にして開く", () => {
