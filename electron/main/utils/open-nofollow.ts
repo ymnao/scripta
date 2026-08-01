@@ -130,7 +130,8 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
  *
  * **失った保証**: `write-file-atomic` の signal-exit hook が無いので、open 〜 rename の間 (ms
  * 単位) に SIGTERM / SIGINT で死ぬと tmp が出力先 dir に残る。名前は dot prefix なので
- * `showHidden` が既定 (false) の file tree には出ないが、OS の file manager では見える。
+ * `showHidden` が既定 (false) の file tree には出ない。OS の file manager でも macOS Finder /
+ * GNOME Files は dot file を既定で隠すので、既定設定で見えるのは Windows Explorer 等に限られる。
  */
 export async function writeFileAtomicNoFollow(path: string, data: Buffer): Promise<void> {
 	// dot prefix で既定の file tree から隠し、`.tmp` suffix と乱数で衝突を避ける。衝突しても
@@ -161,8 +162,8 @@ export async function writeFileAtomicNoFollow(path: string, data: Buffer): Promi
 		}
 		await fsp.rename(tmpPath, path);
 	} catch (e) {
-		// rename まで到達しなかった場合に tmp を残さない。rename 成功後は tmp が既に
-		// 消えているので、この catch には入らない。
+		// rename まで到達しなかった場合に tmp を残さない。rename は try の最後の文なので、
+		// 成功後にこの catch へ入る経路は無い (tmp も rename で消えている)。
 		await fsp.rm(tmpPath, { force: true }).catch(() => {});
 		throw e;
 	}

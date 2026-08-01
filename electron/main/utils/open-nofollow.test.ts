@@ -166,17 +166,31 @@ describe.skipIf(process.platform === "win32")("writeFileAtomicNoFollow", () => {
 	});
 
 	it("既存 file の permission を引き継ぐ (umask に削られる広い側)", async () => {
-		// 0o600 側だけだと open の mode 引数で足りてしまい、書き込み後の chmod が
-		// 消えても気付けない。既定 umask (022) に削られる 0o666 を使うと、chmod が
-		// 無いと 0o644 になるので継承の両方向を pin できる。
-		const p = join(ws.dir, "mode-wide.pdf");
-		await fsp.writeFile(p, "before");
-		await fsp.chmod(p, 0o666);
+		// 0o600 側だけだと open の mode 引数で足りてしまい、書き込み後の chmod が消えても
+		// 気付けない。umask に削られる mode を使うと chmod の欠落を検出できる。
+		//
+		// umask は ambient 依存 (CI は 022 だがコンテナでは 0 のこともある) なので、この test
+		// 内で明示的に 022 を立てて復元する。固定しないと umask 0 の環境で chmod 無しでも
+		// pass する vacuous test になる。
+		const prevUmask = process.umask(0o022);
+		try {
+			const p = join(ws.dir, "mode-wide.pdf");
+			await fsp.writeFile(p, "before");
+			await fsp.chmod(p, 0o666);
 
-		await writeFileAtomicNoFollow(p, Buffer.from("after"));
+			await writeFileAtomicNoFollow(p, Buffer.from("after"));
 
-		expect((await fsp.stat(p)).mode & 0o777).toBe(0o666);
+			expect((await fsp.stat(p)).mode & 0o777).toBe(0o666);
+		} finally {
+			process.umask(prevUmask);
+		}
 	});
+
+	// **pin できていない性質**: 継承 mode を `open` 時点で渡していること (書き込み後の chmod
+	// だけで狭めると、内容入りの tmp が一瞬広い mode で存在する窓ができる) は、**過渡状態**
+	// なので最終状態の assert では区別できない。実際 `open` の mode 引数を落とす変異は上の
+	// test 群を生き残る (mutation で確認済み)。tmp の mode を write 中に観測する手段が無い
+	// ため、この性質は実装側のコメント (open-nofollow.ts) を根拠として受容する。
 
 	it("末端が symlink なら mode を引き継がない (攻撃者に着地 file の mode を選ばせない)", async () => {
 		const victim = join(outside.dir, "victim.pdf");
