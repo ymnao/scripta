@@ -419,10 +419,12 @@ describe.skipIf(process.platform === "win32")("認可の realpath 鮮度 (#453)"
 		await expect(assertWritePathAllowed(WIN_A, link)).rejects.toThrow(/outside workspace/);
 	});
 
-	// 上の 4 本は末端 component の鮮度しか押さえていない。realpathBestEffort は未存在 path で
+	// 他の 4 本は末端 component の鮮度しか押さえていない。realpathBestEffort は未存在 path で
 	// 祖先を 1 段ずつ realpath して fall-through するため、**祖先の解決結果だけを cache する**
 	// 部分的な再導入 (深い未存在 path の syscall 削減が動機になりやすい) は末端側の pin を
 	// すり抜ける。この 1 本が中間 dir symlink の鮮度を押さえる。
+	// 未存在 suffix を 2 段にしてあるのは、「深さ N 段以上の fall-through だけ cache する」型の
+	// 再導入も同じ 1 本で落とすため (1 段だと直近親しか cache されない実装をすり抜ける)。
 	it("未存在 path の祖先 (中間 dir symlink) の retarget も反映する", async () => {
 		await registerWorkspaceRoot(WIN_A, workspaceDir);
 		const root = await canonicalize(workspaceDir);
@@ -430,9 +432,9 @@ describe.skipIf(process.platform === "win32")("認可の realpath 鮮度 (#453)"
 		await mkdir(realSub);
 		const subLink = join(root, "link-sub");
 		await symlink(realSub, subLink);
-		// 末端は未存在なので realpath は祖先 (link-sub) へ fall-through して解決する。
-		const target = join(subLink, "new.md");
-		expect(await assertWritePathAllowed(WIN_A, target)).toBe(join(realSub, "new.md"));
+		// 末端も中間 (draft/) も未存在なので、realpath は 2 段 fall-through して link-sub で解決する。
+		const target = join(subLink, "draft", "new.md");
+		expect(await assertWritePathAllowed(WIN_A, target)).toBe(join(realSub, "draft", "new.md"));
 
 		// 中間 dir symlink を workspace 外へ付け替える。末端 component は触っていない。
 		await unlink(subLink);

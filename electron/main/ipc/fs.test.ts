@@ -584,9 +584,10 @@ describe("deleteEntryImpl", () => {
 // #418 / #453: 末端 component が symlink である path を fs IPC がどう扱うかの pin。2 つの性質を
 // 分けて押さえる:
 //
-//  1. **dangling symlink は O_NOFOLLOW が拒否する (#418)**。canonical の末端が symlink のまま
-//     残るのは realpathBestEffort が祖先 fall-through した場合、すなわち dangling のときだけ。
-//     plain な open だと write が解決先 (workspace 外) を新規作成してしまう
+//  1. **realpath で解決できない symlink は O_NOFOLLOW が拒否する (#418)**。認可時点で canonical の
+//     末端が symlink のまま残るのは realpathBestEffort が祖先 fall-through した場合、すなわち
+//     realpath がその path を解決できなかったとき (dangling / 循環 symlink 等)。以下の fixture は
+//     dangling を使う。plain な open だと write が解決先 (workspace 外) を新規作成してしまう
 //  2. **前回の認可を持ち越さない (#453)**。realpath cache を撤去したので、一度 read / write を
 //     通した path でも、その後 symlink へ retarget されれば次の認可は新しい解決先で判定する。
 //     cache があった頃はここが「ガードは古い canonical を通すが末端は今 symlink」という

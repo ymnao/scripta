@@ -24,7 +24,7 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 	ENAMETOOLONG: "ファイル名が長すぎます",
 	ENOTEMPTY: "フォルダが空ではありません",
 	EMFILE: "開いているファイルが多すぎます",
-	ELOOP: "リンク先が変わったため開けませんでした",
+	ELOOP: "リンクの参照先を解決できないため開けませんでした",
 	// 意味的なファイル操作エラー
 	ALREADY_EXISTS: "同名のファイルが既に存在します",
 	SOURCE_NOT_FOUND: "元のファイルが見つかりません",
@@ -76,7 +76,8 @@ const NON_TRANSIENT_KINDS: ReadonlySet<ErrorKind> = new Set<ErrorKind>([
 	// 末端 symlink の拒否 (#418 / #453)。支配的なのは realpath が解決できない symlink
 	// (dangling / 循環) で、これは再試行しても同じく失敗する。認可 (T1) から open (T2) の
 	// 間に実際に swap された race のうち、解決先が workspace 内なら再試行で成功しうるが、
-	// 窓は µs 単位で、外れを引いた場合の backoff (数秒) に見合わないため transient に
+	// 窓は handler 1 実行内の await 1 回分しかなく、外れを引いたときに払う待ち時間
+	// (withRetry で計 ~1.4 秒、autosave 経路では 5 秒〜) に見合わないため transient に
 	// 倒さない (#453 で main 側の再認可も撤去し、どの層も自動再試行しない構成にした)
 	"ELOOP",
 	"INVALID_PATH",
