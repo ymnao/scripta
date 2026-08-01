@@ -730,8 +730,9 @@ describe("useTabContentManager", () => {
 			// 影響は dirty 表示だけに留まらない。同じ flush 完了で「Keep savedContent」effect
 			// (useTabContentManager.ts:347-365) が savedContentRef と cache の savedContent を
 			// 未保存の内容へ進めるため、この窓で window close すると saveAllTabs は
-			// `getContent() !== savedContentRef.current` が false で active タブを skip し、
-			// 何も書かずに "ok" を返す = 最新の編集が失われる。
+			// `getContent() !== savedContentRef.current` が false で **active タブを skip** し、
+			// その編集を保存しないまま "ok" を返す (他に dirty な cache タブがあればそちらは
+			// 書かれる。失われるのは active タブの編集)。
 			const writesBeforeClose = mockedWriteFile.mock.calls.length;
 			let closeResult!: "ok" | "failed" | "cancelled";
 			await act(async () => {

@@ -1671,6 +1671,9 @@ describe("AppLayout", () => {
 			expect(saveSpy).toHaveBeenCalledTimes(1);
 			// 順序も pin する。逆順でも「両方呼ばれた」assert は通ってしまうが、
 			// scratchpad を先に保存するとタブ保存の失敗時に close を止められない。
+			// 初回の writeFile が close 時のタブ保存であること (= 先行する autosave write が
+			// 無いこと) を明示してから比較する。
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
 			expect(saveSpy.mock.invocationCallOrder[0]).toBeGreaterThan(
 				mockedWriteFile.mock.invocationCallOrder[0],
 			);

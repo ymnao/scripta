@@ -33,6 +33,14 @@ export function createDeferred<T>(): Deferred<T> {
 	return { promise, resolve, reject };
 }
 
+/**
+ * 実 CodeMirror の代わりに getContent() が読む doc を持つ fake。
+ *
+ * 未対応の境界: 実 AppLayout は activeTabPath が null / newtab のとき MarkdownEditor 自体を
+ * unmount して editorViewRef を null にするが、この fake は view を保持し続けるため
+ * getContent() が旧タブの doc を返す。その状態で getContent() を観測する test を書くときは
+ * `ref.current` を手で null にすること。
+ */
 export interface FakeEditor {
 	/** useTabContentManager に渡す editorViewRef。 */
 	ref: RefObject<EditorView | null>;
@@ -44,11 +52,6 @@ export interface FakeEditor {
 	 * remount / snapshot 復元を模して doc を loadedDoc で初期化し直す。
 	 * 実 MarkdownEditor は uncontrolled で、editorKey bump による remount か
 	 * restoreSnapshot でしか doc が外から置き換わらない。テスト側でも同じ境界を保つ。
-	 *
-	 * 未対応の境界: 実 AppLayout は activeTabPath が null / newtab のとき MarkdownEditor 自体を
-	 * unmount し editorViewRef を null にするが、この fake は view を保持し続けるため
-	 * getContent() が旧タブの doc を返す。その状態で getContent() を観測する test を
-	 * 書くときは ref.current を手で null にすること。
 	 */
 	remountWith: (loadedDoc: string) => void;
 }
