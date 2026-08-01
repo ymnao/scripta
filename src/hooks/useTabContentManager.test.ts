@@ -673,4 +673,310 @@ describe("useTabContentManager", () => {
 			);
 		});
 	});
+
+	/** store 上の dirty フラグを path 指定で読む。 */
+	function tabDirty(path: string): boolean | undefined {
+		return useWorkspaceStore.getState().tabs.find((t) => t.path === path)?.dirty;
+	}
+
+	// #458 finding 3: handleFlushComplete の dirty 判定。flush はタブ切替時の非同期 write なので、
+	// 完了時点で「flush 対象が再び active に戻り、かつさらに編集されていた」場合に
+	// ユーザーの追加編集を保存済み扱いにしてしまわないかを pin する
+	// (1 本目は実装の実際の挙動が想定と異なった characterization test、詳細はテスト内コメント参照)。
+	describe("handleFlushComplete の dirty 判定", () => {
+		it("flush 解決前に active タブへ戻ってさらに編集しても、flush 完了直後の dirty 同期 effect が dirty を落とす (characterization)", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { editor, result } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			// A → B の切替で走る flush write を in-flight のまま止める。
+			const deferred = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			// flush 解決前に A へ戻り、さらに編集する。
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+			editor.type("edited-a-more");
+			// 実アプリでは MarkdownEditor の onDocChanged が scheduleAutoSave を呼ぶ。
+			// この配線を入れないと「編集したのに saveStatus が unsaved にならない」
+			// harness 固有の状態になり、dirty 判定の pin が実挙動から乖離する。
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+			expect(tabDirty("/w/a.md")).toBe(true);
+
+			deferred.resolve();
+			await flushAsync();
+
+			// handleFlushComplete (useTabContentManager.ts:188-190) は
+			// `currentActive === path && getContent() !== rawContent` のとき dirty を
+			// 落とさずに return する — が、その直後に useAutoSave が setSaveStatus("saved")
+			// を呼ぶ (useAutoSave.ts:221)。これを受けた「Sync dirty flag to store」effect
+			// (useTabContentManager.ts:370-374) が saveStatus だけを見て dirty=false を
+			// 書き戻すため、早期 return の意図は打ち消される。
+			expect(tabDirty("/w/a.md")).toBe(false);
+
+			// ただし失われるのは dirty 表示だけで、内容は保留中の debounce autosave が
+			// 書き切る。ここまで pin しておかないと「編集が消える」という誤読を招く。
+			await advance(2000);
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "edited-a-more\n");
+		});
+
+		it("flush 後に追加編集が無ければ dirty が落ちる", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			const deferred = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			deferred.resolve();
+			await flushAsync();
+
+			expect(tabDirty("/w/a.md")).toBe(false);
+		});
+
+		it("flush 対象が現在の active タブでない場合も dirty が落ちる", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			const deferred = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			// B が active のまま A の flush が解決する。
+			deferred.resolve();
+			await flushAsync();
+
+			expect(tabDirty("/w/a.md")).toBe(false);
+		});
+	});
+
+	// #458 finding 7: 公開 cache / reload API (getCachedContent / isCachedTabClean /
+	// applyExternalReload / applyCacheReload / applyConflictReload / dropTab)。
+	// tabCacheRef は非公開表現なので、ここでも公開 API の戻り値だけで観測する。
+	describe("公開 cache / reload API", () => {
+		it("getCachedContent は active タブでは編集直後の live editor 内容を返す", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			editor.type("edited-live");
+
+			// cache へ確定するのはタブ切替時 (#302)。それ以前でも active タブは editor から
+			// 直接読む契約になっているはずで、そうでないと編集直後の内容が失われて見える。
+			expect(result.current.getCachedContent("/w/a.md")).toBe("edited-live");
+		});
+
+		it("getCachedContent は非 active タブで cache が無ければ null、あれば cache の内容を返す", async () => {
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/b.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			expect(result.current.getCachedContent("/w/a.md")).toBeNull();
+
+			act(() => {
+				result.current.applyCacheReload("/w/a.md", "cached-content");
+			});
+
+			expect(result.current.getCachedContent("/w/a.md")).toBe("cached-content");
+		});
+
+		it("isCachedTabClean は cache が無ければ false を返す (fail-closed)", async () => {
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/b.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			// 「clean だから安全に上書きしてよい」と誤読されないよう、未知の path は
+			// dirty 扱い (false) が既定でなければならない。
+			expect(result.current.isCachedTabClean("/w/a.md")).toBe(false);
+		});
+
+		it("isCachedTabClean は clean cache で true、dirty cache で false", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			// flush 失敗で A の cache は dirty のまま残る。
+			expect(result.current.isCachedTabClean("/w/a.md")).toBe(false);
+
+			act(() => {
+				result.current.applyCacheReload("/w/c.md", "clean-content");
+			});
+			expect(result.current.isCachedTabClean("/w/c.md")).toBe(true);
+		});
+
+		it("applyExternalReload は自分の write と一致する内容なら no-op", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			await act(async () => {
+				await result.current.saveNow();
+			});
+			await flushAsync();
+
+			const lastSaved = result.current.getLastSavedContent();
+			const beforeDoc = editor.getContent();
+
+			act(() => {
+				result.current.applyExternalReload("/w/a.md", lastSaved);
+			});
+
+			// 自分の write を外部変更と誤認して remount すると、doc は同じ内容でも
+			// undo 履歴が失われる (editorKey bump)。ここでは doc / cache が
+			// 触られていないことまでを assert する。
+			expect(editor.getContent()).toBe(beforeDoc);
+			expect(result.current.getCachedContent("/w/a.md")).toBe(beforeDoc);
+		});
+
+		it("applyExternalReload は内容が異なれば active タブの表示を更新する", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			act(() => {
+				result.current.applyExternalReload("/w/a.md", "external-content");
+			});
+
+			expect(editor.getContent()).toBe("external-content");
+			expect(result.current.getCachedContent("/w/a.md")).toBe("external-content");
+		});
+
+		it("applyExternalReload は対象が active でなければ cache だけ更新して editor を触らない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/b.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			const beforeDoc = editor.getContent();
+
+			act(() => {
+				result.current.applyExternalReload("/w/a.md", "external-content");
+			});
+
+			// readFile 解決を待つ間に非 active タブが active 化していても、
+			// 今表示中の (別タブの) 画面を勝手に書き換えてはいけない。
+			expect(editor.getContent()).toBe(beforeDoc);
+			expect(result.current.getCachedContent("/w/a.md")).toBe("external-content");
+		});
+
+		it("applyCacheReload は整形後の内容が cache と一致するなら cache を置き換えない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("line   ");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w/a.md")).toBe("line   ");
+
+			// 自分の write が processContent 適用後に一致する内容を外部変更として渡しても、
+			// 未保存編集 (末尾空白付きの生の doc) を disk 正規化後の内容で上書きしてはいけない。
+			act(() => {
+				result.current.applyCacheReload("/w/a.md", "line\n");
+			});
+
+			expect(result.current.getCachedContent("/w/a.md")).toBe("line   ");
+		});
+
+		it("applyConflictReload は active タブで cache と editor の両方を置き換え dirty を落とす", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			act(() => {
+				result.current.applyConflictReload("/w/a.md", "conflict-resolved");
+			});
+
+			expect(editor.getContent()).toBe("conflict-resolved");
+			expect(result.current.getCachedContent("/w/a.md")).toBe("conflict-resolved");
+			expect(tabDirty("/w/a.md")).toBe(false);
+		});
+
+		it("applyConflictReload は非 active タブでも cache を置き換え dirty を落とす", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			const bEditorDoc = editor.getContent();
+
+			act(() => {
+				result.current.applyConflictReload("/w/a.md", "conflict-resolved");
+			});
+
+			expect(result.current.getCachedContent("/w/a.md")).toBe("conflict-resolved");
+			expect(tabDirty("/w/a.md")).toBe(false);
+			// 非 active な A への適用が、今表示中の B の editor を書き換えてはいけない。
+			expect(editor.getContent()).toBe(bEditorDoc);
+		});
+
+		it("dropTab は cache だけ捨てタブは閉じない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/b.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			act(() => {
+				result.current.applyCacheReload("/w/a.md", "cached-content");
+			});
+			expect(result.current.getCachedContent("/w/a.md")).toBe("cached-content");
+
+			act(() => {
+				result.current.dropTab("/w/a.md");
+			});
+
+			expect(result.current.getCachedContent("/w/a.md")).toBeNull();
+			expect(tabPaths()).toEqual(["/w/a.md", "/w/b.md"]);
+		});
+	});
 });
