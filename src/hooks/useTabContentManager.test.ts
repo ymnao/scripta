@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
 	advance,
+	createDeferred,
 	createFakeEditor,
 	type FakeEditor,
 	flushAsync,
@@ -264,6 +265,412 @@ describe("useTabContentManager", () => {
 			// 進行中の autosave debounce を流し切ってからでも旧 path へは書かない。
 			await advance(3000);
 			expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("/w/a.md");
+		});
+	});
+
+	// #458 finding 4: handleCloseTab の分岐は元々 AppLayout に埋まっていて単体で試験できなかった。
+	// 特に非 active タブの close は waitForPending → 再チェック → cache 直書き、という
+	// 複数ステップの手続きなので、各分岐が正しい経路を通ることを個別に pin する。
+	describe("handleCloseTab の分岐", () => {
+		it("同一 id を連続 close しても writeFile と tab 消滅は 1 回分だけ起きる", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			// 1 回目の write を in-flight のまま止め、closingTabsRef ガードが
+			// 2 回目の呼び出しを弾くこと (= write が 2 回走らないこと) を確認する。
+			const deferred = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
+
+			let p1!: Promise<void>;
+			let p2!: Promise<void>;
+			act(() => {
+				p1 = result.current.handleCloseTab(1);
+				p2 = result.current.handleCloseTab(1);
+			});
+			await flushAsync();
+
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+			// write 未解決の間は tab もまだ残っている
+			expect(tabPaths()).toEqual(["/w/a.md"]);
+
+			deferred.resolve();
+			await Promise.all([p1, p2]);
+			await flushAsync();
+
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+			expect(tabPaths()).toEqual([]);
+		});
+
+		it("存在しない tab id を渡しても何も起きない", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			const before = tabPaths();
+			await act(async () => {
+				await result.current.handleCloseTab(999);
+			});
+
+			expect(tabPaths()).toEqual(before);
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("newtab ページは保存せずに閉じる", async () => {
+			diskContents.set("/w/other.md", "orig");
+			seedWorkspace("/w", ["newtab://1", "/w/other.md"], "/w/other.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			expect(tabPaths()).toEqual(["/w/other.md"]);
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("active タブは編集内容を保存してから閉じる", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			// processContent により行末改行が付与された内容で保存される。
+			expect(mockedWriteFile).toHaveBeenCalledWith("/w/a.md", "edited\n");
+			expect(tabPaths()).toEqual([]);
+		});
+
+		it("active タブの保存が失敗したら閉じない", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("boom"));
+
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			// saveIfDirty が false を返すので tab は store に残ったまま。
+			expect(tabPaths()).toEqual(["/w/a.md"]);
+		});
+
+		it("waitForPending 中に対象タブが active 化すると、active 経路 (saveIfDirty) の分岐へ進む", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			// A の flush write を in-flight のまま止める。
+			const deferred = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			// 非 active な A の close を開始。waitForPending で flush write 完了待ちのはず。
+			let closePromise!: Promise<void>;
+			act(() => {
+				closePromise = result.current.handleCloseTab(1);
+			});
+			await flushAsync();
+			expect(tabPaths()).toContain("/w/a.md");
+
+			// write 解決前に A を active 化する。
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			deferred.resolve();
+			await closePromise;
+			await flushAsync();
+
+			// 再チェック (id === activeTabId) は「非 active cache への直書き」分岐を避けて
+			// saveIfDirty 経路 (cached.content の直書きではなく getContent()/savedContentRef 比較)
+			// へ進む。tab 自体は最終的に片付く。
+			expect(tabPaths()).not.toContain("/w/a.md");
+			expect(result.current.getCachedContent("/w/a.md")).toBeNull();
+
+			// 1 回目は A→B 切替時の flush (A の編集内容が A へ書かれる = 正しい)。
+			// 2 回目が現状の異常: 再チェック分岐は id === activeTabId を fresh な store state で
+			// 判定する一方、そこから呼ぶ saveIfDirty / saveNow は handleCloseTab を呼んだ時点
+			// (まだ B が active) のレンダーに束縛された closure で、useAutoSave の filePath も
+			// "/w/b.md" のまま。結果として **A の内容が B の path へ書かれる**。
+			// この test は現状の挙動を characterization として固定しているだけで、
+			// 2 行目を「正しい」と主張してはいない (別 issue で追跡)。
+			expect(mockedWriteFile.mock.calls).toEqual([
+				["/w/a.md", "edited-a\n"],
+				["/w/b.md", "edited-a\n"],
+			]);
+		});
+
+		it("cache が無く store 上 dirty なタブは閉じない", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }, "/w/b.md"], "/w/b.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			expect(tabPaths()).toEqual(["/w/a.md", "/w/b.md"]);
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("cache が無く store 上 clean なタブは保存せず閉じる", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }, "/w/b.md"], "/w/b.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			expect(tabPaths()).toEqual(["/w/b.md"]);
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("非 active な dirty cache の write が成功すれば cache 内容を保存して閉じる", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w/a.md")).toBe("edited-a");
+
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			// この経路は cache.content をそのまま書く (processContent を通さない)。
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "edited-a");
+			expect(tabPaths()).toEqual(["/w/b.md"]);
+		});
+
+		it("非 active な dirty cache の write が失敗したら閉じない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w/a.md")).toBe("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("close write failed"));
+			await act(async () => {
+				await result.current.handleCloseTab(1);
+			});
+
+			expect(tabPaths()).toEqual(["/w/a.md", "/w/b.md"]);
+			expect(result.current.getCachedContent("/w/a.md")).toBe("edited-a");
+		});
+	});
+
+	// #458 finding 6: saveAllTabs (window close 前の一括保存) の分岐を pin する。
+	describe("saveAllTabs の分岐", () => {
+		it("active タブが dirty なら保存してから ok を返す", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			let saveResult!: "ok" | "failed" | "cancelled";
+			await act(async () => {
+				saveResult = await result.current.saveAllTabs();
+			});
+
+			expect(saveResult).toBe("ok");
+			expect(mockedWriteFile).toHaveBeenCalledWith("/w/a.md", "edited\n");
+		});
+
+		it("active タブの保存が失敗したら failed を返す", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("boom"));
+
+			let saveResult!: "ok" | "failed" | "cancelled";
+			await act(async () => {
+				saveResult = await result.current.saveAllTabs();
+			});
+
+			expect(saveResult).toBe("failed");
+		});
+
+		it("複数 cache のうち 1 件だけ失敗すると failed を返し、成功分だけ clean になる", async () => {
+			diskContents.set("/w/b.md", "orig-b");
+			diskContents.set("/w/c.md", "orig-c");
+			seedWorkspace("/w", ["/w/b.md", "/w/c.md", "newtab://1"], "/w/b.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			// 末尾改行済みの内容にしておく: processContent (trim + 末尾改行保証) を通しても
+			// 値が変わらないので、write 成功後の cache.content === cache.savedContent 比較
+			// (isCachedTabClean) が正規化の有無に左右されない。
+			editor.type("edited-b\n");
+
+			// B → C: B の flush を失敗させ dirty cache のまま残す
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/c.md");
+			});
+			await flushAsync();
+			editor.type("edited-c\n");
+
+			// C → newtab: C の flush も失敗させる
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("newtab://1");
+			});
+			await flushAsync();
+
+			expect(result.current.getCachedContent("/w/b.md")).toBe("edited-b\n");
+			expect(result.current.getCachedContent("/w/c.md")).toBe("edited-c\n");
+			expect(result.current.isCachedTabClean("/w/b.md")).toBe(false);
+			expect(result.current.isCachedTabClean("/w/c.md")).toBe(false);
+
+			// saveAllTabs 内: B は成功、C は失敗させる (Map の挿入順 = B, C)
+			mockedWriteFile.mockResolvedValueOnce(undefined);
+			mockedWriteFile.mockRejectedValueOnce(new Error("save-all c failed"));
+
+			let saveResult!: "ok" | "failed" | "cancelled";
+			await act(async () => {
+				saveResult = await result.current.saveAllTabs();
+			});
+
+			expect(saveResult).toBe("failed");
+			expect(result.current.isCachedTabClean("/w/b.md")).toBe(true);
+			expect(result.current.isCachedTabClean("/w/c.md")).toBe(false);
+			const tabs = useWorkspaceStore.getState().tabs;
+			expect(tabs.find((t) => t.path === "/w/b.md")?.dirty).toBe(false);
+			expect(tabs.find((t) => t.path === "/w/c.md")?.dirty).toBe(true);
+		});
+
+		it("newtab ページと clean な cache は write 対象から除外される", async () => {
+			seedWorkspace("/w", ["newtab://1", "/w/clean.md"], "newtab://1");
+			const { result } = renderManager();
+			await flushAsync();
+
+			act(() => {
+				result.current.applyCacheReload("/w/clean.md", "clean-content");
+			});
+
+			let saveResult!: "ok" | "failed" | "cancelled";
+			await act(async () => {
+				saveResult = await result.current.saveAllTabs();
+			});
+
+			expect(saveResult).toBe("ok");
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("dirty cache は trimTrailingWhitespace 設定に従って正規化されてから write される", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("line   ");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w/a.md")).toBe("line   ");
+
+			mockedWriteFile.mockResolvedValueOnce(undefined);
+			await act(async () => {
+				await result.current.saveAllTabs();
+			});
+
+			// trimTrailingWhitespace: true (既定) → 行末空白除去 + 末尾改行
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "line\n");
+		});
+
+		it("trimTrailingWhitespace: false のときは行末空白を残したまま write される", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("line   ");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w/a.md")).toBe("line   ");
+
+			useSettingsStore.setState({ trimTrailingWhitespace: false });
+			mockedWriteFile.mockResolvedValueOnce(undefined);
+			await act(async () => {
+				await result.current.saveAllTabs();
+			});
+
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "line   \n");
+		});
+
+		it("await 中に unmount したら cancelled を返し、store を更新しない", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result, editor, unmount } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			const deferred = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
+
+			let saveResult!: "ok" | "failed" | "cancelled";
+			let savePromise!: Promise<void>;
+			act(() => {
+				savePromise = result.current.saveAllTabs().then((r) => {
+					saveResult = r;
+				});
+			});
+			await flushAsync();
+
+			const dirtyBefore = useWorkspaceStore
+				.getState()
+				.tabs.find((t) => t.path === "/w/a.md")?.dirty;
+
+			unmount();
+			deferred.resolve();
+			await savePromise;
+			await flushAsync();
+
+			expect(saveResult).toBe("cancelled");
+			// unmount 後は setTabDirty が呼ばれないので dirty 状態は変化しない。
+			expect(useWorkspaceStore.getState().tabs.find((t) => t.path === "/w/a.md")?.dirty).toBe(
+				dirtyBefore,
+			);
 		});
 	});
 });
