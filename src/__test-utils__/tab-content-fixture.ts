@@ -2,7 +2,6 @@ import type { EditorView } from "@codemirror/view";
 import { act } from "@testing-library/react";
 import type { RefObject } from "react";
 import { vi } from "vitest";
-import type { MarkdownEditorHandle } from "../components/editor/MarkdownEditor";
 import { type Tab, useWorkspaceStore } from "../stores/workspace";
 
 /**
@@ -82,21 +81,6 @@ export function createFakeEditor(initialContent = ""): FakeEditor {
 		detach: () => {
 			ref.current = null;
 		},
-	};
-}
-
-/** captureSnapshot / restoreSnapshot を差し替えられる MarkdownEditorHandle の fake。 */
-export function createFakeEditorHandle(options?: {
-	snapshot?: unknown;
-	restoreResult?: boolean;
-}): MarkdownEditorHandle & {
-	captureSnapshot: ReturnType<typeof vi.fn>;
-	restoreSnapshot: ReturnType<typeof vi.fn>;
-} {
-	const snapshot = options?.snapshot ?? { history: "fake" };
-	return {
-		captureSnapshot: vi.fn(() => snapshot),
-		restoreSnapshot: vi.fn(() => options?.restoreResult ?? true),
 	};
 }
 

@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { createDeferred } from "../../__test-utils__/tab-content-fixture";
 import {
 	fileExists,
 	onFsChange,
@@ -1635,12 +1636,14 @@ describe("AppLayout", () => {
 	// タブ保存自体の分岐は useTabContentManager の hook test 側で pin してあるので、
 	// ここでは「返り値ごとに scratchpad 保存へ進むか / close を中止するか」だけを見る。
 	describe("window close の委譲結果", () => {
-		async function renderWithScratchpad() {
+		async function renderWithScratchpad(): Promise<{ unmount: () => void }> {
 			openFileInStore("/workspace", "/workspace/test.md");
 			useScratchpadStore.setState({ open: true });
+			let unmount!: () => void;
 			await act(async () => {
-				render(<AppLayout />);
+				({ unmount } = render(<AppLayout />));
 			});
+			return { unmount };
 		}
 
 		async function runCloseHandler(): Promise<boolean> {
@@ -1695,24 +1698,14 @@ describe("AppLayout", () => {
 		it('does not save the scratchpad or abort the close when unmounted mid-save ("cancelled")', async () => {
 			const saveSpy = vi.fn().mockResolvedValue(true);
 			scratchpadSaveMock = saveSpy;
-			openFileInStore("/workspace", "/workspace/test.md");
-			useScratchpadStore.setState({ open: true });
-			let unmount!: () => void;
-			await act(async () => {
-				({ unmount } = render(<AppLayout />));
-			});
+			const { unmount } = await renderWithScratchpad();
 			await act(async () => {
 				screen.getByTestId("editor-change").click();
 			});
 
 			// 保存を in-flight のまま止めて unmount する。
-			let resolveWrite!: () => void;
-			mockedWriteFile.mockImplementationOnce(
-				() =>
-					new Promise<void>((resolve) => {
-						resolveWrite = () => resolve();
-					}),
-			);
+			const write = createDeferred<void>();
+			mockedWriteFile.mockImplementationOnce(() => write.promise);
 
 			let threw = false;
 			let closePromise!: Promise<void>;
@@ -1723,7 +1716,7 @@ describe("AppLayout", () => {
 			});
 			await act(async () => {
 				unmount();
-				resolveWrite();
+				write.resolve();
 				await closePromise;
 			});
 
