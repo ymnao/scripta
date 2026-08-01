@@ -112,8 +112,11 @@ describe("useTabContentManager", () => {
 
 			expect(result.current.getCachedContent("/w/a/baz/x.md")).toBe("x-content");
 			expect(result.current.getCachedContent("/w/a/foo/x.md")).toBeNull();
-			// 兄弟は startsWith(prefix) にマッチしないので不変。prefix に区切りを付けずに
-			// 判定すると /w/a/foobar/y.md まで /w/a/bazbar/y.md へ移動してしまう。
+			// 兄弟は移動対象に入らない。この性質は 2 層で守られており (走査側の
+			// startsWith(prefix) と replacePrefix 自身の境界 guard)、mutation で確かめると
+			// 片層だけ壊しても newKey === oldKey になるため挙動が変わらない (= 単層の
+			// mutant は survive する)。この assert が pin しているのは「兄弟が動かない」
+			// という性質そのもので、両層を同時に壊した mutant で KILL される。
 			expect(result.current.getCachedContent("/w/a/foobar/y.md")).toBe("y-content");
 			expect(result.current.getCachedContent("/w/a/bazbar/y.md")).toBeNull();
 			expect(tabPaths()).toEqual(["/w/a/baz/x.md", "/w/a/foobar/y.md"]);
