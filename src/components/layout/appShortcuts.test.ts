@@ -1,10 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import type { EditorView } from "@codemirror/view";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Shortcut } from "../../hooks/useShortcuts";
+import { useWorkspaceStore } from "../../stores/workspace";
 import { type AppShortcutDeps, buildAppShortcuts } from "./appShortcuts";
 
 vi.mock("../../lib/commands", () => ({
 	closeWindow: vi.fn(),
 }));
+
+/** match 側のガードを通し、editor-search-bar の run が読む最小限だけを持つ view。 */
+function makeView(selectedText = ""): EditorView {
+	return {
+		hasFocus: true,
+		state: {
+			selection: { main: { empty: selectedText === "", from: 0, to: selectedText.length } },
+			sliceDoc: () => selectedText,
+		},
+	} as unknown as EditorView;
+}
 
 function makeDeps(overrides: Partial<AppShortcutDeps> = {}): AppShortcutDeps {
 	return {
@@ -19,8 +32,8 @@ function makeDeps(overrides: Partial<AppShortcutDeps> = {}): AppShortcutDeps {
 		setSlideViewActive: vi.fn(),
 		handleExport: vi.fn(),
 		searchInputRef: { current: null },
-		// match 側のガードを通す (editor がある状態) — 未 focus 版は個別テストで差し替える
-		editorViewRef: { current: { hasFocus: true } as unknown as never },
+		// editor がある状態。未 focus / 未 mount 版は個別テストで差し替える
+		editorViewRef: { current: makeView() },
 		searchBarOpenRef: { current: false },
 		searchBarHandleRef: { current: null },
 		setSearchBarExpanded: vi.fn(),
@@ -178,5 +191,185 @@ describe("buildAppShortcuts", () => {
 		const shortcuts = buildAppShortcuts(makeDeps({ editorViewRef: { current: null } }));
 		expect(matchingIds(shortcuts, makeEvent("f", { metaKey: true }))).toEqual([]);
 		expect(matchingIds(shortcuts, makeEvent("g", { metaKey: true }))).toEqual([]);
+	});
+});
+
+/**
+ * run の配線 (どのエントリがどの deps を呼ぶか) を全 22 エントリ分 pin する。
+ *
+ * AppLayout.test.tsx はキー dispatch 経由で 9 エントリしか踏んでおらず、残りは
+ * run を no-op に差し替えても green のままだった。ファクトリ化で mock deps を
+ * 与えられるようになったので、ここで全エントリを直接叩いて塞ぐ。
+ */
+describe("buildAppShortcuts の run 配線", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		useWorkspaceStore.setState({ activeTabPath: "/ws/note.md" });
+	});
+
+	function run(deps: AppShortcutDeps, id: string, key = "x", mods = {}): void {
+		const entry = buildAppShortcuts(deps).find((s) => s.id === id);
+		if (!entry) throw new Error(`shortcut not found: ${id}`);
+		entry.run(makeEvent(key, mods));
+	}
+
+	/** 関数形式の setState 更新を、初期値を与えて実際に適用した結果で検証する。 */
+	function applyUpdater<T>(fn: unknown, prev: T): T {
+		expect(typeof fn).toBe("function");
+		return (fn as (p: T) => T)(prev);
+	}
+
+	it("prev-tab / next-tab はタブ移動を呼ぶ", () => {
+		const deps = makeDeps();
+		run(deps, "prev-tab");
+		expect(deps.activatePrevTab).toHaveBeenCalledTimes(1);
+		run(deps, "next-tab");
+		expect(deps.activateNextTab).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		["history-back-bracket", "handleGoBack"],
+		["history-back-alt", "handleGoBack"],
+		["history-forward-bracket", "handleGoForward"],
+		["history-forward-alt", "handleGoForward"],
+	] as const)("%s は %s を呼ぶ", (id, handler) => {
+		const deps = makeDeps();
+		run(deps, id);
+		expect(deps[handler]).toHaveBeenCalledTimes(1);
+		const other = handler === "handleGoBack" ? deps.handleGoForward : deps.handleGoBack;
+		expect(other).not.toHaveBeenCalled();
+	});
+
+	it("close-tab-or-window は shift 無しで active タブを閉じる", () => {
+		const deps = makeDeps({ activeTabId: 7 });
+		run(deps, "close-tab-or-window", "w", { metaKey: true });
+		expect(deps.handleCloseTab).toHaveBeenCalledWith(7);
+	});
+
+	it("close-tab-or-window はタブが無ければウィンドウを閉じる", async () => {
+		const { closeWindow } = await import("../../lib/commands");
+		const deps = makeDeps({ activeTabId: null });
+		run(deps, "close-tab-or-window", "w", { metaKey: true });
+		expect(deps.handleCloseTab).not.toHaveBeenCalled();
+		expect(closeWindow).toHaveBeenCalledTimes(1);
+	});
+
+	it("close-tab-or-window は shift 有りならタブがあってもウィンドウを閉じる", async () => {
+		const { closeWindow } = await import("../../lib/commands");
+		const deps = makeDeps({ activeTabId: 7 });
+		run(deps, "close-tab-or-window", "W", { metaKey: true, shiftKey: true });
+		expect(deps.handleCloseTab).not.toHaveBeenCalled();
+		expect(closeWindow).toHaveBeenCalledTimes(1);
+	});
+
+	it("toggle-sidebar はサイドバー表示を反転する", () => {
+		const deps = makeDeps();
+		run(deps, "toggle-sidebar");
+		expect(applyUpdater(vi.mocked(deps.setSidebarVisible).mock.calls[0][0], true)).toBe(false);
+	});
+
+	it.each([
+		["sidebar-files", "files"],
+		["sidebar-search", "search"],
+	] as const)("%s は %s パネルへ切り替える", (id, panel) => {
+		const deps = makeDeps();
+		run(deps, id);
+		expect(deps.setSidebarPanel).toHaveBeenCalledWith(panel);
+	});
+
+	it.each([
+		["sidebar-unresolved", "unresolved"],
+		["sidebar-backlink", "backlink"],
+	] as const)("%s は同じパネルなら files へ戻す", (id, panel) => {
+		const deps = makeDeps();
+		run(deps, id);
+		const updater = vi.mocked(deps.setSidebarPanel).mock.calls[0][0];
+		expect(applyUpdater(updater, "files" as const)).toBe(panel);
+		expect(applyUpdater(updater, panel)).toBe("files");
+	});
+
+	it("toggle-slide-view は通常タブでのみスライド表示を反転する", () => {
+		const deps = makeDeps();
+		run(deps, "toggle-slide-view");
+		expect(applyUpdater(vi.mocked(deps.setSlideViewActive).mock.calls[0][0], false)).toBe(true);
+
+		useWorkspaceStore.setState({ activeTabPath: "newtab://1" });
+		const onNewTab = makeDeps();
+		run(onNewTab, "toggle-slide-view");
+		expect(onNewTab.setSlideViewActive).not.toHaveBeenCalled();
+	});
+
+	it("export は active タブのパスを渡す (newtab では呼ばない)", () => {
+		const deps = makeDeps();
+		run(deps, "export");
+		expect(deps.handleExport).toHaveBeenCalledWith("/ws/note.md");
+
+		useWorkspaceStore.setState({ activeTabPath: "newtab://1" });
+		const onNewTab = makeDeps();
+		run(onNewTab, "export");
+		expect(onNewTab.handleExport).not.toHaveBeenCalled();
+	});
+
+	it("editor-search-bar は閉じていれば選択文字列を初期値にして開く", () => {
+		const deps = makeDeps({ editorViewRef: { current: makeView("needle") } });
+		run(deps, "editor-search-bar", "f", { metaKey: true });
+		expect(deps.setSearchBarInitialText).toHaveBeenCalledWith("needle");
+		expect(deps.setSearchBarExpanded).toHaveBeenCalledWith(false);
+		expect(deps.setSearchBarOpen).toHaveBeenCalledWith(true);
+	});
+
+	it("editor-search-bar は Cmd+H なら置換欄を開いた状態にする", () => {
+		const deps = makeDeps();
+		run(deps, "editor-search-bar", "h", { metaKey: true });
+		expect(deps.setSearchBarExpanded).toHaveBeenCalledWith(true);
+	});
+
+	it("editor-search-bar は開いている間は既存バーへ委譲する", () => {
+		const handle = { setSearch: vi.fn(), focusInput: vi.fn() };
+		const deps = makeDeps({
+			searchBarOpenRef: { current: true },
+			searchBarHandleRef: { current: handle },
+			editorViewRef: { current: makeView("needle") },
+		});
+		run(deps, "editor-search-bar", "f", { metaKey: true });
+		expect(handle.setSearch).toHaveBeenCalledWith("needle");
+		expect(deps.setSearchBarOpen).not.toHaveBeenCalled();
+
+		const noSelection = makeDeps({
+			searchBarOpenRef: { current: true },
+			searchBarHandleRef: { current: handle },
+		});
+		run(noSelection, "editor-search-bar", "f", { metaKey: true });
+		expect(handle.focusInput).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		["new-tab", "openNewTab"],
+		["toggle-scratchpad", "toggleScratchpad"],
+	] as const)("%s は workspace がある時だけ %s を呼ぶ", (id, handler) => {
+		const withWorkspace = makeDeps();
+		run(withWorkspace, id);
+		expect(withWorkspace[handler]).toHaveBeenCalledTimes(1);
+
+		const without = makeDeps({ workspacePath: null });
+		run(without, id);
+		expect(without[handler]).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["go-to-line", "setGoToLineOpen"],
+		["command-palette", "setCommandPaletteOpen"],
+		["settings", "setSettingsOpen"],
+		["help", "setHelpOpen"],
+	] as const)("%s は %s を反転する", (id, setter) => {
+		const deps = makeDeps();
+		run(deps, id);
+		expect(applyUpdater(vi.mocked(deps[setter]).mock.calls[0][0], false)).toBe(true);
+	});
+
+	it("slide-show は発表モードを起動する", () => {
+		const deps = makeDeps();
+		run(deps, "slide-show", "F5");
+		expect(deps.startSlideShow).toHaveBeenCalledTimes(1);
 	});
 });
