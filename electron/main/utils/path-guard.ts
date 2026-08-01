@@ -121,6 +121,22 @@ export function clearWorkspaceRootsForWindow(windowId: number): void {
 	transientWritePaths.delete(windowId);
 }
 
+// realpathCache から `p` 自身の entry を落とす (#418)。
+//
+// 用途は 1 つだけ: 認可済み canonical への `O_NOFOLLOW` open が ELOOP を返した呼び手が、
+// 「cache が stale だっただけ」と「認可後に末端を swap された」を切り分けるために使う。
+// 落としたうえで assert 系を呼び直すと、fresh な realpath で両者が分かれる（fs.ts の
+// `withStaleCacheRetry` を参照）。
+//
+// 祖先 entry は触らない: ELOOP が知らせるのは末端 component の状態だけで、祖先を無効化する根拠が
+// 無いため（祖先が stale でないことの保証ではない）。祖先が stale なまま fall-through した場合は
+// 再認可後も同じ末端に戻り、2 度目の ELOOP が伝播して fail-closed になる。cache 全体の鮮度問題
+// そのものは #453 で追跡している。
+export function invalidateRealpathCacheEntry(p: string): void {
+	if (typeof p !== "string" || p.length === 0) return;
+	realpathCache.delete(resolve(p));
+}
+
 export function clearWorkspaceRoots(): void {
 	windowAllowedRoots.clear();
 	transientWritePaths.clear();
@@ -217,11 +233,27 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //   - assert 内で realpath を 1 回だけ計算し、その結果を返すことで重複正規化も
 //     避けられる（hot path の syscall 削減）
 //
-// **TOCTOU の限界 (#412)**: 戻り値が path である以上、呼び出し側の I/O は再度 traversal する。
-// user-IPC 系の read (fs.ts の readFileImpl / readFileBase64Impl) は canonical を fd で開くが
-// O_NOFOLLOW は指定していないため、末端 / 中間 dir いずれの swap 窓も残る。index 取り込み経路
-// (resolveInsideRoot) は #412 で末端側を閉じたが、user-IPC 側は脅威モデルが異なる
-// (内容は元々 renderer に返すもの) ため別途判断する — 追跡は #418。
+// **TOCTOU の限界 (#412 / #418)**: 戻り値が path である以上、呼び出し側の I/O は再度 traversal
+// するため、認可 (T1) と I/O (T2) の間に構成要素を symlink へ差し替えられる窓が残る。窓は
+// 末端 component と中間 dir の 2 つに分かれ、**末端側だけが閉じている**:
+//   - **末端 component: 内容を返す / 書く経路では閉じた**。index 取り込み経路
+//     (resolveInsideRoot) は #412 で、user-IPC の fs:read / fs:read-base64 / fs:write は #418 で
+//     `O_NOFOLLOW` 付き fd の I/O に揃えた。**内容に届かない経路 (fs:list / fs:path-exists /
+//     fs:file-exists) は窓が残る** (entry 名と存在の有無のみ露出。fd 版 readdir/stat が無いため
+//     受容)。経路ごとの根拠は fs.ts 冒頭の doc ブロックを参照。**この doc が扱うのは fs IPC
+//     だけ**で、同じ assert を使う他の write 経路 (pdf.ts の writeFileAtomic / git.ts の
+//     resolveConflict) には同種の窓が残っている (追跡: #455)。
+//   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
+//     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
+// **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に
+// なる (#451 で追跡)。
+// **realpathCache 由来の鮮度差**: 本 API は cache 済みの realpath 結果を使うため、symlink の
+// retarget 直後は canonical が stale になり得る。stale な canonical は「cache 時点で root 内と
+// 確認済みだった path」だが、その path 自身が今は symlink になっている可能性があり、**上の
+// O_NOFOLLOW があって初めて**外部内容の read / 外部 file の上書きが防がれる (cache hit は
+// swap 窓を再現可能にするので、fs.test.ts の #418 test はこの経路を fixture に使っている)。
+// 残る劣化は「ユーザーから見た解決先とのズレ」で、これは #418 のスコープ外として受容し、
+// 判断は #453 で追跡する。
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
@@ -285,7 +317,7 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない。macOS の
 //     `O_NOFOLLOW_ANY` は `fs.constants` に無く magic number 直書き + darwin 限定になるため
-//     採らない (詳細と再検討条件は read-nofollow.ts の doc)。成立には workspace 書込権限と
+//     採らない (詳細と再検討条件は open-nofollow.ts の doc)。成立には workspace 書込権限と
 //     精密なタイミングが要り、payoff は main process の in-memory bigram に限られる
 //     (candidates は renderer に非露出)。
 //   - **hard link 置換は「末端が閉じた」の範囲外**: 同一 filesystem 内で外部 file への

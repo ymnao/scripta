@@ -27,6 +27,7 @@ describe("translateError", () => {
 		["ENAMETOOLONG", "ファイル名が長すぎます"],
 		["ENOTEMPTY", "フォルダが空ではありません"],
 		["EMFILE", "開いているファイルが多すぎます"],
+		["ELOOP", "リンク先が変わったため開けませんでした"],
 		["ALREADY_EXISTS", "同名のファイルが既に存在します"],
 		["SOURCE_NOT_FOUND", "元のファイルが見つかりません"],
 		["TARGET_ALREADY_EXISTS", "移動先に同名のファイルが既に存在します"],
@@ -115,6 +116,8 @@ describe("isTransientError", () => {
 		"ENAMETOOLONG",
 		"ENOTEMPTY",
 		"EMFILE",
+		// #418: main 側で cache 破棄 + 再認可まで済ませた上での失敗なので再試行しない
+		"ELOOP",
 		"INVALID_PATH",
 		"PATH_OUTSIDE_WORKSPACE",
 		"FILE_TOO_LARGE",

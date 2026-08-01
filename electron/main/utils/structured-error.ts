@@ -44,6 +44,7 @@ const ERRNO_TO_KIND: Record<string, ErrorKind> = {
 	ENOTEMPTY: "ENOTEMPTY",
 	EMFILE: "EMFILE",
 	ENFILE: "EMFILE",
+	ELOOP: "ELOOP",
 };
 
 export function classifyErrno(code: string | undefined): ErrorKind {

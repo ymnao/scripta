@@ -1,8 +1,8 @@
-import { promises as fsp } from "node:fs";
+import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
-import { readFileUtf8NoFollow } from "./read-nofollow";
+import { NOFOLLOW_READ_FLAGS, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
 
 // #412: index 取り込み read の末端 swap 窓。
 // TOCTOU の race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って
@@ -55,5 +55,54 @@ describe.skipIf(process.platform === "win32")("readFileUtf8NoFollow", () => {
 
 	it("rejects a missing file (呼び手の skip 契約に乗る)", async () => {
 		await expect(readFileUtf8NoFollow(join(ws.dir, "nope.md"))).rejects.toThrow();
+	});
+});
+
+// #418: 上書き write 版の helper と、read が flag だけ借りるための export 契約。
+describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_FLAG", () => {
+	let ws: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-nofollow-flag-");
+	});
+
+	afterEach(async () => {
+		await ws.cleanup();
+	});
+
+	it("NOFOLLOW_READ_FLAGS は win32 以外で O_RDONLY 相当に落ちない", () => {
+		// win32 fallback (`?? 0`) が効いた状態と区別する。O_RDONLY は 0 なので、
+		// flag が落ちると読み取り専用 open と見分けが付かなくなる。
+		expect(NOFOLLOW_READ_FLAGS).not.toBe(fsConstants.O_RDONLY);
+	});
+
+	it("末端 symlink への書き込みを拒否し、解決先を truncate もしない", async () => {
+		const real = join(ws.dir, "real.md");
+		await fsp.writeFile(real, "before", "utf8");
+		const alias = join(ws.dir, "alias.md");
+		await fsp.symlink(real, alias);
+
+		const err = await writeFileUtf8NoFollow(alias, "after").catch((e: NodeJS.ErrnoException) => e);
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+		expect(await fsp.readFile(real, "utf8")).toBe("before");
+	});
+
+	it("通常 file は fsp.writeFile と同じく truncate + inode 保持で上書きする", async () => {
+		const p = join(ws.dir, "note.md");
+		// 長い内容 → 短い内容。O_TRUNC が抜けると旧内容の残骸が末尾に残るので、
+		// この長さ関係でないと truncate の欠落を検出できない。
+		await fsp.writeFile(p, "before マルチバイトの長い内容", "utf8");
+		const before = await fsp.stat(p);
+
+		await writeFileUtf8NoFollow(p, "after");
+
+		expect(await fsp.readFile(p, "utf8")).toBe("after");
+		expect((await fsp.stat(p)).ino).toBe(before.ino);
+	});
+
+	it("未存在の path は新規作成する", async () => {
+		const p = join(ws.dir, "new.md");
+		await writeFileUtf8NoFollow(p, "created");
+		expect(await fsp.readFile(p, "utf8")).toBe("created");
 	});
 });

@@ -24,6 +24,7 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 	ENAMETOOLONG: "ファイル名が長すぎます",
 	ENOTEMPTY: "フォルダが空ではありません",
 	EMFILE: "開いているファイルが多すぎます",
+	ELOOP: "リンク先が変わったため開けませんでした",
 	// 意味的なファイル操作エラー
 	ALREADY_EXISTS: "同名のファイルが既に存在します",
 	SOURCE_NOT_FOUND: "元のファイルが見つかりません",
@@ -72,6 +73,9 @@ const NON_TRANSIENT_KINDS: ReadonlySet<ErrorKind> = new Set<ErrorKind>([
 	"ENOTEMPTY",
 	// FD 枯渇は短時間の再試行で回復しないことが多く、無駄な再試行を避ける
 	"EMFILE",
+	// 末端 symlink の拒否 (#418)。main 側で cache 破棄 + 再認可まで済ませたうえでの
+	// 失敗なので、renderer が同じ path を再試行しても結果は変わらない
+	"ELOOP",
 	"INVALID_PATH",
 	"PATH_OUTSIDE_WORKSPACE",
 	// サイズ上限超は再試行しても同じく失敗するため transient ではない

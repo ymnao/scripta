@@ -16,6 +16,8 @@ describe("classifyErrno", () => {
 		expect(classifyErrno("ENFILE")).toBe("EMFILE");
 		expect(classifyErrno("EISDIR")).toBe("EISDIR");
 		expect(classifyErrno("ENOTDIR")).toBe("ENOTDIR");
+		// 末端 symlink の拒否 (#418)。未分類だと UNKNOWN → transient 扱いになる
+		expect(classifyErrno("ELOOP")).toBe("ELOOP");
 	});
 
 	it("maps unknown / undefined codes to UNKNOWN", () => {
