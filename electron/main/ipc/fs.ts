@@ -47,16 +47,21 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 // fd に対して I/O し、この窓を閉じる（win32 は flag が 0 に落ちるため従来挙動、#451 で追跡）。
 //
 // canonical の末端が symlink であり得るのは **`realpathBestEffort` が祖先 fall-through した
-// 場合（= dangling symlink）だけ**（#453 で realpath cache を撤去し、認可は毎回 fresh になった）。
-// read open は解決先が無いので `O_NOFOLLOW` の有無に関わらず失敗する（ELOOP / ENOENT）が、
-// **O_CREAT を含む write open は成功して解決先を新規作成してしまう**（次段落の escape がこれ）。
-// workspace 内の正当な symlink note は認可時の realpath が実体まで解決するので、canonical は
-// 非 symlink になり flag は発火しない。
+// 場合、すなわち realpath がその path を解決できなかったとき**（dangling symlink / 循環 symlink
+// など。probe 実測でどちらも canonical が symlink 自身の path になり O_NOFOLLOW open が ELOOP に
+// なることを確認済み）。#453 で realpath cache を撤去し認可が毎回 fresh になったので、
+// 「cache が stale で、載った後に実体が symlink へ置き換わった」は原因から外れた。
+// dangling の read open は解決先が無いので `O_NOFOLLOW` の有無に関わらず失敗する（ELOOP /
+// ENOENT）が、**O_CREAT を含む write open は成功して解決先を新規作成してしまう**（次段落の
+// escape がこれ）。workspace 内の正当な symlink note は認可時の realpath が実体まで解決するので、
+// canonical は非 symlink になり flag は発火しない。
 //
-// **ELOOP はそのまま呼び手へ伝播する（fail-closed）**。cache 撤去後の ELOOP が意味するのは
-// 「dangling」か「認可 (T1) から open (T2) の間に実際に swap された真の race」だけで、どちらも
-// 再試行で解ける状態ではない（#418 当時は cache stale による正当な alias 化が混ざっていたため、
-// cache を捨てて 1 度だけ再認可する `withStaleCacheRetry` で切り分けていた）。
+// **ELOOP はそのまま呼び手へ伝播する（fail-closed）**。cache 撤去後の ELOOP の原因は
+// 「realpath が解決できない symlink（dangling / 循環）」か「認可 (T1) から open (T2) の間に
+// 実際に swap された真の race」で、前者は再試行しても変わらない。後者のうち解決先が workspace
+// 内なら再認可 + 再 open で成功しうるが、窓は µs 単位まで縮んでおり、専用の再試行機構を維持する
+// 頻度的な根拠が無いので fail-closed に倒す（#418 当時は cache stale 由来の**正当な alias 化**が
+// 常時混ざっていたため、cache を捨てて 1 度だけ再認可する `withStaleCacheRetry` が要った）。
 //
 // **`fsp.writeFile` のままでは workspace 外へ escape する**: dangling symlink（workspace 外の
 // **未存在** path を指す）は realpath が ENOENT で throw し、canonical が symlink 自身の path

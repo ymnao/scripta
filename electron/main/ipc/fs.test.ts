@@ -594,7 +594,9 @@ describe("deleteEntryImpl", () => {
 //
 // race そのものは再現せず、終状態を disk 上に作って決定的に検証する (open-nofollow.test.ts と
 // 同方針)。2 の test が「一度呼んでから retarget する」形なのは、**前回の認可結果が残らないこと**
-// 自体を pin するため (cache を再導入すると外向きは ELOOP、内向き alias は ENOENT で落ちる)。
+// 自体を pin するため (cache を再導入すると、stale な canonical の末端が今は symlink なので
+// O_NOFOLLOW open が ELOOP を返し、期待している PATH_OUTSIDE_WORKSPACE / 解決先の内容に届かない
+// = 実測で 6 本とも落ちる)。
 //
 // win32 は O_NOFOLLOW が無く flag が 0 に落ちるため拒否 assert が成立しない (#451 で追跡)。
 describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / #453)", () => {
@@ -662,7 +664,8 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / 
 		it("一度 read した path が workspace 内の alias へ retarget されたら解決先を読む", async () => {
 			// 同じ retarget でも、解決先が workspace 内なら**正当な alias 化** (git checkout /
 			// 同期クライアント等)。成否が「その path を過去に読んだか」で変わらないことを pin する。
-			// cache を再導入すると canonical が消えた実体を指したまま ENOENT で落ちる。
+			// cache を再導入すると canonical は cache 時点の note.md のままで、その末端が今は
+			// symlink なので O_NOFOLLOW open が ELOOP を返して落ちる。
 			const real = join(workspaceDir, "real.md");
 			await writeFile(real, "real body", "utf8");
 			const path = join(workspaceDir, "note.md");

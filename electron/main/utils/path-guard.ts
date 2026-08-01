@@ -225,9 +225,10 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 // なる (#451 で追跡)。
 // **realpath の鮮度**: 本 API は呼ばれるたびに fresh に realpath する (#453 で cache を撤去)。
 // symlink を retarget した直後の認可も新しい解決先で判定されるため、前回の認可結果は持ち越さない。
-// これにより「検索は新しい解決先で判定し、fs:read は古い判定を返す」窓 (ADR-0011 の受容事項 ①) が
-// 閉じ、canonical の末端が symlink であり得るのは realpathBestEffort が祖先 fall-through した
-// **dangling symlink** の場合だけになった。
+// これにより ADR-0011 が「retarget 直後は両者が一時的にズレる」として受容していた窓 (検索は新しい
+// 解決先で判定し、fs:read は古い判定を返す) が閉じ、canonical の末端が symlink であり得るのは
+// **realpathBestEffort が祖先 fall-through したとき、すなわち realpath がその path を解決できな
+// かったとき** (dangling symlink / 循環 symlink 等) だけになった。
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。

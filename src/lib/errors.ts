@@ -73,8 +73,11 @@ const NON_TRANSIENT_KINDS: ReadonlySet<ErrorKind> = new Set<ErrorKind>([
 	"ENOTEMPTY",
 	// FD 枯渇は短時間の再試行で回復しないことが多く、無駄な再試行を避ける
 	"EMFILE",
-	// 末端 symlink の拒否 (#418)。main 側で cache 破棄 + 再認可まで済ませたうえでの
-	// 失敗なので、renderer が同じ path を再試行しても結果は変わらない
+	// 末端 symlink の拒否 (#418 / #453)。支配的なのは realpath が解決できない symlink
+	// (dangling / 循環) で、これは再試行しても同じく失敗する。認可 (T1) から open (T2) の
+	// 間に実際に swap された race のうち、解決先が workspace 内なら再試行で成功しうるが、
+	// 窓は µs 単位で、外れを引いた場合の backoff (数秒) に見合わないため transient に
+	// 倒さない (#453 で main 側の再認可も撤去し、どの層も自動再試行しない構成にした)
 	"ELOOP",
 	"INVALID_PATH",
 	"PATH_OUTSIDE_WORKSPACE",

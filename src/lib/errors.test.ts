@@ -116,7 +116,7 @@ describe("isTransientError", () => {
 		"ENAMETOOLONG",
 		"ENOTEMPTY",
 		"EMFILE",
-		// #418: main 側で cache 破棄 + 再認可まで済ませた上での失敗なので再試行しない
+		// #418 / #453: 支配的な原因 (realpath 不能な symlink) が再試行で変わらないため transient にしない
 		"ELOOP",
 		"INVALID_PATH",
 		"PATH_OUTSIDE_WORKSPACE",

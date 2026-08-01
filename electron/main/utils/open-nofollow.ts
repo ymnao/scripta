@@ -117,9 +117,9 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
  * **末端 symlink を ELOOP で拒否しない**点が `writeFileUtf8NoFollow` との差になるが、
  * 経路の意味論は割れない: 呼び手が渡す canonical は認可時に realpath 済みで、ユーザーが
  * 張った正当な alias は **その時点で実体へ解決されている**。canonical の末端が symlink で
- * ありうるのは (a) 認可後の swap、(b) 認可時点で既に dangling だった symlink
- * (`realpathBestEffort` が祖先 fall-through して symlink 自身の path を返す) の 2 つで
- * (#453 で realpath cache を撤去し、cache stale 由来の 3 つ目が消えた)、いずれも
+ * ありうるのは (a) 認可後の swap、(b) 認可時点で realpath が解決できなかった symlink
+ * (dangling / 循環。`realpathBestEffort` が祖先 fall-through して symlink 自身の path を返す)
+ * の 2 つで (#453 で realpath cache を撤去し、cache stale 由来の 3 つ目が消えた)、いずれも
  * symlink を置き換えるのは escape ではない (外部には届かない)。
  *
  * tmp は destination と同じ dir に作る (rename は同一 filesystem 内でしか原子的でないため)。

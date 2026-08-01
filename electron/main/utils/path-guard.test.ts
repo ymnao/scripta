@@ -419,6 +419,28 @@ describe.skipIf(process.platform === "win32")("認可の realpath 鮮度 (#453)"
 		await expect(assertWritePathAllowed(WIN_A, link)).rejects.toThrow(/outside workspace/);
 	});
 
+	// 上の 4 本は末端 component の鮮度しか押さえていない。realpathBestEffort は未存在 path で
+	// 祖先を 1 段ずつ realpath して fall-through するため、**祖先の解決結果だけを cache する**
+	// 部分的な再導入 (深い未存在 path の syscall 削減が動機になりやすい) は末端側の pin を
+	// すり抜ける。この 1 本が中間 dir symlink の鮮度を押さえる。
+	it("未存在 path の祖先 (中間 dir symlink) の retarget も反映する", async () => {
+		await registerWorkspaceRoot(WIN_A, workspaceDir);
+		const root = await canonicalize(workspaceDir);
+		const realSub = join(root, "sub");
+		await mkdir(realSub);
+		const subLink = join(root, "link-sub");
+		await symlink(realSub, subLink);
+		// 末端は未存在なので realpath は祖先 (link-sub) へ fall-through して解決する。
+		const target = join(subLink, "new.md");
+		expect(await assertWritePathAllowed(WIN_A, target)).toBe(join(realSub, "new.md"));
+
+		// 中間 dir symlink を workspace 外へ付け替える。末端 component は触っていない。
+		await unlink(subLink);
+		await symlink(outsideDir, subLink);
+
+		await expect(assertWritePathAllowed(WIN_A, target)).rejects.toThrow(/outside workspace/);
+	});
+
 	it("isPathWithinAnyAllowedRoot も retarget を反映する", async () => {
 		await registerWorkspaceRoot(WIN_A, workspaceDir);
 		const root = await canonicalize(workspaceDir);
