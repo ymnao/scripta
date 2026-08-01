@@ -245,6 +245,59 @@ describe("useTabContentManager", () => {
 			expect(result.current.getCachedContent("/w/a/foo/x.md")).toBeNull();
 		});
 
+		it("rename 中に旧 path の readFile が遅れて解決しても、新 path のロード結果を上書きしない", async () => {
+			// 旧 path の read は effect cleanup の ignore フラグで破棄されるはず。
+			// 破棄が効かないと、rename 後のエディタに旧 path の内容が現れ、
+			// そのまま新 path へ保存されて中身がすり替わる。
+			const oldRead = createDeferred<string>();
+			mockedReadFile.mockImplementation((path: string) => {
+				if (path === "/w/a/foo/x.md") return oldRead.promise;
+				return Promise.resolve(diskContents.get(path) ?? `disk:${path}`);
+			});
+			diskContents.set("/w/a/baz/x.md", "new-path-content");
+			seedWorkspace("/w", ["/w/a/foo/x.md"], "/w/a/foo/x.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				result.current.handleFileRenamed("/w/a/foo", "/w/a/baz", true);
+			});
+			await flushAsync();
+			expect(editor.getContent()).toBe("new-path-content");
+
+			await act(async () => {
+				oldRead.resolve("stale-old-content");
+			});
+			await flushAsync();
+
+			expect(editor.getContent()).toBe("new-path-content");
+			expect(result.current.getCachedContent("/w/a/baz/x.md")).toBe("new-path-content");
+		});
+
+		it("rename 対象の prefix 外に居る active タブは、追跡 ref を書き換えられない", async () => {
+			// 追跡 ref の追随を prefix 判定なしで無条件に行うと、rename と無関係な
+			// active タブの ref が別 path へ飛ばされ、そのタブの未保存編集が
+			// 「存在しない path の cache」に落ちて失われる。
+			diskContents.set("/w/a/foobar/y.md", "orig-y");
+			seedWorkspace("/w", ["/w/a/foobar/y.md", "/w/c.md"], "/w/a/foobar/y.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-y");
+
+			await act(async () => {
+				result.current.handleFileRenamed("/w/a/foo", "/w/a/baz", true);
+			});
+			await flushAsync();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/c.md");
+			});
+			await flushAsync();
+
+			expect(result.current.getCachedContent("/w/a/foobar/y.md")).toBe("edited-y");
+			expect(result.current.getCachedContent("/w/a/bazbar/y.md")).toBeNull();
+		});
+
 		it("rename 後に切り替えて戻っても、旧 path の cache が作り直されない", async () => {
 			diskContents.set("/w/a.md", "orig");
 			seedWorkspace("/w", ["/w/a.md", "/w/c.md"], "/w/a.md");
@@ -871,16 +924,19 @@ describe("useTabContentManager", () => {
 
 			const lastSaved = result.current.getLastSavedContent();
 			const beforeDoc = editor.getContent();
+			const beforeKey = result.current.editorKey;
 
 			act(() => {
 				result.current.applyExternalReload("/w/a.md", lastSaved);
 			});
 
 			// 自分の write を外部変更と誤認して remount すると、doc は同じ内容でも
-			// undo 履歴が失われる (editorKey bump)。ここで assert するのは doc が
-			// 置き換わらないこと。cache 側は active タブの getCachedContent が live editor を
-			// 返す仕様上ここからは観測できない (cache エントリ自体は作られる)。
+			// undo 履歴が失われる。内容が一致している以上 doc の比較では remount を
+			// 検出できないので、**editorKey が bump していないこと**を直接見る。
+			expect(result.current.editorKey).toBe(beforeKey);
 			expect(editor.getContent()).toBe(beforeDoc);
+			// cache 側は active タブの getCachedContent が live editor を返す仕様上
+			// ここからは観測できない (cache エントリ自体は作られる)。
 			expect(result.current.getCachedContent("/w/a.md")).toBe(beforeDoc);
 		});
 
