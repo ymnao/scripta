@@ -143,5 +143,6 @@ Chromium 固定環境での挙動一貫性を優先し、Electron への全書�
 - **全文検索 / scanUnresolvedWikilinks の並列化**: `Promise.all` でファイル単位の
   read を並列化。FD / メモリ上限を考慮した pool ベース化が要る。
 - **collectMdFiles のキャッシング**: ワークスペース変更ベースで invalidate。
-- **realpath の async 化**: `cachedRealpathSync` の同期 I/O を解消。`assertPathAllowed`
-  / `canonicalize` / 全 fs IPC ハンドラまで波及する API 変更を伴うため引き続き先送り。
+- ~~**realpath の async 化**~~: 解消済み。`assertPathAllowed` / `canonicalize` は
+  `fs/promises` の `realpath` を使う async API になり、結果を保持していた cache も
+  鮮度の判断 (#453) で撤去した。
