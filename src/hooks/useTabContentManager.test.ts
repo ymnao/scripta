@@ -687,7 +687,7 @@ describe("useTabContentManager", () => {
 	// ユーザーの追加編集を保存済み扱いにしてしまわないかを pin する
 	// (1 本目は実装の実際の挙動が想定と異なった characterization test、詳細はテスト内コメント参照)。
 	describe("handleFlushComplete の dirty 判定", () => {
-		it("flush 解決前に active タブへ戻ってさらに編集しても、flush 完了直後の dirty 同期 effect が dirty を落とす (characterization)", async () => {
+		it("flush 解決前に active タブへ戻ってさらに編集すると dirty が落ち、その窓の window close で編集が保存されない (characterization)", async () => {
 			diskContents.set("/w/a.md", "orig-a");
 			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
 			const { editor, result } = renderManager();
@@ -727,8 +727,21 @@ describe("useTabContentManager", () => {
 			// 書き戻すため、早期 return の意図は打ち消される。
 			expect(tabDirty("/w/a.md")).toBe(false);
 
-			// ただし失われるのは dirty 表示だけで、内容は保留中の debounce autosave が
-			// 書き切る。ここまで pin しておかないと「編集が消える」という誤読を招く。
+			// 影響は dirty 表示だけに留まらない。同じ flush 完了で「Keep savedContent」effect
+			// (useTabContentManager.ts:347-365) が savedContentRef と cache の savedContent を
+			// 未保存の内容へ進めるため、この窓で window close すると saveAllTabs は
+			// `getContent() !== savedContentRef.current` が false で active タブを skip し、
+			// 何も書かずに "ok" を返す = 最新の編集が失われる。
+			const writesBeforeClose = mockedWriteFile.mock.calls.length;
+			let closeResult!: "ok" | "failed" | "cancelled";
+			await act(async () => {
+				closeResult = await result.current.saveAllTabs();
+			});
+			expect(closeResult).toBe("ok");
+			expect(mockedWriteFile.mock.calls.length).toBe(writesBeforeClose);
+
+			// 窓を抜ければ保留中の debounce autosave が書き切る。失われるのは
+			// 「flush 完了から debounce 発火までの間に window close した場合」だけ。
 			await advance(2000);
 			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "edited-a-more\n");
 		});
@@ -863,8 +876,9 @@ describe("useTabContentManager", () => {
 			});
 
 			// 自分の write を外部変更と誤認して remount すると、doc は同じ内容でも
-			// undo 履歴が失われる (editorKey bump)。ここでは doc / cache が
-			// 触られていないことまでを assert する。
+			// undo 履歴が失われる (editorKey bump)。ここで assert するのは doc が
+			// 置き換わらないこと。cache 側は active タブの getCachedContent が live editor を
+			// 返す仕様上ここからは観測できない (cache エントリ自体は作られる)。
 			expect(editor.getContent()).toBe(beforeDoc);
 			expect(result.current.getCachedContent("/w/a.md")).toBe(beforeDoc);
 		});

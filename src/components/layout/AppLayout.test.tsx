@@ -1669,6 +1669,11 @@ describe("AppLayout", () => {
 			expect(await runCloseHandler()).toBe(false);
 			expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 			expect(saveSpy).toHaveBeenCalledTimes(1);
+			// 順序も pin する。逆順でも「両方呼ばれた」assert は通ってしまうが、
+			// scratchpad を先に保存するとタブ保存の失敗時に close を止められない。
+			expect(saveSpy.mock.invocationCallOrder[0]).toBeGreaterThan(
+				mockedWriteFile.mock.invocationCallOrder[0],
+			);
 		});
 
 		it('does not touch the scratchpad when saveAllTabs returns "failed"', async () => {
@@ -1722,6 +1727,10 @@ describe("AppLayout", () => {
 
 			// "cancelled" は「保存を続行しなかった」であって失敗ではないので throw しない
 			// (throw すると main 側が close を中止し、ウィンドウが閉じなくなる)。
+			// なお unmount は `cancelled` closure フラグと saveAllTabs の "cancelled" を
+			// 同時に成立させるため、この test は `result === "cancelled"` の項だけを
+			// 単独で pin してはいない (片方を消した mutant は survive する)。hook 側の
+			// mountedRef は useTabContentManager.test.ts が独立に pin している。
 			expect(threw).toBe(false);
 			expect(saveSpy).not.toHaveBeenCalled();
 		});

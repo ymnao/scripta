@@ -40,25 +40,23 @@ export interface FakeEditor {
 	getContent: () => string;
 	/** ユーザーの編集を模す。remount (editorKey / epoch bump) までは保持される。 */
 	type: (content: string) => void;
-	/** IME 変換中フラグ。isEditorComposing() が読む。 */
-	setComposing: (composing: boolean) => void;
 	/**
 	 * remount / snapshot 復元を模して doc を loadedDoc で初期化し直す。
 	 * 実 MarkdownEditor は uncontrolled で、editorKey bump による remount か
 	 * restoreSnapshot でしか doc が外から置き換わらない。テスト側でも同じ境界を保つ。
+	 *
+	 * 未対応の境界: 実 AppLayout は activeTabPath が null / newtab のとき MarkdownEditor 自体を
+	 * unmount し editorViewRef を null にするが、この fake は view を保持し続けるため
+	 * getContent() が旧タブの doc を返す。その状態で getContent() を観測する test を
+	 * 書くときは ref.current を手で null にすること。
 	 */
 	remountWith: (loadedDoc: string) => void;
-	/** view を外す (SlideView 表示中など MarkdownEditor が mount されていない状態)。 */
-	detach: () => void;
 }
 
 export function createFakeEditor(initialContent = ""): FakeEditor {
 	let content = initialContent;
-	let composing = false;
 	const view = {
-		get composing() {
-			return composing;
-		},
+		composing: false,
 		state: {
 			doc: {
 				toString: () => content,
@@ -72,14 +70,8 @@ export function createFakeEditor(initialContent = ""): FakeEditor {
 		type: (next) => {
 			content = next;
 		},
-		setComposing: (next) => {
-			composing = next;
-		},
 		remountWith: (loadedDoc) => {
 			content = loadedDoc;
-		},
-		detach: () => {
-			ref.current = null;
 		},
 	};
 }
