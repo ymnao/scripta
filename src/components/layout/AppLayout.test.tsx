@@ -129,6 +129,17 @@ vi.mock("../slide/SlideShowOverlay", () => {
 	return { SlideShowOverlay: Overlay, default: Overlay };
 });
 
+// #458 finding 13: window close の委譲結果 ("ok" / "failed" / "cancelled") ごとに
+// scratchpad 保存へ進むかどうかが変わる。実 ScratchpadPanel は CodeMirror を持つので、
+// saveRef の登録だけを行う軽量 mock に置き換えて呼ばれ方を観測する。
+let scratchpadSaveMock: (() => Promise<boolean>) | null = null;
+vi.mock("../editor/ScratchpadPanel", () => ({
+	ScratchpadPanel: (props: { saveRef?: { current: (() => Promise<boolean>) | null } }) => {
+		if (props.saveRef) props.saveRef.current = scratchpadSaveMock;
+		return <div data-testid="mock-scratchpad" />;
+	},
+}));
+
 const mockEditorView = { hasFocus: false, state: { doc: { lines: 100, toString: () => "" } } };
 let capturedOnEditorView: ((view: unknown) => void) | null = null;
 
@@ -268,6 +279,7 @@ describe("AppLayout", () => {
 		useWorkspaceConfigStore.getState().reset();
 		useGitSyncStore.getState().resetRuntime();
 		useScratchpadStore.setState({ open: false });
+		scratchpadSaveMock = null;
 		useToastStore.setState({ toasts: [] });
 	});
 
@@ -1617,5 +1629,108 @@ describe("AppLayout", () => {
 		// ExportDialog mock が受け取った markdown は、stale な loadedDoc ("# Hello") ではなく
 		// 最新の uncontrolled doc ("new content") でなければならない
 		expect(capturedExportMarkdown).toBe("new content");
+	});
+
+	// #458 finding 13: window close は saveAllTabs() の返り値でその後の分岐が決まる。
+	// タブ保存自体の分岐は useTabContentManager の hook test 側で pin してあるので、
+	// ここでは「返り値ごとに scratchpad 保存へ進むか / close を中止するか」だけを見る。
+	describe("window close の委譲結果", () => {
+		async function renderWithScratchpad() {
+			openFileInStore("/workspace", "/workspace/test.md");
+			useScratchpadStore.setState({ open: true });
+			await act(async () => {
+				render(<AppLayout />);
+			});
+		}
+
+		async function runCloseHandler(): Promise<boolean> {
+			let threw = false;
+			await act(async () => {
+				try {
+					await closeHandler?.();
+				} catch {
+					threw = true;
+				}
+			});
+			return threw;
+		}
+
+		it('saves the scratchpad after tabs are saved when saveAllTabs returns "ok"', async () => {
+			const saveSpy = vi.fn().mockResolvedValue(true);
+			scratchpadSaveMock = saveSpy;
+			await renderWithScratchpad();
+			await act(async () => {
+				screen.getByTestId("editor-change").click();
+			});
+
+			expect(await runCloseHandler()).toBe(false);
+			expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
+			expect(saveSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not touch the scratchpad when saveAllTabs returns "failed"', async () => {
+			const saveSpy = vi.fn().mockResolvedValue(true);
+			scratchpadSaveMock = saveSpy;
+			await renderWithScratchpad();
+			await act(async () => {
+				screen.getByTestId("editor-change").click();
+			});
+			mockedWriteFile.mockRejectedValue(new Error("disk full"));
+
+			// throw が preload の ack=false になり close が中止される。タブの保存に失敗した
+			// 時点で scratchpad へ進まないことが、この分岐の要点。
+			expect(await runCloseHandler()).toBe(true);
+			expect(saveSpy).not.toHaveBeenCalled();
+		});
+
+		it("aborts the close when the scratchpad save fails", async () => {
+			const saveSpy = vi.fn().mockResolvedValue(false);
+			scratchpadSaveMock = saveSpy;
+			await renderWithScratchpad();
+
+			expect(await runCloseHandler()).toBe(true);
+			expect(saveSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not save the scratchpad or abort the close when unmounted mid-save ("cancelled")', async () => {
+			const saveSpy = vi.fn().mockResolvedValue(true);
+			scratchpadSaveMock = saveSpy;
+			openFileInStore("/workspace", "/workspace/test.md");
+			useScratchpadStore.setState({ open: true });
+			let unmount!: () => void;
+			await act(async () => {
+				({ unmount } = render(<AppLayout />));
+			});
+			await act(async () => {
+				screen.getByTestId("editor-change").click();
+			});
+
+			// 保存を in-flight のまま止めて unmount する。
+			let resolveWrite!: () => void;
+			mockedWriteFile.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveWrite = () => resolve();
+					}),
+			);
+
+			let threw = false;
+			let closePromise!: Promise<void>;
+			await act(async () => {
+				closePromise = Promise.resolve(closeHandler?.()).catch(() => {
+					threw = true;
+				});
+			});
+			await act(async () => {
+				unmount();
+				resolveWrite();
+				await closePromise;
+			});
+
+			// "cancelled" は「保存を続行しなかった」であって失敗ではないので throw しない
+			// (throw すると main 側が close を中止し、ウィンドウが閉じなくなる)。
+			expect(threw).toBe(false);
+			expect(saveSpy).not.toHaveBeenCalled();
+		});
 	});
 });
