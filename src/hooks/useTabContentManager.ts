@@ -472,7 +472,16 @@ export function useTabContentManager({
 				for (const { oldKey, newKey, value } of updates) {
 					cache.delete(oldKey);
 					cache.set(newKey, value);
-					updateRefs(oldKey, newKey);
+				}
+				// 追跡 ref は cache の有無と独立に追随させる。active タブは切替まで
+				// キャッシュされないため、cache 経由でしか ref を更新しないと
+				// 「active タブを含むディレクトリの rename」で ref が旧 path に取り残され、
+				// 直後の切替 effect が cache を作らず未保存の編集を disk 内容で上書きしてしまう。
+				for (const ref of [prevTabPathRef, contentLoadedForPathRef]) {
+					const current = ref.current;
+					if (current?.startsWith(prefix)) {
+						ref.current = replacePrefix(current, oldPath, newPath);
+					}
 				}
 				renameTabsByPrefix(prefix, addTrailingSep(newPath));
 			} else {
