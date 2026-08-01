@@ -4,9 +4,9 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { is } from "@electron-toolkit/utils";
 import { BrowserWindow, session } from "electron";
-import writeFileAtomic from "write-file-atomic";
 import type { PdfExportOptions } from "../../../src/types/pdf";
 import { handle } from "../utils/ipc-handle";
+import { writeFileAtomicNoFollow } from "../utils/open-nofollow";
 import { buildSectionBreakScript } from "../utils/page-break-script";
 import { assertWritePathAllowed, consumeTransientWritePath } from "../utils/path-guard";
 import { installPermissionDenyHandlers } from "../utils/permission-handler";
@@ -24,6 +24,9 @@ import { getLoadRemoteImages } from "./settings";
 // - outputPath は `assertWritePathAllowed(senderId, outputPath)` で検証する。
 //   通常は dialog:save 経由の transient capability のみが workspace 外への書き込みを
 //   許可される（registerTransientWritePath / consumeTransientWritePath）。
+//   書き出しは `writeFileAtomicNoFollow` を使う。`write-file-atomic` は書き込み先を自前で
+//   realpath 解決するため、認可後に末端を symlink へ swap されると解決先（workspace 外）へ
+//   書けてしまう窓が残っていた（#455）。詳細は utils/open-nofollow.ts の doc を参照。
 // - 隠し BrowserWindow は **専用 partition** で作る。main session には CSP ヘッダを
 //   inject する webRequest hook が登録されているため、PDF 用 HTML 内の
 //   `<script>` タグ（動的ページブレーク等）が strip されないようにする。
@@ -41,7 +44,7 @@ import { getLoadRemoteImages } from "./settings";
 // 1. HTML を temp file に書き、隠し BrowserWindow に file:// URL で load
 // 2. did-finish-load を待ち、`document.fonts.ready` でカスタムフォント (KaTeX 等)
 //    の読み込み完了を確認、加えて短時間 idle で DOM を安定化
-// 3. printToPDF で Buffer を取得し、write-file-atomic で原子的に書き出す
+// 3. printToPDF で Buffer を取得し、tmp + rename で原子的に書き出す
 // 4. transient capability を consume し、temp file / window を必ず破棄
 
 const PDF_PARTITION = "scripta-pdf-export";
@@ -323,7 +326,7 @@ export async function exportPdfImpl(
 			throw new Error("PDFファイルが空です");
 		}
 
-		await writeFileAtomic(canonical, buffer);
+		await writeFileAtomicNoFollow(canonical, buffer);
 		consumeTransientWritePath(senderId, canonical);
 	} finally {
 		if (timeoutId !== undefined) clearTimeout(timeoutId);

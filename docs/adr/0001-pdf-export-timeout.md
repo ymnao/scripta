@@ -10,7 +10,7 @@ PDF export（`electron/main/ipc/pdf.ts:exportPdfImpl`）は、隠し `BrowserWin
 1. HTML を OS tmpdir 配下の temp file に書き、`loadFile(tmpHtmlPath)` で file:// URL を load
 2. `document.fonts.ready` を待つ（KaTeX 等のカスタムフォント読み込み完了の確認。`document.fonts` API が無い環境でも壊れないよう try/catch でガード）
 3. 短時間の idle（`POST_LOAD_IDLE_MS = 100`）で DOM を安定化
-4. `webContents.printToPDF(PDF_OPTIONS)` で Buffer を取得し、`write-file-atomic` で原子的に書き出す
+4. `webContents.printToPDF(PDF_OPTIONS)` で Buffer を取得し、原子的に書き出す（本 ADR 時点の実装は `write-file-atomic`。#455 で、認可後の末端 symlink swap を防ぐため自前の tmp + `rename` に差し替えた。原子性という性質は変わらないので、本 ADR の判断には影響しない）
 
 各段の所要時間は文書の重さ（画像点数・数式量・ページ数）に大きく依存し、「重いが正常」な文書では各段が長くなり得る。一方、Chromium の load 後フックや font レンダリングが何らかの理由で完了しないと、`loadFile` 後の段で**無期限にハング**するケースがある（`pdf.test.ts` の `loadFileShouldHang` がこの失敗モードを模す）。
 

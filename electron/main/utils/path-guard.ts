@@ -240,9 +240,10 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //     (resolveInsideRoot) は #412 で、user-IPC の fs:read / fs:read-base64 / fs:write は #418 で
 //     `O_NOFOLLOW` 付き fd の I/O に揃えた。**内容に届かない経路 (fs:list / fs:path-exists /
 //     fs:file-exists) は窓が残る** (entry 名と存在の有無のみ露出。fd 版 readdir/stat が無いため
-//     受容)。経路ごとの根拠は fs.ts 冒頭の doc ブロックを参照。**この doc が扱うのは fs IPC
-//     だけ**で、同じ assert を使う他の write 経路 (pdf.ts の writeFileAtomic / git.ts の
-//     resolveConflict) には同種の窓が残っている (追跡: #455)。
+//     受容)。経路ごとの根拠は fs.ts 冒頭の doc ブロックを参照。**fs IPC 以外で同じ assert を使う
+//     write 経路 (pdf:export / git:resolve-conflict) も #455 で閉じた**: git は fs:write と同じ
+//     `O_NOFOLLOW` write に畳み、pdf は inode 置換が要るため `rename(2)` が末端 symlink を
+//     follow しない性質に乗せた (utils/open-nofollow.ts の doc を参照)。
 //   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
 // **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に

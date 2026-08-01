@@ -11,6 +11,7 @@ import {
 	validateRelativePath,
 } from "../utils/git-validators";
 import { handle } from "../utils/ipc-handle";
+import { writeFileUtf8NoFollow } from "../utils/open-nofollow";
 import { assertPathAllowed } from "../utils/path-guard";
 import { gitError } from "../utils/structured-error";
 
@@ -28,6 +29,13 @@ import { gitError } from "../utils/structured-error";
 
 // `git status --porcelain` の prefix で conflict（unmerged stage）を判定する。
 const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD "]);
+
+// resolveConflict の modify 分岐が symlink 由来の書き込みを拒否するときの文言。lstat 検査
+// (事前) と `O_NOFOLLOW` write の ELOOP (原子的) の 2 経路が拒否しうるため、renderer からは
+// 1 種類の失敗に見えるよう定数で揃える (#455)。ELOOP は末端 symlink 以外 (中間 dir の
+// symlink loop) でも起きるので、文言はその corner も含めて「symlink 由来の拒否」に丸める
+// (fail-closed であることは変わらない)。
+const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
 
 async function checkAvailableImpl(): Promise<boolean> {
 	try {
@@ -223,10 +231,15 @@ async function resolveConflictImpl(
 	const target = pathResolve(canonical, filePath);
 	// file_path 自身が symlink の場合は拒否（別ファイルへの surprise write を防ぐ）。
 	// lstat は symlink 自身を検査するため、canonical 化前の target に対して実行する必要がある。
+	//
+	// この lstat は **単独の防御ではない**（検査と write の間に swap される窓が残る）。POSIX では
+	// 下の `writeFileUtf8NoFollow` の `O_NOFOLLOW` が同じ拒否を open と原子的に行うため、window は
+	// そちらで閉じている（#455）。lstat を残すのは、`O_NOFOLLOW` が無い win32（flag が 0 に落ちる、
+	// #451）で従来の拒否水準を落とさないためと、拒否理由を errno ではなく文言で返すため。
 	try {
 		const st = await fsp.lstat(target);
 		if (st.isSymbolicLink()) {
-			throw new Error("file_path is a symbolic link; refusing to write");
+			throw new Error(SYMLINK_WRITE_REFUSED);
 		}
 	} catch (e) {
 		if (!isErrnoCode(e, "ENOENT")) throw e;
@@ -237,7 +250,17 @@ async function resolveConflictImpl(
 	const canonicalParent = await assertPathAllowed(senderId, dirname(target));
 	const canonicalTarget = join(canonicalParent, basename(target));
 	await fsp.mkdir(canonicalParent, { recursive: true });
-	await fsp.writeFile(canonicalTarget, content, "utf8");
+	// `fsp.writeFile` は path を再 traversal するため、上の lstat 後に末端を symlink へ
+	// 差し替えられると解決先（workspace 外を含む）へ書けてしまう。`O_NOFOLLOW` 付き fd への
+	// write に畳んで検査と I/O を 1 syscall にする（#455、fs:write と同じ機構）。
+	try {
+		await writeFileUtf8NoFollow(canonicalTarget, content);
+	} catch (e) {
+		if (isErrnoCode(e, "ELOOP")) {
+			throw new Error(SYMLINK_WRITE_REFUSED);
+		}
+		throw e;
+	}
 	try {
 		// `git add` は repo-relative path を期待する（git が repo root から自動的に解釈）。
 		await git.raw(["add", "--", filePath]);

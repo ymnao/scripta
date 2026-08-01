@@ -426,6 +426,61 @@ describe("resolveConflictImpl", () => {
 			/symbolic link/,
 		);
 	});
+
+	// `/symbolic link/` の正規表現では **ELOOP の生メッセージ** (`too many symbolic links
+	// encountered`) にも一致してしまい、「main 側で文言に正規化している」ことを pin できない
+	// (mutation 検証で実際に生き残った)。#455 の test は全文で固定する (`toThrow(string)` は
+	// 部分一致だが、生 ELOOP message はこの全文を含まないので判別力がある)。
+	const SYMLINK_REFUSAL = "file_path is a symbolic link; refusing to write";
+
+	// #455: 末端が workspace 外を指す symlink のケース。上の test は「拒否されること」しか
+	// 見ないので、escape の実体 (外部 file の書き換え) が起きていないことをここで pin する。
+	it.skipIf(process.platform === "win32")(
+		"does not write through a symlink pointing outside the workspace",
+		async () => {
+			const dir = await newWorkspace();
+			const outside = await makeCanonicalTempDir("scripta-git-victim-");
+			dirsToCleanup.push(outside);
+			const victim = join(outside, "victim.md");
+			await fsp.writeFile(victim, "ORIGINAL", "utf8");
+			await fsp.symlink(victim, join(dir, "link.md"));
+
+			await expect(
+				resolveConflictImpl(TEST_WIN, dir, "link.md", "PWNED", "modify"),
+			).rejects.toThrow(SYMLINK_REFUSAL);
+			expect(await fsp.readFile(victim, "utf8")).toBe("ORIGINAL");
+		},
+	);
+
+	// #455: lstat 検査と write の間に swap される窓を pin する。lstat が「symlink ではない」と
+	// 答えた直後に symlink が現れる状況を、lstat を 1 度だけ差し替えて決定的に作る。
+	// `O_NOFOLLOW` write が無いとここで外部の実体が書き換わる (win32 は flag が 0 に落ちるため
+	// この層は効かない = #451 のスコープなので skip)。
+	it.skipIf(process.platform === "win32")(
+		"does not write through a symlink swapped in after the lstat check",
+		async () => {
+			const dir = await newWorkspace();
+			const outside = await makeCanonicalTempDir("scripta-git-victim-swap-");
+			dirsToCleanup.push(outside);
+			const victim = join(outside, "victim.md");
+			await fsp.writeFile(victim, "ORIGINAL", "utf8");
+			const target = join(dir, "swapped.md");
+
+			const lstatSpy = vi.spyOn(fsp, "lstat").mockImplementationOnce(async () => {
+				// 検査を通した「直後」に swap されたことにする。
+				await fsp.symlink(victim, target);
+				return { isSymbolicLink: () => false } as Awaited<ReturnType<typeof fsp.lstat>>;
+			});
+			try {
+				await expect(
+					resolveConflictImpl(TEST_WIN, dir, "swapped.md", "PWNED", "modify"),
+				).rejects.toThrow(SYMLINK_REFUSAL);
+				expect(await fsp.readFile(victim, "utf8")).toBe("ORIGINAL");
+			} finally {
+				lstatSpy.mockRestore();
+			}
+		},
+	);
 });
 
 describe("finishConflictResolutionImpl", () => {
