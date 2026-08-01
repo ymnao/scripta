@@ -1,4 +1,5 @@
-// 末端 component の symlink follow を閉じる open flag と、その flag を使う I/O helper (#412 / #418)。
+// 末端 component の symlink follow を閉じる open flag と、その flag を使う I/O helper
+// (#412 / #418 / #455)。
 //
 // **何を閉じるか**: 認可 (`resolveInsideRoot` / `assertPathAllowed`) が返した path を後段の
 // `fsp.readFile` / `fsp.writeFile` に渡すと、その API が path を再 traversal するため
@@ -24,7 +25,17 @@
 // **syscall は増えない**: `fsp.readFile(path)` / `fsp.writeFile(path)` も内部で
 // open/read(write)/close するため、open flag を足して明示的に書き下しただけ。検索 hot path
 // にも editor の保存経路にもコストは乗らない。
+//
+// **atomic write だけは別機構**: inode 置換が要る呼び手 (pdf:export) は `O_NOFOLLOW` open では
+// なく `rename(2)` が末端 symlink を follow しない性質に乗る (`writeFileAtomicNoFollow`)。
+//
+// **適用範囲**: path-guard (`assertPathAllowed` / `assertWritePathAllowed`) を通る write 経路
+// (fs.ts / pdf.ts / git.ts) がこの module を使う。userData 配下に書く settings.ts /
+// window-state.ts は path-guard を通らず renderer 由来 path も受けないため、引き続き
+// `write-file-atomic` を使う。
+import { randomBytes } from "node:crypto";
 import { constants as fsConstants, promises as fsp } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 // Windows には `O_NOFOLLOW` が無い (`fs.constants` 上 undefined になり得る) ため 0 に落とす。
 // その場合の保証は現状維持 = plain open 相当で、退行はしない。Windows の symlink 作成は
@@ -41,6 +52,12 @@ export const NOFOLLOW_READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
 // `fsp.writeFile` の既定 flag `"w"` と同じ access mode に O_NOFOLLOW を足したもの。
 const NOFOLLOW_OVERWRITE_FLAGS =
 	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
+// tmp file 作成用。`O_EXCL` は既存 entry があれば **symlink であっても** EEXIST で落ちる
+// (POSIX 規定。probe で live / dangling とも EEXIST を確認済み) ので、tmp 名が衝突しても
+// 攻撃者が仕込んだ symlink を掴まされることはない。`O_NOFOLLOW` は冗長だが、この module の
+// 他の flag と揃えて「follow しない」意図を flag 側にも残す。
+const NOFOLLOW_CREATE_EXCLUSIVE_FLAGS =
+	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | NOFOLLOW_FLAG;
 
 /**
  * 末端 component が symlink なら reject する utf8 read (#412)。
@@ -78,5 +95,60 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
 		await fh.writeFile(content, "utf8");
 	} finally {
 		await fh.close();
+	}
+}
+
+/**
+ * 末端 component を follow せずに書く **atomic** write (#455)。inode 置換を伴うので、
+ * `writeFileUtf8NoFollow` (同一 inode 上書き) とは契約が違う。pdf:export のように
+ * 「上書きが途中で失敗しても旧 file を壊さない」ことが要る呼び手が使う。
+ *
+ * **`write-file-atomic` を使えない理由**: 同 package は書き込み先を自前で realpath 解決
+ * (`realpath(filename).catch(() => filename)`) してから tmp + rename するため、認可 (T1) 後に
+ * 末端を symlink へ swap されると **解決先 (workspace 外) へ書けてしまう**。realpath 解決を
+ * 無効化する option は無い (v8.0.0 の option は mode / chown / fsync / tmpfileCreated /
+ * encoding のみ)。実 node の probe で escape の成立も確認済み。
+ *
+ * **なぜ safe か**: `rename(2)` は **destination の末端 symlink を follow せず、symlink 自身を
+ * 置き換える** (probe 実測: 外部を指す symlink へ rename すると解決先の内容は無傷のまま、
+ * destination が通常 file になる)。したがって「認可した dir 配下に着地する」ことが
+ * syscall の semantics として保証され、`O_NOFOLLOW` のような追加の検査は要らない。
+ *
+ * **末端 symlink を ELOOP で拒否しない**点が `writeFileUtf8NoFollow` との差になるが、
+ * 経路の意味論は割れない: 呼び手が渡す canonical は認可時に realpath 済みで、ユーザーが
+ * 張った正当な alias は **その時点で実体へ解決されている**。canonical の末端が symlink で
+ * ありうるのは swap か realpath cache の stale だけ (#453) で、そのとき symlink を置き換える
+ * のは escape ではない (外部には届かない)。
+ *
+ * tmp は destination と同じ dir に作る (rename は同一 filesystem 内でしか原子的でないため)。
+ * 既存 file があれば mode を引き継ぐ (`write-file-atomic` と同じ挙動)。
+ */
+export async function writeFileAtomicNoFollow(path: string, data: Buffer): Promise<void> {
+	// dot prefix で file tree UI から隠し、`.tmp` suffix と乱数で衝突を避ける。衝突しても
+	// `O_EXCL` が EEXIST で落とすので、既存 entry を掴んで壊すことはない。
+	const tmpPath = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
+	// 既存 file の permission を引き継ぐ。stat 失敗 (未存在 / dangling) なら open の既定
+	// mode (0o666 & ~umask) のままにする。
+	const inheritedMode = await fsp.stat(path).then(
+		(st) => st.mode & 0o777,
+		() => null,
+	);
+	try {
+		const fh = await fsp.open(tmpPath, NOFOLLOW_CREATE_EXCLUSIVE_FLAGS);
+		try {
+			await fh.writeFile(data);
+			if (inheritedMode !== null) await fh.chmod(inheritedMode);
+			// rename 前に data を disk へ落とす。ここを抜くと「rename は済んだが中身が
+			// 空」という電源断時の壊れ方が残り、atomic write の意味が薄れる。
+			await fh.sync();
+		} finally {
+			await fh.close();
+		}
+		await fsp.rename(tmpPath, path);
+	} catch (e) {
+		// rename まで到達しなかった場合に tmp を残さない。rename 成功後は tmp が既に
+		// 消えているので、この catch には入らない。
+		await fsp.rm(tmpPath, { force: true }).catch(() => {});
+		throw e;
 	}
 }

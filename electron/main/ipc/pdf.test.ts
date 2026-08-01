@@ -158,6 +158,32 @@ describe("exportPdfImpl", () => {
 		await cleanup();
 	});
 
+	// #455: 認可 (assertWritePathAllowed) と実 write の間に末端を symlink へ差し替える。
+	// printToPDF の mock が両者のちょうど間で走るので、race を再現せず **終状態** だけを
+	// 決定的に作れる (open-nofollow.test.ts と同方針)。win32 は symlink 前提が崩れるので skip。
+	it.skipIf(process.platform === "win32")(
+		"認可後に末端を symlink へ swap されても workspace 外の実体を書き換えない",
+		async () => {
+			const victimWs = await createCanonicalTempWorkspace("scripta-pdf-victim-");
+			const victim = join(victimWs.dir, "victim.txt");
+			await fsp.writeFile(victim, "ORIGINAL", "utf8");
+			const outputPath = join(workspace, "swap.pdf");
+			simulateState.printToPdfImpl = async () => {
+				await fsp.symlink(victim, outputPath);
+				return Buffer.from("%PDF-1.4 fake pdf body\n");
+			};
+
+			await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+
+			// 主 assert: 外部の実体が無傷 (= escape が成立していない)。
+			expect(await fsp.readFile(victim, "utf8")).toBe("ORIGINAL");
+			// 副 assert: PDF は認可した path 自身に着地し、symlink は置き換わっている。
+			expect((await fsp.lstat(outputPath)).isSymbolicLink()).toBe(false);
+			expect((await fsp.readFile(outputPath)).toString("utf8")).toContain("%PDF-1.4");
+			await victimWs.cleanup();
+		},
+	);
+
 	it("uses dedicated partition (avoids main session CSP injection)", async () => {
 		const outputPath = join(workspace, "out2.pdf");
 		await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);

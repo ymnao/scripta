@@ -2,7 +2,12 @@ import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
-import { NOFOLLOW_READ_FLAGS, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
+import {
+	NOFOLLOW_READ_FLAGS,
+	readFileUtf8NoFollow,
+	writeFileAtomicNoFollow,
+	writeFileUtf8NoFollow,
+} from "./open-nofollow";
 
 // #412: index 取り込み read の末端 swap 窓。
 // TOCTOU の race そのものは再現せず、「認可後に swap された **終状態**」を disk 上に作って
@@ -104,5 +109,80 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 		const p = join(ws.dir, "new.md");
 		await writeFileUtf8NoFollow(p, "created");
 		expect(await fsp.readFile(p, "utf8")).toBe("created");
+	});
+});
+
+// #455: inode 置換を伴う atomic write 版。`writeFileUtf8NoFollow` と違い ELOOP では
+// 拒否せず、`rename(2)` が末端 symlink を follow しない性質で「認可した dir に着地する」
+// ことを保証する。win32 は symlink を張る assert が成立しないので skip (既存 suite と同方針)。
+describe.skipIf(process.platform === "win32")("writeFileAtomicNoFollow", () => {
+	let ws: TempWorkspace;
+	let outside: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-nofollow-atomic-");
+		outside = await createCanonicalTempWorkspace("scripta-nofollow-atomic-out-");
+	});
+
+	afterEach(async () => {
+		await ws.cleanup();
+		await outside.cleanup();
+	});
+
+	it("末端が外部を指す symlink でも解決先を書き換えない (symlink 自身を置き換える)", async () => {
+		const victim = join(outside.dir, "victim.pdf");
+		await fsp.writeFile(victim, "ORIGINAL");
+		const dest = join(ws.dir, "out.pdf");
+		await fsp.symlink(victim, dest);
+
+		await writeFileAtomicNoFollow(dest, Buffer.from("NEW"));
+
+		// 主 assert: 外部の実体が無傷であること (escape が成立していないこと)。
+		expect(await fsp.readFile(victim, "utf8")).toBe("ORIGINAL");
+		// 副 assert: 書き込みは symlink 自身を通常 file で置き換えた形で着地する。
+		expect((await fsp.lstat(dest)).isSymbolicLink()).toBe(false);
+		expect(await fsp.readFile(dest, "utf8")).toBe("NEW");
+	});
+
+	it("既存 file を inode 置換で上書きする", async () => {
+		const p = join(ws.dir, "out.pdf");
+		await fsp.writeFile(p, "before の長い内容");
+		const before = await fsp.stat(p);
+
+		await writeFileAtomicNoFollow(p, Buffer.from("after"));
+
+		expect(await fsp.readFile(p, "utf8")).toBe("after");
+		expect((await fsp.stat(p)).ino).not.toBe(before.ino);
+	});
+
+	it("既存 file の permission を引き継ぐ", async () => {
+		const p = join(ws.dir, "mode.pdf");
+		await fsp.writeFile(p, "before");
+		await fsp.chmod(p, 0o600);
+
+		await writeFileAtomicNoFollow(p, Buffer.from("after"));
+
+		expect((await fsp.stat(p)).mode & 0o777).toBe(0o600);
+	});
+
+	it("未存在の path は新規作成し、tmp file を残さない", async () => {
+		const p = join(ws.dir, "new.pdf");
+		await writeFileAtomicNoFollow(p, Buffer.from("created"));
+		expect(await fsp.readFile(p, "utf8")).toBe("created");
+		expect(await fsp.readdir(ws.dir)).toEqual(["new.pdf"]);
+	});
+
+	it("rename に失敗しても tmp file を残さない", async () => {
+		// destination が空でない dir なら tmp の作成と write までは成功し、rename だけが
+		// 落ちる。tmp が既に disk 上にある状態で失敗させないと cleanup 経路を通らない
+		// (open 自体が落ちるケースでは tmp が存在しないので、この assert は vacuous になる)。
+		const p = join(ws.dir, "occupied");
+		await fsp.mkdir(p);
+		await fsp.writeFile(join(p, "child"), "keep", "utf8");
+
+		await expect(writeFileAtomicNoFollow(p, Buffer.from("x"))).rejects.toThrow();
+
+		expect(await fsp.readdir(ws.dir)).toEqual(["occupied"]);
+		expect(await fsp.readFile(join(p, "child"), "utf8")).toBe("keep");
 	});
 });

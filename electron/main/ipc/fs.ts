@@ -210,8 +210,9 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 		//   - 外部 file watcher / Dropbox / iCloud / Git working tree の inode 安定性が崩れる
 		// 引き換えに ENOSPC / SIGKILL 中の partial write リスクは残るが、user 編集中
 		// ファイルでは metadata 保存と inode 安定性のほうが優先（#100 で wontfix 判断）。
-		// app 内部 data (settings.ts / pdf.ts) は inode 安定性が問題にならないため、
-		// そちらは引き続き write-file-atomic を使用している。
+		// user 編集ファイル以外は inode 安定性が問題にならないため atomic 側に倒している:
+		// app 内部 data (settings.ts / window-state.ts) は write-file-atomic、pdf:export は
+		// 認可済み path へ書くため自前の tmp + rename (#455、utils/open-nofollow.ts)。
 		//
 		// `fsp.writeFile` ではなく `writeFileUtf8NoFollow` を使うのは #418 の escape 封鎖（上の
 		// doc ブロック参照）。同一 inode 上書きという性質は変わらない。
