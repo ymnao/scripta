@@ -45,41 +45,34 @@ export function validatePath(p: string): string {
 //  - 中間ディレクトリが symlink の場合も正しく解決される（symlink-in-the-middle 対策）
 // すべての祖先が解決失敗した場合は入力をそのまま返す（fall-through）。
 //
-// 実在する祖先の realpath 結果を簡易 LRU でキャッシュする。Symlink target の
-// 変更は process 寿命中に発生する稀有なケースで、Electron app の典型的な
-// 使用シナリオでは許容範囲内と判断。
+// **cache は持たない (#453)**。以前は解決結果を簡易 LRU (上限 256) に載せていたが撤去した。
+// 理由:
+//   - **cache key は「realpath に成功した path 自身」**だったため、実在 file では full path 1 本が
+//     載るだけで、鮮度を保存するのは「同じ path の 2 回目以降」に限られていた。初回アクセスは
+//     元から fresh 解決なので、symlink retarget への追随が「その path を過去に触ったか」という
+//     観測不能な条件で変わる状態になっていた
+//   - **invalidation を持てない**。retarget の通知経路が無い（chokidar は followSymlinks: false で
+//     retarget を change event として emit する保証がない）。これは L3 index 取り込みゲート
+//     (resolveInsideRoot) が元から cache を通していない理由 (#406 Finding 1) と同根で、
+//     user-IPC 認可だけ別扱いにする根拠が無かった
+//   - **削減できていたコストが小さい**。認可 1 回につき realpath 1 回で、実測 ~22µs
+//     (深さ 8 の path、macOS warm dcache。symlink を 1 段挟んで ~31µs)。fs:read の
+//     open + stat + read に埋没する
+// 撤去により user-IPC 認可 (assertPathAllowed / assertWritePathAllowed / isPathAllowed /
+// isPathWithinAnyAllowedRoot) は resolveInsideRoot と同じ「毎回 fresh」に揃い、ADR-0011 の
+// 不変条件（検索結果に出る集合 = fs:read で開ける集合）が cache の温度に依存しなくなった。
 //
-// **用途境界 (#406)**: この cache は user-IPC 認可 (assertPathAllowed /
-// assertWritePathAllowed / isPathAllowed / isPathWithinAnyAllowedRoot) 専用。
-// L3 index 取り込みゲート (resolveInsideRoot) は cache を通さない —
-// symlink retarget を watcher batch 由来の invalidation で確実に拾えないため、
-// 取り込み時点の fresh な realpath が必要（詳細は resolveInsideRoot の doc）。
-const realpathCache = new Map<string, string>();
-const REALPATH_CACHE_MAX = 256;
-
-async function cachedRealpath(p: string): Promise<string> {
-	const cached = realpathCache.get(p);
-	if (cached !== undefined) {
-		// LRU: 末尾に move（Map は insertion order を保つ）
-		realpathCache.delete(p);
-		realpathCache.set(p, cached);
-		return cached;
-	}
-	const result = await realpath(p);
-	if (realpathCache.size >= REALPATH_CACHE_MAX) {
-		const oldest = realpathCache.keys().next().value;
-		if (oldest !== undefined) realpathCache.delete(oldest);
-	}
-	realpathCache.set(p, result);
-	return result;
-}
-
+// **呼び出し 1 回につき realpath 1 回**を前提にしてよいのは、呼び出し元が IPC 1 回 / 画像 1 枚
+// につき 1 回だけ認可を通すため。将来 per-file ループで認可を呼ぶ設計を入れるなら（検索結果 N 件に
+// isPathAllowed を個別適用する等）N × 22µs が顕在化するので、resolveInsideRoot 型の root-prefix
+// 前提設計を先に検討すること。未存在 path では祖先を 1 段ずつ realpath するため、深い未存在 path の
+// syscall 数は深さに比例する点も同じ前提に含まれる。
 async function realpathBestEffort(p: string): Promise<string> {
 	let current = p;
 	let suffix = "";
 	while (true) {
 		try {
-			const real = await cachedRealpath(current);
+			const real = await realpath(current);
 			return suffix ? join(real, suffix) : real;
 		} catch {
 			const parent = dirname(current);
@@ -121,27 +114,9 @@ export function clearWorkspaceRootsForWindow(windowId: number): void {
 	transientWritePaths.delete(windowId);
 }
 
-// realpathCache から `p` 自身の entry を落とす (#418)。
-//
-// 用途は 1 つだけ: 認可済み canonical への `O_NOFOLLOW` open が ELOOP を返した呼び手が、
-// 「cache が stale だっただけ」と「認可後に末端を swap された」を切り分けるために使う。
-// 落としたうえで assert 系を呼び直すと、fresh な realpath で両者が分かれる（fs.ts の
-// `withStaleCacheRetry` を参照）。
-//
-// 祖先 entry は触らない: ELOOP が知らせるのは末端 component の状態だけで、祖先を無効化する根拠が
-// 無いため（祖先が stale でないことの保証ではない）。祖先が stale なまま fall-through した場合は
-// 再認可後も同じ末端に戻り、2 度目の ELOOP が伝播して fail-closed になる。cache 全体の鮮度問題
-// そのものは #453 で追跡している。
-export function invalidateRealpathCacheEntry(p: string): void {
-	if (typeof p !== "string" || p.length === 0) return;
-	realpathCache.delete(resolve(p));
-}
-
 export function clearWorkspaceRoots(): void {
 	windowAllowedRoots.clear();
 	transientWritePaths.clear();
-	// テスト間で symlink ターゲットを切り替えるケースに備え、realpath cache も clear する
-	realpathCache.clear();
 }
 
 export function getWorkspaceRootsForWindow(windowId: number): string[] {
@@ -248,13 +223,11 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
 // **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に
 // なる (#451 で追跡)。
-// **realpathCache 由来の鮮度差**: 本 API は cache 済みの realpath 結果を使うため、symlink の
-// retarget 直後は canonical が stale になり得る。stale な canonical は「cache 時点で root 内と
-// 確認済みだった path」だが、その path 自身が今は symlink になっている可能性があり、**上の
-// O_NOFOLLOW があって初めて**外部内容の read / 外部 file の上書きが防がれる (cache hit は
-// swap 窓を再現可能にするので、fs.test.ts の #418 test はこの経路を fixture に使っている)。
-// 残る劣化は「ユーザーから見た解決先とのズレ」で、これは #418 のスコープ外として受容し、
-// 判断は #453 で追跡する。
+// **realpath の鮮度**: 本 API は呼ばれるたびに fresh に realpath する (#453 で cache を撤去)。
+// symlink を retarget した直後の認可も新しい解決先で判定されるため、前回の認可結果は持ち越さない。
+// これにより「検索は新しい解決先で判定し、fs:read は古い判定を返す」窓 (ADR-0011 の受容事項 ①) が
+// 閉じ、canonical の末端が symlink であり得るのは realpathBestEffort が祖先 fall-through した
+// **dangling symlink** の場合だけになった。
 //
 // validatePath が throw する場合（相対パス・null byte 等）は kind=INVALID_PATH、
 // ガード違反は kind=PATH_OUTSIDE_WORKSPACE の StructuredError を投げる。
@@ -326,10 +299,12 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //     O_NOFOLLOW も symlink ではないので発火しない。これは TOCTOU ではなく T1 時点から
 //     通る設計境界で (#416 Finding 2 が追跡)、payoff は中間 dir 窓と同じ in-memory bigram 限り。
 //   assertPathAllowed も同じ中間 dir 窓を持つ (下記 doc 参照)。
-// - **realpathCache を通さない** (#406 Finding 1)。symlink の retarget は watcher batch
+// - **毎回 fresh に realpath する** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、
-//   retarget を change event として emit する保証がない) ため、index 取り込み時点で
-//   毎回 fresh に解決する。呼び出しは `!isIndexedAndValid` の file に限られるため、
+//   retarget を change event として emit する保証がない) ため、index 取り込み時点の
+//   fresh な解決が要る。この理由は user-IPC 認可側にも同じく当たるため、#453 で
+//   assertPathAllowed 系の realpath cache も撤去し、両者の鮮度が揃った。
+//   呼び出しは `!isIndexedAndValid` の file に限られるため、
 //   index が育った file では syscall は発生しない。ただし「恒久的に index に載らない file」
 //   (admission cutoff 超過 / root 外を指す symlink / workspace 内 alias) は毎回 invalid のまま
 //   なので、その分だけは検索ごとに syscall が乗る (件数が限定的なので受容している)。

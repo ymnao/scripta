@@ -12,7 +12,6 @@ import {
 	assertWritePathAllowed,
 	consumeTransientWritePath,
 	findContainingWorkspaceRoot,
-	invalidateRealpathCacheEntry,
 } from "../utils/path-guard";
 import { StructuredError } from "../utils/structured-error";
 import { getFileTreeFilterOptions } from "./settings";
@@ -47,15 +46,17 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 // (`fs:read` / `fs:read-base64`) と上書き write (`fs:write`) は `O_NOFOLLOW` 付きで open した
 // fd に対して I/O し、この窓を閉じる（win32 は flag が 0 に落ちるため従来挙動、#451 で追跡）。
 //
-// canonical の末端が symlink であり得るのは 2 通り:
-//   1. `realpathBestEffort` が祖先 fall-through した（= dangling symlink）。read open は解決先が
-//      無いので `O_NOFOLLOW` の有無に関わらず失敗する（ELOOP / ENOENT）が、**O_CREAT を含む
-//      write open は成功して解決先を新規作成してしまう**（次段落の escape がこれ）
-//   2. `realpathCache` が stale で、cache に載った後に実体が symlink へ置き換わった。ここは
-//      正当な alias 化（ユーザーの操作）と swap 攻撃の両方を含むので、ELOOP を受けた側で
-//      cache を捨てて再認可し、fresh な realpath で切り分ける（`withStaleCacheRetry`）
-// cache が fresh な限り workspace 内の正当な symlink note は realpath が実体まで解決するので、
-// canonical は非 symlink になり flag は発火しない。
+// canonical の末端が symlink であり得るのは **`realpathBestEffort` が祖先 fall-through した
+// 場合（= dangling symlink）だけ**（#453 で realpath cache を撤去し、認可は毎回 fresh になった）。
+// read open は解決先が無いので `O_NOFOLLOW` の有無に関わらず失敗する（ELOOP / ENOENT）が、
+// **O_CREAT を含む write open は成功して解決先を新規作成してしまう**（次段落の escape がこれ）。
+// workspace 内の正当な symlink note は認可時の realpath が実体まで解決するので、canonical は
+// 非 symlink になり flag は発火しない。
+//
+// **ELOOP はそのまま呼び手へ伝播する（fail-closed）**。cache 撤去後の ELOOP が意味するのは
+// 「dangling」か「認可 (T1) から open (T2) の間に実際に swap された真の race」だけで、どちらも
+// 再試行で解ける状態ではない（#418 当時は cache stale による正当な alias 化が混ざっていたため、
+// cache を捨てて 1 度だけ再認可する `withStaleCacheRetry` で切り分けていた）。
 //
 // **`fsp.writeFile` のままでは workspace 外へ escape する**: dangling symlink（workspace 外の
 // **未存在** path を指す）は realpath が ENOENT で throw し、canonical が symlink 自身の path
@@ -78,10 +79,9 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //   - `fs:path-exists` / `fs:file-exists`: `access` / `stat` は末端 symlink を辿るため、
 //     workspace 外 path の存在オラクルになり得る
 //
-// **`fs:delete` は「解決先を消す」**: canonical は realpath 済みなので、cache が fresh な限り、
-// workspace 内の live な alias を削除すると `shell.trashItem` に渡るのは alias ではなく**実体**の
-// path になる。境界は破らない（実体も root 内）が、直感には反する。cache が stale なら逆に alias
-// 自身が trash へ行く（delete は ELOOP を出さないので `withStaleCacheRetry` の自己修復も働かない）。source が dangling symlink なら rename と
+// **`fs:delete` は「解決先を消す」**: canonical は realpath 済みなので、workspace 内の live な
+// alias を削除すると `shell.trashItem` に渡るのは alias ではなく**実体**の path になる。境界は
+// 破らない（実体も root 内）が、直感には反する。source が dangling symlink なら rename と
 // 同じ理由で Not found になり削除できない（UX 側の帰結は #454）。
 
 // bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
@@ -122,47 +122,16 @@ async function readFileBoundedFromHandle(
 	return buf.subarray(0, total).toString("utf8");
 }
 
-// 「認可 → O_NOFOLLOW I/O、ELOOP なら realpath cache を捨てて 1 度だけ再認可」の骨格 (#418)。
-//
-// ELOOP は **2 つの状態を区別せずに**知らせる:
-//   (a) `realpathCache` が stale で、canonical が今は workspace 内の symlink になっている。
-//       ユーザーが session 中に file を alias 化した（git checkout / 同期クライアント等）ケースで、
-//       **正当な操作**。cache が cold なら realpath が実体まで解決するので、成否が cache の温度で
-//       変わってしまう
-//   (b) 認可後に末端を symlink へ swap された。**拒否すべき**ケース
-// cache entry を落として認可し直すと、fresh な realpath が両者を分ける: (a) は実体へ解決して通り、
-// (b) は解決先が workspace 外なら PATH_OUTSIDE_WORKSPACE で落ちる。判定材料が realpath 1 回に
-// 揃うので、検索側 (ADR-0011 の「解決し直して in-root なら解決先を読む」) とも挙動が一致する。
-//
-// **再試行は 1 度だけ**。dangling symlink のように fresh な realpath でも解決できない path は
-// 祖先 fall-through で同じ canonical に戻るため、2 度目の ELOOP をそのまま呼び手へ伝播させる。
-// 正常系ではこの経路自体に入らないので、hot path に追加コストは乗らない。
-async function withStaleCacheRetry<T>(
-	senderId: number,
-	path: string,
-	assertAllowed: (windowId: number, p: string) => Promise<string>,
-	io: (canonical: string) => Promise<T>,
-): Promise<T> {
-	try {
-		return await io(await assertAllowed(senderId, path));
-	} catch (e) {
-		if (!isErrnoCode(e, "ELOOP")) throw e;
-		invalidateRealpathCacheEntry(path);
-		return await io(await assertAllowed(senderId, path));
-	}
-}
-
 async function readFileImpl(senderId: number, path: string): Promise<string> {
-	return withStaleCacheRetry(senderId, path, assertPathAllowed, async (canonical) => {
-		// 1 回の open で stat と read を済ませて syscall を半減（fs:read は editor の hot path）。
-		// read だけ helper ではなく flag を借りているのは、bounded read が fd 自体を要するため。
-		const fh = await fsp.open(canonical, NOFOLLOW_READ_FLAGS);
-		try {
-			return await readFileBoundedFromHandle(fh, canonical, MAX_READ_FILE_BYTES);
-		} finally {
-			await fh.close();
-		}
-	});
+	const canonical = await assertPathAllowed(senderId, path);
+	// 1 回の open で stat と read を済ませて syscall を半減（fs:read は editor の hot path）。
+	// read だけ helper ではなく flag を借りているのは、bounded read が fd 自体を要するため。
+	const fh = await fsp.open(canonical, NOFOLLOW_READ_FLAGS);
+	try {
+		return await readFileBoundedFromHandle(fh, canonical, MAX_READ_FILE_BYTES);
+	} finally {
+		await fh.close();
+	}
 }
 
 // exportAsHtml の data URI 埋め込み用に、workspace 内の画像を base64 で読む (#314)。
@@ -172,55 +141,53 @@ async function readFileImpl(senderId: number, path: string): Promise<string> {
 // - サイズ上限は fs:read と共通 (64MB)。巨大画像は data URI 化しても外部ブラウザで
 //   持たない (HTML file 自体が肥大化) ため、fail-loud で拒否するのが正解
 async function readFileBase64Impl(senderId: number, path: string): Promise<string> {
-	return withStaleCacheRetry(senderId, path, assertPathAllowed, async (canonical) => {
-		if (mimeForImageExt(extname(canonical)) === null) {
-			throw new StructuredError(
-				"INVALID_PATH",
-				`readFileBase64: unsupported extension: ${extname(canonical) || "(none)"}`,
-				{ path: canonical },
-			);
+	const canonical = await assertPathAllowed(senderId, path);
+	if (mimeForImageExt(extname(canonical)) === null) {
+		throw new StructuredError(
+			"INVALID_PATH",
+			`readFileBase64: unsupported extension: ${extname(canonical) || "(none)"}`,
+			{ path: canonical },
+		);
+	}
+	const fh = await fsp.open(canonical, NOFOLLOW_READ_FLAGS);
+	try {
+		const stat = await fh.stat();
+		if (stat.size > MAX_READ_FILE_BYTES) {
+			throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
 		}
-		const fh = await fsp.open(canonical, NOFOLLOW_READ_FLAGS);
-		try {
-			const stat = await fh.stat();
-			if (stat.size > MAX_READ_FILE_BYTES) {
-				throw FsError.tooLarge(canonical, stat.size, MAX_READ_FILE_BYTES);
-			}
-			const buf = Buffer.alloc(stat.size);
-			let total = 0;
-			while (total < stat.size) {
-				const { bytesRead } = await fh.read(buf, total, stat.size - total);
-				if (bytesRead === 0) break;
-				total += bytesRead;
-			}
-			return buf.subarray(0, total).toString("base64");
-		} finally {
-			await fh.close();
+		const buf = Buffer.alloc(stat.size);
+		let total = 0;
+		while (total < stat.size) {
+			const { bytesRead } = await fh.read(buf, total, stat.size - total);
+			if (bytesRead === 0) break;
+			total += bytesRead;
 		}
-	});
+		return buf.subarray(0, total).toString("base64");
+	} finally {
+		await fh.close();
+	}
 }
 
 async function writeFileImpl(senderId: number, path: string, content: string): Promise<void> {
-	await withStaleCacheRetry(senderId, path, assertWritePathAllowed, async (canonical) => {
-		await fsp.mkdir(dirname(canonical), { recursive: true });
-		// **意図的に直接書き込み**。tmp + rename の atomic write は user workspace の
-		// .md ファイルには使わない。理由（VS Code microsoft/vscode#195539 と同方針）:
-		//   - inode が置き換わると symlink / hardlink が切れる
-		//   - macOS の任意 xattr（Finder タグ、独自 metadata）と ACL が失われる
-		//   - 外部 file watcher / Dropbox / iCloud / Git working tree の inode 安定性が崩れる
-		// 引き換えに ENOSPC / SIGKILL 中の partial write リスクは残るが、user 編集中
-		// ファイルでは metadata 保存と inode 安定性のほうが優先（#100 で wontfix 判断）。
-		// user 編集ファイル以外は inode 安定性が問題にならないため atomic 側に倒している:
-		// app 内部 data (settings.ts / window-state.ts) は write-file-atomic、pdf:export は
-		// 認可済み path へ書くため自前の tmp + rename (#455、utils/open-nofollow.ts)。
-		//
-		// `fsp.writeFile` ではなく `writeFileUtf8NoFollow` を使うのは #418 の escape 封鎖（上の
-		// doc ブロック参照）。同一 inode 上書きという性質は変わらない。
-		await writeFileUtf8NoFollow(canonical, content);
-		// 書き込み成功後にだけ transient capability を消費する。
-		// 失敗時は残り、renderer 側 withRetry で再試行できる。
-		consumeTransientWritePath(senderId, canonical);
-	});
+	const canonical = await assertWritePathAllowed(senderId, path);
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	// **意図的に直接書き込み**。tmp + rename の atomic write は user workspace の
+	// .md ファイルには使わない。理由（VS Code microsoft/vscode#195539 と同方針）:
+	//   - inode が置き換わると symlink / hardlink が切れる
+	//   - macOS の任意 xattr（Finder タグ、独自 metadata）と ACL が失われる
+	//   - 外部 file watcher / Dropbox / iCloud / Git working tree の inode 安定性が崩れる
+	// 引き換えに ENOSPC / SIGKILL 中の partial write リスクは残るが、user 編集中
+	// ファイルでは metadata 保存と inode 安定性のほうが優先（#100 で wontfix 判断）。
+	// user 編集ファイル以外は inode 安定性が問題にならないため atomic 側に倒している:
+	// app 内部 data (settings.ts / window-state.ts) は write-file-atomic、pdf:export は
+	// 認可済み path へ書くため自前の tmp + rename (#455、utils/open-nofollow.ts)。
+	//
+	// `fsp.writeFile` ではなく `writeFileUtf8NoFollow` を使うのは #418 の escape 封鎖（上の
+	// doc ブロック参照）。同一 inode 上書きという性質は変わらない。
+	await writeFileUtf8NoFollow(canonical, content);
+	// 書き込み成功後にだけ transient capability を消費する。
+	// 失敗時は残り、renderer 側 withRetry で再試行できる。
+	consumeTransientWritePath(senderId, canonical);
 }
 
 async function writeNewFileImpl(senderId: number, path: string, content: string): Promise<void> {
