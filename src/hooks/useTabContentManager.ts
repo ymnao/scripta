@@ -69,10 +69,15 @@ export interface TabContentManager {
 	 */
 	applyExternalReload: (path: string, loaded: string) => void;
 	/**
-	 * **非 active** タブの外部変更を cache にだけ反映する。エディタを触らないのは意図的:
+	 * **非 active** タブの外部変更を cache にだけ反映する。エディタを触らないのは意図的で、
 	 * readFile の解決を待つ間にそのタブが active になっていても、ユーザーが今編集している
-	 * 画面を勝手に書き換えないという方針 (dirty な内容は cache に残り、タブ切替時に解決する)。
-	 * active タブには applyExternalReload を使うこと。
+	 * 画面を勝手に書き換えない。active タブには applyExternalReload を使うこと。
+	 *
+	 * 呼び出し側は「cache が clean なタブ」に限って呼ぶ契約になっている
+	 * (useExternalFileConflict の isCachedTabClean ガード)。判定から readFile 解決までの
+	 * 間にそのタブを active 化して編集した場合は、その編集が disk の内容で上書きされる
+	 * 窓が残る (readFile 1 回分の latency に切替と編集を収める必要があり実質踏めないが、
+	 * 「未保存の編集は必ず保護される」とは言い切れない)。
 	 */
 	applyCacheReload: (path: string, loaded: string) => void;
 	/** コンフリクトダイアログの「再読み込み」。cache を全置換して dirty を落とす。 */

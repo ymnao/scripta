@@ -219,6 +219,16 @@ describe("buildAppShortcuts の run 配線", () => {
 		return (fn as (p: T) => T)(prev);
 	}
 
+	/**
+	 * boolean トグルの updater を **両方向**適用して検証する。
+	 * 片方向だけだと `() => true` のような定数返却関数でも通ってしまい、
+	 * 「もう一度押しても閉じない」退行を取り逃がす (round 2 レビュー指摘)。
+	 */
+	function expectToggle(fn: unknown): void {
+		expect(applyUpdater(fn, false)).toBe(true);
+		expect(applyUpdater(fn, true)).toBe(false);
+	}
+
 	it("prev-tab / next-tab はタブ移動を呼ぶ", () => {
 		const deps = makeDeps();
 		run(deps, "prev-tab");
@@ -265,7 +275,7 @@ describe("buildAppShortcuts の run 配線", () => {
 	it("toggle-sidebar はサイドバー表示を反転する", () => {
 		const deps = makeDeps();
 		run(deps, "toggle-sidebar");
-		expect(applyUpdater(vi.mocked(deps.setSidebarVisible).mock.calls[0][0], true)).toBe(false);
+		expectToggle(vi.mocked(deps.setSidebarVisible).mock.calls[0][0]);
 	});
 
 	it.each([
@@ -291,7 +301,7 @@ describe("buildAppShortcuts の run 配線", () => {
 	it("toggle-slide-view は通常タブでのみスライド表示を反転する", () => {
 		const deps = makeDeps();
 		run(deps, "toggle-slide-view");
-		expect(applyUpdater(vi.mocked(deps.setSlideViewActive).mock.calls[0][0], false)).toBe(true);
+		expectToggle(vi.mocked(deps.setSlideViewActive).mock.calls[0][0]);
 
 		useWorkspaceStore.setState({ activeTabPath: "newtab://1" });
 		const onNewTab = makeDeps();
@@ -343,6 +353,33 @@ describe("buildAppShortcuts の run 配線", () => {
 		expect(handle.focusInput).toHaveBeenCalledTimes(1);
 	});
 
+	it("editor-search-bar は開いている状態の Cmd+H で置換欄を展開する", () => {
+		const deps = makeDeps({
+			searchBarOpenRef: { current: true },
+			searchBarHandleRef: { current: { setSearch: vi.fn(), focusInput: vi.fn() } },
+		});
+		run(deps, "editor-search-bar", "h", { metaKey: true });
+		expect(deps.setSearchBarExpanded).toHaveBeenCalledWith(true);
+
+		// Cmd+F では展開しない (h 分岐であることを固定する)
+		const withF = makeDeps({
+			searchBarOpenRef: { current: true },
+			searchBarHandleRef: { current: { setSearch: vi.fn(), focusInput: vi.fn() } },
+		});
+		run(withF, "editor-search-bar", "f", { metaKey: true });
+		expect(withF.setSearchBarExpanded).not.toHaveBeenCalled();
+	});
+
+	it("editor-search-bar は 200 文字を超える選択を検索初期値にしない", () => {
+		const under = makeDeps({ editorViewRef: { current: makeView("x".repeat(200)) } });
+		run(under, "editor-search-bar", "f", { metaKey: true });
+		expect(under.setSearchBarInitialText).toHaveBeenCalledWith("x".repeat(200));
+
+		const over = makeDeps({ editorViewRef: { current: makeView("x".repeat(201)) } });
+		run(over, "editor-search-bar", "f", { metaKey: true });
+		expect(over.setSearchBarInitialText).toHaveBeenCalledWith("");
+	});
+
 	it.each([
 		["new-tab", "openNewTab"],
 		["toggle-scratchpad", "toggleScratchpad"],
@@ -364,7 +401,7 @@ describe("buildAppShortcuts の run 配線", () => {
 	] as const)("%s は %s を反転する", (id, setter) => {
 		const deps = makeDeps();
 		run(deps, id);
-		expect(applyUpdater(vi.mocked(deps[setter]).mock.calls[0][0], false)).toBe(true);
+		expectToggle(vi.mocked(deps[setter]).mock.calls[0][0]);
 	});
 
 	it("slide-show は発表モードを起動する", () => {
