@@ -1153,6 +1153,16 @@ describe("useTabContentManager", () => {
 			expect(result.current.loadedDoc).toBe("orig-b");
 		});
 
+		/**
+		 * 発行済みの readFile を取り出す。未発行なら test を落とす。optional chaining で
+		 * 黙って no-op になると、cleanup の ignore 分岐を一度も通らないまま緑になる。
+		 */
+		function takeDeferred(pending: Map<string, Deferred<string>>, path: string): Deferred<string> {
+			const deferred = pending.get(path);
+			if (!deferred) throw new Error(`readFile が未発行: ${path}`);
+			return deferred;
+		}
+
 		it("読み込み中に別タブへ切り替えると、遅れて解決した前タブの内容で画面を汚さない", async () => {
 			const pending = new Map<string, Deferred<string>>();
 			mockedReadFile.mockImplementation((path: string) => {
@@ -1170,14 +1180,14 @@ describe("useTabContentManager", () => {
 			});
 			await flushAsync();
 			await act(async () => {
-				pending.get("/w/b.md")?.resolve("b-content");
+				takeDeferred(pending, "/w/b.md").resolve("b-content");
 			});
 			await flushAsync();
 			expect(editor.getContent()).toBe("b-content");
 			const keyAfterB = result.current.editorKey;
 
 			await act(async () => {
-				pending.get("/w/a.md")?.resolve("stale-a-content");
+				takeDeferred(pending, "/w/a.md").resolve("stale-a-content");
 			});
 			await flushAsync();
 
@@ -1204,12 +1214,12 @@ describe("useTabContentManager", () => {
 			});
 			await flushAsync();
 			await act(async () => {
-				pending.get("/w/b.md")?.resolve("b-content");
+				takeDeferred(pending, "/w/b.md").resolve("b-content");
 			});
 			await flushAsync();
 
 			await act(async () => {
-				pending.get("/w/a.md")?.reject(new Error("boom"));
+				takeDeferred(pending, "/w/a.md").reject(new Error("boom"));
 			});
 			await flushAsync();
 
@@ -1468,6 +1478,9 @@ describe("useTabContentManager", () => {
 			});
 			await flushAsync();
 
+			const capturedToken = handle.captureSnapshot.mock.results[0]?.value;
+			expect(capturedToken).not.toBeNull();
+
 			// EditorState.fromJSON が壊れた snapshot で throw するケース。
 			handle.restoreFails = true;
 			const keyBefore = result.current.editorKey;
@@ -1478,6 +1491,10 @@ describe("useTabContentManager", () => {
 			});
 			await flushAsync();
 
+			// restore を呼んだうえで false が返ったこと。呼び出し自体を pin しないと、
+			// snapshot 復元を丸ごと諦める実装 (常に remount) でもこの test が通ってしまう。
+			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(1);
+			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(capturedToken);
 			// false を成功扱いすると epoch だけ進んで doc が入らず、復帰したタブが白紙になる。
 			expect(result.current.editorViewEpoch).toBe(epochBefore);
 			expect(result.current.editorKey).toBe(keyBefore + 1);
@@ -1509,6 +1526,7 @@ describe("useTabContentManager", () => {
 
 			// MarkdownEditor が mount されていない瞬間の切替を模す。
 			handle.captureReturnsNull = true;
+			const capturesBeforeNull = handle.captureSnapshot.mock.calls.length;
 			await act(async () => {
 				useWorkspaceStore.getState().setActiveTab("/w/b.md");
 			});
@@ -1524,6 +1542,11 @@ describe("useTabContentManager", () => {
 			// 仕様として固定してしまう)。
 			// A↔B を 2 往復するので復帰は 3 回 (B→A, A→B, B→A)。B 側も切替のたびに
 			// snapshot を持つため、A の token を見るのは最後の復帰。
+			// null 返却の capture が実際に走ったこと。走ったことを pin しないと、
+			// 2 回目以降 capture 自体をやめる実装でも「古い snapshot が残る」形で通る。
+			expect(
+				handle.captureSnapshot.mock.results.slice(capturesBeforeNull).map((r) => r.value),
+			).toEqual([null, null]);
 			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(3);
 			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(firstToken);
 		});
