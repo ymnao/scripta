@@ -2,6 +2,7 @@ import type { EditorView } from "@codemirror/view";
 import { act } from "@testing-library/react";
 import type { RefObject } from "react";
 import { vi } from "vitest";
+import type { MarkdownEditorHandle } from "../components/editor/MarkdownEditor";
 import { type Tab, useWorkspaceStore } from "../stores/workspace";
 
 /**
@@ -49,11 +50,18 @@ export interface FakeEditor {
 	/** ユーザーの編集を模す。remount (editorKey / epoch bump) までは保持される。 */
 	type: (content: string) => void;
 	/**
-	 * remount / snapshot 復元を模して doc を loadedDoc で初期化し直す。
+	 * remount を模して doc を loadedDoc で初期化し直す。
 	 * 実 MarkdownEditor は uncontrolled で、editorKey bump による remount か
 	 * restoreSnapshot でしか doc が外から置き換わらない。テスト側でも同じ境界を保つ。
 	 */
 	remountWith: (loadedDoc: string) => void;
+	/**
+	 * restoreSnapshot 成功時の doc 置換を模す (remount とは別経路)。
+	 * 実 MarkdownEditor の restoreSnapshot は view.setState() で doc ごと state を
+	 * 置き換えるので、fake でも「remount していないのに doc が変わる」経路を分けて持つ。
+	 * 直接呼ばず createFakeSnapshotHandle 経由で使う。
+	 */
+	restoreDoc: (content: string) => void;
 }
 
 export function createFakeEditor(initialContent = ""): FakeEditor {
@@ -76,7 +84,66 @@ export function createFakeEditor(initialContent = ""): FakeEditor {
 		remountWith: (loadedDoc) => {
 			content = loadedDoc;
 		},
+		restoreDoc: (restored) => {
+			content = restored;
+		},
 	};
+}
+
+/** captureSnapshot が返す不透明トークン。中身は fake 側の実装詳細。 */
+interface FakeSnapshotToken {
+	kind: "fake-snapshot";
+	doc: string;
+}
+
+function isFakeSnapshotToken(value: unknown): value is FakeSnapshotToken {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "fake-snapshot"
+	);
+}
+
+export interface FakeSnapshotHandle extends MarkdownEditorHandle {
+	/** captureSnapshot が返した値の履歴 (null 返却も含む)。 */
+	captured: (FakeSnapshotToken | null)[];
+	/** restoreSnapshot に渡された引数の履歴。同一参照の突合に使う。 */
+	restoreCalls: unknown[];
+	/** true の間 captureSnapshot は null を返す (MarkdownEditor 未 mount 時の実挙動)。 */
+	captureReturnsNull: boolean;
+	/** true の間 restoreSnapshot は false を返す (EditorState.fromJSON 失敗の実挙動)。 */
+	restoreFails: boolean;
+}
+
+/**
+ * MarkdownEditorHandle (captureSnapshot / restoreSnapshot) の fake。
+ *
+ * 実物は EditorState を JSON 化 / 復元するが、ここが模すのは
+ * 「capture した時点の doc が restore で戻る」という往復の性質だけ。
+ * restore が doc を戻さないと「復帰後に capture すると別タブの doc が取れる」等、
+ * harness が実配線と乖離した状態を作ってしまう。
+ */
+export function createFakeSnapshotHandle(editor: FakeEditor): FakeSnapshotHandle {
+	const handle: FakeSnapshotHandle = {
+		captured: [],
+		restoreCalls: [],
+		captureReturnsNull: false,
+		restoreFails: false,
+		captureSnapshot() {
+			const token = handle.captureReturnsNull
+				? null
+				: ({ kind: "fake-snapshot", doc: editor.getContent() } satisfies FakeSnapshotToken);
+			handle.captured.push(token);
+			return token;
+		},
+		restoreSnapshot(snapshot) {
+			handle.restoreCalls.push(snapshot);
+			if (handle.restoreFails || !isFakeSnapshotToken(snapshot)) return false;
+			editor.restoreDoc(snapshot.doc);
+			return true;
+		},
+	};
+	return handle;
 }
 
 export interface SeedTabOptions {
