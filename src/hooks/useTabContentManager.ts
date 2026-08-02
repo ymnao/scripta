@@ -74,10 +74,9 @@ export interface TabContentManager {
 	 * 画面を勝手に書き換えない。active タブには applyExternalReload を使うこと。
 	 *
 	 * 呼び出し側は「cache が clean なタブ」に限って呼ぶ契約になっている
-	 * (useExternalFileConflict の isCachedTabClean ガード)。判定から readFile 解決までの
-	 * 間にそのタブを active 化して編集した場合は、その編集が disk の内容で上書きされる
-	 * 窓が残る (readFile 1 回分の latency に切替と編集を収める必要があり実質踏めないが、
-	 * 「未保存の編集は必ず保護される」とは言い切れない)。
+	 * (useExternalFileConflict の isCachedTabClean ガード)。この関数自身は cache を
+	 * 無条件で disk の内容へ置き換えるので、判定が readFile を跨いで失効しないよう、
+	 * 呼び出し側は適用の直前に条件を取り直す責務を負う。
 	 */
 	applyCacheReload: (path: string, loaded: string) => void;
 	/** コンフリクトダイアログの「再読み込み」。cache を全置換して dirty を落とす。 */
