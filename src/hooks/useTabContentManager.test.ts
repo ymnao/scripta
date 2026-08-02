@@ -245,6 +245,44 @@ describe("useTabContentManager", () => {
 			expect(result.current.getCachedContent("/w/a/foo/x.md")).toBeNull();
 		});
 
+		it("未保存の編集がある active タブを rename しても、旧 path へ書き戻さない", async () => {
+			// rename を「別ファイルへの切替」と誤認して flush write すると、main 側は
+			// 書き込み先の親ディレクトリを作り直すため、rename で消えたはずの path が
+			// disk 上にゴーストとして復活する。
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md", "/w/c.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			await act(async () => {
+				result.current.handleFileRenamed("/w/a.md", "/w/b.md", false);
+			});
+			await flushAsync();
+			await advance(3000);
+
+			expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("/w/a.md");
+			// 編集自体は新 path へ保存される (書かないのではなく、書き先が変わる)。
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/b.md", "edited\n");
+		});
+
+		it("未保存の編集がある active タブのディレクトリを rename しても、旧 path へ書き戻さない", async () => {
+			diskContents.set("/w/a/foo/x.md", "orig");
+			seedWorkspace("/w", ["/w/a/foo/x.md", "/w/c.md"], "/w/a/foo/x.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+
+			await act(async () => {
+				result.current.handleFileRenamed("/w/a/foo", "/w/a/baz", true);
+			});
+			await flushAsync();
+			await advance(3000);
+
+			expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("/w/a/foo/x.md");
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a/baz/x.md", "edited\n");
+		});
+
 		it("rename 中に旧 path の readFile が遅れて解決しても、新 path のロード結果を上書きしない", async () => {
 			// 旧 path の read は effect cleanup の ignore フラグで破棄されるはず。
 			// 破棄が効かないと、rename 後のエディタに旧 path の内容が現れ、
@@ -461,16 +499,15 @@ describe("useTabContentManager", () => {
 			expect(tabPaths()).not.toContain("/w/a.md");
 			expect(result.current.getCachedContent("/w/a.md")).toBeNull();
 
-			// 1 回目は A→B 切替時の flush (A の編集内容が A へ書かれる = 正しい)。
-			// 2 回目が現状の異常: 再チェック分岐は id === activeTabId を fresh な store state で
-			// 判定する一方、そこから呼ぶ saveIfDirty / saveNow は handleCloseTab を呼んだ時点
-			// (まだ B が active) のレンダーに束縛された closure で、useAutoSave の filePath も
-			// "/w/b.md" のまま。結果として **A の内容が B の path へ書かれる**。
-			// この test は現状の挙動を characterization として固定しているだけで、
-			// 2 行目を「正しい」と主張してはいない (別 issue で追跡)。
+			// 1 回目は A→B 切替時の flush、2 回目は再チェック分岐からの保存。
+			// **どちらも A の path へ向かねばならない**。再チェックは
+			// id === activeTabId を fresh な store state で判定するのに、そこから呼ぶ
+			// saveIfDirty / saveNow を呼び出し時のレンダーに束縛された closure のままに
+			// すると、useAutoSave の filePath が "/w/b.md" のままになり
+			// **A の内容が B の path へ書かれて B の中身がすり替わる**。
 			expect(mockedWriteFile.mock.calls).toEqual([
 				["/w/a.md", "edited-a\n"],
-				["/w/b.md", "edited-a\n"],
+				["/w/a.md", "edited-a\n"],
 			]);
 		});
 
@@ -737,10 +774,9 @@ describe("useTabContentManager", () => {
 
 	// #458 finding 3: handleFlushComplete の dirty 判定。flush はタブ切替時の非同期 write なので、
 	// 完了時点で「flush 対象が再び active に戻り、かつさらに編集されていた」場合に
-	// ユーザーの追加編集を保存済み扱いにしてしまわないかを pin する
-	// (1 本目は実装の実際の挙動が想定と異なった characterization test、詳細はテスト内コメント参照)。
+	// 完了時点でユーザーの追加編集を保存済み扱いにしてしまわないことを pin する。
 	describe("handleFlushComplete の dirty 判定", () => {
-		it("flush 解決前に active タブへ戻ってさらに編集すると dirty が落ち、その窓の window close で編集が保存されない (characterization)", async () => {
+		it("flush 解決前に active タブへ戻ってさらに編集した場合、dirty を維持し window close でその編集を保存する", async () => {
 			diskContents.set("/w/a.md", "orig-a");
 			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
 			const { editor, result } = renderManager();
@@ -772,31 +808,19 @@ describe("useTabContentManager", () => {
 			deferred.resolve();
 			await flushAsync();
 
-			// handleFlushComplete (useTabContentManager.ts:188-190) は
-			// `currentActive === path && getContent() !== rawContent` のとき dirty を
-			// 落とさずに return する — が、その直後に useAutoSave が setSaveStatus("saved")
-			// を呼ぶ (useAutoSave.ts:221)。これを受けた「Sync dirty flag to store」effect
-			// (useTabContentManager.ts:370-374) が saveStatus だけを見て dirty=false を
-			// 書き戻すため、早期 return の意図は打ち消される。
-			expect(tabDirty("/w/a.md")).toBe(false);
+			// handleFlushComplete (useTabContentManager.ts) は追加編集がある active タブの
+			// dirty を落とさずに return するが、flush 完了時に useAutoSave が無条件に
+			// setSaveStatus("saved") を呼ぶと「Sync dirty flag to store」effect が
+			// saveStatus だけを見て dirty=false に書き戻し、早期 return の意図が消える。
+			expect(tabDirty("/w/a.md")).toBe(true);
 
-			// 影響は dirty 表示だけに留まらない。同じ flush 完了で「Keep savedContent」effect
-			// (useTabContentManager.ts:347-365) が savedContentRef と cache の savedContent を
-			// 未保存の内容へ進めるため、この窓で window close すると saveAllTabs は
-			// `getContent() !== savedContentRef.current` が false で **active タブを skip** し、
-			// その編集を保存しないまま "ok" を返す (他に dirty な cache タブがあればそちらは
-			// 書かれる。失われるのは active タブの編集)。
-			const writesBeforeClose = mockedWriteFile.mock.calls.length;
-			let closeResult!: "ok" | "failed" | "cancelled";
+			// dirty 表示だけの問題ではない。saveStatus が "saved" になると
+			// 「Keep savedContent」effect が savedContentRef を未保存の内容へ進めてしまい、
+			// window close 時の saveAllTabs が `getContent() !== savedContentRef.current`
+			// を false と判定して active タブを skip する = 編集が保存されないまま閉じる。
 			await act(async () => {
-				closeResult = await result.current.saveAllTabs();
+				expect(await result.current.saveAllTabs()).toBe("ok");
 			});
-			expect(closeResult).toBe("ok");
-			expect(mockedWriteFile.mock.calls.length).toBe(writesBeforeClose);
-
-			// 窓を抜ければ保留中の debounce autosave が書き切る。失われるのは
-			// 「flush 完了から debounce 発火までの間に window close した場合」だけ。
-			await advance(2000);
 			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "edited-a-more\n");
 		});
 

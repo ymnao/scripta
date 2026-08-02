@@ -28,6 +28,12 @@ interface UseAutoSaveReturn {
 	waitForPending: () => Promise<void>;
 	getLastSavedContent: () => string;
 	scheduleAutoSave: () => void;
+	/**
+	 * 開いているファイルが rename されたことを知らせる。filePath の変化を
+	 * 「別ファイルへの切替」と誤認して **旧 path へ flush write する**
+	 * (= rename で消えたはずのファイルを disk 上に作り直す) のを防ぐ。
+	 */
+	notifyPathRenamed: (oldPath: string, newPath: string) => void;
 }
 
 export function useAutoSave(
@@ -218,7 +224,20 @@ export function useAutoSave(
 						if (!isMountedRef.current) return;
 						if (flushSaveId !== saveIdRef.current) return;
 						onFlushCompleteRef.current?.(prevPath, currentContent);
-						setSaveStatus("saved");
+						// flush が書いたのは **切替前のファイル**。完了しても「今表示している
+						// タブが保存済み」とは限らない (切替先が cache から dirty のまま復元
+						// された、あるいは元のタブへ戻って編集を続けた場合)。無条件に
+						// "saved" にすると dirty 表示が消えるだけでなく、呼び出し側の
+						// 「保存済み内容」の追跡まで未保存の内容へ進み、window close 時の
+						// 一括保存がそのタブを skip して編集が失われる。
+						// ただし切替先の内容がまだ markSaved で渡されていない間 (awaitingNewFile) は
+						// 判定材料が無いので従来どおり "saved" に落ち着かせ、markSaved 側の
+						// dirty 導出に委ねる。
+						const { trimTrailingWhitespace: tw } = useSettingsStore.getState();
+						const stillDirty =
+							!awaitingNewFileRef.current &&
+							processContent(getContentRef.current(), tw) !== lastSavedContentRef.current;
+						setSaveStatus(stillDirty ? "unsaved" : "saved");
 					})
 					.catch((err) => {
 						if (!isMountedRef.current) return;
@@ -328,6 +347,18 @@ export function useAutoSave(
 		return inflightRef.current;
 	}, []);
 
+	// rename は「同じ文書の path が変わった」だけなので、prevFilePathRef を付け替えて
+	// flush-on-path-change effect を素通りさせる。付け替えないと effect は旧 path を
+	// 「切替元のファイル」とみなして書き込み、main 側は書き込み先の親ディレクトリを
+	// 作り直すため、rename で消えたはずの path がゴーストとして復活する。
+	// 一致判定は API 単体で安全に呼べるようにするためのもので、現状の呼び出し側
+	// (useTabContentManager) は active path に限って呼ぶため常に真になる。
+	const notifyPathRenamed = useCallback((oldPath: string, newPath: string): void => {
+		if (prevFilePathRef.current === oldPath) {
+			prevFilePathRef.current = newPath;
+		}
+	}, []);
+
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;
 	}, []);
@@ -339,5 +370,6 @@ export function useAutoSave(
 		waitForPending,
 		getLastSavedContent,
 		scheduleAutoSave,
+		notifyPathRenamed,
 	};
 }
