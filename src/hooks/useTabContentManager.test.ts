@@ -1390,6 +1390,7 @@ describe("useTabContentManager", () => {
 
 			const keyBefore = result.current.editorKey;
 			const epochBefore = result.current.editorViewEpoch;
+			const remountsBefore = editor.getRemountCount();
 
 			await act(async () => {
 				useWorkspaceStore.getState().setActiveTab("/w/a.md");
@@ -1404,6 +1405,9 @@ describe("useTabContentManager", () => {
 			// なって履歴が飛び、epoch を進めないと view を deps に持つ下流が再走しない。
 			expect(result.current.editorViewEpoch).toBe(epochBefore + 1);
 			expect(result.current.editorKey).toBe(keyBefore);
+			// doc の値では restore と remount を区別できない (復元内容と loadedDoc は
+			// 常に一致する)。remount が走っていないことを経路として観測する。
+			expect(editor.getRemountCount()).toBe(remountsBefore);
 			expect(editor.getContent()).toBe("edited-a");
 		});
 
@@ -1420,6 +1424,7 @@ describe("useTabContentManager", () => {
 			});
 			await flushAsync();
 			const keyBefore = result.current.editorKey;
+			const remountsBefore = editor.getRemountCount();
 
 			await act(async () => {
 				useWorkspaceStore.getState().setActiveTab("/w/a.md");
@@ -1430,6 +1435,7 @@ describe("useTabContentManager", () => {
 			// fallback が効かないと復帰したタブに内容が入らない。
 			expect(result.current.editorViewEpoch).toBe(0);
 			expect(result.current.editorKey).toBe(keyBefore + 1);
+			expect(editor.getRemountCount()).toBe(remountsBefore + 1);
 			expect(editor.getContent()).toBe("edited-a");
 		});
 
@@ -1485,6 +1491,7 @@ describe("useTabContentManager", () => {
 			handle.restoreFails = true;
 			const keyBefore = result.current.editorKey;
 			const epochBefore = result.current.editorViewEpoch;
+			const remountsBefore = editor.getRemountCount();
 
 			await act(async () => {
 				useWorkspaceStore.getState().setActiveTab("/w/a.md");
@@ -1498,6 +1505,7 @@ describe("useTabContentManager", () => {
 			// false を成功扱いすると epoch だけ進んで doc が入らず、復帰したタブが白紙になる。
 			expect(result.current.editorViewEpoch).toBe(epochBefore);
 			expect(result.current.editorKey).toBe(keyBefore + 1);
+			expect(editor.getRemountCount()).toBe(remountsBefore + 1);
 			expect(editor.getContent()).toBe("edited-a");
 		});
 

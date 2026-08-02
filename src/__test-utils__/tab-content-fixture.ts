@@ -56,6 +56,12 @@ export interface FakeEditor {
 	 */
 	remountWith: (loadedDoc: string) => void;
 	/**
+	 * remountWith が呼ばれた回数。restore 成功時は remount しない (view identity を
+	 * 保ったまま state だけ差し替える) という区別を、doc の値ではなく経路で観測するために使う。
+	 * 復元内容と loadedDoc は一致するのが常態なので、doc を見ても両経路を区別できない。
+	 */
+	getRemountCount: () => number;
+	/**
 	 * この editor に紐づく MarkdownEditorHandle の fake を作る。
 	 * 実 MarkdownEditor が自分の view を closure に持って useImperativeHandle を
 	 * 組むのと同じ所有関係にしてあり、doc を restore 経由で書き換える手段は
@@ -99,6 +105,7 @@ export interface FakeSnapshotHandle extends MarkdownEditorHandle {
 
 export function createFakeEditor(initialContent = ""): FakeEditor {
 	let content = initialContent;
+	let remountCount = 0;
 	const view = {
 		composing: false,
 		state: {
@@ -115,8 +122,10 @@ export function createFakeEditor(initialContent = ""): FakeEditor {
 			content = next;
 		},
 		remountWith: (loadedDoc) => {
+			remountCount += 1;
 			content = loadedDoc;
 		},
+		getRemountCount: () => remountCount,
 		createSnapshotHandle: () => {
 			const handle: FakeSnapshotHandle = {
 				captureReturnsNull: false,
