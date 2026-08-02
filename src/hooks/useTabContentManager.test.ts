@@ -5,7 +5,6 @@ import {
 	advance,
 	createDeferred,
 	createFakeEditor,
-	createFakeSnapshotHandle,
 	type Deferred,
 	type FakeEditor,
 	flushAsync,
@@ -1367,7 +1366,7 @@ describe("useTabContentManager", () => {
 			const { result, editor } = renderManager();
 			await flushAsync();
 
-			const handle = createFakeSnapshotHandle(editor);
+			const handle = editor.createSnapshotHandle();
 			result.current.markdownEditorHandleRef.current = handle;
 			editor.type("edited-a");
 
@@ -1375,7 +1374,9 @@ describe("useTabContentManager", () => {
 				useWorkspaceStore.getState().setActiveTab("/w/b.md");
 			});
 			await flushAsync();
-			expect(handle.captured[0]).not.toBeNull();
+			expect(handle.captureSnapshot).toHaveBeenCalledTimes(1);
+			const capturedToken = handle.captureSnapshot.mock.results[0]?.value;
+			expect(capturedToken).not.toBeNull();
 
 			const keyBefore = result.current.editorKey;
 			const epochBefore = result.current.editorViewEpoch;
@@ -1387,8 +1388,8 @@ describe("useTabContentManager", () => {
 
 			// 復元に渡すのは A を離れるときに捕った snapshot そのもの (同一参照)。
 			// 構造だけ似た別 object を渡すと undo 履歴が復元されない。
-			expect(handle.restoreCalls).toEqual([handle.captured[0]]);
-			expect(handle.restoreCalls[0]).toBe(handle.captured[0]);
+			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(1);
+			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(capturedToken);
 			// epoch と key は「どちらが進んだか」に意味がある。key を進めると remount に
 			// なって履歴が飛び、epoch を進めないと view を deps に持つ下流が再走しない。
 			expect(result.current.editorViewEpoch).toBe(epochBefore + 1);
@@ -1428,7 +1429,7 @@ describe("useTabContentManager", () => {
 			const { result, editor } = renderManager();
 			await flushAsync();
 
-			const handle = createFakeSnapshotHandle(editor);
+			const handle = editor.createSnapshotHandle();
 			result.current.markdownEditorHandleRef.current = handle;
 			// 外部リロード由来の cache には snapshot が無い (doc とズレるため破棄される)。
 			act(() => {
@@ -1445,7 +1446,7 @@ describe("useTabContentManager", () => {
 
 			// snapshot が無いのに restore を呼ぶと、実物は不正な引数で false を返すだけだが
 			// 「呼ばない」ことが cache 破棄の契約 (doc とズレた履歴を戻さない) の担保になる。
-			expect(handle.restoreCalls).toEqual([]);
+			expect(handle.restoreSnapshot).not.toHaveBeenCalled();
 			expect(result.current.editorViewEpoch).toBe(epochBefore);
 			expect(result.current.editorKey).toBe(keyBefore + 1);
 			expect(editor.getContent()).toBe("cached-a");
@@ -1458,7 +1459,7 @@ describe("useTabContentManager", () => {
 			const { result, editor } = renderManager();
 			await flushAsync();
 
-			const handle = createFakeSnapshotHandle(editor);
+			const handle = editor.createSnapshotHandle();
 			result.current.markdownEditorHandleRef.current = handle;
 			editor.type("edited-a");
 
@@ -1490,7 +1491,7 @@ describe("useTabContentManager", () => {
 			const { result, editor } = renderManager();
 			await flushAsync();
 
-			const handle = createFakeSnapshotHandle(editor);
+			const handle = editor.createSnapshotHandle();
 			result.current.markdownEditorHandleRef.current = handle;
 			editor.type("edited-a");
 
@@ -1498,7 +1499,7 @@ describe("useTabContentManager", () => {
 				useWorkspaceStore.getState().setActiveTab("/w/b.md");
 			});
 			await flushAsync();
-			const firstToken = handle.captured[0];
+			const firstToken = handle.captureSnapshot.mock.results[0]?.value;
 			expect(firstToken).not.toBeNull();
 
 			await act(async () => {
@@ -1523,8 +1524,8 @@ describe("useTabContentManager", () => {
 			// 仕様として固定してしまう)。
 			// A↔B を 2 往復するので復帰は 3 回 (B→A, A→B, B→A)。B 側も切替のたびに
 			// snapshot を持つため、A の token を見るのは最後の復帰。
-			expect(handle.restoreCalls).toHaveLength(3);
-			expect(handle.restoreCalls.at(-1)).toBe(firstToken);
+			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(3);
+			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(firstToken);
 		});
 
 		it("dirty な cache から復帰したタブは dirty のままで、autosave がその内容を保存する", async () => {
