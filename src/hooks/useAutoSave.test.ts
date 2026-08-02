@@ -381,6 +381,36 @@ describe("useAutoSave", () => {
 		});
 	});
 
+	it("notifyPathRenamed は追跡中でない path の rename では追跡先を変えない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited A";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		// 無関係なファイルの rename。追跡先 (a.md) を書き換えてしまうと、
+		// この後の本物の切替で flush 先が別ファイルになり、a.md の編集が
+		// 無関係な path へ書かれる。
+		act(() => {
+			result.current.notifyPathRenamed("other.md", "renamed.md");
+		});
+
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
+		expect(mockedWriteFile).not.toHaveBeenCalledWith("renamed.md", expect.anything());
+	});
+
 	it("shows error when flush save fails on file switch", async () => {
 		let currentContent = "initial";
 		const getContent = () => currentContent;

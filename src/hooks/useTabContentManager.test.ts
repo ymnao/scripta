@@ -254,6 +254,12 @@ describe("useTabContentManager", () => {
 			const { result, editor } = renderManager();
 			await flushAsync();
 			editor.type("edited");
+			// 実アプリの onDocChanged 相当。rename 前に旧 path 向けの debounce が
+			// 予約された状態を作る (予約を残したまま rename すると、その timer が
+			// 旧 path の closure のまま発火してゴーストを作る)。
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
 
 			await act(async () => {
 				result.current.handleFileRenamed("/w/a.md", "/w/b.md", false);

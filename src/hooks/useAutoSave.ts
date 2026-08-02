@@ -351,8 +351,6 @@ export function useAutoSave(
 	// flush-on-path-change effect を素通りさせる。付け替えないと effect は旧 path を
 	// 「切替元のファイル」とみなして書き込み、main 側は書き込み先の親ディレクトリを
 	// 作り直すため、rename で消えたはずの path がゴーストとして復活する。
-	// 一致判定は API 単体で安全に呼べるようにするためのもので、現状の呼び出し側
-	// (useTabContentManager) は active path に限って呼ぶため常に真になる。
 	const notifyPathRenamed = useCallback((oldPath: string, newPath: string): void => {
 		if (prevFilePathRef.current === oldPath) {
 			prevFilePathRef.current = newPath;
