@@ -123,6 +123,19 @@ export function useExternalFileConflict({
 				} else {
 					readFile(path)
 						.then((loaded) => {
+							// clean だったのは readFile を投げた時点の話。解決までの間に
+							// ユーザーが打ち始めていたら、applyExternalReload は editor を
+							// remount して打ったばかりの文字を捨ててしまう。dirty タブが
+							// 外部変更されたときと同じ扱い (自分の write でなければ
+							// ダイアログで問う) に合流させる。
+							const current = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
+							if (current?.dirty) {
+								if (loaded === getLastSavedContentRef.current()) return;
+								setExternalConflict((prev) =>
+									prev?.type === "deleted" ? prev : { path, type: "modified" },
+								);
+								return;
+							}
 							applyExternalReload(path, loaded);
 						})
 						.catch((err) => {
@@ -137,6 +150,12 @@ export function useExternalFileConflict({
 				if (isCachedTabClean(path)) {
 					readFile(path)
 						.then((loaded) => {
+							// clean 判定は readFile を投げた時点のもの。解決までの間に
+							// そのタブが active 化されて編集されていると、applyCacheReload は
+							// cache を disk の内容で丸ごと置き換えて未保存の編集を捨てる。
+							// 適用直前に同じ条件を取り直す (取り直しと適用の間に await が
+							// 無いので、ここで clean なら適用時も clean)。
+							if (!isCachedTabClean(path)) return;
 							applyCacheReload(path, loaded);
 						})
 						.catch((err) => {

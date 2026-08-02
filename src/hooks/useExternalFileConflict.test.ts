@@ -353,6 +353,127 @@ describe("useExternalFileConflict", () => {
 		});
 	});
 
+	// codex-review qa-fixture (MEDIUM/92, MEDIUM/94) 起点。clean 判定と反映の間に
+	// readFile の await が挟まるため、判定が失効した状態で適用すると
+	// 「読み込み中に打った文字が消える」。適用直前の取り直しをここで固定する。
+	describe("readFile 解決までに前提が失効した場合", () => {
+		it("active clean タブが読み込み中に dirty 化したら、editor を上書きせず modified ダイアログにする", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }], "/w/a.md");
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { result, api } = await renderConflict();
+
+			await emitFsChange(modified("/w/a.md"));
+
+			// 読み込み中にユーザーが打ち始めた
+			act(() => {
+				useWorkspaceStore.getState().setTabDirty("/w/a.md", true);
+			});
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(api.applyExternalReload).not.toHaveBeenCalled();
+			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "modified" });
+		});
+
+		it("読み込み中に dirty 化しても、内容が自分の保存分と同じならダイアログを出さない", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }], "/w/a.md");
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { result, api } = await renderConflict();
+
+			await emitFsChange(modified("/w/a.md"));
+
+			act(() => {
+				useWorkspaceStore.getState().setTabDirty("/w/a.md", true);
+			});
+			act(() => {
+				deferred.resolve("last-saved");
+			});
+			await flushAsync();
+
+			expect(api.applyExternalReload).not.toHaveBeenCalled();
+			expect(result.current.externalConflict).toBeNull();
+		});
+
+		it("読み込み中に delete が届いていたら、遅れて解決した modify は deleted を上書きしない", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }], "/w/a.md");
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { result } = await renderConflict();
+
+			await emitFsChange(modified("/w/a.md"));
+
+			// 読み込み中に編集し、さらに外部で削除された
+			act(() => {
+				useWorkspaceStore.getState().setTabDirty("/w/a.md", true);
+			});
+			await emitFsChange(deleted("/w/a.md"));
+			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
+
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
+		});
+
+		it("非 active タブの cache が読み込み中に dirty 化したら applyCacheReload しない", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: false },
+				],
+				"/w/a.md",
+			);
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			// 1 回目 (判定時) は clean、2 回目 (適用直前の取り直し) は dirty を返す
+			let cleanCalls = 0;
+			const { api } = await renderConflict({
+				isCachedTabClean: () => {
+					cleanCalls += 1;
+					return cleanCalls === 1;
+				},
+			});
+
+			await emitFsChange(modified("/w/b.md"));
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(cleanCalls).toBe(2);
+			expect(api.applyCacheReload).not.toHaveBeenCalled();
+		});
+
+		it("非 active タブの cache が clean のままなら applyCacheReload する", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: false },
+				],
+				"/w/a.md",
+			);
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { api } = await renderConflict();
+
+			await emitFsChange(modified("/w/b.md"));
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(api.applyCacheReload).toHaveBeenCalledWith("/w/b.md", "external-change");
+		});
+	});
+
 	// #458 finding 12: コンフリクト操作ハンドラ。ダイアログの種類ごとに
 	// 呼んでよい操作が違う (誤った種類での呼び出しは no-op になる) ことを固定する。
 	describe("コンフリクト操作ハンドラ", () => {
