@@ -329,6 +329,88 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
+	// flush 完了時の dirty 判定は「切替前のファイルへの write が終わっただけで、
+	// 今表示しているタブが保存済みとは限らない」ことを扱う。判定は processContent を
+	// 通した比較でなければならず、素の文字列比較だと trimTrailingWhitespace で
+	// 消える末尾空白のせいで「保存済みなのに未保存」と表示される。
+	describe.each([
+		{ trim: true, expected: "saved" as const },
+		{ trim: false, expected: "unsaved" as const },
+	])("flush 完了時の dirty 判定 (trimTrailingWhitespace: $trim)", ({ trim, expected }) => {
+		it(`末尾空白だけが異なる内容を ${expected} と判定する`, async () => {
+			useSettingsStore.setState({ trimTrailingWhitespace: trim });
+			let currentContent = "initial";
+			const getContent = () => currentContent;
+			const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+				initialProps: { filePath: "a.md" },
+			});
+
+			act(() => {
+				result.current.markSaved("initial");
+			});
+			currentContent = "edited A";
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+
+			// a.md への flush を in-flight のまま止めて b.md へ切り替える。
+			let resolveFlush!: () => void;
+			mockedWriteFile.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveFlush = () => resolve();
+					}),
+			);
+			await act(async () => {
+				rerender({ filePath: "b.md" });
+			});
+
+			// 切替先の内容が確定 (markSaved) した後に flush が解決する順序を作る。
+			currentContent = "content B";
+			act(() => {
+				result.current.markSaved("content B");
+			});
+			currentContent = "content B   ";
+
+			await act(async () => {
+				resolveFlush();
+				await Promise.resolve();
+			});
+
+			expect(result.current.saveStatus).toBe(expected);
+		});
+	});
+
+	it("notifyPathRenamed は追跡中でない path の rename では追跡先を変えない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited A";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		// 無関係なファイルの rename。追跡先 (a.md) を書き換えてしまうと、
+		// この後の本物の切替で flush 先が別ファイルになり、a.md の編集が
+		// 無関係な path へ書かれる。
+		act(() => {
+			result.current.notifyPathRenamed("other.md", "renamed.md");
+		});
+
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
+		expect(mockedWriteFile).not.toHaveBeenCalledWith("renamed.md", expect.anything());
+	});
+
 	it("shows error when flush save fails on file switch", async () => {
 		let currentContent = "initial";
 		const getContent = () => currentContent;

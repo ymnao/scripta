@@ -192,13 +192,20 @@ export function useTabContentManager({
 		},
 		[setTabDirty, getContent],
 	);
-	const { saveStatus, saveNow, markSaved, waitForPending, getLastSavedContent, scheduleAutoSave } =
-		useAutoSave(
-			isNewTab ? "" : (activeTabPath ?? ""),
-			getContent,
-			isEditorComposing,
-			handleFlushComplete,
-		);
+	const {
+		saveStatus,
+		saveNow,
+		markSaved,
+		waitForPending,
+		getLastSavedContent,
+		scheduleAutoSave,
+		notifyPathRenamed,
+	} = useAutoSave(
+		isNewTab ? "" : (activeTabPath ?? ""),
+		getContent,
+		isEditorComposing,
+		handleFlushComplete,
+	);
 	const getLastSavedContentRef = useRef(getLastSavedContent);
 	getLastSavedContentRef.current = getLastSavedContent;
 	const prevTabPathRef = useRef<string | null>(null);
@@ -381,6 +388,12 @@ export function useTabContentManager({
 		if (getContent() === savedContentRef.current) return true;
 		return await saveNow();
 	}, [getContent, saveNow]);
+	// handleCloseTab は await を跨いでから保存するため、その時点の saveIfDirty
+	// (= useAutoSave の filePath) は呼び出し時のレンダーに固定されている。await 中に
+	// 対象タブが active 化すると「今 active なタブの内容を、呼び出し時に active だった
+	// タブの path へ書く」ことになるので、ref 経由で最新の束縛を使う。
+	const saveIfDirtyRef = useRef(saveIfDirty);
+	saveIfDirtyRef.current = saveIfDirty;
 
 	const handleCloseTab = useCallback(
 		async (id: number) => {
@@ -413,7 +426,7 @@ export function useTabContentManager({
 				// Re-check: tab may have become active during waitForPending
 				const currentState = useWorkspaceStore.getState();
 				if (id === currentState.activeTabId) {
-					if (!(await saveIfDirty())) return;
+					if (!(await saveIfDirtyRef.current())) return;
 					tabCacheRef.current.delete(path);
 					closeTabById(id);
 					return;
@@ -447,6 +460,23 @@ export function useTabContentManager({
 
 	const handleFileRenamed = useCallback(
 		(oldPath: string, newPath: string, isDirectory: boolean) => {
+			// autosave 側にも rename を伝える。伝えないと filePath の変化が
+			// 「別ファイルへの切替」と解釈され、未保存の編集が **旧 path** へ
+			// flush write されて rename 済みのファイルが復活する。
+			const activePath = useWorkspaceStore.getState().activeTabPath;
+			if (activePath) {
+				const renamedActive = isDirectory
+					? activePath.startsWith(addTrailingSep(oldPath))
+						? replacePrefix(activePath, oldPath, newPath)
+						: null
+					: activePath === oldPath
+						? newPath
+						: null;
+				if (renamedActive) {
+					notifyPathRenamed(activePath, renamedActive);
+				}
+			}
+
 			// Helper: update tracking refs so the tab-switch effect doesn't
 			// re-create a stale cache entry under the old path.
 			const updateRefs = (oldKey: string, newKey: string) => {
@@ -472,7 +502,16 @@ export function useTabContentManager({
 				for (const { oldKey, newKey, value } of updates) {
 					cache.delete(oldKey);
 					cache.set(newKey, value);
-					updateRefs(oldKey, newKey);
+				}
+				// 追跡 ref は cache の有無と独立に追随させる。active タブは切替まで
+				// キャッシュされないため、cache 経由でしか ref を更新しないと
+				// 「active タブを含むディレクトリの rename」で ref が旧 path に取り残され、
+				// 直後の切替 effect が cache を作らず未保存の編集を disk 内容で上書きしてしまう。
+				for (const ref of [prevTabPathRef, contentLoadedForPathRef]) {
+					const current = ref.current;
+					if (current?.startsWith(prefix)) {
+						ref.current = replacePrefix(current, oldPath, newPath);
+					}
 				}
 				renameTabsByPrefix(prefix, addTrailingSep(newPath));
 			} else {
@@ -485,7 +524,7 @@ export function useTabContentManager({
 				renameTab(oldPath, newPath);
 			}
 		},
-		[renameTab, renameTabsByPrefix],
+		[renameTab, renameTabsByPrefix, notifyPathRenamed],
 	);
 
 	const handleFileDeleted = useCallback(
