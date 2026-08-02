@@ -25,11 +25,6 @@ vi.mock("../lib/commands", () => ({
 	onWorkspaceReloadTree: vi.fn(),
 }));
 
-vi.mock("../stores/toast", () => {
-	const addToast = vi.fn().mockReturnValue("toast-1");
-	return { useToastStore: { getState: () => ({ addToast }) } };
-});
-
 const { useExternalFileConflict } = await import("./useExternalFileConflict");
 const { useWorkspaceStore } = await import("../stores/workspace");
 
@@ -38,11 +33,17 @@ const mockedReadFile = readFile as Mock;
 /** path ごとの disk 内容。未登録の path は `disk:<path>` を返す。 */
 let diskContents: Map<string, string>;
 
+/**
+ * useFileWatcher の固定バッチ deadline (useFileWatcher.ts の setTimeout(flush, 300))。
+ * 実装側を変えたらここも追随させる。
+ */
+const WATCHER_BATCH_MS = 300;
+
 /** useFileWatcher が張った listener。fs イベント注入の入口。 */
 let fsChangeCallback: ((events: FsChangeEvent[]) => void) | null = null;
 
 /**
- * watcher の 300ms 固定バッチを跨いで fs イベントを配送する。
+ * watcher の固定バッチを跨いで fs イベントを配送する。
  * hook 側は watcher 経由でしか外部変更を受け取らないので、テストも
  * 直接 handler を呼ばずこの経路を通す (batch 整形の前提ごと固定する)。
  */
@@ -50,7 +51,7 @@ async function emitFsChange(events: FsChangeEvent[]): Promise<void> {
 	act(() => {
 		fsChangeCallback?.(events);
 	});
-	await advance(300);
+	await advance(WATCHER_BATCH_MS);
 	await flushAsync();
 }
 
@@ -66,7 +67,7 @@ function deleted(path: string): FsChangeEvent[] {
  * tab API は `Pick<TabContentManager, ...>` なので実装を持ち込む必要が無い。
  * すべて vi.fn() で受け、「どの分岐がどの API を呼んだか」だけを観測する。
  */
-function renderConflict(overrides: { isCachedTabClean?: (path: string) => boolean } = {}) {
+async function renderConflict(overrides: { isCachedTabClean?: (path: string) => boolean } = {}) {
 	const api = {
 		onTreeChange: vi.fn(),
 		getLastSavedContent: vi.fn<() => string>().mockReturnValue("last-saved"),
@@ -77,12 +78,9 @@ function renderConflict(overrides: { isCachedTabClean?: (path: string) => boolea
 		isCachedTabClean: vi.fn(overrides.isCachedTabClean ?? (() => true)),
 	};
 	const rendered = renderHook(() => useExternalFileConflict(api));
-	return { ...rendered, api };
-}
-
-/** watcher が listener を張り終える (= fs イベントを注入できる) まで進める。 */
-async function mountWatcher(): Promise<void> {
+	// watcher が listener を張り終える (= fs イベントを注入できる) まで進める。
 	await flushAsync();
+	return { ...rendered, api };
 }
 
 describe("useExternalFileConflict", () => {
@@ -116,8 +114,7 @@ describe("useExternalFileConflict", () => {
 	describe("workspace 切替", () => {
 		it("workspace が切り替わると表示中のダイアログを破棄する", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
@@ -131,8 +128,7 @@ describe("useExternalFileConflict", () => {
 
 		it("同じ workspace のままの再レンダーではダイアログを保持する", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result, rerender } = renderConflict();
-			await mountWatcher();
+			const { result, rerender } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
@@ -152,8 +148,7 @@ describe("useExternalFileConflict", () => {
 	describe("外部削除", () => {
 		it("対象タブが無ければ何もしない", async () => {
 			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(deleted("/w/other.md"));
 
@@ -164,8 +159,7 @@ describe("useExternalFileConflict", () => {
 
 		it("clean タブは dropTab + closeTab で黙って閉じる", async () => {
 			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 
@@ -176,8 +170,7 @@ describe("useExternalFileConflict", () => {
 
 		it("dirty タブは deleted ダイアログを出し、タブは閉じない", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 
@@ -189,8 +182,7 @@ describe("useExternalFileConflict", () => {
 		it("既存の modified ダイアログを deleted が上書きする", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "modified" });
@@ -207,8 +199,7 @@ describe("useExternalFileConflict", () => {
 		it("読み込んだ内容が getLastSavedContent と一致するなら自分の write なのでダイアログを出さない", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "last-saved");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 
@@ -218,8 +209,7 @@ describe("useExternalFileConflict", () => {
 		it("読み込んだ内容が異なるなら modified ダイアログを出す", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 
@@ -237,8 +227,7 @@ describe("useExternalFileConflict", () => {
 			);
 			const deferred = createDeferred<string>();
 			mockedReadFile.mockImplementationOnce(() => deferred.promise);
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 
@@ -256,8 +245,7 @@ describe("useExternalFileConflict", () => {
 		it("readFile が reject したら状態を維持する", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			mockedReadFile.mockImplementationOnce(() => Promise.reject(new Error("read failed")));
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 
@@ -266,8 +254,7 @@ describe("useExternalFileConflict", () => {
 
 		it("既に deleted ダイアログが出ている場合、modified で上書きしない", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
@@ -285,8 +272,7 @@ describe("useExternalFileConflict", () => {
 		it("active clean タブは applyExternalReload を呼ぶ (applyCacheReload は呼ばない)", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { api } = renderConflict();
-			await mountWatcher();
+			const { api } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 
@@ -297,8 +283,7 @@ describe("useExternalFileConflict", () => {
 		it("active clean タブの readFile 失敗では applyExternalReload を呼ばない", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }], "/w/a.md");
 			mockedReadFile.mockImplementationOnce(() => Promise.reject(new Error("read failed")));
-			const { api } = renderConflict();
-			await mountWatcher();
+			const { api } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 
@@ -315,8 +300,7 @@ describe("useExternalFileConflict", () => {
 				"/w/a.md",
 			);
 			diskContents.set("/w/b.md", "external-change");
-			const { api } = renderConflict();
-			await mountWatcher();
+			const { api } = await renderConflict();
 
 			await emitFsChange(modified("/w/b.md"));
 
@@ -333,8 +317,7 @@ describe("useExternalFileConflict", () => {
 				],
 				"/w/a.md",
 			);
-			const { api } = renderConflict({ isCachedTabClean: () => false });
-			await mountWatcher();
+			const { api } = await renderConflict({ isCachedTabClean: () => false });
 
 			await emitFsChange(modified("/w/b.md"));
 
@@ -352,8 +335,7 @@ describe("useExternalFileConflict", () => {
 				"/w/a.md",
 			);
 			mockedReadFile.mockImplementationOnce(() => Promise.reject(new Error("read failed")));
-			const { api } = renderConflict();
-			await mountWatcher();
+			const { api } = await renderConflict();
 
 			await emitFsChange(modified("/w/b.md"));
 
@@ -362,8 +344,7 @@ describe("useExternalFileConflict", () => {
 
 		it("タブに無い path の modify では readFile を発行しない", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: false }], "/w/a.md");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/missing.md"));
 
@@ -378,8 +359,7 @@ describe("useExternalFileConflict", () => {
 		it("modified 表示中の handleConflictReload 成功で applyConflictReload を呼びダイアログを閉じる", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "modified" });
@@ -397,8 +377,7 @@ describe("useExternalFileConflict", () => {
 		it("modified 表示中の handleConflictReload が readFile reject したとき deleted ダイアログへ遷移する", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "modified" });
@@ -414,13 +393,11 @@ describe("useExternalFileConflict", () => {
 
 		it("deleted 表示中に handleConflictReload を呼んでも no-op", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result } = renderConflict();
-			await mountWatcher();
+			const { result } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
 
-			mockedReadFile.mockClear();
 			act(() => {
 				result.current.handleConflictReload();
 			});
@@ -433,8 +410,7 @@ describe("useExternalFileConflict", () => {
 		it("handleConflictKeep はダイアログを閉じるだけでタブを触らない", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "modified" });
@@ -450,8 +426,7 @@ describe("useExternalFileConflict", () => {
 
 		it("deleted 表示中の handleDeletedDirtyDiscard は dropTab + closeTab でタブを閉じる", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
@@ -468,8 +443,7 @@ describe("useExternalFileConflict", () => {
 		it("modified 表示中に handleDeletedDirtyDiscard を呼んでも no-op", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
 			diskContents.set("/w/a.md", "external-change");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(modified("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "modified" });
@@ -485,8 +459,7 @@ describe("useExternalFileConflict", () => {
 
 		it("handleDeletedDirtyKeep はダイアログを閉じるがタブは残す", async () => {
 			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
-			const { result, api } = renderConflict();
-			await mountWatcher();
+			const { result, api } = await renderConflict();
 
 			await emitFsChange(deleted("/w/a.md"));
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
