@@ -129,7 +129,11 @@ export function useExternalFileConflict({
 							// 外部変更されたときと同じ扱い (自分の write でなければ
 							// ダイアログで問う) に合流させる。
 							const current = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
-							if (current?.dirty) {
+							// 読み込み中にタブが消えた (外部削除で閉じた / workspace 切替)。
+							// applyExternalReload は cache を作り直すので、閉じた path の
+							// cache が復活して次に開いたとき古い内容が出る。
+							if (!current) return;
+							if (current.dirty) {
 								if (loaded === getLastSavedContentRef.current()) return;
 								setExternalConflict((prev) =>
 									prev?.type === "deleted" ? prev : { path, type: "modified" },
