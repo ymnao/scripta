@@ -1647,10 +1647,14 @@ describe("AppLayout", () => {
 		}
 
 		async function runCloseHandler(): Promise<boolean> {
+			// optional call のままだと handler 未登録でも「例外なし」で通ってしまうため、
+			// 登録されていること自体を先に assert する。
+			expect(closeHandler).not.toBeNull();
+			const handler = closeHandler;
 			let threw = false;
 			await act(async () => {
 				try {
-					await closeHandler?.();
+					await handler?.();
 				} catch {
 					threw = true;
 				}
@@ -1715,13 +1719,17 @@ describe("AppLayout", () => {
 			const write = createDeferred<void>();
 			mockedWriteFile.mockImplementationOnce(() => write.promise);
 
+			expect(closeHandler).not.toBeNull();
+			const handler = closeHandler;
 			let threw = false;
 			let closePromise!: Promise<void>;
 			await act(async () => {
-				closePromise = Promise.resolve(closeHandler?.()).catch(() => {
+				closePromise = Promise.resolve(handler?.()).catch(() => {
 					threw = true;
 				});
 			});
+			// 保存が実際に始まっていること (= "cancelled" 経路に入る前提) を確かめる。
+			expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 			await act(async () => {
 				unmount();
 				write.resolve();
