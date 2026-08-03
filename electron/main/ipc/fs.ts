@@ -97,9 +97,12 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 //   - `fs:create-directory`: 対象自体は非 recursive な `mkdir` なので同様に EEXIST
 //   - `fs:rename`: `rename(2)` は末端 symlink を辿らず link 自体を張り替える。source / target の
 //     存在判定も `entryExistsAt`（lstat、no-follow）なので判定と操作の follow 有無が揃う。
-//     source が symlink ならその link 自体が移動し、target に entry が実在すれば（解決先の
-//     有無に関わらず）Target already exists で reject する。check 通過後のレース窓で target に
-//     symlink が現れた場合も `rename(2)` は link 自体を置き換えるので escape しない（test で pin）
+//     **canonical の末端が symlink のまま残る場合**（= realpath が解決できない dangling / 循環）
+//     は link 自体が移動する。live な alias が source のときは canonical が実体の path なので
+//     移動するのは実体で、alias は元位置に dangling として残る（`fs:delete` が実体を消すのと
+//     同型の意外性）。target に entry が実在すれば（解決先の有無に関わらず）Target already
+//     exists で reject する。check 通過後のレース窓で target に symlink が現れた場合も
+//     `rename(2)` は link 自体を置き換えるので escape しない（test で pin）
 //
 // **末端 swap 窓が残る経路（受容）**: 以下は path を再 traversal する API を使うため、認可後に
 // 末端を symlink へ差し替えられると解決先を見に行く。閉じるには fd 相対 traversal が要るが
