@@ -589,7 +589,10 @@ export function FileTree({
 				const result = findDropTarget(e.clientX, e.clientY, drag.source.path);
 				if (result) {
 					skipNextClickRef.current = true;
-					handleMoveEntryRef.current(drag.source, result.overPath);
+					// pointerup は同期ハンドラなので await できない。handleMoveEntry は
+					// 内部で executeRename の失敗を try/catch → toast まで完結させており
+					// reject しないため、fire-and-forget を void で明示する。
+					void handleMoveEntryRef.current(drag.source, result.overPath);
 				}
 				document.body.style.cursor = "";
 			}
