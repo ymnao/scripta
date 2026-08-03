@@ -22,35 +22,36 @@ import { getFileTreeFilterOptions } from "./settings";
 // 同じ「明示的な上限を持つ」思想で揃える。
 export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
 
-async function pathExistsAt(absolute: string): Promise<boolean> {
+// 存在判定は probe に渡す syscall だけが違うので、ENOENT の扱いはここ 1 箇所で決める。
+// ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような呼び出し元が
+// 「実際は権限問題なのに Source not found / Not found」と誤分類してしまう。
+// ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
+async function existsBy(
+	probe: (absolute: string) => Promise<unknown>,
+	absolute: string,
+): Promise<boolean> {
 	try {
-		await fsp.access(absolute);
+		await probe(absolute);
 		return true;
 	} catch (e) {
-		// ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような
-		// 呼び出し元が「実際は権限問題なのに Source not found / Not found」と
-		// 誤分類してしまう。ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
 		if (isErrnoCode(e, "ENOENT")) return false;
 		throw e;
 	}
 }
 
-// `pathExistsAt` との違いは **末端 symlink を辿るかどうか**:
+// 2 つの存在判定の違いは **末端 symlink を辿るかどうか**:
 //   - `pathExistsAt`（access）= **解決先**が存在するか。「使えるファイルがそこにあるか」を
-//     問う `fs:path-exists` / `fs:file-exists` 向け
+//     問う `fs:path-exists` 向け
 //   - `entryExistsAt`（lstat）= **entry 自体**が存在するか。link 自身を操作する
 //     `fs:delete`（trashItem）/ `fs:rename`（rename(2)）向け。判定と操作の follow 有無が
 //     一致するので、realpath が解決できない symlink（dangling / 循環）でも「実在する entry」
 //     として扱える (#454)
-// ENOENT のみ false・他は伝播、という誤分類回避の方針は `pathExistsAt` と共通。
-async function entryExistsAt(absolute: string): Promise<boolean> {
-	try {
-		await fsp.lstat(absolute);
-		return true;
-	} catch (e) {
-		if (isErrnoCode(e, "ENOENT")) return false;
-		throw e;
-	}
+function pathExistsAt(absolute: string): Promise<boolean> {
+	return existsBy(fsp.access, absolute);
+}
+
+function entryExistsAt(absolute: string): Promise<boolean> {
+	return existsBy(fsp.lstat, absolute);
 }
 
 // すべての impl は path-guard の assert 系から **canonical（realpath 済み）** を
