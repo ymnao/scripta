@@ -22,7 +22,9 @@ import { getFileTreeFilterOptions } from "./settings";
 // 同じ「明示的な上限を持つ」思想で揃える。
 export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
 
-// 存在判定は probe に渡す syscall だけが違うので、ENOENT の扱いはここ 1 箇所で決める。
+// `pathExistsAt` / `entryExistsAt` は probe に渡す syscall だけが違うので、ENOENT の扱いは
+// この 2 つについてはここで一度だけ決める（`fileExistsImpl` は `stat.isFile()` を返す都合で
+// 同じポリシーを別に持つ。errno の扱いを変えるときはあちらも一緒に見る）。
 // ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような呼び出し元が
 // 「実際は権限問題なのに Source not found / Not found」と誤分類してしまう。
 // ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
@@ -43,9 +45,10 @@ async function existsBy(
 //   - `pathExistsAt`（access）= **解決先**が存在するか。「使えるファイルがそこにあるか」を
 //     問う `fs:path-exists` 向け
 //   - `entryExistsAt`（lstat）= **entry 自体**が存在するか。link 自身を操作する
-//     `fs:delete`（trashItem）/ `fs:rename`（rename(2)）向け。判定と操作の follow 有無が
-//     一致するので、realpath が解決できない symlink（dangling / 循環）でも「実在する entry」
-//     として扱える (#454)
+//     `fs:delete`（trashItem）/ `fs:rename`（rename(2)）向け。realpath が解決できない
+//     symlink（dangling / 循環）でも「実在する entry」として扱える (#454)。`rename(2)` が
+//     末端を辿らないことは実 syscall の test で pin してあるが、`shell.trashItem` の
+//     follow 有無は Electron / OS 側の挙動で未検証（下の `fs:delete` の節を参照）
 function pathExistsAt(absolute: string): Promise<boolean> {
 	return existsBy(fsp.access, absolute);
 }
@@ -113,8 +116,11 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 // 破らない（実体も root 内）が、直感には反する。一方 **realpath が解決できない path**（dangling /
 // 循環 symlink 等）は canonical が link 自身の path になるため、`shell.trashItem` に渡るのは
 // link 自体になる。存在判定を `entryExistsAt`（lstat）にしたことでここまで到達できる (#454)。
-// `shell.trashItem` 自体が dangling symlink を trash へ送れるかは OS 側の挙動で、unit test では
-// モックしているため未検証。失敗しても StructuredError が renderer に伝わり fail-visible に止まる。
+// `shell.trashItem` 自体の挙動 — dangling symlink を trash へ送れるか、末端 symlink を辿るか —
+// は Electron / OS 側に属し、unit test ではモックしているため未検証。送れない場合も
+// StructuredError が renderer に伝わり fail-visible に止まる。辿る場合、認可から呼び出しまでの
+// 窓で link が workspace 外への live symlink に swap されれば解決先が trash に入りうるが、
+// これは本 IPC 以前に同一ユーザーが自力で trash できる file であり、権限は増えない。
 
 // bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
 // 二段防御で size 上限を強制する:

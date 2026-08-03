@@ -5,6 +5,7 @@ import {
 	open,
 	readFile,
 	readlink,
+	realpath,
 	rename,
 	rm,
 	stat,
@@ -939,9 +940,13 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / 
 			await deleteEntryImpl(TEST_WIN, link);
 
 			// 値ではなく経路を観測する: 渡った path が link 自身であることと、解決先へは
-			// 一切触れていないこと。
+			// 一切触れていないこと。期待値は node の realpath から独立に組む（canonicalize は
+			// impl の認可と同じ realpathBestEffort なので、オラクルに使うと両者が一緒に動いて
+			// 退行を見逃す）。
 			expect(shell.trashItem).toHaveBeenCalledTimes(1);
-			expect(shell.trashItem).toHaveBeenCalledWith(await canonicalize(link));
+			expect(shell.trashItem).toHaveBeenCalledWith(
+				join(await realpath(workspaceDir), "dangling.md"),
+			);
 			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
 		});
 
@@ -953,7 +958,7 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / 
 			await deleteEntryImpl(TEST_WIN, loop);
 
 			expect(shell.trashItem).toHaveBeenCalledTimes(1);
-			expect(shell.trashItem).toHaveBeenCalledWith(await canonicalize(loop));
+			expect(shell.trashItem).toHaveBeenCalledWith(join(await realpath(workspaceDir), "loop.md"));
 		});
 
 		it("path-exists / file-exists は従来どおり follow する (解決先を問う API)", async () => {
