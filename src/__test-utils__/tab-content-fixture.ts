@@ -1,7 +1,8 @@
 import type { EditorView } from "@codemirror/view";
 import { act } from "@testing-library/react";
 import type { RefObject } from "react";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
+import type { MarkdownEditorHandle } from "../components/editor/MarkdownEditor";
 import { type Tab, useWorkspaceStore } from "../stores/workspace";
 
 /**
@@ -49,15 +50,62 @@ export interface FakeEditor {
 	/** ユーザーの編集を模す。remount (editorKey / epoch bump) までは保持される。 */
 	type: (content: string) => void;
 	/**
-	 * remount / snapshot 復元を模して doc を loadedDoc で初期化し直す。
+	 * remount を模して doc を loadedDoc で初期化し直す。
 	 * 実 MarkdownEditor は uncontrolled で、editorKey bump による remount か
 	 * restoreSnapshot でしか doc が外から置き換わらない。テスト側でも同じ境界を保つ。
 	 */
 	remountWith: (loadedDoc: string) => void;
+	/**
+	 * remountWith が呼ばれた回数。restore 成功時は remount しない (view identity を
+	 * 保ったまま state だけ差し替える) という区別を、doc の値ではなく経路で観測するために使う。
+	 * 復元内容と loadedDoc は一致するのが常態なので、doc を見ても両経路を区別できない。
+	 */
+	getRemountCount: () => number;
+	/**
+	 * この editor に紐づく MarkdownEditorHandle の fake を作る。
+	 * 実 MarkdownEditor が自分の view を closure に持って useImperativeHandle を
+	 * 組むのと同じ所有関係にしてあり、doc を restore 経由で書き換える手段は
+	 * この handle の中だけに閉じている (remountWith と混同できない)。
+	 */
+	createSnapshotHandle: () => FakeSnapshotHandle;
+}
+
+/** captureSnapshot が返す不透明トークン。中身は fake 側の実装詳細。 */
+interface FakeSnapshotToken {
+	kind: "fake-snapshot";
+	doc: string;
+}
+
+function isFakeSnapshotToken(value: unknown): value is FakeSnapshotToken {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "fake-snapshot"
+	);
+}
+
+/**
+ * MarkdownEditorHandle (captureSnapshot / restoreSnapshot) の fake。
+ *
+ * 実物は EditorState を JSON 化 / 復元するが、ここが模すのは
+ * 「capture した時点の doc が restore で戻る」という往復の性質だけ。
+ * restore が doc を戻さないと「復帰後に capture すると別タブの doc が取れる」等、
+ * harness が実配線と乖離した状態を作ってしまう。
+ *
+ * 呼び出し履歴は vi.fn の mock.calls / mock.results から読む (リポジトリの既存慣行)。
+ */
+export interface FakeSnapshotHandle extends MarkdownEditorHandle {
+	captureSnapshot: Mock<() => unknown>;
+	restoreSnapshot: Mock<(snapshot: unknown) => boolean>;
+	/** true の間 captureSnapshot は null を返す (MarkdownEditor 未 mount 時の実挙動)。 */
+	captureReturnsNull: boolean;
+	/** true の間 restoreSnapshot は false を返す (EditorState.fromJSON 失敗の実挙動)。 */
+	restoreFails: boolean;
 }
 
 export function createFakeEditor(initialContent = ""): FakeEditor {
 	let content = initialContent;
+	let remountCount = 0;
 	const view = {
 		composing: false,
 		state: {
@@ -74,7 +122,26 @@ export function createFakeEditor(initialContent = ""): FakeEditor {
 			content = next;
 		},
 		remountWith: (loadedDoc) => {
+			remountCount += 1;
 			content = loadedDoc;
+		},
+		getRemountCount: () => remountCount,
+		createSnapshotHandle: () => {
+			const handle: FakeSnapshotHandle = {
+				captureReturnsNull: false,
+				restoreFails: false,
+				captureSnapshot: vi.fn((): unknown =>
+					handle.captureReturnsNull
+						? null
+						: ({ kind: "fake-snapshot", doc: content } satisfies FakeSnapshotToken),
+				),
+				restoreSnapshot: vi.fn((snapshot: unknown): boolean => {
+					if (handle.restoreFails || !isFakeSnapshotToken(snapshot)) return false;
+					content = snapshot.doc;
+					return true;
+				}),
+			};
+			return handle;
 		},
 	};
 }

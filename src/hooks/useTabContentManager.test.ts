@@ -5,6 +5,7 @@ import {
 	advance,
 	createDeferred,
 	createFakeEditor,
+	type Deferred,
 	type FakeEditor,
 	flushAsync,
 	resetWorkspace,
@@ -48,13 +49,16 @@ function renderManager(editor: FakeEditor = createFakeEditor()) {
 			onGoToLine,
 		});
 		// 実 MarkdownEditor は uncontrolled で、doc が外から置き換わるのは editorKey bump に
-		// よる remount と restoreSnapshot (epoch bump) のときだけ。fake もその境界に合わせる
-		// (合わせないと「ロードし直したはずの内容」が編集内容のまま残り、cache の assert が
-		// 実挙動から乖離する)。
-		const remountTokenRef = useRef<string | null>(null);
-		const remountToken = `${manager.editorKey}:${manager.editorViewEpoch}`;
-		if (remountTokenRef.current !== remountToken) {
-			remountTokenRef.current = remountToken;
+		// よる remount と restoreSnapshot のときだけ。fake もその境界に合わせる (合わせないと
+		// 「ロードし直したはずの内容」が編集内容のまま残り、cache の assert が実挙動から乖離する)。
+		//
+		// epoch bump は remount ではない: restoreSnapshot が成功したとき view identity は
+		// 同じまま内部 state だけが置換される。ここで epoch も remount のトリガに含めると
+		// 「restore が doc を戻した」のか「remount が loadedDoc を入れ直した」のかを
+		// 区別できなくなるので、restore 経路の doc 置換は fake handle 自身に行わせる。
+		const remountTokenRef = useRef<number | null>(null);
+		if (remountTokenRef.current !== manager.editorKey) {
+			remountTokenRef.current = manager.editorKey;
 			editor.remountWith(manager.loadedDoc);
 		}
 		return manager;
@@ -1081,6 +1085,507 @@ describe("useTabContentManager", () => {
 
 			expect(result.current.getCachedContent("/w/a.md")).toBeNull();
 			expect(tabPaths()).toEqual(["/w/a.md", "/w/b.md"]);
+		});
+	});
+
+	// #458 finding 1: タブ切替・ロード effect。activeTabPath / workspacePath が変わるたびに
+	// 「前タブの退避 → 新タブの内容決定」を 1 つの effect でやっており、どの分岐を通るかで
+	// 画面に出る内容と savedContent の追跡先が変わる。取り違えると別ファイルの内容を
+	// 表示したまま保存する経路になるので、分岐ごとに個別に pin する。
+	describe("タブ切替・ロード effect の分岐", () => {
+		it("activeTabPath が null になると loadedDoc が空になり、disk 読み込みも走らない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
+			const { result } = renderManager();
+			await flushAsync();
+			expect(result.current.loadedDoc).toBe("orig-a");
+
+			mockedReadFile.mockClear();
+			await act(async () => {
+				useWorkspaceStore.setState({ activeTabPath: null, activeTabId: null });
+			});
+			await flushAsync();
+
+			// 実 AppLayout はこの状態で MarkdownEditor 自体を unmount するので、観測するのは
+			// editor の doc ではなく hook が下流へ渡す loadedDoc。空に戻さないと、次に開いた
+			// ファイルの初期表示に前タブの内容が残る。
+			expect(result.current.loadedDoc).toBe("");
+			expect(mockedReadFile).not.toHaveBeenCalled();
+		});
+
+		it("newtab ページへ切り替えると disk を読まず loadedDoc が空になる", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "newtab://1"], "/w/a.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			mockedReadFile.mockClear();
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("newtab://1");
+			});
+			await flushAsync();
+
+			// newtab:// は disk 上のファイルではない。読みに行くと存在しないパスの
+			// エラーが出るうえ、error 分岐が editorError を立てて新規タブ画面を壊す。
+			expect(result.current.isNewTab).toBe(true);
+			expect(result.current.loadedDoc).toBe("");
+			expect(mockedReadFile).not.toHaveBeenCalled();
+		});
+
+		it("disk 読み込みに失敗すると editorError が立ち、次のタブ切替でクリアされる", async () => {
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/bad.md", "/w/b.md"], "/w/bad.md");
+			mockedReadFile.mockRejectedValueOnce(new Error("boom"));
+			const { result } = renderManager();
+			await flushAsync();
+
+			// 失敗したのに前の内容を残すと、ユーザーはそれを「このファイルの中身」と
+			// 見なして編集し、保存で別ファイルの内容を書き込むことになる。
+			expect(result.current.editorError).not.toBeNull();
+			expect(result.current.loadedDoc).toBe("");
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			expect(result.current.editorError).toBeNull();
+			expect(result.current.loadedDoc).toBe("orig-b");
+		});
+
+		/**
+		 * 発行済みの readFile を取り出す。未発行なら test を落とす。optional chaining で
+		 * 黙って no-op になると、cleanup の ignore 分岐を一度も通らないまま緑になる。
+		 */
+		function takeDeferred(pending: Map<string, Deferred<string>>, path: string): Deferred<string> {
+			const deferred = pending.get(path);
+			if (!deferred) throw new Error(`readFile が未発行: ${path}`);
+			return deferred;
+		}
+
+		it("読み込み中に別タブへ切り替えると、遅れて解決した前タブの内容で画面を汚さない", async () => {
+			const pending = new Map<string, Deferred<string>>();
+			mockedReadFile.mockImplementation((path: string) => {
+				const deferred = createDeferred<string>();
+				pending.set(path, deferred);
+				return deferred.promise;
+			});
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			// A の read を未解決のまま B へ切り替える (effect cleanup で A 側に ignore が立つ)。
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			await act(async () => {
+				takeDeferred(pending, "/w/b.md").resolve("b-content");
+			});
+			await flushAsync();
+			expect(editor.getContent()).toBe("b-content");
+			const keyAfterB = result.current.editorKey;
+
+			await act(async () => {
+				takeDeferred(pending, "/w/a.md").resolve("stale-a-content");
+			});
+			await flushAsync();
+
+			// ignore を無視すると B を見ている画面が A の内容に差し替わり、そのまま
+			// B の path へ保存されて B の中身がすり替わる。
+			expect(editor.getContent()).toBe("b-content");
+			expect(result.current.editorKey).toBe(keyAfterB);
+			expect(result.current.getCachedContent("/w/a.md")).toBeNull();
+		});
+
+		it("読み込み中に別タブへ切り替えると、遅れて失敗した前タブのエラーを表示しない", async () => {
+			const pending = new Map<string, Deferred<string>>();
+			mockedReadFile.mockImplementation((path: string) => {
+				const deferred = createDeferred<string>();
+				pending.set(path, deferred);
+				return deferred.promise;
+			});
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			await act(async () => {
+				takeDeferred(pending, "/w/b.md").resolve("b-content");
+			});
+			await flushAsync();
+
+			await act(async () => {
+				takeDeferred(pending, "/w/a.md").reject(new Error("boom"));
+			});
+			await flushAsync();
+
+			// catch 側の ignore を落とすと、今開いているタブは正常に読めているのに
+			// 別タブ由来のエラーバナーが出て、loadedDoc まで空へ巻き戻される。
+			expect(result.current.editorError).toBeNull();
+			expect(editor.getContent()).toBe("b-content");
+		});
+
+		it("workspace を切り替えると cache が破棄され、切替元のタブも cache に保存されない", async () => {
+			diskContents.set("/w1/a.md", "orig-a");
+			diskContents.set("/w1/b.md", "orig-b");
+			seedWorkspace("/w1", ["/w1/a.md", "/w1/b.md"], "/w1/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w1/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w1/a.md")).toBe("edited-a");
+
+			// 新 workspace の tabs に切替元 (/w1/b.md) と同じ path を残しておく。残さないと
+			// tabStillExists が false になり、!workspaceChanged ガードを外しても cache が
+			// 作られない (= 「保存しない」性質を pin できず mutant が survive する)。
+			await act(async () => {
+				seedWorkspace("/w2", ["/w1/b.md", "/w2/x.md"], "/w2/x.md");
+			});
+			await flushAsync();
+
+			// 旧 workspace の cache を持ち越すと、別 workspace の同名パスに旧内容を
+			// 書き戻す経路になる。切替元タブの退避も旧 workspace 側の内容なので行わない。
+			expect(result.current.getCachedContent("/w1/a.md")).toBeNull();
+			expect(result.current.getCachedContent("/w1/b.md")).toBeNull();
+		});
+
+		it("workspace 切替後に作った cache は、次のタブ切替では破棄されない", async () => {
+			seedWorkspace("/w1", ["/w1/a.md"], "/w1/a.md");
+			const { result } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				seedWorkspace("/w2", ["/w2/x.md", "/w2/y.md"], "/w2/x.md");
+			});
+			await flushAsync();
+
+			act(() => {
+				result.current.applyCacheReload("/w2/z.md", "z-content");
+			});
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w2/y.md");
+			});
+			await flushAsync();
+
+			// prevWorkspacePathRef を更新し損ねると毎回 workspaceChanged が true になり、
+			// タブを切り替えるたびに全 cache が消えて未保存の編集が失われる。
+			expect(result.current.getCachedContent("/w2/z.md")).toBe("z-content");
+		});
+
+		it("保留していた go-to-line は disk 読み込み成功後に適用され、以降は再発火しない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, onGoToLine } = renderManager();
+			await flushAsync();
+
+			act(() => {
+				result.current.queueGoToLine({ line: 5 });
+			});
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			// 読み込み前に飛ばすと行が存在せず、検索結果からのジャンプが黙って無効になる。
+			expect(onGoToLine).toHaveBeenCalledWith({ line: 5 });
+
+			onGoToLine.mockClear();
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// 適用したら消費する。残すと無関係なタブでカーソルが勝手に飛ぶ。
+			expect(onGoToLine).not.toHaveBeenCalled();
+		});
+
+		it("保留していた go-to-line は cache hit のタブ切替でも適用される", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, onGoToLine } = renderManager();
+			await flushAsync();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			act(() => {
+				result.current.queueGoToLine({ line: 7 });
+			});
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// 適用は cache hit / disk 読み込みの 2 箇所に分かれて書かれている。片方だけ
+			// pin してももう片方の退行を検出できないので、両方 pin する。
+			expect(onGoToLine).toHaveBeenCalledWith({ line: 7 });
+		});
+
+		it("読み込みに失敗したタブでは go-to-line を適用せず、その後のタブ切替にも持ち越さない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/bad.md", "/w/b.md"], "/w/a.md");
+			const { result, onGoToLine } = renderManager();
+			await flushAsync();
+
+			act(() => {
+				result.current.queueGoToLine({ line: 9 });
+			});
+			mockedReadFile.mockRejectedValueOnce(new Error("boom"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/bad.md");
+			});
+			await flushAsync();
+
+			expect(onGoToLine).not.toHaveBeenCalled();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			// 破棄し損ねると、読めなかったファイル向けの行番号が次に開いた別ファイルへ
+			// 適用される (pendingGoToLineRef は非公開なので、この持ち越しでしか観測できない)。
+			expect(onGoToLine).not.toHaveBeenCalled();
+		});
+	});
+
+	// #458 finding 2: cache 復元時の snapshot 分岐。restoreSnapshot が成功したかどうかで
+	// 「view の内部 state 差し替え (epoch bump)」と「remount (editorKey bump)」に分かれ、
+	// 前者でしか undo 履歴とカーソル位置が戻らない。fallback が壊れると復帰したタブが
+	// 白紙になるので、成功・失敗の両側を pin する。
+	describe("cache 復元の snapshot 分岐", () => {
+		it("タブ切替で捕った snapshot が復帰時に restoreSnapshot へ渡り、editorViewEpoch だけが進む", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			const handle = editor.createSnapshotHandle();
+			result.current.markdownEditorHandleRef.current = handle;
+			editor.type("edited-a");
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(handle.captureSnapshot).toHaveBeenCalledTimes(1);
+			const capturedToken = handle.captureSnapshot.mock.results[0]?.value;
+			expect(capturedToken).not.toBeNull();
+
+			const keyBefore = result.current.editorKey;
+			const epochBefore = result.current.editorViewEpoch;
+			const remountsBefore = editor.getRemountCount();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// 復元に渡すのは A を離れるときに捕った snapshot そのもの (同一参照)。
+			// 構造だけ似た別 object を渡すと undo 履歴が復元されない。
+			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(1);
+			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(capturedToken);
+			// epoch と key は「どちらが進んだか」に意味がある。key を進めると remount に
+			// なって履歴が飛び、epoch を進めないと view を deps に持つ下流が再走しない。
+			expect(result.current.editorViewEpoch).toBe(epochBefore + 1);
+			expect(result.current.editorKey).toBe(keyBefore);
+			// doc の値では restore と remount を区別できない (復元内容と loadedDoc は
+			// 常に一致する)。remount が走っていないことを経路として観測する。
+			expect(editor.getRemountCount()).toBe(remountsBefore);
+			expect(editor.getContent()).toBe("edited-a");
+		});
+
+		it("snapshot handle が無ければ editorKey bump で remount して cache の内容を表示する", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			const keyBefore = result.current.editorKey;
+			const remountsBefore = editor.getRemountCount();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// SlideView 表示中など MarkdownEditor が mount されていない場合の経路。
+			// fallback が効かないと復帰したタブに内容が入らない。
+			expect(result.current.editorViewEpoch).toBe(0);
+			expect(result.current.editorKey).toBe(keyBefore + 1);
+			expect(editor.getRemountCount()).toBe(remountsBefore + 1);
+			expect(editor.getContent()).toBe("edited-a");
+		});
+
+		it("snapshot を持たない cache では restoreSnapshot を呼ばず editorKey fallback する", async () => {
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/b.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			const handle = editor.createSnapshotHandle();
+			result.current.markdownEditorHandleRef.current = handle;
+			// 外部リロード由来の cache には snapshot が無い (doc とズレるため破棄される)。
+			act(() => {
+				result.current.applyCacheReload("/w/a.md", "cached-a");
+			});
+
+			const keyBefore = result.current.editorKey;
+			const epochBefore = result.current.editorViewEpoch;
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// snapshot が無いのに restore を呼ぶと、実物は不正な引数で false を返すだけだが
+			// 「呼ばない」ことが cache 破棄の契約 (doc とズレた履歴を戻さない) の担保になる。
+			expect(handle.restoreSnapshot).not.toHaveBeenCalled();
+			expect(result.current.editorViewEpoch).toBe(epochBefore);
+			expect(result.current.editorKey).toBe(keyBefore + 1);
+			expect(editor.getContent()).toBe("cached-a");
+		});
+
+		it("restoreSnapshot が失敗したら editorKey fallback で cache の内容を表示する", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			const handle = editor.createSnapshotHandle();
+			result.current.markdownEditorHandleRef.current = handle;
+			editor.type("edited-a");
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			const capturedToken = handle.captureSnapshot.mock.results[0]?.value;
+			expect(capturedToken).not.toBeNull();
+
+			// EditorState.fromJSON が壊れた snapshot で throw するケース。
+			handle.restoreFails = true;
+			const keyBefore = result.current.editorKey;
+			const epochBefore = result.current.editorViewEpoch;
+			const remountsBefore = editor.getRemountCount();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// restore を呼んだうえで false が返ったこと。呼び出し自体を pin しないと、
+			// snapshot 復元を丸ごと諦める実装 (常に remount) でもこの test が通ってしまう。
+			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(1);
+			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(capturedToken);
+			// false を成功扱いすると epoch だけ進んで doc が入らず、復帰したタブが白紙になる。
+			expect(result.current.editorViewEpoch).toBe(epochBefore);
+			expect(result.current.editorKey).toBe(keyBefore + 1);
+			expect(editor.getRemountCount()).toBe(remountsBefore + 1);
+			expect(editor.getContent()).toBe("edited-a");
+		});
+
+		it("captureSnapshot が null を返しても、既に持っている snapshot を捨てない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+
+			const handle = editor.createSnapshotHandle();
+			result.current.markdownEditorHandleRef.current = handle;
+			editor.type("edited-a");
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			const firstToken = handle.captureSnapshot.mock.results[0]?.value;
+			expect(firstToken).not.toBeNull();
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// MarkdownEditor が mount されていない瞬間の切替を模す。
+			handle.captureReturnsNull = true;
+			const capturesBeforeNull = handle.captureSnapshot.mock.calls.length;
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// null で上書きすると次の復帰で snapshot 無し扱いになり、カーソル位置と
+			// undo 履歴が全損する。観測は「同じ token がもう一度 restore に渡ること」で行う
+			// (doc で観測すると、実アプリでは起きない content と snapshot のズレを
+			// 仕様として固定してしまう)。
+			// A↔B を 2 往復するので復帰は 3 回 (B→A, A→B, B→A)。B 側も切替のたびに
+			// snapshot を持つため、A の token を見るのは最後の復帰。
+			// null 返却の capture が実際に走ったこと。走ったことを pin しないと、
+			// 2 回目以降 capture 自体をやめる実装でも「古い snapshot が残る」形で通る。
+			expect(
+				handle.captureSnapshot.mock.results.slice(capturesBeforeNull).map((r) => r.value),
+			).toEqual([null, null]);
+			expect(handle.restoreSnapshot).toHaveBeenCalledTimes(3);
+			expect(handle.restoreSnapshot.mock.lastCall?.[0]).toBe(firstToken);
+		});
+
+		it("dirty な cache から復帰したタブは dirty のままで、autosave がその内容を保存する", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			diskContents.set("/w/b.md", "orig-b");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			expect(result.current.getCachedContent("/w/a.md")).toBe("edited-a");
+
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+
+			// markSaved に cached.content (第 2 引数) を渡さないと復帰時点で「保存済み」と
+			// 判定され、ユーザーが追加編集しない限り二度と保存されずに編集が失われる。
+			// setLoadedDoc も restoreSnapshot も docChanged を発火しないため、dirty は
+			// ここで導出するしかない。
+			expect(tabDirty("/w/a.md")).toBe(true);
+			await advance(3000);
+			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "edited-a\n");
 		});
 	});
 });
