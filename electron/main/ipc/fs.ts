@@ -22,17 +22,39 @@ import { getFileTreeFilterOptions } from "./settings";
 // 同じ「明示的な上限を持つ」思想で揃える。
 export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
 
-async function pathExistsAt(absolute: string): Promise<boolean> {
+// `pathExistsAt` / `entryExistsAt` は probe に渡す syscall だけが違うので、ENOENT の扱いは
+// この 2 つについてはここで一度だけ決める（`fileExistsImpl` は `stat.isFile()` を返す都合で
+// 同じポリシーを別に持つ。errno の扱いを変えるときはあちらも一緒に見る）。
+// ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような呼び出し元が
+// 「実際は権限問題なのに Source not found / Not found」と誤分類してしまう。
+// ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
+async function existsBy(
+	probe: (absolute: string) => Promise<unknown>,
+	absolute: string,
+): Promise<boolean> {
 	try {
-		await fsp.access(absolute);
+		await probe(absolute);
 		return true;
 	} catch (e) {
-		// ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような
-		// 呼び出し元が「実際は権限問題なのに Source not found / Not found」と
-		// 誤分類してしまう。ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
 		if (isErrnoCode(e, "ENOENT")) return false;
 		throw e;
 	}
+}
+
+// 2 つの存在判定の違いは **末端 symlink を辿るかどうか**:
+//   - `pathExistsAt`（access）= **解決先**が存在するか。「使えるファイルがそこにあるか」を
+//     問う `fs:path-exists` 向け
+//   - `entryExistsAt`（lstat）= **entry 自体**が存在するか。link 自身を操作する
+//     `fs:delete`（trashItem）/ `fs:rename`（rename(2)）向け。realpath が解決できない
+//     symlink（dangling / 循環）でも「実在する entry」として扱える (#454)。`rename(2)` が
+//     末端を辿らないことは実 syscall の test で pin してあるが、`shell.trashItem` の
+//     follow 有無は Electron / OS 側の挙動で未検証（下の `fs:delete` の節を参照）
+function pathExistsAt(absolute: string): Promise<boolean> {
+	return existsBy(fsp.access, absolute);
+}
+
+function entryExistsAt(absolute: string): Promise<boolean> {
+	return existsBy(fsp.lstat, absolute);
 }
 
 // すべての impl は path-guard の assert 系から **canonical（realpath 済み）** を
@@ -73,9 +95,14 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 //   - `fs:write-new` / `fs:create-file`: `wx`（O_CREAT|O_EXCL）は末端が symlink なら
 //     dangling でも EEXIST になり、解決先を作らない
 //   - `fs:create-directory`: 対象自体は非 recursive な `mkdir` なので同様に EEXIST
-//   - `fs:rename`: `rename(2)` は末端 symlink を辿らず link 自体を張り替える。source 側が
-//     dangling symlink の場合はそもそも `pathExistsAt`（access は follow する）が false を
-//     返して Source not found で止まる
+//   - `fs:rename`: `rename(2)` は末端 symlink を辿らず link 自体を張り替える。source / target の
+//     存在判定も `entryExistsAt`（lstat、no-follow）なので判定と操作の follow 有無が揃う。
+//     **canonical の末端が symlink のまま残る場合**（= realpath が解決できない dangling / 循環）
+//     は link 自体が移動する。live な alias が source のときは canonical が実体の path なので
+//     移動するのは実体で、alias は元位置に dangling として残る（`fs:delete` が実体を消すのと
+//     同型の意外性）。target に entry が実在すれば（解決先の有無に関わらず）Target already
+//     exists で reject する。check 通過後のレース窓で target に symlink が現れた場合も
+//     `rename(2)` は link 自体を置き換えるので escape しない（test で pin）
 //
 // **末端 swap 窓が残る経路（受容）**: 以下は path を再 traversal する API を使うため、認可後に
 // 末端を symlink へ差し替えられると解決先を見に行く。閉じるには fd 相対 traversal が要るが
@@ -83,12 +110,20 @@ async function pathExistsAt(absolute: string): Promise<boolean> {
 // だけで内容には届かないため受容する:
 //   - `fs:list`: `readdir` は末端が dir への symlink なら解決先を列挙する
 //   - `fs:path-exists` / `fs:file-exists`: `access` / `stat` は末端 symlink を辿るため、
-//     workspace 外 path の存在オラクルになり得る
+//     workspace 外 path の存在オラクルになり得る。この 2 つは「解決先が使えるか」を問う API
+//     なので follow は意図した semantics（dangling に対して false を返すのも仕様）。entry 自体
+//     の存在を要する delete / rename 側は `entryExistsAt`（lstat）を使う
 //
 // **`fs:delete` は「解決先を消す」**: canonical は realpath 済みなので、workspace 内の live な
 // alias を削除すると `shell.trashItem` に渡るのは alias ではなく**実体**の path になる。境界は
-// 破らない（実体も root 内）が、直感には反する。source が dangling symlink なら rename と
-// 同じ理由で Not found になり削除できない（UX 側の帰結は #454）。
+// 破らない（実体も root 内）が、直感には反する。一方 **realpath が解決できない path**（dangling /
+// 循環 symlink 等）は canonical が link 自身の path になるため、`shell.trashItem` に渡るのは
+// link 自体になる。存在判定を `entryExistsAt`（lstat）にしたことでここまで到達できる (#454)。
+// `shell.trashItem` 自体の挙動 — dangling symlink を trash へ送れるか、末端 symlink を辿るか —
+// は Electron / OS 側に属し、unit test ではモックしているため未検証。送れない場合も
+// StructuredError が renderer に伝わり fail-visible に止まる。辿る場合、認可から呼び出しまでの
+// 窓で link が workspace 外への live symlink に swap されれば解決先が trash に入りうるが、
+// これは本 IPC 以前に同一ユーザーが自力で trash できる file であり、権限は増えない。
 
 // bounded read 本体。FileHandle を引数で受けるので test では fake handle を注入できる。
 // 二段防御で size 上限を強制する:
@@ -286,18 +321,18 @@ async function fileExistsImpl(senderId: number, path: string): Promise<boolean> 
 async function renameEntryImpl(senderId: number, oldPath: string, newPath: string): Promise<void> {
 	const oldCanonical = await assertPathAllowed(senderId, oldPath);
 	const newCanonical = await assertPathAllowed(senderId, newPath);
-	if (!(await pathExistsAt(oldCanonical))) throw FsError.sourceNotFound(oldCanonical);
+	if (!(await entryExistsAt(oldCanonical))) throw FsError.sourceNotFound(oldCanonical);
 	// fs.rename は target 既存時に上書きする default 挙動なので、
 	// 「Target already exists」を出すために事前 check が必要。
 	// 単一ユーザーの mem アプリのためレースは許容。
-	if (await pathExistsAt(newCanonical)) throw FsError.targetAlreadyExists(newCanonical);
+	if (await entryExistsAt(newCanonical)) throw FsError.targetAlreadyExists(newCanonical);
 	await fsp.mkdir(dirname(newCanonical), { recursive: true });
 	await fsp.rename(oldCanonical, newCanonical);
 }
 
 async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	if (!(await pathExistsAt(canonical))) throw FsError.notFound(canonical);
+	if (!(await entryExistsAt(canonical))) throw FsError.notFound(canonical);
 	await shell.trashItem(canonical);
 }
 
@@ -326,6 +361,7 @@ export function registerFsIpc(): void {
 }
 
 export const __testing = {
+	existsBy,
 	readFileImpl,
 	readFileBase64Impl,
 	readFileBoundedFromHandle,
