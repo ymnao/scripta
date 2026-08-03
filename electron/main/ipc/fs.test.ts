@@ -37,6 +37,7 @@ const TEST_WIN = 1;
 const OTHER_WIN = 2;
 
 const {
+	existsBy,
 	readFileImpl,
 	readFileBase64Impl,
 	readFileBoundedFromHandle,
@@ -466,6 +467,45 @@ describe("createDirectoryImpl", () => {
 		await expect(createDirectoryImpl(TEST_WIN, path)).rejects.toMatchObject({
 			kind: "ALREADY_EXISTS",
 		});
+	});
+});
+
+// 存在判定の共通土台。「ENOENT のみ false・他は伝播」は、権限エラーを Not found /
+// Source not found と誤分類しないための方針なので、errno ごとの分岐をここで pin する
+// （probe を注入して実 fs の権限状態に依存させない）。
+describe("existsBy (存在判定の errno ポリシー)", () => {
+	function errnoError(code: string): NodeJS.ErrnoException {
+		return Object.assign(new Error(code), { code });
+	}
+
+	it("probe が解決すれば true を返し、渡された path をそのまま probe する", async () => {
+		const probe = vi.fn(async () => undefined);
+		expect(await existsBy(probe, "/tmp/x.md")).toBe(true);
+		expect(probe).toHaveBeenCalledTimes(1);
+		expect(probe).toHaveBeenCalledWith("/tmp/x.md");
+	});
+
+	it("ENOENT は false に落とす", async () => {
+		expect(
+			await existsBy(async () => {
+				throw errnoError("ENOENT");
+			}, "/tmp/x.md"),
+		).toBe(false);
+	});
+
+	it("ENOENT 以外（EACCES 等）は握りつぶさず伝播する", async () => {
+		// ここを catch-all にすると、権限で見えないだけの path が「無い」と report され、
+		// delete / rename が Not found / Source not found を誤って返す。
+		await expect(
+			existsBy(async () => {
+				throw errnoError("EACCES");
+			}, "/tmp/x.md"),
+		).rejects.toMatchObject({ code: "EACCES" });
+		await expect(
+			existsBy(async () => {
+				throw errnoError("ELOOP");
+			}, "/tmp/x.md"),
+		).rejects.toMatchObject({ code: "ELOOP" });
 	});
 });
 

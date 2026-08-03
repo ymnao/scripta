@@ -352,6 +352,7 @@ export function registerFsIpc(): void {
 }
 
 export const __testing = {
+	existsBy,
 	readFileImpl,
 	readFileBase64Impl,
 	readFileBoundedFromHandle,
