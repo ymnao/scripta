@@ -1,5 +1,16 @@
 // @vitest-environment node
-import { mkdir, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+	lstat,
+	mkdir,
+	open,
+	readFile,
+	readlink,
+	rename,
+	rm,
+	stat,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -828,33 +839,100 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / 
 			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
 		});
 
-		it("rename の source が dangling symlink なら Source not found で止まる", async () => {
+		it("rename の source が dangling symlink なら link 自体が移動する (#454)", async () => {
 			const escapeTarget = join(outside.dir, "rename-source-target.md");
 			const link = join(workspaceDir, "old.md");
 			await symlink(escapeTarget, link);
+			const renamed = join(workspaceDir, "renamed.md");
 
-			// pathExistsAt (access) が symlink を辿るため、解決先が無い時点で早期 return する。
-			// escape はしないが symlink 自体を rename する手段も無い（UX 側の帰結は #454）。
-			await expect(
-				renameEntryImpl(TEST_WIN, link, join(workspaceDir, "renamed.md")),
-			).rejects.toThrow(/^Source not found:/);
+			// source の存在判定は entryExistsAt (lstat、no-follow) なので「解決先は無いが link は
+			// 実在する」を正しく拾う。rename(2) も末端 symlink を辿らないため、移動するのは
+			// link 自体であって解決先ではない。
+			await renameEntryImpl(TEST_WIN, link, renamed);
+
+			expect((await lstat(renamed)).isSymbolicLink()).toBe(true);
+			expect(await readlink(renamed)).toBe(escapeTarget);
+			await expect(lstat(link)).rejects.toMatchObject({ code: "ENOENT" });
 			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
 		});
 
-		it("rename の target が dangling symlink なら link 自体が置き換わり、解決先は作られない", async () => {
+		it("rename の target が dangling symlink なら Target already exists で止まる (#454)", async () => {
 			const src = join(workspaceDir, "src.md");
 			await writeFile(src, "body", "utf8");
 			const escapeTarget = join(outside.dir, "rename-target.md");
 			const link = join(workspaceDir, "dst.md");
 			await symlink(escapeTarget, link);
 
-			// target 側は「解決先は無いが link は実在する」。pathExistsAt が follow して false を
-			// 返すため targetAlreadyExists の早期 return には掛からず rename まで到達するが、
-			// rename(2) は末端 symlink を辿らず link 自体を置き換えるので escape はしない。
-			await renameEntryImpl(TEST_WIN, src, link);
-			// 置き換わったのは workspace 内の link であって、解決先ではない
+			// target 側の判定も entryExistsAt なので、解決先の有無に関わらず entry が実在すれば
+			// reject する。rename(2) が link を黙って置き換えてしまう前に止まる。
+			await expect(renameEntryImpl(TEST_WIN, src, link)).rejects.toThrow(/^Target already exists:/);
+			expect(await readlink(link)).toBe(escapeTarget);
+			expect(await readFile(src, "utf8")).toBe("body");
 			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("rename(2) 自体は末端 symlink を辿らず link を置き換える (target check 後のレース窓の根拠)", async () => {
+			const src = join(workspaceDir, "race-src.md");
+			await writeFile(src, "body", "utf8");
+			const escapeTarget = join(outside.dir, "race-target.md");
+			const link = join(workspaceDir, "race-dst.md");
+			await symlink(escapeTarget, link);
+
+			// renameEntryImpl 経由では #454 の target check に阻まれてここへは到達しない。
+			// ただし check 通過後に外部プロセスが target へ symlink を置いた場合はこの syscall
+			// semantics だけが escape を防ぐので、OS 側の性質として直接 pin しておく。
+			await rename(src, link);
+
 			expect(await readFile(link, "utf8")).toBe("body");
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+	});
+
+	// #454: realpath が解決できない symlink (dangling / 循環) は canonical が link 自身の path に
+	// なる。存在判定を entryExistsAt (lstat) にしたことで、これらを FileTree から削除できる。
+	describe("解決できない symlink の削除 (#454)", () => {
+		it("dangling symlink は link 自身が trashItem に渡る", async () => {
+			const escapeTarget = join(outside.dir, "delete-dangling-target.md");
+			const link = join(workspaceDir, "dangling.md");
+			await symlink(escapeTarget, link);
+
+			await deleteEntryImpl(TEST_WIN, link);
+
+			// 値ではなく経路を観測する: 渡った path が link 自身であることと、解決先へは
+			// 一切触れていないこと。
+			expect(shell.trashItem).toHaveBeenCalledTimes(1);
+			expect(shell.trashItem).toHaveBeenCalledWith(await canonicalize(link));
+			await expect(stat(escapeTarget)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("自己参照する循環 symlink も削除できる", async () => {
+			// realpath が失敗する path は dangling だけではない。循環も同じ経路を通る。
+			const loop = join(workspaceDir, "loop.md");
+			await symlink(loop, loop);
+
+			await deleteEntryImpl(TEST_WIN, loop);
+
+			expect(shell.trashItem).toHaveBeenCalledTimes(1);
+			expect(shell.trashItem).toHaveBeenCalledWith(await canonicalize(loop));
+		});
+
+		it("path-exists / file-exists は従来どおり follow する (解決先を問う API)", async () => {
+			const link = join(workspaceDir, "probe.md");
+			await symlink(join(outside.dir, "probe-target.md"), link);
+			const real = join(workspaceDir, "real-probe.md");
+			await writeFile(real, "body", "utf8");
+			const alias = join(workspaceDir, "alias-probe.md");
+			await symlink(real, alias);
+
+			// dangling は「解決先が無い」ので false。live な alias は実体が読めるので true。
+			// alias 側の true は follow ではなく **canonical が realpath 済み**であることに由来する
+			// （impl に届く時点で実体の path になっている）。follow / no-follow の差が観測できるのは
+			// realpath が解決できない path だけで、pathExists を lstat 化すると dangling が true に
+			// 転じ、「解決先が使えるか」という問いの答えとして誤る（mutation で確認済み）。
+			expect(await pathExistsImpl(TEST_WIN, link)).toBe(false);
+			expect(await fileExistsImpl(TEST_WIN, link)).toBe(false);
+			expect(await pathExistsImpl(TEST_WIN, alias)).toBe(true);
+			expect(await fileExistsImpl(TEST_WIN, alias)).toBe(true);
 		});
 	});
 });
