@@ -69,11 +69,10 @@ export function mountEditorView(
 	doc: string,
 	extensions: Extension,
 	cursorPos?: number,
-	selection?: EditorSelection,
 ): EditorView {
 	const parent = document.createElement("div");
 	document.body.appendChild(parent);
-	const state = createTestState(doc, cursorPos, extensions, selection);
+	const state = createTestState(doc, cursorPos, extensions);
 	const view = new EditorView({ state, parent });
 	mountedViews.push(view);
 	return view;

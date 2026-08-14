@@ -480,7 +480,10 @@ describe("mermaidRenderPlugin (real EditorView)", () => {
 	});
 
 	/** debounce (300ms) と、その後に続く rebuild dispatch → 再 render の連鎖が
-	 *  止まるまで時間を進める。 */
+	 *  止まるまで時間を進める。収束には 2 pass 必要で、内訳は
+	 *  debounce 300ms → scheduleRebuild の RAF 1 フレーム → dispatch が張り直す
+	 *  debounce 300ms ≒ 620ms (実測でも 320ms では 1 件落ち、620ms 以上で全 pass)。
+	 *  1000ms はその余白。 */
 	async function settle(): Promise<void> {
 		await vi.advanceTimersByTimeAsync(1000);
 	}
