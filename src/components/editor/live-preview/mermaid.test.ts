@@ -34,18 +34,15 @@ const storeFake = vi.hoisted(() => {
 	return {
 		themeState,
 		settingsState,
-		themeListeners,
-		settingsListeners,
 		subscribeTheme: (listener: (state: typeof themeState) => void) =>
 			subscribeTo(themeListeners, listener),
+		// settings 側は plugin の constructor / destroy が購読・解除するので mock は
+		// 要るが、font 変更の再 render を検証する test はまだ無いので発火 API は持たない。
 		subscribeSettings: (listener: (state: typeof settingsState) => void) =>
 			subscribeTo(settingsListeners, listener),
 		/** subscribe した listener を全員呼ぶ (zustand の通知に相当) */
 		emitTheme() {
 			for (const listener of [...themeListeners]) listener(themeState);
-		},
-		emitSettings() {
-			for (const listener of [...settingsListeners]) listener(settingsState);
 		},
 		reset() {
 			themeState.theme = "light";
