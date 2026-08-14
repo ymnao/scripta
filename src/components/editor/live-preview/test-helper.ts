@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
-import type { Decoration, DecorationSet, EditorView } from "@codemirror/view";
+import { type Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 
 export function createTestState(
 	doc: string,
@@ -49,6 +49,46 @@ export function createViewForTest(
 ): EditorView {
 	const state = createTestState(doc, cursorPos, undefined, selection);
 	return createMockView(state, visibleRanges, hasFocus ?? (selection != null || cursorPos != null));
+}
+
+const mountedViews: EditorView[] = [];
+
+/** real な EditorView を jsdom 上に mount する。
+ *
+ *  使い分け: ViewPlugin の `update()` gate・非同期 `.then` / `.catch` 内の state
+ *  guard・`destroy()` の後始末・plugin をまたぐ dispatch は、`createMockView` の
+ *  偽 view では production の結線を通せず、gate をテスト内で手動再現した
+ *  tautology (production の gate を消しても pass する) になる。これらは本 helper で
+ *  real EditorView を起動して検証する。`createMockView` は state だけを読む同期的な
+ *  pure helper (decoration builder 等) の検証に限って使う。
+ *
+ *  mount した view は registry に積まれるので、呼び出し側の describe で
+ *  `afterEach(cleanupMountedViews)` を結線する。import しただけで afterEach が
+ *  付く形にしないのは、real view を使わないテストにも暗黙の hook が生えるため。 */
+export function mountEditorView(
+	doc: string,
+	extensions: Extension,
+	cursorPos?: number,
+	selection?: EditorSelection,
+): EditorView {
+	const parent = document.createElement("div");
+	document.body.appendChild(parent);
+	const state = createTestState(doc, cursorPos, extensions, selection);
+	const view = new EditorView({ state, parent });
+	mountedViews.push(view);
+	return view;
+}
+
+/** `mountEditorView` で mount した view をすべて破棄する。
+ *  テスト本体が既に `destroy()` 済みの view も含めて呼ぶ (CM6 の destroy は
+ *  2 度目が no-op になる)。 */
+export function cleanupMountedViews(): void {
+	while (mountedViews.length > 0) {
+		const view = mountedViews.pop();
+		const parent = view?.dom.parentElement;
+		view?.destroy();
+		parent?.remove();
+	}
 }
 
 export function collectDecorations(
