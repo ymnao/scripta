@@ -253,10 +253,11 @@ class CodeBlockCopyPlugin implements PluginValue {
 		) {
 			this.decorations = buildCopyDecorations(update.view);
 			this.blockRangeCache = new WeakMap();
-			if (this.activeButton) {
-				this.activeButton.classList.remove("cm-codeblock-copy-visible");
-				this.activeButton = null;
-			}
+			// Why not (rebuild を hover 解除として扱わない): widget の eq() が常に true を
+			// 返すので、rebuild をまたいでも CM6 は同じ button DOM を再利用する。ここで
+			// visible class を落とすと、ファイル表示直後の非同期パース完了 (treeChanged) や
+			// スクロール (viewportChanged) だけでボタンが消え、マウスが動くまで mouseover が
+			// 再発火しないので復帰しない。hover の解除は mouseover / mouseleave が持つ。
 		}
 	}
 }
@@ -284,8 +285,12 @@ export const codeBlockCopyDecoration = ViewPlugin.fromClass(CodeBlockCopyPlugin,
 			}
 			if (btn) {
 				btn.classList.add("cm-codeblock-copy-visible");
-				this.activeButton = btn;
 			}
+			// Why not (btn が null のときも代入する): コピーボタンを持たないコードブロック
+			// (空 fence / カーソル内の mermaid) へ hover したときに前の button を保持し続けると、
+			// 「activeButton は非 null だが visible class は無い」状態が残り、同じブロックへ
+			// hover し直しても上の `btn === this.activeButton` で早期 return して再表示されない。
+			this.activeButton = btn;
 		},
 		mouseleave(this: CodeBlockCopyPlugin) {
 			if (this.activeButton) {

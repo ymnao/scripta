@@ -1,12 +1,19 @@
 import { ensureSyntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
-import { describe, expect, it, vi } from "vitest";
-import { buildCopyDecorations, CodeBlockCopyWidget } from "./code-block-copy";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	buildCopyDecorations,
+	CodeBlockCopyWidget,
+	codeBlockCopyDecoration,
+} from "./code-block-copy";
+import { codeBlockDecoration } from "./code-blocks";
+import {
+	cleanupMountedViews,
 	collectDecorations,
 	createTestState,
 	createViewForTest,
 	lineDecorations,
+	mountEditorView,
 	widgetDecorations,
 } from "./test-helper";
 
@@ -230,4 +237,73 @@ describe("CodeBlockCopyWidget", () => {
 			}
 		}),
 	);
+});
+
+describe("codeBlockCopyDecoration hover state (real EditorView)", () => {
+	afterEach(cleanupMountedViews);
+
+	const DOC = "# Title\n\n```js\nconst x = 1;\n```\n";
+	// 空 fence は codeBlockDecoration が `.cm-codeblock-line` を付ける一方、
+	// buildCopyDecorations はコンテンツ行を持たないブロック (fence 行の行番号差が 2 未満)
+	// を skip するのでコピーボタンを持たない。
+	const DOC_WITH_EMPTY_FENCE = `${DOC}\n\`\`\`\n\`\`\`\n`;
+
+	function mountForHover(doc: string): EditorView {
+		// `.cm-codeblock-line` は codeBlockDecoration 側が付ける line class で、hover 判定
+		// (`target.closest(".cm-codeblock-line")`) がそれに依存するため両方を mount する。
+		return mountEditorView(doc, [codeBlockDecoration, codeBlockCopyDecoration]);
+	}
+
+	function hoverCodeBlockLine(view: EditorView, index: number): void {
+		const lineEl = view.contentDOM.querySelectorAll(".cm-codeblock-line")[index];
+		if (!lineEl) throw new Error(`code block line ${index} not rendered`);
+		lineEl.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+	}
+
+	function copyButton(view: EditorView): HTMLElement {
+		const button = view.contentDOM.querySelector<HTMLElement>(".cm-codeblock-copy");
+		if (!button) throw new Error("copy button not rendered");
+		return button;
+	}
+
+	function mountAndHover(): { view: EditorView; button: HTMLElement } {
+		const view = mountForHover(DOC);
+		hoverCodeBlockLine(view, 0);
+		return { view, button: copyButton(view) };
+	}
+
+	it("hovering a code block line makes the copy button visible", () => {
+		const { button } = mountAndHover();
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(true);
+	});
+
+	it("keeps the copy button visible across a decoration rebuild", () => {
+		const { view, button } = mountAndHover();
+
+		view.dispatch({ changes: { from: 0, insert: "prefix " } });
+
+		expect(view.contentDOM.querySelector(".cm-codeblock-copy")).toBe(button);
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(true);
+	});
+
+	it("re-shows the copy button after hovering a code block that has none", () => {
+		const view = mountForHover(DOC_WITH_EMPTY_FENCE);
+		hoverCodeBlockLine(view, 0);
+		const button = copyButton(view);
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(true);
+
+		hoverCodeBlockLine(view, 3);
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(false);
+
+		hoverCodeBlockLine(view, 0);
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(true);
+	});
+
+	it("hides the copy button when the pointer leaves the editor", () => {
+		const { view, button } = mountAndHover();
+
+		view.contentDOM.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(false);
+	});
 });
