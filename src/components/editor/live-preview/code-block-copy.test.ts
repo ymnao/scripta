@@ -244,7 +244,8 @@ describe("codeBlockCopyDecoration hover state (real EditorView)", () => {
 
 	const DOC = "# Title\n\n```js\nconst x = 1;\n```\n";
 	// 空 fence は codeBlockDecoration が `.cm-codeblock-line` を付ける一方、
-	// buildCopyDecorations は 2 行未満のブロックを skip するのでコピーボタンを持たない。
+	// buildCopyDecorations はコンテンツ行を持たないブロック (fence 行の行番号差が 2 未満)
+	// を skip するのでコピーボタンを持たない。
 	const DOC_WITH_EMPTY_FENCE = `${DOC}\n\`\`\`\n\`\`\`\n`;
 
 	function mountForHover(doc: string): EditorView {
