@@ -230,6 +230,9 @@ test.describe("workspace search", () => {
 	});
 
 	test("結果が上限件数を超えると打ち切り notice が表示される (#300)", async ({ page }) => {
+		// notice の待ち時間 (20s) を既定の test timeout (30s) 内に収めると、描画待ちが
+		// assert の失敗ではなく test timeout として出て切り分けができなくなる。
+		test.setTimeout(60_000);
 		// 1 ファイルに 10,001 行の match を用意し、mock 側の MAX_SEARCH_RESULTS (10,000)
 		// で truncated: true が返ることを確認する。
 		const bigContent = Array.from({ length: 10_001 }, () => "match").join("\n");
@@ -250,8 +253,12 @@ test.describe("workspace search", () => {
 		await page.keyboard.press(`${modKey}+Shift+f`);
 		await page.getByRole("textbox", { name: "ワークスペース内を検索" }).fill("match");
 
+		// notice は打ち切り後の 10,000 件と同じ React commit で描画される。結果リストは
+		// 仮想化されていないので、dev build + StrictMode の二重レンダーで 10,000 行を
+		// DOM 化し終えるまで notice は現れない。既定の 5s では負荷のかかった CI runner で
+		// 間欠的に足りなかった (#491) ため、他の assert より長い timeout を明示する。
 		await expect(page.getByText("結果が多すぎるため 10,000 件で打ち切りました")).toBeVisible({
-			timeout: 5000,
+			timeout: 20_000,
 		});
 	});
 

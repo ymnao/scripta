@@ -1,12 +1,19 @@
 import { ensureSyntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
-import { describe, expect, it, vi } from "vitest";
-import { buildCopyDecorations, CodeBlockCopyWidget } from "./code-block-copy";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	buildCopyDecorations,
+	CodeBlockCopyWidget,
+	codeBlockCopyDecoration,
+} from "./code-block-copy";
+import { codeBlockDecoration } from "./code-blocks";
+import {
+	cleanupMountedViews,
 	collectDecorations,
 	createTestState,
 	createViewForTest,
 	lineDecorations,
+	mountEditorView,
 	widgetDecorations,
 } from "./test-helper";
 
@@ -230,4 +237,44 @@ describe("CodeBlockCopyWidget", () => {
 			}
 		}),
 	);
+});
+
+describe("codeBlockCopyDecoration hover state (real EditorView)", () => {
+	afterEach(cleanupMountedViews);
+
+	const DOC = "# Title\n\n```js\nconst x = 1;\n```\n";
+
+	function mountAndHover(): { view: EditorView; button: HTMLElement } {
+		// `.cm-codeblock-line` は codeBlockDecoration 側が付ける line class で、hover 判定
+		// (`target.closest(".cm-codeblock-line")`) がそれに依存するため両方を mount する。
+		const view = mountEditorView(DOC, [codeBlockDecoration, codeBlockCopyDecoration]);
+		const lineEl = view.contentDOM.querySelector(".cm-codeblock-line");
+		if (!lineEl) throw new Error("code block line not rendered");
+		lineEl.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+		const button = view.contentDOM.querySelector<HTMLElement>(".cm-codeblock-copy");
+		if (!button) throw new Error("copy button not rendered");
+		return { view, button };
+	}
+
+	it("hovering a code block line makes the copy button visible", () => {
+		const { button } = mountAndHover();
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(true);
+	});
+
+	it("keeps the copy button visible across a decoration rebuild", () => {
+		const { view, button } = mountAndHover();
+
+		view.dispatch({ changes: { from: 0, insert: "prefix " } });
+
+		expect(view.contentDOM.querySelector(".cm-codeblock-copy")).toBe(button);
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(true);
+	});
+
+	it("hides the copy button when the pointer leaves the editor", () => {
+		const { view, button } = mountAndHover();
+
+		view.contentDOM.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+
+		expect(button.classList.contains("cm-codeblock-copy-visible")).toBe(false);
+	});
 });
