@@ -1,7 +1,8 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EditorView } from "@codemirror/view";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock mermaid cache module
 vi.mock("../../../lib/mermaid", () => ({
@@ -12,19 +13,60 @@ vi.mock("../../../lib/mermaid", () => ({
 	isMermaidInitFailureExhausted: vi.fn(() => false),
 }));
 
+// theme / settings store の fake。mermaidRenderPlugin は constructor で subscribe し、
+// 変化を受けて clearMermaidCache + 再 render するので、listener を捕捉できないと
+// その経路を発火できない。getState が返す値も差し替えられるよう mutable にする。
+const storeFake = vi.hoisted(() => {
+	const themeState: { theme: "light" | "dark" } = { theme: "light" };
+	const settingsState: { fontFamily: string; fontSize: number } = {
+		fontFamily: "monospace",
+		fontSize: 14,
+	};
+	const themeListeners: ((state: typeof themeState) => void)[] = [];
+	const settingsListeners: ((state: typeof settingsState) => void)[] = [];
+	function subscribeTo<T>(listeners: ((state: T) => void)[], listener: (state: T) => void) {
+		listeners.push(listener);
+		return () => {
+			const index = listeners.indexOf(listener);
+			if (index >= 0) listeners.splice(index, 1);
+		};
+	}
+	return {
+		themeState,
+		settingsState,
+		subscribeTheme: (listener: (state: typeof themeState) => void) =>
+			subscribeTo(themeListeners, listener),
+		// settings 側は plugin の constructor / destroy が購読・解除するので mock は
+		// 要るが、font 変更の再 render を検証する test はまだ無いので発火 API は持たない。
+		subscribeSettings: (listener: (state: typeof settingsState) => void) =>
+			subscribeTo(settingsListeners, listener),
+		/** subscribe した listener を全員呼ぶ (zustand の通知に相当) */
+		emitTheme() {
+			for (const listener of [...themeListeners]) listener(themeState);
+		},
+		reset() {
+			themeState.theme = "light";
+			settingsState.fontFamily = "monospace";
+			settingsState.fontSize = 14;
+			themeListeners.length = 0;
+			settingsListeners.length = 0;
+		},
+	};
+});
+
 // Mock theme store
 vi.mock("../../../stores/theme", () => ({
 	useThemeStore: {
-		getState: () => ({ theme: "light" as const }),
-		subscribe: vi.fn(() => vi.fn()),
+		getState: () => storeFake.themeState,
+		subscribe: storeFake.subscribeTheme,
 	},
 }));
 
 // Mock settings store
 vi.mock("../../../stores/settings", () => ({
 	useSettingsStore: {
-		getState: () => ({ fontFamily: "monospace", fontSize: 14 }),
-		subscribe: vi.fn(() => vi.fn()),
+		getState: () => storeFake.settingsState,
+		subscribe: storeFake.subscribeSettings,
 	},
 }));
 
@@ -39,8 +81,10 @@ import {
 } from "./mermaid";
 import { treeParseProgressed } from "./plugin-utils";
 import {
+	cleanupMountedViews,
 	collectDecorations,
 	createTestState,
+	mountEditorView,
 	replaceDecorations,
 	widgetDecorations,
 } from "./test-helper";
@@ -369,6 +413,239 @@ describe("mermaidDecorationField (StateField diff rebuild)", () => {
 
 		expect(after).toHaveLength(1);
 		expect(after[0].widget).not.toBe(originalWidget);
+	});
+});
+
+// issue #385: mermaidRenderPlugin は ViewPlugin なので、debounce / RAF / destroy /
+// 非同期完了後の rebuild dispatch は state だけを見る createMockView では通せない。
+// real EditorView を mount し、mock した lib API の呼ばれ方と decoration field の
+// 中身で production の結線を観測する。
+describe("mermaidRenderPlugin (real EditorView)", () => {
+	// line1 "text" / line2 "" / line3 "```mermaid" / line4-5 = source / line6 "```" /
+	// line7 "" / line8 "tail"。line5 の行末は pos 33、line8 の先頭は pos 39。
+	const DOC = "text\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntail";
+	const SOURCE = "graph TD\n  A-->B";
+	const LINE5_END_POS = 33;
+	const LINE8_POS = 39;
+
+	type CacheEntry = NonNullable<ReturnType<typeof mermaidLib.getCacheEntry>>;
+
+	// 実 lib の cache を最小構成で再現する。「render 開始済みの source は次の pass で
+	// skip される」性質が無いと renderMissing → rebuild dispatch → renderMissing の
+	// 再帰が止まらず、時間を進めるほど pass が増えてテストが時刻合わせになるため。
+	const fakeCache = new Map<string, CacheEntry>();
+	const inFlight: { source: string; resolve: (svg: string) => void; reject: (e: Error) => void }[] =
+		[];
+
+	function cacheKey(source: string, theme: "light" | "dark"): string {
+		return `${theme} ${source}`;
+	}
+
+	beforeEach(() => {
+		storeFake.reset();
+		fakeCache.clear();
+		inFlight.length = 0;
+		vi.mocked(mermaidLib.getCacheEntry).mockReset();
+		vi.mocked(mermaidLib.getCacheEntry).mockImplementation((source, theme) =>
+			fakeCache.get(cacheKey(source, theme)),
+		);
+		vi.mocked(mermaidLib.renderMermaid).mockReset();
+		vi.mocked(mermaidLib.renderMermaid).mockImplementation((source, theme) => {
+			const promise = new Promise<string>((resolve, reject) => {
+				inFlight.push({ source, resolve, reject });
+			});
+			fakeCache.set(cacheKey(source, theme), { status: "rendering", promise });
+			// unhandled rejection にしないため。production 側の .catch とは別経路。
+			promise.catch(() => {});
+			return promise;
+		});
+		vi.mocked(mermaidLib.clearMermaidCache).mockReset();
+		vi.mocked(mermaidLib.clearMermaidCache).mockImplementation(() => fakeCache.clear());
+		vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mockReset();
+		vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mockReturnValue(false);
+		vi.mocked(mermaidLib.isMermaidInitFailureExhausted).mockReset();
+		vi.mocked(mermaidLib.isMermaidInitFailureExhausted).mockReturnValue(false);
+		// RAF まで fake にしないと scheduleRebuild の dispatch を流せない。Date /
+		// queueMicrotask を fake しないのは CM6 内部と Promise 連鎖を壊さないため。
+		vi.useFakeTimers({
+			toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+		});
+	});
+
+	afterEach(() => {
+		cleanupMountedViews();
+	});
+
+	/** debounce (300ms) と、その後に続く rebuild dispatch → 再 render の連鎖が
+	 *  止まるまで時間を進める。収束には 2 pass 必要で、内訳は
+	 *  debounce 300ms → scheduleRebuild の RAF 1 フレーム → dispatch が張り直す
+	 *  debounce 300ms ≒ 620ms (実測でも 320ms では 1 件落ち、620ms 以上で全 pass)。
+	 *  1000ms はその余白。 */
+	async function settle(): Promise<void> {
+		await vi.advanceTimersByTimeAsync(1000);
+	}
+
+	/** scheduleRebuild の RAF を 1 フレーム分進めて dispatch を着地させる */
+	async function flushFrame(): Promise<void> {
+		await vi.advanceTimersByTimeAsync(16);
+	}
+
+	/** in-flight な render をすべて成功させ、cache を rendered にする */
+	function resolveRenders(svg: string): void {
+		for (const render of inFlight.splice(0)) {
+			fakeCache.set(cacheKey(render.source, storeFake.themeState.theme), {
+				status: "rendered",
+				svg,
+			});
+			render.resolve(svg);
+		}
+	}
+
+	/** in-flight な render をすべて失敗させ、cache を error にする */
+	function rejectRenders(message: string): void {
+		for (const render of inFlight.splice(0)) {
+			fakeCache.set(cacheKey(render.source, storeFake.themeState.theme), {
+				status: "error",
+				message,
+			});
+			render.reject(new Error(message));
+		}
+	}
+
+	/** renderMissing の実行回数。`shouldSkipMermaidInitRetry` は renderMissing 冒頭で
+	 *  1 回だけ評価されるので、pass が走ったかどうかの観測点として使える。 */
+	function renderPasses(): number {
+		return vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mock.calls.length;
+	}
+
+	function widgetOf(view: EditorView): MermaidWidget | undefined {
+		const value = view.state.field(mermaidDecorationField);
+		const iter = value.decos.iter();
+		while (iter.value) {
+			const spec = iter.value.spec as { widget?: MermaidWidget };
+			if (spec.widget) return spec.widget;
+			iter.next();
+		}
+		return undefined;
+	}
+
+	it("mount 後 300ms で mermaid block の source と現在の theme を renderMermaid に渡す", async () => {
+		mountEditorView(DOC, mermaidDecoration);
+		expect(vi.mocked(mermaidLib.renderMermaid)).not.toHaveBeenCalled();
+
+		await settle();
+
+		expect(vi.mocked(mermaidLib.renderMermaid).mock.calls).toHaveLength(1);
+		expect(vi.mocked(mermaidLib.renderMermaid)).toHaveBeenCalledWith(SOURCE, "light");
+	});
+
+	it("debounce 満了前の doc 変更は render 開始を先送りする", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration);
+		await vi.advanceTimersByTimeAsync(100);
+		view.dispatch({ changes: { from: 0, to: 0, insert: "a" } });
+		await vi.advanceTimersByTimeAsync(100);
+		view.dispatch({ changes: { from: 0, to: 0, insert: "b" } });
+
+		// mount から 300ms 経過。変更のたびに debounce が張り直されていれば未発火。
+		await vi.advanceTimersByTimeAsync(100);
+		expect(renderPasses()).toBe(0);
+
+		await settle();
+		expect(renderPasses()).toBeGreaterThan(0);
+	});
+
+	it("block 内の doc 変更後は新しい source で render し直す", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration);
+		await settle();
+		vi.mocked(mermaidLib.renderMermaid).mockClear();
+
+		view.dispatch({ changes: { from: LINE5_END_POS, to: LINE5_END_POS, insert: "C" } });
+		await settle();
+
+		expect(vi.mocked(mermaidLib.renderMermaid)).toHaveBeenCalledWith("graph TD\n  A-->BC", "light");
+	});
+
+	it("カーソルが別の行へ移ると再評価が走る", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration, 0);
+		view.focus();
+		await settle();
+		vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mockClear();
+
+		view.dispatch({ selection: EditorSelection.cursor(LINE8_POS) });
+		await settle();
+
+		expect(renderPasses()).toBeGreaterThan(0);
+	});
+
+	it("同じ行内のカーソル移動では再評価が走らない", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration, 0);
+		view.focus();
+		await settle();
+		vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mockClear();
+
+		// line1 "text" 内での移動 (0 → 2)。カーソル行の集合は変わらない。
+		view.dispatch({ selection: EditorSelection.cursor(2) });
+		await settle();
+
+		expect(renderPasses()).toBe(0);
+	});
+
+	it("debounce 満了前に destroy すると render は開始されない", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration);
+		view.destroy();
+
+		await settle();
+
+		expect(vi.mocked(mermaidLib.renderMermaid)).not.toHaveBeenCalled();
+	});
+
+	it("theme 変更で cache を捨てて新しい theme で render し直す", async () => {
+		mountEditorView(DOC, mermaidDecoration);
+		await settle();
+		expect(vi.mocked(mermaidLib.renderMermaid).mock.calls).toHaveLength(1);
+
+		storeFake.themeState.theme = "dark";
+		storeFake.emitTheme();
+		await settle();
+
+		expect(vi.mocked(mermaidLib.clearMermaidCache)).toHaveBeenCalled();
+		expect(vi.mocked(mermaidLib.renderMermaid)).toHaveBeenCalledWith(SOURCE, "dark");
+	});
+
+	it("destroy 後の theme 変更は cache を捨てない", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration);
+		await settle();
+		view.destroy();
+
+		storeFake.themeState.theme = "dark";
+		storeFake.emitTheme();
+
+		expect(vi.mocked(mermaidLib.clearMermaidCache)).not.toHaveBeenCalled();
+	});
+
+	it("render 完了後の rebuild で widget が SVG に差し替わる", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration);
+		await settle();
+		// render 開始時の rebuild はここまでで消化済み。以降の rebuild は
+		// `.then` 経由でしか起きない。
+		expect(widgetOf(view)?.svg).toBeNull();
+
+		const svg = "<svg><text>done</text></svg>";
+		resolveRenders(svg);
+		await flushFrame();
+
+		expect(widgetOf(view)?.svg).toBe(svg);
+	});
+
+	it("render 失敗後の rebuild で widget が error に差し替わる", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration);
+		await settle();
+		expect(widgetOf(view)?.error).toBeNull();
+
+		rejectRenders("Parse error");
+		await flushFrame();
+
+		expect(widgetOf(view)?.error).toBe("Parse error");
 	});
 });
 
