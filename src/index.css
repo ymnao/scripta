@@ -415,6 +415,21 @@
 	line-height: 1.6;
 }
 
+.search-panel-show-more {
+	width: 100%;
+	padding: 4px 8px;
+	border: none;
+	background: none;
+	color: var(--color-text-link);
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.search-panel-show-more:hover {
+	background-color: color-mix(in srgb, var(--color-text-secondary) 10%, transparent);
+}
+
 .search-panel-match {
 	display: flex;
 	align-items: baseline;

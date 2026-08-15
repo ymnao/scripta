@@ -17,10 +17,41 @@ interface SearchPanelProps {
 	inputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-interface GroupedResults {
+export interface GroupedResults {
 	filePath: string;
 	relativePath: string;
 	matches: SearchResult[];
+}
+
+// 初回描画件数と「さらに表示」1 回あたりの増分 (match 単位)。
+export const MATCH_DISPLAY_STEP = 500;
+
+interface SlicedResults {
+	visible: GroupedResults[];
+	remainingMatches: number;
+}
+
+// 描画対象を先頭 limit 件の match に絞る。group 単位ではなく match 単位で数えるのは
+// 1 ファイルに上限いっぱいの match が集中するケース (MAX_SEARCH_RESULTS の打ち切りは
+// 単一ファイルでも起きる) では group 単位の制限が全く効かないため。
+// collapsed な group も budget を消費させる。除外すると折り畳みの度に下方の group が
+// 出入りして、どこまで表示済みかが利用者から予測できなくなる。
+export function sliceGroupedResults(groups: GroupedResults[], limit: number): SlicedResults {
+	const visible: GroupedResults[] = [];
+	let budget = limit;
+	let total = 0;
+	for (const group of groups) {
+		total += group.matches.length;
+		if (budget <= 0) continue;
+		if (group.matches.length <= budget) {
+			visible.push(group);
+			budget -= group.matches.length;
+		} else {
+			visible.push({ ...group, matches: group.matches.slice(0, budget) });
+			budget = 0;
+		}
+	}
+	return { visible, remainingMatches: Math.max(0, total - limit) };
 }
 
 function groupByFile(results: SearchResult[], workspacePath: string): GroupedResults[] {
@@ -44,6 +75,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	const [results, setResults] = useState<GroupedResults[]>([]);
 	const [searched, setSearched] = useState(false);
 	const [truncated, setTruncated] = useState(false);
+	const [visibleCount, setVisibleCount] = useState(MATCH_DISPLAY_STEP);
 	const { isCollapsed, toggle: toggleCollapse } = useCollapseToggle();
 	const localInputRef = useRef<HTMLInputElement>(null);
 	const ref = inputRef ?? localInputRef;
@@ -67,6 +99,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 				.then((res) => {
 					if (id !== requestIdRef.current) return;
 					setResults(groupByFile(res.results, workspacePath));
+					setVisibleCount(MATCH_DISPLAY_STEP);
 					setTruncated(res.truncated);
 					setSearched(true);
 				})
@@ -88,6 +121,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	}, [query, workspacePath, caseSensitive]);
 
 	const totalMatches = results.reduce((sum, g) => sum + g.matches.length, 0);
+	const { visible, remainingMatches } = sliceGroupedResults(results, visibleCount);
 
 	return (
 		<div className="flex h-full flex-col">
@@ -131,7 +165,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 						結果が多すぎるため {MAX_SEARCH_RESULTS.toLocaleString("en-US")} 件で打ち切りました
 					</p>
 				)}
-				{results.map((group) => (
+				{visible.map((group) => (
 					<div key={group.filePath}>
 						<button
 							type="button"
@@ -178,6 +212,15 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 						)}
 					</div>
 				))}
+				{remainingMatches > 0 && (
+					<button
+						type="button"
+						className="search-panel-show-more"
+						onClick={() => setVisibleCount((c) => c + MATCH_DISPLAY_STEP)}
+					>
+						さらに表示 (残り {remainingMatches.toLocaleString("en-US")} 件)
+					</button>
+				)}
 			</section>
 		</div>
 	);
