@@ -34,33 +34,31 @@ function results(filePath: string, count: number): SearchResult[] {
 
 describe("sliceGroupedResults", () => {
 	it("limit が group 境界をまたぐと最後の group だけ部分 slice される", () => {
-		const { visible, remainingMatches } = sliceGroupedResults(
+		const visible = sliceGroupedResults(
 			[group("/workspace/a.md", 3), group("/workspace/b.md", 4), group("/workspace/c.md", 5)],
 			5,
 		);
 
 		expect(visible.map((g) => g.filePath)).toEqual(["/workspace/a.md", "/workspace/b.md"]);
 		expect(visible[1].matches).toHaveLength(2);
-		expect(remainingMatches).toBe(7);
 	});
 
 	it("limit が group 境界とちょうど一致すると次の group は含まれない", () => {
-		const { visible, remainingMatches } = sliceGroupedResults(
+		const visible = sliceGroupedResults(
 			[group("/workspace/a.md", 3), group("/workspace/b.md", 4)],
 			3,
 		);
 
 		expect(visible.map((g) => g.filePath)).toEqual(["/workspace/a.md"]);
 		expect(visible[0].matches).toHaveLength(3);
-		expect(remainingMatches).toBe(4);
 	});
 
-	it("limit が総 match 数以上なら全件が visible で残りは 0 になる", () => {
+	it("limit が総 match 数以上なら全件が visible になる", () => {
 		const groups = [group("/workspace/a.md", 3), group("/workspace/b.md", 4)];
 
-		expect(sliceGroupedResults(groups, 7).remainingMatches).toBe(0);
-		expect(sliceGroupedResults(groups, 8).visible).toHaveLength(2);
-		expect(sliceGroupedResults(groups, 8).remainingMatches).toBe(0);
+		expect(sliceGroupedResults(groups, 7)).toHaveLength(2);
+		expect(sliceGroupedResults(groups, 8)).toHaveLength(2);
+		expect(sliceGroupedResults(groups, 8)[1].matches).toHaveLength(4);
 	});
 
 	it("元の group の matches を破壊しない", () => {
@@ -71,11 +69,8 @@ describe("sliceGroupedResults", () => {
 		expect(groups[0].matches).toHaveLength(4);
 	});
 
-	it("空の結果では visible も空で残りは 0 になる", () => {
-		expect(sliceGroupedResults([], MATCH_DISPLAY_STEP)).toEqual({
-			visible: [],
-			remainingMatches: 0,
-		});
+	it("空の結果では visible も空になる", () => {
+		expect(sliceGroupedResults([], MATCH_DISPLAY_STEP)).toEqual([]);
 	});
 });
 
