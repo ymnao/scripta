@@ -285,8 +285,12 @@ export const codeBlockCopyDecoration = ViewPlugin.fromClass(CodeBlockCopyPlugin,
 			}
 			if (btn) {
 				btn.classList.add("cm-codeblock-copy-visible");
-				this.activeButton = btn;
 			}
+			// Why not (btn が null のときも代入する): コピーボタンを持たないコードブロック
+			// (空 fence / カーソル内の mermaid) へ hover したときに前の button を保持し続けると、
+			// 「activeButton は非 null だが visible class は無い」状態が残り、同じブロックへ
+			// hover し直しても上の `btn === this.activeButton` で早期 return して再表示されない。
+			this.activeButton = btn;
 		},
 		mouseleave(this: CodeBlockCopyPlugin) {
 			if (this.activeButton) {
