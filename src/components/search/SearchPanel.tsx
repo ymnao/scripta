@@ -23,7 +23,8 @@ export interface GroupedResults {
 	matches: SearchResult[];
 }
 
-// 初回描画件数と「さらに表示」1 回あたりの増分 (match 単位)。
+// 初回描画件数と増分を別定数に分けていないのは、利用者から見た「1 回分の塊」の
+// 大きさを両者で変える理由が無いため。
 export const MATCH_DISPLAY_STEP = 500;
 
 // 描画対象を先頭 limit 件の match に絞る。group 単位ではなく match 単位で数えるのは
