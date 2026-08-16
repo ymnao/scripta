@@ -6,7 +6,11 @@ import type { FileEntry } from "../../../src/types/workspace";
 import { createEntryFilter } from "../utils/entry-filter";
 import { FsError, isErrnoCode } from "../utils/fs-errors";
 import { handle } from "../utils/ipc-handle";
-import { NOFOLLOW_READ_FLAGS, writeFileUtf8NoFollow } from "../utils/open-nofollow";
+import {
+	NOFOLLOW_READ_FLAGS,
+	rejectEndSymlinkWhenEmulated,
+	writeFileUtf8NoFollow,
+} from "../utils/open-nofollow";
 import {
 	assertPathAllowed,
 	assertWritePathAllowed,
@@ -95,10 +99,16 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 // になる。この path は root 内なのでガードを通り、`fsp.writeFile` は symlink を辿って
 // workspace 外に file を**新規作成**してしまう。`O_NOFOLLOW` はこれを ELOOP で拒否する。
 //
-// **末端 symlink を作らない / 辿らない経路**（O_NOFOLLOW を足す必要が無い）:
-//   - `fs:write-new` / `fs:create-file`: `wx`（O_CREAT|O_EXCL）は末端が symlink なら
-//     dangling でも EEXIST になり、解決先を作らない
-//   - `fs:create-directory`: 対象自体は非 recursive な `mkdir` なので同様に EEXIST
+// **create 系（`fs:write-new` / `fs:create-file` / `fs:create-directory`）は二段で閉じる**:
+// POSIX では `wx`（O_CREAT|O_EXCL）と非 recursive な `mkdir` が、末端が symlink なら dangling でも
+// EEXIST で落ちるので解決先を作らない。**win32 の `O_EXCL` はこれを満たさない**: reparse point を
+// follow したうえで解決先が無いため `CREATE_NEW` が通り、workspace 外に file を新規作成する
+// (#504 で windows runner 実測、#499 の write 版 escape がこれ)。そこで 3 経路とも
+// `rejectEndSymlinkWhenEmulated` を前置し、flag が落ちる platform では open / mkdir の前に
+// ELOOP で拒否する。**win32 だけ既存 symlink 上のエラーが EEXIST（Already exists）ではなく
+// ELOOP になる**が、#451 の「emulation の拒否は ELOOP」に揃えて platform 間で判定材料を割らない。
+//
+// **末端 symlink を辿らない経路**（O_NOFOLLOW も guard も足す必要が無い）:
 //   - `fs:rename`: `rename(2)` は末端 symlink を辿らず link 自体を張り替える。source / target の
 //     存在判定も `entryExistsAt`（lstat、no-follow）なので判定と操作の follow 有無が揃う。
 //     **canonical の末端が symlink のまま残る場合**（= realpath が解決できない dangling / 循環）
@@ -235,9 +245,16 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	consumeTransientWritePath(senderId, canonical);
 }
 
+// create 系 3 経路の前処理。検査を mkdir の**後**に置くのは lstat から open / mkdir までの窓を
+// 縮めるため（末端に entry があるなら親も実在するので、逆順でも定常状態の検出力は同じ）。
+async function prepareCreateTarget(canonical: string): Promise<void> {
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	await rejectEndSymlinkWhenEmulated(canonical);
+}
+
 async function writeNewFileImpl(senderId: number, path: string, content: string): Promise<void> {
 	const canonical = await assertWritePathAllowed(senderId, path);
-	await fsp.mkdir(dirname(canonical), { recursive: true });
+	await prepareCreateTarget(canonical);
 	const fh = await fsp.open(canonical, "wx");
 	try {
 		await fh.writeFile(content, "utf8");
@@ -283,7 +300,7 @@ async function listDirectoryImpl(
 
 async function createFileImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	await fsp.mkdir(dirname(canonical), { recursive: true });
+	await prepareCreateTarget(canonical);
 	try {
 		const fh = await fsp.open(canonical, "wx");
 		await fh.close();
@@ -295,9 +312,10 @@ async function createFileImpl(senderId: number, path: string): Promise<void> {
 
 async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	// 親は recursive で先に作る。対象自体は非 recursive にすることで
-	// 「既存なら EEXIST」を atomic に得る（race-free）。
-	await fsp.mkdir(dirname(canonical), { recursive: true });
+	// 対象自体は非 recursive にすることで「既存なら EEXIST」を atomic に得る（race-free）。
+	// guard を挟むのは、拒否を mkdir の platform 依存な挙動に委ねないため
+	// （`O_EXCL` と同じ posture。doc ブロックの create 系の節）。
+	await prepareCreateTarget(canonical);
 	try {
 		await fsp.mkdir(canonical);
 	} catch (e) {

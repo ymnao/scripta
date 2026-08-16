@@ -17,6 +17,7 @@ import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
 import {
 	NOFOLLOW_EMULATED,
 	readFileUtf8NoFollow,
+	rejectEndSymlinkWhenEmulated,
 	writeFileAtomicNoFollow,
 	writeFileUtf8NoFollow,
 } from "./open-nofollow";
@@ -150,8 +151,9 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	// **実測が POSIX と割れた唯一の前提** (#504)。Windows は reparse point を follow した
 	// うえで「解決先が無い」ため CREATE_NEW が通り、解決先に file が作られる。
 	// open-nofollow.ts が「symlink であっても EEXIST」と書いていた根拠はここで崩れる。
-	// 期待値を実測値で pin するのは、production 側の判断 (受容 / lstat 追加) が #504 に
-	// 分かれているため。判断が入ったらこの it は追随させる。
+	// **これは raw な syscall semantics の pin**で、production 側はこの semantics に乗るのを
+	// やめ、create 系 3 経路に `rejectEndSymlinkWhenEmulated` を前置する判断になった (#504)。
+	// 下の「create 系は…」がその guard 後の実測。
 	it("O_EXCL は dangling な既存 symlink を拒否せず解決先に file を作る", async () => {
 		const resolved = join(dir, "nope.md");
 		const dangling = join(dir, "dangling.tmp");
@@ -159,5 +161,89 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 
 		expect(await openExclusive(dangling)).toBeNull();
 		expect((await fsp.lstat(resolved)).isFile()).toBe(true);
+	});
+
+	// 非 recursive な `mkdir` は `fs:create-directory` が「既存なら EEXIST」を atomic に得る
+	// ために使っている。`O_EXCL` とは別 syscall (CreateDirectory) なので上の実測からは移送
+	// されない。live / dangling を分けるのは、割れたときにどちらか読めるようにするため。
+	it("非 recursive mkdir は live な既存 symlink を EEXIST で拒否する", async () => {
+		const target = join(dir, "target-dir");
+		await fsp.mkdir(target);
+		const link = join(dir, "link-dir");
+		await fsp.symlink(target, link, "junction");
+
+		const err = await fsp.mkdir(link).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("EEXIST");
+	});
+
+	// **`O_EXCL` とは割れ方が違う**: mkdir は dangling でも follow せず EEXIST を返す
+	// (PR #506 の初回 CI で実測。当初は `O_EXCL` と同系と推測して「解決先に作る」側に
+	// 期待値を置いていたが、赤になったので実測値へ pin し直した)。
+	// `fs:create-directory` の guard は、この platform 依存の挙動に拒否を委ねないために
+	// 置いている (実測前から fail-closed を確定させる判断。fs.ts の該当コメント参照)。
+	it("非 recursive mkdir は dangling な既存 symlink も EEXIST で拒否する", async () => {
+		const resolved = join(dir, "nope-dir");
+		const dangling = join(dir, "dangling-dir");
+		await fsp.symlink(resolved, dangling, "junction");
+
+		const err = await fsp.mkdir(dangling).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("EEXIST");
+		await expect(fsp.lstat(resolved)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	// create 系 3 経路に前置した guard の土台 (#504)。上の「lstat は file symlink を…」は
+	// **live** な symlink でしか測っておらず、guard が塞ぐ相手は **dangling** の方なので別に測る。
+	// 呼び手側の配線 (fs.ts の 3 経路が guard を呼ぶこと) は darwin の
+	// 「O_NOFOLLOW を落とした module」が pin する。既定引数のまま呼ぶことで、win32 実機で
+	// `NOFOLLOW_EMULATED` が拒否側に倒れていることも同時に観測する。
+	it("rejectEndSymlinkWhenEmulated は dangling symlink も ELOOP で拒否する", async () => {
+		const dangling = join(dir, "dangling-guard.md");
+		await fsp.symlink(join(dir, "nope-guard.md"), dangling, "file");
+
+		const err = await rejectEndSymlinkWhenEmulated(dangling).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("ELOOP");
+	});
+
+	// `fs:create-directory` の末端に置かれうるのは file symlink ではなく junction の方
+	// (win32 で無特権に作れる)。lstat が junction をどう報告するかは上の readdir の実測
+	// (Dirent は別 syscall) からは移送されないので、guard の土台として別に測る。
+	it("rejectEndSymlinkWhenEmulated は dangling junction も ELOOP で拒否する", async () => {
+		const dangling = join(dir, "dangling-junction");
+		await fsp.symlink(join(dir, "nope-junction"), dangling, "junction");
+
+		const err = await rejectEndSymlinkWhenEmulated(dangling).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("ELOOP");
+	});
+
+	// **末端ではなく親**が dangling の場合の recursive mkdir。これが follow して解決先に dir を
+	// 作ると親が live 化し、末端の guard は ENOENT で素通りする (= 認可済み root の外へ着地しうる)。
+	// 影響は create 系 3 経路に閉じない: 同じ `mkdir(dirname, {recursive:true})` は `fs:write` /
+	// `fs:rename` / `git:resolve-conflict` も通り、末端 guard の有無に関わらず同型になる。
+	// **実測は darwin と同じ ENOTDIR**（darwin は node probe、win32 は PR #506 の初回 CI）。
+	// 当初は `O_EXCL` と同系と推測して「follow して作る」側に期待値を置いたが赤になったので
+	// 実測値へ pin し直した。これで #505 が前提にしていた escape は成立しないことが確定した。
+	it("親が dangling symlink なら recursive mkdir は ENOTDIR で失敗し解決先に何も作らない", async () => {
+		const outsideParent = join(dir, "outside-parent");
+		const linkParent = join(dir, "link-parent");
+		await fsp.symlink(outsideParent, linkParent, "junction");
+
+		const err = await fsp.mkdir(join(linkParent, "child"), { recursive: true }).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("ENOTDIR");
+		await expect(fsp.lstat(outsideParent)).rejects.toMatchObject({ code: "ENOENT" });
 	});
 });

@@ -850,6 +850,8 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / 
 
 	// 以下は O_NOFOLLOW を足さずに閉じている経路。「触っていないから安全」ではなく
 	// open flag / syscall の semantics で閉じていることを pin する (fs.ts の doc と対応)。
+	// **create 系 3 件が観測しているのは POSIX kernel の EEXIST**。flag が落ちる platform では
+	// 同じ拒否を guard が担い、errno が ELOOP になる (下の「O_NOFOLLOW を落とした module」)。
 	describe("O_NOFOLLOW 無しで閉じている経路", () => {
 		it("create-file は dangling symlink 上で alreadyExists になる (wx = O_CREAT|O_EXCL)", async () => {
 			const escapeTarget = join(outside.dir, "created-by-create.md");
@@ -981,3 +983,84 @@ describe.skipIf(process.platform === "win32")("末端 symlink の境界 (#418 / 
 		});
 	});
 });
+
+// #504: win32 の `O_EXCL` は dangling symlink を follow して解決先に file を作るため、create 系 3
+// 経路は `rejectEndSymlinkWhenEmulated` を前置している。その**配線**は素の POSIX では観測できない
+// (guard を消しても kernel の EEXIST が同じ拒否を返す = 等価変異になる)。`O_NOFOLLOW` を落とした
+// `node:fs` で fs.ts を読み直すと、拒否の出どころが errno の差として観測に出る。
+//
+// **escape そのものの回帰確認ではない**: 解決先に file が作られる現象は win32 実機でしか起きず、
+// そちらは win32-fs-semantics.test.ts が windows runner で測る (#500)。
+describe.skipIf(process.platform === "win32")(
+	"O_NOFOLLOW を落とした module の create 系 (#504)",
+	() => {
+		let outside: TempWorkspace;
+
+		beforeEach(async () => {
+			outside = await createTempWorkspace("scripta-fs-drop-out-");
+		});
+
+		afterEach(async () => {
+			vi.doUnmock("node:fs");
+			vi.resetModules();
+			await outside.cleanup();
+		});
+
+		async function importWithoutNoFollow(): Promise<typeof __testing> {
+			vi.resetModules();
+			vi.doMock("node:fs", async () => {
+				const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+				return {
+					...actual,
+					constants: { ...actual.constants, O_NOFOLLOW: undefined },
+				};
+			});
+			// resetModules は path-guard の module state も作り直すので、再 import した側へ workspace
+			// root を登録し直す (元 graph への登録は新しい fs.ts からは見えず、全 call が認可で落ちる)。
+			const guard = await import("../utils/path-guard");
+			guard.clearWorkspaceRoots();
+			await guard.registerWorkspaceRoot(TEST_WIN, workspaceDir);
+			return (await import("./fs")).__testing;
+		}
+
+		it("write-new は dangling symlink 上で ELOOP になる", async () => {
+			const link = join(workspaceDir, "new.md");
+			await symlink(join(outside.dir, "escaped.md"), link);
+			const impl = await importWithoutNoFollow();
+
+			await expect(impl.writeNewFileImpl(TEST_WIN, link, "x")).rejects.toMatchObject({
+				code: "ELOOP",
+			});
+		});
+
+		it("create-file は dangling symlink 上で ELOOP になる", async () => {
+			const link = join(workspaceDir, "created.md");
+			await symlink(join(outside.dir, "escaped-create.md"), link);
+			const impl = await importWithoutNoFollow();
+
+			await expect(impl.createFileImpl(TEST_WIN, link)).rejects.toMatchObject({ code: "ELOOP" });
+		});
+
+		it("create-directory は dangling symlink 上で ELOOP になる", async () => {
+			const link = join(workspaceDir, "newdir");
+			await symlink(join(outside.dir, "escaped-dir"), link);
+			const impl = await importWithoutNoFollow();
+
+			await expect(impl.createDirectoryImpl(TEST_WIN, link)).rejects.toMatchObject({
+				code: "ELOOP",
+			});
+		});
+
+		it("emulation 下でも symlink でない path の create は通る", async () => {
+			const impl = await importWithoutNoFollow();
+
+			await impl.writeNewFileImpl(TEST_WIN, join(workspaceDir, "a", "fresh.md"), "body");
+			await impl.createFileImpl(TEST_WIN, join(workspaceDir, "empty.md"));
+			await impl.createDirectoryImpl(TEST_WIN, join(workspaceDir, "dir"));
+
+			expect(await readFile(join(workspaceDir, "a", "fresh.md"), "utf8")).toBe("body");
+			expect(await readFile(join(workspaceDir, "empty.md"), "utf8")).toBe("");
+			expect((await stat(join(workspaceDir, "dir"))).isDirectory()).toBe(true);
+		});
+	},
+);
