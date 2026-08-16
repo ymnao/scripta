@@ -225,9 +225,11 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 		expect(err?.code).toBe("ELOOP");
 	});
 
-	// **末端ではなく親**が dangling の場合の recursive mkdir。create 系は guard の前に
-	// `mkdir(dirname, {recursive:true})` を通るので、これが follow して解決先に dir を作ると
-	// 親が live 化し、末端の guard は ENOENT で素通りする (= 認可済み root の外へ着地しうる)。
+	// **末端ではなく親**が dangling の場合の recursive mkdir。これが follow して解決先に dir を
+	// 作ると親が live 化し、末端の guard は ENOENT で素通りする (= 認可済み root の外へ着地しうる)。
+	// 影響は create 系 3 経路に閉じない: 同じ `mkdir(dirname, {recursive:true})` は `fs:write` /
+	// `fs:rename` / `git:resolve-conflict` も通り、末端 guard の有無に関わらず同型になる。
+	// production 側の判断はこの実測を見てから (末端 symlink とは別クラスなので本 PR の scope 外)。
 	// darwin では ENOTDIR で失敗し解決先に何も作られない (scratchpad の node probe で実測)。
 	// win32 は未実測なのでここで測る。期待値は「follow して作る」側 (`O_EXCL` / CREATE_NEW と
 	// 同系) に置く。赤くなれば win32 も POSIX 側だったという実測結果になる。

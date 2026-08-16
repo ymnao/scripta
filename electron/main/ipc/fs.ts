@@ -245,7 +245,7 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	consumeTransientWritePath(senderId, canonical);
 }
 
-// create 系 3 経路の前処理。検査を mkdir の**後**に置くのは lstat から open までの窓を
+// create 系 3 経路の前処理。検査を mkdir の**後**に置くのは lstat から open / mkdir までの窓を
 // 縮めるため（末端に entry があるなら親も実在するので、逆順でも定常状態の検出力は同じ）。
 async function prepareCreateTarget(canonical: string): Promise<void> {
 	await fsp.mkdir(dirname(canonical), { recursive: true });

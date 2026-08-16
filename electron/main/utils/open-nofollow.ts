@@ -193,7 +193,8 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
  * **tmp の作成だけは末端 symlink を拒否する**: win32 では `O_EXCL` が dangling symlink を
  * follow して解決先に file を作るため (#504)、tmp 名に先回りで symlink を置かれると内容が
  * workspace 外へ着地しうる。`rejectEndSymlinkWhenEmulated` を前置して flag が落ちる platform
- * でも拒否水準を揃える (POSIX では `O_EXCL` 自身が拒否するので guard は no-op)。
+ * でも拒否水準を揃える (POSIX では `emulated === false` なので guard は no-op になり、拒否は
+ * `O_EXCL` 自身が担う)。
  *
  * destination が既存の**通常 file** なら permission bit (`& 0o777`) を引き継ぐ。
  * `write-file-atomic` は mask せず setuid/setgid/sticky まで引き継ぐが、ここは落とす
