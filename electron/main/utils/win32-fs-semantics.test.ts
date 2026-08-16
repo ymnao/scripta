@@ -17,6 +17,7 @@ import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
 import {
 	NOFOLLOW_EMULATED,
 	readFileUtf8NoFollow,
+	rejectEndSymlinkWhenEmulated,
 	writeFileAtomicNoFollow,
 	writeFileUtf8NoFollow,
 } from "./open-nofollow";
@@ -150,8 +151,9 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	// **実測が POSIX と割れた唯一の前提** (#504)。Windows は reparse point を follow した
 	// うえで「解決先が無い」ため CREATE_NEW が通り、解決先に file が作られる。
 	// open-nofollow.ts が「symlink であっても EEXIST」と書いていた根拠はここで崩れる。
-	// 期待値を実測値で pin するのは、production 側の判断 (受容 / lstat 追加) が #504 に
-	// 分かれているため。判断が入ったらこの it は追随させる。
+	// **これは raw な syscall semantics の pin**で、production 側はこの semantics に乗るのを
+	// やめ、create 系 3 経路に `rejectEndSymlinkWhenEmulated` を前置する判断になった (#504)。
+	// 下の「create 系は…」がその guard 後の実測。
 	it("O_EXCL は dangling な既存 symlink を拒否せず解決先に file を作る", async () => {
 		const resolved = join(dir, "nope.md");
 		const dangling = join(dir, "dangling.tmp");
@@ -159,5 +161,53 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 
 		expect(await openExclusive(dangling)).toBeNull();
 		expect((await fsp.lstat(resolved)).isFile()).toBe(true);
+	});
+
+	// 非 recursive な `mkdir` は `fs:create-directory` が「既存なら EEXIST」を atomic に得る
+	// ために使っている。`O_EXCL` とは別 syscall (CreateDirectory) なので上の実測からは移送
+	// されない。live / dangling を分けるのは、割れたときにどちらか読めるようにするため。
+	it("非 recursive mkdir は live な既存 symlink を EEXIST で拒否する", async () => {
+		const target = join(dir, "target-dir");
+		await fsp.mkdir(target);
+		const link = join(dir, "link-dir");
+		await fsp.symlink(target, link, "junction");
+
+		const err = await fsp.mkdir(link).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("EEXIST");
+	});
+
+	it("非 recursive mkdir は dangling な既存 symlink をどう扱うか", async () => {
+		const resolved = join(dir, "nope-dir");
+		const dangling = join(dir, "dangling-dir");
+		await fsp.symlink(resolved, dangling, "junction");
+
+		// 期待値は「`O_EXCL` と同じく follow して解決先を作る」側に置く。実測が EEXIST なら
+		// この it が赤くなり、それが実測結果になる (production は guard 前置で確定済みなので
+		// どちらでも判断は動かない)。
+		const err = await fsp.mkdir(dangling).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err).toBeNull();
+		expect((await fsp.lstat(resolved)).isDirectory()).toBe(true);
+	});
+
+	// create 系 3 経路に前置した guard の土台 (#504)。上の「lstat は file symlink を…」は
+	// **live** な symlink でしか測っておらず、guard が塞ぐ相手は **dangling** の方なので別に測る。
+	// 呼び手側の配線 (fs.ts の 3 経路が guard を呼ぶこと) は darwin の
+	// 「O_NOFOLLOW を落とした module」が pin する。既定引数のまま呼ぶことで、win32 実機で
+	// `NOFOLLOW_EMULATED` が拒否側に倒れていることも同時に観測する。
+	it("rejectEndSymlinkWhenEmulated は dangling symlink も ELOOP で拒否する", async () => {
+		const dangling = join(dir, "dangling-guard.md");
+		await fsp.symlink(join(dir, "nope-guard.md"), dangling, "file");
+
+		const err = await rejectEndSymlinkWhenEmulated(dangling).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("ELOOP");
 	});
 });

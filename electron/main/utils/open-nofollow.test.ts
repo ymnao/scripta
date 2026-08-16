@@ -210,6 +210,7 @@ describe.skipIf(process.platform === "win32")("O_NOFOLLOW を落とした module
 
 	afterEach(async () => {
 		vi.doUnmock("node:fs");
+		vi.doUnmock("node:crypto");
 		vi.resetModules();
 		await ws.cleanup();
 		await outside.cleanup();
@@ -217,7 +218,11 @@ describe.skipIf(process.platform === "win32")("O_NOFOLLOW を落とした module
 
 	// `O_NOFOLLOW` だけを undefined にした `node:fs` で module を読み直す。他の constant と
 	// promises API は実物のままなので、観測される差は「flag が 0 に落ちたこと」だけになる。
-	async function importWithoutNoFollow(): Promise<typeof import("./open-nofollow")> {
+	// `fixedTmpSuffix` を渡すと `randomBytes` も固定し、`writeFileAtomicNoFollow` の tmp 名を
+	// 決定的にする (先回りで symlink を置くために要る)。
+	async function importWithoutNoFollow(
+		fixedTmpSuffix?: string,
+	): Promise<typeof import("./open-nofollow")> {
 		vi.resetModules();
 		vi.doMock("node:fs", async () => {
 			const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -226,6 +231,12 @@ describe.skipIf(process.platform === "win32")("O_NOFOLLOW を落とした module
 				constants: { ...actual.constants, O_NOFOLLOW: undefined },
 			};
 		});
+		if (fixedTmpSuffix !== undefined) {
+			vi.doMock("node:crypto", async () => {
+				const actual = await vi.importActual<typeof import("node:crypto")>("node:crypto");
+				return { ...actual, randomBytes: () => Buffer.from(fixedTmpSuffix, "hex") };
+			});
+		}
 		return await import("./open-nofollow");
 	}
 
@@ -269,6 +280,32 @@ describe.skipIf(process.platform === "win32")("O_NOFOLLOW を落とした module
 
 		await mod.writeFileUtf8NoFollow(p, "created");
 		expect(await mod.readFileUtf8NoFollow(p)).toBe("created");
+	});
+
+	// #504: tmp 名に先回りで置かれた symlink を `O_EXCL` に任せられるのは POSIX だけ。
+	// **ここで観測できるのは配線の有無だけ** (guard を外しても POSIX kernel が EEXIST を返すので
+	// escape は起きず、変わるのは errno)。win32 実機での「解決先に file が作られる」escape 自体は
+	// win32-fs-semantics.test.ts が windows runner で測る。
+	it("writeFileAtomicNoFollow は tmp 名の symlink を ELOOP で拒否する", async () => {
+		const suffix = "0123456789ab";
+		const dest = join(ws.dir, "out.pdf");
+		await fsp.symlink(join(outside.dir, "escaped.pdf"), join(ws.dir, `.out.pdf.${suffix}.tmp`));
+		const mod = await importWithoutNoFollow(suffix);
+
+		const err = await mod
+			.writeFileAtomicNoFollow(dest, Buffer.from("NEW"))
+			.catch((e: NodeJS.ErrnoException) => e);
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+	});
+
+	it("emulation 下でも tmp が衝突しなければ atomic write は通る", async () => {
+		const p = join(ws.dir, "out.pdf");
+		const mod = await importWithoutNoFollow("0123456789ab");
+
+		await mod.writeFileAtomicNoFollow(p, Buffer.from("created"));
+
+		expect(await fsp.readFile(p, "utf8")).toBe("created");
+		expect(await fsp.readdir(ws.dir)).toEqual(["out.pdf"]);
 	});
 });
 

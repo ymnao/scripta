@@ -18,7 +18,10 @@
 // **`O_NOFOLLOW` が無い platform (win32)**: flag が 0 に落ちて plain open 相当になるため、
 // helper 内で `lstat` による拒否をエミュレートする (#451、`rejectEndSymlinkWhenEmulated`)。
 // 末端 symlink の拒否そのものは全 platform で成立し、差は「open と原子的か / 別 syscall か」だけに
-// なる。**この helper を経由しない `NOFOLLOW_READ_FLAGS` の直接利用 (fs.ts の bounded read /
+// なる。**同じ guard は `O_EXCL` に乗っていた create 系にも要る**: win32 の `O_EXCL` は dangling
+// symlink を follow して解決先に file を作るため (#504 で実測)、fs.ts の `fs:write-new` /
+// `fs:create-file` / `fs:create-directory` と下の tmp 作成が guard を前置している。
+// **この helper を経由しない `NOFOLLOW_READ_FLAGS` の直接利用 (fs.ts の bounded read /
 // base64 read) はエミュレーションの対象外**で、win32 では従来どおり末端 swap を検出しない。
 // そこは認可 (`assertPathAllowed`) が realpath ベースで外部を指す symlink を拒否するため
 // **定常状態では内容露出が無く**、失うのは認可 (T1) から open (T2) の間の swap 検出に限られる
@@ -70,14 +73,15 @@ export const NOFOLLOW_READ_FLAGS = fsConstants.O_RDONLY | NOFOLLOW_FLAG;
 // `fsp.writeFile` の既定 flag `"w"` と同じ access mode に O_NOFOLLOW を足したもの。
 const NOFOLLOW_OVERWRITE_FLAGS =
 	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | NOFOLLOW_FLAG;
-// tmp file 作成用。`O_EXCL` は既存 entry があれば **symlink であっても** EEXIST で落ちる
-// (POSIX 規定。probe で live / dangling とも EEXIST を確認済み) ので、tmp 名が衝突しても
+// tmp file 作成用。POSIX の `O_EXCL` は既存 entry があれば **symlink であっても** EEXIST で
+// 落ちる (POSIX 規定。probe で live / dangling とも EEXIST を確認済み) ので、tmp 名が衝突しても
 // 攻撃者が仕込んだ symlink を掴まされることはない。`O_NOFOLLOW` は冗長だが、この module の
 // 他の flag と揃えて「follow しない」意図を flag 側にも残す。
 //
-// **win32 は dangling symlink だけ例外** (#504、#500 の probe で実測): reparse point を
-// follow したうえで解決先が無いため `CREATE_NEW` が通り、解決先に file が作られる。live な
-// symlink は POSIX と同じく EEXIST。受容するか tmp path に `lstat` を挟むかは #504 で判断する。
+// **win32 の dangling symlink はこの flag だけでは閉じない** (#504、#500 の probe で実測):
+// reparse point を follow したうえで解決先が無いため `CREATE_NEW` が通り、解決先に file が
+// 作られる (live な symlink は POSIX と同じく EEXIST)。拒否水準を platform で割らないため、
+// この flag を使う呼び手は `rejectEndSymlinkWhenEmulated` を前置して塞ぐ。
 const NOFOLLOW_CREATE_EXCLUSIVE_FLAGS =
 	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | NOFOLLOW_FLAG;
 
@@ -186,6 +190,11 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
  * symlink を置き換えるのは escape ではない (外部には届かない)。
  *
  * tmp は destination と同じ dir に作る (rename は同一 filesystem 内でしか原子的でないため)。
+ * **tmp の作成だけは末端 symlink を拒否する**: win32 では `O_EXCL` が dangling symlink を
+ * follow して解決先に file を作るため (#504)、tmp 名に先回りで symlink を置かれると内容が
+ * workspace 外へ着地しうる。`rejectEndSymlinkWhenEmulated` を前置して flag が落ちる platform
+ * でも拒否水準を揃える (POSIX では `O_EXCL` 自身が拒否するので guard は no-op)。
+ *
  * destination が既存の**通常 file** なら permission bit (`& 0o777`) を引き継ぐ。
  * `write-file-atomic` は mask せず setuid/setgid/sticky まで引き継ぐが、ここは落とす
  * (PDF 出力に特殊 bit を残す理由が無く、落とす方が安全側)。destination が symlink の場合は
@@ -199,8 +208,11 @@ export async function writeFileUtf8NoFollow(path: string, content: string): Prom
  */
 export async function writeFileAtomicNoFollow(path: string, data: Buffer): Promise<void> {
 	// dot prefix で既定の file tree から隠し、`.tmp` suffix と乱数で衝突を避ける。衝突しても
-	// `O_EXCL` が EEXIST で落とすので、既存 entry を掴んで壊すことはない。
+	// `O_EXCL` (emulated platform では下の guard) が落とすので、既存 entry を掴んで壊さない。
 	const tmpPath = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
+	// **destination (`path`) ではなく tmp にだけ掛ける**。destination の末端 symlink は
+	// rename が置き換えるので拒否対象ではない (doc の「末端 symlink を ELOOP で拒否しない」節)。
+	await rejectEndSymlinkWhenEmulated(tmpPath);
 	// destination が既存の通常 file なら permission を引き継ぐ。symlink / dir / 未存在なら
 	// 引き継がず、既定 mode (0o666 & ~umask) にする (doc の「mode 継承」節を参照)。
 	const inheritedMode = await fsp.lstat(path).then(
