@@ -60,7 +60,9 @@ jobs:
   # pin できていなかった。
   # **required check には登録しない**: windows runner 固有の path / 権限まわりの不安定さを
   # merge gate に持ち込まないため。失敗は PR の checks 一覧で見える。
-  # 全 suite ではなく probe file 1 本に絞って恒常コストを抑える。
+  # 実行は全 suite ではなく probe file 1 本に絞る。ただし job 全体の支配項は
+  # setup-node-pnpm の `pnpm install` が postinstall 経由で毎回取る electron バイナリで、
+  # そこは削っていない (`--ignore-scripts` は allowBuilds の esbuild を巻き込むため保留)。
   win32-fs-probe:
     runs-on: windows-latest
     steps:

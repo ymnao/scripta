@@ -7,25 +7,36 @@
 // assertion で書かれており、win32 では拒否経路が emulation (lstat) に替わるため
 // assertion 側の platform 分岐が広範囲に要る。ここでは測りたい前提だけを独立に置く。
 //
-// **Why not skip に倒さない**: symlink 作成が特権エラーで落ちたときに skip すると、
+// **Why not skip**: symlink 作成が特権エラーで落ちたときに skip すると、
 // 「測れなかった」が「測って問題なかった」と区別できない vacuous pass になる。
 // `fsp.symlink` は握らずそのまま await し、失敗はこの file の失敗として出す。
 import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
+import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
 import { NOFOLLOW_EMULATED, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
 
 describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#500)", () => {
-	let ws: TempWorkspace;
+	let dir: string;
 
 	beforeEach(async () => {
-		ws = await createCanonicalTempWorkspace("scripta-win32-probe-");
+		dir = await makeCanonicalTempDir("scripta-win32-probe-");
 	});
 
 	afterEach(async () => {
-		await ws.cleanup();
+		// Windows は close 済み handle の解放が遅延しうる。`createCanonicalTempWorkspace` の
+		// cleanup は maxRetries を渡さないので、git.test.ts の先例に合わせて自前で消す
+		// (infra 由来の EPERM / EBUSY を probe の赤にしないため)。
+		await fsp.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 	});
+
+	async function createFileSymlink(): Promise<{ target: string; link: string }> {
+		const target = join(dir, "target.md");
+		await fsp.writeFile(target, "body", "utf8");
+		const link = join(dir, "link.md");
+		await fsp.symlink(target, link, "file");
+		return { target, link };
+	}
 
 	it("O_NOFOLLOW は undefined で、emulation 経路が選ばれる", () => {
 		expect(fsConstants.O_NOFOLLOW).toBeUndefined();
@@ -33,10 +44,7 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	});
 
 	it("lstat は file symlink を isSymbolicLink()=true で報告する", async () => {
-		const target = join(ws.dir, "target.md");
-		await fsp.writeFile(target, "body", "utf8");
-		const link = join(ws.dir, "link.md");
-		await fsp.symlink(target, link, "file");
+		const { link } = await createFileSymlink();
 
 		const st = await fsp.lstat(link);
 		expect(st.isSymbolicLink()).toBe(true);
@@ -44,10 +52,7 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	});
 
 	it("plain open は file symlink を follow して解決先の内容を返す", async () => {
-		const target = join(ws.dir, "target.md");
-		await fsp.writeFile(target, "body", "utf8");
-		const link = join(ws.dir, "link.md");
-		await fsp.symlink(target, link, "file");
+		const { link } = await createFileSymlink();
 
 		const fh = await fsp.open(link, "r");
 		try {
@@ -58,10 +63,10 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	});
 
 	it("directory junction は readdir で isDirectory()=false / isSymbolicLink()=true になる", async () => {
-		const outside = join(ws.dir, "outside");
+		const outside = join(dir, "outside");
 		await fsp.mkdir(outside);
 		await fsp.writeFile(join(outside, "leaked.md"), "leaked", "utf8");
-		const root = join(ws.dir, "root");
+		const root = join(dir, "root");
 		await fsp.mkdir(root);
 		await fsp.symlink(outside, join(root, "junction"), "junction");
 
@@ -75,10 +80,7 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	});
 
 	it("readFileUtf8NoFollow は末端 symlink を ELOOP で拒否する", async () => {
-		const target = join(ws.dir, "target.md");
-		await fsp.writeFile(target, "body", "utf8");
-		const link = join(ws.dir, "link.md");
-		await fsp.symlink(target, link, "file");
+		const { link } = await createFileSymlink();
 
 		const err = await readFileUtf8NoFollow(link).then(
 			() => null,
@@ -88,10 +90,7 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 	});
 
 	it("writeFileUtf8NoFollow は末端 symlink を ELOOP で拒否し解決先を書き換えない", async () => {
-		const target = join(ws.dir, "target.md");
-		await fsp.writeFile(target, "body", "utf8");
-		const link = join(ws.dir, "link.md");
-		await fsp.symlink(target, link, "file");
+		const { target, link } = await createFileSymlink();
 
 		const err = await writeFileUtf8NoFollow(link, "overwritten").then(
 			() => null,
