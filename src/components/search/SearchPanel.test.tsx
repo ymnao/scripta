@@ -135,7 +135,7 @@ describe("SearchPanel の段階表示", () => {
 
 		await search("match");
 
-		expect(screen.getByText("1 ファイル中 6 件")).toBeTruthy();
+		expect(screen.getByText(`1 ファイル中 ${STEP + 1} 件`)).toBeTruthy();
 		expect(screen.getByText("結果が多すぎるため 10,000 件で打ち切りました")).toBeTruthy();
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
@@ -168,15 +168,15 @@ describe("SearchPanel の段階表示", () => {
 		fireEvent.click(screen.getByRole("button", { name: /さらに表示/ }));
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP * 2);
 
-		// 2 回目の総件数を初期値 (STEP) と stale 値 (STEP * 2) の狭間に置くのは、
-		// この外だとリセットの有無が描画件数で区別できなくなるため。
+		// 2 回目の総件数を STEP より大きく置くのは、STEP 以下だとリセットの有無に
+		// かかわらず全件描画になり、描画件数で区別できなくなるため。
 		mockedSearchFiles.mockResolvedValue({
 			results: results("/workspace/other.md", STEP + 2),
 			truncated: false,
 		});
 		await search("other");
 
-		expect(screen.getByText("1 ファイル中 7 件")).toBeTruthy();
+		expect(screen.getByText(`1 ファイル中 ${STEP + 2} 件`)).toBeTruthy();
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
 });
