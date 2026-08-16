@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelSearch, searchFiles } from "../../lib/commands";
 import { addTrailingSep } from "../../lib/path";
-import { MAX_SEARCH_RESULTS, type SearchResult } from "../../types/search";
+import { MATCH_DISPLAY_STEP, MAX_SEARCH_RESULTS, type SearchResult } from "../../types/search";
 
 interface SearchPanelProps {
 	workspacePath: string;
@@ -22,10 +22,6 @@ export interface GroupedResults {
 	relativePath: string;
 	matches: SearchResult[];
 }
-
-// 初回描画件数と増分を別定数に分けていないのは、利用者から見た「1 回分の塊」の
-// 大きさを両者で変える理由が無いため。
-export const MATCH_DISPLAY_STEP = 500;
 
 // 描画対象を先頭 limit 件の match に絞る。group 単位ではなく match 単位で数えるのは
 // 1 ファイルに上限いっぱいの match が集中するケース (MAX_SEARCH_RESULTS の打ち切りは
