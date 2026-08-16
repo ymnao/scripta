@@ -55,6 +55,21 @@ jobs:
 
       - run: pnpm test
 
+  # win32 の fs semantics 実測 probe (#500)。出荷対象 platform でありながら test job が
+  # 1 つも無く、#451 の symlink 境界は「flag が落ちた platform だとしたら」までしか
+  # pin できていなかった。
+  # **required check には登録しない**: windows runner 固有の path / 権限まわりの不安定さを
+  # merge gate に持ち込まないため。失敗は PR の checks 一覧で見える。
+  # 全 suite ではなく probe file 1 本に絞って恒常コストを抑える。
+  win32-fs-probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-node-pnpm
+
+      - run: pnpm exec vitest run --project main electron/main/utils/win32-fs-semantics.test.ts
+
   e2e:
     runs-on: ubuntu-latest
     steps:
