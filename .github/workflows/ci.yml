@@ -60,9 +60,10 @@ jobs:
   # pin できていなかった。
   # **required check には登録しない**: windows runner 固有の path / 権限まわりの不安定さを
   # merge gate に持ち込まないため。失敗は PR の checks 一覧で見える。
-  # 実行は全 suite ではなく probe file 1 本に絞る。ただし job 全体の支配項は
-  # setup-node-pnpm の `pnpm install` が postinstall 経由で毎回取る electron バイナリで、
-  # そこは削っていない (`--ignore-scripts` は allowBuilds の esbuild を巻き込むため保留)。
+  # 実行は全 suite ではなく probe file 1 本に絞る。ただし setup-node-pnpm の
+  # `pnpm install` は postinstall 経由で electron バイナリを毎回取得し (その cache は
+  # `cache: pnpm` の対象外)、probe はそれを使わない。`--ignore-scripts` で削る案は
+  # allowBuilds の esbuild と katex css 生成を巻き込むため保留している。
   win32-fs-probe:
     runs-on: windows-latest
     steps:
