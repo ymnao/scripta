@@ -234,8 +234,13 @@ async function resolveConflictImpl(
 	//
 	// この lstat は **単独の防御ではない**（検査と write の間に swap される窓が残る）。POSIX では
 	// 下の `writeFileUtf8NoFollow` の `O_NOFOLLOW` が同じ拒否を open と原子的に行うため、window は
-	// そちらで閉じている（#455）。lstat を残すのは、`O_NOFOLLOW` が無い win32（flag が 0 に落ちる、
-	// #451）で従来の拒否水準を落とさないためと、拒否理由を errno ではなく文言で返すため。
+	// そちらで閉じている（#455）。win32 も同 helper が `lstat` で拒否をエミュレートするので、
+	// **拒否水準は全 platform で helper 側だけでも成立する**（#451）。それでもここを残すのは、
+	// **拒否理由の precedence を取るため**: ここを外すと、target の親が workspace 外にある
+	// symlink 書き込みは後段の `assertPathAllowed` が先に `PATH_OUTSIDE_WORKSPACE` で落とすので、
+	// user に返る理由が「symlink には書かない」から「workspace 外」へ変わる。
+	// 検査対象 entry は helper 側と同じ（親の canonical 化は末端 entry を変えない）ので、
+	// **拒否集合は広がらない** — 増えるのは「別時点で 2 回見る」ことだけ。
 	try {
 		const st = await fsp.lstat(target);
 		if (st.isSymbolicLink()) {

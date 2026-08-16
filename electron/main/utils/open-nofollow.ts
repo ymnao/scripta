@@ -1,5 +1,5 @@
 // 末端 component の symlink follow を閉じる open flag と、その flag を使う I/O helper
-// (#412 / #418 / #455)。
+// (#412 / #418 / #451 / #455)。
 //
 // **何を閉じるか**: 認可 (`resolveInsideRoot` / `assertPathAllowed`) が返した path を後段の
 // `fsp.readFile` / `fsp.writeFile` に渡すと、その API が path を再 traversal するため
@@ -15,6 +15,16 @@
 // (Node が constant を expose したら再検討する)。受容の全体像は path-guard.ts の
 // `resolveInsideRoot` doc を参照。
 //
+// **`O_NOFOLLOW` が無い platform (win32)**: flag が 0 に落ちて plain open 相当になるため、
+// helper 内で `lstat` による拒否をエミュレートする (#451、`rejectEndSymlinkWhenEmulated`)。
+// 末端 symlink の拒否そのものは全 platform で成立し、差は「open と原子的か / 別 syscall か」だけに
+// なる。**この helper を経由しない `NOFOLLOW_READ_FLAGS` の直接利用 (fs.ts の bounded read /
+// base64 read) はエミュレーションの対象外**で、win32 では従来どおり末端 swap を検出しない。
+// そこは認可 (`assertPathAllowed`) が realpath ベースで外部を指す symlink を拒否するため
+// **定常状態では内容露出が無く**、失うのは認可 (T1) から open (T2) の間の swap 検出に限られる
+// (裏を返すと、その窓で swap されれば win32 の plain open は follow して外部内容を返す。
+// 「露出しない」ではなく「窓を受容した」が実態)。
+//
 // **正常系の挙動は変わらない**: どの呼び手も「末端が symlink でない」ことを確認済みの path
 // しか渡さない (index 取り込み経路は `isIndexableResolution(resolved, ioPath) === true`、
 // すなわち `realpath(ioPath) === ioPath` を確認した path。user-IPC 経路は path-guard の
@@ -22,9 +32,11 @@
 // 実際に swap が起きた瞬間であり、その file はもはや認可した実体と一致しないので
 // **読み書きせずに reject するのが正しい**。
 //
-// **syscall は増えない**: `fsp.readFile(path)` / `fsp.writeFile(path)` も内部で
-// open/read(write)/close するため、open flag を足して明示的に書き下しただけ。検索 hot path
-// にも editor の保存経路にもコストは乗らない。
+// **syscall は増えない (`O_NOFOLLOW` がある platform では)**: `fsp.readFile(path)` /
+// `fsp.writeFile(path)` も内部で open/read(write)/close するため、open flag を足して明示的に
+// 書き下しただけ。検索 hot path にも editor の保存経路にもコストは乗らない。flag が落ちる
+// platform だけは上記エミュレーションの `lstat` が 1 回増える (その platform では open が
+// 拒否を担えないので、拒否水準を保つ対価として払う)。
 //
 // **atomic write だけは別機構**: inode 置換が要る呼び手 (pdf:export) は `O_NOFOLLOW` open では
 // なく `rename(2)` が末端 symlink を follow しない性質に乗る (`writeFileAtomicNoFollow`)。
@@ -36,15 +48,21 @@
 import { randomBytes } from "node:crypto";
 import { constants as fsConstants, promises as fsp } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { isErrnoCode } from "./fs-errors";
 
 // Windows には `O_NOFOLLOW` が無い (`fs.constants` 上 undefined になり得る) ため 0 に落とす。
-// その場合の保証は現状維持 = plain open 相当で、退行はしない。Windows の symlink 作成は
-// 既定で管理者特権 (または開発者モード) を要するため、攻撃前提そのものが成立しにくい。
-// **Windows でこの flag が無効になる帰結**は #451 で追跡している。
 //
 // `?? 0` の fallback 知識と access mode との合成をこの module に閉じ込める。呼び手は
 // `fsConstants.O_NOFOLLOW` を直接参照せず、下の helper か `NOFOLLOW_READ_FLAGS` を使う。
 const NOFOLLOW_FLAG = fsConstants.O_NOFOLLOW ?? 0;
+
+// flag が 0 に落ちた platform では open が plain open 相当になり、末端 symlink を拒否しない。
+// その platform でだけ open の前に `lstat` を挟んで同じ拒否をエミュレートする (#451)。
+//
+// **Why not 常に lstat**: POSIX では open 自身が原子的に拒否するので lstat は純粋な syscall
+// 追加になる。検索 scan は workspace の全 `.md` がこの helper を通るため、エミュレーションが
+// 要らない platform の hot path に恒常コストを乗せない。
+export const NOFOLLOW_EMULATED = NOFOLLOW_FLAG === 0;
 
 // `fsp.open(path, "r")` と同じ access mode に O_NOFOLLOW を足したもの。fd 自体を必要とする
 // 呼び手 (fs.ts の bounded read / base64 変換) が open flag として使う。
@@ -60,6 +78,45 @@ const NOFOLLOW_CREATE_EXCLUSIVE_FLAGS =
 	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | NOFOLLOW_FLAG;
 
 /**
+ * `O_NOFOLLOW` が使えない platform 向けに、末端 symlink の拒否を open の前段で再現する (#451)。
+ * `emulated === false` (POSIX) では何もしない。
+ *
+ * **何が戻るか**: エミュレーション側でも呼び手から見た失敗の形は `O_NOFOLLOW` の ELOOP と同じに
+ * する (`code === "ELOOP"`)。検索 scan (search.ts の分岐 3) も git:resolve-conflict も
+ * 「open が末端 symlink を拒否した」ことを起点に fallback するため、判定材料を platform で
+ * 割らないのが要点。
+ *
+ * **残る窓**: lstat (T1) と open (T2) は別 syscall なので、その間に末端を差し替える race は
+ * 閉じない。`O_NOFOLLOW` は同じ拒否を open と原子的に行うのでこの窓を持たない。埋められないのは
+ * Node が Windows の `FILE_FLAG_OPEN_REPARSE_POINT` 相当を expose していないためで、受容の
+ * posture は #412 と同じ (Windows の symlink 作成は既定で管理者特権または開発者モードを要する)。
+ *
+ * **通すのは ENOENT だけ**: lstat の失敗を一律に握り潰さない。**まだ存在しない path への write**
+ * が `O_CREAT` の open に到達できないと新規作成できなくなる (`writeFileUtf8NoFollow` は既存 file の
+ * 上書きと新規作成の両方に使われる) ため、ENOENT だけは通して open に判断を委ねる。
+ * **他の errno を通さないのは、lstat と open が別の object を見るため**: lstat は link 自身を、
+ * open は解決先を検査する。「lstat が失敗する失敗様式なら open も失敗する」は成り立たず (link 自身
+ * への deny ACE で属性読取だけ拒否される構成など)、握り潰すと symlink を検出できないまま open が
+ * 解決先を follow しうる。ENOENT 以外で fail-closed に倒しても、正常系は lstat が成功するので
+ * 観測できる差は出ない。
+ */
+export async function rejectEndSymlinkWhenEmulated(
+	path: string,
+	emulated = NOFOLLOW_EMULATED,
+): Promise<void> {
+	if (!emulated) return;
+	const st = await fsp.lstat(path).catch((e: unknown) => {
+		if (isErrnoCode(e, "ENOENT")) return null;
+		throw e;
+	});
+	if (st?.isSymbolicLink() !== true) return;
+	const err: NodeJS.ErrnoException = new Error(`ELOOP: symbolic link encountered, open '${path}'`);
+	err.code = "ELOOP";
+	err.path = path;
+	throw err;
+}
+
+/**
  * 末端 component が symlink なら reject する utf8 read (#412)。
  *
  * index 取り込みに繋がる read 経路 (piggyback / idle fill / dark assert の再 index) に加え、
@@ -72,6 +129,7 @@ const NOFOLLOW_CREATE_EXCLUSIVE_FLAGS =
  * file は skip」か、上記 scan 側の解決し直しのどちらかに倒せばよい。
  */
 export async function readFileUtf8NoFollow(path: string): Promise<string> {
+	await rejectEndSymlinkWhenEmulated(path);
 	const fh = await fsp.open(path, NOFOLLOW_READ_FLAGS);
 	try {
 		return await fh.readFile({ encoding: "utf8" });
@@ -90,6 +148,7 @@ export async function readFileUtf8NoFollow(path: string): Promise<string> {
  * 呼び手の契約は fs.ts の #100 コメントを参照）。
  */
 export async function writeFileUtf8NoFollow(path: string, content: string): Promise<void> {
+	await rejectEndSymlinkWhenEmulated(path);
 	const fh = await fsp.open(path, NOFOLLOW_OVERWRITE_FLAGS);
 	try {
 		await fh.writeFile(content, "utf8");
