@@ -18,16 +18,22 @@ import { NOFOLLOW_EMULATED, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "
 
 describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#500)", () => {
 	let dir: string;
+	const dirsToCleanup: string[] = [];
 
 	beforeEach(async () => {
 		dir = await makeCanonicalTempDir("scripta-win32-probe-");
+		dirsToCleanup.push(dir);
 	});
 
 	afterEach(async () => {
 		// Windows は close 済み handle の解放が遅延しうる。`createCanonicalTempWorkspace` の
 		// cleanup は maxRetries を渡さないので、git.test.ts の先例に合わせて自前で消す
 		// (infra 由来の EPERM / EBUSY を probe の赤にしないため)。
-		await fsp.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		// 配列経由なのは、mkdtemp 自体が失敗した回で未代入の dir を rm に渡さないため
+		// (probe が出したい一次エラーに TypeError が重なる)。
+		for (const d of dirsToCleanup.splice(0)) {
+			await fsp.rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		}
 	});
 
 	async function createFileSymlink(): Promise<{ target: string; link: string }> {
