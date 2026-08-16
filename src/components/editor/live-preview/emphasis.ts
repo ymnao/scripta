@@ -13,7 +13,7 @@ import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 
 const replaceDecoration = Decoration.replace({});
 
-function buildDecorations(view: EditorView): DecorationSet {
+export function buildDecorations(view: EditorView): DecorationSet {
 	const { state } = view;
 	const cursorLines = collectCursorLines(view);
 	const ranges: Range<Decoration>[] = [];
