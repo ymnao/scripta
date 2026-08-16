@@ -109,6 +109,10 @@ describe("emphasisDecoration update gate (real EditorView)", () => {
 		expect(v.contentDOM.textContent).toBe("textem and bold");
 	});
 
+	// forceRebuild の 3 disjunct (docChanged / viewportChanged / syntax tree 差し替え) は
+	// このテストでは分離できない。jsdom では doc への挿入が viewportChanged も必ず立てる
+	// ため、どれか 1 つ (あるいは docChanged と tree 比較の 2 つ) を消しても pass する。
+	// 観測できるのは「doc 変更後に装飾が現れる」という gate 全体の性質だけ。
 	it("rebuilds decorations after a document change introduces emphasis", () => {
 		const v = mountEditorView("text", emphasisDecoration);
 		expect(renderedClasses(v)).toEqual([]);
@@ -118,12 +122,18 @@ describe("emphasisDecoration update gate (real EditorView)", () => {
 		expect(renderedClasses(v)).toEqual(["cm-emphasis"]);
 	});
 
-	it("drops the decorations of the line the cursor moves onto and restores them on leaving", () => {
+	function mountFocused(): EditorView {
 		const v = mountEditorView(DOC, emphasisDecoration);
 		v.focus();
-		// collectCursorLines は hasFocus が false だと常に空集合を返すため、focus が
-		// 実際に入ったことを確かめないとカーソル行の検証が vacuous pass になる。
+		// collectCursorLines は hasFocus が false だと常に空集合を返す。focus が入らないと
+		// 以下のテストはどれも「カーソル行なし」の同一シナリオへ退化し、うち再構築されない
+		// 側の検証は vacuous pass になるため、focus が入ったことをここで固定する。
 		expect(v.hasFocus).toBe(true);
+		return v;
+	}
+
+	it("drops the decorations of the line the cursor moves onto and restores them on leaving", () => {
+		const v = mountFocused();
 
 		v.dispatch({ selection: { anchor: DOC.indexOf("em") } });
 		expect(renderedClasses(v)).toEqual([]);
@@ -133,12 +143,13 @@ describe("emphasisDecoration update gate (real EditorView)", () => {
 	});
 
 	it("does not rebuild when the selection moves within the same line", () => {
-		const v = mountEditorView(DOC, emphasisDecoration);
-		v.focus();
-		expect(v.hasFocus).toBe(true);
+		const v = mountFocused();
 
 		v.dispatch({ selection: { anchor: 0 } });
 		const before = pluginDecorations(v);
+		// 空の DecorationSet は Decoration.none シングルトンなので、装飾が 0 件だと
+		// 再構築の有無に関わらず identity が一致してしまう。非空をここで固定する。
+		expect(renderedClasses(v)).toEqual(["cm-emphasis", "cm-strong"]);
 		v.dispatch({ selection: { anchor: 1 } });
 
 		// 装飾内容は再構築されても同一なので、DOM も DecorationSet の中身も差が出ない。
@@ -148,9 +159,7 @@ describe("emphasisDecoration update gate (real EditorView)", () => {
 	});
 
 	it("rebuilds when the selection moves to another line", () => {
-		const v = mountEditorView(DOC, emphasisDecoration);
-		v.focus();
-		expect(v.hasFocus).toBe(true);
+		const v = mountFocused();
 
 		v.dispatch({ selection: { anchor: 0 } });
 		const before = pluginDecorations(v);
