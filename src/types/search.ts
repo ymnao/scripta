@@ -14,8 +14,10 @@ export const MAX_SEARCH_RESULTS = 10_000;
 
 // renderer の描画チューニング値で、隣の MAX_SEARCH_RESULTS と違い IPC 境界を
 // またがない (main からは参照しない)。使用元の SearchPanel.tsx ではなくここに
-// 置いているのは、component file を vi.mock するとコンポーネント自体がモック
-// され、テストが定数だけを差し替えられないため。
+// 置いているのは、定数と使用箇所が同じ module にあるとテストから差し替えられ
+// ないため。vi.mock で export を上書きしても module 内部の参照はその export を
+// 経由しないので、使用箇所は元の値を読み続ける。
+//
 // 初回描画件数と増分を別定数に分けていないのは、利用者から見た「1 回分の塊」の
 // 大きさを両者で変える理由が無いため。
 export const MATCH_DISPLAY_STEP = 500;
