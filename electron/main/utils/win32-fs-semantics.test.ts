@@ -147,10 +147,17 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 		expect((await openExclusive(link))?.code).toBe("EEXIST");
 	});
 
-	it("O_EXCL は dangling な既存 symlink を EEXIST で拒否する", async () => {
+	// **実測が POSIX と割れた唯一の前提** (#504)。Windows は reparse point を follow した
+	// うえで「解決先が無い」ため CREATE_NEW が通り、解決先に file が作られる。
+	// open-nofollow.ts が「symlink であっても EEXIST」と書いていた根拠はここで崩れる。
+	// 期待値を実測値で pin するのは、production 側の判断 (受容 / lstat 追加) が #504 に
+	// 分かれているため。判断が入ったらこの it は追随させる。
+	it("O_EXCL は dangling な既存 symlink を拒否せず解決先に file を作る", async () => {
+		const resolved = join(dir, "nope.md");
 		const dangling = join(dir, "dangling.tmp");
-		await fsp.symlink(join(dir, "nope.md"), dangling, "file");
+		await fsp.symlink(resolved, dangling, "file");
 
-		expect((await openExclusive(dangling))?.code).toBe("EEXIST");
+		expect(await openExclusive(dangling)).toBeNull();
+		expect((await fsp.lstat(resolved)).isFile()).toBe(true);
 	});
 });

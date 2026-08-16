@@ -115,10 +115,11 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 });
 
 // #451: `O_NOFOLLOW` が無い platform (win32) 向けの拒否エミュレーション。
-// **win32 実機では検証できない**ので、判定を `emulated` 引数として外から与え、
+// **この describe は win32 実機では走らない**ので、判定を `emulated` 引数として外から与え、
 // platform 非依存に pin する。ここで固定できるのは「flag が落ちた platform だとしたら
 // こう振る舞う」までで、win32 の fs semantics 自体 (O_NOFOLLOW が本当に undefined か /
-// lstat が file symlink をどう報告するか) は windows runner でしか実測できない。
+// lstat が file symlink をどう報告するか) は win32-fs-semantics.test.ts が
+// windows runner で実測する (#500)。
 //
 // helper への **配線**（`readFileUtf8NoFollow` / `writeFileUtf8NoFollow` が
 // `rejectEndSymlinkWhenEmulated` を呼ぶこと）は、この describe では観測できない

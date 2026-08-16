@@ -74,6 +74,10 @@ const NOFOLLOW_OVERWRITE_FLAGS =
 // (POSIX 規定。probe で live / dangling とも EEXIST を確認済み) ので、tmp 名が衝突しても
 // 攻撃者が仕込んだ symlink を掴まされることはない。`O_NOFOLLOW` は冗長だが、この module の
 // 他の flag と揃えて「follow しない」意図を flag 側にも残す。
+//
+// **win32 は dangling symlink だけ例外** (#504、#500 の probe で実測): reparse point を
+// follow したうえで解決先が無いため `CREATE_NEW` が通り、解決先に file が作られる。live な
+// symlink は POSIX と同じく EEXIST。受容するか tmp path に `lstat` を挟むかは #504 で判断する。
 const NOFOLLOW_CREATE_EXCLUSIVE_FLAGS =
 	fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | NOFOLLOW_FLAG;
 
