@@ -300,7 +300,7 @@ describe.skipIf(process.platform === "win32")("O_NOFOLLOW を落とした module
 
 	it("emulation 下でも tmp が衝突しなければ atomic write は通る", async () => {
 		const p = join(ws.dir, "out.pdf");
-		const mod = await importWithoutNoFollow("0123456789ab");
+		const mod = await importWithoutNoFollow();
 
 		await mod.writeFileAtomicNoFollow(p, Buffer.from("created"));
 

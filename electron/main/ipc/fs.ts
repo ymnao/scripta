@@ -245,12 +245,16 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	consumeTransientWritePath(senderId, canonical);
 }
 
+// create 系 3 経路の前処理。親を作った**後**に検査する順序を 1 箇所に閉じる。逆順にすると
+// 親未存在の回は lstat が ENOENT を返すだけで末端を見ておらず、検査が空振りする。
+async function prepareCreateTarget(canonical: string): Promise<void> {
+	await fsp.mkdir(dirname(canonical), { recursive: true });
+	await rejectEndSymlinkWhenEmulated(canonical);
+}
+
 async function writeNewFileImpl(senderId: number, path: string, content: string): Promise<void> {
 	const canonical = await assertWritePathAllowed(senderId, path);
-	await fsp.mkdir(dirname(canonical), { recursive: true });
-	// 親を作った**後**に検査する。先に置くと親未作成時は lstat が ENOENT を返すだけで
-	// 末端を見ておらず、検査が空振りする。
-	await rejectEndSymlinkWhenEmulated(canonical);
+	await prepareCreateTarget(canonical);
 	const fh = await fsp.open(canonical, "wx");
 	try {
 		await fh.writeFile(content, "utf8");
@@ -296,8 +300,7 @@ async function listDirectoryImpl(
 
 async function createFileImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	await fsp.mkdir(dirname(canonical), { recursive: true });
-	await rejectEndSymlinkWhenEmulated(canonical);
+	await prepareCreateTarget(canonical);
 	try {
 		const fh = await fsp.open(canonical, "wx");
 		await fh.close();
@@ -309,12 +312,10 @@ async function createFileImpl(senderId: number, path: string): Promise<void> {
 
 async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	// 親は recursive で先に作る。対象自体は非 recursive にすることで
-	// 「既存なら EEXIST」を atomic に得る（race-free）。
-	await fsp.mkdir(dirname(canonical), { recursive: true });
-	// mkdir が末端 symlink をどう扱うかは win32 で未実測なので、`O_EXCL` と同じく
-	// guard を前置して未検証の前提に production を乗せない（doc ブロックの create 系の節）。
-	await rejectEndSymlinkWhenEmulated(canonical);
+	// 対象自体は非 recursive にすることで「既存なら EEXIST」を atomic に得る（race-free）。
+	// guard を挟むのは、mkdir が末端 symlink を win32 でどう扱うかが未実測だから
+	// （`O_EXCL` と同じく未検証の前提に production を乗せない。doc ブロックの create 系の節）。
+	await prepareCreateTarget(canonical);
 	try {
 		await fsp.mkdir(canonical);
 	} catch (e) {
