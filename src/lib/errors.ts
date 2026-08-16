@@ -24,7 +24,7 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 	ENAMETOOLONG: "ファイル名が長すぎます",
 	ENOTEMPTY: "フォルダが空ではありません",
 	EMFILE: "開いているファイルが多すぎます",
-	ELOOP: "リンクの参照先を解決できないため開けませんでした",
+	ELOOP: "リンクの参照先を解決できないため操作できませんでした",
 	// 意味的なファイル操作エラー
 	ALREADY_EXISTS: "同名のファイルが既に存在します",
 	SOURCE_NOT_FOUND: "元のファイルが見つかりません",

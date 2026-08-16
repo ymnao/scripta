@@ -210,4 +210,37 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 		);
 		expect(err?.code).toBe("ELOOP");
 	});
+
+	// `fs:create-directory` の末端に置かれうるのは file symlink ではなく junction の方
+	// (win32 で無特権に作れる)。lstat が junction をどう報告するかは上の readdir の実測
+	// (Dirent は別 syscall) からは移送されないので、guard の土台として別に測る。
+	it("rejectEndSymlinkWhenEmulated は dangling junction も ELOOP で拒否する", async () => {
+		const dangling = join(dir, "dangling-junction");
+		await fsp.symlink(join(dir, "nope-junction"), dangling, "junction");
+
+		const err = await rejectEndSymlinkWhenEmulated(dangling).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err?.code).toBe("ELOOP");
+	});
+
+	// **末端ではなく親**が dangling の場合の recursive mkdir。create 系は guard の前に
+	// `mkdir(dirname, {recursive:true})` を通るので、これが follow して解決先に dir を作ると
+	// 親が live 化し、末端の guard は ENOENT で素通りする (= 認可済み root の外へ着地しうる)。
+	// darwin では ENOTDIR で失敗し解決先に何も作られない (scratchpad の node probe で実測)。
+	// win32 は未実測なのでここで測る。期待値は「follow して作る」側 (`O_EXCL` / CREATE_NEW と
+	// 同系) に置く。赤くなれば win32 も POSIX 側だったという実測結果になる。
+	it("親が dangling symlink のときの recursive mkdir をどう扱うか", async () => {
+		const outsideParent = join(dir, "outside-parent");
+		const linkParent = join(dir, "link-parent");
+		await fsp.symlink(outsideParent, linkParent, "junction");
+
+		const err = await fsp.mkdir(join(linkParent, "child"), { recursive: true }).then(
+			() => null,
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err).toBeNull();
+		expect((await fsp.lstat(join(outsideParent, "child"))).isDirectory()).toBe(true);
+	});
 });

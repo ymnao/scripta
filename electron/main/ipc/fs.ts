@@ -245,8 +245,8 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	consumeTransientWritePath(senderId, canonical);
 }
 
-// create 系 3 経路の前処理。親を作った**後**に検査する順序を 1 箇所に閉じる。逆順にすると
-// 親未存在の回は lstat が ENOENT を返すだけで末端を見ておらず、検査が空振りする。
+// create 系 3 経路の前処理。検査を mkdir の**後**に置くのは lstat から open までの窓を
+// 縮めるため（末端に entry があるなら親も実在するので、逆順でも定常状態の検出力は同じ）。
 async function prepareCreateTarget(canonical: string): Promise<void> {
 	await fsp.mkdir(dirname(canonical), { recursive: true });
 	await rejectEndSymlinkWhenEmulated(canonical);
@@ -313,8 +313,8 @@ async function createFileImpl(senderId: number, path: string): Promise<void> {
 async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
 	// 対象自体は非 recursive にすることで「既存なら EEXIST」を atomic に得る（race-free）。
-	// guard を挟むのは、mkdir が末端 symlink を win32 でどう扱うかが未実測だから
-	// （`O_EXCL` と同じく未検証の前提に production を乗せない。doc ブロックの create 系の節）。
+	// guard を挟むのは、拒否を mkdir の platform 依存な挙動に委ねないため
+	// （`O_EXCL` と同じ posture。doc ブロックの create 系の節）。
 	await prepareCreateTarget(canonical);
 	try {
 		await fsp.mkdir(canonical);
