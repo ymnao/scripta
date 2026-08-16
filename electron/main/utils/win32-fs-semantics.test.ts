@@ -128,24 +128,29 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 		expect(await fsp.readFile(link, "utf8")).toBe("landed");
 	});
 
-	it("O_EXCL は既存 symlink を live / dangling とも EEXIST で拒否する", async () => {
-		const target = join(dir, "target.md");
-		await fsp.writeFile(target, "body", "utf8");
-		const live = join(dir, "live.tmp");
-		await fsp.symlink(target, live, "file");
+	// live / dangling を 1 本にまとめると、どちらが割れたのかが結果から読めない
+	// (実際に 1 度まとめて書いて読めなかった)。probe の目的は差の同定なので分ける。
+	async function openExclusive(path: string): Promise<NodeJS.ErrnoException | null> {
+		const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL;
+		return fsp.open(path, flags).then(
+			async (fh) => {
+				await fh.close();
+				return null;
+			},
+			(e: NodeJS.ErrnoException) => e,
+		);
+	}
+
+	it("O_EXCL は live な既存 symlink を EEXIST で拒否する", async () => {
+		const { link } = await createFileSymlink();
+
+		expect((await openExclusive(link))?.code).toBe("EEXIST");
+	});
+
+	it("O_EXCL は dangling な既存 symlink を EEXIST で拒否する", async () => {
 		const dangling = join(dir, "dangling.tmp");
 		await fsp.symlink(join(dir, "nope.md"), dangling, "file");
 
-		const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL;
-		for (const p of [live, dangling]) {
-			const err = await fsp.open(p, flags).then(
-				async (fh) => {
-					await fh.close();
-					return null;
-				},
-				(e: NodeJS.ErrnoException) => e,
-			);
-			expect(err?.code).toBe("EEXIST");
-		}
+		expect((await openExclusive(dangling))?.code).toBe("EEXIST");
 	});
 });
