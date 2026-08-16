@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import {
+	NOFOLLOW_EMULATED,
 	NOFOLLOW_READ_FLAGS,
 	readFileUtf8NoFollow,
+	rejectEndSymlinkWhenEmulated,
 	writeFileAtomicNoFollow,
 	writeFileUtf8NoFollow,
 } from "./open-nofollow";
@@ -109,6 +111,66 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 		const p = join(ws.dir, "new.md");
 		await writeFileUtf8NoFollow(p, "created");
 		expect(await fsp.readFile(p, "utf8")).toBe("created");
+	});
+});
+
+// #451: `O_NOFOLLOW` が無い platform (win32) 向けの拒否エミュレーション。
+// **win32 実機では検証できない**ので、判定を `emulated` 引数として外から与え、
+// platform 非依存に pin する。ここで固定できるのは「flag が落ちた platform だとしたら
+// こう振る舞う」までで、win32 の fs semantics 自体 (O_NOFOLLOW が本当に undefined か /
+// lstat が file symlink をどう報告するか) は windows runner でしか実測できない。
+describe.skipIf(process.platform === "win32")("rejectEndSymlinkWhenEmulated", () => {
+	let ws: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-nofollow-emul-");
+	});
+
+	afterEach(async () => {
+		await ws.cleanup();
+	});
+
+	it("この platform では emulation を使わない (lstat を払わない)", () => {
+		// O_NOFOLLOW がある platform で emulation が有効化されると、検索 scan の全 `.md` に
+		// lstat 1 回が恒常的に乗る。flag の有無と emulation の有無が連動していることを固定する。
+		expect(NOFOLLOW_EMULATED).toBe(false);
+	});
+
+	it("emulated なら末端 symlink を ELOOP で拒否する", async () => {
+		const real = join(ws.dir, "real.md");
+		await fsp.writeFile(real, "body", "utf8");
+		const alias = join(ws.dir, "alias.md");
+		await fsp.symlink(real, alias);
+
+		const err = await rejectEndSymlinkWhenEmulated(alias, true).catch(
+			(e: NodeJS.ErrnoException) => e,
+		);
+		// errno まで固定するのは、呼び手 (search.ts の分岐 3 / git:resolve-conflict) が
+		// O_NOFOLLOW の ELOOP と同じ形で受けられることが要件だから。
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+	});
+
+	it("emulated でも通常 file は通す", async () => {
+		const p = join(ws.dir, "note.md");
+		await fsp.writeFile(p, "body", "utf8");
+		await expect(rejectEndSymlinkWhenEmulated(p, true)).resolves.toBeUndefined();
+	});
+
+	it("emulated でも未存在 path は通す (open に判断を委ねる)", async () => {
+		// ここで throw に倒すと `writeFileUtf8NoFollow` の新規作成が O_CREAT の open に
+		// 到達できなくなる。lstat の失敗を拒否根拠にしないことを pin する。
+		await expect(
+			rejectEndSymlinkWhenEmulated(join(ws.dir, "nope.md"), true),
+		).resolves.toBeUndefined();
+	});
+
+	it("emulated でなければ symlink でも拒否しない (判定は open 側の責務)", async () => {
+		const real = join(ws.dir, "real2.md");
+		await fsp.writeFile(real, "body", "utf8");
+		const alias = join(ws.dir, "alias2.md");
+		await fsp.symlink(real, alias);
+
+		await expect(rejectEndSymlinkWhenEmulated(alias, false)).resolves.toBeUndefined();
 	});
 });
 

@@ -221,8 +221,10 @@ function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {
 //     follow しない性質に乗せた (utils/open-nofollow.ts の doc を参照)。
 //   - **中間 dir: 受容**。閉じるには fd 相対 traversal (POSIX `openat` / Linux `openat2` の
 //     `RESOLVE_BENEATH`) が要るが Node はどちらも expose していない (resolveInsideRoot の doc 参照)。
-// **Windows では末端側も閉じない**: `O_NOFOLLOW` が無く flag が 0 に落ちるため plain open 相当に
-// なる (#451 で追跡)。
+// **Windows の末端側は「拒否は成立するが原子的ではない」**: `O_NOFOLLOW` が無く flag が 0 に
+// 落ちるため、open の前に `lstat` を挟んで同じ拒否をエミュレートしている (#451、
+// utils/open-nofollow.ts)。閉じるのは末端 symlink の拒否までで、lstat と open の間の
+// 差し替え race は残る (POSIX は同じ拒否を open と原子的に行うのでこの窓を持たない)。
 // **realpath の鮮度**: 本 API は呼ばれるたびに fresh に realpath する (#453 で cache を撤去)。
 // symlink を retarget した直後の認可も新しい解決先で判定されるため、前回の認可結果は持ち越さない。
 // これにより ADR-0011 が「retarget 直後は両者が一時的にズレる」として受容していた窓 (検索は新しい
