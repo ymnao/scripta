@@ -236,9 +236,10 @@ async function resolveConflictImpl(
 	// 下の `writeFileUtf8NoFollow` の `O_NOFOLLOW` が同じ拒否を open と原子的に行うため、window は
 	// そちらで閉じている（#455）。win32 も同 helper が `lstat` で拒否をエミュレートするので、
 	// **拒否水準は全 platform で helper 側だけでも成立する**（#451）。それでもここを残すのは、
-	// **検査対象の path が違う**ため: ここは canonical 化前の `target` 自身の末端を見るのに対し、
-	// helper が見るのは親を canonical 化した後の `canonicalTarget`。加えて拒否理由を errno では
-	// なく文言で返す役割も持つ。
+	// **拒否を副作用の前に持ってくるため**: この後の `assertPathAllowed` と `mkdir` は
+	// helper に到達する前に走るので、ここで落とさないと拒否する write のために dir を掘る。
+	// 検査対象 entry は helper 側と同じ（親の canonical 化は末端 entry を変えない）ので、
+	// 拒否集合は広がらない — 増えるのは「別時点で 2 回見る」ことだけ。
 	try {
 		const st = await fsp.lstat(target);
 		if (st.isSymbolicLink()) {

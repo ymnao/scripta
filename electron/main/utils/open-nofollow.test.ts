@@ -1,6 +1,6 @@
 import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import {
 	NOFOLLOW_EMULATED,
@@ -120,12 +120,10 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 // こう振る舞う」までで、win32 の fs semantics 自体 (O_NOFOLLOW が本当に undefined か /
 // lstat が file symlink をどう報告するか) は windows runner でしか実測できない。
 //
-// **配線そのものは原理的に pin できない**: `readFileUtf8NoFollow` /
-// `writeFileUtf8NoFollow` が渡す第 2 引数を `NOFOLLOW_EMULATED` から `false` に変える変異は
-// この platform では **等価変異**になり survive する (emulation が off の platform では
-// 配線の有無が観測値に出ない)。呼び出し自体を消しても同じ。テストの穴ではなく、
-// 「emulation を使わない platform で emulation の配線を観測する」ことが不可能なため。
-// 実測には windows runner が要る (#451 の follow-up)。
+// helper への **配線**（`readFileUtf8NoFollow` / `writeFileUtf8NoFollow` が
+// `rejectEndSymlinkWhenEmulated` を呼ぶこと）は、この describe では観測できない
+// (emulation が off の platform では呼んでも呼ばなくても観測値が同じ)。配線は下の
+// 「O_NOFOLLOW を落とした module」の describe が pin する。
 describe.skipIf(process.platform === "win32")("rejectEndSymlinkWhenEmulated", () => {
 	let ws: TempWorkspace;
 
@@ -171,6 +169,18 @@ describe.skipIf(process.platform === "win32")("rejectEndSymlinkWhenEmulated", ()
 		).resolves.toBeUndefined();
 	});
 
+	it("emulated では ENOENT 以外の lstat 失敗を通さない", async () => {
+		// 親が通常 file の path は lstat が ENOTDIR で落ちる。ここを握り潰すと「symlink か
+		// どうか分からないまま open に進む」ので、ENOENT だけを通す narrowing を pin する。
+		const file = join(ws.dir, "not-a-dir.md");
+		await fsp.writeFile(file, "body", "utf8");
+
+		const err = await rejectEndSymlinkWhenEmulated(join(file, "child.md"), true).catch(
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect((err as NodeJS.ErrnoException).code).toBe("ENOTDIR");
+	});
+
 	it("emulated でなければ symlink でも拒否しない (判定は open 側の責務)", async () => {
 		const real = join(ws.dir, "real2.md");
 		await fsp.writeFile(real, "body", "utf8");
@@ -178,6 +188,86 @@ describe.skipIf(process.platform === "win32")("rejectEndSymlinkWhenEmulated", ()
 		await fsp.symlink(real, alias);
 
 		await expect(rejectEndSymlinkWhenEmulated(alias, false)).resolves.toBeUndefined();
+	});
+});
+
+// #451: `fs.constants` から `O_NOFOLLOW` を落とした module を読み込み、**win32 と同じ
+// 「flag が 0 に落ちた」状態**を POSIX 上で再現する。
+//
+// **これでしか pin できないもの**: helper 側の `rejectEndSymlinkWhenEmulated` 呼び出しを消す
+// 変異は、実 `node:fs` の下 (emulation が off) では観測値を変えないので survive する。flag を
+// 落とすと plain open が symlink read に成功してしまうため、配線の有無が初めて観測に出る
+// = #451 の事故そのもの (「flag が落ちた platform で symlink の内容が読めてしまう」) を pin する。
+describe.skipIf(process.platform === "win32")("O_NOFOLLOW を落とした module", () => {
+	let ws: TempWorkspace;
+	let outside: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-nofollow-drop-");
+		outside = await createCanonicalTempWorkspace("scripta-nofollow-drop-out-");
+	});
+
+	afterEach(async () => {
+		vi.doUnmock("node:fs");
+		vi.resetModules();
+		await ws.cleanup();
+		await outside.cleanup();
+	});
+
+	// `O_NOFOLLOW` だけを undefined にした `node:fs` で module を読み直す。他の constant と
+	// promises API は実物のままなので、観測される差は「flag が 0 に落ちたこと」だけになる。
+	async function importWithoutNoFollow(): Promise<typeof import("./open-nofollow")> {
+		vi.resetModules();
+		vi.doMock("node:fs", async () => {
+			const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+			return {
+				...actual,
+				constants: { ...actual.constants, O_NOFOLLOW: undefined },
+			};
+		});
+		return await import("./open-nofollow");
+	}
+
+	it("flag が落ちると emulation が有効になる", async () => {
+		const mod = await importWithoutNoFollow();
+		expect(mod.NOFOLLOW_EMULATED).toBe(true);
+		// plain open 相当に落ちたことも併せて固定する (この前提が崩れると以下の 2 件は
+		// 「O_NOFOLLOW が効いたから拒否された」と区別できなくなる)。
+		expect(mod.NOFOLLOW_READ_FLAGS).toBe(fsConstants.O_RDONLY);
+	});
+
+	it("readFileUtf8NoFollow が外部 symlink の内容を返さない", async () => {
+		const secret = join(outside.dir, "secret.txt");
+		await fsp.writeFile(secret, "SECRET", "utf8");
+		const link = join(ws.dir, "evil.md");
+		await fsp.symlink(secret, link);
+		const mod = await importWithoutNoFollow();
+
+		const err = await mod.readFileUtf8NoFollow(link).catch((e: NodeJS.ErrnoException) => e);
+		// 配線が無いと plain open が follow して "SECRET" を返す = この assert が落ちる。
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+	});
+
+	it("writeFileUtf8NoFollow が symlink の解決先を書き換えない", async () => {
+		const real = join(ws.dir, "real.md");
+		await fsp.writeFile(real, "before", "utf8");
+		const alias = join(ws.dir, "alias.md");
+		await fsp.symlink(real, alias);
+		const mod = await importWithoutNoFollow();
+
+		const err = await mod
+			.writeFileUtf8NoFollow(alias, "after")
+			.catch((e: NodeJS.ErrnoException) => e);
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
+		expect(await fsp.readFile(real, "utf8")).toBe("before");
+	});
+
+	it("emulation 下でも通常 file の read / write は通る", async () => {
+		const p = join(ws.dir, "note.md");
+		const mod = await importWithoutNoFollow();
+
+		await mod.writeFileUtf8NoFollow(p, "created");
+		expect(await mod.readFileUtf8NoFollow(p)).toBe("created");
 	});
 });
 

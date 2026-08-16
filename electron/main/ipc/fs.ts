@@ -66,7 +66,11 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 // **末端 component の pin (#418)**: canonical を渡しても I/O 側 API は path を再 traversal
 // するため、認可 (T1) と I/O (T2) の間に末端を symlink へ差し替えられる窓が残る。read
 // (`fs:read` / `fs:read-base64`) と上書き write (`fs:write`) は `O_NOFOLLOW` 付きで open した
-// fd に対して I/O し、この窓を閉じる（win32 は flag が 0 に落ちるため従来挙動、#451 で追跡）。
+// fd に対して I/O し、この窓を閉じる。**win32 は flag が 0 に落ちるため経路で水準が割れる**
+// (#451): `fs:write` は `writeFileUtf8NoFollow` 経由なので helper 内の `lstat` 拒否が効くが、
+// **read 2 本はこの直下で `NOFOLLOW_READ_FLAGS` を直接使うため対象外**。read を対象外にしたのは
+// 認可が realpath ベースで毎回 fresh (#453) なので定常状態では外部 symlink が認可段階で落ち、
+// 失うのが T1-T2 の swap 検出に限られるから（#412 で受容済みの race と同クラス）。
 //
 // **認可時点で** canonical の末端が symlink であり得るのは **`realpathBestEffort` が祖先
 // fall-through した場合、すなわち realpath がその path を解決できなかったとき**（dangling / 循環

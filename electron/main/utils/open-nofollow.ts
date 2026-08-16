@@ -21,7 +21,9 @@
 // なる。**この helper を経由しない `NOFOLLOW_READ_FLAGS` の直接利用 (fs.ts の bounded read /
 // base64 read) はエミュレーションの対象外**で、win32 では従来どおり末端 swap を検出しない。
 // そこは認可 (`assertPathAllowed`) が realpath ベースで外部を指す symlink を拒否するため
-// **内容露出は無く**、失うのは認可 (T1) から open (T2) の間の swap 検出に限られる。
+// **定常状態では内容露出が無く**、失うのは認可 (T1) から open (T2) の間の swap 検出に限られる
+// (裏を返すと、その窓で swap されれば win32 の plain open は follow して外部内容を返す。
+// 「露出しない」ではなく「窓を受容した」が実態)。
 //
 // **正常系の挙動は変わらない**: どの呼び手も「末端が symlink でない」ことを確認済みの path
 // しか渡さない (index 取り込み経路は `isIndexableResolution(resolved, ioPath) === true`、
@@ -46,6 +48,7 @@
 import { randomBytes } from "node:crypto";
 import { constants as fsConstants, promises as fsp } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { isErrnoCode } from "./fs-errors";
 
 // Windows には `O_NOFOLLOW` が無い (`fs.constants` 上 undefined になり得る) ため 0 に落とす。
 //
@@ -88,14 +91,24 @@ const NOFOLLOW_CREATE_EXCLUSIVE_FLAGS =
  * Node が Windows の `FILE_FLAG_OPEN_REPARSE_POINT` 相当を expose していないためで、受容の
  * posture は #412 と同じ (Windows の symlink 作成は既定で管理者特権または開発者モードを要する)。
  *
- * **lstat 自体の失敗は通す**: 「symlink であると積極的に観測できた」ときだけ拒否する。fail-open に
- * 見えるが、直後の open が同じ理由 (ENOENT / EACCES 等) で失敗するので拒否水準は変わらない。
- * ここで throw に倒すと、**まだ存在しない path への write** が `O_CREAT` の open に到達できず
- * 新規作成できなくなる (`writeFileUtf8NoFollow` は既存 file の上書きと新規作成の両方に使われる)。
+ * **通すのは ENOENT だけ**: lstat の失敗を一律に握り潰さない。**まだ存在しない path への write**
+ * が `O_CREAT` の open に到達できないと新規作成できなくなる (`writeFileUtf8NoFollow` は既存 file の
+ * 上書きと新規作成の両方に使われる) ため、ENOENT だけは通して open に判断を委ねる。
+ * **他の errno を通さないのは、lstat と open が別の object を見るため**: lstat は link 自身を、
+ * open は解決先を検査する。「lstat が失敗する失敗様式なら open も失敗する」は成り立たず (link 自身
+ * への deny ACE で属性読取だけ拒否される構成など)、握り潰すと symlink を検出できないまま open が
+ * 解決先を follow しうる。ENOENT 以外で fail-closed に倒しても、正常系は lstat が成功するので
+ * 観測できる差は出ない。
  */
-export async function rejectEndSymlinkWhenEmulated(path: string, emulated: boolean): Promise<void> {
+export async function rejectEndSymlinkWhenEmulated(
+	path: string,
+	emulated = NOFOLLOW_EMULATED,
+): Promise<void> {
 	if (!emulated) return;
-	const st = await fsp.lstat(path).catch(() => null);
+	const st = await fsp.lstat(path).catch((e: unknown) => {
+		if (isErrnoCode(e, "ENOENT")) return null;
+		throw e;
+	});
 	if (st?.isSymbolicLink() !== true) return;
 	const err: NodeJS.ErrnoException = new Error(`ELOOP: symbolic link encountered, open '${path}'`);
 	err.code = "ELOOP";
@@ -116,7 +129,7 @@ export async function rejectEndSymlinkWhenEmulated(path: string, emulated: boole
  * file は skip」か、上記 scan 側の解決し直しのどちらかに倒せばよい。
  */
 export async function readFileUtf8NoFollow(path: string): Promise<string> {
-	await rejectEndSymlinkWhenEmulated(path, NOFOLLOW_EMULATED);
+	await rejectEndSymlinkWhenEmulated(path);
 	const fh = await fsp.open(path, NOFOLLOW_READ_FLAGS);
 	try {
 		return await fh.readFile({ encoding: "utf8" });
@@ -135,7 +148,7 @@ export async function readFileUtf8NoFollow(path: string): Promise<string> {
  * 呼び手の契約は fs.ts の #100 コメントを参照）。
  */
 export async function writeFileUtf8NoFollow(path: string, content: string): Promise<void> {
-	await rejectEndSymlinkWhenEmulated(path, NOFOLLOW_EMULATED);
+	await rejectEndSymlinkWhenEmulated(path);
 	const fh = await fsp.open(path, NOFOLLOW_OVERWRITE_FLAGS);
 	try {
 		await fh.writeFile(content, "utf8");
