@@ -255,7 +255,10 @@ async function processMdFilesParallel(
 						// ゲート未評価 (index 未提供 / index 無効 / 既に valid)。まず O_NOFOLLOW open を
 						// 試して **その fd から読む**。成功 = 「開いた対象は symlink ではない」と「読んだ
 						// 内容」が同一 object に束ねられるので、検査と read の間に差し替える窓が存在しない
-						// (#416)。cache の有無で分けないのは、この read が **L2 admission だけでなく検索
+						// (#416)。**この原子性は `O_NOFOLLOW` がある platform に限る**: flag が落ちる
+						// win32 では helper が open 前に `lstat` を挟むエミュレーションに倒れるため
+						// (#451)、検出そのものは成立するが lstat と open の間の差し替え窓が残る。
+						// cache の有無で分けないのは、この read が **L2 admission だけでなく検索
 						// 結果の可視範囲も決める** ようになったため (#434)。syscall 数は plain read と同じ
 						// (open/read/close) なので、cache 無しの純 scan 経路に足すコストは無い。
 						try {
@@ -304,9 +307,14 @@ async function processMdFilesParallel(
 				// まで確認済みなので追加の syscall なしで判定できる。未評価の枝 (index disabled /
 				// 既に index 済みで valid / index handle 未提供) は read そのものを
 				// O_NOFOLLOW open + 同一 fd read にして、判定と内容を同じ object に束ねる。
-				// **検査した対象そのもので I/O する** ので、lstat 等の別 syscall で検査する方式に残る
+				// **検査した対象そのもので I/O する** ので、別 syscall で検査する方式に残る
 				// 「検査と read の間に差し替えられる」窓は存在しない。syscall 数も plain read と同じ
 				// (open/read/close) で、増えるのは実際に symlink だった file の失敗 open 1 回だけ。
+				// **win32 だけはこの原子性が無い** (#451): `O_NOFOLLOW` が落ちるため helper が
+				// open 前の `lstat` に倒れ、まさにその「別 syscall で検査する方式」になる。
+				// symlink の検出は成立する = 上の不変条件の **定常状態は全 platform で成り立つ**が、
+				// lstat と open の間に差し替えられた場合だけ symlink 経由の内容が L2 に載りうる
+				// (受容の根拠は ADR-0011 の Windows bullet と utils/open-nofollow.ts の doc)。
 				// **残る窓**: **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は
 				// O_NOFOLLOW でも realpath でも素通りするため両方の名前が L2 に載り、片方の名前で来た
 				// modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が別
