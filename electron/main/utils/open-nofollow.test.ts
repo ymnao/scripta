@@ -119,6 +119,13 @@ describe.skipIf(process.platform === "win32")("writeFileUtf8NoFollow / NOFOLLOW_
 // platform 非依存に pin する。ここで固定できるのは「flag が落ちた platform だとしたら
 // こう振る舞う」までで、win32 の fs semantics 自体 (O_NOFOLLOW が本当に undefined か /
 // lstat が file symlink をどう報告するか) は windows runner でしか実測できない。
+//
+// **配線そのものは原理的に pin できない**: `readFileUtf8NoFollow` /
+// `writeFileUtf8NoFollow` が渡す第 2 引数を `NOFOLLOW_EMULATED` から `false` に変える変異は
+// この platform では **等価変異**になり survive する (emulation が off の platform では
+// 配線の有無が観測値に出ない)。呼び出し自体を消しても同じ。テストの穴ではなく、
+// 「emulation を使わない platform で emulation の配線を観測する」ことが不可能なため。
+// 実測には windows runner が要る (#451 の follow-up)。
 describe.skipIf(process.platform === "win32")("rejectEndSymlinkWhenEmulated", () => {
 	let ws: TempWorkspace;
 
