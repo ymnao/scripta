@@ -14,7 +14,12 @@ import { constants as fsConstants, promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
-import { NOFOLLOW_EMULATED, readFileUtf8NoFollow, writeFileUtf8NoFollow } from "./open-nofollow";
+import {
+	NOFOLLOW_EMULATED,
+	readFileUtf8NoFollow,
+	writeFileAtomicNoFollow,
+	writeFileUtf8NoFollow,
+} from "./open-nofollow";
 
 describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#500)", () => {
 	let dir: string;
@@ -104,5 +109,43 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 		);
 		expect(err?.code).toBe("ELOOP");
 		expect(await fsp.readFile(target, "utf8")).toBe("body");
+	});
+
+	// `writeFileAtomicNoFollow` は ELOOP 拒否ではなく rename(2) / O_EXCL の semantics に
+	// 乗って境界を保つ (open-nofollow.ts の doc)。その根拠は POSIX の probe でしか
+	// 確かめられておらず、win32 の rename は MoveFileEx 系の別実装なので自動では移送されない。
+	// pdf:export として Windows にも出荷される経路なのでここで測る。
+	it("rename は destination の末端 symlink を follow せず symlink 自身を置き換える", async () => {
+		const outside = join(dir, "outside.md");
+		await fsp.writeFile(outside, "outside body", "utf8");
+		const link = join(dir, "export.pdf");
+		await fsp.symlink(outside, link, "file");
+
+		await writeFileAtomicNoFollow(link, Buffer.from("landed"));
+
+		expect(await fsp.readFile(outside, "utf8")).toBe("outside body");
+		expect((await fsp.lstat(link)).isSymbolicLink()).toBe(false);
+		expect(await fsp.readFile(link, "utf8")).toBe("landed");
+	});
+
+	it("O_EXCL は既存 symlink を live / dangling とも EEXIST で拒否する", async () => {
+		const target = join(dir, "target.md");
+		await fsp.writeFile(target, "body", "utf8");
+		const live = join(dir, "live.tmp");
+		await fsp.symlink(target, live, "file");
+		const dangling = join(dir, "dangling.tmp");
+		await fsp.symlink(join(dir, "nope.md"), dangling, "file");
+
+		const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL;
+		for (const p of [live, dangling]) {
+			const err = await fsp.open(p, flags).then(
+				async (fh) => {
+					await fh.close();
+					return null;
+				},
+				(e: NodeJS.ErrnoException) => e,
+			);
+			expect(err?.code).toBe("EEXIST");
+		}
 	});
 });
