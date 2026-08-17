@@ -41,7 +41,7 @@
 		"chokidar": "^5.0.0",
 		"dompurify": "^3.4.13",
 		"js-yaml": "^5.2.3",
-		"katex": "^0.18.1",
+		"katex": "^0.18.4",
 		"lucide-react": "^1.31.0",
 		"marked": "^18.0.9",
 		"mermaid": "^11.16.1",
