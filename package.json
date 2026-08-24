@@ -66,14 +66,14 @@
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.4",
 		"@types/write-file-atomic": "^4.0.3",
-		"@vitejs/plugin-react": "^6.0.5",
+		"@vitejs/plugin-react": "^6.1.0",
 		"electron": "^43.3.0",
 		"electron-builder": "26.15.3",
 		"electron-vite": "^5.0.0",
 		"jsdom": "^30.0.1",
 		"tailwindcss": "^4.3.3",
 		"typescript": "~7.0.2",
-		"vite": "^8.2.1",
+		"vite": "^8.2.2",
 		"vitest": "^4.1.10"
 	}
 }
