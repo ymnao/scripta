@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { SearchResult } from "../../types/search";
 
@@ -7,8 +7,18 @@ vi.mock("../../lib/commands", () => ({
 	cancelSearch: vi.fn().mockResolvedValue(undefined),
 }));
 
+const { STEP } = vi.hoisted(() => ({ STEP: 5 }));
+
+// 実値 500 のまま描画すると 1 テストあたり 500-700 行の実描画で 1s 級になり、
+// フルスイートの CPU 競合下で testTimeout に届く (#501)。段階表示の性質は
+// step に対して parametric なので、小さい値を注入して同じ性質を pin する。
+vi.mock("../../types/search", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../types/search")>();
+	return { ...actual, MATCH_DISPLAY_STEP: STEP };
+});
+
 const { searchFiles } = await import("../../lib/commands");
-const { MATCH_DISPLAY_STEP, SearchPanel, sliceGroupedResults } = await import("./SearchPanel");
+const { SearchPanel, sliceGroupedResults } = await import("./SearchPanel");
 
 const mockedSearchFiles = searchFiles as Mock;
 
@@ -70,12 +80,23 @@ describe("sliceGroupedResults", () => {
 	});
 
 	it("空の結果では visible も空になる", () => {
-		expect(sliceGroupedResults([], MATCH_DISPLAY_STEP)).toEqual([]);
+		expect(sliceGroupedResults([], 5)).toEqual([]);
 	});
+});
+
+// テストが production の MATCH_DISPLAY_STEP を import せず test 固有の STEP を
+// 使うのは、import すると注入が効かなくなったとき期待値も 500 に追随して
+// 「500 行描画のまま pass」してしまい、再発が観測に出ないため。注入で隠れる
+// 実値そのものは、この it だけが mock を迂回して pin する。
+it("MATCH_DISPLAY_STEP の production 実値は 500", async () => {
+	const actual = await vi.importActual<typeof import("../../types/search")>("../../types/search");
+
+	expect(actual.MATCH_DISPLAY_STEP).toBe(500);
 });
 
 describe("SearchPanel の段階表示", () => {
 	beforeEach(() => {
+		vi.useFakeTimers();
 		vi.clearAllMocks();
 	});
 
@@ -83,84 +104,79 @@ describe("SearchPanel の段階表示", () => {
 		return render(<SearchPanel workspacePath={WORKSPACE} onNavigate={vi.fn()} />);
 	}
 
-	function search(query: string): void {
+	async function search(query: string): Promise<void> {
 		fireEvent.change(screen.getByRole("textbox", { name: "ワークスペース内を検索" }), {
 			target: { value: query },
 		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(300);
+		});
 	}
 
-	it("初回描画は MATCH_DISPLAY_STEP 件までで、残件数がボタンに出る", async () => {
+	it("初回描画は 1 単位までで、残件数がボタンに出る", async () => {
 		mockedSearchFiles.mockResolvedValue({
-			results: results("/workspace/big.md", MATCH_DISPLAY_STEP + 200),
+			results: results("/workspace/big.md", STEP + 2),
 			truncated: false,
 		});
 		renderPanel();
 
-		search("match");
+		await search("match");
 
-		await waitFor(() => {
-			expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP);
-		});
-		expect(screen.getByRole("button", { name: "さらに表示 (残り 200 件)" })).toBeTruthy();
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
+		expect(screen.getByRole("button", { name: "さらに表示 (残り 2 件)" })).toBeTruthy();
 	});
 
-	it("件数表示と打ち切り notice は先頭 500 件と同時に見えている", async () => {
+	it("件数表示と打ち切り notice は初回分と同時に見えている", async () => {
 		mockedSearchFiles.mockResolvedValue({
-			results: results("/workspace/big.md", 10_000),
+			results: results("/workspace/big.md", STEP + 1),
 			truncated: true,
 		});
 		renderPanel();
 
-		search("match");
+		await search("match");
 
-		await waitFor(() => {
-			expect(screen.getByText("1 ファイル中 10000 件")).toBeTruthy();
-		});
+		expect(screen.getByText(`1 ファイル中 ${STEP + 1} 件`)).toBeTruthy();
 		expect(screen.getByText("結果が多すぎるため 10,000 件で打ち切りました")).toBeTruthy();
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP);
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
 
 	it("「さらに表示」を押すと描画数が増え、全件出るとボタンが消える", async () => {
 		mockedSearchFiles.mockResolvedValue({
-			results: results("/workspace/big.md", MATCH_DISPLAY_STEP + 200),
+			results: results("/workspace/big.md", STEP + 2),
 			truncated: false,
 		});
 		renderPanel();
 
-		search("match");
-		await waitFor(() => {
-			expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP);
-		});
+		await search("match");
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 
-		fireEvent.click(screen.getByRole("button", { name: "さらに表示 (残り 200 件)" }));
+		fireEvent.click(screen.getByRole("button", { name: "さらに表示 (残り 2 件)" }));
 
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP + 200);
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP + 2);
 		expect(screen.queryByRole("button", { name: /さらに表示/ })).toBeNull();
 	});
 
 	it("新しい検索の結果では表示件数が初期値に戻る", async () => {
 		mockedSearchFiles.mockResolvedValue({
-			results: results("/workspace/big.md", MATCH_DISPLAY_STEP * 3),
+			results: results("/workspace/big.md", STEP * 3),
 			truncated: false,
 		});
 		renderPanel();
 
-		search("match");
-		await waitFor(() => {
-			expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP);
-		});
+		await search("match");
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 		fireEvent.click(screen.getByRole("button", { name: /さらに表示/ }));
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP * 2);
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP * 2);
 
+		// 2 回目の総件数を STEP より大きく置くのは、STEP 以下だとリセットの有無に
+		// かかわらず全件描画になり、描画件数で区別できなくなるため。
 		mockedSearchFiles.mockResolvedValue({
-			results: results("/workspace/other.md", MATCH_DISPLAY_STEP + 200),
+			results: results("/workspace/other.md", STEP + 2),
 			truncated: false,
 		});
-		search("other");
+		await search("other");
 
-		await waitFor(() => {
-			expect(screen.getByText("1 ファイル中 700 件")).toBeTruthy();
-		});
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(MATCH_DISPLAY_STEP);
+		expect(screen.getByText(`1 ファイル中 ${STEP + 2} 件`)).toBeTruthy();
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
 });
