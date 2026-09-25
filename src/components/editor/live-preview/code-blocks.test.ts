@@ -138,13 +138,18 @@ describe("blockquote 内のコードブロック", () => {
 	it("同一行に blockquote と codeblock の line class が両方付く", () => {
 		const doc = ["> quote", `> ${FENCE}js`, "> const a = 1;", `> ${FENCE}`, "> quote"].join("\n");
 		const view = mountEditorView(doc, [blockquoteDecoration, codeBlockDecoration], 0);
-		const classes = [...view.contentDOM.querySelectorAll(".cm-line")].map((el) => el.className);
-		expect(classes).toEqual([
-			"cm-line cm-blockquote-line",
-			"cm-line cm-blockquote-line cm-codeblock-line",
-			"cm-line cm-blockquote-line cm-codeblock-line",
-			"cm-line cm-blockquote-line cm-codeblock-line",
-			"cm-line cm-blockquote-line",
+		// class の連結順は extension の登録順 (combineAttrs) で決まり production とは
+		// 逆になりうるので、順序ではなく各行が持つクラスの真偽だけを見る。
+		const marks = [...view.contentDOM.querySelectorAll(".cm-line")].map((el) => ({
+			blockquote: el.classList.contains("cm-blockquote-line"),
+			codeblock: el.classList.contains("cm-codeblock-line"),
+		}));
+		expect(marks).toEqual([
+			{ blockquote: true, codeblock: false },
+			{ blockquote: true, codeblock: true },
+			{ blockquote: true, codeblock: true },
+			{ blockquote: true, codeblock: true },
+			{ blockquote: true, codeblock: false },
 		]);
 	});
 });
