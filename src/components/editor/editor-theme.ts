@@ -198,15 +198,32 @@ export const staticEditorTheme = EditorView.theme({
 		color: "var(--color-text-secondary)",
 		fontSize: "0.85em",
 	},
+	// 背景は .cm-line 自身ではなく擬似要素に描く。background-clip: content-box で
+	// horizontal padding へのはみ出しを抑える方式だと、.cm-line の vertical padding
+	// (1px, dynamic theme) まで同時にクリップされ、行ごとに 2px の隙間が入って
+	// コードブロックが行単位に分割されて見える。
+	// ::before ではなく ::after なのは、blockquote 内のコードブロック行が
+	// .cm-blockquote-line と .cm-codeblock-line の両方を持ち (両 plugin が独立に
+	// Decoration.line を付ける)、::before は .cm-blockquote-line の罫線が使っている
+	// ため。同じ擬似要素を奪い合うと罫線と背景が同時に壊れる。
 	".cm-codeblock-line": {
-		backgroundColor: "var(--color-bg-secondary)",
 		fontFamily: FONT_FAMILY_MAP.monospace,
-		// .cm-line の horizontal padding 領域に背景がはみ出すのを content-box にクリップ。
-		// 全ての editor で lineWrapping 有効前提 (long line が横スクロールしないため
-		// content-box が常に viewport 幅と一致)。lineWrapping を切ると長い行の背景が
-		// 切れて見える可能性あり。
-		backgroundOrigin: "content-box",
-		backgroundClip: "content-box",
+		position: "relative",
+		// z-index: -1 の ::after を行内に閉じ込め、.cm-scroller の負 z-index 層
+		// (selection layer 等) と混ざらないようにする stacking context。
+		isolation: "isolate",
+	},
+	".cm-codeblock-line::after": {
+		content: '""',
+		position: "absolute",
+		// absolute の包含ブロックは padding box なので top/bottom: 0 が vertical padding
+		// を含み、隣接行の背景と連続する。左右は horizontal padding 分だけ内側へ。
+		top: "0",
+		bottom: "0",
+		left: "var(--cm-horizontal-padding, 0px)",
+		right: "var(--cm-horizontal-padding, 0px)",
+		backgroundColor: "var(--color-bg-secondary)",
+		zIndex: "-1",
 	},
 	".cm-codeblock-copy-anchor": {
 		position: "relative",
