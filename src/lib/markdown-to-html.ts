@@ -458,7 +458,10 @@ export function markdownToHtmlRaw(
 	// placeholder のまま残すと sanitize 後の文字列復元で KaTeX HTML が属性内に
 	// 展開されて HTML が壊れる（テキスト文脈でない場所に math placeholder を
 	// 残してはならない）。
-	marked.walkTokens(tokens, (token) => {
+	// void 明示: callback は同期だが walkTokens の戻り値型は `MaybePromise[]` 固定で、
+	// noFloatingPromises が「未処理の Promise 配列」として検出する
+	// (biome 2.5.11 以降この呼び出しを型解決するようになった。2026-09-26 実測)。
+	void marked.walkTokens(tokens, (token) => {
 		if (token.type !== "image") return;
 		const img = token as Tokens.Image;
 		img.tokens = img.tokens.map((t: Token) => {
