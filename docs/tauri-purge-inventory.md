@@ -260,7 +260,7 @@ WKWebView の drawSelection 描画バグ回避用 (`.cm-selectionBackground` が
 | `src/components/layout/NewTabContent.tsx` | 51-52 | `WebkitBackgroundClip` / `WebkitTextFillColor` | gradient text、保持 |
 | `src/lib/export.ts` | 423 | `-webkit-print-color-adjust: exact` | 印刷時の色保持、必須、保持 |
 
-`src/lib/export.ts:496` — `:has()` 古い WebKit 対応の言及。Chromium 105+ で `:has()` 利用可。同梱 Chromium 版は `electron.vite.config.ts` の `RENDERER_TARGET` が正本で、105 を大きく上回るため完全対応。**Phase 6** (ビルド最適化) で `:has(input)` selector ベースに書き換え検討。
+`src/lib/export.ts:292` — `:has()` 古い WebKit 対応の言及。Chromium 105+ で `:has()` 利用可。同梱 Chromium 版は CLAUDE.md「build target の明示」節を参照（105 を大きく上回るため完全対応）。**Phase 6** (ビルド最適化) で `:has(input)` selector ベースに書き換え検討。
 
 ---
 

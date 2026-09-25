@@ -84,9 +84,9 @@ electron 42.0.0 で npm パッケージの `postinstall` script が削除され�
 
 #### 3. build target の明示（stale な node target fallback への対応）
 
-`electron-vite@5.0.0` の `getElectronNodeTarget()` / `getElectronChromeTarget()` は Electron 39 までしか electron→node / electron→chromium のマップを持たず、42+ では `node16.17` / `chrome108` へ stale fallback する（過度な down-level transpile）。`electron.vite.config.ts` で main / preload に `target: "node24"`（Electron 44 同梱 Node は v24 系）、renderer に `target: "chrome152"`（Electron 44 = Chromium 152）を明示してこれを矯正している。版の出所は `electron/electron` の `DEPS` を tag 指定で取得したもので、v44.4.3 時点の `chromium_version` = 152.0.7977.130 / `node_version` = v24.21.0。`engines.node`（npm script を回すホスト Node 条件）は Electron 同梱の runtime Node 版とは別物である点に注意。
+`electron-vite@5.0.0` の `getElectronNodeTarget()` / `getElectronChromeTarget()` は Electron 39 までしか electron→node / electron→chromium のマップを持たず、42+ では `node16.17` / `chrome108` へ stale fallback する（過度な down-level transpile）。`electron.vite.config.ts` で main / preload に `target: "node24"`（Electron 44 同梱 Node は v24 系）、renderer に `target: "chrome152"`（Electron 44 = Chromium 152）を明示してこれを矯正している。実測値は `electron.vite.config.ts` の定数直上コメント、確認手順は本節末尾が正本。`engines.node`（npm script を回すホスト Node 条件）は Electron 同梱の runtime Node 版とは別物である点に注意。
 
-renderer は `esnext` ではなく**実 Chromium 版**（`chrome152`）を指す点が重要。`esnext` は「esbuild が最新扱いする構文を極力変換しない」指定なので、将来構文が依存や自前コードに混入すると build は通っても Electron 44 の実行時に parse error になり得る。固定 Chromium に対応するバージョンを明示することで、その範囲へ確実に down-level させる。
+renderer は `esnext` ではなく**実 Chromium 版**（`chrome152`）を指す点が重要。`esnext` は「最新扱いされる構文を極力変換しない」指定なので、将来構文が依存や自前コードに混入すると build は通っても Electron 44 の実行時に parse error になり得る。固定 Chromium に対応するバージョンを明示することで、その範囲へ確実に down-level させる。
 
 `NODE_TARGET` / `RENDERER_TARGET` は `package.json` の electron version と独立してメンテされるため、**Electron をアップグレードする際は** electron-vite が新バージョンの Node / Chromium を内部マップに追加済みかを確認し、未対応なら両定数を新 Electron 同梱の Node / Chromium に追従させる。同梱版は `electron/electron` の `DEPS` を対象 tag で取得し `chromium_version` / `node_version` を読むのが一次情報（`electron-to-chromium` は補助）。
 
