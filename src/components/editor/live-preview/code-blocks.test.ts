@@ -1,11 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { buildDecorations } from "./code-blocks";
+import { afterEach, describe, expect, it } from "vitest";
+import { blockquoteDecoration } from "./blockquotes";
+import { buildDecorations, codeBlockDecoration } from "./code-blocks";
 import {
+	cleanupMountedViews,
 	collectDecorations,
 	createViewForTest,
 	lineDecorations,
+	mountEditorView,
 	replaceDecorations,
 } from "./test-helper";
+
+const FENCE = "```";
 
 describe("buildDecorations", () => {
 	it("creates line decorations for all lines including fences", () => {
@@ -121,5 +126,25 @@ describe("buildDecorations", () => {
 		const view = createViewForTest("hello world\n\nno code here");
 		const decos = collectDecorations(buildDecorations(view));
 		expect(decos).toHaveLength(0);
+	});
+});
+
+describe("blockquote 内のコードブロック", () => {
+	afterEach(cleanupMountedViews);
+
+	// theme 側が .cm-codeblock-line の背景を ::after に描く根拠となる事実。
+	// 両 plugin が独立に Decoration.line を付けるため同一 .cm-line が両クラスを持ち、
+	// 擬似要素を共有すると blockquote の罫線 (::before) と奪い合って両方壊れる。
+	it("同一行に blockquote と codeblock の line class が両方付く", () => {
+		const doc = ["> quote", `> ${FENCE}js`, "> const a = 1;", `> ${FENCE}`, "> quote"].join("\n");
+		const view = mountEditorView(doc, [blockquoteDecoration, codeBlockDecoration], 0);
+		const classes = [...view.contentDOM.querySelectorAll(".cm-line")].map((el) => el.className);
+		expect(classes).toEqual([
+			"cm-line cm-blockquote-line",
+			"cm-line cm-blockquote-line cm-codeblock-line",
+			"cm-line cm-blockquote-line cm-codeblock-line",
+			"cm-line cm-blockquote-line cm-codeblock-line",
+			"cm-line cm-blockquote-line",
+		]);
 	});
 });

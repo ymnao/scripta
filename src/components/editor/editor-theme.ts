@@ -198,18 +198,22 @@ export const staticEditorTheme = EditorView.theme({
 		color: "var(--color-text-secondary)",
 		fontSize: "0.85em",
 	},
-	// 背景は .cm-line 自身ではなく ::before に描く。background-clip: content-box で
+	// 背景は .cm-line 自身ではなく擬似要素に描く。background-clip: content-box で
 	// horizontal padding へのはみ出しを抑える方式だと、.cm-line の vertical padding
 	// (1px, dynamic theme) まで同時にクリップされ、行ごとに 2px の隙間が入って
 	// コードブロックが行単位に分割されて見える。
+	// ::before ではなく ::after なのは、blockquote 内のコードブロック行が
+	// .cm-blockquote-line と .cm-codeblock-line の両方を持ち (両 plugin が独立に
+	// Decoration.line を付ける)、::before は .cm-blockquote-line の罫線が使っている
+	// ため。同じ擬似要素を奪い合うと罫線と背景が同時に壊れる。
 	".cm-codeblock-line": {
 		fontFamily: FONT_FAMILY_MAP.monospace,
 		position: "relative",
-		// z-index: -1 の ::before を .cm-line の外 (editor 背景の裏) へ落とさないための
-		// stacking context。
+		// z-index: -1 の ::after を行内に閉じ込め、.cm-scroller の負 z-index 層
+		// (selection layer 等) と混ざらないようにする stacking context。
 		isolation: "isolate",
 	},
-	".cm-codeblock-line::before": {
+	".cm-codeblock-line::after": {
 		content: '""',
 		position: "absolute",
 		// absolute の包含ブロックは padding box なので top/bottom: 0 が vertical padding
