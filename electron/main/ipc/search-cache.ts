@@ -159,13 +159,12 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
 	const epochBefore = e.state.epoch;
-	applyBatchToState(e.state, batch, canonicalRoot);
+	// 各消費点で filter すると、消費点を足すたびに当て忘れ = #396 と同型の非対称を作れて
+	// しまう。入口で 1 回だけ落として以降は「filter 済み batch を処理する」に統一する。
+	const visible = batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path));
+	applyBatchToState(e.state, visible);
 	let shouldBumpL2 = false;
-	for (const ev of batch) {
-		// key 単位では no-op なので L1 の filter だけで足りるように見えるが、それでは
-		// shouldBumpL2 が立ち続けて `.scripta/scratchpads/*.md` の保存ごとに l2Generation が
-		// 進み、in-flight の L2 set が捨てられる。
-		if (isUnderMdWalkSkippedPath(canonicalRoot, ev.path)) continue;
+	for (const ev of visible) {
 		const isMd = ev.path.endsWith(".md");
 		if (isMd) {
 			if (ev.kind === "create") continue; // 新規 file → race 対象外

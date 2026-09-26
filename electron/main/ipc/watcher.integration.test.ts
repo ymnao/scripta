@@ -246,4 +246,21 @@ describe("watcher.ts: symlinked workspace", () => {
 			]);
 		},
 	);
+
+	it.skipIf(process.platform === "win32")(
+		"converts paths under a directory whose name starts with two dots",
+		async () => {
+			// root 外判定を `rel.startsWith("..")` で書くと `..foo` が root 外に化けて
+			// canonical のまま renderer へ渡り、開いているタブとの path 比較が外れる。
+			const start = getHandler("watcher:start");
+			await start({ sender: webContents }, symlinkDir);
+
+			createdWatchers[0].emit("add", join(canonicalRealDir, "..foo", "a.md"));
+			await vi.advanceTimersByTimeAsync(600);
+
+			expect(webContents.send).toHaveBeenCalledWith("watcher:fs-change", [
+				{ kind: "create", path: join(symlinkDir, "..foo", "a.md") },
+			]);
+		},
+	);
 });

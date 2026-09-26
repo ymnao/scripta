@@ -52,9 +52,7 @@ export function setCacheFiles(state: FileListCacheState, files: readonly string[
 //     watcher.ts:94-98 は addDir/unlinkDir も同じ FsKind に畳んでおり、
 //     batch payload からは file / dir を区別できないための安全側倒し。
 //   - 非 `.md` modify と `.md` modify は無視 (Phase A の files 集合には影響しない)。
-//   - canonicalRoot からの相対パスに walk の skip 対象 component (`.` 始まり / `node_modules`)
-//     を含む event は kind / 拡張子を問わず無視 (#396)。files 集合の不変条件は
-//     「= walkMdFiles の結果」で、walk はそれらの配下を再帰しないため。
+//   - walk の skip 対象 path は呼び出し側 (applyFsBatch) が batch ごと落としてから渡す (#396)。
 // 構造的変化 (create/delete のうち集合に効いたもの、および full invalidate) があれば
 // epoch を +1 し、派生物 3 つを dirty にする。
 // state.files が null の間 (populate 進行中 or 既 invalidate) でも create/delete イベントは
@@ -63,15 +61,11 @@ export function setCacheFiles(state: FileListCacheState, files: readonly string[
 export function applyBatchToState(
 	state: FileListCacheState,
 	batch: ReadonlyArray<FsChangeEvent>,
-	canonicalRoot: string,
 ): void {
 	let shouldBump = false;
 	for (const ev of batch) {
 		// modify は Phase A の files 集合に影響しない (.md / 非 .md いずれも無視)。
 		if (ev.kind === "modify") continue;
-		// watcher 側 (isWatcherIgnored) で除外しないのは、hidden path の変更を renderer へ
-		// 届ける責務がそちらに在るため (`.scripta/scratchpads/*.md` は開いて編集され得る)。
-		if (isUnderMdWalkSkippedPath(canonicalRoot, ev.path)) continue;
 		if (state.files === null) {
 			// populate 進行中 or 既 full-invalidate: 追記はできないが「変化があった」信号として
 			// epoch を進める (populate 完了時の epoch guard を作動させる)。
