@@ -15,6 +15,7 @@ import {
 	getExistingStems,
 	getFileMap,
 	getSortedFiles,
+	isUnderMdWalkSkippedPath,
 	setCacheFiles,
 	sortWalkResult,
 } from "../utils/search-cache-pure";
@@ -138,11 +139,13 @@ export function releaseFileListCache(canonicalRoot: string): void {
 //   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
 // **generation bump は evict の成否ではなく「invalidation の意図」で判定する**。
 // 具体的には .md modify/delete および非 .md create/delete/modify の全てで bump する
+// (walk の skip 対象 path は下記 #396 の例外として bump しない)
 // (.md create のみ bump しない — 新規 file なので進行中の scan の in-flight read と競合しない)。
 // これは「L2 miss で readFile 中の file 自身が modify された」ケース = 本命の
 // stale-insert race を防ぐため。delete 成否で判定すると、cache に無い (=まさに読み中の)
 // key に対する modify で generation が進まず、readFile 完了時の set が古い text を格納する。
 // Phase A の applyBatchToState が files === null 中も epoch を bump する保守側倒しと同方針。
+// walk の skip 対象 path は L1 / L2 / L3 のいずれも無視する (#396)。
 // inputFileMapMemo は epoch 依存なので、L1 側で epoch が進んだかを比較して invalidate する。
 // **非責務 (#406)**: symlink target の rewire に対する realpath の鮮度はこの層では扱わない
 // (batch 由来の invalidation では取りこぼす — 理由は path-guard の resolveInsideRoot の doc 参照)。
@@ -156,9 +159,12 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
 	const epochBefore = e.state.epoch;
-	applyBatchToState(e.state, batch);
+	// 各消費点で filter すると、消費点を足すたびに当て忘れ = #396 と同型の非対称を作れて
+	// しまう。入口で 1 回だけ落として以降は「filter 済み batch を処理する」に統一する。
+	const visible = batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path));
+	applyBatchToState(e.state, visible);
 	let shouldBumpL2 = false;
-	for (const ev of batch) {
+	for (const ev of visible) {
 		const isMd = ev.path.endsWith(".md");
 		if (isMd) {
 			if (ev.kind === "create") continue; // 新規 file → race 対象外

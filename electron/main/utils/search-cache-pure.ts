@@ -1,6 +1,18 @@
 import { basename, sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
+import { relComponentsUnderRoot } from "./root-relative-path";
 import { byteCmp } from "./search-pure";
+
+export function isMdWalkSkippedName(name: string): boolean {
+	return name.startsWith(".") || name === "node_modules";
+}
+
+// canonicalRoot 自身と canonicalRoot 外は false。後者は呼び出し契約 (canonical batch は
+// 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来どおりの
+// add / delete / invalidate に落とす。
+export function isUnderMdWalkSkippedPath(canonicalRoot: string, absPath: string): boolean {
+	return relComponentsUnderRoot(canonicalRoot, absPath)?.some(isMdWalkSkippedName) === true;
+}
 
 // canonical `.md` パス集合を single source of truth とし、
 // query 側が使う派生物 (sorted / fileMap / existingStems) を lazy に構築する。
@@ -40,6 +52,7 @@ export function setCacheFiles(state: FileListCacheState, files: readonly string[
 //     watcher.ts:94-98 は addDir/unlinkDir も同じ FsKind に畳んでおり、
 //     batch payload からは file / dir を区別できないための安全側倒し。
 //   - 非 `.md` modify と `.md` modify は無視 (Phase A の files 集合には影響しない)。
+//   - walk の skip 対象 path は呼び出し側 (applyFsBatch) が batch ごと落としてから渡す (#396)。
 // 構造的変化 (create/delete のうち集合に効いたもの、および full invalidate) があれば
 // epoch を +1 し、派生物 3 つを dirty にする。
 // state.files が null の間 (populate 進行中 or 既 invalidate) でも create/delete イベントは

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { relative, sep } from "node:path";
 import type { FsKind } from "../../../src/types/workspace";
+import { relComponentsUnderRoot } from "./root-relative-path";
 
 export type { FsKind };
 
@@ -17,14 +17,16 @@ export type { FsKind };
 // ノートが発生するケースは通常なく、過剰除外は実害なしと判断（`.git` と同じ扱い）。
 // `.gitignore` や `.scripta/scratchpads/*.md` のような hidden path は通常通り監視する
 // （ユーザーが開いて編集する可能性がある）。
+// 述語を module top-level に置くのは、chokidar の ignored callback が全 raw fs event ごとに
+// isWatcherIgnored を呼ぶため。inline arrow だと呼び出しごとに closure が 1 個 allocate される。
+function isIgnoredComponent(part: string): boolean {
+	return part === ".git" || part === "node_modules";
+}
+
 export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolean {
-	const rel = relative(canonicalRoot, absPath);
-	if (rel === "") return false;
-	if (rel === ".." || rel.startsWith(`..${sep}`)) return false;
-	for (const part of rel.split(sep)) {
-		if (part === ".git" || part === "node_modules") return true;
-	}
-	return false;
+	const components = relComponentsUnderRoot(canonicalRoot, absPath);
+	if (components === null) return false;
+	return components.some(isIgnoredComponent);
 }
 
 // 新しい event kind を pending Map にマージする。状態遷移ルール：

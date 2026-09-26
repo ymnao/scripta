@@ -11,6 +11,7 @@ import {
 	getExistingStems,
 	getFileMap,
 	getSortedFiles,
+	isUnderMdWalkSkippedPath,
 	setCacheFiles,
 } from "../utils/search-cache-pure";
 import {
@@ -135,6 +136,88 @@ describe("search-cache-pure: applyBatchToState", () => {
 	});
 });
 
+describe("search-cache-pure: isUnderMdWalkSkippedPath", () => {
+	it("treats a dot-dir directly under root as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p(".scripta/a.md"))).toBe(true);
+	});
+
+	it("treats a dot-dir nested below root as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/.hidden/a.md"))).toBe(true);
+	});
+
+	it("treats node_modules as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("node_modules/x/a.md"))).toBe(true);
+	});
+
+	it("treats a dotfile leaf as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/.draft.md"))).toBe(true);
+	});
+
+	it("treats a leaf whose name starts with two dots as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("..foo/a.md"))).toBe(true);
+	});
+
+	it("does not skip a plain nested .md", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/a.md"))).toBe(false);
+	});
+
+	it("does not skip a directory whose name merely starts with node_modules", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("node_modules_bak/a.md"))).toBe(false);
+	});
+
+	it("does not skip the root itself", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, ROOT)).toBe(false);
+	});
+
+	it("does not skip a path outside the root", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws${sep}other${sep}a.md`)).toBe(false);
+	});
+
+	it("does not skip the parent directory of the root", () => {
+		// rel が `..` そのものになる唯一の入力。これが無いと `rel === ".."` ガードを落としても
+		// 全 case が通る (`/ws/other/a.md` は startsWith(`../`) 側で弾かれるため)。
+		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws`)).toBe(false);
+	});
+
+	it("does not skip when the root itself lives under a dot-dir", () => {
+		const hiddenRoot = `${sep}ws${sep}.vault`;
+		expect(isUnderMdWalkSkippedPath(hiddenRoot, `${hiddenRoot}${sep}a.md`)).toBe(false);
+	});
+});
+
+describe("search-cache: applyFsBatch skips walk-excluded paths (#396)", () => {
+	it("ignores hidden .md create so L1 stays identical to a cold walk", async () => {
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		applyFsBatch(ROOT, [{ kind: "create", path: p(".scripta/scratchpads/s.md") }]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md")]);
+	});
+
+	it("ignores non-.md create under a dot-dir instead of full-invalidating", async () => {
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		applyFsBatch(ROOT, [{ kind: "create", path: p(".scripta/foo.txt") }]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md")]);
+	});
+
+	it("ignores node_modules create instead of full-invalidating", async () => {
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		applyFsBatch(ROOT, [{ kind: "create", path: p("node_modules/pkg/readme.md") }]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md")]);
+	});
+
+	it("applies the visible .md of a mixed batch and drops the hidden one", async () => {
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		applyFsBatch(ROOT, [
+			{ kind: "create", path: p(".scripta/s.md") },
+			{ kind: "create", path: p("b.md") },
+		]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md"), p("b.md")]);
+	});
+});
+
 describe("search-cache-pure: derived builders", () => {
 	it("buildFileMapFrom picks lexicographically smallest path per stem", () => {
 		const map = buildFileMapFrom([p("z/foo.md"), p("a/foo.md"), p("m/foo.md")]);
@@ -227,6 +310,21 @@ describe("search-cache: applyFsBatch", () => {
 		const re = await populateFileListCache(ROOT, async () => [p("a.md"), p("b.md")]);
 		expect(re).toEqual([p("a.md"), p("b.md")]);
 		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md"), p("b.md")]);
+	});
+
+	it("leaves L1 and its epoch-derived memo untouched for hidden events (#396)", async () => {
+		// epoch が進んでいないことを、files の不変ではなく inputFileMapMemo の identity
+		// 保持で観測する (epoch が進めば別 Map になる)。
+		const INPUT_ROOT = `${sep}ws${sep}alias`;
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		const m1 = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		applyFsBatch(ROOT, [
+			{ kind: "create", path: p(".scripta/scratchpads/s.md") },
+			{ kind: "create", path: p(".scripta/foo.txt") },
+		]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md")]);
+		expect(getCachedInputFileMap(ROOT, INPUT_ROOT)).toBe(m1);
 	});
 });
 
@@ -526,6 +624,16 @@ describe("search-cache: L2 ContentCache", () => {
 			h?.set(p("a.md"), "aaa", h.generation);
 			const genBefore = h?.generation ?? 0;
 			applyFsBatch(ROOT, [{ kind: "create", path: p("b.md") }]);
+			expect(h?.get(p("a.md"))).toBe("aaa");
+			expect(h?.generation).toBe(genBefore);
+		});
+
+		it("does not bump generation for a walk-skipped path (#396)", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("a.md"), "aaa", h.generation);
+			const genBefore = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "modify", path: p(".scripta/scratchpads/s.md") }]);
 			expect(h?.get(p("a.md"))).toBe("aaa");
 			expect(h?.generation).toBe(genBefore);
 		});

@@ -321,8 +321,9 @@ function installApiMock(opts: {
 		const out: string[] = [];
 		const entries = store.directories[dirPath] ?? [];
 		for (const e of entries) {
-			// 本番 (electron/main/ipc/search.ts walkMdFiles) と同じく `.` 始まりと
-			// `node_modules` は早期 skip。隠しディレクトリ・依存パッケージの中身は再帰しない。
+			// 本番 (electron/main/utils/search-cache-pure.ts isMdWalkSkippedName) と同じく
+			// `.` 始まりと `node_modules` は早期 skip。隠しディレクトリ・依存パッケージの
+			// 中身は再帰しない。
 			if (e.name.startsWith(".") || e.name === "node_modules") continue;
 			if (e.isDirectory) out.push(...collectMdFiles(e.path));
 			else if (e.name.endsWith(".md")) out.push(e.path);
