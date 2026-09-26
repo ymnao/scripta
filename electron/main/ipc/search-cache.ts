@@ -7,6 +7,7 @@ import {
 	InvertedIndex,
 	verifyIndexSuperset,
 } from "../utils/inverted-index";
+import { relComponentsUnderRoot } from "../utils/root-relative-path";
 import {
 	applyBatchToState,
 	canonicalToInputPaths,
@@ -130,7 +131,8 @@ export function releaseFileListCache(canonicalRoot: string): void {
 	if (e.refCount <= 0) entries.delete(canonicalRoot);
 }
 
-// watcher flush 直後に呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// watcher flush 直後、および fs mutating handler の I/O 成功直後 (applyLocalFsChanges 経由) に
+// 呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
 // L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
 // L1 側は applyBatchToState、L2 側は本関数内で分岐する。
 // - `.md` modify/delete → L2 の該当 ioPath を delete
@@ -189,6 +191,29 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	if (shouldBumpL2) e.l2Generation++;
 	// epoch が進んだ場合、input-form fileMap memo は L1 に依存するため破棄。
 	if (e.state.epoch !== epochBefore) e.inputFileMapMemo = null;
+}
+
+// アプリ自身の書き込み (fs:write / fs:write-new / fs:create-file / fs:create-directory /
+// fs:rename / fs:delete) を watcher flush (BATCH_DEADLINE_MS = 500ms) より先に cache へ反映する
+// (#397)。呼び手は canonical path の event を渡し、root の解決はこの層が行う。
+//
+// **L2 だけを狙う狭い evict API にせず applyFsBatch に流す**のは、L3 InvertedIndex が
+// searchFilesImpl の候補絞りに本配線されている (#394 Phase D) ため。L2 のみ evict すると
+// 「新内容が query に match するのに、旧 posting が indexedValid のまま candidates に入らず
+// file ごと scan 対象から落ちる」= hit の欠落になり、L2 stale (旧 lineContent) より重い症状に
+// なる。同一経路に流せば L1 / L2 / L3 / l2Generation / #396 の入口 filter が watcher と揃う。
+//
+// **root は path-guard の findContainingWorkspaceRoot ではなく自分の entries から引く**。
+// あちらは「その window が登録した root の最長一致」を返すため、nested root (outer を watch し
+// inner も登録済み) で inner が返り entries.get(inner) が undefined になって黙って空振りする。
+// cache は canonical root 単位で window 横断に共有されているので、path を含む **全 entry** に
+// 効かせるのが正しい。entry は通常 1〜2 個なので走査コストは無視できる。
+export function applyLocalFsChanges(batch: ReadonlyArray<FsChangeEvent>): void {
+	for (const canonicalRoot of entries.keys()) {
+		const under = batch.filter((ev) => relComponentsUnderRoot(canonicalRoot, ev.path) !== null);
+		if (under.length === 0) continue;
+		applyFsBatch(canonicalRoot, under);
+	}
 }
 
 // cache hit の canonical file 配列を返す。populated & valid でなければ null。

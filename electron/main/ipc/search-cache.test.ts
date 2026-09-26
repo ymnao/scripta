@@ -18,6 +18,7 @@ import {
 	_resetFileListCacheForTest,
 	acquireFileListCache,
 	applyFsBatch,
+	applyLocalFsChanges,
 	getCachedExistingStems,
 	getCachedFileMap,
 	getCachedInputFileMap,
@@ -710,6 +711,40 @@ describe("search-cache: L2 ContentCache", () => {
 			h?.set(p("a.md"), "stale", genAtStart);
 			expect(h?.get(p("a.md"))).toBeUndefined();
 		});
+	});
+});
+
+describe("search-cache: applyLocalFsChanges (#397)", () => {
+	const INNER = `${ROOT}${sep}sub`;
+	const OTHER = `${sep}ws${sep}other`;
+
+	it("applies to every entry whose root contains the path, not just one", () => {
+		acquireFileListCache(ROOT);
+		acquireFileListCache(INNER);
+		const outer = getContentCacheHandle(ROOT);
+		const inner = getContentCacheHandle(INNER);
+		const target = `${INNER}${sep}a.md`;
+		outer?.set(target, "old", outer.generation);
+		inner?.set(target, "old", inner.generation);
+
+		applyLocalFsChanges([{ kind: "modify", path: target }]);
+
+		expect(outer?.get(target)).toBeUndefined();
+		expect(inner?.get(target)).toBeUndefined();
+	});
+
+	it("leaves an entry whose root does not contain the path untouched", () => {
+		acquireFileListCache(ROOT);
+		acquireFileListCache(OTHER);
+		const other = getContentCacheHandle(OTHER);
+		const otherFile = `${OTHER}${sep}a.md`;
+		other?.set(otherFile, "keep", other.generation);
+		const genBefore = other?.generation ?? 0;
+
+		applyLocalFsChanges([{ kind: "modify", path: p("a.md") }]);
+
+		expect(other?.get(otherFile)).toBe("keep");
+		expect(other?.generation).toBe(genBefore);
 	});
 });
 
