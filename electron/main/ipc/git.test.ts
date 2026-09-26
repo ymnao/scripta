@@ -401,6 +401,7 @@ describe("resolveConflictImpl", () => {
 			const cache = getContentCacheHandle(canonicalRoot);
 			const target = join(canonicalRoot, file);
 			cache?.set(target, "stale", cache.generation);
+			expect(cache?.get(target)).toBe("stale");
 
 			await resolveConflictImpl(TEST_WIN, dir, file, "resolved\n", "modify");
 
@@ -431,6 +432,7 @@ describe("resolveConflictImpl", () => {
 			const cache = getContentCacheHandle(canonicalRoot);
 			const target = join(canonicalRoot, file);
 			cache?.set(target, "stale", cache.generation);
+			expect(cache?.get(target)).toBe("stale");
 
 			await resolveConflictImpl(TEST_WIN, dir, file, "", "delete");
 

@@ -726,6 +726,8 @@ describe("search-cache: applyLocalFsChanges (#397)", () => {
 		const target = `${INNER}${sep}a.md`;
 		outer?.set(target, "old", outer.generation);
 		inner?.set(target, "old", inner.generation);
+		expect(outer?.get(target)).toBe("old");
+		expect(inner?.get(target)).toBe("old");
 
 		applyLocalFsChanges([{ kind: "modify", path: target }]);
 
@@ -738,8 +740,20 @@ describe("search-cache: applyLocalFsChanges (#397)", () => {
 		acquireFileListCache(INNER);
 		const inner = getContentCacheHandle(INNER);
 		inner?.set(`${INNER}${sep}a.md`, "old", inner.generation);
+		expect(inner?.get(`${INNER}${sep}a.md`)).toBe("old");
 
 		applyLocalFsChanges([{ kind: "delete", path: INNER }]);
+
+		expect(inner?.get(`${INNER}${sep}a.md`)).toBeUndefined();
+	});
+
+	it("applies an event on an ancestor of a root to that root's entry", () => {
+		acquireFileListCache(INNER);
+		const inner = getContentCacheHandle(INNER);
+		inner?.set(`${INNER}${sep}a.md`, "old", inner.generation);
+		expect(inner?.get(`${INNER}${sep}a.md`)).toBe("old");
+
+		applyLocalFsChanges([{ kind: "delete", path: ROOT }]);
 
 		expect(inner?.get(`${INNER}${sep}a.md`)).toBeUndefined();
 	});

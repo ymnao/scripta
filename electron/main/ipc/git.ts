@@ -226,6 +226,9 @@ async function resolveConflictImpl(
 		} catch (e) {
 			throw gitError(extractGitErrorMessage(e));
 		}
+		// modify 分岐のような親の realpath を通さないのは、**git が symlink を辿った path を
+		// track しない**ため。filePath は git 由来の tracked path なので中間 component に symlink は
+		// 現れず、canonical 表記との食い違いが起きない (現れる path を渡せば rm 自体が先に失敗する)。
 		applyLocalFsChanges([{ kind: "delete", path: pathResolve(canonical, filePath) }]);
 		return;
 	}

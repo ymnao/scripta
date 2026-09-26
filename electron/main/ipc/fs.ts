@@ -332,7 +332,7 @@ async function createDirectoryImpl(senderId: number, path: string): Promise<void
 		if (isErrnoCode(e, "EEXIST")) throw FsError.alreadyExists(canonical);
 		throw e;
 	}
-	// **ここだけ applyLocalFsChanges を呼ばない** (#397)。非 recursive な mkdir が作る dir は空 =
+	// **ここだけ applyLocalFsChanges を呼ばない** (#397)。mkdir が作る dir は親を含めていずれも空 =
 	// L1 の不変条件 (= walkMdFiles の結果) を変えないので、流すと「非 `.md` create → files = null」の
 	// 保守的 full invalidate と L2 / L3 の subtree 走査を無駄に払うだけになる。
 }
@@ -364,8 +364,10 @@ async function renameEntryImpl(senderId: number, oldPath: string, newPath: strin
 	await fsp.mkdir(dirname(newCanonical), { recursive: true });
 	await fsp.rename(oldCanonical, newCanonical);
 	// chokidar が emit する unlink + add と同じ組を 1 batch で流す (#397)。1 回にまとめると
-	// l2Generation bump と epoch 変化がそれぞれ 1 回で済む。target 既存は上で reject 済みなので
-	// 新 path 側に L2 / L3 の entry は無く、`create` の early continue で取り残しは生じない。
+	// l2Generation bump と epoch 変化がそれぞれ 1 回で済む。新 path 側を `create` にして L2 / L3 を
+	// 掃除しないのは、entryExistsAt の reject により **アプリ自身が作った** entry は残らないから。
+	// 外部 delete が watcher の窓内で pending のまま同 path へ rename した場合は旧内容が残るが、
+	// それは flush 時の delete + create → modify merge が回収する既存の窓と同じ。
 	applyLocalFsChanges([
 		{ kind: "delete", path: oldCanonical },
 		{ kind: "create", path: newCanonical },

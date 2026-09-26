@@ -133,9 +133,10 @@ export function releaseFileListCache(canonicalRoot: string): void {
 
 // watcher flush 直後、および fs mutating handler の I/O 成功直後 (applyLocalFsChanges 経由) に
 // 呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
-// **同じ batch の再適用は冪等**: L1 は files.add / delete の戻り値、L3 の validCount は
-// bumpFileEpoch の wasValid ガードで二重カウントせず、l2Generation の追加 bump は in-flight
-// read を捨てるだけ。アプリ自身の書き込みは proactive と watcher の 2 回流れるのでこれに依る。
+// **同じ batch の再適用は状態を壊さない** (アプリ自身の書き込みは proactive と watcher の 2 回
+// 流れるのでこれに依る)。`.md` event は files.add / delete の戻り値と bumpFileEpoch の wasValid
+// ガードにより epoch / validCount とも二重に動かない。非 `.md` event は 2 回目も full invalidate
+// として epoch を進めるが、files は null のままで派生物の再構築が 1 回余分になるだけ。
 // L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
 // L1 側は applyBatchToState、L2 側は本関数内で分岐する。
 // - `.md` modify/delete → L2 の該当 ioPath を delete
@@ -212,9 +213,9 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 // cache は canonical root 単位で window 横断に共有されているので、path を含む **全 entry** に
 // 効かせるのが正しい。entry は通常 1〜2 個なので走査コストは無視できる。
 //
-// **root 自身と一致する event も通す** (relComponentsUnderRoot は root 自身に null を返す)。
-// 落とすと nested root で outer 側の window が inner root dir を delete / rename したとき、
-// inner entry だけ自前の watcher flush まで stale が残る。
+// **root 自身および root の祖先と一致する event も通す** (relComponentsUnderRoot はどちらにも
+// null を返す)。落とすと nested root で outer 側の window が inner root やその上の dir を
+// delete / rename したとき、inner entry だけ自前の watcher flush まで stale が残る。
 //
 // **watcher が 500ms 後に同じ event をもう一度流すのは抑制しない**。抑制のために「直近で自分が
 // 書いた path」を記録すると、同じ窓に入った外部書き込みを取り落とす (staleness に対する
@@ -222,7 +223,10 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 export function applyLocalFsChanges(batch: ReadonlyArray<FsChangeEvent>): void {
 	for (const canonicalRoot of entries.keys()) {
 		const relevant = batch.filter(
-			(ev) => ev.path === canonicalRoot || relComponentsUnderRoot(canonicalRoot, ev.path) !== null,
+			(ev) =>
+				ev.path === canonicalRoot ||
+				relComponentsUnderRoot(canonicalRoot, ev.path) !== null ||
+				relComponentsUnderRoot(ev.path, canonicalRoot) !== null,
 		);
 		if (relevant.length === 0) continue;
 		applyFsBatch(canonicalRoot, relevant);
