@@ -1,5 +1,6 @@
-import { basename, isAbsolute, relative, sep } from "node:path";
+import { basename, sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
+import { relComponentsUnderRoot } from "./root-relative-path";
 import { byteCmp } from "./search-pure";
 
 export function isMdWalkSkippedName(name: string): boolean {
@@ -8,13 +9,9 @@ export function isMdWalkSkippedName(name: string): boolean {
 
 // canonicalRoot 自身と canonicalRoot 外は false。後者は呼び出し契約 (canonical batch は
 // 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来の
-// 保守的 invalidate 側へ倒す。判定を `rel.startsWith("..")` で書くと `..foo` のような
-// component を root 外と誤読して filter を素通りさせ、walk 側 (startsWith(".") で skip)
-// との非対称を新たに作る。
+// 保守的 invalidate 側へ倒す。
 export function isUnderMdWalkSkippedPath(canonicalRoot: string, absPath: string): boolean {
-	const rel = relative(canonicalRoot, absPath);
-	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
-	return rel.split(sep).some(isMdWalkSkippedName);
+	return relComponentsUnderRoot(canonicalRoot, absPath)?.some(isMdWalkSkippedName) === true;
 }
 
 // canonical `.md` パス集合を single source of truth とし、

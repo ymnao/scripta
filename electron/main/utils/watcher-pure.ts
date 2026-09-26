@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { relative, sep } from "node:path";
 import type { FsKind } from "../../../src/types/workspace";
+import { relComponentsUnderRoot } from "./root-relative-path";
 
 export type { FsKind };
 
@@ -18,13 +18,9 @@ export type { FsKind };
 // `.gitignore` や `.scripta/scratchpads/*.md` のような hidden path は通常通り監視する
 // （ユーザーが開いて編集する可能性がある）。
 export function isWatcherIgnored(absPath: string, canonicalRoot: string): boolean {
-	const rel = relative(canonicalRoot, absPath);
-	if (rel === "") return false;
-	if (rel === ".." || rel.startsWith(`..${sep}`)) return false;
-	for (const part of rel.split(sep)) {
-		if (part === ".git" || part === "node_modules") return true;
-	}
-	return false;
+	const components = relComponentsUnderRoot(canonicalRoot, absPath);
+	if (components === null) return false;
+	return components.some((part) => part === ".git" || part === "node_modules");
 }
 
 // 新しい event kind を pending Map にマージする。状態遷移ルール：
