@@ -14,6 +14,7 @@ import { handle } from "../utils/ipc-handle";
 import { writeFileUtf8NoFollow } from "../utils/open-nofollow";
 import { assertPathAllowed } from "../utils/path-guard";
 import { gitError } from "../utils/structured-error";
+import { applyLocalFsChanges } from "./search-cache";
 
 // git sync 操作を simple-git ベースで集約する IPC ハンドラ群。
 //
@@ -266,6 +267,9 @@ async function resolveConflictImpl(
 		}
 		throw e;
 	}
+	// fs:write と同じ「アプリ自身の .md 上書き」なので、同じく watcher flush を待たずに cache へ
+	// 反映する (#397)。ここを落とすと conflict 解決直後の検索だけ旧内容で hit する非対称になる。
+	applyLocalFsChanges([{ kind: "modify", path: canonicalTarget }]);
 	try {
 		// `git add` は repo-relative path を期待する（git が repo root から自動的に解釈）。
 		await git.raw(["add", "--", filePath]);

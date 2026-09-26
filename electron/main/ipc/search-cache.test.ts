@@ -733,6 +733,17 @@ describe("search-cache: applyLocalFsChanges (#397)", () => {
 		expect(inner?.get(target)).toBeUndefined();
 	});
 
+	it("applies an event on a root itself to that root's entry", () => {
+		acquireFileListCache(ROOT);
+		acquireFileListCache(INNER);
+		const inner = getContentCacheHandle(INNER);
+		inner?.set(`${INNER}${sep}a.md`, "old", inner.generation);
+
+		applyLocalFsChanges([{ kind: "delete", path: INNER }]);
+
+		expect(inner?.get(`${INNER}${sep}a.md`)).toBeUndefined();
+	});
+
 	it("leaves an entry whose root does not contain the path untouched", () => {
 		acquireFileListCache(ROOT);
 		acquireFileListCache(OTHER);

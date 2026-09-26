@@ -208,11 +208,25 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 // inner も登録済み) で inner が返り entries.get(inner) が undefined になって黙って空振りする。
 // cache は canonical root 単位で window 横断に共有されているので、path を含む **全 entry** に
 // 効かせるのが正しい。entry は通常 1〜2 個なので走査コストは無視できる。
+//
+// **root 自身と一致する event も通す**。relComponentsUnderRoot は root 自身に null を返すので
+// 配下判定だけで絞ると落ちるが、applyFsBatch は同じ event を非 `.md` として full invalidate に
+// 落とす。落とすと nested root (outer / inner を両方 watch) で outer 側の window が inner root
+// dir を delete / rename したとき inner entry だけ stale が残り、「同一経路に流せば watcher と
+// 揃う」という上の前提が破れる。
+//
+// **watcher が 500ms 後に同じ event をもう一度流すのは意図どおり**。抑制しない理由は 2 つ:
+// (1) 抑制のために「直近で自分が書いた path」を記録すると、同 path への外部書き込みが同じ窓に
+// 入った場合に取り落とす (staleness に対する fail-open)。(2) 再適用は冪等 — L1 は
+// files.add / delete の戻り値で、L3 の validCount は bumpFileEpoch の wasValid ガードで
+// 二重カウントしない。l2Generation の追加 bump は in-flight read を捨てるだけ。
 export function applyLocalFsChanges(batch: ReadonlyArray<FsChangeEvent>): void {
 	for (const canonicalRoot of entries.keys()) {
-		const under = batch.filter((ev) => relComponentsUnderRoot(canonicalRoot, ev.path) !== null);
-		if (under.length === 0) continue;
-		applyFsBatch(canonicalRoot, under);
+		const relevant = batch.filter(
+			(ev) => ev.path === canonicalRoot || relComponentsUnderRoot(canonicalRoot, ev.path) !== null,
+		);
+		if (relevant.length === 0) continue;
+		applyFsBatch(canonicalRoot, relevant);
 	}
 }
 

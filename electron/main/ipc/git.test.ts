@@ -15,6 +15,7 @@ import { isNetworkError } from "../../../src/lib/errors";
 import { createGit } from "../utils/git-env";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import { __testing, registerGitIpc } from "./git";
+import { acquireFileListCache, getContentCacheHandle, releaseFileListCache } from "./search-cache";
 
 const TEST_WIN = 1;
 const OTHER_WIN = 2;
@@ -389,6 +390,24 @@ describe("resolveConflictImpl", () => {
 		// stage 0 にエントリが入る = `git diff --cached` で見える
 		const cached = await createGit(dir).raw(["diff", "--cached", "--name-only"]);
 		expect(cached.split("\n")).toContain(file);
+	});
+
+	it('evicts the L2 ContentCache entry for the written file on "modify" (#397)', async () => {
+		const dir = await newWorkspace();
+		const file = await makeMergeConflict(dir);
+		const canonicalRoot = await fsp.realpath(dir);
+		acquireFileListCache(canonicalRoot);
+		try {
+			const cache = getContentCacheHandle(canonicalRoot);
+			const target = join(canonicalRoot, file);
+			cache?.set(target, "stale", cache.generation);
+
+			await resolveConflictImpl(TEST_WIN, dir, file, "resolved\n", "modify");
+
+			expect(cache?.get(target)).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
 	});
 
 	it('removes file via git rm for "delete"', async () => {

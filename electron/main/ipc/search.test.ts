@@ -6,9 +6,9 @@ import { mkdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// fs.ts の deleteEntryImpl が使う shell.trashItem は実際に entry を消す。search 側の観測
-// (L1 / L3 から消えたか) を「file が実在したまま」で取ると、消えていない cache を pass と
-// 誤読できてしまうため。
+// fs.ts の deleteEntryImpl が使う shell.trashItem は production と同じく実際に entry を消す。
+// ただし file が消えると「L1 に stale な path が残っていても read 失敗で skip される」ため、
+// 検索結果だけでは delete kind を pin できない。L1 は getCachedMdFiles で直接観測する。
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 	shell: {
@@ -1388,8 +1388,17 @@ describe("searchFilesImpl (#397: fs mutating handler の proactive 反映)", () 
 
 		await renameEntryImpl(TEST_WIN, oldPath, newPath);
 
+		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "b.md")]);
 		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "renamed");
 		expect(after.results.map((r) => basename(r.filePath))).toEqual(["b.md"]);
+
+		// watcher が 500ms 後に同じ event を流す定常状態。再適用しても結果は変わらない。
+		applyFsBatch(canonical, [
+			{ kind: "delete", path: join(canonical, "a.md") },
+			{ kind: "create", path: join(canonical, "b.md") },
+		]);
+		const reapplied = await searchFilesImpl(TEST_WIN, workspaceDir, "renamed");
+		expect(reapplied).toEqual(after);
 		releaseFileListCache(canonical);
 	});
 
@@ -1402,6 +1411,7 @@ describe("searchFilesImpl (#397: fs mutating handler の proactive 反映)", () 
 
 		await deleteEntryImpl(TEST_WIN, filePath);
 
+		expect(getCachedMdFiles(canonical)).toEqual([]);
 		expect((await searchFilesImpl(TEST_WIN, workspaceDir, "doomed")).results).toHaveLength(0);
 		releaseFileListCache(canonical);
 	});
