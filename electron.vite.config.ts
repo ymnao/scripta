@@ -15,20 +15,21 @@ const root = import.meta.dirname;
 // 上流の慣例どおり electron は runtime に CLI が hijack するモジュールなので external 必須。
 const externalElectron = ["electron", /^electron\/.+/];
 
-// Chromium 固定（Electron 43 = Chromium 150 / 同梱 Node.js 24 系）に伴い、
+// Chromium 固定（Electron 44 = Chromium 152 / 同梱 Node.js 24 系）に伴い、
 // 多 WebView 互換のための保守的 transpile を解除して build target を実態へ揃える。
-//   - renderer は固定 Chromium 実行なので chrome150 を明示。esnext ではなく実 Chromium 版を
-//     指すことで、依存や自前コードに将来構文が混入しても Electron 43 が parse できる範囲へ
+//   - renderer は固定 Chromium 実行なので chrome152 を明示。esnext ではなく実 Chromium 版を
+//     指すことで、依存や自前コードに将来構文が混入しても Electron 44 が parse できる範囲へ
 //     down-level される（esnext は「変換しない」指定で素通りし、起動時 parse error になり得る）。
 //   - main / preload は Node.js 実行のため node 系ターゲットが必須
 //     （electron-vite が main/preload の build.target を "node?" に制約しており esnext は拒否される）。
-//     Electron 43 同梱 Node は v24.17 系のため node24 を明示。これは同梱 runtime の Node 版で
+//     Electron 44 同梱 Node は v24 系のため node24 を明示。これは同梱 runtime の Node 版で
 //     あり、各 package.json の engines.node（npm script を回すホスト Node 条件）とは別物。
 // なお electron-vite v5 の getElectronNodeTarget() は Electron 39 までしかマップを持たず、
-// 43 では stale fallback で node16.17 に解決される。ここで明示することでその過度な
+// 44 では stale fallback で node16.17 に解決される。ここで明示することでその過度な
 // down-level 化も同時に矯正する。
-// Chromium 版は electron-to-chromium の Electron 43.0 → 150 マッピングに基づく。
-const RENDERER_TARGET = "chrome150";
+// 版の出所は electron/electron の DEPS（tag 指定で取得）。v44.4.3 時点で
+// chromium_version = 152.0.7977.130 / node_version = v24.21.0。
+const RENDERER_TARGET = "chrome152";
 const NODE_TARGET = "node24";
 
 export default defineConfig({
