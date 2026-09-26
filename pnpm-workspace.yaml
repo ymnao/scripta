@@ -50,11 +50,14 @@ allowBuilds:
 # export は呼び出し可能な関数のままなので、minimatch@3/5 の `require('brace-expansion')`
 # 直呼びとも、minimatch@9 の CJS build が使う default interop 経由の呼び出しとも互換。
 #
-# ここだけ `parent>child` ではなく child 側 range で絞るのは、親 minimatch が 3.1.5 / 5.1.9 /
+# `parent>child` ではなく child 側 range で絞るのは、親 minimatch が 3.1.5 / 5.1.9 /
 # 9.0.9 / 10.2.5 の 4 版共存で各々別 major の brace-expansion を要求するため。素の
 # `minimatch>brace-expansion` は 4 系統に同一 range を適用して semver を壊し、親側に range を
 # 書く形（`minimatch@9>brace-expansion`）は親が bump された時点で selector が外れて override が
-# 無言で失効する。各 GHSA の range と実害評価は下記各行のインラインコメント参照。
+# 無言で失効する。`@xmldom/xmldom` も同じ理由（親 plist が 3.1.0 / 3.1.1 の 2 版共存で
+# `^0.8.8` / `^0.9.10` を要求する。major は両方 0 だが caret は 0.x で minor を互換境界に
+# するため両者は交わらず、minimatch と同じく単一 range では片方を壊す）で child 側 range 形を使う。
+# 各 GHSA の range と実害評価は下記各行のインラインコメント参照。
 overrides:
   "@codemirror/autocomplete": $@codemirror/autocomplete
   "@codemirror/commands": $@codemirror/commands
@@ -68,15 +71,22 @@ overrides:
   "brace-expansion@^1.0.0": ^1.1.18        # GHSA-rgw5-rvv9-x895 (high, <1.1.18。中間配列が非制限で ~25KB 入力から OOM。mh99 の maxLength 緩和のバイパス) + GHSA-mh99-v99m-4gvg (high, <1.1.17。展開結果の長さが非制限で OOM) + GHSA-3jxr-9vmj-r5cp (high, <1.1.16。連続する非展開 {} 群の指数時間展開)。いずれも minimatch@3 (glob@7 / @electron/asar / dir-compare 経由) の build-time 依存のみで、攻撃者制御のパターンを展開する経路は無し。実害なし、alert closed 化が目的 (2.x/5.x 行も同じ)。
   "brace-expansion@^2.0.0": ^2.1.4         # 同 3 件 (rgw5: >=2.0.0 <2.1.4 / mh99: >=2.0.0 <2.1.3 / 3jxr: >=2.0.0 <2.1.2)。minimatch@5 (filelist) / minimatch@9 (@electron/universal) 経由。実害評価は上記に同じ。
   "brace-expansion@^5.0.0": ^5.0.9         # 同 3 件 (rgw5: >=4.0.0 <5.0.9 / mh99: >=4.0.0 <5.0.8 / 3jxr: >=3.0.0 <5.0.7) + GHSA-jxxr-4gwj-5jf2 (medium, DoS, >=5.0.0 <5.0.6)。minimatch@10 (app-builder-lib) 経由。実害評価は上記に同じ。range は 3.x/4.x も含むが 4.x の patched 版は同 major に存在せず 5.0.9 なので、この selector が覆うのは実質 5.x のみ。3.x/4.x を要求する transitive が将来現れたら別対応が要る (3.x の patched は rgw5=3.0.6 / mh99=3.0.3 だが 3jxr は 3.x 内に patched 版が無く 5.0.7 が下限なので、3.0.6 へ上げるだけでは足りない)。
+  "@xmldom/xmldom@^0.8.0": ^0.8.15         # GHSA-4w3w-2rp5-g8jm / GHSA-w2rr-34g9-rvrj (いずれも high, patched >=0.8.14) + GHSA-27p8-2357-5qqv / GHSA-8344-3jmq-59r6 / GHSA-93r5-fhx6-vmg9 / GHSA-965w-775f-mr7g / GHSA-c7q8-3ch8-vqpv / GHSA-x4fp-j954-r2f4 (いずれも high, patched >=0.8.15) の 8 件 + 同じ bump で閉じる GHSA-6h8r-xr42-gp59 / GHSA-6gmq-8vp8-gcm6 (いずれも medium, patched >=0.8.15)。plist@3.1.0 (app-builder-lib 直下) 経由で electron-builder の macOS packaging に使われる。parse 対象は Electron 同梱および自前生成の Info.plist と、pkgbuild / actool といったローカル build tool の出力で、いずれも攻撃者制御の XML を通す経路は無く実害なし、audit 解消が目的 (0.9 行も同じ)。
+  "@xmldom/xmldom@^0.9.0": ^0.9.12         # 上記のうち 4w3w / w2rr は 0.9 系 patched が >=0.9.11、27p8 / 8344 / 93r5 / 965w / c7q8 は >=0.9.12。加えて GHSA-g53g-w8rj-fmg7 (high, patched >=0.9.11, PI grammar regex ReDoS) + GHSA-3px3-54cx-rmw9 / GHSA-6mj3-qw4j-hgrw / GHSA-vr34-hp96-76pp (いずれも high, patched >=0.9.12) の計 11 件 + 0.8 行と同じ medium 2 件 (6h8r / 6gmq, patched >=0.9.12)。plist@3.1.1 (@electron/osx-sign / @electron/universal 経由) 用。こちらは署名時の entitlements と `security cms -D` が出す provisioning profile も parse するが、どちらもローカルの署名設定・証明書由来。実害評価は 0.8 行に同じ。
   "tmp@<0.2.6": ">=0.2.6"          # GHSA: Path Traversal (Dep #7)。tmp-promise → tmp@0.2.5 を修正版へ強制
   # security advisory 対応の override は global ではなく `parent>child` syntax で
   # alert 入口に絞る。将来別 transitive が同名 package の旧 version を要求した
   # 場合に意図せず major/minor をまたいで強制されるのを防ぐ。
   # 各 GHSA の実害評価は本リポ用途で「いずれも実害なし」、alert closed 化が目的。
+  # 実害評価を書くときは、**その用途がどの copy のどの親経由で起きるか**まで実測して
+  # から書く。同名 package が複数 copy で入る構成では、片方の copy にしか無い用途を
+  # もう片方の行に書いても動作では露見せず、誤った根拠が検証済みの顔で残る
+  # (#536 対応で xmldom 0.8 行に osx-sign 由来の entitlements を書いて踏んだ)。
   "electron-vite>esbuild": ^0.28.1        # GHSA-gv7w-rqvm-qjhr (high, Dep #8)。electron-vite@5.0.0 の `^0.25.11` 固定を patched 版へ。脆弱性は Deno module 限定、本リポ Node path は binaryIntegrityCheck() 保護下。上流が ^0.28 許容したら削除可。
   "electron-vite>@babel/core": ^7.29.6    # GHSA-4x5r-pxfx-6jf8 (low)。electron-vite 経由の 7.29.0 を source map disclosure patched 版へ。self-contained build なので攻撃前提を満たさず。
+  "@babel/helper-compilation-targets>browserslist": ^4.28.7   # GHSA-c83g-rgw3-j3cx (high, <=4.28.6, query 結果 cache の eviction 欠如による無制限メモリ増), GHSA-73wf-gq98-2v4g (high, <=4.28.6, 信頼できない browserslist-stats.json の custom stats で crash / prototype write)。lockfile 上 @babel/core の入口は electron-vite だけ (@vitejs/plugin-react@6 は babel 非依存) で、electron-vite が呼ぶのは bytecodePlugin 内の babel.transform のみ。本リポの electron.vite.config.ts は bytecode を使わないのでそこが走らない。仮に走っても getTargets は BROWSERSLIST 系 env か browserslist 設定ファイル (browserslist / .browserslistrc / package.json:browserslist) が見つかった時だけ query へ進む実装で、本リポはどれも持たない (c83g の cache も 73wf の custom stats も query 経路の先)。親は patched 版を含む range を宣言しているので親 range の外へ出す pin ではなく、lockfile の据え置きを外して再解決させ以後の下限を固定するのが役割 (`ajv>fast-uri` 行と同形)。
   "electron-publish>form-data": ^4.0.6    # GHSA-hmw2-7cc7-3qxx (high)。electron-publish 経由の 4.0.5 を CRLF injection patched 版へ。build-time 自前入力のみで attacker-controlled な append() 引数は無し。
-  "ajv>fast-uri": ^3.1.5                  # GHSA-4c8g-83qw-93j6 (high, >=3.0.0 <3.1.3), GHSA-v2hh-gcrm-f6hx (high, >=3.0.0 <=3.1.3), GHSA-7p8r-x3mc-p8w7 (high, >=3.0.0 <3.1.5)。literal backslash authority delimiter / IDN canonicalization 失敗による host confusion。7p8r は fast-uri の host 判定結果を Node の WHATWG URL / fetch へ渡す構成が対象。ajv は app-builder-lib の JSON schema 検証専用で、URI format 検証に外部入力を通す経路も host 判定へ結果を使う経路も無い。下限は最も広い 7p8r の range に合わせて ^3.1.5。
+  "ajv>fast-uri": ^3.1.6                  # GHSA-4c8g-83qw-93j6 (high, >=3.0.0 <3.1.3), GHSA-v2hh-gcrm-f6hx (high, >=3.0.0 <=3.1.3), GHSA-7p8r-x3mc-p8w7 (high, >=3.0.0 <3.1.5), GHSA-5jgf-p345-68v8 (high, >=3.1.3 <3.1.6), GHSA-f65p-4m7j-42xc (high, >=3.0.0 <3.1.6), GHSA-fph4-wmhf-6fwf (high, >=3.1.2 <3.1.6), GHSA-jqff-g426-hqxp (high, >=3.0.0 <3.1.6)。literal backslash authority delimiter / IDN canonicalization スキップ / IPv6 正規化不正 / hostname の多重 percent-decode / percent-encoded scheme 正規化による host confusion・SSRF 系。いずれも fast-uri の host 判定結果を Node の WHATWG URL / fetch へ渡す構成が対象。ajv は app-builder-lib の JSON schema 検証専用で、URI format 検証に外部入力を通す経路も host 判定へ結果を使う経路も無い。下限は 3.1.6 を要求する後半 4 件に合わせて ^3.1.6。
   "app-builder-lib>tar": ^7.5.18          # GHSA-vmf3-w455-68vh (medium, PAX header desync), GHSA-w8wr-v893-vjvp (medium, PAX numeric path type confusion によるプロセスクラッシュ)。app-builder-lib 経由の node-tar を patched 版へ。自前 build 成果物 archive のみで攻撃者作成 tar の parse は無し。
   "node-gyp>tar": ^7.5.18                 # 同 2 GHSA。node-gyp も独立して node-tar を direct dep として持つため別行で対応。
   "mermaid>dompurify": ^3.4.9             # GHSA-vxr8-fq34-vvx9 (low)。mermaid@11.15.0 が direct dep として持つ 3.4.8 を Trusted Types reset patched 版へ。direct dep の ^3.4.10 と同 minor なので mermaid 描画互換性は CI e2e で担保。
