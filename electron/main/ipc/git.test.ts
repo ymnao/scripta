@@ -422,6 +422,24 @@ describe("resolveConflictImpl", () => {
 		).toBe(false);
 	});
 
+	it('evicts the L2 ContentCache entry for the removed file on "delete" (#397)', async () => {
+		const dir = await newWorkspace();
+		const file = await makeMergeConflict(dir);
+		const canonicalRoot = await fsp.realpath(dir);
+		acquireFileListCache(canonicalRoot);
+		try {
+			const cache = getContentCacheHandle(canonicalRoot);
+			const target = join(canonicalRoot, file);
+			cache?.set(target, "stale", cache.generation);
+
+			await resolveConflictImpl(TEST_WIN, dir, file, "", "delete");
+
+			expect(cache?.get(target)).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
 	it("rejects invalid resolution string", async () => {
 		const dir = await newWorkspace();
 		const file = await makeMergeConflict(dir);

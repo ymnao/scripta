@@ -226,6 +226,7 @@ async function resolveConflictImpl(
 		} catch (e) {
 			throw gitError(extractGitErrorMessage(e));
 		}
+		applyLocalFsChanges([{ kind: "delete", path: pathResolve(canonical, filePath) }]);
 		return;
 	}
 	// modify — repo 内への安全な書き込み。
@@ -267,8 +268,6 @@ async function resolveConflictImpl(
 		}
 		throw e;
 	}
-	// fs:write と同じ「アプリ自身の .md 上書き」なので、同じく watcher flush を待たずに cache へ
-	// 反映する (#397)。ここを落とすと conflict 解決直後の検索だけ旧内容で hit する非対称になる。
 	applyLocalFsChanges([{ kind: "modify", path: canonicalTarget }]);
 	try {
 		// `git add` は repo-relative path を期待する（git が repo root から自動的に解釈）。

@@ -332,11 +332,9 @@ async function createDirectoryImpl(senderId: number, path: string): Promise<void
 		if (isErrnoCode(e, "EEXIST")) throw FsError.alreadyExists(canonical);
 		throw e;
 	}
-	// **ここだけ applyLocalFsChanges を呼ばない**。非 recursive な mkdir が作る dir は空なので
-	// L1 の不変条件 (= walkMdFiles の結果) は変わらず、流しても「非 `.md` create → files = null」の
-	// 保守的 full invalidate (次回検索で全 walk) と L2 / L3 の subtree 走査だけを払う。watcher は
-	// file / dir を区別できないので 500ms 後に同じ悲観化をするが、こちらは「空の dir を作った」と
-	// 確定して知っているので払う必要がない。
+	// **ここだけ applyLocalFsChanges を呼ばない** (#397)。非 recursive な mkdir が作る dir は空 =
+	// L1 の不変条件 (= walkMdFiles の結果) を変えないので、流すと「非 `.md` create → files = null」の
+	// 保守的 full invalidate と L2 / L3 の subtree 走査を無駄に払うだけになる。
 }
 
 async function pathExistsImpl(senderId: number, path: string): Promise<boolean> {
