@@ -173,6 +173,12 @@ describe("search-cache-pure: isUnderMdWalkSkippedPath", () => {
 		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws${sep}other${sep}a.md`)).toBe(false);
 	});
 
+	it("does not skip the parent directory of the root", () => {
+		// rel が `..` そのものになる唯一の入力。これが無いと `rel === ".."` ガードを落としても
+		// 全 case が通る (`/ws/other/a.md` は startsWith(`../`) 側で弾かれるため)。
+		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws`)).toBe(false);
+	});
+
 	it("does not skip when the root itself lives under a dot-dir", () => {
 		const hiddenRoot = `${sep}ws${sep}.vault`;
 		expect(isUnderMdWalkSkippedPath(hiddenRoot, `${hiddenRoot}${sep}a.md`)).toBe(false);
@@ -635,6 +641,16 @@ describe("search-cache: L2 ContentCache", () => {
 			h?.set(p("a.md"), "aaa", h.generation);
 			const genBefore = h?.generation ?? 0;
 			applyFsBatch(ROOT, [{ kind: "create", path: p("b.md") }]);
+			expect(h?.get(p("a.md"))).toBe("aaa");
+			expect(h?.generation).toBe(genBefore);
+		});
+
+		it("does not bump generation for a walk-skipped path (#396)", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("a.md"), "aaa", h.generation);
+			const genBefore = h?.generation ?? 0;
+			applyFsBatch(ROOT, [{ kind: "modify", path: p(".scripta/scratchpads/s.md") }]);
 			expect(h?.get(p("a.md"))).toBe("aaa");
 			expect(h?.generation).toBe(genBefore);
 		});

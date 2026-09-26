@@ -8,8 +8,8 @@ export function isMdWalkSkippedName(name: string): boolean {
 }
 
 // canonicalRoot 自身と canonicalRoot 外は false。後者は呼び出し契約 (canonical batch は
-// 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来の
-// 保守的 invalidate 側へ倒す。
+// 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来どおりの
+// add / delete / invalidate に落とす。
 export function isUnderMdWalkSkippedPath(canonicalRoot: string, absPath: string): boolean {
 	return relComponentsUnderRoot(canonicalRoot, absPath)?.some(isMdWalkSkippedName) === true;
 }
