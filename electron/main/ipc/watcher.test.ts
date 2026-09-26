@@ -41,8 +41,11 @@ describe("isWatcherIgnored", () => {
 	it("does not ignore root itself or paths outside root (defensive)", () => {
 		expect(isWatcherIgnored("/home/user/workspace", root)).toBe(false);
 		expect(isWatcherIgnored("/etc/passwd", root)).toBe(false);
-		// 除外名を含む root 外 path。これが無いと root 外ガードを落としても全 case が通る
-		// (`/etc/passwd` の rel は `.git` / `node_modules` component を持たないため)。
+	});
+
+	it("does not ignore an outside path that contains an excluded name", () => {
+		// ガードを削ると落ちる唯一の case。`/etc/passwd` の rel は `.git` / `node_modules`
+		// component を持たないので、上の it だけでは root 外ガードが pin されない。
 		expect(isWatcherIgnored("/etc/node_modules/x.md", root)).toBe(false);
 	});
 

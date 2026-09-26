@@ -139,6 +139,7 @@ export function releaseFileListCache(canonicalRoot: string): void {
 //   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
 // **generation bump は evict の成否ではなく「invalidation の意図」で判定する**。
 // 具体的には .md modify/delete および非 .md create/delete/modify の全てで bump する
+// (walk の skip 対象 path は下記 #396 の例外として bump しない)
 // (.md create のみ bump しない — 新規 file なので進行中の scan の in-flight read と競合しない)。
 // これは「L2 miss で readFile 中の file 自身が modify された」ケース = 本命の
 // stale-insert race を防ぐため。delete 成否で判定すると、cache に無い (=まさに読み中の)
