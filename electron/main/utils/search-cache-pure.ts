@@ -71,8 +71,6 @@ export function applyBatchToState(
 		if (ev.kind === "modify") continue;
 		// watcher 側 (isWatcherIgnored) で除外しないのは、hidden path の変更を renderer へ
 		// 届ける責務がそちらに在るため (`.scripta/scratchpads/*.md` は開いて編集され得る)。
-		// 非 .md でも invalidate せず continue するのは、walk が hidden component 配下を
-		// 再帰しない = そこで何が起きても cold walk の結果が変わらないから。
 		if (isUnderMdWalkSkippedPath(canonicalRoot, ev.path)) continue;
 		if (state.files === null) {
 			// populate 進行中 or 既 full-invalidate: 追記はできないが「変化があった」信号として

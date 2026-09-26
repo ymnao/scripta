@@ -144,9 +144,7 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // stale-insert race を防ぐため。delete 成否で判定すると、cache に無い (=まさに読み中の)
 // key に対する modify で generation が進まず、readFile 完了時の set が古い text を格納する。
 // Phase A の applyBatchToState が files === null 中も epoch を bump する保守側倒しと同方針。
-// walk の skip 対象 path (`.` 始まり / `node_modules` component) は L1 / L2 / L3 のいずれも
-// 無視する (#396)。L2 / L3 に載る key は L1 の母集合由来なので evict 自体は no-op だが、
-// generation bump は no-op ではないため同じ述語をこの loop にも当てる。
+// walk の skip 対象 path は L1 / L2 / L3 のいずれも無視する (#396)。
 // inputFileMapMemo は epoch 依存なので、L1 側で epoch が進んだかを比較して invalidate する。
 // **非責務 (#406)**: symlink target の rewire に対する realpath の鮮度はこの層では扱わない
 // (batch 由来の invalidation では取りこぼす — 理由は path-guard の resolveInsideRoot の doc 参照)。
