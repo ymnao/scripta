@@ -45,7 +45,7 @@
 		"lucide-react": "^1.31.0",
 		"marked": "^18.0.11",
 		"mermaid": "^11.16.1",
-		"p-limit": "^7.3.1",
+		"p-limit": "^7.3.3",
 		"react": "^19.3.0",
 		"react-dom": "^19.3.0",
 		"simple-git": "^3.36.0",
