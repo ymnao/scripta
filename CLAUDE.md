@@ -76,6 +76,8 @@ electron 42.0.0 で npm パッケージの `postinstall` script が削除され�
 1. **`scripts.postinstall`** — fresh checkout / lockfile 変更時に `node node_modules/electron/install.js` を実行
 2. **バイナリ依存 script への chain** — pnpm 10/11 の lockfile-unchanged 高速パス（lifecycle scripts skip）で postinstall がスルーされるケースに備え、`dev` / `preview` / `dist` / `test:e2e` / `test:e2e:ui` の頭でも同じ install.js をチェーン実行する。`install.js` はバイナリ存在時に即 return する idempotent script（~20ms）なので chain コストは無視可能
 
+**`pnpm up electron@<ver>` 直後はこの 2 段構えのどちらにも乗らない**。新版の `node_modules/electron/` に `path.txt` が無い状態になり、`electron` を import する `electron/main/utils/remote-image-policy.test.ts` が `Electron failed to install correctly` で **suite ごと失敗**する（`test` script は install.js を chain していないため `pnpm test` でも解消しない）。依存 bump 後は `node node_modules/electron/install.js` を明示実行してからテストを回す。この失敗は 1 suite が丸ごと落ちる形なので、**pass 件数だけを見ると「全部通った」と誤読しやすい**（2026-09-26 の PR #562 で実際に誤読しかけた）。
+
 #### 2. `electron` module の external 化
 
 `electron` は devDependencies に置く慣例で、`externalizeDepsPlugin` のデフォルトは dependencies のみを external にするため、`@electron-toolkit/utils` 経由の transitive ESM import から electron の `index.js` が bundle に取り込まれる。electron 41 までは index.js が単純な path 返却だったので bundle されても害が小さかったが、42 から lazy download ロジックが index.js に追加された結果、bundle 後の `__dirname` が `path.txt` を見失って `Electron failed to install correctly` エラーで起動失敗するようになった。
