@@ -156,7 +156,7 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
 	const epochBefore = e.state.epoch;
-	applyBatchToState(e.state, batch);
+	applyBatchToState(e.state, batch, canonicalRoot);
 	let shouldBumpL2 = false;
 	for (const ev of batch) {
 		const isMd = ev.path.endsWith(".md");

@@ -25,7 +25,9 @@ import {
 	_resetFileListCacheForTest,
 	acquireFileListCache,
 	applyFsBatch,
+	getCachedMdFiles,
 	getInvertedIndexHandle,
+	populateFileListCache,
 	releaseFileListCache,
 } from "./search-cache";
 
@@ -1532,6 +1534,40 @@ describe("search: walk abort reporting (#442)", () => {
 			expect(out).toEqual([]);
 		} finally {
 			spy.mockRestore();
+		}
+	});
+});
+
+describe("cold walk と warm cache の母集合一致 (#396)", () => {
+	it("keeps the cached L1 set equal to a fresh cold walk after hidden files appear", async () => {
+		const hidden = join(workspaceDir, ".scripta", "scratchpads");
+		await mkdir(hidden, { recursive: true });
+		await writeFile(join(workspaceDir, "a.md"), "body");
+		await writeFile(join(hidden, "s.md"), "body");
+		const canonical = await realpath(workspaceDir);
+
+		const cold1: string[] = [];
+		expect(await __testing.walkMdFiles(canonical, cold1)).toBe("completed");
+
+		acquireFileListCache(canonical);
+		try {
+			await populateFileListCache(canonical, async () => cold1);
+
+			await writeFile(join(workspaceDir, "b.md"), "body");
+			await writeFile(join(hidden, "t.md"), "body");
+			applyFsBatch(canonical, [
+				{ kind: "create", path: join(canonical, "b.md") },
+				{ kind: "create", path: join(canonical, ".scripta", "scratchpads", "t.md") },
+			]);
+
+			const cold2: string[] = [];
+			expect(await __testing.walkMdFiles(canonical, cold2)).toBe("completed");
+			const warm = getCachedMdFiles(canonical);
+			expect(warm).not.toBeNull();
+			expect([...(warm ?? [])].sort()).toEqual([...cold2].sort());
+			expect((warm ?? []).map((f) => basename(f)).sort()).toEqual(["a.md", "b.md"]);
+		} finally {
+			releaseFileListCache(canonical);
 		}
 	});
 });

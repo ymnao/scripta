@@ -11,6 +11,7 @@ import {
 	getExistingStems,
 	getFileMap,
 	getSortedFiles,
+	isUnderMdWalkSkippedPath,
 	setCacheFiles,
 } from "../utils/search-cache-pure";
 import {
@@ -40,7 +41,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "create", path: p("b.md") }]);
+		applyBatchToState(s, [{ kind: "create", path: p("b.md") }], ROOT);
 		expect(s.files).not.toBeNull();
 		expect(s.files?.has(p("b.md"))).toBe(true);
 		expect(s.epoch).toBe(epoch0 + 1);
@@ -50,7 +51,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md"), p("b.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "delete", path: p("a.md") }]);
+		applyBatchToState(s, [{ kind: "delete", path: p("a.md") }], ROOT);
 		expect(s.files?.has(p("a.md"))).toBe(false);
 		expect(s.epoch).toBe(epoch0 + 1);
 	});
@@ -59,7 +60,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "modify", path: p("a.md") }]);
+		applyBatchToState(s, [{ kind: "modify", path: p("a.md") }], ROOT);
 		expect(s.epoch).toBe(epoch0);
 	});
 
@@ -67,7 +68,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "create", path: p("a.md") }]);
+		applyBatchToState(s, [{ kind: "create", path: p("a.md") }], ROOT);
 		expect(s.epoch).toBe(epoch0);
 	});
 
@@ -75,7 +76,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "delete", path: p("z.md") }]);
+		applyBatchToState(s, [{ kind: "delete", path: p("z.md") }], ROOT);
 		expect(s.epoch).toBe(epoch0);
 	});
 
@@ -83,7 +84,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "create", path: p("subdir") }]);
+		applyBatchToState(s, [{ kind: "create", path: p("subdir") }], ROOT);
 		expect(s.files).toBeNull();
 		expect(s.epoch).toBe(epoch0 + 1);
 	});
@@ -91,7 +92,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 	it("non-.md delete → full invalidate", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
-		applyBatchToState(s, [{ kind: "delete", path: p("subdir") }]);
+		applyBatchToState(s, [{ kind: "delete", path: p("subdir") }], ROOT);
 		expect(s.files).toBeNull();
 	});
 
@@ -99,7 +100,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
 		const epoch0 = s.epoch;
-		applyBatchToState(s, [{ kind: "modify", path: p("settings.json") }]);
+		applyBatchToState(s, [{ kind: "modify", path: p("settings.json") }], ROOT);
 		expect(s.files?.has(p("a.md"))).toBe(true);
 		expect(s.epoch).toBe(epoch0);
 	});
@@ -110,7 +111,7 @@ describe("search-cache-pure: applyBatchToState", () => {
 		expect(getSortedFiles(s)).toEqual([p("a.md"), p("b.md")]);
 		expect(getFileMap(s)?.size).toBe(2);
 		expect(getExistingStems(s)?.size).toBe(2);
-		applyBatchToState(s, [{ kind: "create", path: p("c.md") }]);
+		applyBatchToState(s, [{ kind: "create", path: p("c.md") }], ROOT);
 		// 直接 state.* を見て「dirty 化されているか」を検証する。次アクセスで再構築される。
 		expect(s.sorted).toBeNull();
 		expect(s.fileMap).toBeNull();
@@ -123,15 +124,108 @@ describe("search-cache-pure: applyBatchToState", () => {
 		// 「workspace が変わった」信号として epoch を進める。populate 側の guard を作動させるため。
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md")]);
-		applyBatchToState(s, [{ kind: "delete", path: p("subdir") }]);
+		applyBatchToState(s, [{ kind: "delete", path: p("subdir") }], ROOT);
 		expect(s.files).toBeNull();
 		const epoch1 = s.epoch;
-		applyBatchToState(s, [{ kind: "create", path: p("x.md") }]);
+		applyBatchToState(s, [{ kind: "create", path: p("x.md") }], ROOT);
 		expect(s.epoch).toBe(epoch1 + 1);
 		// modify 単発は無視される
 		const epoch2 = s.epoch;
-		applyBatchToState(s, [{ kind: "modify", path: p("y.md") }]);
+		applyBatchToState(s, [{ kind: "modify", path: p("y.md") }], ROOT);
 		expect(s.epoch).toBe(epoch2);
+	});
+});
+
+describe("search-cache-pure: isUnderMdWalkSkippedPath", () => {
+	it("treats a dot-dir directly under root as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p(".scripta/a.md"))).toBe(true);
+	});
+
+	it("treats a dot-dir nested below root as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/.hidden/a.md"))).toBe(true);
+	});
+
+	it("treats node_modules as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("node_modules/x/a.md"))).toBe(true);
+	});
+
+	it("treats a dotfile leaf as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/.draft.md"))).toBe(true);
+	});
+
+	it("treats a leaf whose name starts with two dots as skipped", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("..foo/a.md"))).toBe(true);
+	});
+
+	it("does not skip a plain nested .md", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/a.md"))).toBe(false);
+	});
+
+	it("does not skip a directory whose name merely starts with node_modules", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, p("node_modules_bak/a.md"))).toBe(false);
+	});
+
+	it("does not skip the root itself", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, ROOT)).toBe(false);
+	});
+
+	it("does not skip a path outside the root", () => {
+		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws${sep}other${sep}a.md`)).toBe(false);
+	});
+
+	it("does not skip when the root itself lives under a dot-dir", () => {
+		const hiddenRoot = `${sep}ws${sep}.vault`;
+		expect(isUnderMdWalkSkippedPath(hiddenRoot, `${hiddenRoot}${sep}a.md`)).toBe(false);
+	});
+});
+
+describe("search-cache-pure: applyBatchToState skips walk-excluded paths (#396)", () => {
+	it("ignores hidden .md create so files stays identical to a cold walk", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md")]);
+		const epoch0 = s.epoch;
+		applyBatchToState(s, [{ kind: "create", path: p(".scripta/scratchpads/s.md") }], ROOT);
+		expect([...(s.files ?? [])]).toEqual([p("a.md")]);
+		expect(s.epoch).toBe(epoch0);
+	});
+
+	it("ignores non-.md create under a dot-dir instead of full-invalidating", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md")]);
+		const epoch0 = s.epoch;
+		applyBatchToState(s, [{ kind: "create", path: p(".scripta/foo.txt") }], ROOT);
+		expect(s.files).not.toBeNull();
+		expect(s.epoch).toBe(epoch0);
+	});
+
+	it("ignores node_modules create instead of full-invalidating", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md")]);
+		const epoch0 = s.epoch;
+		applyBatchToState(s, [{ kind: "create", path: p("node_modules/pkg/readme.md") }], ROOT);
+		expect([...(s.files ?? [])]).toEqual([p("a.md")]);
+		expect(s.epoch).toBe(epoch0);
+	});
+
+	it("does not bump epoch for hidden events while files is null", () => {
+		const s = createCacheState();
+		const epoch0 = s.epoch;
+		applyBatchToState(s, [{ kind: "create", path: p(".scripta/s.md") }], ROOT);
+		expect(s.epoch).toBe(epoch0);
+	});
+
+	it("applies the visible .md of a mixed batch and drops the hidden one", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md")]);
+		applyBatchToState(
+			s,
+			[
+				{ kind: "create", path: p(".scripta/s.md") },
+				{ kind: "create", path: p("b.md") },
+			],
+			ROOT,
+		);
+		expect([...(s.files ?? [])].sort()).toEqual([p("a.md"), p("b.md")]);
 	});
 });
 
@@ -227,6 +321,21 @@ describe("search-cache: applyFsBatch", () => {
 		const re = await populateFileListCache(ROOT, async () => [p("a.md"), p("b.md")]);
 		expect(re).toEqual([p("a.md"), p("b.md")]);
 		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md"), p("b.md")]);
+	});
+
+	it("passes canonicalRoot through so hidden events leave L1 and its memo untouched (#396)", async () => {
+		// canonicalRoot が applyBatchToState に届いていることを、files の不変ではなく
+		// inputFileMapMemo の identity 保持で観測する (epoch が進んでいれば別 Map になる)。
+		const INPUT_ROOT = `${sep}ws${sep}alias`;
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		const m1 = getCachedInputFileMap(ROOT, INPUT_ROOT);
+		applyFsBatch(ROOT, [
+			{ kind: "create", path: p(".scripta/scratchpads/s.md") },
+			{ kind: "create", path: p(".scripta/foo.txt") },
+		]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md")]);
+		expect(getCachedInputFileMap(ROOT, INPUT_ROOT)).toBe(m1);
 	});
 });
 
