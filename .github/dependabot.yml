@@ -6,6 +6,16 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      # Dependabot は同一 action でも参照 path 単位で別 dependency として扱うため、
+      # group が無いと github/codeql-action/init と .../analyze が別 PR に割れる
+      # (codeql-action のバージョン更新ごとに毎回 2 PR へ割れており、直近は
+      # #543 / #545)。npm 側と違い、ここには単独 PR で届けたい
+      # action (npm の electron-builder のような配布契約に効くもの) が無いので
+      # catch-all の 1 group にまとめ、週次の PR を 1 本に圧縮する。
+      github-actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: npm
     directory: /
