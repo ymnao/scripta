@@ -20,6 +20,7 @@ import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
 	canonicalToInputPaths,
+	isMdWalkSkippedName,
 } from "../utils/search-cache-pure";
 import {
 	buildLineStarts,
@@ -363,7 +364,7 @@ async function walkMdFiles(
 	const entries = await fsp.readdir(ioDir, { withFileTypes: true });
 	if (isStale?.() === true) return "aborted";
 	for (const ent of entries) {
-		if (ent.name.startsWith(".") || ent.name === "node_modules") continue;
+		if (isMdWalkSkippedName(ent.name)) continue;
 		const ioPath = join(ioDir, ent.name);
 		// Node の readdir({withFileTypes}) は symlink→dir に対して isDirectory()=false /
 		// isSymbolicLink()=true を返すため、symlink ディレクトリはこの if/else if の

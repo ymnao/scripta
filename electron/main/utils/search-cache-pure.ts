@@ -1,6 +1,21 @@
-import { basename, sep } from "node:path";
+import { basename, isAbsolute, relative, sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { byteCmp } from "./search-pure";
+
+export function isMdWalkSkippedName(name: string): boolean {
+	return name.startsWith(".") || name === "node_modules";
+}
+
+// canonicalRoot 自身と canonicalRoot 外は false。後者は呼び出し契約 (canonical batch は
+// 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来の
+// 保守的 invalidate 側へ倒す。判定を `rel.startsWith("..")` で書くと `..foo` のような
+// component を root 外と誤読して filter を素通りさせ、walk 側 (startsWith(".") で skip)
+// との非対称を新たに作る。
+export function isUnderMdWalkSkippedPath(canonicalRoot: string, absPath: string): boolean {
+	const rel = relative(canonicalRoot, absPath);
+	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
+	return rel.split(sep).some(isMdWalkSkippedName);
+}
 
 // canonical `.md` パス集合を single source of truth とし、
 // query 側が使う派生物 (sorted / fileMap / existingStems) を lazy に構築する。
