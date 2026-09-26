@@ -108,6 +108,20 @@ const { exportPdfImpl, shouldAllowPdfRequest } = __testing;
 
 const SENDER_ID = 42;
 
+// installPdfWebRequestFilter は module-level flag で 1 度しか install しないため、
+// 登録そのものを観測するテストは「まだ install されていない graph」を必要とする。
+// 静的 import の exportPdfImpl を使えないのは、先行テストが flag を消費済みな上に
+// vitest 5 の clearMocks 既定 (false → true) で登録時の呼び出し履歴も残らないため。
+async function loadFreshPdfGraph(root: string): Promise<typeof __testing.exportPdfImpl> {
+	vi.resetModules();
+	// 再 import した側へ workspace root を登録し直す (静的 import 側の登録は新しい
+	// path-guard インスタンスからは見えない)。返した関数を呼ぶ前に済んでいればよい。
+	const pathGuard = await import("../utils/path-guard");
+	await pathGuard.registerWorkspaceRoot(SENDER_ID, root);
+	const fresh = await import("./pdf");
+	return fresh.__testing.exportPdfImpl;
+}
+
 describe("exportPdfImpl", () => {
 	let workspace: string;
 	let ws: TempWorkspace;
@@ -264,8 +278,9 @@ describe("exportPdfImpl", () => {
 		// PDF export 用の隔離 partition (defaultSession とは別) からも `<img
 		// src="scripta-asset://...">` を配信できるよう、pdfSession に scripta-asset の
 		// protocol handler を registered する。defaultSession の登録は継承されない。
+		const exportFresh = await loadFreshPdfGraph(workspace);
 		const outputPath = join(workspace, "asset.pdf");
-		await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+		await exportFresh(SENDER_ID, "<html></html>", outputPath);
 		expect(pdfFakeSession.protocol.handle).toHaveBeenCalledWith(
 			"scripta-asset",
 			expect.any(Function),
@@ -273,11 +288,11 @@ describe("exportPdfImpl", () => {
 	});
 
 	it("installs permission deny handlers on the dedicated PDF session", async () => {
-		// installPdfWebRequestFilter は module-level flag で 1 度しか install しない。
-		// 他テストでも累積するため、ここでは「少なくとも 1 度は install されている」
-		// 事実だけを verify。中身（all-deny）の挙動は permission-handler.test.ts 側でテスト済み。
+		// 中身（all-deny）の挙動は permission-handler.test.ts 側でテスト済みなので、
+		// ここでは初回 export で install が走る事実だけを verify する。
+		const exportFresh = await loadFreshPdfGraph(workspace);
 		const outputPath = join(workspace, "perm.pdf");
-		await exportPdfImpl(SENDER_ID, "<html></html>", outputPath);
+		await exportFresh(SENDER_ID, "<html></html>", outputPath);
 		expect(pdfFakeSession.setPermissionRequestHandler).toHaveBeenCalled();
 		expect(pdfFakeSession.setPermissionCheckHandler).toHaveBeenCalled();
 	});
