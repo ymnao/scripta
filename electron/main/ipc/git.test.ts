@@ -15,7 +15,13 @@ import { isNetworkError } from "../../../src/lib/errors";
 import { createGit } from "../utils/git-env";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
 import { __testing, registerGitIpc } from "./git";
-import { acquireFileListCache, getContentCacheHandle, releaseFileListCache } from "./search-cache";
+import {
+	acquireFileListCache,
+	getCachedMdFiles,
+	getContentCacheHandle,
+	populateFileListCache,
+	releaseFileListCache,
+} from "./search-cache";
 
 const TEST_WIN = 1;
 const OTHER_WIN = 2;
@@ -661,5 +667,296 @@ describe("git:emit-conflict-resolved IPC ハンドラ配線", () => {
 		const dir = await makeCanonicalTempDir("scripta-git-wiring-");
 		dirsToCleanup.push(dir);
 		await expect(listener(event, dir)).rejects.toThrow(/Permission denied/);
+	});
+});
+
+// git 子プロセスが書き換えた working tree を watcher flush (500ms) より先に search-cache へ
+// 反映することの pin (#569)。L1 は getCachedMdFiles で直接観測する (検索結果経由だと
+// 消えた file が read 失敗で skip され vacuous pass する)。
+describe("git working tree writes: proactive search-cache invalidation (#569)", () => {
+	// remote を clone した別 working copy で mutate して push する。
+	async function pushFromOtherClone(
+		remote: string,
+		mutate: (dir: string) => Promise<void>,
+	): Promise<void> {
+		const other = await makeCanonicalTempDir("scripta-git-other-");
+		dirsToCleanup.push(other);
+		const ogit = createGit(other);
+		await ogit.raw(["clone", remote, other]);
+		await ogit.raw(["config", "user.email", "test2@test.com"]);
+		await ogit.raw(["config", "user.name", "Test2"]);
+		await ogit.raw(["config", "commit.gpgsign", "false"]);
+		await mutate(other);
+		await ogit.raw(["push"]);
+	}
+
+	// upstream 追従済みの work repo (first.md を 1 commit 持つ)。
+	async function setupPullable(): Promise<{ work: string; remote: string; canonicalRoot: string }> {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		await createGit(work).raw(["push", "-u", "origin", "main"]);
+		return { work, remote, canonicalRoot: await fsp.realpath(work) };
+	}
+
+	// L2 に stale を仕込み、読み出し用の closure を返す。set が効いたことを先に観測するのは、
+	// handle が undefined だと set / get が共に no-op になり toBeUndefined が vacuous に通るため。
+	function seedStale(canonicalRoot: string, target: string): () => unknown {
+		const cache = getContentCacheHandle(canonicalRoot);
+		cache?.set(target, "stale", cache.generation);
+		expect(cache?.get(target)).toBe("stale");
+		return () => cache?.get(target);
+	}
+
+	it("evicts the L2 entry for a file changed by a fast-forward pull (merge)", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+		});
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
+			await pullImpl(TEST_WIN, work, "merge");
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("evicts the L2 entry for a file changed by pull --rebase", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+		});
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
+			await pullImpl(TEST_WIN, work, "rebase");
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	// `core.quotepath=false` は非 ASCII の 8 進 escape だけを止める。`"` を含む path は
+	// なお `"q\"uote.md"` の形で quote されるため、`-z` が無いと cache key と一致しない。
+	// win32 は `"` を file 名に使えないので POSIX 限定。
+	it.skipIf(process.platform === "win32")(
+		"evicts a path that git would quote in its non -z output",
+		async () => {
+			const quoted = 'q"uote.md';
+			const { work, remote, canonicalRoot } = await setupPullable();
+			await commitFile(work, quoted, "base\n", "add quoted");
+			await createGit(work).raw(["push"]);
+			await pushFromOtherClone(remote, async (dir) => {
+				await commitFile(dir, quoted, "upstream\n", "upstream quoted");
+			});
+			acquireFileListCache(canonicalRoot);
+			try {
+				const read = seedStale(canonicalRoot, join(canonicalRoot, quoted));
+				await pullImpl(TEST_WIN, work, "merge");
+				expect(read()).toBeUndefined();
+			} finally {
+				releaseFileListCache(canonicalRoot);
+			}
+		},
+	);
+
+	it("evicts every file of a multi-file pull", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "second.md", "base\n", "add second");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await fsp.writeFile(join(dir, "first.md"), "upstream first\n", "utf8");
+			await fsp.writeFile(join(dir, "second.md"), "upstream second\n", "utf8");
+			const dgit = createGit(dir);
+			await dgit.raw(["add", "--", "first.md", "second.md"]);
+			await dgit.raw(["commit", "-m", "upstream both"]);
+		});
+		acquireFileListCache(canonicalRoot);
+		try {
+			const readFirst = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
+			const readSecond = seedStale(canonicalRoot, join(canonicalRoot, "second.md"));
+			await pullImpl(TEST_WIN, work, "merge");
+			expect(readFirst()).toBeUndefined();
+			expect(readSecond()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("adds an upstream-created .md to L1", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "added.md", "added\n", "upstream add");
+		});
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
+			await pullImpl(TEST_WIN, work, "merge");
+			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "added.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("removes an upstream-deleted .md from L1", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await createGit(dir).raw(["rm", "--", "first.md"]);
+			await createGit(dir).raw(["commit", "-m", "upstream delete"]);
+		});
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
+			await pullImpl(TEST_WIN, work, "merge");
+			expect(getCachedMdFiles(canonicalRoot)).not.toContain(join(canonicalRoot, "first.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("reflects an upstream rename as delete + create in L1", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			const dgit = createGit(dir);
+			await dgit.raw(["mv", "first.md", "renamed.md"]);
+			await dgit.raw(["commit", "-m", "upstream rename"]);
+		});
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
+			await pullImpl(TEST_WIN, work, "merge");
+			const files = getCachedMdFiles(canonicalRoot);
+			expect(files).not.toContain(join(canonicalRoot, "first.md"));
+			expect(files).toContain(join(canonicalRoot, "renamed.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	// merge conflict では HEAD が動かないため、HEAD 前後の diff だけでは空になる。
+	// working tree には auto-merge 結果と marker が書かれているので index 差分で拾う。
+	it("evicts the conflicted file even though the merge pull rejects", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("leaves the cache untouched for an up-to-date pull", async () => {
+		const { work, canonicalRoot } = await setupPullable();
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
+			await pullImpl(TEST_WIN, work, "merge");
+			expect(read()).toBe("stale");
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("adds tracked .md files to L1 on the first pull into an unborn branch", async () => {
+		const { work: seed, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(seed, remote);
+		await createGit(seed).raw(["push", "-u", "origin", "main"]);
+		const work = await initRepo();
+		dirsToCleanup.push(work);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		const wgit = createGit(work);
+		await wgit.raw(["remote", "add", "origin", remote]);
+		// unborn branch では `--set-upstream-to` が使えない (branch ref が無い) ので config を直に書く。
+		await wgit.raw(["config", "branch.main.remote", "origin"]);
+		await wgit.raw(["config", "branch.main.merge", "refs/heads/main"]);
+		const canonicalRoot = await fsp.realpath(work);
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => []);
+			await pullImpl(TEST_WIN, work, "merge");
+			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	// workspace が repo の subdir のケース (`git:check-repo` は `--is-inside-work-tree` 判定なので
+	// 到達しうる)。`--relative` が無いと diff の path が repo root 相対になり、workspace 基準で
+	// resolve した cache key と一致しない。
+	it("evicts using workspace-relative paths when the workspace is a repo subdirectory", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await fsp.mkdir(join(work, "sub"));
+		await commitFile(work, join("sub", "x.md"), "base\n", "add sub/x.md");
+		await createGit(work).raw(["push", "-u", "origin", "main"]);
+		const workspace = join(work, "sub");
+		await registerWorkspaceRoot(TEST_WIN, workspace);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, join("sub", "x.md"), "upstream\n", "upstream sub change");
+		});
+		const canonicalRoot = await fsp.realpath(workspace);
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "x.md"));
+			await pullImpl(TEST_WIN, workspace, "merge");
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	// rebase 中の残り commit を replay して working tree が変わる経路。conflict を解決した
+	// file (a.md) ではなく、replay でしか変わらない file (b.md) を観測する。
+	it("evicts a file rewritten by rebase --continue replaying the remaining commit", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "a.md", "base a\n", "add a");
+		await commitFile(work, "b.md", "base b\n", "add b");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "a.md", "upstream a\n", "upstream a");
+		});
+		await commitFile(work, "a.md", "local a\n", "local a");
+		await commitFile(work, "b.md", "local b\n", "local b");
+		await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+		await resolveConflictImpl(TEST_WIN, work, "a.md", "resolved a\n", "modify");
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "b.md"));
+			await finishConflictResolutionImpl(TEST_WIN, work);
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("evicts the marker version when rebase --continue stops at the next conflict", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "a.md", "base a\n", "add a");
+		await commitFile(work, "c.md", "base c\n", "add c");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "a.md", "upstream a\n", "upstream a");
+			await commitFile(dir, "c.md", "upstream c\n", "upstream c");
+		});
+		await commitFile(work, "a.md", "local a\n", "local a");
+		await commitFile(work, "c.md", "local c\n", "local c");
+		await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+		await resolveConflictImpl(TEST_WIN, work, "a.md", "resolved a\n", "modify");
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "c.md"));
+			await expect(finishConflictResolutionImpl(TEST_WIN, work)).rejects.toThrow();
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
 	});
 });
