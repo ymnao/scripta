@@ -18,6 +18,7 @@ import {
 	findContainingWorkspaceRoot,
 } from "../utils/path-guard";
 import { StructuredError } from "../utils/structured-error";
+import { applyLocalFsChanges } from "./search-cache";
 import { getFileTreeFilterOptions } from "./settings";
 
 // fs:read のサイズ上限。`.md` は通常 1MB 未満なので 64MB は十分なマージン。
@@ -243,6 +244,13 @@ async function writeFileImpl(senderId: number, path: string, content: string): P
 	// 書き込み成功後にだけ transient capability を消費する。
 	// 失敗時は残り、renderer 側 withRetry で再試行できる。
 	consumeTransientWritePath(senderId, canonical);
+	// **I/O の await より後**に流す (#397)。search-cache の l2Generation は「read 開始前に
+	// capture して set 時に不一致なら捨てる」規約なので、write 完了前に bump すると bump 後に
+	// 始まった read が旧内容を新 generation で L2 に載せ、stale が固定化する。
+	// **`create` ではなく `modify`**: 未存在 path への write で L1 add を取りこぼすが、それは
+	// watcher が 500ms 後に拾う現状挙動と同じで退行ではない。lstat で判別すると hot path に
+	// syscall が 1 つ増えるだけで、#397 の症状 (既存 note 上書き後の stale hit) には効かない。
+	applyLocalFsChanges([{ kind: "modify", path: canonical }]);
 }
 
 // create 系 3 経路の前処理。検査を mkdir の**後**に置くのは lstat から open / mkdir までの窓を
@@ -262,6 +270,7 @@ async function writeNewFileImpl(senderId: number, path: string, content: string)
 		await fh.close();
 	}
 	consumeTransientWritePath(senderId, canonical);
+	applyLocalFsChanges([{ kind: "create", path: canonical }]);
 }
 
 async function listDirectoryImpl(
@@ -308,6 +317,7 @@ async function createFileImpl(senderId: number, path: string): Promise<void> {
 		if (isErrnoCode(e, "EEXIST")) throw FsError.alreadyExists(canonical);
 		throw e;
 	}
+	applyLocalFsChanges([{ kind: "create", path: canonical }]);
 }
 
 async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
@@ -322,6 +332,9 @@ async function createDirectoryImpl(senderId: number, path: string): Promise<void
 		if (isErrnoCode(e, "EEXIST")) throw FsError.alreadyExists(canonical);
 		throw e;
 	}
+	// **ここだけ applyLocalFsChanges を呼ばない** (#397)。mkdir が作る dir は親を含めていずれも空 =
+	// L1 の不変条件 (= walkMdFiles の結果) を変えないので、流すと「非 `.md` create → files = null」の
+	// 保守的 full invalidate と L2 / L3 の subtree 走査を無駄に払うだけになる。
 }
 
 async function pathExistsImpl(senderId: number, path: string): Promise<boolean> {
@@ -350,12 +363,22 @@ async function renameEntryImpl(senderId: number, oldPath: string, newPath: strin
 	if (await entryExistsAt(newCanonical)) throw FsError.targetAlreadyExists(newCanonical);
 	await fsp.mkdir(dirname(newCanonical), { recursive: true });
 	await fsp.rename(oldCanonical, newCanonical);
+	// chokidar が emit する unlink + add と同じ組を 1 batch で流す (#397)。1 回にまとめると
+	// l2Generation bump と epoch 変化がそれぞれ 1 回で済む。新 path 側を `create` にして L2 / L3 を
+	// 掃除しないのは、entryExistsAt の reject により **アプリ自身が作った** entry は残らないから。
+	// 外部 delete が watcher の窓内で pending のまま同 path へ rename した場合は旧内容が残るが、
+	// それは flush 時の delete + create → modify merge が回収する既存の窓と同じ。
+	applyLocalFsChanges([
+		{ kind: "delete", path: oldCanonical },
+		{ kind: "create", path: newCanonical },
+	]);
 }
 
 async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
 	if (!(await entryExistsAt(canonical))) throw FsError.notFound(canonical);
 	await shell.trashItem(canonical);
+	applyLocalFsChanges([{ kind: "delete", path: canonical }]);
 }
 
 export function registerFsIpc(): void {

@@ -6,12 +6,22 @@ import { mkdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// fs.ts の deleteEntryImpl が使う shell.trashItem は production と同じく実際に entry を消す。
+// ただし file が消えると「L1 に stale な path が残っていても read 失敗で skip される」ため、
+// 検索結果だけでは delete kind を pin できない。L1 は getCachedMdFiles で直接観測する。
 vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
+	shell: {
+		trashItem: vi.fn(async (target: string) => {
+			const { rm } = await import("node:fs/promises");
+			await rm(target, { recursive: true });
+		}),
+	},
 }));
 
 import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
+import { __testing as fsTesting } from "./fs";
 import {
 	__testing,
 	cancelBacklinkScanForWindow,
@@ -34,6 +44,7 @@ import {
 const TEST_WIN = 1;
 const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl, scanBacklinksImpl } =
 	__testing;
+const { writeFileImpl, renameEntryImpl, deleteEntryImpl, createFileImpl } = fsTesting;
 
 let workspaceDir = "";
 let ws: TempWorkspace;
@@ -1336,6 +1347,90 @@ describe.skipIf(process.platform === "win32")(
 		});
 	},
 );
+
+// watcher flush (BATCH_DEADLINE_MS = 500ms) を待たずに、アプリ自身の書き込みが
+// 直後の検索へ反映されること (#397)。watcher は起動せず、fs impl の proactive 反映だけを見る。
+describe("searchFilesImpl (#397: fs mutating handler の proactive 反映)", () => {
+	it("fs:write 直後の検索で旧内容が hit しない", async () => {
+		const filePath = join(workspaceDir, "note.md");
+		await writeFile(filePath, "original content");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "original");
+
+		await writeFileImpl(TEST_WIN, filePath, "updated content");
+
+		expect((await searchFilesImpl(TEST_WIN, workspaceDir, "original")).results).toHaveLength(0);
+		releaseFileListCache(canonical);
+	});
+
+	it("fs:write 直後に、旧内容に無かった語でも hit する (L3 の候補絞りで落ちない)", async () => {
+		const filePath = join(workspaceDir, "note.md");
+		await writeFile(filePath, "original content");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		// 1 回目の検索で piggyback indexing が旧内容を L3 に載せる。
+		await searchFilesImpl(TEST_WIN, workspaceDir, "original");
+
+		await writeFileImpl(TEST_WIN, filePath, "zebra appears now");
+
+		expect((await searchFilesImpl(TEST_WIN, workspaceDir, "zebra")).results).toHaveLength(1);
+		releaseFileListCache(canonical);
+	});
+
+	it("fs:rename 直後の検索が新しい path で hit する", async () => {
+		const oldPath = join(workspaceDir, "a.md");
+		const newPath = join(workspaceDir, "b.md");
+		await writeFile(oldPath, "renamed body");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "renamed");
+
+		await renameEntryImpl(TEST_WIN, oldPath, newPath);
+
+		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "b.md")]);
+		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "renamed");
+		expect(after.results.map((r) => basename(r.filePath))).toEqual(["b.md"]);
+
+		// watcher が 500ms 後に同じ event を流す定常状態。再適用しても結果は変わらない。
+		applyFsBatch(canonical, [
+			{ kind: "delete", path: join(canonical, "a.md") },
+			{ kind: "create", path: join(canonical, "b.md") },
+		]);
+		const reapplied = await searchFilesImpl(TEST_WIN, workspaceDir, "renamed");
+		expect(reapplied).toEqual(after);
+		releaseFileListCache(canonical);
+	});
+
+	it("fs:delete 直後の検索が phantom hit を返さない", async () => {
+		const filePath = join(workspaceDir, "note.md");
+		await writeFile(filePath, "doomed body");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "doomed");
+
+		await deleteEntryImpl(TEST_WIN, filePath);
+
+		expect(getCachedMdFiles(canonical)).toEqual([]);
+		expect((await searchFilesImpl(TEST_WIN, workspaceDir, "doomed")).results).toHaveLength(0);
+		releaseFileListCache(canonical);
+	});
+
+	it("fs:create-file 直後の検索対象に新しい file が入る", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "needle here");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
+
+		const created = join(workspaceDir, "fresh.md");
+		await createFileImpl(TEST_WIN, created);
+		await writeFile(created, "needle here too");
+
+		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
+		expect(after.results.map((r) => basename(r.filePath)).sort()).toEqual(["a.md", "fresh.md"]);
+		releaseFileListCache(canonical);
+	});
+});
 
 describe("scanBacklinksImpl (Phase B: getCachedInputFileMap)", () => {
 	it("uses cached input fileMap when watcher is running (result parity with fallback)", async () => {

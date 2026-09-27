@@ -14,6 +14,7 @@ import { handle } from "../utils/ipc-handle";
 import { writeFileUtf8NoFollow } from "../utils/open-nofollow";
 import { assertPathAllowed } from "../utils/path-guard";
 import { gitError } from "../utils/structured-error";
+import { applyLocalFsChanges } from "./search-cache";
 
 // git sync 操作を simple-git ベースで集約する IPC ハンドラ群。
 //
@@ -225,6 +226,10 @@ async function resolveConflictImpl(
 		} catch (e) {
 			throw gitError(extractGitErrorMessage(e));
 		}
+		// modify 分岐のような親の realpath を通さないのは、**git が symlink を辿った path を
+		// track しない**ため。filePath は git 由来の tracked path なので中間 component に symlink は
+		// 現れず、canonical 表記との食い違いが起きない (現れる path を渡せば rm 自体が先に失敗する)。
+		applyLocalFsChanges([{ kind: "delete", path: pathResolve(canonical, filePath) }]);
 		return;
 	}
 	// modify — repo 内への安全な書き込み。
@@ -266,6 +271,7 @@ async function resolveConflictImpl(
 		}
 		throw e;
 	}
+	applyLocalFsChanges([{ kind: "modify", path: canonicalTarget }]);
 	try {
 		// `git add` は repo-relative path を期待する（git が repo root から自動的に解釈）。
 		await git.raw(["add", "--", filePath]);
