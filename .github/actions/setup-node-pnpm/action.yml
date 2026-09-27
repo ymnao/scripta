@@ -5,11 +5,11 @@ inputs:
   node-version:
     description: Node.js version to use
     required: false
-    # 22.22 系の最新 patch を取得する。22.23 以降が出てもここではそれを取らない
-    # （明示更新で確認するため）。本リポジトリの `engines.node (>=22.22.2)` は
-    # 依存ツリー (pnpm-lock.yaml) の `engines.node` の最大要求 (jsdom 系の
-    # `^22.22.2`) に合わせてあり、pnpm 11 自身の `>=22.13` もこれで満たす。
-    # 22.22.0 / 22.22.1 は floor 未満だが、setup-node は 22.22 を最新 patch に解決する。
+    # 22.22 系の patch を取得する。22.23.x 以降は既に存在するが、ここでは取らない
+    # （明示更新で確認するため）。本リポジトリの `engines.node` は依存ツリー
+    # (pnpm-lock.yaml) の `engines.node` の実要求 (jsdom 系と production 依存の
+    # write-file-atomic@8 の `^22.22.2 || ^24.15.0 || >=26.0.0`) に揃えてあり、
+    # 22.22 系で満たすのは 22.22.2 以上。pnpm 11 自身の `>=22.13` もこれで満たす。
     default: "22.22"
 
 runs:
