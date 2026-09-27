@@ -52,9 +52,9 @@ async function initRepo(): Promise<string> {
 	await git.raw(["config", "user.email", "test@test.com"]);
 	await git.raw(["config", "user.name", "Test"]);
 	await git.raw(["config", "commit.gpgsign", "false"]);
-	// 開発者の global `pull.rebase=true` が漏れると `syncMethod: "merge"` の test が実際には
-	// rebase 経路を走り、CI (global config 無し) と挙動が分かれる。repo-local で固定して
-	// merge / rebase の経路指定を test 側の意図どおりにする。
+	// `syncMethod: "merge"` の test が実際に merge を走るようにする。global config を遮断した
+	// 状態（beforeEach）では `pull.rebase` が未設定になり、divergent な pull は merge を試す前に
+	// 「どちらで reconcile するか指定せよ」で中断するため、working tree に marker が書かれない。
 	await git.raw(["config", "pull.rebase", "false"]);
 	return real;
 }
@@ -129,7 +129,13 @@ async function setupRepoWithRemote(): Promise<{ work: string; remote: string }> 
 
 let dirsToCleanup: string[] = [];
 
+// 開発者の global git config を class ごと遮断する（git 2.32+）。`pull.rebase=true` が漏れると
+// `syncMethod: "merge"` を渡した test が実際には rebase 経路を走り、「merge conflict では HEAD が
+// 動かない」前提を pin したい test が HEAD が動く経路を観測して mutant を見逃す（実際に
+// `--cached` 削除の mutant が survive した）。キー単位で repo-local に上書きすると次に別キーで
+// 同じことが起きるので、global config 自体を読ませない。
 beforeEach(() => {
+	vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
 	clearWorkspaceRoots();
 	dirsToCleanup = [];
 });
@@ -143,6 +149,7 @@ afterEach(async () => {
 		// flaky cleanup を防ぐ。
 		await fsp.rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 	}
+	vi.unstubAllEnvs();
 });
 
 async function newWorkspace(): Promise<string> {

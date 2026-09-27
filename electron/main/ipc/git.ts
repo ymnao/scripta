@@ -42,6 +42,10 @@ const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
 
 // HEAD の commit hash。unborn branch（commit が 1 つも無い repo）では null。
 // `--verify -q` は unborn で「出力なし + exit 1」になるので、エラー文言は見ない。
+// **null は「unborn」と「読めなかった」を区別しない**。区別しないと後者を unborn と誤判定して
+// `ls-files` 全件を create として流すが、create は L2 を evict しないので結果は
+// 「watcher flush まで stale」= この修正前の挙動に戻るだけ。区別のために失敗種別を
+// エラー文言から判定すると、git のメッセージ変更に追従する負債の方が大きい。
 async function readHead(git: SimpleGit): Promise<string | null> {
 	try {
 		const out = (await git.raw(["rev-parse", "--verify", "-q", "HEAD"])).trim();
@@ -431,27 +435,19 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 	]);
 	// marker 判定と下の「どちらでもない」throw は working tree を触らないので helper の外に置く
 	// （HEAD 読み + diff を無駄に払わない）。包むのは実際に git を走らせる 2 経路だけ。
-	if (rebaseMerge || rebaseApply) {
-		return withWorkingTreeInvalidation(git, canonical, async () => {
+	const run = (args: string[]): Promise<string> =>
+		withWorkingTreeInvalidation(git, canonical, async () => {
 			try {
-				return (await git.raw(["rebase", "--continue"])).trim();
+				return (await git.raw(args)).trim();
 			} catch (e) {
 				throw gitError(extractGitErrorMessage(e));
 			}
 		});
-	}
-	if (mergeHead) {
-		// `commit --no-edit` 自体は working tree を変えないが、HEAD が merge commit へ動くので
-		// diff には merge で入った file が出る（= 冗長な invalidate）。merge 完了だけを
-		// special-case して分岐を増やすより、該当 file の L2 再読込を払う方を選ぶ。
-		return withWorkingTreeInvalidation(git, canonical, async () => {
-			try {
-				return (await git.raw(["commit", "--no-edit"])).trim();
-			} catch (e) {
-				throw gitError(extractGitErrorMessage(e));
-			}
-		});
-	}
+	if (rebaseMerge || rebaseApply) return run(["rebase", "--continue"]);
+	// `commit --no-edit` 自体は working tree を変えないが、HEAD が merge commit へ動くので
+	// diff には merge で入った file が出る（= 冗長な invalidate）。merge 完了だけを
+	// special-case して分岐を増やすより、該当 file の L2 再読込を払う方を選ぶ。
+	if (mergeHead) return run(["commit", "--no-edit"]);
 	throw new Error("Not in a merge or rebase state");
 }
 
