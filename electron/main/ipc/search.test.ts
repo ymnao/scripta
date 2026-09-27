@@ -44,7 +44,8 @@ import {
 const TEST_WIN = 1;
 const { searchFilesImpl, searchFilenamesImpl, scanUnresolvedWikilinksImpl, scanBacklinksImpl } =
 	__testing;
-const { writeFileImpl, renameEntryImpl, deleteEntryImpl, createFileImpl } = fsTesting;
+const { writeFileImpl, writeNewFileImpl, renameEntryImpl, deleteEntryImpl, createFileImpl } =
+	fsTesting;
 
 let workspaceDir = "";
 let ws: TempWorkspace;
@@ -1425,6 +1426,19 @@ describe("searchFilesImpl (#397: fs mutating handler の proactive 反映)", () 
 		const created = join(workspaceDir, "fresh.md");
 		await createFileImpl(TEST_WIN, created);
 		await writeFile(created, "needle here too");
+
+		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
+		expect(after.results.map((r) => basename(r.filePath)).sort()).toEqual(["a.md", "fresh.md"]);
+		releaseFileListCache(canonical);
+	});
+
+	it("fs:write-new 直後の検索対象に新しい file が入る", async () => {
+		await writeFile(join(workspaceDir, "a.md"), "needle here");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
+
+		await writeNewFileImpl(TEST_WIN, join(workspaceDir, "fresh.md"), "needle here too");
 
 		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "needle");
 		expect(after.results.map((r) => basename(r.filePath)).sort()).toEqual(["a.md", "fresh.md"]);
