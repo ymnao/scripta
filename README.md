@@ -48,7 +48,7 @@ Chromium 固定環境で挙動を安定させるため、バンドルサイズ�
 
 ### 前提条件
 
-- Node.js `>=22.13.0`（pnpm 11 の要件、Vite 8 / electron-vite 5 / Vitest 4 はもう少し緩い）
+- Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`（依存ツリーの `engines` の実要求。jsdom 系と production 依存の write-file-atomic@8 がこの range を要求する。pnpm 11 自身は `>=22.13`）
 - pnpm >= 11
 
 ### コマンド
