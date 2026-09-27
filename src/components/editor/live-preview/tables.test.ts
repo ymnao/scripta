@@ -1,4 +1,3 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, runScopeHandlers } from "@codemirror/view";
@@ -83,8 +82,7 @@ describe("insertTable (runtime)", () => {
 		expect(doc).toBe(`${tA}\ntext\n\n${createEmptyTable(3, 2)}\n`);
 
 		// 結果ドキュメントで両テーブルが widget として認識される（密着なら 0 になる）
-		const fresh = EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] });
-		ensureSyntaxTree(fresh, doc.length, Number.POSITIVE_INFINITY);
+		const fresh = createTestState(doc);
 		const widgets = replaceDecorations(collectDecorations(buildTableDecorations(fresh))).length;
 		expect(widgets).toBe(2);
 	});
