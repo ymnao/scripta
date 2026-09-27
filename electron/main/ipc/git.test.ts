@@ -52,6 +52,10 @@ async function initRepo(): Promise<string> {
 	await git.raw(["config", "user.email", "test@test.com"]);
 	await git.raw(["config", "user.name", "Test"]);
 	await git.raw(["config", "commit.gpgsign", "false"]);
+	// 開発者の global `pull.rebase=true` が漏れると `syncMethod: "merge"` の test が実際には
+	// rebase 経路を走り、CI (global config 無し) と挙動が分かれる。repo-local で固定して
+	// merge / rebase の経路指定を test 側の意図どおりにする。
+	await git.raw(["config", "pull.rebase", "false"]);
 	return real;
 }
 
