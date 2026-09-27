@@ -1,7 +1,9 @@
 import { promises as fsp } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve as pathResolve } from "node:path";
 import { BrowserWindow } from "electron";
+import type { SimpleGit } from "simple-git";
 import type { ConflictContent, GitStatus } from "../../../src/types/git-sync";
+import type { FsChangeEvent, FsKind } from "../../../src/types/workspace";
 import { isErrnoCode } from "../utils/fs-errors";
 import { createGit, createGitNoCwd, extractGitErrorMessage } from "../utils/git-env";
 import {
@@ -37,6 +39,138 @@ const CONFLICT_PREFIXES = new Set(["UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD
 // symlink loop) でも起きるので、文言はその corner も含めて「symlink 由来の拒否」に丸める
 // (fail-closed であることは変わらない)。
 const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
+
+// HEAD の commit hash。unborn branch（commit が 1 つも無い repo）では null。
+// `--verify -q` は unborn で「出力なし + exit 1」になるので、エラー文言は見ない。
+// **null は「unborn」と「読めなかった」を区別しない**。後者を unborn と誤判定すると
+// `ls-files` 全件を create として流す。`.md` の create は L2 を evict しないので、実際に
+// 書き換わった `.md` は watcher flush まで stale のまま（この修正前と同じ）。tracked に非 `.md`
+// があればその create が L1 の full invalidate を起こすので、再 walk のコストは余分に払う
+// （安全側）。区別のために失敗種別をエラー文言から判定すると、git のメッセージ変更に追従する
+// 負債の方が大きい。
+async function readHead(git: SimpleGit): Promise<string | null> {
+	try {
+		const out = (await git.raw(["rev-parse", "--verify", "-q", "HEAD"])).trim();
+		return out.length > 0 ? out : null;
+	} catch {
+		return null;
+	}
+}
+
+// `git diff --name-status -z` の出力（`status\0path\0status\0path\0…` の平坦な NUL 区切り）を
+// FsChangeEvent へ変換する。path は cwd 相対（`--relative` 前提）なので canonicalRoot で絶対化する。
+//
+// **`-z` が必要**なのは、既定の出力が path 中の `"` / 改行 / 制御文字を C escape + quote して
+// 返すため（`core.quotepath=false` は非 ASCII の 8 進 escape だけを止める。git-env.ts の
+// createGit が既に設定済み）。escape された path をそのまま cache key に使うと evict が空振りする。
+// **`--no-renames` が必要**なのは、`diff.renames` の既定が true で `R100\0old\0new\0` の
+// 3 要素 record が混ざり、2 要素前提のこのループが以降ずれるため。rename を delete + create の
+// 2 event に分解する意味論は fs:rename の既存配線と同じ。
+function parseNameStatusZ(out: string, canonicalRoot: string): FsChangeEvent[] {
+	const tokens = out.split("\0");
+	const events: FsChangeEvent[] = [];
+	for (let i = 0; i + 1 < tokens.length; i += 2) {
+		const status = tokens[i];
+		const rel = tokens[i + 1];
+		if (status.length === 0 || rel.length === 0) continue;
+		// A / D 以外（M / T / U / 未知）は modify。kind を全部 modify に丸めないのは
+		// applyBatchToState が modify を L1（files 集合）に反映しないため — upstream で
+		// 追加された `.md` が検索に出ず、削除された `.md` が残る（#397 の症状の別形）。
+		const kind: FsKind = status[0] === "A" ? "create" : status[0] === "D" ? "delete" : "modify";
+		events.push({ kind, path: pathResolve(canonicalRoot, rel) });
+	}
+	return events;
+}
+
+// git 子プロセスが working tree に対して行った変更を事後に集める（#569 finding 1）。
+// `before` は op 実行前の HEAD、`failed` は op が throw したか。
+//
+// HEAD が動いた場合はその範囲の diff が working tree 変更と一致する（pull / rebase --continue は
+// 成功時 working tree を HEAD の tree に揃える）。**失敗時に `--cached` を足す**のは、merge
+// conflict で停止すると HEAD が動かないまま auto-merge 済みの内容と marker が working tree へ
+// 書かれるため（rebase conflict では HEAD が途中まで動く）。`git diff HEAD`（working tree 比較）
+// ではなく `--cached`（index 比較）にするのは、pull 前から存在した unstaged なユーザー編集を
+// offline pull が落ちるたびに毎回 evict しないため。
+//
+// **`--relative` を付ける**のは、workspace が repo の subdir でも成立させるため
+// （`git:check-repo` は `rev-parse --is-inside-work-tree` で判定するので subdir workspace が
+// 到達しうる）。既定の repo root 相対 path を canonicalRoot で resolve すると別 path になる。
+// 副作用として workspace 外の変更 file が落ちるが、cache root は workspace なのでそれが正しい。
+// `git ls-files` は既定で cwd 相対なので同様。
+async function collectWorkingTreeChanges(
+	git: SimpleGit,
+	canonicalRoot: string,
+	before: string | null,
+	failed: boolean,
+): Promise<FsChangeEvent[]> {
+	const after = await readHead(git);
+	const events: FsChangeEvent[] = [];
+	if (before !== after) {
+		if (before === null) {
+			// unborn からの初回 pull: HEAD の tree = index なので tracked 全件が create。
+			const out = await git.raw(["ls-files", "-z"]);
+			for (const rel of out.split("\0")) {
+				if (rel.length > 0) events.push({ kind: "create", path: pathResolve(canonicalRoot, rel) });
+			}
+		} else if (after !== null) {
+			const out = await git.raw([
+				"diff",
+				"--name-status",
+				"-z",
+				"--no-renames",
+				"--relative",
+				before,
+				after,
+			]);
+			events.push(...parseNameStatusZ(out, canonicalRoot));
+		}
+	}
+	if (failed) {
+		const out = await git.raw([
+			"diff",
+			"--cached",
+			"--name-status",
+			"-z",
+			"--no-renames",
+			"--relative",
+		]);
+		events.push(...parseNameStatusZ(out, canonicalRoot));
+	}
+	return events;
+}
+
+// working tree を書き換えうる git 操作を包み、完了後に search-cache へ proactive invalidate を
+// 流す（#569）。**call-site ごとの手配線にしない**のは、対象が「子プロセスが何を書いたかを
+// 事後にしか知れない操作」で、success / failure の両経路 × git 実行 3 種（pull /
+// rebase --continue / commit --no-edit）の 6 箇所に同じ処理を書くことになるため（#397 では
+// resolveConflict の兄弟分岐 1 つを実際に落とした）。
+// 逆に `resolveConflict` のように **call-site が書いた path を知っている**書き込みは、
+// 明示配線のままにする方が正確 — HEAD と同内容へ解決したケースは index == HEAD になって
+// `--cached` に現れず、disk 上の marker 版が cache に残る。
+//
+// invalidate 自体の失敗は握りつぶす。ここで throw すると成功した pull を失敗に変え、失敗経路では
+// op 本来のエラーを覆い隠す。取りこぼしは watcher の flush（500ms）が回収する。
+async function withWorkingTreeInvalidation<T>(
+	git: SimpleGit,
+	canonicalRoot: string,
+	op: () => Promise<T>,
+): Promise<T> {
+	const before = await readHead(git);
+	let failed = false;
+	try {
+		return await op();
+	} catch (e) {
+		failed = true;
+		throw e;
+	} finally {
+		try {
+			const events = await collectWorkingTreeChanges(git, canonicalRoot, before, failed);
+			if (events.length > 0) applyLocalFsChanges(events);
+		} catch {
+			// best-effort（上記 doc の理由）。
+		}
+	}
+}
 
 async function checkAvailableImpl(): Promise<boolean> {
 	try {
@@ -120,14 +254,19 @@ async function pullImpl(senderId: number, path: string, syncMethod: string): Pro
 		throw new Error(`Invalid sync_method: ${syncMethod}. Expected "merge" or "rebase".`);
 	}
 	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull"];
-	try {
-		return (await createGit(canonical).raw(args)).trim();
-	} catch (e) {
-		const msg = extractGitErrorMessage(e);
-		// 初回 pull で upstream 未設定 → 成功扱い（空文字列を返す）。
-		if (msg.includes("no tracking information")) return "";
-		throw gitError(msg);
-	}
+	const git = createGit(canonical);
+	// upstream 未設定の「成功扱い」は **op の内側**で潰す。外に出すと failed 経路として
+	// `--cached` を 1 回無駄に呼ぶ（working tree は変わっていない）。
+	return withWorkingTreeInvalidation(git, canonical, async () => {
+		try {
+			return (await git.raw(args)).trim();
+		} catch (e) {
+			const msg = extractGitErrorMessage(e);
+			// 初回 pull で upstream 未設定 → 成功扱い（空文字列を返す）。
+			if (msg.includes("no tracking information")) return "";
+			throw gitError(msg);
+		}
+	});
 }
 
 async function pushImpl(senderId: number, path: string): Promise<string> {
@@ -297,20 +436,21 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 		exists("rebase-apply"),
 		exists("MERGE_HEAD"),
 	]);
-	if (rebaseMerge || rebaseApply) {
-		try {
-			return (await git.raw(["rebase", "--continue"])).trim();
-		} catch (e) {
-			throw gitError(extractGitErrorMessage(e));
-		}
-	}
-	if (mergeHead) {
-		try {
-			return (await git.raw(["commit", "--no-edit"])).trim();
-		} catch (e) {
-			throw gitError(extractGitErrorMessage(e));
-		}
-	}
+	// marker 判定と下の「どちらでもない」throw は working tree を触らないので helper の外に置く
+	// （HEAD 読み + diff を無駄に払わない）。包むのは実際に git を走らせる 2 経路だけ。
+	const run = (args: string[]): Promise<string> =>
+		withWorkingTreeInvalidation(git, canonical, async () => {
+			try {
+				return (await git.raw(args)).trim();
+			} catch (e) {
+				throw gitError(extractGitErrorMessage(e));
+			}
+		});
+	if (rebaseMerge || rebaseApply) return run(["rebase", "--continue"]);
+	// `commit --no-edit` 自体は working tree を変えないが、HEAD が merge commit へ動くので
+	// diff には merge で入った file が出る（= 冗長な invalidate）。merge 完了だけを
+	// special-case して分岐を増やすより、該当 file の L2 再読込を払う方を選ぶ。
+	if (mergeHead) return run(["commit", "--no-edit"]);
 	throw new Error("Not in a merge or rebase state");
 }
 

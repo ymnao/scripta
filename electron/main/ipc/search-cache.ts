@@ -197,9 +197,10 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	if (e.state.epoch !== epochBefore) e.inputFileMapMemo = null;
 }
 
-// アプリ自身の書き込み (fs:write / fs:write-new / fs:create-file / fs:create-directory /
-// fs:rename / fs:delete) を watcher flush (BATCH_DEADLINE_MS = 500ms) より先に cache へ反映する
-// (#397)。呼び手は canonical path の event を渡し、root の解決はこの層が行う。
+// アプリ自身の書き込み (fs / git の mutating handler) を watcher flush
+// (BATCH_DEADLINE_MS = 500ms) より先に cache へ反映する (#397)。呼び手は canonical path の
+// event を渡し、root の解決はこの層が行う。呼び手の列挙はここに書かない — #569 で git 側に
+// 2 経路増えた時点で古くなったので、現在の呼び手は `grep applyLocalFsChanges electron/main` で引く。
 //
 // **L2 だけを狙う狭い evict API にせず applyFsBatch に流す**のは、L3 InvertedIndex が
 // searchFilesImpl の候補絞りに本配線されている (#394 Phase D) ため。L2 のみ evict すると
