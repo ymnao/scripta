@@ -42,10 +42,12 @@ const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
 
 // HEAD の commit hash。unborn branch（commit が 1 つも無い repo）では null。
 // `--verify -q` は unborn で「出力なし + exit 1」になるので、エラー文言は見ない。
-// **null は「unborn」と「読めなかった」を区別しない**。区別しないと後者を unborn と誤判定して
-// `ls-files` 全件を create として流すが、create は L2 を evict しないので結果は
-// 「watcher flush まで stale」= この修正前の挙動に戻るだけ。区別のために失敗種別を
-// エラー文言から判定すると、git のメッセージ変更に追従する負債の方が大きい。
+// **null は「unborn」と「読めなかった」を区別しない**。後者を unborn と誤判定すると
+// `ls-files` 全件を create として流す。`.md` の create は L2 を evict しないので、実際に
+// 書き換わった `.md` は watcher flush まで stale のまま（この修正前と同じ）。tracked に非 `.md`
+// があればその create が L1 の full invalidate を起こすので、再 walk のコストは余分に払う
+// （安全側）。区別のために失敗種別をエラー文言から判定すると、git のメッセージ変更に追従する
+// 負債の方が大きい。
 async function readHead(git: SimpleGit): Promise<string | null> {
 	try {
 		const out = (await git.raw(["rev-parse", "--verify", "-q", "HEAD"])).trim();
@@ -139,8 +141,9 @@ async function collectWorkingTreeChanges(
 
 // working tree を書き換えうる git 操作を包み、完了後に search-cache へ proactive invalidate を
 // 流す（#569）。**call-site ごとの手配線にしない**のは、対象が「子プロセスが何を書いたかを
-// 事後にしか知れない操作」で、success / failure の両経路 × pull / finishConflict の 4 箇所に
-// 同じ処理を書くことになるため（#397 では resolveConflict の兄弟分岐 1 つを実際に落とした）。
+// 事後にしか知れない操作」で、success / failure の両経路 × git 実行 3 種（pull /
+// rebase --continue / commit --no-edit）の 6 箇所に同じ処理を書くことになるため（#397 では
+// resolveConflict の兄弟分岐 1 つを実際に落とした）。
 // 逆に `resolveConflict` のように **call-site が書いた path を知っている**書き込みは、
 // 明示配線のままにする方が正確 — HEAD と同内容へ解決したケースは index == HEAD になって
 // `--cached` に現れず、disk 上の marker 版が cache に残る。

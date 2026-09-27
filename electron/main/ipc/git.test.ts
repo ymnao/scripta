@@ -129,13 +129,14 @@ async function setupRepoWithRemote(): Promise<{ work: string; remote: string }> 
 
 let dirsToCleanup: string[] = [];
 
-// 開発者の global git config を class ごと遮断する（git 2.32+）。`pull.rebase=true` が漏れると
-// `syncMethod: "merge"` を渡した test が実際には rebase 経路を走り、「merge conflict では HEAD が
-// 動かない」前提を pin したい test が HEAD が動く経路を観測して mutant を見逃す（実際に
+// 開発者の global / system git config を scope ごと遮断する（git 2.32+）。`pull.rebase=true` が
+// 漏れると `syncMethod: "merge"` を渡した test が実際には rebase 経路を走り、「merge conflict では
+// HEAD が動かない」前提を pin したい test が HEAD が動く経路を観測して mutant を見逃す（実際に
 // `--cached` 削除の mutant が survive した）。キー単位で repo-local に上書きすると次に別キーで
-// 同じことが起きるので、global config 自体を読ませない。
+// 同じことが起きるので、repo-local 以外の scope 自体を読ませない。
 beforeEach(() => {
 	vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
+	vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
 	clearWorkspaceRoots();
 	dirsToCleanup = [];
 });
@@ -734,15 +735,21 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		}
 	});
 
+	// local commit が無いと `--rebase` も単純 fast-forward になり、merge 版と同じ分岐しか通らない。
+	// 非 conflict な local commit を 1 つ積んで rewind + replay を実際に通す。
 	it("evicts the L2 entry for a file changed by pull --rebase", async () => {
 		const { work, remote, canonicalRoot } = await setupPullable();
 		await pushFromOtherClone(remote, async (dir) => {
 			await commitFile(dir, "first.md", "upstream\n", "upstream change");
 		});
+		await commitFile(work, "local.md", "local\n", "local commit");
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
 			await pullImpl(TEST_WIN, work, "rebase");
+			// replay が起きたことを観測する (fast-forward なら upstream commit が最上位に来る)。
+			const log = (await createGit(work).raw(["log", "-2", "--format=%s"])).trim().split("\n");
+			expect(log).toEqual(["local commit", "upstream change"]);
 			expect(read()).toBeUndefined();
 		} finally {
 			releaseFileListCache(canonicalRoot);
