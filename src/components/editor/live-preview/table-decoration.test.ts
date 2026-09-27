@@ -1,10 +1,7 @@
 import { history, redo, undo } from "@codemirror/commands";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, type WidgetType } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { treeParseProgressed } from "./plugin-utils";
 import {
 	buildTableDecorations,
 	clearCellSelection,
@@ -184,13 +181,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 	function mountEditor(doc: string, cursorPos = 0, extraExtensions: Extension[] = []): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(cursorPos),
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration, ...extraExtensions],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(doc, cursorPos, [tableDecoration, ...extraExtensions]);
 		const view = new EditorView({ state, parent });
 		view.focus();
 		mounted.push(view);
@@ -656,13 +647,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
 		const initial = `hello\n\n${simpleTable}`;
-		let state = EditorState.create({
-			doc: initial,
-			selection: EditorSelection.cursor(0),
-			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(initial, 0, [history(), tableDecoration]);
 		const view = new EditorView({ state, parent });
 		mounted.push(view);
 
@@ -693,13 +678,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		// で確実に CM history へ橋渡しする。
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc: simpleTable,
-			selection: EditorSelection.cursor(0),
-			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(simpleTable, 0, [history(), tableDecoration]);
 		const view = new EditorView({ state, parent });
 		mounted.push(view);
 
@@ -730,13 +709,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		// 「Cmd+Z が効かない」状態になっていた。差分があれば必ず DOM を追従させる。
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc: simpleTable,
-			selection: EditorSelection.cursor(0),
-			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(simpleTable, 0, [history(), tableDecoration]);
 		const view = new EditorView({ state, parent });
 		mounted.push(view);
 
@@ -791,13 +764,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 	it("undo / redo はテーブル末尾退避フィルタを通らず履歴上の状態を忠実に復元する（#90）", () => {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc: `${simpleTable}\ntext`,
-			selection: EditorSelection.cursor(0),
-			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(`${simpleTable}\ntext`, 0, [history(), tableDecoration]);
 		const view = new EditorView({ state, parent });
 		mounted.push(view);
 
@@ -848,13 +815,7 @@ describe("table runtime (clamp / exitTableDown / paste)", () => {
 		const doc = `${simpleTable}\n\ntext`;
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(0),
-			extensions: [history(), markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(doc, 0, [history(), tableDecoration]);
 		const view = new EditorView({ state, parent });
 		mounted.push(view);
 
@@ -893,13 +854,7 @@ describe("multi-cell selection (#119)", () => {
 	function mountEditor(doc: string): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(0),
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(doc, 0, tableDecoration);
 		const view = new EditorView({ state, parent });
 		view.focus();
 		mounted.push(view);
@@ -1287,19 +1242,7 @@ describe("parseTsv", () => {
 //   EditableTableWidget インスタンスを生成する（内容が同じでも参照は別物になる）
 describe("tableDecorationField (StateField diff rebuild)", () => {
 	function makeState(doc: string, selection?: EditorSelection): EditorState {
-		let state = EditorState.create({
-			doc,
-			selection,
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		// 空の update({}) では足りない: LanguageState.init の parse は 20ms で打ち切られうる
-		// (full run の CPU 競合下で実際に起きた、#419)。field の create はその途中の tree で
-		// 走り、ensureSyntaxTree で tree が完成しても field 自身は rebuild されない。
-		// 本番で treeChangeDispatcher が dispatch する effect をここで流して追いつかせる。
-		// このファイルの他の state 構築箇所も同じ理由で同じ effect を流している。
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
-		return state;
+		return createTestState(doc, undefined, tableDecoration, selection);
 	}
 
 	interface WidgetEntry {
@@ -1327,7 +1270,7 @@ describe("tableDecorationField (StateField diff rebuild)", () => {
 	const table = "| a | b |\n| - | - |\n| 1 | 2 |";
 
 	it("初回 parse が時間予算で打ち切られても makeState 後の widget はテーブル分そろう (#419)", () => {
-		let now = 1_000_000;
+		let now = 0;
 		const spy = vi.spyOn(Date, "now").mockImplementation(() => {
 			now += 1000;
 			return now;
@@ -1510,12 +1453,7 @@ describe("tableWidgetPositionSync (skip path でも dataset.tableFrom が live �
 	function mountEditor(doc: string): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({ effects: treeParseProgressed.of(null) }).state;
+		const state = createTestState(doc, undefined, tableDecoration);
 		const view = new EditorView({ state, parent });
 		mounted.push(view);
 		return view;

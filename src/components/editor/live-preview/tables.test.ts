@@ -40,13 +40,7 @@ describe("insertTable (runtime)", () => {
 	function mountEditor(doc: string, cursorPos: number): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(cursorPos),
-			extensions: [markdown({ base: markdownLanguage }), tableKeymap],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({}).state;
+		const state = createTestState(doc, cursorPos, tableKeymap);
 		const view = new EditorView({ state, parent });
 		view.focus();
 		mounted.push(view);
@@ -143,13 +137,7 @@ describe("backspaceIntoTableFromBelow (runtime)", () => {
 	function mountEditor(doc: string, cursorPos: number): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(cursorPos),
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration, tableKeymap],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({}).state;
+		const state = createTestState(doc, cursorPos, [tableDecoration, tableKeymap]);
 		const view = new EditorView({ state, parent });
 		view.focus();
 		mounted.push(view);
