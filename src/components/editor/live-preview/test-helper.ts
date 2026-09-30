@@ -2,6 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { type Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import { treeParseProgressed } from "./plugin-utils";
 
 export function createTestState(
 	doc: string,
@@ -23,9 +24,13 @@ export function createTestState(
 	// `ensureSyntaxTree` は parse context の tree を更新するが、`syntaxTree(state)` が
 	// 返す `field.tree` はスナップショットなので同期されない。
 	// LanguageState.apply は `this.tree != this.context.tree` のとき new LanguageState を
-	// 作って context.tree を field.tree にコピーする。no-op transaction で apply を
+	// 作って context.tree を field.tree にコピーする。transaction で apply を
 	// 発火させ、field.tree を最新の parse 結果と同期する。
-	return initial.update({}).state;
+	// 空の update({}) では足りない: LanguageState.init の parse は 20ms 予算で打ち切られ
+	// うる (full run の CPU 競合下で実際に起きた、#419)。tree 依存の StateField
+	// (table / mermaid) の create はその途中の tree で走り、tree が完成しても自分では
+	// rebuild しないので、本番の treeChangeDispatcher と同じ effect を流す。
+	return initial.update({ effects: treeParseProgressed.of(null) }).state;
 }
 
 export function createMockView(

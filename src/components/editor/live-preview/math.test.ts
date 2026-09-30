@@ -1,6 +1,4 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { ensureSyntaxTree } from "@codemirror/language";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, type EditorState } from "@codemirror/state";
 import { assert, beforeAll, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
@@ -27,7 +25,9 @@ const {
 	mathDecorationField,
 	preloadKatexForTest,
 } = await import("./math");
-const { collectDecorations, createViewForTest, widgetDecorations } = await import("./test-helper");
+const { collectDecorations, createTestState, createViewForTest, widgetDecorations } = await import(
+	"./test-helper"
+);
 
 // MathWidget.toDOM は katex の動的 import 完了後にのみ同期 render される
 // (#301: lazy-load 化）。同期 toDOM を前提とする既存テストのために、
@@ -363,15 +363,7 @@ describe("buildDecorations", () => {
 // 代替する。
 describe("mathDecorationField (StateField diff rebuild)", () => {
 	function makeState(doc: string, selection?: EditorSelection): EditorState {
-		let state = EditorState.create({
-			doc,
-			selection,
-			extensions: [markdown({ base: markdownLanguage }), mathDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		// LanguageState.apply の tree 同期を発火させる (test-helper.ts の createTestState と同型)。
-		state = state.update({}).state;
-		return state;
+		return createTestState(doc, undefined, mathDecoration, selection);
 	}
 
 	interface WidgetEntry {

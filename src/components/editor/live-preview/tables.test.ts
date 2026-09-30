@@ -1,4 +1,3 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, runScopeHandlers } from "@codemirror/view";
@@ -40,13 +39,7 @@ describe("insertTable (runtime)", () => {
 	function mountEditor(doc: string, cursorPos: number): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(cursorPos),
-			extensions: [markdown({ base: markdownLanguage }), tableKeymap],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({}).state;
+		const state = createTestState(doc, cursorPos, tableKeymap);
 		const view = new EditorView({ state, parent });
 		view.focus();
 		mounted.push(view);
@@ -89,8 +82,7 @@ describe("insertTable (runtime)", () => {
 		expect(doc).toBe(`${tA}\ntext\n\n${createEmptyTable(3, 2)}\n`);
 
 		// 結果ドキュメントで両テーブルが widget として認識される（密着なら 0 になる）
-		const fresh = EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] });
-		ensureSyntaxTree(fresh, doc.length, Number.POSITIVE_INFINITY);
+		const fresh = createTestState(doc);
 		const widgets = replaceDecorations(collectDecorations(buildTableDecorations(fresh))).length;
 		expect(widgets).toBe(2);
 	});
@@ -143,13 +135,7 @@ describe("backspaceIntoTableFromBelow (runtime)", () => {
 	function mountEditor(doc: string, cursorPos: number): EditorView {
 		const parent = document.createElement("div");
 		document.body.appendChild(parent);
-		let state = EditorState.create({
-			doc,
-			selection: EditorSelection.cursor(cursorPos),
-			extensions: [markdown({ base: markdownLanguage }), tableDecoration, tableKeymap],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		state = state.update({}).state;
+		const state = createTestState(doc, cursorPos, [tableDecoration, tableKeymap]);
 		const view = new EditorView({ state, parent });
 		view.focus();
 		mounted.push(view);

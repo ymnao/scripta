@@ -1,6 +1,4 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { ensureSyntaxTree } from "@codemirror/language";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, type EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -227,15 +225,7 @@ describe("buildMermaidDecorations", () => {
 //   インスタンスを生成する（内容が同じでも参照は別物になる）
 describe("mermaidDecorationField (StateField diff rebuild)", () => {
 	function makeState(doc: string, selection?: EditorSelection): EditorState {
-		let state = EditorState.create({
-			doc,
-			selection,
-			extensions: [markdown({ base: markdownLanguage }), mermaidDecoration],
-		});
-		ensureSyntaxTree(state, state.doc.length, Number.POSITIVE_INFINITY);
-		// LanguageState.apply の tree 同期を発火させる (test-helper.ts の createTestState と同型)。
-		state = state.update({}).state;
-		return state;
+		return createTestState(doc, undefined, mermaidDecoration, selection);
 	}
 
 	interface WidgetEntry {
