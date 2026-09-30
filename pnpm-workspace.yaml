@@ -67,7 +67,7 @@ overrides:
   "@codemirror/search": $@codemirror/search
   "@codemirror/state": $@codemirror/state
   "@codemirror/view": $@codemirror/view
-  "@lezer/common": ^1.5.2
+  "@lezer/common": ^1.5.3                 # 2 版が同居すると NodeProp の identity が copy 間で食い違い、HTML の mixed parse 判定と highlight (`tags is not iterable`) が壊れる (#576 で 1.5.2 / 1.5.3 に分裂して test 9 件 fail)。range は同居を防がないので、依存側が新しい patch を要求したら下限をその版へ上げて一本化する
   "brace-expansion@^1.0.0": ^1.1.18        # GHSA-rgw5-rvv9-x895 (high, <1.1.18。中間配列が非制限で ~25KB 入力から OOM。mh99 の maxLength 緩和のバイパス) + GHSA-mh99-v99m-4gvg (high, <1.1.17。展開結果の長さが非制限で OOM) + GHSA-3jxr-9vmj-r5cp (high, <1.1.16。連続する非展開 {} 群の指数時間展開)。いずれも minimatch@3 (glob@7 / @electron/asar / dir-compare 経由) の build-time 依存のみで、攻撃者制御のパターンを展開する経路は無し。実害なし、alert closed 化が目的 (2.x/5.x 行も同じ)。
   "brace-expansion@^2.0.0": ^2.1.4         # 同 3 件 (rgw5: >=2.0.0 <2.1.4 / mh99: >=2.0.0 <2.1.3 / 3jxr: >=2.0.0 <2.1.2)。minimatch@5 (filelist) / minimatch@9 (@electron/universal) 経由。実害評価は上記に同じ。
   "brace-expansion@^5.0.0": ^5.0.9         # 同 3 件 (rgw5: >=4.0.0 <5.0.9 / mh99: >=4.0.0 <5.0.8 / 3jxr: >=3.0.0 <5.0.7) + GHSA-jxxr-4gwj-5jf2 (medium, DoS, >=5.0.0 <5.0.6)。minimatch@10 (app-builder-lib) 経由。実害評価は上記に同じ。range は 3.x/4.x も含むが 4.x の patched 版は同 major に存在せず 5.0.9 なので、この selector が覆うのは実質 5.x のみ。3.x/4.x を要求する transitive が将来現れたら別対応が要る (3.x の patched は rgw5=3.0.6 / mh99=3.0.3 だが 3jxr は 3.x 内に patched 版が無く 5.0.7 が下限なので、3.0.6 へ上げるだけでは足りない)。
