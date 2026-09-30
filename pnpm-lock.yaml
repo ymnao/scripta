@@ -27,7 +27,6 @@ overrides:
   ajv>fast-uri: ^3.1.6
   app-builder-lib>tar: ^7.5.18
   node-gyp>tar: ^7.5.18
-  mermaid>dompurify: ^3.4.9
   lodash-es@<4.18.0: ^4.18.1
   '@electron/get>undici': ^7.29.0
   node-gyp>undici: ^6.28.0
