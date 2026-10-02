@@ -44,7 +44,7 @@
 		"katex": "^0.18.9",
 		"lucide-react": "^1.48.0",
 		"marked": "^18.0.14",
-		"mermaid": "^11.16.1",
+		"mermaid": "^12.0.0",
 		"p-limit": "^7.3.3",
 		"react": "^19.3.0",
 		"react-dom": "^19.3.0",
