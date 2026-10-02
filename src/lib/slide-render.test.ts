@@ -209,8 +209,8 @@ describe("renderSlideHtmlWithMermaid: module-level cache", () => {
 	});
 
 	it("regression: cache cap を超える枚数の Promise.all で 1 個目の entry が LRU eviction されても Promise.all 全体は reject しない (self-poisoning 対策)", async () => {
-		// deck > MAX_CACHE_SIZE 相当の cache miss を同期的に登録すると、131 個目の set が
-		// 1 個目 entry を evict する。もし evict で controller.abort() すると 1 個目の preprocess
+		// deck > MAX_CACHE_SIZE 相当の cache miss を同期的に登録すると、129 個目の set が
+		// 1 個目 entry を evict する (131 個目までで先頭 3 件)。もし evict で controller.abort() すると 1 個目の preprocess
 		// が AbortError で reject → Promise.all 全体 reject → useAsyncDerived が silent 化
 		// → deck 凍結、というシナリオが起きる。この回帰テストは MAX_CACHE_SIZE (128) を超える
 		// unique markdown を並列で登録して、全 promise が正常 resolve することを確認する。
@@ -218,9 +218,10 @@ describe("renderSlideHtmlWithMermaid: module-level cache", () => {
 		const EVICTED = 3;
 		const N = CACHE_CAP + EVICTED;
 		// mermaid を evict される先頭 3 件だけに絞るのは、131 件すべてを mermaid 経路に通すと
-		// queue + sanitize で 200ms 近くかかり full run の CPU 競合下で timeout するため (#419)。
-		// ブロックを 2 個にするのは、1 個目は abort 前に render を起動済みで、abort を観測
-		// できるのが 2 個目の直前の loop-head check だけだから。
+		// queue + sanitize で 200ms 近くかかり (2026-10-03 実測) full run の CPU 競合下で
+		// timeout するため (#419)。ブロックを 2 個にするのは、逆順で先に処理される末尾ブロックは
+		// abort 前に render を起動済みで、abort を観測できるのが次のブロックの直前の
+		// loop-head check だけだから。
 		const markdowns = Array.from({ length: N }, (_, i) =>
 			i < EVICTED
 				? `# slide ${i}\n\n\`\`\`mermaid\ngraph TD\n  A${i}-->B${i}\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\n  C${i}-->D${i}\n\`\`\``
@@ -233,7 +234,7 @@ describe("renderSlideHtmlWithMermaid: module-level cache", () => {
 			expect(html.match(/mermaid-diagram/g)).toHaveLength(2);
 		}
 		results.slice(EVICTED).forEach((html, j) => {
-			expect(html).toContain(`slide ${EVICTED + j}`);
+			expect(html).toContain(`>slide ${EVICTED + j}<`);
 		});
 	});
 
