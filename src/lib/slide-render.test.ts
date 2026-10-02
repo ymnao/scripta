@@ -215,17 +215,27 @@ describe("renderSlideHtmlWithMermaid: module-level cache", () => {
 		// → deck 凍結、というシナリオが起きる。この回帰テストは MAX_CACHE_SIZE (128) を超える
 		// unique markdown を並列で登録して、全 promise が正常 resolve することを確認する。
 		const CACHE_CAP = 128;
-		const N = CACHE_CAP + 3;
-		const markdowns = Array.from(
-			{ length: N },
-			(_, i) => `# slide ${i}\n\n\`\`\`mermaid\ngraph TD\n  A${i}-->B${i}\n\`\`\``,
+		const EVICTED = 3;
+		const N = CACHE_CAP + EVICTED;
+		// mermaid を evict される先頭 3 件だけに絞るのは、131 件すべてを mermaid 経路に通すと
+		// queue + sanitize で 200ms 近くかかり full run の CPU 競合下で timeout するため (#419)。
+		// ブロックを 2 個にするのは、1 個目は abort 前に render を起動済みで、abort を観測
+		// できるのが 2 個目の直前の loop-head check だけだから。
+		const markdowns = Array.from({ length: N }, (_, i) =>
+			i < EVICTED
+				? `# slide ${i}\n\n\`\`\`mermaid\ngraph TD\n  A${i}-->B${i}\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\n  C${i}-->D${i}\n\`\`\``
+				: `# slide ${i}`,
 		);
 		const promises = markdowns.map((md) => renderSlideHtmlWithMermaid(md, null, "light"));
 		const results = await Promise.all(promises);
 		expect(results.length).toBe(N);
-		for (const html of results) {
-			expect(html).toContain("mermaid-diagram");
-		}
+		results.forEach((html, i) => {
+			if (i < EVICTED) {
+				expect(html.match(/mermaid-diagram/g)).toHaveLength(2);
+			} else {
+				expect(html).toContain(`slide ${i}`);
+			}
+		});
 	});
 
 	it("clearSlideRenderCache 後の 2 回目呼び出しは cache miss で再 render される", async () => {
