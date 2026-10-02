@@ -229,12 +229,11 @@ describe("renderSlideHtmlWithMermaid: module-level cache", () => {
 		const promises = markdowns.map((md) => renderSlideHtmlWithMermaid(md, null, "light"));
 		const results = await Promise.all(promises);
 		expect(results.length).toBe(N);
-		results.forEach((html, i) => {
-			if (i < EVICTED) {
-				expect(html.match(/mermaid-diagram/g)).toHaveLength(2);
-			} else {
-				expect(html).toContain(`slide ${i}`);
-			}
+		for (const html of results.slice(0, EVICTED)) {
+			expect(html.match(/mermaid-diagram/g)).toHaveLength(2);
+		}
+		results.slice(EVICTED).forEach((html, j) => {
+			expect(html).toContain(`slide ${EVICTED + j}`);
 		});
 	});
 
