@@ -96,7 +96,7 @@ describe("index-fill: kickIdleFill", () => {
 		};
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
-		// 最初の 1 file の indexFile 呼び出し後、isAlive() チェックで即座に break するはず。
+		// readFile 直後の isAlive() チェックで break し、indexFile は呼ばれないはず。
 		// 少なくとも全 4 file が indexed されてはいない (bail が効いている)。
 		expect(indexed.size).toBeLessThan(files.length);
 	});

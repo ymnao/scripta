@@ -74,8 +74,8 @@ export interface IdleFillState {
 // skip 記録を runFill の local ではなく state に置くのは、検索ごとの kick で毎回空から
 // 始まると、cutoff 超過 (1MiB 超) の .md を毎検索フル read してしまうため (#589 A1)。
 // running を root キーの module Set にせず entry 単位にするのは、旧 loop が await 中に
-// reopen されると root キーでは新 entry の kick が no-op になり、旧 loop が bail した後に
-// 誰も再 kick しないため。
+// reopen されると root キーでは新 entry の kick が no-op になり、旧 loop が bail した後の
+// 次の検索まで新 entry の fill が始まらないため。
 export function createIdleFillState(): IdleFillState {
 	return { running: false, skipUntilEpochChange: new Map<string, number>() };
 }
@@ -161,6 +161,9 @@ async function runFill(deps: IdleFillDeps): Promise<void> {
 					}
 				} catch {
 					// 読み取り失敗は skip 記録する (存在しない file / 権限エラー等の無限リトライ回避)。
+					// errno は区別しないので、一時的な失敗 (lock / EMFILE 等) も epoch が動くか reopen まで
+					// idle fill では retry しない。未 index file は検索の scan 対象に残り piggyback が
+					// 拾うので、失うのは最適化だけで結果の正しさは変わらない。
 					skipUntilEpochChange.set(p, current);
 				}
 				picked++;
