@@ -314,8 +314,8 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   index が育った file では syscall は発生しない。ただし「恒久的に index に載らない file」
 //   (admission cutoff 超過 / root 外を指す symlink / workspace 内 alias) は毎回 invalid のまま
 //   なので、その分だけは検索ごとに syscall が乗る (件数が限定的なので受容している)。
-//   内訳: piggyback (search.ts) で 1 回 + idle fill (index-fill.ts) の skipUntilEpochChange が
-//   runFill ローカルで kick ごとに作り直されるため、kick 1 回につきさらに 1 回。
+//   内訳: piggyback (search.ts) で検索ごとに 1 回。idle fill (index-fill.ts) は skip 記録を
+//   cache entry 単位で保持する (#589) ため、その file の epoch が動くまで再び呼ばない。
 // - **index が disabled な workspace ではこのゲート自体が呼ばれない** (#413 Finding 1)。
 //   disabled 時は indexedEpoch が clear されて全 file が「未 index」に見えるため、ゲートを
 //   残すと全 file 分の syscall が検索ごとに乗ってしまう (indexFile は no-op なので無駄)。

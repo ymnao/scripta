@@ -1,9 +1,10 @@
 // L3 InvertedIndex の idle fill scheduler (#394 Phase C Step 5)。
 //
-// searchFilesImpl 完了直後などから `kickIdleFill(canonicalRoot)` で発火され、
+// searchFilesImpl 完了直後などから `kickIdleFill(deps)` で発火され、
 // 未 indexed / stale な .md file を setImmediate ループで少しずつ read → indexFile する。
-// kick は冪等 (走行中なら no-op、完了後の再 kick で再開)。
-// workspace 生存中のみ動作する (entry が Map から drop された時点で自動 bail)。
+// kick は冪等 (同一 IdleFillState が走行中なら no-op、完了後の再 kick で再開)。
+// 発火時点の cache entry が生きている間のみ動作する (isAlive が entry identity で判定し、
+// entry が drop または別 entry に置き換わった時点で自動 bail)。
 //
 // search-cache.ts の module state に直接触らず、deps injection で疎結合にする
 // (test 容易性の確保と、helper 側の独立テスト性を保つため — processMdFilesParallel の
@@ -32,8 +33,16 @@ export interface IdleFillDeps {
 	 * (production の wiring は search.ts の kickIdleFill 呼び出し側)。
 	 */
 	readFile(ioPath: string): Promise<string>;
-	/** entry がまだ生きているか (refCount > 0 で map に残っているか)。 */
+	/**
+	 * kick 時点の cache entry がまだ生きているか。**entry identity で判定する** (#589 A2/A3、
+	 * root キーの存在確認では足りない理由は search-cache.ts の InvertedIndexHandle.isAlive 参照)。
+	 */
 	isAlive(): boolean;
+	/**
+	 * CacheEntry に 1 個持たせ、entry drop で一緒に捨てる (reopen で継承しない)。
+	 * 同じ entry の kick 間で skip 記録と running を共有するための置き場。
+	 */
+	state: IdleFillState;
 	/**
 	 * L3 handle。**kick 時点で 1 度取得したもの**を返す (毎 tick 再取得しない)。
 	 * handle は entry-identity を内部で保持しているため、workspace close → 再 open で
@@ -57,25 +66,37 @@ export interface IdleFillDeps {
 	resolveAllowed(ioPath: string): Promise<string | null>;
 }
 
-// 「走行中の canonicalRoot 集合」を保持する。field 1 個だけの wrapper を持つより素直。
-const running = new Set<string>();
+export interface IdleFillState {
+	running: boolean;
+	skipUntilEpochChange: Map<string, number>;
+}
+
+// skip 記録を runFill の local ではなく state に置くのは、検索ごとの kick で毎回空から
+// 始まると、cutoff 超過 (1MiB 超) の .md を毎検索フル read してしまうため (#589 A1)。
+// running を root キーの module Set にせず entry 単位にするのは、旧 loop が await 中に
+// reopen されると root キーでは新 entry の kick が no-op になり、旧 loop が bail した後の
+// 次の検索まで新 entry の fill が始まらないため。
+export function createIdleFillState(): IdleFillState {
+	return { running: false, skipUntilEpochChange: new Map<string, number>() };
+}
 
 const TICK_SIZE = 4;
 
-// 冪等: 走行中なら no-op。呼び手は search.ts の searchFilesImpl 完了直後などから呼ぶ。
-export function kickIdleFill(canonicalRoot: string, deps: IdleFillDeps): void {
-	if (running.has(canonicalRoot)) return;
-	running.add(canonicalRoot);
-	void runFill(canonicalRoot, deps);
+// 冪等: 同一 state が走行中なら no-op。呼び手は search.ts の searchFilesImpl 完了直後などから呼ぶ。
+export function kickIdleFill(deps: IdleFillDeps): void {
+	if (deps.state.running) return;
+	deps.state.running = true;
+	void runFill(deps);
 }
 
-async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void> {
+async function runFill(deps: IdleFillDeps): Promise<void> {
 	// index.indexFile を試みても valid にならなかった file を skip する記録。
+	// kick を跨いで保持する (deps.state 経由、entry drop まで生存)。
 	// key = ioPath、value = skip 時の captured epoch。fileEpoch が動いていれば retry する
 	// (cutoff 超過 → file が縮小されて再度 admission 通過するケースを retry で回収)。
 	// この skip 記録がないと、恒常的な read エラー / cutoff 超過 file を無限に retry して
 	// setImmediate 全速で CPU / IO を焼く無限ループになる。
-	const skipUntilEpochChange = new Map<string, number>();
+	const skipUntilEpochChange = deps.state.skipUntilEpochChange;
 	// 前回 tick の再開カーソル。N file の full fill で毎 tick 先頭から線形走査すると
 	// O(N² / TICK_SIZE) になるため、位置を保持して次 tick は続きから舐める。
 	// listIoFiles の並びが安定しない場合 (invalidation / file 追加) は cursor を 0 に戻す
@@ -140,6 +161,9 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 					}
 				} catch {
 					// 読み取り失敗は skip 記録する (存在しない file / 権限エラー等の無限リトライ回避)。
+					// errno は区別しないので、一時的な失敗 (lock / EMFILE 等) も epoch が動くか reopen まで
+					// idle fill では retry しない。未 index file は検索の scan 対象に残り piggyback が
+					// 拾うので、失うのは最適化だけで結果の正しさは変わらない。
 					skipUntilEpochChange.set(p, current);
 				}
 				picked++;
@@ -150,7 +174,7 @@ async function runFill(canonicalRoot: string, deps: IdleFillDeps): Promise<void>
 			await y();
 		}
 	} finally {
-		running.delete(canonicalRoot);
+		deps.state.running = false;
 	}
 }
 
@@ -158,14 +182,4 @@ function defaultYield(): Promise<void> {
 	return new Promise((resolve) => {
 		setImmediate(resolve);
 	});
-}
-
-// test 用: 全 idle fill state をリセットする。production コードから呼んではならない。
-export function _cancelAllIdleFillForTest(): void {
-	running.clear();
-}
-
-// test 用: 現在 running 中かどうかを返す。
-export function _isRunningForTest(canonicalRoot: string): boolean {
-	return running.has(canonicalRoot);
 }

@@ -843,6 +843,29 @@ describe("L3 InvertedIndex integration", () => {
 		expect(getInvertedIndexHandle(ROOT)).toBeUndefined();
 	});
 
+	it("handle.isAlive は release→再 acquire 後の新 entry に対して false", () => {
+		acquireFileListCache(ROOT);
+		const h1 = getInvertedIndexHandle(ROOT);
+		expect(h1?.isAlive()).toBe(true);
+		releaseFileListCache(ROOT);
+		expect(h1?.isAlive()).toBe(false);
+		acquireFileListCache(ROOT);
+		expect(hasFileListCacheEntry(ROOT)).toBe(true);
+		expect(h1?.isAlive()).toBe(false);
+		expect(getInvertedIndexHandle(ROOT)?.isAlive()).toBe(true);
+	});
+
+	it("再 acquire した entry の idleFill は旧 entry と別 object", () => {
+		acquireFileListCache(ROOT);
+		const h1 = getInvertedIndexHandle(ROOT);
+		h1?.idleFill.skipUntilEpochChange.set(p("a.md"), 0);
+		releaseFileListCache(ROOT);
+		acquireFileListCache(ROOT);
+		const h2 = getInvertedIndexHandle(ROOT);
+		expect(h2?.idleFill).not.toBe(h1?.idleFill);
+		expect(h2?.idleFill.skipUntilEpochChange.size).toBe(0);
+	});
+
 	describe("applyFsBatch L3 branch", () => {
 		it(".md create is a no-op for L3 (new file is not indexed yet)", () => {
 			acquireFileListCache(ROOT);
