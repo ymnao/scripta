@@ -215,6 +215,43 @@ describe("renderMermaid", () => {
 		expect(renderSpy).toHaveBeenCalledTimes(1);
 	});
 
+	it("rendering 中に LRU evict された entry は resolve するが、完了時に cache へ書き戻さない", async () => {
+		clearMermaidCache();
+		const mermaidMod = (await import("mermaid")).default;
+		const renderSpy = mermaidMod.render as ReturnType<typeof vi.fn>;
+		let resolveBlocker!: (value: { svg: string }) => void;
+		renderSpy.mockImplementationOnce(
+			() =>
+				new Promise<{ svg: string }>((resolve) => {
+					resolveBlocker = resolve;
+				}),
+		);
+		const CACHE_CAP = 128;
+		const blockerSource = "graph TD\n  BLOCK-->X";
+		const evictedSource = "graph TD\n  EVICT-->X";
+		const blockerPromise = renderMermaid(blockerSource, "light");
+		const evictedPromise = renderMermaid(evictedSource, "light");
+		// blocker を cache hit で LRU 末尾へ寄せ、queue 順 (blocker → evicted) と LRU 順を
+		// 逆にする。全 entry が rendering のまま cap を超えると最古の evicted が落ち、
+		// blocker は evicted より先に rendered (protect 外) になる。evicted の完了時に
+		// cache が誤って書き戻すと、protect 外の blocker が代わりに evict され evicted が残る。
+		renderMermaid(blockerSource, "light");
+		const fillers = Array.from({ length: CACHE_CAP - 1 }, (_, i) =>
+			renderMermaid(`graph TD\n  FILL${i}-->X`, "light"),
+		);
+		expect(getCacheEntry(evictedSource, "light")).toBeUndefined();
+
+		await vi.waitFor(() => expect(resolveBlocker).toBeDefined(), { interval: 1 });
+		resolveBlocker({ svg: "<svg>blocker</svg>" });
+		await blockerPromise;
+		await expect(evictedPromise).resolves.toContain("<svg");
+		expect(getCacheEntry(evictedSource, "light")).toBeUndefined();
+		expect(getCacheEntry(blockerSource, "light")?.status).toBe("rendered");
+
+		clearMermaidCache();
+		await Promise.allSettled(fillers);
+	});
+
 	it("init 失敗 (initialize throw) は per-source error として cache されない (#312 追跡 fix)", async () => {
 		clearMermaidCache();
 		const source = "graph TD\n  INIT-->FAIL";

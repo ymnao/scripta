@@ -67,7 +67,9 @@ describe("EmojiInputDialog", () => {
 		renderDialog();
 		const grid = screen.getByLabelText("絵文字一覧");
 		expect(grid).toBeInTheDocument();
-		expect(within(grid).getAllByRole("button").length).toBeGreaterThan(0);
+		// getAllByRole ではないのは、1359 個の button に可視性判定が走って 200ms 超かかり
+		// (2026-10-03 実測)、full run の CPU 競合下で timeout するため (#419)
+		expect(grid.querySelectorAll("button").length).toBeGreaterThan(0);
 	});
 
 	it("カテゴリタブが表示される", () => {
