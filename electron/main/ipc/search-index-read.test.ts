@@ -21,35 +21,22 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
+import { makeFakeIndex } from "../test-utils/search-fakes";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
-import { createIdleFillState } from "./index-fill";
 import { __testing } from "./search";
 import {
 	_resetFileListCacheForTest,
 	acquireFileListCache,
 	getInvertedIndexHandle,
 	hasFileListCacheEntry,
-	type InvertedIndexHandle,
 	releaseFileListCache,
 } from "./search-cache";
 
 const { buildIdleFillDeps, readForReindex } = __testing;
 
 // buildIdleFillDeps は index handle を素通しするだけなので、read 経路の pin には
-// 最小の stub で足りる。
-const stubIndex = {
-	indexFile: () => {},
-	currentEpochOf: () => 0,
-	isIndexedAndValid: () => false,
-	getCandidates: () => ({ kind: "fallback" }) as const,
-	verify: () => {},
-	collectViolations: () => null,
-	isAlive: () => true,
-	idleFill: createIdleFillState(),
-	get isDisabled(): boolean {
-		return false;
-	},
-} satisfies InvertedIndexHandle;
+// 振る舞いを持たない fake で足りる。
+const stubIndex = makeFakeIndex().handle;
 
 describe.skipIf(process.platform === "win32")("index 取り込み read の wiring (#412)", () => {
 	let ws: TempWorkspace;

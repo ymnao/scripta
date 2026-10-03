@@ -401,14 +401,12 @@ export function getContentCacheHandle(canonicalRoot: string): ContentCacheHandle
 export function getInvertedIndexHandle(canonicalRoot: string): InvertedIndexHandle | undefined {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return undefined;
+	const isAlive = (): boolean => entries.get(canonicalRoot) === e;
 	return {
-		isAlive(): boolean {
-			return entries.get(canonicalRoot) === e;
-		},
+		isAlive,
 		idleFill: e.idleFill,
 		indexFile(ioPath: string, text: string, capturedEpoch: number): void {
-			const current = entries.get(canonicalRoot);
-			if (current !== e) return;
+			if (!isAlive()) return;
 			if (e.l3.currentEpochOf(ioPath) !== capturedEpoch) return;
 			e.l3.indexFile(ioPath, text);
 		},

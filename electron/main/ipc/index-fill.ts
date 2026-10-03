@@ -34,9 +34,8 @@ export interface IdleFillDeps {
 	 */
 	readFile(ioPath: string): Promise<string>;
 	/**
-	 * kick 時点の cache entry がまだ生きているか。**entry identity で判定する** (#589 A2/A3)。
-	 * root キーの存在確認 (entries.has) だと、workspace close → reopen 後の新 entry に対しても
-	 * true を返し続け、旧 loop が旧 entry (L2 最大 64MiB を含む) を retain したまま空回りする。
+	 * kick 時点の cache entry がまだ生きているか。**entry identity で判定する** (#589 A2/A3、
+	 * root キーの存在確認では足りない理由は search-cache.ts の InvertedIndexHandle.isAlive 参照)。
 	 */
 	isAlive(): boolean;
 	/**

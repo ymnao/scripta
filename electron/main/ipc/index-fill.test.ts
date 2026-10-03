@@ -69,7 +69,6 @@ describe("index-fill: kickIdleFill", () => {
 		expect(deps.state.running).toBe(true);
 		// 完了を待つ
 		await waitUntil(() => !deps.state.running);
-		expect(deps.state.running).toBe(false);
 	});
 
 	it("fill 進行: 3 file 中未 indexed のものが全て indexed になる", async () => {
@@ -97,7 +96,6 @@ describe("index-fill: kickIdleFill", () => {
 		};
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
-		expect(deps.state.running).toBe(false);
 		// 最初の 1 file の indexFile 呼び出し後、isAlive() チェックで即座に break するはず。
 		// 少なくとも全 4 file が indexed されてはいない (bail が効いている)。
 		expect(indexed.size).toBeLessThan(files.length);
@@ -227,7 +225,6 @@ describe("index-fill: kickIdleFill", () => {
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
 		expect(readCalled).toBe(false);
-		expect(deps.state.running).toBe(false);
 	});
 
 	describe("skip 記録の kick 跨ぎ保持 (#589 A1)", () => {
@@ -285,7 +282,6 @@ describe("index-fill: kickIdleFill", () => {
 		kickIdleFill(second.deps);
 		await waitUntil(() => !second.deps.state.running);
 		expect(second.reads.value).toBeGreaterThan(0);
-		expect(second.deps.state.running).toBe(false);
 
 		first.alive.value = false;
 		release();
