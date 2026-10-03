@@ -635,7 +635,7 @@ async function searchFilesImpl(
 	if (indexHandle !== undefined) {
 		// deps は **必ず buildIdleFillDeps 経由**で作ること (#412)。inline literal に戻すと
 		// readFile の nofollow 契約が wiring pin test をすり抜けて退行し得る。
-		kickIdleFill(canonicalRoot, buildIdleFillDeps(canonicalRoot, indexHandle));
+		kickIdleFill(buildIdleFillDeps(canonicalRoot, indexHandle));
 	}
 	// Phase D dual-run assert (#394 Phase D / #399 Finding 1)。
 	// candidates 経由 (本 pass) と全走査 (index 抑止) の 2 pass を実行して file hit 集合を突合。
@@ -670,7 +670,8 @@ function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHand
 	return {
 		listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
 		readFile: (p) => readFileUtf8NoFollow(p),
-		isAlive: () => hasFileListCacheEntry(canonicalRoot),
+		isAlive: () => indexHandle.isAlive(),
+		state: indexHandle.idleFill,
 		index: indexHandle,
 		resolveAllowed: (p) => resolveInsideRoot(p, canonicalRoot),
 	};

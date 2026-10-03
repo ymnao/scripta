@@ -22,8 +22,16 @@ vi.mock("electron", () => ({
 }));
 
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
+import { createIdleFillState } from "./index-fill";
 import { __testing } from "./search";
-import type { InvertedIndexHandle } from "./search-cache";
+import {
+	_resetFileListCacheForTest,
+	acquireFileListCache,
+	getInvertedIndexHandle,
+	hasFileListCacheEntry,
+	type InvertedIndexHandle,
+	releaseFileListCache,
+} from "./search-cache";
 
 const { buildIdleFillDeps, readForReindex } = __testing;
 
@@ -36,6 +44,8 @@ const stubIndex = {
 	getCandidates: () => ({ kind: "fallback" }) as const,
 	verify: () => {},
 	collectViolations: () => null,
+	isAlive: () => true,
+	idleFill: createIdleFillState(),
 	get isDisabled(): boolean {
 		return false;
 	},
@@ -78,5 +88,40 @@ describe.skipIf(process.platform === "win32")("index 取り込み read の wirin
 		// 読めない file は null = 「再検証できない」に倒す既存契約 (#405) は維持する。
 		expect(await readForReindex(normal)).toBe("normal body");
 		expect(await readForReindex(swapped)).toBeNull();
+	});
+});
+
+describe("idle fill deps の entry 結線 (#589)", () => {
+	let ws: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-idle-deps-");
+	});
+
+	afterEach(async () => {
+		_resetFileListCacheForTest();
+		await ws.cleanup();
+	});
+
+	it("buildIdleFillDeps の isAlive は handle の entry identity を見る", () => {
+		acquireFileListCache(ws.dir);
+		const h = getInvertedIndexHandle(ws.dir);
+		if (h === undefined) throw new Error("handle should exist after acquire");
+		const deps = buildIdleFillDeps(ws.dir, h);
+		expect(deps.isAlive()).toBe(true);
+		releaseFileListCache(ws.dir);
+		acquireFileListCache(ws.dir);
+		expect(hasFileListCacheEntry(ws.dir)).toBe(true);
+		expect(deps.isAlive()).toBe(false);
+		releaseFileListCache(ws.dir);
+	});
+
+	it("buildIdleFillDeps の state は handle の idleFill そのもの", () => {
+		acquireFileListCache(ws.dir);
+		const h = getInvertedIndexHandle(ws.dir);
+		if (h === undefined) throw new Error("handle should exist after acquire");
+		const deps = buildIdleFillDeps(ws.dir, h);
+		expect(deps.state).toBe(h.idleFill);
+		releaseFileListCache(ws.dir);
 	});
 });

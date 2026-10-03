@@ -7,6 +7,7 @@
 //
 // 各 test がファイルを分けている理由は path-guard を mock するかどうかであって fixture の
 // 形ではないため、この集約は test 間の独立性に影響しない。
+import { createIdleFillState } from "../ipc/index-fill";
 import type { ContentCacheHandle, InvertedIndexHandle } from "../ipc/search-cache";
 
 export interface FakeIndex {
@@ -41,6 +42,8 @@ export function makeFakeIndex(): FakeIndex {
 		collectViolations(): string[] | null {
 			return null;
 		},
+		isAlive: () => true,
+		idleFill: createIdleFillState(),
 		get isDisabled(): boolean {
 			return disabled.value;
 		},
