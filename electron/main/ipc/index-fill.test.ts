@@ -97,8 +97,7 @@ describe("index-fill: kickIdleFill", () => {
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
 		// readFile 直後の isAlive() チェックで break し、indexFile は呼ばれないはず。
-		// 少なくとも全 4 file が indexed されてはいない (bail が効いている)。
-		expect(indexed.size).toBeLessThan(files.length);
+		expect(indexed.size).toBe(0);
 	});
 
 	it("isDisabled で bail: index が disabled なら fill 停止", async () => {
