@@ -293,15 +293,6 @@ describe("index-fill: kickIdleFill", () => {
 			return { tickStarts: () => visits.map((v) => v[0]) };
 		}
 
-		function recordReads(deps: IdleFillDeps): string[] {
-			const readPaths: string[] = [];
-			deps.readFile = async (p: string) => {
-				readPaths.push(p);
-				return "";
-			};
-			return readPaths;
-		}
-
 		it("次の tick は前 tick が読んだ file の続きから舐める", async () => {
 			const { deps, indexed } = makeFakeDeps(FILES, new Map());
 			const { tickStarts } = trackTicks(deps);
@@ -317,7 +308,11 @@ describe("index-fill: kickIdleFill", () => {
 			// 末尾 2 件を index 済みにしておき、cursor から末尾までに picked が出ない状態を作る。
 			indexed.set(FILES[8], 0);
 			indexed.set(FILES[9], 0);
-			const readPaths = recordReads(deps);
+			const readPaths: string[] = [];
+			deps.readFile = async (p: string) => {
+				readPaths.push(p);
+				return "";
+			};
 			trackTicks(deps, (tick) => {
 				// tick 2 (f4..f7) を読み終え cursor が f8 を指した時点で、読み済みの f1 を変更する。
 				if (tick === 2) currentEpoch.set(FILES[1], 1);
