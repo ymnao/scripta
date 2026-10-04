@@ -1,13 +1,6 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from "vitest";
-import {
-	_cancelAllIdleFillForTest,
-	_isRunningForTest,
-	type IdleFillDeps,
-	kickIdleFill,
-} from "./index-fill";
-
-const ROOT = "/ws/notes";
+import { describe, expect, it } from "vitest";
+import { createIdleFillState, type IdleFillDeps, kickIdleFill } from "./index-fill";
 
 interface FakeIndexHandle {
 	indexFile(path: string, text: string, capturedEpoch: number): void;
@@ -25,11 +18,13 @@ function makeFakeDeps(
 	currentEpoch: Map<string, number>;
 	alive: { value: boolean };
 	disabled: { value: boolean };
+	reads: { value: number };
 } {
 	const indexed = new Map<string, number>(); // path → captured epoch (record)
 	const currentEpoch = new Map<string, number>();
 	const alive = { value: true };
 	const disabled = { value: false };
+	const reads = { value: 0 };
 
 	const index: FakeIndexHandle = {
 		indexFile: (p: string, _text: string, captured: number) => {
@@ -45,20 +40,20 @@ function makeFakeDeps(
 
 	const deps: IdleFillDeps = {
 		listIoFiles: () => initialFiles,
-		readFile: async (p: string) => texts.get(p) ?? "",
+		readFile: async (p: string) => {
+			reads.value++;
+			return texts.get(p) ?? "";
+		},
 		isAlive: () => alive.value,
+		state: createIdleFillState(),
 		index,
 		yieldTick: async () => {}, // test では即座 resolve
 		// fake deps は境界通過を明示する。identity 解決 = 「symlink でない通常 file」相当。
 		resolveAllowed: async (p: string) => p,
 	};
 
-	return { deps, indexed, currentEpoch, alive, disabled };
+	return { deps, indexed, currentEpoch, alive, disabled, reads };
 }
-
-afterEach(() => {
-	_cancelAllIdleFillForTest();
-});
 
 describe("index-fill: kickIdleFill", () => {
 	it("kick 冪等性: 同時に 2 回 kick しても実 fill は 1 度のみ", async () => {
@@ -67,22 +62,21 @@ describe("index-fill: kickIdleFill", () => {
 			["/ws/notes/b.md", "bbb"],
 		]);
 		const { deps } = makeFakeDeps(["/ws/notes/a.md", "/ws/notes/b.md"], texts);
-		kickIdleFill(ROOT, deps);
-		expect(_isRunningForTest(ROOT)).toBe(true);
+		kickIdleFill(deps);
+		expect(deps.state.running).toBe(true);
 		// 2 回目の kick は no-op (既存 state を再利用)
-		kickIdleFill(ROOT, deps);
-		expect(_isRunningForTest(ROOT)).toBe(true);
+		kickIdleFill(deps);
+		expect(deps.state.running).toBe(true);
 		// 完了を待つ
-		await waitUntil(() => !_isRunningForTest(ROOT));
-		expect(_isRunningForTest(ROOT)).toBe(false);
+		await waitUntil(() => !deps.state.running);
 	});
 
 	it("fill 進行: 3 file 中未 indexed のものが全て indexed になる", async () => {
 		const files = ["/ws/notes/a.md", "/ws/notes/b.md", "/ws/notes/c.md"];
 		const texts = new Map(files.map((f) => [f, `text of ${f}`]));
 		const { deps, indexed } = makeFakeDeps(files, texts);
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		for (const f of files) {
 			expect(indexed.has(f)).toBe(true);
 		}
@@ -100,12 +94,10 @@ describe("index-fill: kickIdleFill", () => {
 			if (readCount === 1) alive.value = false;
 			return texts.get(p) ?? "";
 		};
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
-		expect(_isRunningForTest(ROOT)).toBe(false);
-		// 最初の 1 file の indexFile 呼び出し後、isAlive() チェックで即座に break するはず。
-		// 少なくとも全 4 file が indexed されてはいない (bail が効いている)。
-		expect(indexed.size).toBeLessThan(files.length);
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
+		// readFile 直後の isAlive() チェックで break し、indexFile は呼ばれないはず。
+		expect(indexed.size).toBe(0);
 	});
 
 	it("isDisabled で bail: index が disabled なら fill 停止", async () => {
@@ -113,8 +105,8 @@ describe("index-fill: kickIdleFill", () => {
 		const texts = new Map(files.map((f) => [f, `text of ${f}`]));
 		const { deps, disabled, indexed } = makeFakeDeps(files, texts);
 		disabled.value = true;
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		expect(indexed.size).toBe(0);
 	});
 
@@ -131,8 +123,8 @@ describe("index-fill: kickIdleFill", () => {
 			}
 			return texts.get(p) ?? "";
 		};
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		// 1 回目の read: captured=0, current 変化 (1) → indexFile は fake で no-op → skip 記録 (epoch=0)
 		// 2 回目の read: captured=1, current=1 → indexFile 成功 → indexed
 		expect(indexed.get("/ws/notes/a.md")).toBe(1);
@@ -154,8 +146,8 @@ describe("index-fill: kickIdleFill", () => {
 			isIndexedAndValid: (_p) => false,
 			currentEpochOf: (_p) => 0,
 		};
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		// 1 回だけ試みて skip 記録 → 次 tick で全 skip → picked=0 で bail
 		expect(indexFileCallCount).toBe(1);
 		expect(indexed.size).toBe(0);
@@ -176,8 +168,8 @@ describe("index-fill: kickIdleFill", () => {
 		};
 		// evil.md だけ realpath で reject する fake。
 		deps.resolveAllowed = async (p) => (p === "/ws/notes/evil.md" ? null : p);
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		// evil.md は readFile されず (境界チェックで先に落ちる)、ok.md は 1 度 read + index される。
 		expect(readCallCount).toBe(1);
 		expect(indexed.has("/ws/notes/evil.md")).toBe(false);
@@ -205,8 +197,8 @@ describe("index-fill: kickIdleFill", () => {
 			readPaths.push(p);
 			return texts.get(p) ?? "";
 		};
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		// alias は解決先も symlink path も読まない (index 目的の read しかしないため)。
 		expect(readPaths).toEqual(["/ws/notes/ok.md"]);
 		expect(indexed.has("/ws/notes/link.md")).toBe(false);
@@ -214,7 +206,7 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
 		// skipUntilEpochChange に倒れているので tick を回し切って終了する。無限 retry の
 		// 退行は上の waitUntil が timeout で throw して検出する (この時点の
-		// _isRunningForTest は waitUntil 成功後なので恒真であり、assert には含めない)。
+		// deps.state.running は waitUntil 成功後なので恒真であり、assert には含めない)。
 	});
 
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {
@@ -229,10 +221,70 @@ describe("index-fill: kickIdleFill", () => {
 			readCalled = true;
 			return texts.get(p) ?? "";
 		};
-		kickIdleFill(ROOT, deps);
-		await waitUntil(() => !_isRunningForTest(ROOT));
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
 		expect(readCalled).toBe(false);
-		expect(_isRunningForTest(ROOT)).toBe(false);
+	});
+
+	describe("skip 記録の kick 跨ぎ保持 (#589 A1)", () => {
+		const BIG = "/ws/notes/big.md";
+
+		function makeCutoffDeps(): ReturnType<typeof makeFakeDeps> {
+			const fake = makeFakeDeps([BIG], new Map([[BIG, "big"]]));
+			// cutoff 超過相当: indexFile を呼んでも valid にならない。
+			fake.deps.index = {
+				...fake.deps.index,
+				indexFile: () => {},
+				isIndexedAndValid: () => false,
+			};
+			return fake;
+		}
+
+		it("indexFile に reject される file は 2 回目の kick で再 read されない", async () => {
+			const { deps, reads } = makeCutoffDeps();
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			expect(reads.value).toBe(1);
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			expect(reads.value).toBe(1);
+		});
+
+		it("skip 済み file は epoch が進んだ後の kick で再 read される", async () => {
+			const { deps, reads, currentEpoch } = makeCutoffDeps();
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			expect(reads.value).toBe(1);
+			currentEpoch.set(BIG, 1);
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			expect(reads.value).toBe(2);
+		});
+	});
+
+	it("旧 state の loop が readFile 待ちでも別 state の kick は走る", async () => {
+		const files = ["/ws/notes/a.md"];
+		const texts = new Map([["/ws/notes/a.md", "aaa"]]);
+		const first = makeFakeDeps(files, texts);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		first.deps.readFile = async (p: string) => {
+			await gate;
+			return texts.get(p) ?? "";
+		};
+		kickIdleFill(first.deps);
+		await waitUntil(() => first.deps.state.running);
+
+		const second = makeFakeDeps(files, texts);
+		kickIdleFill(second.deps);
+		await waitUntil(() => !second.deps.state.running);
+		expect(second.reads.value).toBeGreaterThan(0);
+
+		first.alive.value = false;
+		release();
+		await waitUntil(() => !first.deps.state.running);
 	});
 });
 

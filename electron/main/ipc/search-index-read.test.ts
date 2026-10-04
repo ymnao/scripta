@@ -21,25 +21,22 @@ vi.mock("electron", () => ({
 	ipcMain: { handle: vi.fn() },
 }));
 
+import { makeFakeIndex } from "../test-utils/search-fakes";
 import { createCanonicalTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { __testing } from "./search";
-import type { InvertedIndexHandle } from "./search-cache";
+import {
+	_resetFileListCacheForTest,
+	acquireFileListCache,
+	getInvertedIndexHandle,
+	hasFileListCacheEntry,
+	releaseFileListCache,
+} from "./search-cache";
 
 const { buildIdleFillDeps, readForReindex } = __testing;
 
 // buildIdleFillDeps は index handle を素通しするだけなので、read 経路の pin には
-// 最小の stub で足りる。
-const stubIndex = {
-	indexFile: () => {},
-	currentEpochOf: () => 0,
-	isIndexedAndValid: () => false,
-	getCandidates: () => ({ kind: "fallback" }) as const,
-	verify: () => {},
-	collectViolations: () => null,
-	get isDisabled(): boolean {
-		return false;
-	},
-} satisfies InvertedIndexHandle;
+// 共通 fake で足りる。
+const stubIndex = makeFakeIndex().handle;
 
 describe.skipIf(process.platform === "win32")("index 取り込み read の wiring (#412)", () => {
 	let ws: TempWorkspace;
@@ -78,5 +75,40 @@ describe.skipIf(process.platform === "win32")("index 取り込み read の wirin
 		// 読めない file は null = 「再検証できない」に倒す既存契約 (#405) は維持する。
 		expect(await readForReindex(normal)).toBe("normal body");
 		expect(await readForReindex(swapped)).toBeNull();
+	});
+});
+
+describe("idle fill deps の entry 結線 (#589)", () => {
+	let ws: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-idle-deps-");
+	});
+
+	afterEach(async () => {
+		_resetFileListCacheForTest();
+		await ws.cleanup();
+	});
+
+	it("buildIdleFillDeps の isAlive は handle の entry identity を見る", () => {
+		acquireFileListCache(ws.dir);
+		const h = getInvertedIndexHandle(ws.dir);
+		if (h === undefined) throw new Error("handle should exist after acquire");
+		const deps = buildIdleFillDeps(ws.dir, h);
+		expect(deps.isAlive()).toBe(true);
+		releaseFileListCache(ws.dir);
+		acquireFileListCache(ws.dir);
+		expect(hasFileListCacheEntry(ws.dir)).toBe(true);
+		expect(deps.isAlive()).toBe(false);
+		releaseFileListCache(ws.dir);
+	});
+
+	it("buildIdleFillDeps の state は handle の idleFill そのもの", () => {
+		acquireFileListCache(ws.dir);
+		const h = getInvertedIndexHandle(ws.dir);
+		if (h === undefined) throw new Error("handle should exist after acquire");
+		const deps = buildIdleFillDeps(ws.dir, h);
+		expect(deps.state).toBe(h.idleFill);
+		releaseFileListCache(ws.dir);
 	});
 });

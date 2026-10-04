@@ -20,6 +20,7 @@ import {
 	setCacheFiles,
 	sortWalkResult,
 } from "../utils/search-cache-pure";
+import { createIdleFillState, type IdleFillState } from "./index-fill";
 
 // canonical workspace root ごとに FileListCache を持つ。
 // entry 存在 = watcher 稼働中 という不変条件を保つことで、
@@ -60,6 +61,10 @@ interface CacheEntry {
 	// しようとしても L2 の global generation では L3 の tombstone 計算を表現できないため、
 	// 誤って同一 counter に括ってはならない。
 	l3: InvertedIndex;
+	// idle fill の running flag と skip 記録 (#589)。root キーの module state にせず entry に
+	// 持たせるのは、release で entry と一緒に捨て、reopen 後の新 entry へ旧 loop の状態
+	// (running=true や旧 epoch 基準の skip) を継承させないため。
+	idleFill: IdleFillState;
 }
 
 // L2 に読み書きするための狭い interface。processMdFilesParallel はこの handle 経由で
@@ -100,6 +105,14 @@ export interface InvertedIndexHandle {
 		hitIoFiles: readonly string[],
 	): string[] | null;
 	readonly isDisabled: boolean;
+	/**
+	 * この handle を取得した entry がまだ Map 上の同一 entry か (identity 比較)。
+	 * entries.has(root) だと close → reopen 後の新 entry でも true になり、旧 loop が旧 entry
+	 * (L2 最大 64MiB 含む) を retain したまま空回りする (#589 A2/A3)。
+	 */
+	isAlive(): boolean;
+	/** この entry の idle fill state。entry と生死を共にする (#589)。 */
+	readonly idleFill: IdleFillState;
 }
 
 const entries = new Map<string, CacheEntry>();
@@ -116,6 +129,7 @@ export function acquireFileListCache(canonicalRoot: string): void {
 			l2Generation: 0,
 			inputFileMapMemo: null,
 			l3: new InvertedIndex(),
+			idleFill: createIdleFillState(),
 		});
 	} else {
 		e.refCount++;
@@ -387,10 +401,12 @@ export function getContentCacheHandle(canonicalRoot: string): ContentCacheHandle
 export function getInvertedIndexHandle(canonicalRoot: string): InvertedIndexHandle | undefined {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return undefined;
+	const isAlive = (): boolean => entries.get(canonicalRoot) === e;
 	return {
+		isAlive,
+		idleFill: e.idleFill,
 		indexFile(ioPath: string, text: string, capturedEpoch: number): void {
-			const current = entries.get(canonicalRoot);
-			if (current !== e) return;
+			if (!isAlive()) return;
 			if (e.l3.currentEpochOf(ioPath) !== capturedEpoch) return;
 			e.l3.indexFile(ioPath, text);
 		},
