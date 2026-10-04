@@ -1014,7 +1014,7 @@ export async function resolveDarkAssertViolations(
 		if (deps.isStale()) return { kind: "stale" };
 		const remaining = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
 		// null (fallback) は「解消」ではなく判定不能。round 1 の null と同じく ok に倒す
-		// (判定不能を破損扱いにしないための防御)。
+		// (fallback になるのは queryLower 由来の条件だけで、retry 中に不変なので現状は到達しない)。
 		if (remaining === null) return { kind: "ok" };
 		if (remaining.length === 0) return { kind: "resolved", dropped };
 		violations = remaining;

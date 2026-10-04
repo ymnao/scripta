@@ -78,12 +78,11 @@ describe("currentEpochOf: pathToId registration side effect (Phase C stale-inser
 		const idx = new InvertedIndex();
 		// piggyback / idle fill の read 前 snapshot を模す (path はまだ index されたことがない)。
 		const captured = idx.currentEpochOf("/ws/a.md");
-		expect(captured).toBe(0);
 		// read 中に modify batch が来て invalidate が呼ばれた状態。
 		// 登録前は no-op だったが、登録後は fileEpoch が bump される。
 		idx.invalidate("/ws/a.md");
 		expect(idx.currentEpochOf("/ws/a.md")).not.toBe(captured);
-		// readFile 完了後の handle.indexFile (capturedEpoch=0) は current=1 と一致せず破棄されるので、
+		// readFile 完了後の handle.indexFile (capturedEpoch) は bump 後の current と一致せず破棄されるので、
 		// InvertedIndex 単体では indexFile を通しても後段の epoch 照合で reject されるべき。
 		// ここでは InvertedIndex API 単体の検証: indexFile 自身は epoch 照合しない (handle が照合する)
 		// が、pathToId 登録の副作用が確実に発生していることを別方向から確認する。
@@ -233,6 +232,15 @@ describe("admission cutoff", () => {
 			expect(after.candidates.has("/ws/a.md")).toBe(false);
 		}
 	});
+
+	it("rejects text whose lowercase form is longer than the cutoff even though the raw length fits", () => {
+		const idx = new InvertedIndex({ admissionMaxBytes: 100 });
+		const text = "İ".repeat(30); // raw charge 60 <= 100, lowercase charge 120 > 100
+		expect(text.toLowerCase().length).toBe(60);
+		idx.indexFile("/ws/a.md", text);
+		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(false);
+		expect(idx.gramCount).toBe(0);
+	});
 });
 
 describe("tombstone full clear", () => {
@@ -262,16 +270,16 @@ describe("tombstone full clear", () => {
 	});
 });
 
-describe("gram count ceiling (#589 B1)", () => {
-	function candidatesOf(
-		idx: InvertedIndex,
-		query: string,
-	): { candidates: Set<string>; indexedValid: Set<string> } {
-		const r = idx.getCandidates(query);
-		if (r.kind !== "candidates") throw new Error(`expected candidates, got ${r.kind}`);
-		return r;
-	}
+function candidatesOf(
+	idx: InvertedIndex,
+	query: string,
+): { candidates: Set<string>; indexedValid: Set<string> } {
+	const r = idx.getCandidates(query);
+	if (r.kind !== "candidates") throw new Error(`expected candidates, got ${r.kind}`);
+	return r;
+}
 
+describe("gram count ceiling (#589 B1)", () => {
 	it("rejects a file whose new grams would exceed the max, leaving existing files and gramCount untouched", () => {
 		const idx = new InvertedIndex({ maxGramCount: 4 });
 		idx.indexFile("/ws/a.md", "abcd"); // ab bc cd
@@ -324,7 +332,7 @@ describe("gram count ceiling (#589 B1)", () => {
 		expect(candidatesOf(idx, "ab").candidates.has("/ws/a.md")).toBe(true);
 	});
 
-	it("clears saturated once a posting gram key is actually removed", () => {
+	it("clears saturated once grams.size drops below the size at reject", () => {
 		const idx = new InvertedIndex({ maxGramCount: 3 });
 		idx.indexFile("/ws/a.md", "abcd"); // ab bc cd
 		idx.indexFile("/ws/b.md", "wxyz");
@@ -333,7 +341,17 @@ describe("gram count ceiling (#589 B1)", () => {
 		expect(idx.isSaturated).toBe(false);
 	});
 
-	it("keeps saturated while no posting key has been freed", () => {
+	it("stays saturated when a re-index frees and re-adds the same number of keys", () => {
+		const idx = new InvertedIndex({ maxGramCount: 3 });
+		idx.indexFile("/ws/a.md", "abcd"); // ab bc cd
+		idx.indexFile("/ws/b.md", "wxyz");
+		expect(idx.isSaturated).toBe(true);
+		idx.indexFile("/ws/a.md", "abce"); // cd is removed, ce is added: still 3 keys
+		expect(idx.gramCount).toBe(3);
+		expect(idx.isSaturated).toBe(true);
+	});
+
+	it("keeps saturated while no capacity has been freed", () => {
 		const idx = new InvertedIndex({ maxGramCount: 3 });
 		idx.indexFile("/ws/a.md", "abcd");
 		idx.indexFile("/ws/b.md", "wxyz");
@@ -351,67 +369,79 @@ describe("gram count ceiling (#589 B1)", () => {
 		expect(idx.isSaturated).toBe(false);
 	});
 
-	it("clears saturated on generation clear", () => {
-		const idx = new InvertedIndex({ maxGramCount: 3, maxPathCount: 2 });
+	it("does not stay saturated after a tombstone clear once grams grow back to the old size", () => {
+		const idx = new InvertedIndex({ maxGramCount: 3 });
 		idx.indexFile("/ws/a.md", "abcd");
 		idx.indexFile("/ws/b.md", "wxyz");
-		expect(idx.isSaturated).toBe(true);
-		idx.currentEpochOf("/ws/c.md");
+		idx.invalidate("/ws/a.md"); // full clear without anyone reading isSaturated
+		idx.indexFile("/ws/c.md", "efgh"); // back to 3 keys
 		expect(idx.isSaturated).toBe(false);
-	});
-
-	it("rejects text whose lowercase form is longer than the cutoff even though the raw length fits", () => {
-		const idx = new InvertedIndex({ admissionMaxBytes: 100 });
-		const text = "İ".repeat(30); // raw charge 60 <= 100, lowercase charge 120 > 100
-		expect(text.toLowerCase().length).toBe(60);
-		idx.indexFile("/ws/a.md", text);
-		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(false);
-		expect(idx.gramCount).toBe(0);
 	});
 });
 
-describe("path count generation clear (#589 B2)", () => {
-	it("drops every old path, posting and valid count when a new path exceeds maxPathCount", () => {
+describe("path count cap (#589 B2)", () => {
+	it("reclaims ids holding no posting and keeps valid files when a new path hits the cap", () => {
 		const idx = new InvertedIndex({ maxPathCount: 2 });
 		idx.indexFile("/ws/a.md", "hello");
-		idx.indexFile("/ws/b.md", "world");
-		expect(idx.indexedValidCount).toBe(2);
-		idx.currentEpochOf("/ws/c.md");
-		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(false);
-		expect(idx.isIndexedAndValid("/ws/b.md")).toBe(false);
-		expect(idx.gramCount).toBe(0);
-		expect(idx.indexedValidCount).toBe(0);
-	});
-
-	it("lets the new path be indexed and become valid after the clear", () => {
-		const idx = new InvertedIndex({ maxPathCount: 2 });
-		idx.indexFile("/ws/a.md", "hello");
-		idx.indexFile("/ws/b.md", "world");
-		idx.indexFile("/ws/c.md", "fresh text");
-		expect(idx.isIndexedAndValid("/ws/c.md")).toBe(true);
-		expect(idx.indexedValidCount).toBe(1);
-		const r = idx.getCandidates("fresh");
-		expect(r.kind === "candidates" && r.candidates.has("/ws/c.md")).toBe(true);
-	});
-
-	it("does not clear while the path count is still at the max", () => {
-		const idx = new InvertedIndex({ maxPathCount: 2 });
-		idx.indexFile("/ws/a.md", "hello");
-		idx.indexFile("/ws/b.md", "world");
+		idx.currentEpochOf("/ws/b.md"); // registered only
+		const grams = idx.gramCount;
+		idx.indexFile("/ws/c.md", "fresh");
 		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(true);
-		expect(idx.isIndexedAndValid("/ws/b.md")).toBe(true);
+		expect(idx.isIndexedAndValid("/ws/c.md")).toBe(true);
+		expect(idx.indexedValidCount).toBe(2);
+		expect(idx.gramCount).toBeGreaterThan(grams);
+		expect(idx.isSaturated).toBe(false);
+		expect(candidatesOf(idx, "hello").candidates.has("/ws/a.md")).toBe(true);
 	});
 
-	it("never lets an epoch captured before the clear match afterwards (stale-insert race)", () => {
+	it("keeps the epoch of a surviving file unchanged across reclamation", () => {
+		const idx = new InvertedIndex({ maxPathCount: 2 });
+		idx.indexFile("/ws/a.md", "hello");
+		const before = idx.currentEpochOf("/ws/a.md");
+		idx.currentEpochOf("/ws/b.md");
+		idx.currentEpochOf("/ws/c.md"); // reclaims b
+		expect(idx.currentEpochOf("/ws/a.md")).toBe(before);
+	});
+
+	it("never lets an epoch captured before reclamation match afterwards (stale-insert race)", () => {
 		const idx = new InvertedIndex({ maxPathCount: 2 });
 		const p = "/ws/p.md";
 		const e0 = idx.currentEpochOf(p);
 		idx.currentEpochOf("/ws/q.md");
-		idx.invalidate(p);
-		idx.currentEpochOf("/ws/r.md");
+		idx.currentEpochOf("/ws/r.md"); // reclaims p and q
 		expect(idx.currentEpochOf(p)).not.toBe(e0);
-		if (idx.currentEpochOf(p) === e0) idx.indexFile(p, "stale text");
-		expect(idx.isIndexedAndValid(p)).toBe(false);
+	});
+
+	it("refuses new paths and saturates when less than half of the cap is reclaimable", () => {
+		const idx = new InvertedIndex({ maxPathCount: 2, tombstoneRatio: 100 });
+		idx.indexFile("/ws/a.md", "hello");
+		idx.indexFile("/ws/b.md", "world");
+		idx.indexFile("/ws/c.md", "fresh");
+		expect(idx.isIndexedAndValid("/ws/c.md")).toBe(false);
+		expect(idx.isSaturated).toBe(true);
+		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(true);
+		expect(idx.isIndexedAndValid("/ws/b.md")).toBe(true);
+	});
+
+	it("reports the same epoch for a refused path until it can be registered", () => {
+		const idx = new InvertedIndex({ maxPathCount: 2, tombstoneRatio: 100 });
+		idx.indexFile("/ws/a.md", "hello");
+		idx.indexFile("/ws/b.md", "world");
+		expect(idx.currentEpochOf("/ws/c.md")).toBe(idx.currentEpochOf("/ws/c.md"));
+	});
+
+	it("registers again after a tombstone clear, with an epoch different from the refused one", () => {
+		const idx = new InvertedIndex({ maxPathCount: 2 });
+		idx.indexFile("/ws/a.md", "hello");
+		idx.indexFile("/ws/b.md", "world");
+		const refused = idx.currentEpochOf("/ws/c.md");
+		expect(idx.isSaturated).toBe(true);
+		idx.invalidate("/ws/a.md");
+		idx.invalidate("/ws/b.md"); // tombstone ratio exceeded → full clear
+		expect(idx.isSaturated).toBe(false);
+		expect(idx.currentEpochOf("/ws/c.md")).not.toBe(refused);
+		idx.indexFile("/ws/c.md", "fresh");
+		expect(idx.isIndexedAndValid("/ws/c.md")).toBe(true);
 	});
 
 	it("hands out strictly increasing epochs across different paths", () => {
@@ -427,25 +457,15 @@ describe("path count generation clear (#589 B2)", () => {
 		}
 	});
 
-	it("does not clear on invalidate / remove / invalidatePrefix of unknown paths at the cap", () => {
+	it("does not reclaim on invalidate / remove / invalidatePrefix of unknown paths at the cap", () => {
 		const idx = new InvertedIndex({ maxPathCount: 2, tombstoneRatio: 100 });
 		idx.indexFile("/ws/a.md", "hello");
-		idx.indexFile("/ws/b.md", "world");
+		// b は登録のみ = 回収対象。回収が走れば floor が進み、b の epoch が変わる。
+		const eb = idx.currentEpochOf("/ws/b.md");
 		idx.invalidate("/ws/unknown.md");
 		idx.remove("/ws/unknown.md");
 		expect(idx.invalidatePrefix("/ws/unknown-dir")).toBe(0);
-		expect(idx.isIndexedAndValid("/ws/a.md")).toBe(true);
-		expect(idx.isIndexedAndValid("/ws/b.md")).toBe(true);
-	});
-
-	it("does not clear on invalidate / remove / invalidatePrefix of known paths at the cap", () => {
-		const idx = new InvertedIndex({ maxPathCount: 2, tombstoneRatio: 100 });
-		idx.indexFile("/ws/a.md", "hello");
-		idx.indexFile("/ws/b.md", "world");
-		idx.invalidate("/ws/a.md");
-		idx.remove("/ws/a.md");
-		idx.invalidatePrefix("/ws/a");
-		expect(idx.isIndexedAndValid("/ws/b.md")).toBe(true);
+		expect(idx.currentEpochOf("/ws/b.md")).toBe(eb);
 	});
 });
 
