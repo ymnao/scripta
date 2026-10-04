@@ -16,7 +16,7 @@ export interface IdleFillIndex {
 	indexFile(path: string, text: string, capturedEpoch: number): void;
 	currentEpochOf(path: string): number;
 	isIndexedAndValid(path: string): boolean;
-	readonly isDisabled: boolean;
+	readonly isSaturated: boolean;
 }
 
 export interface IdleFillDeps {
@@ -105,7 +105,7 @@ async function runFill(deps: IdleFillDeps): Promise<void> {
 	let prevListLength = -1;
 	try {
 		while (deps.isAlive()) {
-			if (deps.index.isDisabled) break;
+			if (deps.index.isSaturated) break;
 			const files = deps.listIoFiles();
 			if (files === undefined) break;
 			if (files.length !== prevListLength) {
@@ -134,7 +134,7 @@ async function runFill(deps: IdleFillDeps): Promise<void> {
 					// doc 参照)。index の key は従来どおり `p` (workspace 内の path)。
 					const resolved = await deps.resolveAllowed(p).catch(() => null);
 					if (!deps.isAlive()) break;
-					if (deps.index.isDisabled) break;
+					if (deps.index.isSaturated) break;
 					// resolved !== p は workspace 内 symlink (alias)。index の key は p 側に付くが
 					// watcher (followSymlinks: false) の modify は解決先の path でしか来ないため
 					// invalidate が波及せず stale posting が残る。reject と同じ経路に倒して
@@ -149,7 +149,7 @@ async function runFill(deps: IdleFillDeps): Promise<void> {
 						// p を渡す (述語は boolean 返しで、false 側の型が正確に表せないため)。
 						const text = await deps.readFile(p);
 						if (!deps.isAlive()) break;
-						if (deps.index.isDisabled) break;
+						if (deps.index.isSaturated) break;
 						deps.index.indexFile(p, text, current);
 						// indexFile が noop (identity check / capturedEpoch 不一致 / cutoff reject 等) で
 						// valid にならなかったら skip 記録して次回の epoch 変化まで retry しない。

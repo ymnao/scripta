@@ -104,7 +104,7 @@ export interface InvertedIndexHandle {
 		allIoFiles: readonly string[],
 		hitIoFiles: readonly string[],
 	): string[] | null;
-	readonly isDisabled: boolean;
+	readonly isSaturated: boolean;
 	/**
 	 * この handle を取得した entry がまだ Map 上の同一 entry か (identity 比較)。
 	 * entries.has(root) だと close → reopen 後の新 entry でも true になり、旧 loop が旧 entry
@@ -434,8 +434,8 @@ export function getInvertedIndexHandle(canonicalRoot: string): InvertedIndexHand
 		): string[] | null {
 			return collectViolations(e.l3, queryLower, allIoFiles, hitIoFiles);
 		},
-		get isDisabled(): boolean {
-			return e.l3.isDisabled;
+		get isSaturated(): boolean {
+			return e.l3.isSaturated;
 		},
 	};
 }

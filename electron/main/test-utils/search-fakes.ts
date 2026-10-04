@@ -14,8 +14,8 @@ export interface FakeIndex {
 	handle: InvertedIndexHandle;
 	/** indexFile が呼ばれた file とその内容。 */
 	indexed: Map<string, string>;
-	/** disabled を test 中に切り替えるための box (handle は getter 経由で読む)。 */
-	disabled: { value: boolean };
+	/** saturated を test 中に切り替えるための box (handle は getter 経由で読む)。 */
+	saturated: { value: boolean };
 }
 
 /**
@@ -24,7 +24,7 @@ export interface FakeIndex {
  */
 export function makeFakeIndex(): FakeIndex {
 	const indexed = new Map<string, string>();
-	const disabled = { value: false };
+	const saturated = { value: false };
 	const handle: InvertedIndexHandle = {
 		indexFile(ioPath: string, text: string, _capturedEpoch: number): void {
 			indexed.set(ioPath, text);
@@ -44,11 +44,11 @@ export function makeFakeIndex(): FakeIndex {
 		},
 		isAlive: () => true,
 		idleFill: createIdleFillState(),
-		get isDisabled(): boolean {
-			return disabled.value;
+		get isSaturated(): boolean {
+			return saturated.value;
 		},
 	};
-	return { handle, indexed, disabled };
+	return { handle, indexed, saturated };
 }
 
 export interface FakeCache {
