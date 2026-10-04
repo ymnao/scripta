@@ -936,8 +936,9 @@ describe("L3 InvertedIndex integration", () => {
 	it("piggyback epoch race: indexFile with a stale capturedEpoch is discarded", () => {
 		acquireFileListCache(ROOT);
 		const h = getInvertedIndexHandle(ROOT);
-		// 事前に file を index 済みにしておく (pathToId 登録がないと invalidate が no-op になるため)。
-		// tombstone 全 clear を避けるため 3 file 分登録しておく。
+		// 事前 index は、modify で a.md が tombstone になったときに全 clear が走らないよう
+		// valid な file (b.md / c.md) を残すため。path 登録は currentEpochOf だけで済む
+		// (未 index path の経路は次の test)。
 		h?.indexFile(p("a.md"), "irrelevant text", h.currentEpochOf(p("a.md")));
 		h?.indexFile(p("b.md"), "irrelevant text", h.currentEpochOf(p("b.md")));
 		h?.indexFile(p("c.md"), "irrelevant text", h.currentEpochOf(p("c.md")));
@@ -953,6 +954,17 @@ describe("L3 InvertedIndex integration", () => {
 			expect(result.indexedValid.has(p("a.md"))).toBe(false);
 			expect(result.candidates.has(p("a.md"))).toBe(false);
 		}
+	});
+
+	it("piggyback epoch race: an unindexed path captured via currentEpochOf is invalidated by applyFsBatch", () => {
+		acquireFileListCache(ROOT);
+		const h = getInvertedIndexHandle(ROOT);
+		const capturedEpoch = h?.currentEpochOf(p("a.md")) ?? 0;
+		applyFsBatch(ROOT, [{ kind: "modify", path: p("a.md") }]);
+		h?.indexFile(p("a.md"), "hello world", capturedEpoch);
+		expect(h?.isIndexedAndValid(p("a.md"))).toBe(false);
+		h?.indexFile(p("a.md"), "hello world", h.currentEpochOf(p("a.md")));
+		expect(h?.isIndexedAndValid(p("a.md"))).toBe(true);
 	});
 
 	describe("verify (SCRIPTA_DARK_ASSERT smoke)", () => {

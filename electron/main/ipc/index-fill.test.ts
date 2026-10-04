@@ -262,6 +262,81 @@ describe("index-fill: kickIdleFill", () => {
 		});
 	});
 
+	describe("tick を跨ぐ cursor 再開 (#589 C1)", () => {
+		// TICK_SIZE (4) を超える件数にして、1 kick 内で複数 tick を回す。
+		const FILES = Array.from({ length: 10 }, (_, i) => `/ws/notes/f${i}.md`);
+
+		// 再開位置は index 結果には現れない (先頭から舐め直しても valid な file は picked に
+		// 数えずに通過するので、read 順も最終状態も同じになる)。そこで各 tick で最初に
+		// isIndexedAndValid を問われた path を tick の開始位置として観測する。
+		function trackTicks(
+			deps: IdleFillDeps,
+			onYield: (tick: number) => void = () => {},
+		): { tickStarts: () => string[] } {
+			const visits: string[][] = [[]];
+			const base = deps.index;
+			deps.index = {
+				indexFile: base.indexFile,
+				currentEpochOf: base.currentEpochOf,
+				isIndexedAndValid: (p: string) => {
+					visits[visits.length - 1].push(p);
+					return base.isIndexedAndValid(p);
+				},
+				get isSaturated(): boolean {
+					return base.isSaturated;
+				},
+			};
+			deps.yieldTick = async () => {
+				onYield(visits.length);
+				visits.push([]);
+			};
+			return { tickStarts: () => visits.map((v) => v[0]) };
+		}
+
+		it("次の tick は前 tick が読んだ file の続きから舐める", async () => {
+			const { deps, indexed } = makeFakeDeps(FILES, new Map());
+			const { tickStarts } = trackTicks(deps);
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			// f8, f9 を読んだ tick 3 の末尾で cursor が先頭へ戻り、tick 4 は全 valid で bail する。
+			expect(tickStarts()).toEqual([FILES[0], FILES[4], FILES[8], FILES[0]]);
+			expect(indexed.size).toBe(FILES.length);
+		});
+
+		it("cursor より手前で stale になった file は末尾から折り返して回収する", async () => {
+			const { deps, indexed, currentEpoch } = makeFakeDeps(FILES, new Map());
+			// 末尾 2 件を index 済みにしておき、cursor から末尾までに picked が出ない状態を作る。
+			indexed.set(FILES[8], 0);
+			indexed.set(FILES[9], 0);
+			const readPaths: string[] = [];
+			deps.readFile = async (p: string) => {
+				readPaths.push(p);
+				return "";
+			};
+			trackTicks(deps, (tick) => {
+				// tick 2 (f4..f7) を読み終え cursor が f8 を指した時点で、読み済みの f1 を変更する。
+				if (tick === 2) currentEpoch.set(FILES[1], 1);
+			});
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			expect(readPaths).toEqual([...FILES.slice(0, 8), FILES[1]]);
+			expect(indexed.get(FILES[1])).toBe(1);
+		});
+
+		it("file 数が変わった次の tick は先頭から舐め直す", async () => {
+			const files = [...FILES];
+			const { deps, indexed } = makeFakeDeps(files, new Map());
+			const { tickStarts } = trackTicks(deps, (tick) => {
+				// 先頭側への挿入で並びがずれる。cursor を据え置くと位置の意味が変わる。
+				if (tick === 1) files.unshift("/ws/notes/e.md");
+			});
+			kickIdleFill(deps);
+			await waitUntil(() => !deps.state.running);
+			expect(tickStarts()[1]).toBe("/ws/notes/e.md");
+			expect(indexed.size).toBe(files.length);
+		});
+	});
+
 	it("旧 state の loop が readFile 待ちでも別 state の kick は走る", async () => {
 		const files = ["/ws/notes/a.md"];
 		const texts = new Map([["/ws/notes/a.md", "aaa"]]);
