@@ -317,7 +317,7 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   内訳: piggyback (search.ts) で検索ごとに 1 回。idle fill (index-fill.ts) は skip 記録を
 //   cache entry 単位で保持する (#589) ため、その file の epoch が動くまで再び呼ばない。
 // - **index が saturated な workspace ではこのゲート自体が呼ばれない** (#413 Finding 1)。
-//   saturated 時は gram 上限で file が reject され続け未 index の file が残るため、ゲートを
+//   saturated 時は gram / path 数上限で file が reject され続け未 index の file が残るため、ゲートを
 //   残すと未 index file 分の syscall が検索ごとに乗ってしまう (載らないので無駄)。
 // - realpathBestEffort と異なり **祖先 fall-through をしない**: 未存在 / dangling symlink は
 //   realpath が throw して null になる (fail-closed)。index ゲートに「最も近い実在祖先」の

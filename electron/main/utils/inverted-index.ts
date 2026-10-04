@@ -31,7 +31,7 @@ import { sep } from "node:path";
 /**
  * gram 数上限。この上限を超えることになる file は取り込まず reject する (#589 B1)。
  * 超過判定は挿入前に行うので、1 file が上限を大きく越えて spike することはない。
- * reject すると saturated が立ち、grams.size が reject 時点より減るまで続く。
+ * reject すると saturated が立ち、tombstone clear まで続く。
  */
 export const MAX_GRAM_COUNT = 2_000_000;
 /**
@@ -150,14 +150,13 @@ export class InvertedIndex {
 	// 恒久停止 (旧 disabled) にしなかったのは、悪意ある file 1 個で最適化を workspace 生存中ずっと
 	// 止められるため。フラグ無しの純 reject にしなかったのは、上限到達後も piggyback が毎検索で
 	// 全未 index file に realpath + bigram 構築 + reject を繰り返し (#413 と同形の退行)、呼び手が
-	// 抑制できなくなるため。変化のない workspace では saturated のまま小さい file も載らないが、
-	// 別 file の変更で容量が空けば回復する。
-	// gram 側は boolean ではなく reject 時点の grams.size を持つ: 再 index が自分の gram key を一旦
-	// 消して同数戻すだけで解除されると、空きの無いまま呼び手のゲートが開いて reject を繰り返すため。
-	private gramRejectedAtSize: number | null = null;
-	// path 側は compactIds が上限の半分も回収できなかった状態。解除は tombstone clear (indexedEpoch が
-	// 空になり全 id が回収可能になる) のみ。新規 path のたびに O(pathToId) の走査を繰り返さない。
-	private pathsFull = false;
+	// 抑制できなくなるため。
+	// 解除は tombstone clear のみ。呼び手は saturated 中に indexFile を呼ばないので、gram 容量が
+	// 空くのも (removeFromPostings は indexFile 内でしか走らない)、indexedEpoch が空いて id が回収
+	// 可能になるのも、実質 tombstone clear のときだけ。saturated の間に変更・削除された file が
+	// valid 数の半分を超えると clear が走って回復する。それまで新しい file は index に載らず scan
+	// される。path 側では新規 path のたびに compactIds の O(pathToId) 走査を繰り返さない役も兼ねる。
+	private saturated = false;
 
 	constructor(opts?: {
 		maxGramCount?: number;
@@ -176,10 +175,7 @@ export class InvertedIndex {
 	}
 
 	get isSaturated(): boolean {
-		if (this.gramRejectedAtSize !== null && this.grams.size < this.gramRejectedAtSize) {
-			this.gramRejectedAtSize = null;
-		}
-		return this.pathsFull || this.gramRejectedAtSize !== null;
+		return this.saturated;
 	}
 
 	get indexedValidCount(): number {
@@ -193,7 +189,7 @@ export class InvertedIndex {
 	// current で一致して stale text を index する race (Phase C 版 stale-insert race)。
 	// L2 が cache に無い key への modify でも global generation を bump するのと同じ意図で、
 	// path 単位でも「read 中の file を invalidate 可能な状態」に持ち込む。
-	// 登録を拒否した path (pathsFull) は UNREGISTERED_EPOCH を返す。登録後の epoch とは一致しないので、
+	// 登録を拒否した path (saturated 中の新規 path) は UNREGISTERED_EPOCH を返す。登録後の epoch とは一致しないので、
 	// 拒否中に capture した epoch で後から stale text を index されることはない。
 	currentEpochOf(ioPath: string): number {
 		const id = this.getOrCreateId(ioPath);
@@ -217,8 +213,8 @@ export class InvertedIndex {
 		if (existing !== undefined) return existing;
 		// lookup のみの invalidate/remove/invalidatePrefix は新規登録しないので、回収を誘発できない。
 		if (this.pathToId.size >= this.maxPathCount) {
-			if (this.pathsFull || !this.compactIds()) {
-				this.pathsFull = true;
+			if (this.saturated || !this.compactIds()) {
+				this.saturated = true;
 				return undefined;
 			}
 		}
@@ -230,7 +226,8 @@ export class InvertedIndex {
 
 	// indexedEpoch を持たない id (登録だけされた path、reject された file、削除された file) を回収する。
 	// 削除 file の posting は tombstone clear まで残るが、indexedEpoch が無いので候補にも indexedValid
-	// にも出ず、nextId は単調なので id の再利用も起きない。valid な posting は残すので、live file が
+	// にも出ず、nextId は単調なので id の再利用も起きない (同名 path を再 create すると新 id で載り、
+	// 旧 id の posting は tombstone として数えられたまま clear まで残る)。valid な posting は残すので、live file が
 	// 上限未満の workspace で回収が索引を作り直させることはない。回収量が上限の半分に満たなければ
 	// 何もせず false を返す:
 	// 少量ずつ回収すると、回収した path の再登録 → epoch 変化 → idle fill の再 read が新規 path の
@@ -263,8 +260,7 @@ export class InvertedIndex {
 		this.idToGrams.clear();
 		this.indexedEpoch.clear();
 		this.validCount = 0;
-		this.gramRejectedAtSize = null;
-		this.pathsFull = false;
+		this.saturated = false;
 	}
 
 	// posting から fileId への参照を全て除去する (indexFile 更新時・admission reject 時に使う)。
@@ -330,7 +326,9 @@ export class InvertedIndex {
 
 		const uniqueGrams = this.collectNewGramsWithinCeiling(lower);
 		if (uniqueGrams === null) {
-			this.gramRejectedAtSize = this.grams.size;
+			// rejectFile より先に立てる: reject が tombstone clear を誘発したら clearPostings が下ろす。
+			// 逆順だと空の index に saturated が残り、tombstone を作れないまま恒久停止する。
+			this.saturated = true;
 			this.rejectFile(id);
 			return;
 		}

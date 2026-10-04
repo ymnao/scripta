@@ -332,23 +332,29 @@ describe("gram count ceiling (#589 B1)", () => {
 		expect(candidatesOf(idx, "ab").candidates.has("/ws/a.md")).toBe(true);
 	});
 
-	it("clears saturated once grams.size drops below the size at reject", () => {
+	it("stays saturated through an invalidate until the tombstone ratio forces a clear", () => {
 		const idx = new InvertedIndex({ maxGramCount: 3 });
 		idx.indexFile("/ws/a.md", "abcd"); // ab bc cd
+		idx.indexFile("/ws/c.md", "abc"); // existing grams only
+		idx.indexFile("/ws/d.md", "bcd"); // existing grams only
 		idx.indexFile("/ws/b.md", "wxyz");
 		expect(idx.isSaturated).toBe(true);
-		idx.indexFile("/ws/a.md", "ab"); // bc / cd keys disappear
+		idx.invalidate("/ws/a.md"); // valid 2, tombstones 1: no clear yet
+		expect(idx.isSaturated).toBe(true);
+		idx.invalidate("/ws/c.md"); // valid 1, tombstones 2 → full clear
+		expect(idx.gramCount).toBe(0);
 		expect(idx.isSaturated).toBe(false);
 	});
 
-	it("stays saturated when a re-index frees and re-adds the same number of keys", () => {
+	it("does not stay saturated when the rejecting update itself triggers a tombstone clear", () => {
 		const idx = new InvertedIndex({ maxGramCount: 3 });
 		idx.indexFile("/ws/a.md", "abcd"); // ab bc cd
-		idx.indexFile("/ws/b.md", "wxyz");
-		expect(idx.isSaturated).toBe(true);
-		idx.indexFile("/ws/a.md", "abce"); // cd is removed, ce is added: still 3 keys
-		expect(idx.gramCount).toBe(3);
-		expect(idx.isSaturated).toBe(true);
+		idx.indexFile("/ws/b.md", "ab");
+		idx.indexFile("/ws/c.md", "bc");
+		idx.invalidate("/ws/c.md"); // valid 2, tombstones 1: no clear yet
+		idx.indexFile("/ws/a.md", "wxyz"); // rejected; a leaves valid → tombstones 1 > 0.5 → clear
+		expect(idx.gramCount).toBe(0);
+		expect(idx.isSaturated).toBe(false);
 	});
 
 	it("keeps saturated while no capacity has been freed", () => {
@@ -368,19 +374,10 @@ describe("gram count ceiling (#589 B1)", () => {
 		expect(idx.gramCount).toBe(0);
 		expect(idx.isSaturated).toBe(false);
 	});
-
-	it("does not stay saturated after a tombstone clear once grams grow back to the old size", () => {
-		const idx = new InvertedIndex({ maxGramCount: 3 });
-		idx.indexFile("/ws/a.md", "abcd");
-		idx.indexFile("/ws/b.md", "wxyz");
-		idx.invalidate("/ws/a.md"); // full clear without anyone reading isSaturated
-		idx.indexFile("/ws/c.md", "efgh"); // back to 3 keys
-		expect(idx.isSaturated).toBe(false);
-	});
 });
 
 describe("path count cap (#589 B2)", () => {
-	it("reclaims ids holding no posting and keeps valid files when a new path hits the cap", () => {
+	it("reclaims ids without indexedEpoch and keeps valid files when a new path hits the cap", () => {
 		const idx = new InvertedIndex({ maxPathCount: 2 });
 		idx.indexFile("/ws/a.md", "hello");
 		idx.currentEpochOf("/ws/b.md"); // registered only
@@ -392,6 +389,20 @@ describe("path count cap (#589 B2)", () => {
 		expect(idx.gramCount).toBeGreaterThan(grams);
 		expect(idx.isSaturated).toBe(false);
 		expect(candidatesOf(idx, "hello").candidates.has("/ws/a.md")).toBe(true);
+	});
+
+	it("reclaims a removed file whose posting remains, and a re-created file of the same name is indexed afresh", () => {
+		const idx = new InvertedIndex({ maxPathCount: 2, tombstoneRatio: 100 });
+		idx.indexFile("/ws/a.md", "hello");
+		idx.indexFile("/ws/x.md", "other");
+		idx.remove("/ws/a.md"); // posting of a stays until a tombstone clear
+		idx.currentEpochOf("/ws/b.md"); // reclaims a
+		expect(candidatesOf(idx, "he").candidates.has("/ws/a.md")).toBe(false);
+		idx.indexFile("/ws/a.md", "world");
+		expect(idx.indexedValidCount).toBe(2);
+		const r = candidatesOf(idx, "he");
+		expect(r.candidates.has("/ws/a.md")).toBe(false);
+		expect(candidatesOf(idx, "wo").candidates.has("/ws/a.md")).toBe(true);
 	});
 
 	it("keeps the epoch of a surviving file unchanged across reclamation", () => {
@@ -436,8 +447,7 @@ describe("path count cap (#589 B2)", () => {
 		idx.indexFile("/ws/b.md", "world");
 		const refused = idx.currentEpochOf("/ws/c.md");
 		expect(idx.isSaturated).toBe(true);
-		idx.invalidate("/ws/a.md");
-		idx.invalidate("/ws/b.md"); // tombstone ratio exceeded → full clear
+		idx.invalidate("/ws/a.md"); // tombstone ratio exceeded → full clear
 		expect(idx.isSaturated).toBe(false);
 		expect(idx.currentEpochOf("/ws/c.md")).not.toBe(refused);
 		idx.indexFile("/ws/c.md", "fresh");

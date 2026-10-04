@@ -157,7 +157,7 @@ async function processMdFilesParallel(
 					// file を reject している間は、未 index の file が isIndexedAndValid=false のまま
 					// この分岐に流れ込み、非キャッシュ realpath + bigram 構築 + reject が検索ごとに
 					// 全未 index file 分走る。載る見込みの薄いゲートを走らせる意味がない。
-					// saturated は posting の gram key が減れば自動で下りる (恒久停止ではない)。
+					// saturated は tombstone clear で下りる (恒久停止ではない)。
 					// index-fill.ts の tick 冒頭 bail と同方針。
 					// **alias は index に載せない (#413 Finding 2)**: 判定は isIndexableResolution
 					// (null = workspace 外 / 解決先 !== ioPath = workspace 内 symlink を 1 つの述語で弾く)。
