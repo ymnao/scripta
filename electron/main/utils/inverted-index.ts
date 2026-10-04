@@ -2,7 +2,7 @@
 // (search-cache.ts) から使う。#394 Phase C。
 //
 // posting は「行内 lowercase bigram → fileId の Set」。fileId は path の数値 intern
-// (世代内では再利用禁止。delete でも pathToId の entry は消さない — 同名 path が再 create された時に
+// (再利用禁止。delete でも pathToId の entry は消さない (下記の回収を除く) — 同名 path が再 create された時に
 // 同じ fileId を再ヒットさせるため。indexedEpoch との照合で自動的に未 indexed 扱いになる。
 // これは L1/L2 の姉妹罠「epoch 履歴を消すと再 create で偽 valid になる」への対応)。
 // ただし pathToId が MAX_PATH_COUNT に達したら、indexedEpoch を持たない id だけを
@@ -151,10 +151,11 @@ export class InvertedIndex {
 	// 止められるため。フラグ無しの純 reject にしなかったのは、上限到達後も piggyback が毎検索で
 	// 全未 index file に realpath + bigram 構築 + reject を繰り返し (#413 と同形の退行)、呼び手が
 	// 抑制できなくなるため。
-	// 解除は tombstone clear のみ。呼び手は saturated 中に indexFile を呼ばないので、gram 容量が
-	// 空くのも (removeFromPostings は indexFile 内でしか走らない)、indexedEpoch が空いて id が回収
-	// 可能になるのも、実質 tombstone clear のときだけ。saturated の間に変更・削除された file が
-	// valid 数の半分を超えると clear が走って回復する。それまで新しい file は index に載らず scan
+	// 解除は tombstone clear のみ。production の呼び手 (piggyback / idle fill) は saturated 中に
+	// indexFile を呼ばない (dev 専用の dark assert の再 index だけが例外) ので、gram 容量が空くのも
+	// (removeFromPostings は indexFile 内でしか走らない)、indexedEpoch が空いて id が回収可能になる
+	// のも、実質 tombstone clear のときだけ。saturated の間に変更・削除された file が valid 数の半分を
+	// 超えると clear が走って回復する。それまで新規 file も変更された file も index に載らず scan
 	// される。path 側では新規 path のたびに compactIds の O(pathToId) 走査を繰り返さない役も兼ねる。
 	private saturated = false;
 

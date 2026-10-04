@@ -153,8 +153,8 @@ async function processMdFilesParallel(
 					// 露出は「L2 に載った内容がそのまま返る」既存の L2 staleness 契約の範囲)。
 					// resolved path から読み直す案は
 					// 検索 hot path に I/O を足すため見送り、この窓は受容する (#406)。
-					// **saturated 時はゲートごと skip する (#413 Finding 1)**: index が gram 上限に達して
-					// file を reject している間は、未 index の file が isIndexedAndValid=false のまま
+					// **saturated 時はゲートごと skip する (#413 Finding 1)**: index が gram / path 数上限に
+					// 達して file を reject している間は、未 index の file が isIndexedAndValid=false のまま
 					// この分岐に流れ込み、非キャッシュ realpath + bigram 構築 + reject が検索ごとに
 					// 全未 index file 分走る。載る見込みの薄いゲートを走らせる意味がない。
 					// saturated は tombstone clear で下りる (恒久停止ではない)。
