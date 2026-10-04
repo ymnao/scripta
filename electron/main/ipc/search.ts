@@ -153,18 +153,19 @@ async function processMdFilesParallel(
 					// 露出は「L2 に載った内容がそのまま返る」既存の L2 staleness 契約の範囲)。
 					// resolved path から読み直す案は
 					// 検索 hot path に I/O を足すため見送り、この窓は受容する (#406)。
-					// **disabled 時はゲートごと skip する (#413 Finding 1)**: index が gram 上限超過で
-					// 恒久 disabled になると indexedEpoch が clear されて isIndexedAndValid が全 file
-					// false を返すため、この分岐に全 file が流れ込んで非キャッシュ realpath が
-					// 検索ごとに全 file 分走る。indexFile 自体は disabled で no-op なので、
-					// ゲートを走らせる意味がない。index-fill.ts の tick 冒頭 bail と同方針。
+					// **saturated 時はゲートごと skip する (#413 Finding 1)**: index が gram 上限に達して
+					// file を reject している間は、未 index の file が isIndexedAndValid=false のまま
+					// この分岐に流れ込み、非キャッシュ realpath + bigram 構築 + reject が検索ごとに
+					// 全未 index file 分走る。載る見込みの薄いゲートを走らせる意味がない。
+					// saturated は posting の gram key が減れば自動で下りる (恒久停止ではない)。
+					// index-fill.ts の tick 冒頭 bail と同方針。
 					// **alias は index に載せない (#413 Finding 2)**: 判定は isIndexableResolution
 					// (null = workspace 外 / 解決先 !== ioPath = workspace 内 symlink を 1 つの述語で弾く)。
 					// alias を載せると解決先の modify で invalidate が波及せず stale posting が残る。
 					// 未 index file は buildScanList が常に scan 対象に含めるので結果は落ちない。
 					if (
 						indexOptions !== undefined &&
-						!indexOptions.handle.isDisabled &&
+						!indexOptions.handle.isSaturated &&
 						!indexOptions.handle.isIndexedAndValid(ioPath)
 					) {
 						const epoch = indexOptions.handle.currentEpochOf(ioPath);
@@ -174,7 +175,7 @@ async function processMdFilesParallel(
 						// (認可済み実体の) 内容ごと結果から落とす。fs:read も同じ理由で拒否するため、
 						// 出しても開けない。判定は既に払った realpath の再利用で追加 syscall はゼロ。
 						// alias (resolved !== ioPath かつ非 null) は fs:read で開けるので落とさない。
-						// ゲートを評価しない pass (index 無効 / 既に valid / index 未提供) には判定材料が
+						// ゲートを評価しない pass (index saturated / 既に valid / index 未提供) には判定材料が
 						// 無いため従来どおり L2 の内容を返す (この窓は ADR-0011 に受容として記載)。
 						if (resolved === null) return;
 						if (isIndexableResolution(resolved, ioPath)) {
@@ -192,14 +193,14 @@ async function processMdFilesParallel(
 				// 来た場合、handle 側で不一致検出して indexFile を no-op にする (Phase B の姉妹罠)。
 				// currentEpochOf は path を pathToId に登録する副作用があるので、以降の invalidate
 				// batch は path 未登録による no-op を回避できる (Phase C 版 stale-insert race 対策)。
-				// disabled 時は index に載る余地がないので、以降の epoch capture と realpath ゲートを
+				// saturated 時は index に載る見込みが薄いので、以降の epoch capture と realpath ゲートを
 				// まとめて skip する (#413 Finding 1、L2-hit 側と同じ理由)。
 				// 「この file を index に載せる候補か」を boolean ではなく options 自体で表す
 				// (#407 Finding 1/3)。非 undefined なら handle / root が揃っていることを型が保証するので、
 				// 以降の handle 参照から `as InvertedIndexHandle` の cast が消える。
 				const indexTarget =
 					indexOptions !== undefined &&
-					!indexOptions.handle.isDisabled &&
+					!indexOptions.handle.isSaturated &&
 					!indexOptions.handle.isIndexedAndValid(ioPath)
 						? indexOptions
 						: undefined;
@@ -207,11 +208,11 @@ async function processMdFilesParallel(
 				// realpath 再認可 (#394 Phase D / #399 Finding 2) を readFile の **前** に行い、
 				// 許可された file は解決済み path を読む (#406 Finding 2、契約は resolveInsideRoot の doc)。
 				// 非 null = 「index に載せてよい + この path で読むべき」を 1 変数で表す。
-				// index に載せない file (既に valid / index 無効) には realpath syscall を増やさない。
+				// index に載せない file (既に valid / index saturated) には realpath syscall を増やさない。
 				let resolvedForIndex: string | null = null;
 				// ゲートを実際に評価したか = index 対象候補だったか。評価した上で弾かれた file
 				// (workspace 外を指す symlink / workspace 内 alias) だけが L2 抑止の対象で、
-				// そもそも評価していない file (既に valid / index 無効) は従来どおり L2 に載せる。
+				// そもそも評価していない file (既に valid / index saturated) は従来どおり L2 に載せる。
 				// indexTarget から導出できるので別の可変 state は持たない (両者がズレる状態を作らない)。
 				const indexGateEvaluated = indexTarget !== undefined;
 				if (indexTarget !== undefined) {
@@ -253,7 +254,7 @@ async function processMdFilesParallel(
 						if (resolvedForIndex === null) return;
 						text = await readFileUtf8NoFollow(resolvedForIndex);
 					} else {
-						// ゲート未評価 (index 未提供 / index 無効 / 既に valid)。まず O_NOFOLLOW open を
+						// ゲート未評価 (index 未提供 / index saturated / 既に valid)。まず O_NOFOLLOW open を
 						// 試して **その fd から読む**。成功 = 「開いた対象は symlink ではない」と「読んだ
 						// 内容」が同一 object に束ねられるので、検査と read の間に差し替える窓が存在しない
 						// (#416)。**この原子性は `O_NOFOLLOW` がある platform に限る**: flag が落ちる
@@ -305,7 +306,7 @@ async function processMdFilesParallel(
 				// 場合は解決先の modify で evict されず stale な内容が検索結果に出るため (#413 Finding 2)。
 				// scan 結果は cache 有無に関わらず毎回 read するので影響しない。
 				// **2 つの枝を使い分ける理由**: ゲート評価済みの枝は resolveInsideRoot が末端非 symlink
-				// まで確認済みなので追加の syscall なしで判定できる。未評価の枝 (index disabled /
+				// まで確認済みなので追加の syscall なしで判定できる。未評価の枝 (index saturated /
 				// 既に index 済みで valid / index handle 未提供) は read そのものを
 				// O_NOFOLLOW open + 同一 fd read にして、判定と内容を同じ object に束ねる。
 				// **検査した対象そのもので I/O する** ので、別 syscall で検査する方式に残る
@@ -565,7 +566,7 @@ async function searchFilesImpl(
 	//   - indexHandle undefined (watcher 非稼働 / cache 未 populate)
 	//   - caseSensitive = true (verifyIndexSuperset が Final_Sigma で保証放棄。case-preserving
 	//     index は Phase E 以降のスコープ)
-	//   - getCandidates が { kind: "fallback" } を返す (query.length < 2 / 改行含む / disabled)
+	//   - getCandidates が { kind: "fallback" } を返す (query.length < 2 / 改行含む)
 	// buildScanList は fallback kind でも呼べる (全 file 素通しを返す) が、caseSensitive gate は
 	// 呼び出し側の意図 (index を「候補絞り」に使うのは lowered 経路のみ) を明示するため冒頭で倒す。
 	const candResult =
@@ -1013,7 +1014,7 @@ export async function resolveDarkAssertViolations(
 		if (deps.isStale()) return { kind: "stale" };
 		const remaining = deps.collectViolations(queryLower, allIoFiles, Array.from(truth));
 		// null (fallback) は「解消」ではなく判定不能。round 1 の null と同じく ok に倒す
-		// (retry 中の indexFile が admission cutoff を押して index が disabled 化した場合など)。
+		// (判定不能を破損扱いにしないための防御)。
 		if (remaining === null) return { kind: "ok" };
 		if (remaining.length === 0) return { kind: "resolved", dropped };
 		violations = remaining;

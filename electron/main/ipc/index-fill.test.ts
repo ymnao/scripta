@@ -6,7 +6,7 @@ interface FakeIndexHandle {
 	indexFile(path: string, text: string, capturedEpoch: number): void;
 	currentEpochOf(path: string): number;
 	isIndexedAndValid(path: string): boolean;
-	readonly isDisabled: boolean;
+	readonly isSaturated: boolean;
 }
 
 function makeFakeDeps(
@@ -17,13 +17,13 @@ function makeFakeDeps(
 	indexed: Map<string, number>;
 	currentEpoch: Map<string, number>;
 	alive: { value: boolean };
-	disabled: { value: boolean };
+	saturated: { value: boolean };
 	reads: { value: number };
 } {
 	const indexed = new Map<string, number>(); // path → captured epoch (record)
 	const currentEpoch = new Map<string, number>();
 	const alive = { value: true };
-	const disabled = { value: false };
+	const saturated = { value: false };
 	const reads = { value: 0 };
 
 	const index: FakeIndexHandle = {
@@ -33,8 +33,8 @@ function makeFakeDeps(
 		},
 		currentEpochOf: (p: string) => currentEpoch.get(p) ?? 0,
 		isIndexedAndValid: (p: string) => indexed.get(p) === (currentEpoch.get(p) ?? 0),
-		get isDisabled(): boolean {
-			return disabled.value;
+		get isSaturated(): boolean {
+			return saturated.value;
 		},
 	};
 
@@ -52,7 +52,7 @@ function makeFakeDeps(
 		resolveAllowed: async (p: string) => p,
 	};
 
-	return { deps, indexed, currentEpoch, alive, disabled, reads };
+	return { deps, indexed, currentEpoch, alive, saturated, reads };
 }
 
 describe("index-fill: kickIdleFill", () => {
@@ -100,11 +100,11 @@ describe("index-fill: kickIdleFill", () => {
 		expect(indexed.size).toBe(0);
 	});
 
-	it("isDisabled で bail: index が disabled なら fill 停止", async () => {
+	it("isSaturated で bail: index が saturated なら fill 停止", async () => {
 		const files = ["/ws/notes/a.md", "/ws/notes/b.md"];
 		const texts = new Map(files.map((f) => [f, `text of ${f}`]));
-		const { deps, disabled, indexed } = makeFakeDeps(files, texts);
-		disabled.value = true;
+		const { deps, saturated, indexed } = makeFakeDeps(files, texts);
+		saturated.value = true;
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
 		expect(indexed.size).toBe(0);

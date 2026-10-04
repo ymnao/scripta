@@ -31,7 +31,7 @@ describe("processMdFilesParallel: index options の型契約 (#407 Finding 1/3)"
 		// **file 配列は空のまま維持すること**。ここで渡す options は意図的に malformed で、
 		// processMdFilesParallel は suppress 判定しかせず不正な形を弾かない。file を 1 つでも
 		// 足すと root 欠落側は resolveInsideRoot(ioPath, undefined) 内の path.relative が、
-		// handle 欠落側は handle.isDisabled 参照が TypeError になる (fail-loud なので実害は
+		// handle 欠落側は handle.isSaturated 参照が TypeError になる (fail-loud なので実害は
 		// 無いが、型 pin の意図とは無関係な失敗で読み手を混乱させる)。
 		const { handle } = makeFakeIndex();
 

@@ -316,7 +316,7 @@ describe("resolveDarkAssertViolations", () => {
 		expect(calls.filter((c) => c.startsWith("read:"))).toEqual(["read:/ws/a.md"]);
 	});
 
-	it("returns ok when the recheck falls back (index disabled mid-retry), not resolved", async () => {
+	it("returns ok when the recheck falls back (判定不能の fallback), not resolved", async () => {
 		// fallback は「解消」ではなく判定不能。warn を出さない ok に倒す。
 		let call = 0;
 		const { deps } = makeFakeDeps({

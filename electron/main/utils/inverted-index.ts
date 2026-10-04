@@ -2,9 +2,13 @@
 // (search-cache.ts) から使う。#394 Phase C。
 //
 // posting は「行内 lowercase bigram → fileId の Set」。fileId は path の数値 intern
-// (再利用禁止。delete でも pathToId の entry は消さない — 同名 path が再 create された時に
+// (世代内では再利用禁止。delete でも pathToId の entry は消さない — 同名 path が再 create された時に
 // 同じ fileId を再ヒットさせるため。indexedEpoch との照合で自動的に未 indexed 扱いになる。
 // これは L1/L2 の姉妹罠「epoch 履歴を消すと再 create で偽 valid になる」への対応)。
+// ただし pathToId が MAX_PATH_COUNT に達したら「世代 clear」で intern 表ごと捨てる (#589 B2)。
+// 世代を跨ぐと indexedEpoch も一緒に消えるので旧 fileId の再ヒットは起きず、fileEpoch の既定値
+// (epochFloor) を世代 clear 時点の採番値へ進めることで、clear 前に capture した epoch との
+// 偽一致 (= 偽 valid) も防ぐ。
 //
 // valid 判定は「fileEpoch (現在世代) と indexedEpoch (index 取り込み時点の世代) の一致」で行う
 // 二重照合。invalidate/remove/invalidatePrefix はいずれも「意図ベース bump」— fileEpoch を
@@ -24,8 +28,14 @@
 
 import { sep } from "node:path";
 
-/** gram 数上限。超過で workspace 単位で index 無効化 (workspace 生存中は復活しない)。 */
+/**
+ * gram 数上限。この上限を超えることになる file は取り込まず reject する (#589 B1)。
+ * 超過判定は挿入前に行うので、1 file が上限を大きく越えて spike することはない。
+ * reject すると saturated が立ち、posting の gram key が実際に減るまで続く。
+ */
 export const MAX_GRAM_COUNT = 2_000_000;
+/** pathToId の登録数上限。到達すると次の新規登録で世代 clear する (#589 B2)。 */
+export const MAX_PATH_COUNT = 100_000;
 /** L2 と同じ admission cutoff。charge = text.length * 2 (UTF-16 code unit)。 */
 export const INDEX_ADMISSION_MAX_BYTES = 1 * 1024 * 1024;
 /** stale + removed が indexed 総数の 50% を超えたら全 clear (lazy 再養成)。 */
@@ -54,7 +64,7 @@ function isScanEligible(
 /**
  * #394 Phase D の scan list 構築。allIoFiles と getCandidates 戻り値から
  * 「実際に readFile + scan する対象」に絞る。
- * - fallback kind: 全 file 素通し (query.length < 2 / 改行含む / disabled / 未 indexed 多数)。
+ * - fallback kind: 全 file 素通し (query.length < 2 / 改行含む / 未 indexed 多数)。
  * - candidates kind: `candidates ∪ (allIoFiles \ indexedValid)` = 候補 file + 未 indexed/stale file。
  *   前者は index が絞った候補、後者は index が「valid ではない」= no-match を保証できない集合。
  *   両方を scan することで「index 0% でも 100% でも同一結果」不変条件を維持する。
@@ -97,18 +107,26 @@ function charge(text: string): number {
 
 export class InvertedIndex {
 	private readonly maxGramCount: number;
+	private readonly maxPathCount: number;
 	private readonly admissionMaxBytes: number;
 	private readonly tombstoneRatio: number;
 
 	// fileId intern。delete でも entry を消さない (再 create で同じ fileId を再利用するため)。
+	// 消えるのは世代 clear のときだけ。
 	private pathToId = new Map<string, number>();
 	private idToPath: string[] = [];
 	private nextId = 0;
 
 	// 現在世代。invalidate/remove/invalidatePrefix で bump する。
+	// 値は epochCounter からの採番 (per-file +1 ではない)。世代 clear で fileEpoch を捨てても、
+	// 以後の採番値は過去に返した値と衝突しない。未設定の file は epochFloor を既定値とする。
 	private fileEpoch = new Map<number, number>();
+	private epochCounter = 0;
+	// 未設定 file の epoch 既定値。世代 clear のたびに採番値まで進め、clear 前に capture された
+	// epoch (未登録 path なら旧 floor) と二度と一致させない。clear では巻き戻さない。
+	private epochFloor = 0;
 	// index 取り込み時点の世代。indexFile で fileEpoch と同期する。
-	// valid ⟺ indexedEpoch.get(id) === (fileEpoch.get(id) ?? 0)
+	// valid ⟺ indexedEpoch.get(id) === (fileEpoch.get(id) ?? epochFloor)
 	private indexedEpoch = new Map<number, number>();
 
 	// gram → fileId の posting map。
@@ -123,14 +141,22 @@ export class InvertedIndex {
 	// indexedEpoch 全走査 (旧 indexedValidCount_ の O(N)) を排除する。
 	// tombstones は `idToGrams.size - validCount` で O(1) 算出できるため field は持たない。
 	private validCount = 0;
-	private disabled = false;
+	// gram 上限で file を reject した状態。posting の gram key が実際に減ったときだけ下ろす。
+	// 恒久停止 (旧 disabled) にしなかったのは、悪意ある file 1 個で最適化を workspace 生存中ずっと
+	// 止められるため。フラグ無しの純 reject にしなかったのは、上限到達後も piggyback が毎検索で
+	// 全未 index file に realpath + bigram 構築 + reject を繰り返し (#413 と同形の退行)、呼び手が
+	// 抑制できなくなるため。変化のない workspace では saturated が立ったまま小さい file も載らないが、
+	// 別 file の変更で gram key が減れば回復する。
+	private saturated = false;
 
 	constructor(opts?: {
 		maxGramCount?: number;
+		maxPathCount?: number;
 		admissionMaxBytes?: number;
 		tombstoneRatio?: number;
 	}) {
 		this.maxGramCount = opts?.maxGramCount ?? MAX_GRAM_COUNT;
+		this.maxPathCount = opts?.maxPathCount ?? MAX_PATH_COUNT;
 		this.admissionMaxBytes = opts?.admissionMaxBytes ?? INDEX_ADMISSION_MAX_BYTES;
 		this.tombstoneRatio = opts?.tombstoneRatio ?? TOMBSTONE_RATIO;
 	}
@@ -139,8 +165,8 @@ export class InvertedIndex {
 		return this.grams.size;
 	}
 
-	get isDisabled(): boolean {
-		return this.disabled;
+	get isSaturated(): boolean {
+		return this.saturated;
 	}
 
 	get indexedValidCount(): number {
@@ -148,15 +174,15 @@ export class InvertedIndex {
 	}
 
 	// piggyback / idle fill が read 前に snapshot する用。
-	// **重要**: 未登録 path はここで pathToId に登録する (fileEpoch は未設定のまま=0 相当)。
+	// **重要**: 未登録 path はここで pathToId に登録する (fileEpoch は未設定のまま=epochFloor 相当)。
 	// これをしないと、read 中に applyFsBatch → invalidate(path) が「path 未登録」で no-op になり、
-	// epoch が bump されないまま readFile 完了時の handle.indexFile が capturedEpoch=0 と
-	// current=0 で一致して stale text を index する race (Phase C 版 stale-insert race)。
+	// epoch が bump されないまま readFile 完了時の handle.indexFile が capturedEpoch と
+	// current で一致して stale text を index する race (Phase C 版 stale-insert race)。
 	// L2 が cache に無い key への modify でも global generation を bump するのと同じ意図で、
 	// path 単位でも「read 中の file を invalidate 可能な状態」に持ち込む。
 	currentEpochOf(ioPath: string): number {
 		const id = this.getOrCreateId(ioPath);
-		return this.fileEpoch.get(id) ?? 0;
+		return this.fileEpoch.get(id) ?? this.epochFloor;
 	}
 
 	isIndexedAndValid(ioPath: string): boolean {
@@ -164,16 +190,40 @@ export class InvertedIndex {
 		if (id === undefined) return false;
 		const indexed = this.indexedEpoch.get(id);
 		if (indexed === undefined) return false;
-		return indexed === (this.fileEpoch.get(id) ?? 0);
+		return indexed === (this.fileEpoch.get(id) ?? this.epochFloor);
 	}
 
 	private getOrCreateId(ioPath: string): number {
 		const existing = this.pathToId.get(ioPath);
 		if (existing !== undefined) return existing;
+		// lookup のみの invalidate/remove/invalidatePrefix は新規登録しないので、clear を誘発できない
+		// (上限到達中の modify event 洪水で索引を空にされない)。
+		if (this.pathToId.size >= this.maxPathCount) this.generationClear();
 		const id = this.nextId++;
 		this.pathToId.set(ioPath, id);
 		this.idToPath[id] = ioPath;
 		return id;
+	}
+
+	// 世代 clear: intern 表と posting を丸ごと捨てて pathToId の単調増加を止める。
+	// epochFloor を先に進める理由: 未登録 path P で currentEpochOf(P)=e0 を capture → read 中に
+	// invalidate(P) → clear → 再登録された P の epoch が e0 に戻って一致すると、stale text を
+	// valid として index してしまう。floor は過去に返した任意の値より大きいので一致しない。
+	private generationClear(): void {
+		this.epochFloor = ++this.epochCounter;
+		this.pathToId.clear();
+		this.idToPath = [];
+		this.nextId = 0;
+		this.fileEpoch.clear();
+		this.clearPostings();
+	}
+
+	private clearPostings(): void {
+		this.grams.clear();
+		this.idToGrams.clear();
+		this.indexedEpoch.clear();
+		this.validCount = 0;
+		this.saturated = false;
 	}
 
 	// posting から fileId への参照を全て除去する (indexFile 更新時・admission reject 時に使う)。
@@ -185,14 +235,17 @@ export class InvertedIndex {
 			const set = this.grams.get(gram);
 			if (set === undefined) continue;
 			set.delete(id);
-			if (set.size === 0) this.grams.delete(gram);
+			if (set.size === 0) {
+				this.grams.delete(gram);
+				this.saturated = false;
+			}
 		}
 		this.idToGrams.delete(id);
 	}
 
 	// indexedEpoch の set/delete と validCount 差分更新を対で行うヘルパー群。
 	private markValid(id: number): void {
-		const cur = this.fileEpoch.get(id) ?? 0;
+		const cur = this.fileEpoch.get(id) ?? this.epochFloor;
 		const prev = this.indexedEpoch.get(id);
 		const wasValid = prev !== undefined && prev === cur;
 		this.indexedEpoch.set(id, cur);
@@ -202,46 +255,45 @@ export class InvertedIndex {
 	private forgetIndexed(id: number): void {
 		const prev = this.indexedEpoch.get(id);
 		if (prev === undefined) return;
-		const wasValid = prev === (this.fileEpoch.get(id) ?? 0);
+		const wasValid = prev === (this.fileEpoch.get(id) ?? this.epochFloor);
 		this.indexedEpoch.delete(id);
 		if (wasValid) this.validCount--;
 	}
 
 	// 意図ベース bump: fileEpoch を進めるだけ。posting は残置する (tombstone clear で回収)。
 	private bumpFileEpoch(id: number): void {
-		const cur = this.fileEpoch.get(id) ?? 0;
+		const cur = this.fileEpoch.get(id) ?? this.epochFloor;
 		const prev = this.indexedEpoch.get(id);
 		const wasValid = prev !== undefined && prev === cur;
-		this.fileEpoch.set(id, cur + 1);
+		this.fileEpoch.set(id, ++this.epochCounter);
 		if (wasValid) this.validCount--;
 	}
 
 	indexFile(ioPath: string, text: string): void {
-		if (this.disabled) return;
-
-		const c = charge(text);
 		const id = this.getOrCreateId(ioPath);
 
-		if (c > this.admissionMaxBytes) {
-			// reject: 既存 indexed 情報 (indexedEpoch entry と posting からの当該 fileId 削除) を除去する。
-			// 「新値受入拒否 + 旧値保持」は両立させない。
-			this.removeFromPostings(id);
-			this.forgetIndexed(id);
-			this.maybeClearOnTombstoneRatio();
+		// raw 長で先に弾くのは巨大 file の toLowerCase (O(n) の文字列確保) 自体を避けるため。
+		if (charge(text) > this.admissionMaxBytes) {
+			this.rejectFile(id);
+			return;
+		}
+		const lower = text.toLowerCase();
+		// toLowerCase は伸長しうる (İ → i + U+0307)。bigram は lower から作るので、raw の charge だけでは
+		// cutoff をすり抜けて 1 file で想定の 2 倍の gram を仕込める。
+		if (charge(lower) > this.admissionMaxBytes) {
+			this.rejectFile(id);
 			return;
 		}
 
 		// 既存 indexed (更新) の場合、先に posting から古い fileId 参照を除去してから追加する
-		// (bigram set が変化しうるため)。
+		// (bigram set が変化しうるため)。gram 上限の判定はこの除去後の grams.size を baseline にする。
 		this.removeFromPostings(id);
 
-		const lower = text.toLowerCase();
-		const lines = lower.split(/\r?\n/);
-		const uniqueGrams = new Set<string>();
-		for (const line of lines) {
-			for (const g of bigramsOfLine(line)) {
-				uniqueGrams.add(g);
-			}
+		const uniqueGrams = this.collectNewGramsWithinCeiling(lower);
+		if (uniqueGrams === null) {
+			this.saturated = true;
+			this.rejectFile(id);
+			return;
 		}
 		for (const g of uniqueGrams) {
 			let set = this.grams.get(g);
@@ -255,20 +307,37 @@ export class InvertedIndex {
 		// あるため、独立コピーを持たせる)。
 		this.idToGrams.set(id, new Set(uniqueGrams));
 
-		if (this.grams.size > this.maxGramCount) {
-			// gram 上限退避: workspace 生存中は復活しない。
-			this.disabled = true;
-			this.grams.clear();
-			this.idToGrams.clear();
-			this.indexedEpoch.clear();
-			this.validCount = 0;
-			return;
-		}
-
 		// indexedEpoch を fileEpoch と同期 (indexFile 完了時点で valid にする)。
 		this.markValid(id);
 
 		this.maybeClearOnTombstoneRatio();
+	}
+
+	// reject: 既存 indexed 情報 (indexedEpoch entry と posting からの当該 fileId 削除) を除去する。
+	// 「新値受入拒否 + 旧値保持」は両立させない。
+	private rejectFile(id: number): void {
+		this.removeFromPostings(id);
+		this.forgetIndexed(id);
+		this.maybeClearOnTombstoneRatio();
+	}
+
+	// lower の unique bigram を集める。this.grams に未登録の gram だけを newCount に数え、挿入すると
+	// maxGramCount を超えると分かった時点で null を返して中断する。挿入前に確定するので rollback が
+	// 要らず、1 file が上限を越えて spike することもない (#589 B1)。既存 gram との重複は posting への
+	// 追加のみで key が増えないので数えない。
+	private collectNewGramsWithinCeiling(lower: string): Set<string> | null {
+		const uniqueGrams = new Set<string>();
+		let newCount = 0;
+		for (const line of lower.split(/\r?\n/)) {
+			for (const g of bigramsOfLine(line)) {
+				if (uniqueGrams.has(g)) continue;
+				uniqueGrams.add(g);
+				if (this.grams.has(g)) continue;
+				newCount++;
+				if (this.grams.size + newCount > this.maxGramCount) return null;
+			}
+		}
+		return uniqueGrams;
 	}
 
 	// .md modify。pathToId 未登録なら no-op。
@@ -307,7 +376,6 @@ export class InvertedIndex {
 	getCandidates(queryLower: string): CandidateResult {
 		if (queryLower.length < 2) return { kind: "fallback" };
 		if (queryLower.includes("\n") || queryLower.includes("\r")) return { kind: "fallback" };
-		if (this.disabled) return { kind: "fallback" };
 
 		const grams = bigramsOfLine(queryLower);
 		// query.length >= 2 なので bigramsOfLine は空を返さない。
@@ -333,7 +401,7 @@ export class InvertedIndex {
 		const candidates = new Set<string>();
 		for (const id of intersection) {
 			const indexed = this.indexedEpoch.get(id);
-			if (indexed !== undefined && indexed === (this.fileEpoch.get(id) ?? 0)) {
+			if (indexed !== undefined && indexed === (this.fileEpoch.get(id) ?? this.epochFloor)) {
 				const path = this.idToPath[id];
 				if (path !== undefined) candidates.add(path);
 			}
@@ -344,7 +412,7 @@ export class InvertedIndex {
 	private collectIndexedValid(): Set<string> {
 		const out = new Set<string>();
 		for (const [id, epoch] of this.indexedEpoch) {
-			if (epoch === (this.fileEpoch.get(id) ?? 0)) {
+			if (epoch === (this.fileEpoch.get(id) ?? this.epochFloor)) {
 				const path = this.idToPath[id];
 				if (path !== undefined) out.add(path);
 			}
@@ -358,10 +426,7 @@ export class InvertedIndex {
 	private maybeClearOnTombstoneRatio(): void {
 		const tombstones = this.idToGrams.size - this.validCount;
 		if (tombstones <= this.validCount * this.tombstoneRatio) return;
-		this.grams.clear();
-		this.idToGrams.clear();
-		this.indexedEpoch.clear();
-		this.validCount = 0;
+		this.clearPostings();
 	}
 }
 

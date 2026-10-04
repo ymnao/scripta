@@ -1,7 +1,7 @@
 // @vitest-environment node
 //
 // piggyback indexing のゲート (#413) を processMdFilesParallel 単体で固定する。
-// - Finding 1: index が disabled なら realpath ゲート (resolveInsideRoot) を一切呼ばない。
+// - Finding 1: index が saturated なら realpath ゲート (resolveInsideRoot) を一切呼ばない。
 // - Finding 2: 解決先が入力 path と異なる file (workspace 内 alias) は index / L2 に載せない。
 //
 // realpath 呼び出し回数を数えるため path-guard を partial mock する。mock は module 単位で
@@ -50,14 +50,14 @@ afterEach(async () => {
 	await ws.cleanup();
 });
 
-describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", () => {
-	it("L2-miss 経路: disabled ならゲートも indexFile も走らないが scan と L2 population は続く", async () => {
+describe("processMdFilesParallel: index saturated ゲート (#413 Finding 1)", () => {
+	it("L2-miss 経路: saturated ならゲートも indexFile も走らないが scan と L2 population は続く", async () => {
 		const a = join(root, "a.md");
 		const b = join(root, "b.md");
 		await writeFile(a, "alpha");
 		await writeFile(b, "beta");
-		const { handle, indexed, disabled } = makeFakeIndex();
-		disabled.value = true;
+		const { handle, indexed, saturated } = makeFakeIndex();
+		saturated.value = true;
 		const { cache, stored } = makeFakeCache(new Map());
 		const scanned: string[] = [];
 
@@ -74,7 +74,7 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		expect(indexed.size).toBe(0);
 		// index を通らなくても scan (検索結果) は従来どおり全 file 分行われる。
 		expect(scanned.sort()).toEqual([`${a}:alpha`, `${b}:beta`]);
-		// **ゲート未評価の file は L2 に載せ続ける**。ここを止めると disabled workspace で
+		// **ゲート未評価の file は L2 に載せ続ける**。ここを止めると saturated workspace で
 		// L2 population が全停止して検索が毎回全 file 再読になる。search.ts の
 		// 「ゲート未評価の枝」全体が消える退行を殺すための assert (#416 Finding 1 の fix 後は
 		// この枝が lstat 判定付きになったので、symlink 側の抑止は
@@ -82,11 +82,11 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		expect(stored.size).toBe(2);
 	});
 
-	it("L2-hit 経路: disabled なら realpath ゲートも indexFile も走らない", async () => {
+	it("L2-hit 経路: saturated なら realpath ゲートも indexFile も走らない", async () => {
 		const a = join(root, "a.md");
 		await writeFile(a, "alpha on disk");
-		const { handle, indexed, disabled } = makeFakeIndex();
-		disabled.value = true;
+		const { handle, indexed, saturated } = makeFakeIndex();
+		saturated.value = true;
 		const { cache } = makeFakeCache(new Map([[a, "alpha cached"]]));
 		const scanned: string[] = [];
 
@@ -104,7 +104,7 @@ describe("processMdFilesParallel: index disabled ゲート (#413 Finding 1)", ()
 		expect(scanned).toEqual(["alpha cached"]);
 	});
 
-	it("disabled でなければ従来どおりゲートを通って index される (L2-miss / L2-hit 双方)", async () => {
+	it("saturated でなければ従来どおりゲートを通って index される (L2-miss / L2-hit 双方)", async () => {
 		const a = join(root, "a.md");
 		const b = join(root, "b.md");
 		await writeFile(a, "alpha");

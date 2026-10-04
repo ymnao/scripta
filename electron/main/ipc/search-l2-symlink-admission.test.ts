@@ -3,8 +3,8 @@
 // L2 admission の symlink 抑止 (#416 Finding 1) と、**検索結果の可視範囲** (#434) を
 // processMdFilesParallel 単体で固定する。
 //
-// #413 Finding 1 で「index が disabled なら realpath ゲートを skip する」ようにした結果、
-// disabled workspace ではゲートが評価されず L2 への格納が無条件に通っていた。ここでは
+// #413 Finding 1 で「index が saturated なら realpath ゲートを skip する」ようにした結果、
+// saturated workspace ではゲートが評価されず L2 への格納が無条件に通っていた。ここでは
 // 「ゲートを評価しなかった read は O_NOFOLLOW open に成功した fd から読めたときだけ L2 に載せる」
 // 不変条件 (= 検査した対象そのものから読む) を pin する。
 //
@@ -53,13 +53,13 @@ afterEach(async () => {
 describe.skipIf(process.platform === "win32")(
 	"processMdFilesParallel: ゲート未評価 read の L2 symlink 抑止 (#416 Finding 1)",
 	() => {
-		it("index disabled: workspace 内 alias は L2 に載らないが scan 結果には出る", async () => {
+		it("index saturated: workspace 内 alias は L2 に載らないが scan 結果には出る", async () => {
 			const real = join(root, "real.md");
 			const link = join(root, "link.md");
 			await writeFile(real, "alphaword body");
 			await symlink(real, link);
-			const { handle, indexed, disabled } = makeFakeIndex();
-			disabled.value = true;
+			const { handle, indexed, saturated } = makeFakeIndex();
+			saturated.value = true;
 			const { cache, stored } = makeFakeCache();
 			const scanned: string[] = [];
 
@@ -72,24 +72,24 @@ describe.skipIf(process.platform === "win32")(
 				},
 			});
 
-			// disabled なので index には何も載らない (#413 Finding 1、既存挙動)。
+			// saturated なので index には何も載らない (#413 Finding 1、既存挙動)。
 			expect(indexed.size).toBe(0);
 			// alias は L2 に載らない: 解決先 (real.md) の modify では evict されないため、
 			// 載せると L2 entry の寿命ぶん stale な内容が検索結果に出る。
 			expect(stored.has(link)).toBe(false);
-			// 実体は従来どおり L2 に載る (disabled workspace の L2 population を止めない)。
+			// 実体は従来どおり L2 に載る (saturated workspace の L2 population を止めない)。
 			expect(stored.get(real)).toBe("alphaword body");
 			// alias の内容は検索結果には出る (#434): 解決先が root 内なので fs:read でも開ける。
 			expect(scanned.sort()).toEqual([`${link}:alphaword body`, `${real}:alphaword body`]);
 		});
 
-		it("index disabled: workspace 外を指す symlink は L2 にも scan 結果にも出ない", async () => {
+		it("index saturated: workspace 外を指す symlink は L2 にも scan 結果にも出ない", async () => {
 			const target = join(outside.dir, "secret.md");
 			const link = join(root, "outside-link.md");
 			await writeFile(target, "outside body");
 			await symlink(target, link);
-			const { handle, disabled } = makeFakeIndex();
-			disabled.value = true;
+			const { handle, saturated } = makeFakeIndex();
+			saturated.value = true;
 			const { cache, stored } = makeFakeCache();
 			const scanned: string[] = [];
 
@@ -254,7 +254,7 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		await writeFile(b, "beta");
 		const gated = makeFakeIndex();
 		const ungated = makeFakeIndex();
-		ungated.disabled.value = true;
+		ungated.saturated.value = true;
 		const lstatSpy = vi.spyOn(fsp, "lstat");
 		const statSpy = vi.spyOn(fsp, "stat");
 
@@ -278,20 +278,20 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		// ゲート評価済みは従来どおり index と L2 の両方へ。
 		expect(first.stored.get(a)).toBe("alpha");
 		expect(gated.indexed.get(a)).toBe("alpha");
-		// ゲート未評価は L2 のみ (disabled なので index には載らない)。
+		// ゲート未評価は L2 のみ (saturated なので index には載らない)。
 		expect(second.stored.get(b)).toBe("beta");
 		expect(ungated.indexed.size).toBe(0);
 	});
 
-	it("index disabled の通常 file は fd 経路でも従来どおり L2 に載る", async () => {
-		// disabled workspace で L2 population が全停止すると検索が毎回全 file 再読になる。
+	it("index saturated の通常 file は fd 経路でも従来どおり L2 に載る", async () => {
+		// saturated workspace で L2 population が全停止すると検索が毎回全 file 再読になる。
 		// 抑止対象は symlink だけであることを固定する。
 		const a = join(root, "a.md");
 		const b = join(root, "b.md");
 		await writeFile(a, "alpha");
 		await writeFile(b, "beta");
-		const { handle, disabled } = makeFakeIndex();
-		disabled.value = true;
+		const { handle, saturated } = makeFakeIndex();
+		saturated.value = true;
 		const { cache, stored } = makeFakeCache();
 
 		await processMdFilesParallel([a, b], [a, b], never, {
@@ -313,8 +313,8 @@ describe("processMdFilesParallel: 判定手段を別 syscall に分けない (#4
 		// 結果や L2 に混ざる経路は残らない (fail-closed) ことをここで固定する。
 		const a = join(root, "a.md");
 		await writeFile(a, "alpha");
-		const { handle, disabled } = makeFakeIndex();
-		disabled.value = true;
+		const { handle, saturated } = makeFakeIndex();
+		saturated.value = true;
 		const { cache, stored } = makeFakeCache();
 		const scanned: string[] = [];
 		vi.spyOn(fsp, "open").mockRejectedValue(new Error("EMFILE"));
