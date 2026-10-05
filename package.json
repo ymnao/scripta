@@ -48,7 +48,7 @@
 		"p-limit": "^7.3.3",
 		"react": "^19.3.0",
 		"react-dom": "^19.3.0",
-		"simple-git": "^3.36.0",
+		"simple-git": "^4.0.2",
 		"write-file-atomic": "^8.0.0",
 		"zustand": "^5.0.15"
 	},

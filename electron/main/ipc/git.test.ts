@@ -166,6 +166,41 @@ describe("checkAvailableImpl", () => {
 	});
 });
 
+describe("ambient guarded env (simple-git 4 allowEnvironment)", () => {
+	it("operates on the workspace repo, not the one an ambient GIT_DIR points to", async () => {
+		const dir = await newWorkspace();
+		const other = await initRepo();
+		dirsToCleanup.push(other);
+		vi.stubEnv("GIT_DIR", join(other, ".git"));
+		// `--show-toplevel` は GIT_DIR が届いても cwd を返すので、git-dir 側で区別する
+		const gitDir = (await createGit(dir).raw(["rev-parse", "--absolute-git-dir"])).trim();
+		expect(gitDir).toBe(join(dir, ".git"));
+	});
+
+	it("passes an honored GIT_CONFIG_GLOBAL through to the git child process", async () => {
+		const dir = await newWorkspace();
+		const globalConfig = join(dir, "global.gitconfig");
+		await fsp.writeFile(globalConfig, "[scripta]\n\tprobe = from-global\n", "utf8");
+		vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfig);
+		const value = (await createGit(dir).raw(["config", "--global", "scripta.probe"])).trim();
+		expect(value).toBe("from-global");
+	});
+
+	it("still finds git when an ambient PREFIX is set", async () => {
+		vi.stubEnv("PREFIX", "/opt/homebrew");
+		expect(await checkAvailableImpl()).toBe(true);
+	});
+
+	it("ignores env-injected config via GIT_CONFIG_COUNT", async () => {
+		const dir = await newWorkspace();
+		vi.stubEnv("GIT_CONFIG_COUNT", "1");
+		vi.stubEnv("GIT_CONFIG_KEY_0", "user.name");
+		vi.stubEnv("GIT_CONFIG_VALUE_0", "Injected");
+		const name = (await createGit(dir).raw(["config", "user.name"])).trim();
+		expect(name).toBe("Test");
+	});
+});
+
 describe("checkRepoImpl", () => {
 	it("returns true for a git-initialized directory", async () => {
 		const dir = await newWorkspace();
