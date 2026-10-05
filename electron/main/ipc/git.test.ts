@@ -172,8 +172,9 @@ describe("ambient guarded env (simple-git 4 allowEnvironment)", () => {
 		const other = await initRepo();
 		dirsToCleanup.push(other);
 		vi.stubEnv("GIT_DIR", join(other, ".git"));
-		const top = (await createGit(dir).raw(["rev-parse", "--show-toplevel"])).trim();
-		expect(top).toBe(dir);
+		// `--show-toplevel` は GIT_DIR が届いても cwd を返すので、git-dir 側で区別する
+		const gitDir = (await createGit(dir).raw(["rev-parse", "--absolute-git-dir"])).trim();
+		expect(gitDir).toBe(join(dir, ".git"));
 	});
 
 	it("still finds git when an ambient PREFIX is set", async () => {

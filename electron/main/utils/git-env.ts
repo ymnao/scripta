@@ -38,8 +38,8 @@ const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 };
 
 // ambient env のうち、simple-git 4 が guarded と見なす key（後述）でも子 git に通すもの。
-// (B) の方針で尊重するユーザー環境のうち、env でしか指定できず、かつ UNSAFE_FLAGS で
-// 許可済みの category に収まる key だけを列挙する。
+// (B) の方針で尊重するユーザー環境のうち、git が操作する repo を変えず、通すのに
+// UNSAFE_FLAGS への新しい許可が要らない key だけを列挙する。
 //
 // `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` / `GIT_CONFIG_PARAMETERS`
 // を通さないのは、任意の config を env から注入する経路で、通すには新しい unsafe flag
@@ -47,6 +47,8 @@ const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 // `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` 等を通さないのは、assertPathAllowed で
 // 認可した workspace と git が実際に触る repo を env でずらせてしまうため。
 // `GIT_SSL_*` 等の transport 系も通さない（`http.sslCAInfo` 等を `.gitconfig` に書けば効く）。
+// `GIT_EXEC_PATH` は 3.x では子 git に届いていたが、4.x では `allowUnsafeExec` を要する
+// 任意実行の経路なので通さない。
 const HONORED_AMBIENT_KEYS = [
 	"GIT_SSH_COMMAND",
 	"GIT_SSH",
@@ -104,8 +106,7 @@ export function buildGitEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 //     Electron 内でも同等にできるのが要件。攻撃者制御値の流入は
 //     IPC 認可（assertPathAllowed）で workspace 単位に閉じ込めて防ぐ。
 //     - allowUnsafeCredentialHelper: ユーザーの credential.helper（macOS keychain 等）
-//     - allowUnsafeConfigPaths:      ユーザーの GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG /
-//                                    XDG_CONFIG_HOME を継承
+//     - allowUnsafeConfigPaths:      ユーザーの GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG を継承
 //     - allowUnsafeSshCommand:       ユーザーの GIT_SSH_COMMAND / GIT_SSH（カスタム鍵指定など）を継承
 //
 // `allowUnsafeProtocolOverride` は (A) (B) どちらにも該当しない（我々は -c 経由で
