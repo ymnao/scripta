@@ -303,7 +303,10 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   - **hard link 置換は「末端が閉じた」の範囲外**: 同一 filesystem 内で外部 file への
 //     hard link を末端に置く変種は realpath が恒等に振る舞うため T1 のゲートを通り、
 //     O_NOFOLLOW も symlink ではないので発火しない。これは TOCTOU ではなく T1 時点から
-//     通る設計境界で (#416 Finding 2 が追跡)、payoff は中間 dir 窓と同じ in-memory bigram 限り。
+//     通る設計境界で、payoff は中間 dir 窓と同じ in-memory bigram 限り。ただし取り込み read は
+//     fd の `nlink` を見て `nlink !== 1` を index / L2 に載せない (#416 Finding 2)。外部 file への
+//     hard link は nlink ≥ 2 なので、取り込み時点で既に hard link になっていれば載らない (後から
+//     hard link が作られた場合の窓は search.ts の L2 admission コメント参照)。
 //   assertPathAllowed も同じ中間 dir 窓を持つ (下記 doc 参照)。
 // - **毎回 fresh に realpath する** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、

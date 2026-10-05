@@ -25,14 +25,16 @@ export interface IdleFillDeps {
 	/**
 	 * file を readFile する。失敗時は throw して呼び手が catch/skip する。
 	 * 呼び手は `resolveAllowed` が返した **解決済み path** を渡す (#406 Finding 2)。
+	 * 戻り値の `nlink` は読んだ fd 自身の値で、`!== 1` (hard link) の file は index に載せず
+	 * skip 記録に倒す (#416 Finding 2)。
 	 *
-	 * **末端 symlink を拒否する実装 (`readFileUtf8NoFollow`) を注入すること** (#412)。
+	 * **末端 symlink を拒否し nlink を返す実装 (`readFileUtf8NoFollowWithLinkCount`) を注入すること** (#412)。
 	 * これは index 取り込み専用 read で、認可 (`resolveAllowed`) から read までの間に末端
 	 * component を symlink へ差し替えられる窓を open 時点で閉じるための契約。plain readFile を
 	 * 注入するとその窓が再開する。型では強制できないため契約として明文化する
 	 * (production の wiring は search.ts の kickIdleFill 呼び出し側)。
 	 */
-	readFile(ioPath: string): Promise<string>;
+	readFile(ioPath: string): Promise<{ text: string; nlink: number }>;
 	/**
 	 * kick 時点の cache entry がまだ生きているか。**entry identity で判定する** (#589 A2/A3、
 	 * root キーの存在確認では足りない理由は search-cache.ts の InvertedIndexHandle.isAlive 参照)。
@@ -147,12 +149,16 @@ async function runFill(deps: IdleFillDeps): Promise<void> {
 						// ここに来た時点で resolved === p (isIndexableResolution の契約) なので、
 						// #406 の「検査した実体を読む」は p を読むことと同値。narrowing に頼らず
 						// p を渡す (述語は boolean 返しで、false 側の型が正確に表せないため)。
-						const text = await deps.readFile(p);
+						const { text, nlink } = await deps.readFile(p);
 						if (!deps.isAlive()) break;
 						if (deps.index.isSaturated) break;
-						deps.index.indexFile(p, text, current);
-						// indexFile が noop (identity check / capturedEpoch 不一致 / cutoff reject 等) で
-						// valid にならなかったら skip 記録して次回の epoch 変化まで retry しない。
+						// hard link は alias と判別できず、片方の名前の書き込みでもう片方の posting が
+						// stale になるため載せない (#416 Finding 2)。載せないので下の valid 判定で
+						// skip 記録に落ち、p 自身の epoch が動くまで再訪しない。
+						if (nlink === 1) deps.index.indexFile(p, text, current);
+						// indexFile が noop (identity check / capturedEpoch 不一致 / cutoff reject / 上の
+						// nlink 拒否等) で valid にならなかったら skip 記録して次回の epoch 変化まで
+						// retry しない。
 						if (!deps.index.isIndexedAndValid(p)) {
 							skipUntilEpochChange.set(p, current);
 						} else {

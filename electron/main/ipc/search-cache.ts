@@ -174,7 +174,8 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // event path (= 解決先) と alias の key (= walk が返す symlink path) は別物で、ここで波及させるには
 // 「解決先 → alias 群」の逆引きを全 file 分保守する必要がある。代わりに取り込み側 (search.ts の
 // piggyback / index-fill.ts) が alias を index / L2 に載せないことで、stale entry が生じる状態
-// そのものを作らない方針を採る (#413 Finding 2)。
+// そのものを作らない方針を採る (#413 Finding 2)。hard link も同じ方針で、取り込み read の fd の
+// nlink が 1 でない file は L2 / index に載せない (#416 Finding 2)。この層は同期処理で stat できない。
 export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChangeEvent>): void {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;

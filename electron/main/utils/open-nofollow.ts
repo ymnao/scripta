@@ -147,6 +147,38 @@ export async function readFileUtf8NoFollow(path: string): Promise<string> {
 }
 
 /**
+ * `readFileUtf8NoFollow` に、読んだ fd 自身の `nlink` を添えて返す (#416 Finding 2)。
+ * index / L2 取り込み用 read は、`nlink === 1` のときだけ内容を取り込んでよい。
+ *
+ * **なぜ hard link を弾く必要があるか**: hard link は `realpath(p) === p` が両名前で成り立つので
+ * `isIndexableResolution` では alias と判別できない。app は同一 inode を in-place で書く
+ * (fs.ts の #100) うえ watcher / `applyFsBatch` が invalidate するのは書かれた名前だけなので、
+ * もう片方の名前の L2 entry / posting が旧内容のまま valid に残る。
+ *
+ * **Why not path に対する別 stat / ino 突合**: 別 syscall は検査と read の間に差し替えられる窓を
+ * 作り、ino 突合は全 file 分の状態を保守する。fd に対する `fstat` は「読んだ object そのもの」の
+ * nlink を答えるので窓が無く、コストも L2-miss の取り込み read 1 回につき 1 syscall に収まる
+ * (#413 と同じ「stale になる状態そのものを作らない」方針)。
+ *
+ * **判定は呼び手に委ねる**: nlink は生の値で返す。0 (open 中に unlink された) も `=== 1` で
+ * 弾かれるので fail-closed になる。text は nlink によらず返す = 検索結果は落とさない。
+ * 失敗時の挙動は `readFileUtf8NoFollow` と同じ (throw)。
+ */
+export async function readFileUtf8NoFollowWithLinkCount(
+	path: string,
+): Promise<{ text: string; nlink: number }> {
+	await rejectEndSymlinkWhenEmulated(path);
+	const fh = await fsp.open(path, NOFOLLOW_READ_FLAGS);
+	try {
+		const { nlink } = await fh.stat();
+		const text = await fh.readFile({ encoding: "utf8" });
+		return { text, nlink };
+	} finally {
+		await fh.close();
+	}
+}
+
+/**
  * 末端 component が symlink なら reject する utf8 上書き write (#418)。`readFileUtf8NoFollow` の
  * write 版で、user-IPC の `fs:write` が使う。
  *

@@ -66,9 +66,26 @@ describe.skipIf(process.platform === "win32")("index 取り込み read の wirin
 		const deps = buildIdleFillDeps(ws.dir, stubIndex);
 
 		// 通常 file は従来どおり読める。
-		await expect(deps.readFile(normal)).resolves.toBe("normal body");
+		await expect(deps.readFile(normal)).resolves.toEqual({ text: "normal body", nlink: 1 });
 		// 末端が symlink の file は reject する (呼び手の skipUntilEpochChange 経路に倒れる)。
 		await expect(deps.readFile(swapped)).rejects.toThrow();
+	});
+
+	it("idle fill の readFile は読んだ fd の nlink を返す (#416 Finding 2)", async () => {
+		const deps = buildIdleFillDeps(ws.dir, stubIndex);
+		const hard = join(ws.dir, "hard.md");
+		await fsp.link(normal, hard);
+
+		await expect(deps.readFile(normal)).resolves.toEqual({ text: "normal body", nlink: 2 });
+		await expect(deps.readFile(hard)).resolves.toEqual({ text: "normal body", nlink: 2 });
+	});
+
+	it("dark assert の再 index read は nlink !== 1 を null に倒す (#416 Finding 2)", async () => {
+		const hard = join(ws.dir, "hard.md");
+		await fsp.link(normal, hard);
+
+		expect(await readForReindex(normal)).toBeNull();
+		expect(await readForReindex(hard)).toBeNull();
 	});
 
 	it("dark assert の再 index read は末端 symlink を拒否して null を返す", async () => {
