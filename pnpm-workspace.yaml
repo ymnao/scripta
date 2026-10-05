@@ -95,7 +95,7 @@ overrides:
 
 # 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
 #
-# - **`katex`** (dual-resolution allow): 本リポは direct で 0.18 系を pin するが、
+# - **`katex`** (dual-resolution allow): 本リポは direct で 0.19 系を pin するが、
 #   `mermaid@12` が dependencies として 0.16 系の `katex` を持つため（peerDependency
 #   ではなく direct dep）、`pnpm dedupe` で direct 版には合流不可。`katex` を direct 版
 #   で override 強制すると mermaid 内部の math 描画 (mermaid graph の数式ラベル) が
