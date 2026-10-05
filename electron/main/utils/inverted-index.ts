@@ -26,9 +26,8 @@
 // 自分自身を返す) ため別機構で、取り込み側が **取り込み read の fd に対する fstat の nlink** で
 // `nlink !== 1` を拒否する (#416 Finding 2、open-nofollow.ts の `readFileUtf8NoFollowWithLinkCount`)。
 // 弾かないと片方の名前で書かれた modify event がもう片方の posting を invalidate せず、symlink alias と
-// 同型の stale posting が残る。**残る窓**: 取り込み時に nlink === 1 だった file に後から hard link が
-// 作られると、isIndexedAndValid の経路は re-read も stat もしないため、新しい名前だけへの書き込みで
-// 元の名前の posting が stale になる。元の名前自身への event / evict / app 再起動で解消する。
+// 同型の stale posting が残る。取り込み後に hard link が作られた場合の残る窓は search.ts の
+// L2 admission コメント (#416 の正本) を参照。
 
 import { sep } from "node:path";
 

@@ -137,13 +137,9 @@ export async function rejectEndSymlinkWhenEmulated(
  * file は skip」か、上記 scan 側の解決し直しのどちらかに倒せばよい。
  */
 export async function readFileUtf8NoFollow(path: string): Promise<string> {
-	await rejectEndSymlinkWhenEmulated(path);
-	const fh = await fsp.open(path, NOFOLLOW_READ_FLAGS);
-	try {
-		return await fh.readFile({ encoding: "utf8" });
-	} finally {
-		await fh.close();
-	}
+	// 残る呼び手は alias の解決先 read だけなので、nlink 用の fstat 1 回は open/close の
+	// 骨格を 2 本保守するより安い。
+	return (await readFileUtf8NoFollowWithLinkCount(path)).text;
 }
 
 /**

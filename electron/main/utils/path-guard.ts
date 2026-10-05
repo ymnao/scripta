@@ -290,7 +290,7 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   の間に構成要素を symlink へ差し替えられる窓が残る (#412)。この窓は 2 つに分かれ、
 //   **片方だけが閉じている**:
 //   - **末端 component: 閉じた**。index 取り込みに繋がる read (piggyback / idle fill /
-//     dark assert の再 index) は `readFileUtf8NoFollow` (O_NOFOLLOW 付き fd read) を使い、
+//     dark assert の再 index) は `readFileUtf8NoFollowWithLinkCount` (O_NOFOLLOW 付き fd read) を使い、
 //     open 時点で末端が symlink なら ELOOP で reject して「読み取り失敗 = skip」に倒す。
 //     本 API が非 null かつ入力 path 一致を返した時点で末端は非 symlink と確認済みなので、
 //     正常系では発火しない (発火 = 実際に swap が起きた瞬間)。

@@ -233,12 +233,9 @@ async function processMdFilesParallel(
 				// 読める内容は認可した実体ではないため read 失敗として skip するのが正しい。
 				const useNoFollow = indexGateEvaluated && indexable;
 				let text: string;
-				// この read が「末端非 symlink と確認済みの fd」から読めたか。L2 admission の
-				// もう一方の枝 (ゲート評価済み ∧ indexable) と or を取る。
-				let readFromVerifiedFd = false;
-				// この read の fd が単一名 (`nlink === 1`) の file だったか (#416 Finding 2)。hard link は
-				// realpath でも O_NOFOLLOW でも alias と判別できないため、L2 / index に載せる read では
-				// fd 自身の nlink で弾く。fd を経由しない read (alias の解決先 read) は false のまま。
+				// この read が「ioPath 自身を O_NOFOLLOW で開いた fd」から読め、かつその fd の
+				// `nlink === 1` だったか。L2 admission / index 取り込みの条件 (下の不変条件参照)。
+				// alias の解決先 read と分岐 3 の realpath fallback は false のまま。
 				let singleLink = false;
 				try {
 					if (useNoFollow) {
@@ -268,18 +265,11 @@ async function processMdFilesParallel(
 						// (#451)、検出そのものは成立するが lstat と open の間の差し替え窓が残る。
 						// cache の有無で分けないのは、この read が **L2 admission だけでなく検索
 						// 結果の可視範囲も決める** ようになったため (#434)。syscall 数は plain read と同じ
-						// (open/read/close) なので、cache 無しの純 scan 経路に足すコストは無い。
-						// nlink (#416 Finding 2) はこの分岐では L2 admission にしか使わないので、fstat を
-						// 足すのは cache がある pass だけにする (index 取り込みはゲート評価済みの分岐 1 のみ)。
+						// (open/read/close) に hard link 判定の fstat 1 回 (#416 Finding 2) を足しただけ。
 						try {
-							if (cache === undefined) {
-								text = await readFileUtf8NoFollow(ioPath);
-							} else {
-								const read = await readFileUtf8NoFollowWithLinkCount(ioPath);
-								text = read.text;
-								singleLink = read.nlink === 1;
-							}
-							readFromVerifiedFd = true;
+							const read = await readFileUtf8NoFollowWithLinkCount(ioPath);
+							text = read.text;
+							singleLink = read.nlink === 1;
 						} catch {
 							// 失敗の主因は ELOOP = 末端が symlink。**ここで初めて** realpath を払って解決先を
 							// 判定する (#434)。root 内なら in-root alias なので解決先から読んで結果に出し、
@@ -296,7 +286,7 @@ async function processMdFilesParallel(
 							// resolveInsideRoot === null) と同じ規則**。境界の意味を変えるときは 3 箇所とも直す。
 							// realpath は実際に open に失敗した file にしか乗らない = #413 Finding 1 で削った
 							// 「全 file への realpath」は復活しない。
-							// readFromVerifiedFd は false のままなので、この経路の内容は L2 に載らない。
+							// singleLink は false のままなので、この経路の内容は L2 に載らない。
 							const resolved = await resolveInsideRoot(ioPath, options.root);
 							if (resolved === null) return;
 							text = await readFileUtf8NoFollow(resolved);
@@ -310,9 +300,9 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				// **L2 admission の不変条件**: 「(ゲート評価済み ∧ indexable) ∨ (O_NOFOLLOW open に
-				// 成功した fd から読んだ)」read の内容だけを L2 に載せる。どちらの枝も「格納する内容は
-				// ioPath 自身の実体から読んだもの」を意味し、symlink 経由の内容は L2 に入らない。
+				// **L2 admission の不変条件**: 「ioPath 自身を O_NOFOLLOW open した fd から読み、その fd の
+				// nlink が 1」の read (= singleLink) の内容だけを L2 に載せる。格納する内容は ioPath 自身の
+				// 実体から読んだもので、symlink 経由の内容も hard link の内容も L2 に入らない。
 				// symlink を弾く理由は 2 つ。workspace 外を指す symlink の場合は
 				// 「外部内容が L2 に残る → attacker が symlink を workspace 内へ swap back →
 				// 次の検索で L2 hit + fresh ゲート pass → cache 中の外部内容が index に入る」経路で
@@ -325,25 +315,25 @@ async function processMdFilesParallel(
 				// O_NOFOLLOW open + 同一 fd read にして、判定と内容を同じ object に束ねる。
 				// **検査した対象そのもので I/O する** ので、別 syscall で検査する方式に残る
 				// 「検査と read の間に差し替えられる」窓は存在しない。syscall 数も plain read と同じ
-				// (open/read/close) で、増えるのは実際に symlink だった file の失敗 open 1 回だけ
-				// (と、下記 hard link 判定の fstat 1 回。cache がある pass の read に限る)。
+				// (open/read/close) で、増えるのは実際に symlink だった file の失敗 open 1 回と、
+				// 下記 hard link 判定の fstat 1 回だけ。
 				// **win32 だけはこの原子性が無い** (#451): `O_NOFOLLOW` が落ちるため helper が
 				// open 前の `lstat` に倒れ、まさにその「別 syscall で検査する方式」になる。
 				// symlink の検出は成立する = 上の不変条件の **定常状態は全 platform で成り立つ**が、
 				// lstat と open の間に差し替えられた場合だけ symlink 経由の内容が L2 に載りうる
 				// (受容の根拠は ADR-0011 の Windows bullet と utils/open-nofollow.ts の doc)。
 				// **hard link は fd の nlink で弾く** (#416 Finding 2): hard link は O_NOFOLLOW でも
-				// realpath でも素通りし、片方の名前で来た modify がもう片方を evict しないため、上の
-				// 条件に `singleLink` (= 読んだ fd の `nlink === 1`) を AND する。nlink は read と同じ
-				// fd から取るので検査と read の間の窓は無い。text は nlink によらず process に渡すので
-				// 検索結果は落ちない。0 (open 中の unlink) も弾かれて fail-closed になる。
-				// **残る窓**: 取り込み時に nlink === 1 だった file に **後から** hard link が作られると、
-				// L2 hit / isIndexedAndValid の経路は re-read も stat もしないため、新しい名前だけへの
-				// 書き込みで元の名前の L2 entry / posting が stale になる (watcher の create は新しい名前
-				// 側にしか来ず、applyFsBatch は同期処理で stat できない)。解消するのは元の名前自身への
-				// event / L2・index の evict / app 再起動 (いずれも in-memory)。workspace 外への hard link
-				// も同じ窓。影響は検索結果の staleness のみで security 上の影響は無い。
-				if (((indexGateEvaluated && indexable) || readFromVerifiedFd) && singleLink) {
+				// realpath でも素通りし、片方の名前で来た modify がもう片方を evict しないため。nlink は
+				// read と同じ fd から取るので検査と read の間の窓は無い。text は nlink によらず process に
+				// 渡すので検索結果は落ちない。0 (open 中の unlink) も弾かれて fail-closed になる。
+				// **残る窓 (#416 の正本)**: 取り込み時に nlink === 1 だった file に **後から** hard link が
+				// 作られると、L2 hit / isIndexedAndValid の経路は re-read も stat もしないため、新しい名前
+				// だけへの書き込みで元の名前の L2 entry / posting が stale になる (watcher の create /
+				// modify は新しい名前でしか来ず、元の名前の entry を evict する経路が無い)。解消するのは
+				// 元の名前自身への event / L2・index の evict / app 再起動 (いずれも in-memory)。
+				// workspace 外への hard link も同じ窓。影響は検索結果の staleness のみで security 上の
+				// 影響は無い。
+				if (singleLink) {
 					cache?.set(ioPath, text, genAtStart);
 				}
 				if (indexable && singleLink) {
@@ -686,7 +676,7 @@ async function searchFilesImpl(
 }
 
 // idle fill の deps 構築。**inline literal ではなく named function にしてある**のは、
-// #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollow) を
+// #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollowWithLinkCount) を
 // 注入する」契約が型では強制できず wiring 側にしか載らないため、test から直接 pin できる
 // ようにするため (plain readFile への退行を殺す)。契約の詳細は open-nofollow.ts の doc。
 function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHandle): IdleFillDeps {
