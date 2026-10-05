@@ -42,7 +42,7 @@ function makeFakeDeps(
 		listIoFiles: () => initialFiles,
 		readFile: async (p: string) => {
 			reads.value++;
-			return texts.get(p) ?? "";
+			return { text: texts.get(p) ?? "", nlink: 1 };
 		},
 		isAlive: () => alive.value,
 		state: createIdleFillState(),
@@ -92,7 +92,7 @@ describe("index-fill: kickIdleFill", () => {
 		deps.readFile = async (p: string) => {
 			readCount++;
 			if (readCount === 1) alive.value = false;
-			return texts.get(p) ?? "";
+			return { text: texts.get(p) ?? "", nlink: 1 };
 		};
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
@@ -121,7 +121,7 @@ describe("index-fill: kickIdleFill", () => {
 				// 1 回目の read 中にのみ invalidation が起きて epoch が進んだ状態を模す。
 				currentEpoch.set(p, (currentEpoch.get(p) ?? 0) + 1);
 			}
-			return texts.get(p) ?? "";
+			return { text: texts.get(p) ?? "", nlink: 1 };
 		};
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
@@ -195,7 +195,7 @@ describe("index-fill: kickIdleFill", () => {
 		deps.resolveAllowed = async (p) => (p === "/ws/notes/link.md" ? "/ws/notes/real.md" : p);
 		deps.readFile = async (p: string) => {
 			readPaths.push(p);
-			return texts.get(p) ?? "";
+			return { text: texts.get(p) ?? "", nlink: 1 };
 		};
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
@@ -209,6 +209,25 @@ describe("index-fill: kickIdleFill", () => {
 		// deps.state.running は waitUntil 成功後なので恒真であり、assert には含めない)。
 	});
 
+	it("nlink !== 1 (hard link) の file は index せず skip 記録し、次 tick で再 read しない (#416 Finding 2)", async () => {
+		// hard link は alias と判別できず、片方の名前の in-place write でもう片方の posting が
+		// stale になる。read は済ませるが index には載せず、epoch が動くまで再訪もしない。
+		const files = ["/ws/notes/hard.md", "/ws/notes/ok.md"];
+		const { deps, indexed } = makeFakeDeps(files, new Map());
+		const readPaths: string[] = [];
+		deps.readFile = async (p: string) => {
+			readPaths.push(p);
+			return { text: "body", nlink: p === "/ws/notes/hard.md" ? 2 : 1 };
+		};
+		kickIdleFill(deps);
+		await waitUntil(() => !deps.state.running);
+		expect(indexed.has("/ws/notes/hard.md")).toBe(false);
+		expect(indexed.has("/ws/notes/ok.md")).toBe(true);
+		// picked=0 で終わる最終 tick までに hard.md を再 read していなければ skip 記録が効いている。
+		expect(readPaths).toEqual(["/ws/notes/hard.md", "/ws/notes/ok.md"]);
+		expect(deps.state.skipUntilEpochChange.get("/ws/notes/hard.md")).toBe(0);
+	});
+
 	it("全 file valid = 即完了: picked=0 で exit、running が false になる", async () => {
 		const files = ["/ws/notes/a.md"];
 		const texts = new Map([["/ws/notes/a.md", "aaa"]]);
@@ -219,7 +238,7 @@ describe("index-fill: kickIdleFill", () => {
 		let readCalled = false;
 		deps.readFile = async (p: string) => {
 			readCalled = true;
-			return texts.get(p) ?? "";
+			return { text: texts.get(p) ?? "", nlink: 1 };
 		};
 		kickIdleFill(deps);
 		await waitUntil(() => !deps.state.running);
@@ -311,7 +330,7 @@ describe("index-fill: kickIdleFill", () => {
 			const readPaths: string[] = [];
 			deps.readFile = async (p: string) => {
 				readPaths.push(p);
-				return "";
+				return { text: "", nlink: 1 };
 			};
 			trackTicks(deps, (tick) => {
 				// tick 2 (f4..f7) を読み終え cursor が f8 を指した時点で、読み済みの f1 を変更する。
@@ -347,7 +366,7 @@ describe("index-fill: kickIdleFill", () => {
 		});
 		first.deps.readFile = async (p: string) => {
 			await gate;
-			return texts.get(p) ?? "";
+			return { text: texts.get(p) ?? "", nlink: 1 };
 		};
 		kickIdleFill(first.deps);
 		await waitUntil(() => first.deps.state.running);

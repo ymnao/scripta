@@ -37,9 +37,10 @@
 //
 // **syscall は増えない (`O_NOFOLLOW` がある platform では)**: `fsp.readFile(path)` /
 // `fsp.writeFile(path)` も内部で open/read(write)/close するため、open flag を足して明示的に
-// 書き下しただけ。検索 hot path にも editor の保存経路にもコストは乗らない。flag が落ちる
-// platform だけは上記エミュレーションの `lstat` が 1 回増える (その platform では open が
-// 拒否を担えないので、拒否水準を保つ対価として払う)。
+// 書き下しただけ。editor の保存経路にコストは乗らない。flag が落ちる platform だけは上記
+// エミュレーションの `lstat` が 1 回増える (その platform では open が拒否を担えないので、
+// 拒否水準を保つ対価として払う)。read 側だけは例外で、hard link 判定 (#416 Finding 2) の
+// `fstat` を 1 回足している (`readFileUtf8NoFollowWithLinkCount` の doc)。
 //
 // **atomic write だけは別機構**: inode 置換が要る呼び手 (pdf:export) は `O_NOFOLLOW` open では
 // なく `rename(2)` が末端 symlink を follow しない性質に乗る (`writeFileAtomicNoFollow`)。
@@ -137,10 +138,38 @@ export async function rejectEndSymlinkWhenEmulated(
  * file は skip」か、上記 scan 側の解決し直しのどちらかに倒せばよい。
  */
 export async function readFileUtf8NoFollow(path: string): Promise<string> {
+	// 残る呼び手は alias の解決先 read だけなので、nlink 用の fstat 1 回は open/close の
+	// 骨格を 2 本保守するより安い。
+	return (await readFileUtf8NoFollowWithLinkCount(path)).text;
+}
+
+/**
+ * `readFileUtf8NoFollow` に、読んだ fd 自身の `nlink` を添えて返す (#416 Finding 2)。
+ * index / L2 取り込み用 read は、`nlink === 1` のときだけ内容を取り込んでよい。
+ *
+ * **なぜ hard link を弾く必要があるか**: hard link は `realpath(p) === p` が両名前で成り立つので
+ * `isIndexableResolution` では alias と判別できない。app は同一 inode を in-place で書く
+ * (fs.ts の #100) うえ watcher / `applyFsBatch` が invalidate するのは書かれた名前だけなので、
+ * もう片方の名前の L2 entry / posting が旧内容のまま valid に残る。
+ *
+ * **Why not path に対する別 stat / ino 突合**: 別 syscall は検査と read の間に差し替えられる窓を
+ * 作り、ino 突合は全 file 分の状態を保守する。fd に対する `fstat` は「読んだ object そのもの」の
+ * nlink を答えるので窓が無く、コストも L2-miss の read 1 回につき 1 syscall に収まる
+ * (#413 と同じ「stale になる状態そのものを作らない」方針)。
+ *
+ * **判定は呼び手に委ねる**: nlink は生の値で返す。0 (open 中に unlink された) も `=== 1` で
+ * 弾かれるので fail-closed になる。text は nlink によらず返す = 検索結果は落とさない。
+ * 失敗時の挙動は `readFileUtf8NoFollow` と同じ (throw)。
+ */
+export async function readFileUtf8NoFollowWithLinkCount(
+	path: string,
+): Promise<{ text: string; nlink: number }> {
 	await rejectEndSymlinkWhenEmulated(path);
 	const fh = await fsp.open(path, NOFOLLOW_READ_FLAGS);
 	try {
-		return await fh.readFile({ encoding: "utf8" });
+		const { nlink } = await fh.stat();
+		const text = await fh.readFile({ encoding: "utf8" });
+		return { text, nlink };
 	} finally {
 		await fh.close();
 	}

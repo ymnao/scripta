@@ -14,7 +14,7 @@ import type {
 } from "../../../src/types/wikilink";
 import { buildScanList } from "../utils/inverted-index";
 import { handle } from "../utils/ipc-handle";
-import { readFileUtf8NoFollow } from "../utils/open-nofollow";
+import { readFileUtf8NoFollow, readFileUtf8NoFollowWithLinkCount } from "../utils/open-nofollow";
 import { assertPathAllowed, isIndexableResolution, resolveInsideRoot } from "../utils/path-guard";
 import {
 	buildExistingStemsFrom,
@@ -35,6 +35,7 @@ import {
 } from "../utils/search-pure";
 import { type IdleFillDeps, kickIdleFill } from "./index-fill";
 import {
+	applyFsBatch,
 	type ContentCacheHandle,
 	getCachedExistingStems,
 	getCachedInputFileMap,
@@ -233,15 +234,18 @@ async function processMdFilesParallel(
 				// 読める内容は認可した実体ではないため read 失敗として skip するのが正しい。
 				const useNoFollow = indexGateEvaluated && indexable;
 				let text: string;
-				// この read が「末端非 symlink と確認済みの fd」から読めたか。L2 admission の
-				// もう一方の枝 (ゲート評価済み ∧ indexable) と or を取る。
-				let readFromVerifiedFd = false;
+				// この read が「ioPath 自身を O_NOFOLLOW で開いた fd」から読め、かつその fd の
+				// `nlink === 1` だったか。L2 admission / index 取り込みの条件 (下の不変条件参照)。
+				// alias の解決先 read と分岐 3 の realpath fallback は false のまま。
+				let singleLink = false;
 				try {
 					if (useNoFollow) {
 						// ゲートが resolvedForIndex === ioPath を確認済みなので「解決済み path を読む」
 						// (#406) と同値。ここでの O_NOFOLLOW 発火 = 認可後に末端を差し替えられた瞬間で、
 						// 読める内容は認可した実体ではないため read 失敗として skip する (#412)。
-						text = await readFileUtf8NoFollow(ioPath);
+						const read = await readFileUtf8NoFollowWithLinkCount(ioPath);
+						text = read.text;
+						singleLink = read.nlink === 1;
 					} else if (indexGateEvaluated) {
 						// ゲート評価済み ∧ 非 indexable = 「workspace 外を指す symlink」か「in-root alias」。
 						// ゲートが既に realpath 済みなので、追加 syscall なしで両者を判別できる (#434)。
@@ -262,10 +266,11 @@ async function processMdFilesParallel(
 						// (#451)、検出そのものは成立するが lstat と open の間の差し替え窓が残る。
 						// cache の有無で分けないのは、この read が **L2 admission だけでなく検索
 						// 結果の可視範囲も決める** ようになったため (#434)。syscall 数は plain read と同じ
-						// (open/read/close) なので、cache 無しの純 scan 経路に足すコストは無い。
+						// (open/read/close) に hard link 判定の fstat 1 回 (#416 Finding 2) を足しただけ。
 						try {
-							text = await readFileUtf8NoFollow(ioPath);
-							readFromVerifiedFd = true;
+							const read = await readFileUtf8NoFollowWithLinkCount(ioPath);
+							text = read.text;
+							singleLink = read.nlink === 1;
 						} catch {
 							// 失敗の主因は ELOOP = 末端が symlink。**ここで初めて** realpath を払って解決先を
 							// 判定する (#434)。root 内なら in-root alias なので解決先から読んで結果に出し、
@@ -282,7 +287,7 @@ async function processMdFilesParallel(
 							// resolveInsideRoot === null) と同じ規則**。境界の意味を変えるときは 3 箇所とも直す。
 							// realpath は実際に open に失敗した file にしか乗らない = #413 Finding 1 で削った
 							// 「全 file への realpath」は復活しない。
-							// readFromVerifiedFd は false のままなので、この経路の内容は L2 に載らない。
+							// singleLink は false のままなので、この経路の内容は L2 に載らない。
 							const resolved = await resolveInsideRoot(ioPath, options.root);
 							if (resolved === null) return;
 							text = await readFileUtf8NoFollow(resolved);
@@ -296,9 +301,9 @@ async function processMdFilesParallel(
 				if (shouldStop()) return;
 				// admission cutoff を通過するもののみ L2 に入れる。cutoff 超過は set の内部で false を
 				// 返して no-op になるので caller は結果を気にしない (結果落ちは絶対にしない設計)。
-				// **L2 admission の不変条件**: 「(ゲート評価済み ∧ indexable) ∨ (O_NOFOLLOW open に
-				// 成功した fd から読んだ)」read の内容だけを L2 に載せる。どちらの枝も「格納する内容は
-				// ioPath 自身の実体から読んだもの」を意味し、symlink 経由の内容は L2 に入らない。
+				// **L2 admission の不変条件**: 「ioPath 自身を O_NOFOLLOW open した fd から読み、その fd の
+				// nlink が 1」の read (= singleLink) の内容だけを L2 に載せる。格納する内容は ioPath 自身の
+				// 実体から読んだもので、symlink 経由の内容も hard link の内容も L2 に入らない。
 				// symlink を弾く理由は 2 つ。workspace 外を指す symlink の場合は
 				// 「外部内容が L2 に残る → attacker が symlink を workspace 内へ swap back →
 				// 次の検索で L2 hit + fresh ゲート pass → cache 中の外部内容が index に入る」経路で
@@ -311,20 +316,28 @@ async function processMdFilesParallel(
 				// O_NOFOLLOW open + 同一 fd read にして、判定と内容を同じ object に束ねる。
 				// **検査した対象そのもので I/O する** ので、別 syscall で検査する方式に残る
 				// 「検査と read の間に差し替えられる」窓は存在しない。syscall 数も plain read と同じ
-				// (open/read/close) で、増えるのは実際に symlink だった file の失敗 open 1 回だけ。
+				// (open/read/close) で、増えるのは実際に symlink だった file の失敗 open 1 回と、
+				// 下記 hard link 判定の fstat 1 回だけ。
 				// **win32 だけはこの原子性が無い** (#451): `O_NOFOLLOW` が落ちるため helper が
 				// open 前の `lstat` に倒れ、まさにその「別 syscall で検査する方式」になる。
 				// symlink の検出は成立する = 上の不変条件の **定常状態は全 platform で成り立つ**が、
 				// lstat と open の間に差し替えられた場合だけ symlink 経由の内容が L2 に載りうる
 				// (受容の根拠は ADR-0011 の Windows bullet と utils/open-nofollow.ts の doc)。
-				// **残る窓**: **hard link alias は検出できない** (#416 Finding 2、未対応): hard link は
-				// O_NOFOLLOW でも realpath でも素通りするため両方の名前が L2 に載り、片方の名前で来た
-				// modify がもう片方を evict しない stale 窓が残る。symlink 系とは検出手段が別
-				// (ino/dev 突合が要る) なので本 fix のスコープ外として受容する。
-				if ((indexGateEvaluated && indexable) || readFromVerifiedFd) {
+				// **hard link は fd の nlink で弾く** (#416 Finding 2): hard link は O_NOFOLLOW でも
+				// realpath でも素通りし、片方の名前で来た modify がもう片方を evict しないため。nlink は
+				// read と同じ fd から取るので検査と read の間の窓は無い。text は nlink によらず process に
+				// 渡すので検索結果は落ちない。0 (open 中の unlink) も弾かれて fail-closed になる。
+				// **残る窓 (#416 の正本)**: 取り込み時に nlink === 1 だった file に **後から** hard link が
+				// 作られると、L2 hit / isIndexedAndValid の経路は re-read も stat もしないため、新しい名前
+				// だけへの書き込みで元の名前の L2 entry / posting が stale になる (watcher の create /
+				// modify は新しい名前でしか来ず、元の名前の entry を evict する経路が無い)。解消するのは
+				// 元の名前自身への event / L2・index の evict / app 再起動 (いずれも in-memory)。
+				// workspace 外への hard link も同じ窓。影響は検索結果の staleness のみで security 上の
+				// 影響は無い。
+				if (singleLink) {
 					cache?.set(ioPath, text, genAtStart);
 				}
-				if (indexable) {
+				if (indexable && singleLink) {
 					// text は resolvedForIndex (検査済みの実体) から読んだもの。index の key は
 					// 従来どおり ioPath (workspace 内の path) 側で持つ。
 					// indexable = resolvedForIndex 非 null なので indexTarget は必ず非 undefined
@@ -664,13 +677,13 @@ async function searchFilesImpl(
 }
 
 // idle fill の deps 構築。**inline literal ではなく named function にしてある**のは、
-// #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollow) を
+// #412 の「index 専用 read には末端 symlink を拒否する fd read (readFileUtf8NoFollowWithLinkCount) を
 // 注入する」契約が型では強制できず wiring 側にしか載らないため、test から直接 pin できる
 // ようにするため (plain readFile への退行を殺す)。契約の詳細は open-nofollow.ts の doc。
 function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHandle): IdleFillDeps {
 	return {
 		listIoFiles: () => getCachedMdFiles(canonicalRoot) ?? undefined,
-		readFile: (p) => readFileUtf8NoFollow(p),
+		readFile: (p) => readFileUtf8NoFollowWithLinkCount(p),
 		isAlive: () => indexHandle.isAlive(),
 		state: indexHandle.idleFill,
 		index: indexHandle,
@@ -682,9 +695,19 @@ function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHand
 // 揃える (#412)。この経路は invariant 違反を検出して再取り込みする monitor 自身なので、監視側が
 // 末端 swap 窓を開けたままなのは自己矛盾になる (#413 の「到達不能の論証に頼らず閉じる」と同方針)。
 // 読めない file は null = 「再検証できない」に倒す (ELOOP もここに入る)。
-async function readForReindex(p: string): Promise<string | null> {
+//
+// nlink !== 1 (hard link, #416 Finding 2) も null に倒す: index に載せない file を再 index すると
+// 取り込み側の不変条件を監視側が破る。null は resolveDarkAssertViolations が truth から外して
+// unreadable として計上するだけで、再 index はしない。
+// 加えてその path に modify を流して L2 entry / posting を落とす。ここに来るのは「取り込み時は
+// nlink === 1 で、後から hard link が作られた」残る窓 (L2 admission コメント) の file で、監視側が
+// 検出した瞬間に「元の名前自身への event」と同じ回収をしておけば、次の検索から scan 対象に戻る。
+async function readForReindex(p: string, canonicalRoot: string): Promise<string | null> {
 	try {
-		return await readFileUtf8NoFollow(p);
+		const { text, nlink } = await readFileUtf8NoFollowWithLinkCount(p);
+		if (nlink === 1) return text;
+		applyFsBatch(canonicalRoot, [{ kind: "modify", path: p }]);
+		return null;
 	} catch {
 		return null;
 	}
@@ -752,7 +775,7 @@ async function runDarkAssert(
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		// **必ず readForReindex を使うこと** (#412)。inline の plain read に戻すと wiring pin
 		// test をすり抜けて末端 swap 窓が再開する。
-		readFile: readForReindex,
+		readFile: (p) => readForReindex(p, canonicalRoot),
 		indexFile: (p, text, epoch) => {
 			indexHandle.indexFile(p, text, epoch);
 		},
@@ -875,6 +898,11 @@ export interface DarkAssertDropCounts {
 	 * **#412 以降は ELOOP (末端が symlink = 認可後に swap された疑い) もここに計上される**。
 	 * triage では良性の transient 失敗と混在する点に注意 — 恒常的に増える場合は
 	 * 末端 swap の可能性を検討すること。
+	 * **#416 Finding 2 以降は nlink !== 1 (hard link) もここに計上される**。取り込み後に hard link
+	 * が作られた残る窓 (search.ts の L2 admission コメント) の file は、元の名前の stale な L2 entry が
+	 * 落ちた後、新内容だけに hit する query で violation として上がり、ここに 1 回計上される
+	 * (readForReindex がその path の posting を invalidate するので、次の検索からは上がらない)。
+	 * L2 entry が残っている間は truth pass も L2 hit の旧内容を見るので violation 自体が立たない。
 	 */
 	unreadable: number;
 }

@@ -22,9 +22,12 @@
 // index に載せない。alias の key に対する invalidate は watcher から来ない (event は解決先の path で
 // 来る) ため、載せると stale posting が valid のまま残る。この class 自身は path の実体性を判定
 // しないので、取り込み側 (search.ts の piggyback / index-fill.ts) がゲートで担保する。
-// **成立範囲**: この担保は symlink に限る。hard link は realpath が解決しない (両名前とも自分自身を
-// 返す) ため両方が index に載り、片方の名前で書かれた modify event はもう片方の posting を
-// invalidate しない — symlink alias と同型の stale posting が残る (#416 で追跡)。
+// **成立範囲**: symlink はこのゲート (realpath) で弾く。hard link は realpath が解決しない (両名前とも
+// 自分自身を返す) ため別機構で、取り込み側が **取り込み read の fd に対する fstat の nlink** で
+// `nlink !== 1` を拒否する (#416 Finding 2、open-nofollow.ts の `readFileUtf8NoFollowWithLinkCount`)。
+// 弾かないと片方の名前で書かれた modify event がもう片方の posting を invalidate せず、symlink alias と
+// 同型の stale posting が残る。取り込み後に hard link が作られた場合の残る窓は search.ts の
+// L2 admission コメント (#416 の正本) を参照。
 
 import { sep } from "node:path";
 

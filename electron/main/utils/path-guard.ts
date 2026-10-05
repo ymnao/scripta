@@ -290,7 +290,7 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   の間に構成要素を symlink へ差し替えられる窓が残る (#412)。この窓は 2 つに分かれ、
 //   **片方だけが閉じている**:
 //   - **末端 component: 閉じた**。index 取り込みに繋がる read (piggyback / idle fill /
-//     dark assert の再 index) は `readFileUtf8NoFollow` (O_NOFOLLOW 付き fd read) を使い、
+//     dark assert の再 index) は `readFileUtf8NoFollowWithLinkCount` (O_NOFOLLOW 付き fd read) を使い、
 //     open 時点で末端が symlink なら ELOOP で reject して「読み取り失敗 = skip」に倒す。
 //     本 API が非 null かつ入力 path 一致を返した時点で末端は非 symlink と確認済みなので、
 //     正常系では発火しない (発火 = 実際に swap が起きた瞬間)。
@@ -303,7 +303,10 @@ export async function isPathAllowed(windowId: number, p: string): Promise<boolea
 //   - **hard link 置換は「末端が閉じた」の範囲外**: 同一 filesystem 内で外部 file への
 //     hard link を末端に置く変種は realpath が恒等に振る舞うため T1 のゲートを通り、
 //     O_NOFOLLOW も symlink ではないので発火しない。これは TOCTOU ではなく T1 時点から
-//     通る設計境界で (#416 Finding 2 が追跡)、payoff は中間 dir 窓と同じ in-memory bigram 限り。
+//     通る設計境界で、payoff は中間 dir 窓と同じ in-memory bigram 限り。ただし取り込み read は
+//     fd の `nlink` を見て `nlink !== 1` を index / L2 に載せない (#416 Finding 2)。外部 file への
+//     hard link は nlink ≥ 2 なので、取り込み時点で既に hard link になっていれば載らない (後から
+//     hard link が作られた場合の窓は search.ts の L2 admission コメント参照)。
 //   assertPathAllowed も同じ中間 dir 窓を持つ (下記 doc 参照)。
 // - **毎回 fresh に realpath する** (#406 Finding 1)。symlink の retarget は watcher batch
 //   由来の invalidation では確実に拾えない (chokidar は followSymlinks: false で、

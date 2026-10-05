@@ -6,6 +6,7 @@ import {
 	NOFOLLOW_EMULATED,
 	NOFOLLOW_READ_FLAGS,
 	readFileUtf8NoFollow,
+	readFileUtf8NoFollowWithLinkCount,
 	rejectEndSymlinkWhenEmulated,
 	writeFileAtomicNoFollow,
 	writeFileUtf8NoFollow,
@@ -62,6 +63,49 @@ describe.skipIf(process.platform === "win32")("readFileUtf8NoFollow", () => {
 
 	it("rejects a missing file (呼び手の skip 契約に乗る)", async () => {
 		await expect(readFileUtf8NoFollow(join(ws.dir, "nope.md"))).rejects.toThrow();
+	});
+});
+
+// #416 Finding 2: nlink を fd 自身から返す read。判定 (=== 1) は呼び手側なので生の値を pin する。
+describe.skipIf(process.platform === "win32")("readFileUtf8NoFollowWithLinkCount", () => {
+	let ws: TempWorkspace;
+	let outside: TempWorkspace;
+
+	beforeEach(async () => {
+		ws = await createCanonicalTempWorkspace("scripta-nofollow-nlink-");
+		outside = await createCanonicalTempWorkspace("scripta-nofollow-nlink-out-");
+	});
+
+	afterEach(async () => {
+		await ws.cleanup();
+		await outside.cleanup();
+	});
+
+	it("returns nlink 1 for a lone file", async () => {
+		const p = join(ws.dir, "note.md");
+		await fsp.writeFile(p, "# hello", "utf8");
+		expect(await readFileUtf8NoFollowWithLinkCount(p)).toEqual({ text: "# hello", nlink: 1 });
+	});
+
+	it("returns nlink 2 from either name once a hard link exists", async () => {
+		const a = join(ws.dir, "a.md");
+		const b = join(ws.dir, "b.md");
+		await fsp.writeFile(a, "shared", "utf8");
+		await fsp.link(a, b);
+		expect(await readFileUtf8NoFollowWithLinkCount(a)).toEqual({ text: "shared", nlink: 2 });
+		expect(await readFileUtf8NoFollowWithLinkCount(b)).toEqual({ text: "shared", nlink: 2 });
+	});
+
+	it("rejects a terminal symlink with ELOOP", async () => {
+		const secret = join(outside.dir, "secret.txt");
+		await fsp.writeFile(secret, "SECRET", "utf8");
+		const link = join(ws.dir, "evil.md");
+		await fsp.symlink(secret, link);
+		const err = await readFileUtf8NoFollowWithLinkCount(link).catch(
+			(e: NodeJS.ErrnoException) => e,
+		);
+		expect(err).toBeInstanceOf(Error);
+		expect((err as NodeJS.ErrnoException).code).toBe("ELOOP");
 	});
 });
 

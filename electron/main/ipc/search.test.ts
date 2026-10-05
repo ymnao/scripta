@@ -2,7 +2,7 @@
 // search.ts が読む実体と同じ object を spy するため `node:fs` の promises を使う
 // (node:fs/promises の ESM namespace は frozen で spy できない)。
 import { type Dirent, promises as fsp } from "node:fs";
-import { mkdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, realpath, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1317,6 +1317,90 @@ describe.skipIf(process.platform === "win32")(
 				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "betaword");
 				expect(res.results.some((r) => r.filePath.endsWith("real.md"))).toBe(true);
 				expect(res.results.some((r) => r.filePath.endsWith("link.md"))).toBe(true);
+			} finally {
+				releaseFileListCache(canonical);
+			}
+		});
+
+		it("never indexes either name of a hard-linked pair (#416 Finding 2)", async () => {
+			// hard link は realpath でも O_NOFOLLOW でも alias と判別できない。取り込み read の fd の
+			// nlink が 1 でないので、どちらの名前も index に載らず、検索結果には両方出る。
+			const canonical = await realpath(workspaceDir);
+			const real = join(canonical, "real.md");
+			await writeFile(real, "alphaword body");
+			const hard = join(canonical, "hard.md");
+			await link(real, hard);
+			const lone = join(canonical, "lone.md");
+			await writeFile(lone, "alphaword lone");
+
+			acquireFileListCache(canonical);
+			const handle = getInvertedIndexHandle(canonical);
+			if (handle === undefined) throw new Error("index handle must exist after acquire");
+			try {
+				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+				for (const name of ["real.md", "hard.md", "lone.md"]) {
+					expect(res.results.some((r) => r.filePath.endsWith(name))).toBe(true);
+				}
+				expect(handle.isIndexedAndValid(real)).toBe(false);
+				expect(handle.isIndexedAndValid(hard)).toBe(false);
+				// 対照: 単一名の file は従来どおり index される。
+				expect(handle.isIndexedAndValid(lone)).toBe(true);
+			} finally {
+				releaseFileListCache(canonical);
+			}
+		});
+
+		it("keeps hits on the other name after an in-place write via one name (#416 Finding 2)", async () => {
+			// app は同一 inode を in-place で書き (fs.ts の #100)、modify event は書かれた名前でしか
+			// 来ない。もう片方の posting / L2 が valid に残ると新内容の hit が落ちる。
+			const canonical = await realpath(workspaceDir);
+			const real = join(canonical, "real.md");
+			await writeFile(real, "alphaword body");
+			const hard = join(canonical, "hard.md");
+			await link(real, hard);
+			// 単一名の file を index に載せておく。2 file だけだと real.md の invalidate 1 件で
+			// tombstone 比率が閾値を超えて index が全 clear され、hard.md の posting も消えるため
+			// hit 落ちが観測できない。
+			for (let i = 0; i < 3; i++) {
+				await writeFile(join(canonical, `filler${i}.md`), "alphaword filler");
+			}
+
+			acquireFileListCache(canonical);
+			try {
+				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+
+				const inoBefore = (await stat(real)).ino;
+				await writeFile(real, "alphaword body betaword");
+				expect((await stat(hard)).ino).toBe(inoBefore);
+				applyFsBatch(canonical, [{ kind: "modify", path: real }]);
+
+				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "betaword");
+				expect(res.results.some((r) => r.filePath.endsWith("real.md"))).toBe(true);
+				expect(res.results.some((r) => r.filePath.endsWith("hard.md"))).toBe(true);
+			} finally {
+				releaseFileListCache(canonical);
+			}
+		});
+
+		it("does not serve stale L2 content for a hard-linked name after a write via the other (#416 Finding 2)", async () => {
+			// 逆向き: hard.md 経由で alphaword を消す。modify は hard.md にしか来ないので、real.md が
+			// L2 / index に載っていると旧内容 (alphaword を含む) が hit として返ってしまう。
+			const canonical = await realpath(workspaceDir);
+			const real = join(canonical, "real.md");
+			await writeFile(real, "alphaword body");
+			const hard = join(canonical, "hard.md");
+			await link(real, hard);
+
+			acquireFileListCache(canonical);
+			try {
+				await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+
+				await writeFile(hard, "gammaword only");
+				applyFsBatch(canonical, [{ kind: "modify", path: hard }]);
+
+				const res = await searchFilesImpl(TEST_WIN, workspaceDir, "alphaword");
+				expect(res.results.some((r) => r.filePath.endsWith("real.md"))).toBe(false);
+				expect(res.results.some((r) => r.filePath.endsWith("hard.md"))).toBe(false);
 			} finally {
 				releaseFileListCache(canonical);
 			}
