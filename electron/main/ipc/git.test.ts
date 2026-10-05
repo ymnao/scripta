@@ -166,6 +166,31 @@ describe("checkAvailableImpl", () => {
 	});
 });
 
+describe("ambient guarded env (simple-git 4 allowEnvironment)", () => {
+	it("operates on the workspace repo, not the one an ambient GIT_DIR points to", async () => {
+		const dir = await newWorkspace();
+		const other = await initRepo();
+		dirsToCleanup.push(other);
+		vi.stubEnv("GIT_DIR", join(other, ".git"));
+		const top = (await createGit(dir).raw(["rev-parse", "--show-toplevel"])).trim();
+		expect(top).toBe(dir);
+	});
+
+	it("still finds git when an ambient PREFIX is set", async () => {
+		vi.stubEnv("PREFIX", "/opt/homebrew");
+		expect(await checkAvailableImpl()).toBe(true);
+	});
+
+	it("ignores env-injected config via GIT_CONFIG_COUNT", async () => {
+		const dir = await newWorkspace();
+		vi.stubEnv("GIT_CONFIG_COUNT", "1");
+		vi.stubEnv("GIT_CONFIG_KEY_0", "user.name");
+		vi.stubEnv("GIT_CONFIG_VALUE_0", "Injected");
+		const name = (await createGit(dir).raw(["config", "user.name"])).trim();
+		expect(name).toBe("Test");
+	});
+});
+
 describe("checkRepoImpl", () => {
 	it("returns true for a git-initialized directory", async () => {
 		const dir = await newWorkspace();
