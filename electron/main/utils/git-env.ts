@@ -46,6 +46,7 @@ const GIT_ENV_OVERRIDES: NodeJS.ProcessEnv = {
 // `allowUnsafeConfigEnvCount` と添字ごとの key 列挙が要るため（`.gitconfig` で代替できる）。
 // `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` 等を通さないのは、assertPathAllowed で
 // 認可した workspace と git が実際に触る repo を env でずらせてしまうため。
+// `GIT_SSL_*` 等の transport 系も通さない（`http.sslCAInfo` 等を `.gitconfig` に書けば効く）。
 const HONORED_AMBIENT_KEYS = [
 	"GIT_SSH_COMMAND",
 	"GIT_SSH",
@@ -77,9 +78,8 @@ function isGuardedEnvKey(normalised: string): boolean {
 	return normalised.startsWith("git_") || GUARDED_NON_GIT_KEYS.has(normalised);
 }
 
-// simple-git 4 は `.env()` で明示された guarded key を `allowEnvironment` に無い限り throw
-// する。process.env を丸ごと渡すとユーザー環境の `GIT_*` / `PREFIX` で全操作が落ちるので、
-// 許可外の guarded key は simple-git の ambient strip と同じく落としてから override を重ねる。
+// process.env を `.env()` に丸ごと渡すと、simple-git 4 は許可外の guarded key ごとに throw
+// する（ambient なら黙って strip するが、`.env()` 経由は明示扱い）。同じ判定で先に落とす。
 export function buildGitEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(ambient)) {
@@ -101,9 +101,7 @@ export function buildGitEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 //
 // (B) 我々は明示制御せず、ユーザーの普段の git 環境（`.gitconfig` / 環境変数）を
 //     **意図的に尊重** するもの。UX 上ユーザーが手元の git でできることは
-//     Electron 内でも同等にできるのが要件。`.gitconfig` 経由の設定はそのまま効き、
-//     env は guarded でない key と HONORED_AMBIENT_KEYS だけを継承する。
-//     攻撃者制御値の流入は
+//     Electron 内でも同等にできるのが要件。攻撃者制御値の流入は
 //     IPC 認可（assertPathAllowed）で workspace 単位に閉じ込めて防ぐ。
 //     - allowUnsafeCredentialHelper: ユーザーの credential.helper（macOS keychain 等）
 //     - allowUnsafeConfigPaths:      ユーザーの GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG /
@@ -122,27 +120,27 @@ const UNSAFE_FLAGS = {
 	allowUnsafeSshCommand: true,
 };
 
+const BASE_OPTIONS = {
+	binary: "git",
+	unsafe: UNSAFE_FLAGS,
+	allowEnvironment: ALLOW_ENVIRONMENT,
+};
+
 // 与えられた canonical な repo path を baseDir にした SimpleGit instance を返す。
 // `core.hooksPath=/dev/null` で hooks を無効化、
 // `core.quotepath=false` で 非 ASCII path を 8 進エスケープしない。
 export function createGit(canonicalRepoPath: string): SimpleGit {
 	return simpleGit({
+		...BASE_OPTIONS,
 		baseDir: canonicalRepoPath,
-		binary: "git",
 		maxConcurrentProcesses: 1,
 		config: [`core.hooksPath=${NULL_HOOKS}`, "core.quotepath=false"],
-		unsafe: UNSAFE_FLAGS,
-		allowEnvironment: ALLOW_ENVIRONMENT,
 	}).env(buildGitEnv(process.env));
 }
 
 // `git --version` の存在確認用に baseDir 不要の instance を返す。
 export function createGitNoCwd(): SimpleGit {
-	return simpleGit({
-		binary: "git",
-		unsafe: UNSAFE_FLAGS,
-		allowEnvironment: ALLOW_ENVIRONMENT,
-	}).env(buildGitEnv(process.env));
+	return simpleGit(BASE_OPTIONS).env(buildGitEnv(process.env));
 }
 
 // simple-git GitError は `message` に git の stderr を含む。
