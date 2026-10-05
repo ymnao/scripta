@@ -37,9 +37,10 @@
 //
 // **syscall は増えない (`O_NOFOLLOW` がある platform では)**: `fsp.readFile(path)` /
 // `fsp.writeFile(path)` も内部で open/read(write)/close するため、open flag を足して明示的に
-// 書き下しただけ。検索 hot path にも editor の保存経路にもコストは乗らない。flag が落ちる
-// platform だけは上記エミュレーションの `lstat` が 1 回増える (その platform では open が
-// 拒否を担えないので、拒否水準を保つ対価として払う)。
+// 書き下しただけ。editor の保存経路にコストは乗らない。flag が落ちる platform だけは上記
+// エミュレーションの `lstat` が 1 回増える (その platform では open が拒否を担えないので、
+// 拒否水準を保つ対価として払う)。read 側だけは例外で、hard link 判定 (#416 Finding 2) の
+// `fstat` を 1 回足している (`readFileUtf8NoFollowWithLinkCount` の doc)。
 //
 // **atomic write だけは別機構**: inode 置換が要る呼び手 (pdf:export) は `O_NOFOLLOW` open では
 // なく `rename(2)` が末端 symlink を follow しない性質に乗る (`writeFileAtomicNoFollow`)。
@@ -153,7 +154,7 @@ export async function readFileUtf8NoFollow(path: string): Promise<string> {
  *
  * **Why not path に対する別 stat / ino 突合**: 別 syscall は検査と read の間に差し替えられる窓を
  * 作り、ino 突合は全 file 分の状態を保守する。fd に対する `fstat` は「読んだ object そのもの」の
- * nlink を答えるので窓が無く、コストも L2-miss の取り込み read 1 回につき 1 syscall に収まる
+ * nlink を答えるので窓が無く、コストも L2-miss の read 1 回につき 1 syscall に収まる
  * (#413 と同じ「stale になる状態そのものを作らない」方針)。
  *
  * **判定は呼び手に委ねる**: nlink は生の値で返す。0 (open 中に unlink された) も `=== 1` で

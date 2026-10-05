@@ -71,7 +71,7 @@ errno は**見分けない**。ELOOP 以外の失敗（EACCES / ENOENT 等）も
 ### 関連する将来の検討事項
 
 - FileTree（`listDirectory`）/ コマンドパレットのファイル名検索（SR-4）/ wikilink の解決先 stem 集合で、workspace 外を指す symlink をどう扱うか。いずれも file を読まない経路なので、揃えるには file list 構築時の realpath コストをどう払うかの判断が要る
-- ~~hard link alias の検出（ino/dev 突合）を入れるかどうか~~ → **#416 Finding 2 で解決**。全 file への stat ではなく、L2-miss の取り込み read が開いた fd への `fstat`（nlink）を採った。コストは取り込み read 1 回あたり 1 syscall で、L2 hit / 既 index の file には乗らない
+- ~~hard link alias の検出（ino/dev 突合）を入れるかどうか~~ → **#416 Finding 2 で解決**。全 file への別 stat ではなく、scan の read が開いた fd への `fstat`（nlink）を採った。コストは L2-miss の read 1 回あたり 1 syscall で、L2 hit には乗らない。hard link の file は L2 / index の恩恵を受けず、検索のたびに realpath と全文 read を払う（admission cutoff 超過 file と同じ扱い）
 
 ## References
 

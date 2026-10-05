@@ -17,6 +17,7 @@ import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
 import {
 	NOFOLLOW_EMULATED,
 	readFileUtf8NoFollow,
+	readFileUtf8NoFollowWithLinkCount,
 	rejectEndSymlinkWhenEmulated,
 	writeFileAtomicNoFollow,
 	writeFileUtf8NoFollow,
@@ -99,6 +100,25 @@ describe.skipIf(process.platform !== "win32")("win32 の fs semantics 実測 (#5
 			(e: NodeJS.ErrnoException) => e,
 		);
 		expect(err?.code).toBe("ELOOP");
+	});
+
+	// #416 Finding 2: L2 / index の取り込みは fd の nlink === 1 に依存する。NTFS で単一名 file が
+	// 1 を返さなければ全 file が取り込み対象から外れ、hard link が 2 を返さなければ stale が残る。
+	it("readFileUtf8NoFollowWithLinkCount は単一名 file で nlink 1 を返す", async () => {
+		const p = join(dir, "lone.md");
+		await fsp.writeFile(p, "lone");
+
+		expect((await readFileUtf8NoFollowWithLinkCount(p)).nlink).toBe(1);
+	});
+
+	it("readFileUtf8NoFollowWithLinkCount は hard link の両名前で nlink 2 を返す", async () => {
+		const real = join(dir, "real.md");
+		await fsp.writeFile(real, "body");
+		const hard = join(dir, "hard.md");
+		await fsp.link(real, hard);
+
+		expect((await readFileUtf8NoFollowWithLinkCount(real)).nlink).toBe(2);
+		expect((await readFileUtf8NoFollowWithLinkCount(hard)).nlink).toBe(2);
 	});
 
 	it("writeFileUtf8NoFollow は末端 symlink を ELOOP で拒否し解決先を書き換えない", async () => {

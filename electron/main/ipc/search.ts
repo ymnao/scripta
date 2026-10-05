@@ -892,6 +892,11 @@ export interface DarkAssertDropCounts {
 	 * **#412 以降は ELOOP (末端が symlink = 認可後に swap された疑い) もここに計上される**。
 	 * triage では良性の transient 失敗と混在する点に注意 — 恒常的に増える場合は
 	 * 末端 swap の可能性を検討すること。
+	 * **#416 Finding 2 以降は nlink !== 1 (hard link) もここに計上される**。取り込み後に hard link
+	 * が作られた残る窓 (search.ts の L2 admission コメント) では、元の名前の stale な L2 entry が
+	 * 落ちた後、新内容だけに hit する query で同じ file が検索ごとに violation → unreadable →
+	 * resolved として上がり続ける (再 index しないので posting は直らない)。L2 entry が残っている
+	 * 間は truth pass も L2 hit の旧内容を見るので violation 自体が立たない。
 	 */
 	unreadable: number;
 }
