@@ -177,6 +177,15 @@ describe("ambient guarded env (simple-git 4 allowEnvironment)", () => {
 		expect(gitDir).toBe(join(dir, ".git"));
 	});
 
+	it("passes an honored GIT_CONFIG_GLOBAL through to the git child process", async () => {
+		const dir = await newWorkspace();
+		const globalConfig = join(dir, "global.gitconfig");
+		await fsp.writeFile(globalConfig, "[scripta]\n\tprobe = from-global\n", "utf8");
+		vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfig);
+		const value = (await createGit(dir).raw(["config", "--global", "scripta.probe"])).trim();
+		expect(value).toBe("from-global");
+	});
+
 	it("still finds git when an ambient PREFIX is set", async () => {
 		vi.stubEnv("PREFIX", "/opt/homebrew");
 		expect(await checkAvailableImpl()).toBe(true);
