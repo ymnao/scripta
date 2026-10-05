@@ -84,14 +84,31 @@ describe.skipIf(process.platform === "win32")("index 取り込み read の wirin
 		const hard = join(ws.dir, "hard.md");
 		await fsp.link(normal, hard);
 
-		expect(await readForReindex(normal)).toBeNull();
-		expect(await readForReindex(hard)).toBeNull();
+		expect(await readForReindex(normal, ws.dir)).toBeNull();
+		expect(await readForReindex(hard, ws.dir)).toBeNull();
+	});
+
+	it("dark assert の再 index read は nlink !== 1 を検出した path の posting を invalidate する (#416 Finding 2)", async () => {
+		// 取り込み時は単一名で index に載り、後から hard link が作られた残る窓の終状態。
+		acquireFileListCache(ws.dir);
+		try {
+			const h = getInvertedIndexHandle(ws.dir);
+			if (h === undefined) throw new Error("handle should exist after acquire");
+			h.indexFile(normal, "normal body", h.currentEpochOf(normal));
+			expect(h.isIndexedAndValid(normal)).toBe(true);
+			await fsp.link(normal, join(ws.dir, "hard.md"));
+
+			expect(await readForReindex(normal, ws.dir)).toBeNull();
+			expect(h.isIndexedAndValid(normal)).toBe(false);
+		} finally {
+			releaseFileListCache(ws.dir);
+		}
 	});
 
 	it("dark assert の再 index read は末端 symlink を拒否して null を返す", async () => {
 		// 読めない file は null = 「再検証できない」に倒す既存契約 (#405) は維持する。
-		expect(await readForReindex(normal)).toBe("normal body");
-		expect(await readForReindex(swapped)).toBeNull();
+		expect(await readForReindex(normal, ws.dir)).toBe("normal body");
+		expect(await readForReindex(swapped, ws.dir)).toBeNull();
 	});
 });
 

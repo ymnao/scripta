@@ -35,6 +35,7 @@ import {
 } from "../utils/search-pure";
 import { type IdleFillDeps, kickIdleFill } from "./index-fill";
 import {
+	applyFsBatch,
 	type ContentCacheHandle,
 	getCachedExistingStems,
 	getCachedInputFileMap,
@@ -698,10 +699,15 @@ function buildIdleFillDeps(canonicalRoot: string, indexHandle: InvertedIndexHand
 // nlink !== 1 (hard link, #416 Finding 2) も null に倒す: index に載せない file を再 index すると
 // 取り込み側の不変条件を監視側が破る。null は resolveDarkAssertViolations が truth から外して
 // unreadable として計上するだけで、再 index はしない。
-async function readForReindex(p: string): Promise<string | null> {
+// 加えてその path に modify を流して L2 entry / posting を落とす。ここに来るのは「取り込み時は
+// nlink === 1 で、後から hard link が作られた」残る窓 (L2 admission コメント) の file で、監視側が
+// 検出した瞬間に「元の名前自身への event」と同じ回収をしておけば、次の検索から scan 対象に戻る。
+async function readForReindex(p: string, canonicalRoot: string): Promise<string | null> {
 	try {
 		const { text, nlink } = await readFileUtf8NoFollowWithLinkCount(p);
-		return nlink === 1 ? text : null;
+		if (nlink === 1) return text;
+		applyFsBatch(canonicalRoot, [{ kind: "modify", path: p }]);
+		return null;
 	} catch {
 		return null;
 	}
@@ -769,7 +775,7 @@ async function runDarkAssert(
 		currentEpochOf: (p) => indexHandle.currentEpochOf(p),
 		// **必ず readForReindex を使うこと** (#412)。inline の plain read に戻すと wiring pin
 		// test をすり抜けて末端 swap 窓が再開する。
-		readFile: readForReindex,
+		readFile: (p) => readForReindex(p, canonicalRoot),
 		indexFile: (p, text, epoch) => {
 			indexHandle.indexFile(p, text, epoch);
 		},
@@ -893,10 +899,10 @@ export interface DarkAssertDropCounts {
 	 * triage では良性の transient 失敗と混在する点に注意 — 恒常的に増える場合は
 	 * 末端 swap の可能性を検討すること。
 	 * **#416 Finding 2 以降は nlink !== 1 (hard link) もここに計上される**。取り込み後に hard link
-	 * が作られた残る窓 (search.ts の L2 admission コメント) では、元の名前の stale な L2 entry が
-	 * 落ちた後、新内容だけに hit する query で同じ file が検索ごとに violation → unreadable →
-	 * resolved として上がり続ける (再 index しないので posting は直らない)。L2 entry が残っている
-	 * 間は truth pass も L2 hit の旧内容を見るので violation 自体が立たない。
+	 * が作られた残る窓 (search.ts の L2 admission コメント) の file は、元の名前の stale な L2 entry が
+	 * 落ちた後、新内容だけに hit する query で violation として上がり、ここに 1 回計上される
+	 * (readForReindex がその path の posting を invalidate するので、次の検索からは上がらない)。
+	 * L2 entry が残っている間は truth pass も L2 hit の旧内容を見るので violation 自体が立たない。
 	 */
 	unreadable: number;
 }
