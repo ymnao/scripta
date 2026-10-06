@@ -439,6 +439,40 @@ describe("FileTree", () => {
 		expect(await screen.findByText("added.md")).toBeInTheDocument();
 	});
 
+	it("keeps a refresh result that resolves after the folder was collapsed", async () => {
+		const readme = { name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false };
+		const added = { name: "added.md", path: "/workspace/docs/added.md", isDirectory: false };
+		let resolveRefresh!: (entries: (typeof readme)[]) => void;
+		let docsCalls = 0;
+		mockedListDirectory.mockImplementation((path: string) => {
+			if (path !== "/workspace/docs") return Promise.resolve(mockEntries);
+			docsCalls++;
+			if (docsCalls === 1) return Promise.resolve([readme]);
+			return new Promise((resolve) => {
+				resolveRefresh = resolve;
+			});
+		});
+
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		const docs = await screen.findByLabelText("docs folder");
+		await userEvent.click(docs);
+		await screen.findByText("readme.md");
+		act(() => {
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+		});
+		await waitFor(() => {
+			expect(docsCalls).toBe(2);
+		});
+		await userEvent.click(docs);
+		await act(async () => {
+			resolveRefresh([readme, added]);
+		});
+		await userEvent.click(docs);
+
+		expect(await screen.findByText("added.md")).toBeInTheDocument();
+		expect(docsCalls).toBe(2);
+	});
+
 	it("does not refetch a collapsed folder on re-expand once the stale refetch has completed", async () => {
 		const childEntries = [
 			{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },

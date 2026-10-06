@@ -112,7 +112,11 @@ export function FileTreeItem({
 
 	// Re-fetch children when refreshKey changes. Collapsed folders are reset to
 	// not-loaded instead, so every expand path re-fetches them on the next expand.
+	// Superseded results are dropped by id rather than by effect cleanup: cleanup also
+	// runs when the folder is collapsed mid-fetch, and dropping the result there would
+	// leave loaded=true with stale children that the next expand does not re-fetch.
 	const prevRefreshKeyRef = useRef(refreshKey);
+	const refreshIdRef = useRef(0);
 	useEffect(() => {
 		if (prevRefreshKeyRef.current === refreshKey) return;
 		prevRefreshKeyRef.current = refreshKey;
@@ -121,19 +125,16 @@ export function FileTreeItem({
 			setLoaded(false);
 			return;
 		}
-		let ignore = false;
+		const id = ++refreshIdRef.current;
 		listDirectory(entry.path, { applyFileTreeFilter: true })
 			.then((entries) => {
-				if (ignore || !isMountedRef.current) return;
+				if (refreshIdRef.current !== id || !isMountedRef.current) return;
 				setChildren(entries);
 			})
 			.catch((err) => {
-				if (ignore || !isMountedRef.current) return;
+				if (refreshIdRef.current !== id || !isMountedRef.current) return;
 				console.error("Failed to refresh directory:", err);
 			});
-		return () => {
-			ignore = true;
-		};
 	}, [refreshKey, entry.isDirectory, entry.path, expanded, loaded]);
 
 	// Auto-expand folder on drag hover (500ms)
