@@ -75,8 +75,9 @@ describe("insertTable (runtime)", () => {
 
 		const cell = view.dom.querySelector('.cm-table-widget [data-row="0"][data-col="0"]');
 		expect(cell).not.toBeNull();
-		// jsdom は contentEditable のセルへ focus() を移さない（activeElement は body のまま）
-		// ので、focusCell が置く DOM selection で観測する。
+		// jsdom は contentEditable の IDL property を実装しておらず、widget の
+		// `cell.contentEditable = "true"` が属性に反映されないためセルが focusable にならない
+		// （activeElement は body のまま）。focusCell が置く DOM selection で観測する。
 		expect(cell?.contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
 	});
 
