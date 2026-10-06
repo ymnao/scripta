@@ -1,5 +1,8 @@
-import { EditorSelection, type EditorState } from "@codemirror/state";
-import { assert, beforeAll, describe, expect, it, vi } from "vitest";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { syntaxTree } from "@codemirror/language";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { afterEach, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
 const renderToStringMock = vi.fn(
@@ -571,5 +574,42 @@ describe("mathDecorationField (StateField diff rebuild)", () => {
 
 		expect(after).toHaveLength(1);
 		expect(after[0].widget).not.toBe(originalWidget);
+	});
+});
+
+describe("mathDecorationField (background parse の完了)", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("init parse の外にある code block 内の $...$ は、idle parse の完了後に math として描画されない", async () => {
+		// fake timers は Date も止めるので、parse の時間予算による打ち切り位置も決定的になる。
+		vi.useFakeTimers();
+		// init parse (先頭 3000 文字) の外に code block を置く。
+		const filler = `${"word ".repeat(100)}\n\n`.repeat(8);
+		const doc = `${filler}\`\`\`\n$x$ code\n\`\`\`\n\nafter`;
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		const view = new EditorView({
+			state: EditorState.create({
+				doc,
+				extensions: [markdown({ base: markdownLanguage }), mathDecoration],
+			}),
+			parent,
+		});
+		try {
+			const mathWidgets = () =>
+				widgetDecorations(collectDecorations(view.state.field(mathDecorationField).decos));
+			expect(syntaxTree(view.state).length).toBeLessThan(doc.indexOf("```"));
+			expect(mathWidgets()).toHaveLength(1);
+
+			await vi.advanceTimersByTimeAsync(2000);
+
+			expect(syntaxTree(view.state).length).toBe(doc.length);
+			expect(mathWidgets()).toHaveLength(0);
+		} finally {
+			view.destroy();
+			parent.remove();
+		}
 	});
 });
