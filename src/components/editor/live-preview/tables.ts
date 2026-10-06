@@ -178,7 +178,7 @@ export const tableKeymap: Extension = Prec.high(
  *
  *  Table ノードは lezer が直後の本文行まで含めてしまうことがあるため、
  *  trimToLastTableLine でパイプを含む最後の行まで詰めた実際の範囲で判定する
- *  （table-decoration.ts の buildTableDecorations / findTableNode と同じ補正）。 */
+ *  （table-decoration.ts の buildTableDecorations / table-widget-core.ts の findTableNode と同じ補正）。 */
 export function rangeOverlapsCodeOrTable(state: EditorState, from: number, to: number): boolean {
 	const doc = state.doc;
 	const isEmpty = from === to;
