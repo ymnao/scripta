@@ -74,7 +74,12 @@ export function FileTreeItem({
 		};
 	}, []);
 
+	// Bumped by every children fetch so that an in-flight refresh never overwrites
+	// a fetch issued after it (see the refresh effect below).
+	const fetchIdRef = useRef(0);
+
 	const loadChildren = useCallback(() => {
+		fetchIdRef.current++;
 		setLoading(true);
 		setLoadError(false);
 		listDirectory(entry.path, { applyFileTreeFilter: true })
@@ -116,7 +121,6 @@ export function FileTreeItem({
 	// runs when the folder is collapsed mid-fetch, and dropping the result there would
 	// leave loaded=true with stale children that the next expand does not re-fetch.
 	const prevRefreshKeyRef = useRef(refreshKey);
-	const refreshIdRef = useRef(0);
 	useEffect(() => {
 		if (prevRefreshKeyRef.current === refreshKey) return;
 		prevRefreshKeyRef.current = refreshKey;
@@ -125,14 +129,14 @@ export function FileTreeItem({
 			setLoaded(false);
 			return;
 		}
-		const id = ++refreshIdRef.current;
+		const id = ++fetchIdRef.current;
 		listDirectory(entry.path, { applyFileTreeFilter: true })
 			.then((entries) => {
-				if (refreshIdRef.current !== id || !isMountedRef.current) return;
+				if (fetchIdRef.current !== id || !isMountedRef.current) return;
 				setChildren(entries);
 			})
 			.catch((err) => {
-				if (refreshIdRef.current !== id || !isMountedRef.current) return;
+				if (fetchIdRef.current !== id || !isMountedRef.current) return;
 				console.error("Failed to refresh directory:", err);
 			});
 	}, [refreshKey, entry.isDirectory, entry.path, expanded, loaded]);

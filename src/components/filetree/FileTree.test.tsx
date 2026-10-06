@@ -473,6 +473,47 @@ describe("FileTree", () => {
 		expect(docsCalls).toBe(2);
 	});
 
+	it("does not let an older refresh result overwrite a newer re-expand fetch", async () => {
+		const readme = { name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false };
+		const added = { name: "added.md", path: "/workspace/docs/added.md", isDirectory: false };
+		let resolveRefresh!: (entries: (typeof readme)[]) => void;
+		let docsCalls = 0;
+		mockedListDirectory.mockImplementation((path: string) => {
+			if (path !== "/workspace/docs") return Promise.resolve(mockEntries);
+			docsCalls++;
+			if (docsCalls === 2) {
+				return new Promise((resolve) => {
+					resolveRefresh = resolve;
+				});
+			}
+			return Promise.resolve(docsCalls === 1 ? [readme] : [readme, added]);
+		});
+
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		const docs = await screen.findByLabelText("docs folder");
+		await userEvent.click(docs);
+		await screen.findByText("readme.md");
+		act(() => {
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+		});
+		await waitFor(() => {
+			expect(docsCalls).toBe(2);
+		});
+		await userEvent.click(docs);
+		act(() => {
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+		});
+		await userEvent.click(docs);
+		await screen.findByText("added.md");
+
+		await act(async () => {
+			resolveRefresh([readme]);
+		});
+
+		expect(screen.getByText("added.md")).toBeInTheDocument();
+		expect(docsCalls).toBe(3);
+	});
+
 	it("does not refetch a collapsed folder on re-expand once the stale refetch has completed", async () => {
 		const childEntries = [
 			{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
