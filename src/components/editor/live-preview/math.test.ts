@@ -2,7 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { afterEach, assert, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
 const renderToStringMock = vi.fn(
@@ -28,9 +28,14 @@ const {
 	mathDecorationField,
 	preloadKatexForTest,
 } = await import("./math");
-const { collectDecorations, createTestState, createViewForTest, widgetDecorations } = await import(
-	"./test-helper"
-);
+const {
+	cleanupMountedViews,
+	collectDecorations,
+	createTestState,
+	createViewForTest,
+	mountEditorView,
+	widgetDecorations,
+} = await import("./test-helper");
 
 // MathWidget.toDOM は katex の動的 import 完了後にのみ同期 render される
 // (#301: lazy-load 化）。同期 toDOM を前提とする既存テストのために、
@@ -611,5 +616,53 @@ describe("mathDecorationField (background parse の完了)", () => {
 			view.destroy();
 			parent.remove();
 		}
+	});
+});
+
+describe("mathFocusHandler (real EditorView)", () => {
+	const DOC = "text $x$ here";
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		cleanupMountedViews();
+		vi.useRealTimers();
+	});
+
+	function mathWidgets(view: EditorView) {
+		return widgetDecorations(collectDecorations(view.state.field(mathDecorationField).decos));
+	}
+
+	// CM6 は focusChanged を setTimeout(10ms) 経由で通知するので fake timer で進める。
+	// mermaid の同種 test と違い focus 前に settle しないのは、math には render 起点の
+	// rebuild が無く、katex も beforeAll で preload 済みで notifyKatexReady が走らないため。
+	async function flushFocusChange(): Promise<void> {
+		await vi.advanceTimersByTimeAsync(20);
+	}
+
+	it("数式の行にカーソルがあるとき、focus で source 表示に切り替わる", async () => {
+		const view = mountEditorView(DOC, mathDecoration, DOC.length);
+		expect(mathWidgets(view)).toHaveLength(1);
+
+		view.focus();
+		await flushFocusChange();
+
+		expect(view.hasFocus).toBe(true);
+		expect(mathWidgets(view)).toHaveLength(0);
+	});
+
+	it("数式の行にカーソルがあるとき、blur で preview 表示に戻る", async () => {
+		const view = mountEditorView(DOC, mathDecoration, DOC.length);
+		view.focus();
+		await flushFocusChange();
+		expect(mathWidgets(view)).toHaveLength(0);
+
+		view.contentDOM.blur();
+		await flushFocusChange();
+
+		expect(view.hasFocus).toBe(false);
+		expect(mathWidgets(view)).toHaveLength(1);
 	});
 });
