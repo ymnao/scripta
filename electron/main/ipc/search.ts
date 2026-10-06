@@ -20,7 +20,6 @@ import {
 	buildExistingStemsFrom,
 	buildFileMapFrom,
 	canonicalToInputPaths,
-	isMdWalkSkippedName,
 } from "../utils/search-cache-pure";
 import {
 	buildLineStarts,
@@ -31,6 +30,7 @@ import {
 	fuzzyMatch,
 	isEscaped,
 	isInRanges,
+	isMdWalkSkippedName,
 	maskRanges,
 } from "../utils/search-pure";
 import { type IdleFillDeps, kickIdleFill } from "./index-fill";

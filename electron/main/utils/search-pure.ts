@@ -52,6 +52,10 @@ export function byteCmp(a: string, b: string): number {
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 
+export function isMdWalkSkippedName(name: string): boolean {
+	return name.startsWith(".") || name === "node_modules";
+}
+
 /** 各 query char が target に **順序どおり** 含まれるかを判定する fuzzy match。 */
 export function fuzzyMatch(query: string, target: string): boolean {
 	const q = query.toLowerCase();
