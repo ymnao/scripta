@@ -1502,6 +1502,7 @@ describe("tableDecorationField (編集と同じ transaction で parse が未 par
 		}
 	});
 
+	// mountEditorView は createTestState 経由で全文 parse を強制し、打ち切り parse の前提が崩れるので使わない。
 	it("init parse の打ち切り位置より後ろのテーブルが、parse を完了させた編集の時点で描画される", () => {
 		// init parse (先頭 3000 文字) の外にテーブルを置き、長い行で viewport を文書末まで届かせる。
 		const filler = `${"word ".repeat(100)}\n\n`.repeat(8);

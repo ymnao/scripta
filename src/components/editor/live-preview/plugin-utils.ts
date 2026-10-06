@@ -149,9 +149,11 @@ function changedRangeTouchesCandidates(
 }
 
 /**
- * LanguageState.apply は打ち切られた parse を編集の transaction 内でも viewport 末尾まで
- * 進めるが、treeChangeDispatcher は docChanged の transaction で effect を流さない。
- * ここで拾わないと、そこで parse が完了したとき rebuild の契機が二度と来ない。
+ * LanguageState.apply は打ち切られた parse を編集の transaction 内でも (時間予算の範囲で)
+ * viewport 末尾まで進めるが、treeChangeDispatcher は docChanged の transaction で effect を
+ * 流さない。ここで拾わないと、そこで parse が完了したとき ①② に当たる編集が来るまで
+ * rebuild されない。mapPos の assoc を既定の -1 にしないのは、全文 parse 済みの文書の末尾への
+ * 入力で旧末尾が挿入の手前に写像され、毎打鍵 rebuild になるため。
  */
 function parseExtendedPastPreviousTree(tr: Transaction): boolean {
 	const prevEnd = tr.changes.mapPos(syntaxTree(tr.startState).length, 1);

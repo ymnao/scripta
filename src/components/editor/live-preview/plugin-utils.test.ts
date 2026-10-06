@@ -227,6 +227,14 @@ describe("blockFieldNeedsRebuild — parse の進み", () => {
 
 		expect(blockFieldNeedsRebuild(tr, [], /\|/)).toBe(false);
 	});
+
+	it("全文 parse 済みの文書の末尾への入力では false (旧 tree 末尾は挿入の後ろへ写像される)", () => {
+		const state = createTestState("short doc");
+		expect(syntaxTree(state).length).toBe(state.doc.length);
+		const tr = state.update({ changes: { from: state.doc.length, insert: "x" } });
+
+		expect(blockFieldNeedsRebuild(tr, [], /\|/)).toBe(false);
+	});
 });
 
 // #303 Phase 3: cursorTouchesCandidates は anchor のみを見る (head ではない)。
