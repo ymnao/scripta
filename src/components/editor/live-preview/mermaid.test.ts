@@ -455,9 +455,6 @@ describe("mermaidRenderPlugin (real EditorView)", () => {
 		vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mockReturnValue(false);
 		vi.mocked(mermaidLib.isMermaidInitFailureExhausted).mockReset();
 		vi.mocked(mermaidLib.isMermaidInitFailureExhausted).mockReturnValue(false);
-		// toFake を絞らないのは、scheduleRebuild の RAF を fake clock に乗せるため。
-		// jsdom の RAF は setInterval 駆動なので、RAF と setInterval の両方を
-		// fake から外したときだけ dispatch が流れなくなる。
 		vi.useFakeTimers();
 	});
 
