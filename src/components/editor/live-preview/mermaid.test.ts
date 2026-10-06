@@ -637,6 +637,36 @@ describe("mermaidRenderPlugin (real EditorView)", () => {
 
 		expect(widgetOf(view)?.error).toBe("Parse error");
 	});
+
+	// focus 前に settle するのは、初回 render 開始時の scheduleRebuild も view.hasFocus を
+	// 運ぶため。focus 後に初回 render が走ると focusChangeHandler 抜きでも切り替わる。
+	// focus / blur 後も microtask の flush では足りないのは、CM6 が focusChanged を
+	// setTimeout(10ms) 経由で通知し、それを fake timer で進める必要があるため。
+	it("fence 内にカーソルがあるとき、focus で source 表示に切り替わる", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration, LINE5_END_POS);
+		await settle();
+		expect(widgetOf(view)).toBeDefined();
+
+		view.focus();
+		await settle();
+
+		expect(view.hasFocus).toBe(true);
+		expect(widgetOf(view)).toBeUndefined();
+	});
+
+	it("fence 内にカーソルがあるとき、blur で preview 表示に戻る", async () => {
+		const view = mountEditorView(DOC, mermaidDecoration, LINE5_END_POS);
+		await settle();
+		view.focus();
+		await settle();
+		expect(widgetOf(view)).toBeUndefined();
+
+		view.contentDOM.blur();
+		await settle();
+
+		expect(view.hasFocus).toBe(false);
+		expect(widgetOf(view)).toBeDefined();
+	});
 });
 
 // issue #384: back-off の実体は lib 側 (グローバル 1 record) に移した。
