@@ -149,11 +149,9 @@ function changedRangeTouchesCandidates(
 }
 
 /**
- * docChanged の transaction 内で、parse 済み範囲が旧 tree の末尾 (新座標) より先へ伸びたか。
- * LanguageState.apply は打ち切られた parse の続きを viewport 末尾まで進めるため、
- * 編集と同じ transaction で未 parse 領域の node (Table / fence) が初めて現れうる。
- * treeChangeDispatcher は docChanged の transaction では effect を流さないので、
- * ここで拾わないと parse 完了後に rebuild の契機が二度と来ない。
+ * LanguageState.apply は打ち切られた parse を編集の transaction 内でも viewport 末尾まで
+ * 進めるが、treeChangeDispatcher は docChanged の transaction で effect を流さない。
+ * ここで拾わないと、そこで parse が完了したとき rebuild の契機が二度と来ない。
  */
 function parseExtendedPastPreviousTree(tr: Transaction): boolean {
 	const prevEnd = tr.changes.mapPos(syntaxTree(tr.startState).length, 1);
@@ -164,7 +162,7 @@ function parseExtendedPastPreviousTree(tr: Transaction): boolean {
  * blockFieldNeedsRebuild: docChanged 時に full rebuild が必要か判定する。
  * ① 挿入/削除テキストが marker 文字を含むなら true (新規候補の出現/消滅を検知)
  * ② 変更範囲 (新座標) が candidates と交差 or ±1 行 隣接するなら true
- * ③ parse 済み範囲が旧 tree の末尾より先へ伸びたなら true (candidates が未 parse 領域を欠く)
+ * ③ parse 済み範囲が旧 tree の末尾より先へ伸びたなら true
  * いずれも false なら false = decos.map + candidates map で済む。
  */
 export function blockFieldNeedsRebuild(
@@ -311,6 +309,8 @@ export function createHrReplaceDecoration(
 export const treeChangeDispatcher = ViewPlugin.fromClass(
 	class {
 		update(update: ViewUpdate) {
+			// docChanged の transaction では tree identity が必ず変わるので、parse の前進は
+			// 各 field の blockFieldNeedsRebuild が同じ transaction 内で判定する。
 			if (!update.docChanged && syntaxTree(update.state) !== syntaxTree(update.startState)) {
 				const { view } = update;
 				queueMicrotask(() => {
