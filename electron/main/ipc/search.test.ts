@@ -21,6 +21,7 @@ vi.mock("electron", () => ({
 
 import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
+import { isPathTraversal } from "../utils/search-pure";
 import { __testing as fsTesting } from "./fs";
 import {
 	__testing,
@@ -29,7 +30,6 @@ import {
 	cancelSearchForWindow,
 	cancelWikilinkScanForWindow,
 	extractWikilinks,
-	isPathTraversal,
 } from "./search";
 import {
 	_resetFileListCacheForTest,

@@ -29,6 +29,7 @@ const {
 	isEscaped,
 	isInRanges,
 	isMdWalkSkippedName,
+	isPathTraversal,
 	maskRanges,
 } = searchPure;
 
@@ -117,6 +118,7 @@ const PURE_HELPERS = [
 	isEscaped,
 	isInRanges,
 	isMdWalkSkippedName,
+	isPathTraversal,
 	maskRanges,
 ];
 
@@ -661,15 +663,7 @@ function installApiMock(opts: {
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
-						if (
-							!page ||
-							page.includes("/") ||
-							page.includes("\\") ||
-							page === "." ||
-							page === ".." ||
-							page.includes("..")
-						)
-							continue;
+						if (!page || isPathTraversal(page)) continue;
 						const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
 						const normalized = stripped.normalize("NFC");
 						if (!normalized || existingPages.has(normalized)) continue;
@@ -755,15 +749,7 @@ function installApiMock(opts: {
 						const inner = m[1];
 						const pipeIdx = inner.indexOf("|");
 						const page = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
-						if (
-							!page ||
-							page.includes("/") ||
-							page.includes("\\") ||
-							page === "." ||
-							page === ".." ||
-							page.includes("..")
-						)
-							continue;
+						if (!page || isPathTraversal(page)) continue;
 						const stripped = page.toLowerCase().endsWith(".md") ? page.slice(0, -3) : page;
 						const normalized = stripped.normalize("NFC");
 						if (!normalized || normalized !== targetPage) continue;
