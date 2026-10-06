@@ -61,6 +61,24 @@ describe("insertTable (runtime)", () => {
 		expect(lastLineIsBlank(view)).toBe(true);
 	});
 
+	it("挿入後にヘッダ行の先頭セルへキャレットが移る", async () => {
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		const view = new EditorView({
+			state: createTestState("", 0, [tableDecoration, tableKeymap]),
+			parent,
+		});
+		mounted.push(view);
+		insertTable(view);
+		await new Promise(requestAnimationFrame);
+
+		const cell = view.dom.querySelector('.cm-table-widget [data-row="0"][data-col="0"]');
+		expect(cell).not.toBeNull();
+		// jsdom は contentEditable のセルへ focus() を移さない（activeElement は body のまま）
+		// ので、focusCell が置く DOM selection で観測する。
+		expect(cell?.contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
+	});
+
 	it("本文行の直後に挿入され、本文と空行で区切られテーブル直下に行ができる", () => {
 		const view = mountEditor("hello", 5);
 		insertTable(view);
