@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 // NOTE: 当初の仕様では userEvent.setup({ advanceTimers }) を使う想定だったが、本リポジトリの
-// 実行環境（vitest 4 + jsdom + @testing-library/user-event）では vi.useFakeTimers() 下で
+// 実行環境（vitest + jsdom + @testing-library/user-event）では vi.useFakeTimers() 下で
 // userEvent.hover / tab の await が解決せずデッドロックする（advanceTimers / delay:null でも回避不可。
 // 素の <button> でも再現）。500ms 表示遅延を fake timers で検証する都合上、interaction は
 // fireEvent（同期・fake timers と両立）で発火する。pointer / focus / blur / keydown いずれも
