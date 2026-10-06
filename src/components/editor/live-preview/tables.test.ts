@@ -12,7 +12,13 @@ import {
 	tableKeymap,
 	tsvToMarkdownTable,
 } from "./tables";
-import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
+import {
+	cleanupMountedViews,
+	collectDecorations,
+	createTestState,
+	mountEditorView,
+	replaceDecorations,
+} from "./test-helper";
 
 const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
 
@@ -35,6 +41,7 @@ describe("insertTable (runtime)", () => {
 			mounted.pop()?.destroy();
 		}
 	});
+	afterEach(cleanupMountedViews);
 
 	function mountEditor(doc: string, cursorPos: number): EditorView {
 		const parent = document.createElement("div");
@@ -62,13 +69,7 @@ describe("insertTable (runtime)", () => {
 	});
 
 	it("挿入後にヘッダ行の先頭セルへキャレットが移る", async () => {
-		const parent = document.createElement("div");
-		document.body.appendChild(parent);
-		const view = new EditorView({
-			state: createTestState("", 0, [tableDecoration, tableKeymap]),
-			parent,
-		});
-		mounted.push(view);
+		const view = mountEditorView("", [tableDecoration, tableKeymap], 0);
 		insertTable(view);
 		await new Promise(requestAnimationFrame);
 

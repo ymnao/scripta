@@ -37,7 +37,6 @@ export {
 	focusCell,
 	parseTsv,
 	pasteIntoCell,
-	placeCaretAtEnd,
 	sanitizePasteText,
 	tableCellFocusField,
 } from "./table-widget-core";
