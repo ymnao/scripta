@@ -56,6 +56,12 @@ export function isMdWalkSkippedName(name: string): boolean {
 	return name.startsWith(".") || name === "node_modules";
 }
 
+// path traversal 文字を含むページ名を弾く。
+// `..something` のような正当な名前も弾く（`contains("..")` 相当）。
+export function isPathTraversal(name: string): boolean {
+	return name.includes("/") || name.includes("\\") || name === "." || name.includes("..");
+}
+
 /** 各 query char が target に **順序どおり** 含まれるかを判定する fuzzy match。 */
 export function fuzzyMatch(query: string, target: string): boolean {
 	const q = query.toLowerCase();

@@ -31,6 +31,7 @@ import {
 	isEscaped,
 	isInRanges,
 	isMdWalkSkippedName,
+	isPathTraversal,
 	maskRanges,
 } from "../utils/search-pure";
 import { type IdleFillDeps, kickIdleFill } from "./index-fill";
@@ -1073,12 +1074,6 @@ async function searchFilenamesImpl(
 	// caller が破棄前提でそのまま返してよい (共有 cache 参照ではない)。
 	if (query === "") return input;
 	return input.filter((p) => fuzzyMatch(query, basename(p)));
-}
-
-// path traversal 文字を含むページ名を弾く。
-// `..something` のような正当な名前も弾く（`contains("..")` 相当）。
-export function isPathTraversal(name: string): boolean {
-	return name.includes("/") || name.includes("\\") || name === "." || name.includes("..");
 }
 
 // 1 行から `[[inner]]` を順次抽出する。empty inner（`[[]]`）はスキップ。
