@@ -455,11 +455,10 @@ describe("mermaidRenderPlugin (real EditorView)", () => {
 		vi.mocked(mermaidLib.shouldSkipMermaidInitRetry).mockReturnValue(false);
 		vi.mocked(mermaidLib.isMermaidInitFailureExhausted).mockReset();
 		vi.mocked(mermaidLib.isMermaidInitFailureExhausted).mockReturnValue(false);
-		// RAF まで fake にしないと scheduleRebuild の dispatch を流せない。Date /
-		// queueMicrotask を fake しないのは CM6 内部と Promise 連鎖を壊さないため。
-		vi.useFakeTimers({
-			toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
-		});
+		// toFake を絞らないのは、scheduleRebuild の RAF を fake clock に乗せるため。
+		// jsdom の RAF は setInterval 駆動なので、RAF と setInterval の両方を
+		// fake から外したときだけ dispatch が流れなくなる。
+		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
