@@ -623,7 +623,7 @@ describe("mathFocusHandler (real EditorView)", () => {
 	const DOC = "text $x$ here";
 
 	beforeEach(() => {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
@@ -636,7 +636,8 @@ describe("mathFocusHandler (real EditorView)", () => {
 	}
 
 	// CM6 は focusChanged を setTimeout(10ms) 経由で通知するので fake timer で進める。
-	// queueMicrotask を fake しないのは handler が microtask で dispatch するため。
+	// mermaid の同種 test と違い focus 前に settle しないのは、math には render 起点の
+	// rebuild が無く、katex も beforeAll で preload 済みで notifyKatexReady が走らないため。
 	async function flushFocusChange(): Promise<void> {
 		await vi.advanceTimersByTimeAsync(20);
 	}
