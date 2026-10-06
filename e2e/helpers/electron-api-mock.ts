@@ -2,8 +2,8 @@ import type { Page } from "@playwright/test";
 // browser scope に inject する pure helper 群。installApiMock 内側で bare 参照する
 // identifier をここに列挙し、下の PURE_HELPERS が同じ列を projection として持つ。
 // 追加時は destructure と PURE_HELPERS の 2 箇所を同時更新する。scope は
-// installApiMock が実際に使う helper に絞られ、search-pure.ts / search-cache-pure.ts に
-// 将来追加される mock 無関係な helper が addInitScript payload に混入することは無い。
+// installApiMock が実際に使う helper に絞られ、search-pure.ts に将来追加される mock
+// 無関係な helper が addInitScript payload に混入することは無い。
 //
 // **必ず `import * as` + local const destructure の形を保つこと**:
 // Playwright 内蔵 babel は helper file を package.json に `"type": "module"` が無い
@@ -16,10 +16,8 @@ import type { Page } from "@playwright/test";
 // すると babel は identifier を preserve するため、.toString() の中でも bare の
 // identifier 形が残り、SCRIPT_PREFIX で並べた hoisted 関数宣言が browser 側で
 // resolve できる。
-import * as searchCachePure from "../../electron/main/utils/search-cache-pure";
 import * as searchPure from "../../electron/main/utils/search-pure";
 
-const { isMdWalkSkippedName } = searchCachePure;
 const {
 	buildLineStarts,
 	buildLowerToOrigUtf16Map,
@@ -30,6 +28,7 @@ const {
 	isAsciiOnly,
 	isEscaped,
 	isInRanges,
+	isMdWalkSkippedName,
 	maskRanges,
 } = searchPure;
 
@@ -45,9 +44,8 @@ import type { FileEntry, FsChangeEvent } from "../../src/types/workspace";
 // renderer-only Playwright で `window.api` を addInitScript 注入するモック。
 // 旧 Tauri 版 `tauri-mock.ts` の Electron 移植版（参考: ~/development/tools/scripta/e2e/helpers/tauri-mock.ts）。
 //
-// installApiMock 内で使う純関数群は search-pure.ts / search-cache-pure.ts (本番
-// electron/main/ipc/search.ts が import する同じモジュール) の関数をそのまま browser
-// scope に inject する経路を通す。
+// installApiMock 内で使う純関数群は search-pure.ts (本番 electron/main/ipc/search.ts が
+// import する同じモジュール) の関数をそのまま browser scope に inject する経路を通す。
 // addInitScript の callback は 1 個の関数を .toString() して browser 側で実行するため、
 // callback スコープの外にある import された関数は参照できない。そこで setup() で以下の
 // 順に script content を組み立てる:
@@ -105,8 +103,8 @@ declare global {
 }
 
 // addInitScript の script content 先頭に .toString() を並べて注入する pure helper 群。
-// 上の searchPure / searchCachePure destructure と 1:1 対応 (真実源は destructure、
-// この配列はそれを value として projection する)。順序は依存関係を意識しない — 関数宣言は hoist される
+// 上の searchPure destructure と 1:1 対応 (真実源は destructure、この配列はそれを
+// value として projection する)。順序は依存関係を意識しない — 関数宣言は hoist される
 // ので実質どの順でも動く。
 const PURE_HELPERS = [
 	buildLineStarts,

@@ -1,11 +1,7 @@
 import { basename, sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { relComponentsUnderRoot } from "./root-relative-path";
-import { byteCmp } from "./search-pure";
-
-export function isMdWalkSkippedName(name: string): boolean {
-	return name.startsWith(".") || name === "node_modules";
-}
+import { byteCmp, isMdWalkSkippedName } from "./search-pure";
 
 // canonicalRoot 自身と canonicalRoot 外は false。後者は呼び出し契約 (canonical batch は
 // 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来どおりの
