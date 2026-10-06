@@ -638,7 +638,7 @@ describe("mermaidRenderPlugin (real EditorView)", () => {
 		expect(widgetOf(view)?.error).toBe("Parse error");
 	});
 
-	// focus 前に settle するのは、初回 render 完了時の scheduleRebuild も view.hasFocus を
+	// focus 前に settle するのは、初回 render 開始時の scheduleRebuild も view.hasFocus を
 	// 運ぶため。focus 後に初回 render が走ると focusChangeHandler 抜きでも切り替わる。
 	// focus / blur 後も microtask の flush では足りないのは、CM6 が focusChanged を
 	// setTimeout(10ms) 経由で通知し、それを fake timer で進める必要があるため。
