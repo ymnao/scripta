@@ -12,7 +12,13 @@ import {
 	tableKeymap,
 	tsvToMarkdownTable,
 } from "./tables";
-import { collectDecorations, createTestState, replaceDecorations } from "./test-helper";
+import {
+	cleanupMountedViews,
+	collectDecorations,
+	createTestState,
+	mountEditorView,
+	replaceDecorations,
+} from "./test-helper";
 
 const simpleTable = "| A | B |\n| --- | --- |\n| 1 | 2 |";
 
@@ -34,6 +40,7 @@ describe("insertTable (runtime)", () => {
 		while (mounted.length > 0) {
 			mounted.pop()?.destroy();
 		}
+		cleanupMountedViews();
 	});
 
 	function mountEditor(doc: string, cursorPos: number): EditorView {
@@ -59,6 +66,19 @@ describe("insertTable (runtime)", () => {
 		// 末尾は単一の改行（余分な空行 \n\n を作らない）
 		expect(text).toBe(`${createEmptyTable(3, 2)}\n`);
 		expect(lastLineIsBlank(view)).toBe(true);
+	});
+
+	it("挿入後にヘッダ行の先頭セルへキャレットが移る", async () => {
+		const view = mountEditorView("", [tableDecoration, tableKeymap], 0);
+		insertTable(view);
+		await new Promise(requestAnimationFrame);
+
+		const cell = view.dom.querySelector('.cm-table-widget [data-row="0"][data-col="0"]');
+		expect(cell).not.toBeNull();
+		// jsdom は contentEditable の IDL property を実装しておらず、widget の
+		// `cell.contentEditable = "true"` が属性に反映されないためセルが focusable にならない
+		// （activeElement は body のまま）。focusCell が置く DOM selection で観測する。
+		expect(cell?.contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
 	});
 
 	it("本文行の直後に挿入され、本文と空行で区切られテーブル直下に行ができる", () => {

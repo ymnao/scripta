@@ -52,7 +52,7 @@ const DELIMITER_RE = /^\s*:?-{1,}:?\s*$/;
  * `|` 直前の `\` 個数は常に奇数になる。3 段目 (`[\r\n]+` → 空白) は表構造を
  * 壊す行内改行を潰すためで、パイプエスケープの整合性とは独立。
  *
- * tsvToMarkdownTable (tables.ts) / cellContents 組み立て (table-decoration.ts) の
+ * tsvToMarkdownTable (tables.ts) / cellContents 組み立て (table-widget-core.ts) の
  * 共通実装。副作用として `|` に隣接しない lone `\` も倍化される (旧 escapeCell は
  * lone `\` を保持していた) — DOM→md 経路との roundtrip 一貫性を優先した。
  */
