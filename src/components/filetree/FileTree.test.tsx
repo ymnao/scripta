@@ -9,6 +9,7 @@ import {
 	renameEntry,
 } from "../../lib/commands";
 import { useDragStore } from "../../stores/drag";
+import { useWorkspaceStore } from "../../stores/workspace";
 
 vi.mock("../../lib/commands", () => ({
 	listDirectory: vi.fn(),
@@ -407,6 +408,66 @@ describe("FileTree", () => {
 			expect(mockedDeleteEntry).toHaveBeenCalledWith("/workspace/hello.md");
 		});
 		expect(onFileDeleted).toHaveBeenCalledWith("/workspace/hello.md", false);
+	});
+
+	it("refetches a collapsed folder on re-expand when a tree refresh happened while collapsed", async () => {
+		let docsEntries = [
+			{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+		];
+		mockedListDirectory.mockImplementation(async (path: string) =>
+			path === "/workspace/docs" ? docsEntries : mockEntries,
+		);
+
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		const docs = await screen.findByLabelText("docs folder");
+		await userEvent.click(docs);
+		await screen.findByText("readme.md");
+		await userEvent.click(docs);
+		await waitFor(() => {
+			expect(screen.queryByText("readme.md")).not.toBeInTheDocument();
+		});
+
+		docsEntries = [
+			...docsEntries,
+			{ name: "added.md", path: "/workspace/docs/added.md", isDirectory: false },
+		];
+		act(() => {
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+		});
+		await userEvent.click(docs);
+
+		expect(await screen.findByText("added.md")).toBeInTheDocument();
+	});
+
+	it("does not refetch a collapsed folder on re-expand once the stale refetch has completed", async () => {
+		const childEntries = [
+			{ name: "readme.md", path: "/workspace/docs/readme.md", isDirectory: false },
+		];
+		mockedListDirectory.mockImplementation(async (path: string) =>
+			path === "/workspace/docs" ? childEntries : mockEntries,
+		);
+		const docsFetchCount = () =>
+			mockedListDirectory.mock.calls.filter(([path]) => path === "/workspace/docs").length;
+
+		render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+		const docs = await screen.findByLabelText("docs folder");
+		await userEvent.click(docs);
+		await screen.findByText("readme.md");
+		await userEvent.click(docs);
+		act(() => {
+			useWorkspaceStore.getState().bumpFileTreeVersion();
+		});
+		await userEvent.click(docs);
+		await screen.findByText("readme.md");
+		expect(docsFetchCount()).toBe(2);
+
+		await userEvent.click(docs);
+		await waitFor(() => {
+			expect(screen.queryByText("readme.md")).not.toBeInTheDocument();
+		});
+		await userEvent.click(docs);
+		await screen.findByText("readme.md");
+		expect(docsFetchCount()).toBe(2);
 	});
 
 	describe("Drag and Drop", () => {
