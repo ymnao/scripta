@@ -10,6 +10,7 @@ import {
 	isAsciiOnly,
 	isEscaped,
 	isInRanges,
+	isPathTraversal,
 	maskRanges,
 } from "./search-pure";
 
@@ -113,6 +114,31 @@ describe("byteCmp", () => {
 		const arr = ["banana", "apple", "cherry"];
 		arr.sort(byteCmp);
 		expect(arr).toEqual(["apple", "banana", "cherry"]);
+	});
+});
+
+describe("isPathTraversal", () => {
+	it("rejects forward slash", () => {
+		expect(isPathTraversal("path/to/file")).toBe(true);
+	});
+
+	it("rejects backslash", () => {
+		expect(isPathTraversal("path\\to\\file")).toBe(true);
+	});
+
+	it("rejects single dot", () => {
+		expect(isPathTraversal(".")).toBe(true);
+	});
+
+	it("rejects double dot anywhere", () => {
+		expect(isPathTraversal("..")).toBe(true);
+		expect(isPathTraversal("..secret")).toBe(true);
+	});
+
+	it("accepts normal page names", () => {
+		expect(isPathTraversal("normal")).toBe(false);
+		expect(isPathTraversal("page-name")).toBe(false);
+		expect(isPathTraversal("日本語ページ")).toBe(false);
 	});
 });
 

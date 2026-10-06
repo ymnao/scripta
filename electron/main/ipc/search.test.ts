@@ -21,7 +21,6 @@ vi.mock("electron", () => ({
 
 import { createTempWorkspace, type TempWorkspace } from "../test-utils/temp-workspace";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
-import { isPathTraversal } from "../utils/search-pure";
 import { __testing as fsTesting } from "./fs";
 import {
 	__testing,
@@ -61,31 +60,6 @@ afterEach(async () => {
 	clearWorkspaceRoots();
 	await ws.cleanup();
 	_resetFileListCacheForTest();
-});
-
-describe("isPathTraversal", () => {
-	it("rejects forward slash", () => {
-		expect(isPathTraversal("path/to/file")).toBe(true);
-	});
-
-	it("rejects backslash", () => {
-		expect(isPathTraversal("path\\to\\file")).toBe(true);
-	});
-
-	it("rejects single dot", () => {
-		expect(isPathTraversal(".")).toBe(true);
-	});
-
-	it("rejects double dot anywhere", () => {
-		expect(isPathTraversal("..")).toBe(true);
-		expect(isPathTraversal("..secret")).toBe(true);
-	});
-
-	it("accepts normal page names", () => {
-		expect(isPathTraversal("normal")).toBe(false);
-		expect(isPathTraversal("page-name")).toBe(false);
-		expect(isPathTraversal("日本語ページ")).toBe(false);
-	});
 });
 
 describe("extractWikilinks", () => {
