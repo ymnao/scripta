@@ -2,7 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { afterEach, assert, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
 const renderToStringMock = vi.fn(
@@ -622,6 +622,10 @@ describe("mathDecorationField (background parse の完了)", () => {
 describe("mathFocusHandler (real EditorView)", () => {
 	const DOC = "text $x$ here";
 
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+	});
+
 	afterEach(() => {
 		cleanupMountedViews();
 		vi.useRealTimers();
@@ -638,7 +642,6 @@ describe("mathFocusHandler (real EditorView)", () => {
 	}
 
 	it("数式の行にカーソルがあるとき、focus で source 表示に切り替わる", async () => {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		const view = mountEditorView(DOC, mathDecoration, DOC.length);
 		expect(mathWidgets(view)).toHaveLength(1);
 
@@ -650,7 +653,6 @@ describe("mathFocusHandler (real EditorView)", () => {
 	});
 
 	it("数式の行にカーソルがあるとき、blur で preview 表示に戻る", async () => {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		const view = mountEditorView(DOC, mathDecoration, DOC.length);
 		view.focus();
 		await flushFocusChange();
