@@ -1,4 +1,6 @@
 import { history, redo, undo } from "@codemirror/commands";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, type WidgetType } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1485,5 +1487,50 @@ describe("tableWidgetPositionSync (skip path でも dataset.tableFrom が live �
 		const tableFromAfter = Number(widgetAfter.dataset.tableFrom);
 		expect(tableFromAfter).toBe(view.posAtDOM(widgetAfter));
 		expect(tableFromAfter).toBe(tableFromBefore + 5);
+	});
+});
+
+describe("tableDecorationField (編集と同じ transaction で parse が未 parse 領域へ進んだとき)", () => {
+	const mounted: EditorView[] = [];
+
+	afterEach(() => {
+		while (mounted.length > 0) {
+			const view = mounted.pop();
+			const parent = view?.dom.parentElement;
+			view?.destroy();
+			parent?.remove();
+		}
+		vi.restoreAllMocks();
+	});
+
+	// mountEditorView は createTestState 経由で全文 parse を強制し、打ち切り parse の前提が崩れるので使わない。
+	it("init parse の打ち切り位置より後ろのテーブルが、parse を完了させた編集の時点で描画される", () => {
+		// parse の時間予算 (20ms) が CPU 競合で切れると打ち切り位置がずれるので、時計を止めて決定化する (#419)。
+		vi.spyOn(Date, "now").mockReturnValue(0);
+		// init parse (先頭 3000 文字) の外にテーブルを置き、長い行で viewport を文書末まで届かせる。
+		const filler = `${"word ".repeat(100)}\n\n`.repeat(8);
+		const doc = `${filler}| a | b |\n| - | - |\n| 1 | 2 |\n\nafter`;
+		const parent = document.createElement("div");
+		document.body.appendChild(parent);
+		const view = new EditorView({
+			state: EditorState.create({
+				doc,
+				extensions: [markdown({ base: markdownLanguage }), tableDecoration],
+			}),
+			parent,
+		});
+		mounted.push(view);
+		expect(syntaxTree(view.state).length).toBeLessThan(doc.indexOf("| a |"));
+		expect(view.viewport.to).toBe(doc.length);
+
+		// 非 doc の update で parse context に実 viewport を渡す (実機では mount 直後の measure がこれを担う)。
+		view.dispatch({ selection: { anchor: 0 } });
+		// テーブルから離れた位置への `|` を含まない入力 (marker / 隣接判定はどちらも false)。
+		view.dispatch({ changes: { from: 0, insert: "a" } });
+
+		expect(syntaxTree(view.state).length).toBe(view.state.doc.length);
+		expect(
+			widgetDecorations(collectDecorations(view.state.field(tableDecorationField).decos)),
+		).toHaveLength(1);
 	});
 });

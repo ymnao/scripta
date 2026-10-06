@@ -25,6 +25,8 @@ import {
 	type CandidateRange,
 	cursorTouchesCandidates,
 	mapCandidates,
+	treeChangeDispatcher,
+	treeParseProgressed,
 } from "./plugin-utils";
 
 export { isEscaped };
@@ -373,6 +375,10 @@ export const mathDecorationField = StateField.define<BlockFieldValue>({
 			if (e.is(rebuildMathDecos)) {
 				return buildMathDecorationsAndCandidates(tr.state, e.value);
 			}
+			// math 自体は正規表現で拾うが、code block 内の除外は tree 由来の codeRanges に依る。
+			if (e.is(treeParseProgressed)) {
+				return buildMathDecorationsAndCandidates(tr.state, tr.state.field(mathHasFocusField));
+			}
 		}
 		if (tr.docChanged) {
 			if (blockFieldNeedsRebuild(tr, value.candidates, MATH_MARKER_RE)) {
@@ -517,6 +523,8 @@ export const mathDecoration: Extension = [
 	codeRangesField,
 	mathHasFocusField,
 	mathDecorationField,
+	// mermaid / table と同じインスタンスなので、併用時も CodeMirror が dedup する。
+	treeChangeDispatcher,
 	mathFocusHandler,
 	mathViewRegistryPlugin,
 	createMathClickHandler(),
