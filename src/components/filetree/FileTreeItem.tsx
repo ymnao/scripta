@@ -59,7 +59,6 @@ export function FileTreeItem({
 	const [loaded, setLoaded] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [loadError, setLoadError] = useState(false);
-	const [stale, setStale] = useState(false);
 	const isMountedRef = useRef(true);
 
 	const isDragSource = useDragStore((s) => s.sourcePath === entry.path);
@@ -83,7 +82,6 @@ export function FileTreeItem({
 				if (!isMountedRef.current) return;
 				setChildren(entries);
 				setLoaded(true);
-				setStale(false);
 				setExpanded(true);
 			})
 			.catch((err) => {
@@ -104,23 +102,23 @@ export function FileTreeItem({
 	// Auto-expand folder when creating inside it
 	useEffect(() => {
 		if (isCreatingHere && !expanded) {
-			if ((!loaded || stale) && !loading && !loadError) {
+			if (!loaded && !loading && !loadError) {
 				loadChildren();
 			} else if (loaded) {
 				setExpanded(true);
 			}
 		}
-	}, [isCreatingHere, expanded, loaded, stale, loading, loadError, loadChildren]);
+	}, [isCreatingHere, expanded, loaded, loading, loadError, loadChildren]);
 
-	// Re-fetch children when refreshKey changes. Collapsed folders are marked stale
-	// instead and re-fetch on the next expand.
+	// Re-fetch children when refreshKey changes. Collapsed folders are reset to
+	// not-loaded instead, so every expand path re-fetches them on the next expand.
 	const prevRefreshKeyRef = useRef(refreshKey);
 	useEffect(() => {
 		if (prevRefreshKeyRef.current === refreshKey) return;
 		prevRefreshKeyRef.current = refreshKey;
 		if (!entry.isDirectory || !loaded) return;
 		if (!expanded) {
-			setStale(true);
+			setLoaded(false);
 			return;
 		}
 		let ignore = false;
@@ -142,19 +140,19 @@ export function FileTreeItem({
 	useEffect(() => {
 		if (!isDragOver || expanded) return;
 		const timer = setTimeout(() => {
-			if ((!loaded || stale) && !loading && !loadError) {
+			if (!loaded && !loading && !loadError) {
 				loadChildren();
 			} else if (loaded) {
 				setExpanded(true);
 			}
 		}, DRAG_EXPAND_DELAY);
 		return () => clearTimeout(timer);
-	}, [isDragOver, expanded, loaded, stale, loading, loadError, loadChildren]);
+	}, [isDragOver, expanded, loaded, loading, loadError, loadChildren]);
 
 	const handleClick = useCallback(
 		(e: React.MouseEvent) => {
 			if (entry.isDirectory) {
-				if ((!loaded || loadError || (stale && !expanded)) && !loading) {
+				if ((!loaded || loadError) && !loading) {
 					loadChildren();
 				} else if (loaded) {
 					setExpanded((prev) => !prev);
@@ -170,8 +168,6 @@ export function FileTreeItem({
 			entry.path,
 			loaded,
 			loadError,
-			stale,
-			expanded,
 			loading,
 			loadChildren,
 			onFileSelect,
