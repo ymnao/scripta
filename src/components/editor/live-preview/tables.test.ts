@@ -40,8 +40,8 @@ describe("insertTable (runtime)", () => {
 		while (mounted.length > 0) {
 			mounted.pop()?.destroy();
 		}
+		cleanupMountedViews();
 	});
-	afterEach(cleanupMountedViews);
 
 	function mountEditor(doc: string, cursorPos: number): EditorView {
 		const parent = document.createElement("div");
