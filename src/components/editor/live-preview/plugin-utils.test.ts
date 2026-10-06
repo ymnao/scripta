@@ -1,3 +1,5 @@
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { ChangeSet, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
@@ -196,6 +198,34 @@ describe("blockFieldNeedsRebuild — marker detection stability", () => {
 		const state = EditorState.create({ doc: "a$b" });
 		const tr = state.update({ changes: { from: 1, to: 2, insert: "" } });
 		expect(blockFieldNeedsRebuild(tr, candidates, marker)).toBe(true);
+	});
+});
+
+describe("blockFieldNeedsRebuild — parse の進み", () => {
+	// LanguageState.init は先頭 3000 文字までしか parse しない。
+	const longDoc = `${"word ".repeat(100)}\n\n`.repeat(8);
+
+	function createTruncatedState(): EditorState {
+		return EditorState.create({ doc: longDoc, extensions: [markdown({ base: markdownLanguage })] });
+	}
+
+	it("parse 済み範囲が旧 tree の末尾を越えて伸びたら true", () => {
+		const state = createTruncatedState();
+		expect(syntaxTree(state).length).toBeLessThan(longDoc.length);
+		// context 側だけ全文 parse しておくと、次の transaction の apply で field の tree が伸びる。
+		ensureSyntaxTree(state, longDoc.length, Number.POSITIVE_INFINITY);
+		const tr = state.update({ changes: { from: 0, insert: "a" } });
+		expect(syntaxTree(tr.state).length).toBe(tr.state.doc.length);
+
+		expect(blockFieldNeedsRebuild(tr, [], /\|/)).toBe(true);
+	});
+
+	it("parse が打ち切られたまま伸びない編集では false (毎打鍵 rebuild しない)", () => {
+		const state = createTruncatedState();
+		const tr = state.update({ changes: { from: 0, insert: "a" } });
+		expect(syntaxTree(tr.state).length).toBe(syntaxTree(state).length + 1);
+
+		expect(blockFieldNeedsRebuild(tr, [], /\|/)).toBe(false);
 	});
 });
 
