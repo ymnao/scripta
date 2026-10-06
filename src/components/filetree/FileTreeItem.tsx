@@ -74,7 +74,12 @@ export function FileTreeItem({
 		};
 	}, []);
 
+	// Bumped by every children fetch so that an in-flight refresh never overwrites
+	// a fetch issued after it (see the refresh effect below).
+	const fetchIdRef = useRef(0);
+
 	const loadChildren = useCallback(() => {
+		fetchIdRef.current++;
 		setLoading(true);
 		setLoadError(false);
 		listDirectory(entry.path, { applyFileTreeFilter: true })
@@ -110,25 +115,30 @@ export function FileTreeItem({
 		}
 	}, [isCreatingHere, expanded, loaded, loading, loadError, loadChildren]);
 
-	// Re-fetch children when refreshKey changes (for expanded folders)
+	// Re-fetch children when refreshKey changes. Collapsed folders are reset to
+	// not-loaded instead, so every expand path re-fetches them on the next expand.
+	// Superseded results are dropped by id rather than by effect cleanup: cleanup also
+	// runs when the folder is collapsed mid-fetch, and dropping the result there would
+	// leave loaded=true with stale children that the next expand does not re-fetch.
 	const prevRefreshKeyRef = useRef(refreshKey);
 	useEffect(() => {
 		if (prevRefreshKeyRef.current === refreshKey) return;
 		prevRefreshKeyRef.current = refreshKey;
-		if (!entry.isDirectory || !expanded || !loaded) return;
-		let ignore = false;
+		if (!entry.isDirectory || !loaded) return;
+		if (!expanded) {
+			setLoaded(false);
+			return;
+		}
+		const id = ++fetchIdRef.current;
 		listDirectory(entry.path, { applyFileTreeFilter: true })
 			.then((entries) => {
-				if (ignore || !isMountedRef.current) return;
+				if (fetchIdRef.current !== id || !isMountedRef.current) return;
 				setChildren(entries);
 			})
 			.catch((err) => {
-				if (ignore || !isMountedRef.current) return;
+				if (fetchIdRef.current !== id || !isMountedRef.current) return;
 				console.error("Failed to refresh directory:", err);
 			});
-		return () => {
-			ignore = true;
-		};
 	}, [refreshKey, entry.isDirectory, entry.path, expanded, loaded]);
 
 	// Auto-expand folder on drag hover (500ms)
