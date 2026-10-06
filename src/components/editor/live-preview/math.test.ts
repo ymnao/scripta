@@ -28,9 +28,14 @@ const {
 	mathDecorationField,
 	preloadKatexForTest,
 } = await import("./math");
-const { collectDecorations, createTestState, createViewForTest, widgetDecorations } = await import(
-	"./test-helper"
-);
+const {
+	cleanupMountedViews,
+	collectDecorations,
+	createTestState,
+	createViewForTest,
+	mountEditorView,
+	widgetDecorations,
+} = await import("./test-helper");
 
 // MathWidget.toDOM は katex の動的 import 完了後にのみ同期 render される
 // (#301: lazy-load 化）。同期 toDOM を前提とする既存テストのために、
@@ -611,5 +616,50 @@ describe("mathDecorationField (background parse の完了)", () => {
 			view.destroy();
 			parent.remove();
 		}
+	});
+});
+
+describe("mathFocusHandler (real EditorView)", () => {
+	const DOC = "text $x$ here";
+
+	afterEach(() => {
+		cleanupMountedViews();
+		vi.useRealTimers();
+	});
+
+	function mathWidgets(view: EditorView) {
+		return widgetDecorations(collectDecorations(view.state.field(mathDecorationField).decos));
+	}
+
+	// CM6 は focusChanged を setTimeout(10ms) 経由で通知するので fake timer で進める。
+	// queueMicrotask を fake しないのは handler が microtask で dispatch するため。
+	async function flushFocusChange(): Promise<void> {
+		await vi.advanceTimersByTimeAsync(20);
+	}
+
+	it("数式の行にカーソルがあるとき、focus で source 表示に切り替わる", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		const view = mountEditorView(DOC, mathDecoration, DOC.length);
+		expect(mathWidgets(view)).toHaveLength(1);
+
+		view.focus();
+		await flushFocusChange();
+
+		expect(view.hasFocus).toBe(true);
+		expect(mathWidgets(view)).toHaveLength(0);
+	});
+
+	it("数式の行にカーソルがあるとき、blur で preview 表示に戻る", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		const view = mountEditorView(DOC, mathDecoration, DOC.length);
+		view.focus();
+		await flushFocusChange();
+		expect(mathWidgets(view)).toHaveLength(0);
+
+		view.contentDOM.blur();
+		await flushFocusChange();
+
+		expect(view.hasFocus).toBe(false);
+		expect(mathWidgets(view)).toHaveLength(1);
 	});
 });
