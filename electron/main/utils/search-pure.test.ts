@@ -140,6 +140,11 @@ describe("isPathTraversal", () => {
 		expect(isPathTraversal("page-name")).toBe(false);
 		expect(isPathTraversal("日本語ページ")).toBe(false);
 	});
+
+	it("accepts names containing a single dot", () => {
+		expect(isPathTraversal("v1.2")).toBe(false);
+		expect(isPathTraversal("a.b.c")).toBe(false);
+	});
 });
 
 describe("fuzzyMatch", () => {
