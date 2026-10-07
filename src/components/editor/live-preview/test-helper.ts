@@ -2,6 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { type Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import { afterEach, beforeEach, type MockInstance, vi } from "vitest";
 import { treeParseProgressed } from "./plugin-utils";
 
 export function createTestState(
@@ -81,6 +82,24 @@ export function mountEditorView(
 	const view = new EditorView({ state, parent });
 	mountedViews.push(view);
 	return view;
+}
+
+/** 呼び出した describe の各 test の間、`Date.now` を固定する。
+ *
+ *  CM6 の parse は `Date.now` で測る 20ms 予算でも打ち切られ、CPU 競合下ではその
+ *  位置が揺れる。固定すると打ち切りは位置 (init の 3000 文字 / viewport) だけで
+ *  決まる (#419)。編集後に `treeParseProgressed` を流して tree を追いつかせる形に
+ *  しないのは、tree 依存の StateField がその effect で無条件に rebuild し、skip
+ *  path (widget 参照の維持) を検証できなくなるため。 */
+export function freezeParseClock(): void {
+	let spy: MockInstance<() => number> | undefined;
+	beforeEach(() => {
+		const now = Date.now();
+		spy = vi.spyOn(Date, "now").mockReturnValue(now);
+	});
+	afterEach(() => {
+		spy?.mockRestore();
+	});
 }
 
 /** `mountEditorView` で mount した view をすべて破棄する。

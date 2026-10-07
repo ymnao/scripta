@@ -2,7 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { ChangeSet, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
 	blockFieldNeedsRebuild,
 	type CandidateRange,
@@ -10,7 +10,7 @@ import {
 	handleComposingUpdate,
 	iterateVisibleSyntax,
 } from "./plugin-utils";
-import { createMockView, createTestState } from "./test-helper";
+import { createMockView, createTestState, freezeParseClock } from "./test-helper";
 
 describe("iterateVisibleSyntax", () => {
 	it("visits nodes inside visibleRanges only", () => {
@@ -205,13 +205,7 @@ describe("blockFieldNeedsRebuild — parse の進み", () => {
 	// LanguageState.init は先頭 3000 文字までしか parse しない。
 	const longDoc = `${"word ".repeat(100)}\n\n`.repeat(8);
 
-	// parse の時間予算 (20ms) が CPU 競合で切れると打ち切り位置がずれるので、時計を止めて決定化する (#419)。
-	beforeEach(() => {
-		vi.spyOn(Date, "now").mockReturnValue(0);
-	});
-	afterEach(() => {
-		vi.restoreAllMocks();
-	});
+	freezeParseClock();
 
 	function createTruncatedState(): EditorState {
 		return EditorState.create({ doc: longDoc, extensions: [markdown({ base: markdownLanguage })] });

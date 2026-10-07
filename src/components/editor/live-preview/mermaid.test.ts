@@ -82,6 +82,7 @@ import {
 	cleanupMountedViews,
 	collectDecorations,
 	createTestState,
+	freezeParseClock,
 	mountEditorView,
 	replaceDecorations,
 	widgetDecorations,
@@ -224,6 +225,8 @@ describe("buildMermaidDecorations", () => {
 // - full rebuild path (`buildMermaidDecorationsAndCandidates`) は常に新しい MermaidWidget
 //   インスタンスを生成する（内容が同じでも参照は別物になる）
 describe("mermaidDecorationField (StateField diff rebuild)", () => {
+	freezeParseClock();
+
 	function makeState(doc: string, selection?: EditorSelection): EditorState {
 		return createTestState(doc, undefined, mermaidDecoration, selection);
 	}
