@@ -2,6 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { type Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import { afterEach, beforeEach, type MockInstance, vi } from "vitest";
 import { treeParseProgressed } from "./plugin-utils";
 
 export function createTestState(
@@ -81,6 +82,25 @@ export function mountEditorView(
 	const view = new EditorView({ state, parent });
 	mountedViews.push(view);
 	return view;
+}
+
+/** 呼び出した describe の各 test の間、`Date.now` を固定する。
+ *
+ *  編集 transaction の `LanguageState.apply` は incremental parse を `Date.now` で
+ *  測る 20ms 予算で打ち切りうる (full run の CPU 競合下で mermaid の diff rebuild
+ *  test が widget 0 件で落ちた)。tree 依存の StateField はその途中の tree で
+ *  rebuild する。打ち切り後に `treeParseProgressed` を流して追いつかせないのは、
+ *  field がその effect で無条件に rebuild し、skip path (widget 参照の維持) を
+ *  検証できなくなるため。途中までの parse を検証する describe では呼ばない。 */
+export function freezeParseClock(): void {
+	let spy: MockInstance<() => number> | undefined;
+	beforeEach(() => {
+		const now = Date.now();
+		spy = vi.spyOn(Date, "now").mockReturnValue(now);
+	});
+	afterEach(() => {
+		spy?.mockRestore();
+	});
 }
 
 /** `mountEditorView` で mount した view をすべて破棄する。

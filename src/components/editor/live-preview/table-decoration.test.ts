@@ -18,6 +18,7 @@ import {
 import {
 	collectDecorations,
 	createTestState,
+	freezeParseClock,
 	replaceDecorations,
 	widgetDecorations,
 } from "./test-helper";
@@ -1243,6 +1244,8 @@ describe("parseTsv", () => {
 // - full rebuild path (`buildTableDecorationsAndCandidates`) は常に新しい
 //   EditableTableWidget インスタンスを生成する（内容が同じでも参照は別物になる）
 describe("tableDecorationField (StateField diff rebuild)", () => {
+	freezeParseClock();
+
 	function makeState(doc: string, selection?: EditorSelection): EditorState {
 		return createTestState(doc, undefined, tableDecoration, selection);
 	}
