@@ -783,7 +783,7 @@ export function AppLayout() {
 				updateDescription={updateDescription}
 				onUpdateConfirm={openReleasePage}
 				onUpdateCancel={dismissUpdateDialog}
-				externalConflict={externalFileConflict}
+				externalFileConflict={externalFileConflict}
 			/>
 		</div>
 	);

@@ -7,7 +7,7 @@ interface AppNotificationDialogsProps {
 	updateDescription: string;
 	onUpdateConfirm: () => void;
 	onUpdateCancel: () => void;
-	externalConflict: ExternalFileConflictState;
+	externalFileConflict: ExternalFileConflictState;
 }
 
 export function AppNotificationDialogs({
@@ -15,7 +15,7 @@ export function AppNotificationDialogs({
 	updateDescription,
 	onUpdateConfirm,
 	onUpdateCancel,
-	externalConflict: {
+	externalFileConflict: {
 		externalConflict,
 		handleConflictReload,
 		handleConflictKeep,
