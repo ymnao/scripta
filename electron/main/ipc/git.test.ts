@@ -934,9 +934,13 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
+			// L1 は populate 時点で first.md を含むので、invalidation が丸ごと空振りしても
+			// toContain は通る。経路が動いたことは L2 の evict で観測する。
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
 			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
 			expect(await fsp.readFile(join(canonicalRoot, "first.md"), "utf8")).toBe("local\n");
 			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
+			expect(read()).toBeUndefined();
 		} finally {
 			releaseFileListCache(canonicalRoot);
 		}
@@ -959,6 +963,34 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
 			expect(await fsp.readFile(join(canonicalRoot, "other.md"), "utf8")).toBe("upstream other\n");
 			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("removes a .md under a dir replaced upstream by a file when the merge pull stops at another conflict", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await fsp.mkdir(join(work, "d.md"));
+		await commitFile(work, join("d.md", "x.md"), "base\n", "add d.md/x.md");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			const dgit = createGit(dir);
+			await dgit.raw(["rm", "-r", "--", "d.md"]);
+			await commitFile(dir, "d.md", "now a file\n", "replace dir with file");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [
+				join(canonicalRoot, "first.md"),
+				join(canonicalRoot, "d.md", "x.md"),
+			]);
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			expect((await fsp.lstat(join(canonicalRoot, "d.md"))).isFile()).toBe(true);
+			const files = getCachedMdFiles(canonicalRoot);
+			expect(files).not.toContain(join(canonicalRoot, "d.md", "x.md"));
+			expect(files).toContain(join(canonicalRoot, "d.md"));
 		} finally {
 			releaseFileListCache(canonicalRoot);
 		}

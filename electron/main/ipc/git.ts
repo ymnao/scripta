@@ -43,8 +43,9 @@ const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
 // HEAD の commit hash。unborn branch（commit が 1 つも無い repo）では null。
 // `--verify -q` は unborn で「出力なし + exit 1」になるので、エラー文言は見ない。
 // **null は「unborn」と「読めなかった」を区別しない**。後者を unborn と誤判定すると
-// `ls-files` 全件を create として流す。`.md` の create は L2 を evict しないので、実際に
-// 書き換わった `.md` は watcher flush まで stale のまま（この修正前と同じ）。tracked に非 `.md`
+// `ls-files` 全件を create として流す。`.md` の create は L2 を evict しないので、成功経路では
+// 実際に書き換わった `.md` は watcher flush まで stale のまま（この修正前と同じ。失敗経路は
+// resolveKindsByWorkingTree が modify も流す）。tracked に非 `.md`
 // があればその create が L1 の full invalidate を起こすので、再 walk のコストは余分に払う
 // （安全側）。区別のために失敗種別をエラー文言から判定すると、git のメッセージ変更に追従する
 // 負債の方が大きい。
@@ -87,8 +88,8 @@ function parseNameStatusZ(out: string, canonicalRoot: string): FsChangeEvent[] {
 // kind を決めず working tree の実在で決める。status 文字に頼ると、modify/delete conflict で
 // 復活した file が `U` → modify になって L1 に入らず、rebase では HEAD 差分の `D` で残っている
 // file が L1 から消える。実在するときに modify も流すのは、create だけでは `.md` の L2 / L3 が
-// evict されず marker 版や旧内容が残るため。lstat が ENOENT 以外で失敗したら実在を判定できない
-// ので、L1 を動かさない modify に倒す。
+// evict されず marker 版や旧内容が残るため。lstat が ENOENT / ENOTDIR 以外で失敗したら実在を
+// 判定できないので、L1 を動かさない modify に倒す。
 async function resolveKindsByWorkingTree(paths: Iterable<string>): Promise<FsChangeEvent[]> {
 	const resolved = await Promise.all(
 		Array.from(paths, async (path): Promise<FsChangeEvent[]> => {
@@ -99,7 +100,10 @@ async function resolveKindsByWorkingTree(paths: Iterable<string>): Promise<FsCha
 					{ kind: "modify", path },
 				];
 			} catch (e) {
-				return [{ kind: isErrnoCode(e, "ENOENT") ? "delete" : "modify", path }];
+				// ENOTDIR は upstream で親 dir が file に置き換わった path（dir → file の置換が
+				// 別 file の conflict と同時に来ると HEAD 差分 / `--cached` に `D <dir>/<file>` が残る）。
+				const gone = isErrnoCode(e, "ENOENT") || isErrnoCode(e, "ENOTDIR");
+				return [{ kind: gone ? "delete" : "modify", path }];
 			}
 		}),
 	);
@@ -158,8 +162,8 @@ async function collectWorkingTreeChanges(
 			"--no-renames",
 			"--relative",
 		]);
-		// HEAD 差分の path も含めて決め直す。rebase conflict では HEAD が途中まで動くので、
-		// HEAD 差分の status 文字も working tree と一致しない。
+		// HEAD 差分の path も含めて 1 回で決め直す。rebase conflict の `U` は HEAD 差分と `--cached`
+		// の両方に出て文字が食い違うので、2 つの event 列を順に積むと後勝ちの順序に依存する。
 		const paths = new Set(events.map((ev) => ev.path));
 		for (const ev of parseNameStatusZ(out, canonicalRoot)) paths.add(ev.path);
 		return resolveKindsByWorkingTree(paths);
