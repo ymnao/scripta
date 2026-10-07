@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createDeferred } from "../../__test-utils__/tab-content-fixture";
 import {
+	checkForUpdate,
 	fileExists,
 	onFsChange,
 	onWindowCloseRequested,
 	openConflictWindow,
+	openExternal,
 	readFile,
 	writeFile,
 } from "../../lib/commands";
@@ -1630,6 +1632,47 @@ describe("AppLayout", () => {
 		// ExportDialog mock が受け取った markdown は、stale な loadedDoc ("# Hello") ではなく
 		// 最新の uncontrolled doc ("new content") でなければならない
 		expect(capturedExportMarkdown).toBe("new content");
+	});
+
+	describe("アップデート通知ダイアログ", () => {
+		async function renderWithUpdateAvailable(): Promise<void> {
+			(openExternal as Mock).mockClear();
+			(checkForUpdate as Mock).mockResolvedValueOnce({
+				hasUpdate: true,
+				latestVersion: "0.2.0",
+				currentVersion: "0.1.0",
+				releaseUrl: "https://example.com/releases/v0.2.0",
+			});
+			await act(async () => {
+				render(<AppLayout />);
+			});
+			for (let i = 0; i < 5; i++) {
+				await act(async () => {});
+			}
+			expect(screen.getByText("アップデートのお知らせ")).toBeInTheDocument();
+		}
+
+		it("「ダウンロードページを開く」でリリースページを開いて閉じる", async () => {
+			await renderWithUpdateAvailable();
+
+			await act(async () => {
+				screen.getByRole("button", { name: "ダウンロードページを開く" }).click();
+			});
+
+			expect(openExternal).toHaveBeenCalledWith("https://example.com/releases/v0.2.0");
+			expect(screen.queryByText("アップデートのお知らせ")).not.toBeInTheDocument();
+		});
+
+		it("「後で」はリリースページを開かずに閉じる", async () => {
+			await renderWithUpdateAvailable();
+
+			await act(async () => {
+				screen.getByRole("button", { name: "後で" }).click();
+			});
+
+			expect(openExternal).not.toHaveBeenCalled();
+			expect(screen.queryByText("アップデートのお知らせ")).not.toBeInTheDocument();
+		});
 	});
 
 	// #458 finding 13: window close は saveAllTabs() の返り値でその後の分岐が決まる。
