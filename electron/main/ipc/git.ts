@@ -43,8 +43,9 @@ const SYMLINK_WRITE_REFUSED = "file_path is a symbolic link; refusing to write";
 // HEAD の commit hash。unborn branch（commit が 1 つも無い repo）では null。
 // `--verify -q` は unborn で「出力なし + exit 1」になるので、エラー文言は見ない。
 // **null は「unborn」と「読めなかった」を区別しない**。後者を unborn と誤判定すると
-// `ls-files` 全件を create として流す。`.md` の create は L2 を evict しないので、実際に
-// 書き換わった `.md` は watcher flush まで stale のまま（この修正前と同じ）。tracked に非 `.md`
+// `ls-files` 全件を create として流す。`.md` の create は L2 を evict しないので、成功経路では
+// 実際に書き換わった `.md` は watcher flush まで stale のまま（この修正前と同じ。失敗経路は
+// resolveKindsByWorkingTree が modify も流す）。tracked に非 `.md`
 // があればその create が L1 の full invalidate を起こすので、再 walk のコストは余分に払う
 // （安全側）。区別のために失敗種別をエラー文言から判定すると、git のメッセージ変更に追従する
 // 負債の方が大きい。
@@ -73,13 +74,42 @@ function parseNameStatusZ(out: string, canonicalRoot: string): FsChangeEvent[] {
 		const status = tokens[i];
 		const rel = tokens[i + 1];
 		if (status.length === 0 || rel.length === 0) continue;
-		// A / D 以外（M / T / U / 未知）は modify。kind を全部 modify に丸めないのは
+		// A / D 以外（M / T / 未知）は modify。kind を全部 modify に丸めないのは
 		// applyBatchToState が modify を L1（files 集合）に反映しないため — upstream で
 		// 追加された `.md` が検索に出ず、削除された `.md` が残る（#397 の症状の別形）。
+		// 失敗経路の kind はここで決めず resolveKindsByWorkingTree が作り直す（`U` もそちら）。
 		const kind: FsKind = status[0] === "A" ? "create" : status[0] === "D" ? "delete" : "modify";
 		events.push({ kind, path: pathResolve(canonicalRoot, rel) });
 	}
 	return events;
+}
+
+// conflict で停止した後の working tree は HEAD とも index とも一致しないので、status 文字から
+// kind を決めず working tree の実在で決める。status 文字に頼ると、modify/delete conflict で
+// 復活した file が `U` → modify になって L1 に入らず、rebase では HEAD 差分の `D` で残っている
+// file が L1 から消える。実在するときに modify も流すのは、create だけでは `.md` の L2 / L3 が
+// evict されず marker 版や旧内容が残るため。lstat が ENOENT / ENOTDIR 以外で失敗したら実在を
+// 判定できないので、L1 を動かさない modify に倒す。
+async function resolveKindsByWorkingTree(paths: Iterable<string>): Promise<FsChangeEvent[]> {
+	const resolved = await Promise.all(
+		Array.from(paths, async (path): Promise<FsChangeEvent[]> => {
+			try {
+				// git の diff は dir を列挙しないので、dir があるのは file から dir へ置き換わった path。
+				// L1 は file の集合なので、実在しても削除として流す。
+				if ((await fsp.lstat(path)).isDirectory()) return [{ kind: "delete", path }];
+				return [
+					{ kind: "create", path },
+					{ kind: "modify", path },
+				];
+			} catch (e) {
+				// ENOTDIR は upstream で親 dir が file に置き換わった path（dir → file の置換が
+				// 別 file の conflict と同時に来ると HEAD 差分 / `--cached` に `D <dir>/<file>` が残る）。
+				const gone = isErrnoCode(e, "ENOENT") || isErrnoCode(e, "ENOTDIR");
+				return [{ kind: gone ? "delete" : "modify", path }];
+			}
+		}),
+	);
+	return resolved.flat();
 }
 
 // git 子プロセスが working tree に対して行った変更を事後に集める（#569 finding 1）。
@@ -134,7 +164,11 @@ async function collectWorkingTreeChanges(
 			"--no-renames",
 			"--relative",
 		]);
-		events.push(...parseNameStatusZ(out, canonicalRoot));
+		// HEAD 差分の path も含めて 1 回で決め直す。rebase conflict では同じ path が HEAD 差分に `D`、
+		// `--cached` に `U` で出るので、2 つの event 列を順に積むと後勝ちの順序に依存する。
+		const paths = new Set(events.map((ev) => ev.path));
+		for (const ev of parseNameStatusZ(out, canonicalRoot)) paths.add(ev.path);
+		return resolveKindsByWorkingTree(paths);
 	}
 	return events;
 }

@@ -906,6 +906,148 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		}
 	});
 
+	it("adds a .md resurrected by a modify/delete conflict of a merge pull to L1", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+		});
+		await createGit(work).raw(["rm", "--", "first.md"]);
+		await createGit(work).raw(["commit", "-m", "local delete"]);
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => []);
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			expect(await fsp.readFile(join(canonicalRoot, "first.md"), "utf8")).toBe("upstream\n");
+			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("keeps a .md left by a modify/delete conflict of pull --rebase in L1", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await pushFromOtherClone(remote, async (dir) => {
+			await createGit(dir).raw(["rm", "--", "first.md"]);
+			await createGit(dir).raw(["commit", "-m", "upstream delete"]);
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
+			// L1 は populate 時点で first.md を含むので、invalidation が丸ごと空振りしても
+			// toContain は通る。経路が動いたことは L2 の evict で観測する。
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
+			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+			expect(await fsp.readFile(join(canonicalRoot, "first.md"), "utf8")).toBe("local\n");
+			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	// rebase conflict で HEAD が upstream まで動いた範囲の変更は、index == HEAD なので
+	// `--cached` に現れない。HEAD 差分の path だけが拾う。
+	it("evicts a file changed upstream when pull --rebase stops at a conflict on another file", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "other.md", "base other\n", "add other");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			await commitFile(dir, "other.md", "upstream other\n", "upstream other");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "other.md"));
+			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+			expect(await fsp.readFile(join(canonicalRoot, "other.md"), "utf8")).toBe("upstream other\n");
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("removes a .md under a dir replaced upstream by a file when the merge pull stops at another conflict", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await fsp.mkdir(join(work, "d.md"));
+		await commitFile(work, join("d.md", "x.md"), "base\n", "add d.md/x.md");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			const dgit = createGit(dir);
+			await dgit.raw(["rm", "-r", "--", "d.md"]);
+			await commitFile(dir, "d.md", "now a file\n", "replace dir with file");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [
+				join(canonicalRoot, "first.md"),
+				join(canonicalRoot, "d.md", "x.md"),
+			]);
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			expect((await fsp.lstat(join(canonicalRoot, "d.md"))).isFile()).toBe(true);
+			const files = getCachedMdFiles(canonicalRoot);
+			expect(files).not.toContain(join(canonicalRoot, "d.md", "x.md"));
+			expect(files).toContain(join(canonicalRoot, "d.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("removes a .md replaced upstream by a dir from L1 when the merge pull stops at another conflict", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "d.md", "base\n", "add d.md");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			await createGit(dir).raw(["rm", "--", "d.md"]);
+			await fsp.mkdir(join(dir, "d.md"));
+			await commitFile(dir, join("d.md", "x.md"), "now a dir\n", "replace file with dir");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [
+				join(canonicalRoot, "first.md"),
+				join(canonicalRoot, "d.md"),
+			]);
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			expect((await fsp.lstat(join(canonicalRoot, "d.md"))).isDirectory()).toBe(true);
+			const files = getCachedMdFiles(canonicalRoot);
+			expect(files).not.toContain(join(canonicalRoot, "d.md"));
+			expect(files).toContain(join(canonicalRoot, "d.md", "x.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
+	it("removes a .md deleted upstream from L1 when the merge pull stops at another conflict", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "gone.md", "base\n", "add gone");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			await createGit(dir).raw(["rm", "--", "gone.md"]);
+			await createGit(dir).raw(["commit", "-m", "upstream delete gone"]);
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [
+				join(canonicalRoot, "first.md"),
+				join(canonicalRoot, "gone.md"),
+			]);
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			const files = getCachedMdFiles(canonicalRoot);
+			expect(files).not.toContain(join(canonicalRoot, "gone.md"));
+			expect(files).toContain(join(canonicalRoot, "first.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
 	it("leaves the cache untouched for an up-to-date pull", async () => {
 		const { work, canonicalRoot } = await setupPullable();
 		acquireFileListCache(canonicalRoot);
