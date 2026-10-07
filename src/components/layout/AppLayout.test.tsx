@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createDeferred } from "../../__test-utils__/tab-content-fixture";
 import {
+	checkForUpdate,
 	fileExists,
 	onFsChange,
 	onWindowCloseRequested,
 	openConflictWindow,
+	openExternal,
 	readFile,
 	writeFile,
 } from "../../lib/commands";
@@ -247,6 +249,13 @@ describe("AppLayout", () => {
 		mockedReadFile.mockReset().mockResolvedValue("# Hello");
 		mockedWriteFile.mockReset().mockResolvedValue(undefined);
 		mockedFileExists.mockReset().mockResolvedValue(false);
+		(checkForUpdate as Mock).mockReset().mockResolvedValue({
+			hasUpdate: false,
+			latestVersion: "0.1.0",
+			currentVersion: "0.1.0",
+			releaseUrl: "",
+		});
+		(openExternal as Mock).mockClear();
 		fsChangeCallback = null;
 		closeHandler = null;
 		capturedOnFileSelect = null;
@@ -1195,7 +1204,7 @@ describe("AppLayout", () => {
 		expect(openConflictWindowMock).toHaveBeenCalledTimes(1);
 
 		// Update conflictFiles with a different array reference but still >0
-		// Before the fix, this would trigger openConflictResolver again
+		// Before the fix, this would trigger openGitConflictResolver again
 		// because zustand returned a new array reference on every update.
 		openConflictWindowMock.mockClear();
 		await act(async () => {
@@ -1630,6 +1639,44 @@ describe("AppLayout", () => {
 		// ExportDialog mock が受け取った markdown は、stale な loadedDoc ("# Hello") ではなく
 		// 最新の uncontrolled doc ("new content") でなければならない
 		expect(capturedExportMarkdown).toBe("new content");
+	});
+
+	describe("アップデート通知ダイアログ", () => {
+		async function renderWithUpdateAvailable(): Promise<void> {
+			(checkForUpdate as Mock).mockResolvedValueOnce({
+				hasUpdate: true,
+				latestVersion: "0.2.0",
+				currentVersion: "0.1.0",
+				releaseUrl: "https://example.com/releases/v0.2.0",
+			});
+			await act(async () => {
+				render(<AppLayout />);
+			});
+			expect(screen.getByText("アップデートのお知らせ")).toBeInTheDocument();
+		}
+
+		it("「ダウンロードページを開く」でリリースページを開いて閉じる", async () => {
+			await renderWithUpdateAvailable();
+
+			await act(async () => {
+				screen.getByRole("button", { name: "ダウンロードページを開く" }).click();
+			});
+
+			expect(openExternal).toHaveBeenCalledTimes(1);
+			expect(openExternal).toHaveBeenCalledWith("https://example.com/releases/v0.2.0");
+			expect(screen.queryByText("アップデートのお知らせ")).not.toBeInTheDocument();
+		});
+
+		it("「後で」はリリースページを開かずに閉じる", async () => {
+			await renderWithUpdateAvailable();
+
+			await act(async () => {
+				screen.getByRole("button", { name: "後で" }).click();
+			});
+
+			expect(openExternal).not.toHaveBeenCalled();
+			expect(screen.queryByText("アップデートのお知らせ")).not.toBeInTheDocument();
+		});
 	});
 
 	// #458 finding 13: window close は saveAllTabs() の返り値でその後の分岐が決まる。

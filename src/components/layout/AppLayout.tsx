@@ -9,6 +9,7 @@ import {
 	useState,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { useAppBootstrap } from "../../hooks/useAppBootstrap";
 import { useExternalFileConflict } from "../../hooks/useExternalFileConflict";
 import { useGitSync } from "../../hooks/useGitSync";
 import { useScratchpadVolatile } from "../../hooks/useScratchpadVolatile";
@@ -16,33 +17,27 @@ import { useShortcuts } from "../../hooks/useShortcuts";
 import { useTabContentManager } from "../../hooks/useTabContentManager";
 import { useUpdateCheck } from "../../hooks/useUpdateCheck";
 import {
-	clearWebviewBrowsingData,
-	listDirectory,
 	onMenuEvent,
 	onWindowCloseRequested,
 	openConflictWindow,
 	readFile,
-	workspaceSet,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { addTrailingSep, basename, isNewTabPath } from "../../lib/path";
+import { addTrailingSep, isNewTabPath } from "../../lib/path";
 import {
 	extractSlideFrontmatterTheme,
 	findSlideAtCursor,
 	parseSlides,
 } from "../../lib/slide-parser";
-import { loadSettings, saveSetting } from "../../lib/store";
 import { useBacklinkStore } from "../../stores/backlink";
 import { useGitSyncStore } from "../../stores/git-sync";
 import { useScratchpadStore } from "../../stores/scratchpad";
 import { useSettingsStore } from "../../stores/settings";
-import { useThemeStore } from "../../stores/theme";
 import { useToastStore } from "../../stores/toast";
 import { useWikilinkStore } from "../../stores/wikilink";
 import { selectNavigation, useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { SlideSection, SlideTheme } from "../../types/slide";
-import { Dialog } from "../common/Dialog";
 import { DirectoryPickerDialog } from "../common/DirectoryPickerDialog";
 import { ExportDialog } from "../common/ExportDialog";
 import { HelpDialog } from "../common/HelpDialog";
@@ -59,6 +54,7 @@ import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
 import type { SlideShowOverlayProps } from "../slide/SlideShowOverlay";
 import { SlideView } from "../slide/SlideView";
+import { AppNotificationDialogs } from "./AppNotificationDialogs";
 import { buildAppShortcuts } from "./appShortcuts";
 import { NewTabContent } from "./NewTabContent";
 import { Sidebar, type SidebarPanel } from "./Sidebar";
@@ -78,7 +74,6 @@ export function AppLayout() {
 		activeTabPath,
 		activeTabId,
 		workspacePath,
-		setWorkspacePath,
 		setActiveTabById,
 		openTab,
 		navigateInTab,
@@ -94,7 +89,6 @@ export function AppLayout() {
 			activeTabPath: s.activeTabPath,
 			activeTabId: s.activeTabId,
 			workspacePath: s.workspacePath,
-			setWorkspacePath: s.setWorkspacePath,
 			setActiveTabById: s.setActiveTabById,
 			openTab: s.openTab,
 			navigateInTab: s.navigateInTab,
@@ -129,17 +123,15 @@ export function AppLayout() {
 		})),
 	);
 
-	const { hydrateGitSync, gitAction, lastCommitTime, conflictFiles, offlineMode, gitReady } =
-		useGitSyncStore(
-			useShallow((s) => ({
-				hydrateGitSync: s.hydrate,
-				gitAction: s.gitAction,
-				lastCommitTime: s.lastCommitTime,
-				conflictFiles: s.conflictFiles,
-				offlineMode: s.offlineMode,
-				gitReady: s.gitReady,
-			})),
-		);
+	const { gitAction, lastCommitTime, conflictFiles, offlineMode, gitReady } = useGitSyncStore(
+		useShallow((s) => ({
+			gitAction: s.gitAction,
+			lastCommitTime: s.lastCommitTime,
+			conflictFiles: s.conflictFiles,
+			offlineMode: s.offlineMode,
+			gitReady: s.gitReady,
+		})),
+	);
 
 	const { scratchpadOpen, toggleScratchpad, setScratchpadOpen } = useScratchpadStore(
 		useShallow((s) => ({
@@ -149,10 +141,8 @@ export function AppLayout() {
 		})),
 	);
 
-	const hydratePreference = useThemeStore((s) => s.hydratePreference);
-	const { hydrateSettings, autoUpdateCheck, fontFamily } = useSettingsStore(
+	const { autoUpdateCheck, fontFamily } = useSettingsStore(
 		useShallow((s) => ({
-			hydrateSettings: s.hydrate,
 			autoUpdateCheck: s.autoUpdateCheck,
 			fontFamily: s.fontFamily,
 		})),
@@ -162,13 +152,7 @@ export function AppLayout() {
 
 	useScratchpadVolatile(workspacePath);
 
-	const [loading, setLoading] = useState(true);
-
-	// New windows (opened via Cmd+Shift+N) carry ?newWindow=true and should not
-	// restore or persist the workspace path — only theme and sidebar are restored.
-	const [isNewWindow] = useState(() =>
-		new URLSearchParams(window.location.search).has("newWindow"),
-	);
+	const { loading, isNewWindow, sidebarVisible, setSidebarVisible } = useAppBootstrap();
 	const {
 		dialogOpen: updateDialogOpen,
 		description: updateDescription,
@@ -198,7 +182,6 @@ export function AppLayout() {
 	const [searchBarExpanded, setSearchBarExpanded] = useState(false);
 	const [searchBarInitialText, setSearchBarInitialText] = useState("");
 	const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>("files");
-	const [sidebarVisible, setSidebarVisible] = useState(true);
 	const [cursorInfo, setCursorInfo] = useState<CursorInfo | null>(null);
 	const [goToLine, setGoToLine] = useState<GoToLine>(null);
 	const editorViewRef = useRef<EditorView | null>(null);
@@ -245,91 +228,10 @@ export function AppLayout() {
 		onGoToLine: setGoToLine,
 	});
 
-	// Load persisted settings on mount
-	useEffect(() => {
-		let cancelled = false;
-
-		void (async () => {
-			const settings = await loadSettings();
-			if (cancelled) return;
-
-			if (!isNewWindow && settings.workspacePath) {
-				let registeredOnMain = false;
-				try {
-					await workspaceSet(settings.workspacePath);
-					registeredOnMain = true;
-					if (cancelled) return;
-					await listDirectory(settings.workspacePath);
-					if (cancelled) return;
-					setWorkspacePath(settings.workspacePath);
-				} catch {
-					// 段階別ハンドリング：
-					// - workspaceSet 自体の失敗（settings 永続化失敗・未承認扱い等）→
-					//   main 側 state は atomic で変化していないので、保存済み workspacePath を
-					//   削除してはいけない。何もしない
-					// - workspaceSet 成功後の listDirectory 失敗（パス消失・権限喪失等）→
-					//   main 側に登録済みなので fail-closed の整合性のため巻き戻す
-					// 加えて unmount / window close 後（cancelled）はロールバックしない
-					// （ユーザーの保存済み workspacePath を意図せず削除する副作用を防ぐ）
-					if (cancelled) return;
-					if (registeredOnMain) {
-						await workspaceSet(null).catch(() => {});
-					}
-				}
-			}
-
-			if (cancelled) return;
-			hydratePreference(settings.themePreference);
-			hydrateSettings({
-				showLineNumbers: settings.showLineNumbers,
-				fontSize: settings.fontSize,
-				autoSaveDelay: settings.autoSaveDelay,
-				highlightActiveLine: settings.highlightActiveLine,
-				fontFamily: settings.fontFamily,
-				trimTrailingWhitespace: settings.trimTrailingWhitespace,
-				showLinkCards: settings.showLinkCards,
-				loadRemoteImages: settings.loadRemoteImages,
-				scratchpadVolatile: settings.scratchpadVolatile,
-				autoUpdateCheck: settings.autoUpdateCheck,
-				fileTreeShowHidden: settings.fileTreeShowHidden,
-				fileTreeExcludePatterns: settings.fileTreeExcludePatterns,
-				slidePreviewWidthRatio: settings.slidePreviewWidthRatio,
-				slideThumbnailsVisible: settings.slideThumbnailsVisible,
-			});
-			hydrateGitSync({
-				gitSyncEnabled: settings.gitSyncEnabled,
-				autoCommitInterval: settings.autoCommitInterval,
-				autoPullInterval: settings.autoPullInterval,
-				autoPushInterval: settings.autoPushInterval,
-				pullBeforePush: settings.pullBeforePush,
-				syncMethod: settings.syncMethod,
-				commitMessage: settings.commitMessage,
-				autoPullOnStartup: settings.autoPullOnStartup,
-			});
-			setSidebarVisible(settings.sidebarVisible);
-			clearWebviewBrowsingData().catch((e) => console.warn("clearWebviewBrowsingData:", e));
-			setLoading(false);
-		})();
-
-		return () => {
-			cancelled = true;
-		};
-	}, [isNewWindow, setWorkspacePath, hydratePreference, hydrateSettings, hydrateGitSync]);
-
 	// Sync editor font-family to CSS custom property
 	useEffect(() => {
 		document.documentElement.style.setProperty("--editor-font-family", FONT_FAMILY_MAP[fontFamily]);
 	}, [fontFamily]);
-
-	// workspacePath の永続化は main 側 workspace:set ハンドラが担うため、
-	// renderer 側で settings:set を呼ぶ必要はない（settings の workspacePath は
-	// reserved key として renderer からの書き込みを拒否する）。
-
-	// Persist sidebar visibility changes (skip while loading to avoid writing back restored values)
-	useEffect(() => {
-		if (loading) return;
-		void saveSetting("sidebarVisible", sidebarVisible);
-	}, [sidebarVisible, loading]);
 
 	// Open new tab when workspace has no tabs (startup and workspace switch)
 	useEffect(() => {
@@ -368,7 +270,7 @@ export function AppLayout() {
 	}, [workspacePath]);
 
 	// Open (or re-focus) the conflict resolution window
-	const openConflictResolver = useCallback(async () => {
+	const openGitConflictResolver = useCallback(async () => {
 		if (!workspacePath) return;
 		try {
 			await openConflictWindow(workspacePath);
@@ -387,9 +289,9 @@ export function AppLayout() {
 		const prev = prevConflictCountRef.current;
 		prevConflictCountRef.current = conflictFiles.length;
 		if (prev === 0 && conflictFiles.length > 0 && workspacePath) {
-			void openConflictResolver();
+			void openGitConflictResolver();
 		}
-	}, [conflictFiles, workspacePath, openConflictResolver]);
+	}, [conflictFiles, workspacePath, openGitConflictResolver]);
 
 	// Show setup wizard for uninitialized workspaces.
 	// configLoaded が true かつ workspaceInitialized が false のときだけ開く。
@@ -482,13 +384,7 @@ export function AppLayout() {
 		bumpFileTreeVersion();
 	}, [bumpFileTreeVersion]);
 
-	const {
-		externalConflict,
-		handleConflictReload,
-		handleConflictKeep,
-		handleDeletedDirtyDiscard,
-		handleDeletedDirtyKeep,
-	} = useExternalFileConflict({
+	const externalFileConflict = useExternalFileConflict({
 		onTreeChange: handleTreeChange,
 		getLastSavedContent,
 		applyExternalReload,
@@ -811,7 +707,7 @@ export function AppLayout() {
 				hasConflicts={conflictFiles.length > 0}
 				offlineMode={offlineMode}
 				onGitSync={manualSync}
-				onOpenConflictResolver={openConflictResolver}
+				onOpenConflictResolver={openGitConflictResolver}
 				gitReady={gitReady}
 				onToggleSlideView={
 					activeTabPath && !isNewTab && !editorError
@@ -882,34 +778,12 @@ export function AppLayout() {
 					/>
 				</Suspense>
 			)}
-			<Dialog
-				open={updateDialogOpen}
-				title="アップデートのお知らせ"
-				description={updateDescription}
-				confirmLabel="ダウンロードページを開く"
-				cancelLabel="後で"
-				onConfirm={openReleasePage}
-				onCancel={dismissUpdateDialog}
-			/>
-
-			<Dialog
-				open={externalConflict?.type === "modified"}
-				title="ファイルが外部で変更されました"
-				description={`「${externalConflict ? basename(externalConflict.path) : ""}」がエディタの外部で変更されました。未保存の変更があります。`}
-				confirmLabel="再読み込み"
-				cancelLabel="自分の変更を保持"
-				onConfirm={handleConflictReload}
-				onCancel={handleConflictKeep}
-			/>
-
-			<Dialog
-				open={externalConflict?.type === "deleted"}
-				title="ファイルが外部で削除されました"
-				description={`「${externalConflict ? basename(externalConflict.path) : ""}」がエディタの外部で削除されました。未保存の変更があります。`}
-				confirmLabel="破棄"
-				cancelLabel="編集を続ける"
-				onConfirm={handleDeletedDirtyDiscard}
-				onCancel={handleDeletedDirtyKeep}
+			<AppNotificationDialogs
+				updateDialogOpen={updateDialogOpen}
+				updateDescription={updateDescription}
+				onUpdateConfirm={openReleasePage}
+				onUpdateCancel={dismissUpdateDialog}
+				externalFileConflict={externalFileConflict}
 			/>
 		</div>
 	);
