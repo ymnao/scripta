@@ -942,6 +942,28 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		}
 	});
 
+	// rebase conflict で HEAD が upstream まで動いた範囲の変更は、index == HEAD なので
+	// `--cached` に現れない。HEAD 差分の path だけが拾う。
+	it("evicts a file changed upstream when pull --rebase stops at a conflict on another file", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "other.md", "base other\n", "add other");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			await commitFile(dir, "other.md", "upstream other\n", "upstream other");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			const read = seedStale(canonicalRoot, join(canonicalRoot, "other.md"));
+			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+			expect(await fsp.readFile(join(canonicalRoot, "other.md"), "utf8")).toBe("upstream other\n");
+			expect(read()).toBeUndefined();
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
 	it("removes a .md deleted upstream from L1 when the merge pull stops at another conflict", async () => {
 		const { work, remote, canonicalRoot } = await setupPullable();
 		await commitFile(work, "gone.md", "base\n", "add gone");

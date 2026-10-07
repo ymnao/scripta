@@ -73,9 +73,10 @@ function parseNameStatusZ(out: string, canonicalRoot: string): FsChangeEvent[] {
 		const status = tokens[i];
 		const rel = tokens[i + 1];
 		if (status.length === 0 || rel.length === 0) continue;
-		// A / D 以外（M / T / U / 未知）は modify。kind を全部 modify に丸めないのは
+		// A / D 以外（M / T / 未知）は modify。kind を全部 modify に丸めないのは
 		// applyBatchToState が modify を L1（files 集合）に反映しないため — upstream で
 		// 追加された `.md` が検索に出ず、削除された `.md` が残る（#397 の症状の別形）。
+		// 失敗経路の kind はここで決めず resolveKindsByWorkingTree が作り直す（`U` もそちら）。
 		const kind: FsKind = status[0] === "A" ? "create" : status[0] === "D" ? "delete" : "modify";
 		events.push({ kind, path: pathResolve(canonicalRoot, rel) });
 	}
@@ -88,11 +89,9 @@ function parseNameStatusZ(out: string, canonicalRoot: string): FsChangeEvent[] {
 // file が L1 から消える。実在するときに modify も流すのは、create だけでは `.md` の L2 / L3 が
 // evict されず marker 版や旧内容が残るため。lstat が ENOENT 以外で失敗したら実在を判定できない
 // ので、L1 を動かさない modify に倒す。
-async function resolveKindsByWorkingTree(
-	events: ReadonlyArray<FsChangeEvent>,
-): Promise<FsChangeEvent[]> {
+async function resolveKindsByWorkingTree(paths: Iterable<string>): Promise<FsChangeEvent[]> {
 	const resolved = await Promise.all(
-		events.map(async ({ path }): Promise<FsChangeEvent[]> => {
+		Array.from(paths, async (path): Promise<FsChangeEvent[]> => {
 			try {
 				await fsp.lstat(path);
 				return [
@@ -159,8 +158,11 @@ async function collectWorkingTreeChanges(
 			"--no-renames",
 			"--relative",
 		]);
-		// HEAD 差分の event より後ろに積むので、同じ path では working tree の実在が後勝ちになる。
-		events.push(...(await resolveKindsByWorkingTree(parseNameStatusZ(out, canonicalRoot))));
+		// HEAD 差分の path も含めて決め直す。rebase conflict では HEAD が途中まで動くので、
+		// HEAD 差分の status 文字も working tree と一致しない。
+		const paths = new Set(events.map((ev) => ev.path));
+		for (const ev of parseNameStatusZ(out, canonicalRoot)) paths.add(ev.path);
+		return resolveKindsByWorkingTree(paths);
 	}
 	return events;
 }
