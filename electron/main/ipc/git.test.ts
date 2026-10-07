@@ -996,6 +996,33 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		}
 	});
 
+	it("removes a .md replaced upstream by a dir from L1 when the merge pull stops at another conflict", async () => {
+		const { work, remote, canonicalRoot } = await setupPullable();
+		await commitFile(work, "d.md", "base\n", "add d.md");
+		await createGit(work).raw(["push"]);
+		await pushFromOtherClone(remote, async (dir) => {
+			await commitFile(dir, "first.md", "upstream\n", "upstream change");
+			await createGit(dir).raw(["rm", "--", "d.md"]);
+			await fsp.mkdir(join(dir, "d.md"));
+			await commitFile(dir, join("d.md", "x.md"), "now a dir\n", "replace file with dir");
+		});
+		await commitFile(work, "first.md", "local\n", "local change");
+		acquireFileListCache(canonicalRoot);
+		try {
+			await populateFileListCache(canonicalRoot, async () => [
+				join(canonicalRoot, "first.md"),
+				join(canonicalRoot, "d.md"),
+			]);
+			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			expect((await fsp.lstat(join(canonicalRoot, "d.md"))).isDirectory()).toBe(true);
+			const files = getCachedMdFiles(canonicalRoot);
+			expect(files).not.toContain(join(canonicalRoot, "d.md"));
+			expect(files).toContain(join(canonicalRoot, "d.md", "x.md"));
+		} finally {
+			releaseFileListCache(canonicalRoot);
+		}
+	});
+
 	it("removes a .md deleted upstream from L1 when the merge pull stops at another conflict", async () => {
 		const { work, remote, canonicalRoot } = await setupPullable();
 		await commitFile(work, "gone.md", "base\n", "add gone");

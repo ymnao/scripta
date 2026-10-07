@@ -94,7 +94,9 @@ async function resolveKindsByWorkingTree(paths: Iterable<string>): Promise<FsCha
 	const resolved = await Promise.all(
 		Array.from(paths, async (path): Promise<FsChangeEvent[]> => {
 			try {
-				await fsp.lstat(path);
+				// git の diff は dir を列挙しないので、dir があるのは file から dir へ置き換わった path。
+				// L1 は file の集合なので、実在しても削除として流す。
+				if ((await fsp.lstat(path)).isDirectory()) return [{ kind: "delete", path }];
 				return [
 					{ kind: "create", path },
 					{ kind: "modify", path },
@@ -162,8 +164,8 @@ async function collectWorkingTreeChanges(
 			"--no-renames",
 			"--relative",
 		]);
-		// HEAD 差分の path も含めて 1 回で決め直す。rebase conflict の `U` は HEAD 差分と `--cached`
-		// の両方に出て文字が食い違うので、2 つの event 列を順に積むと後勝ちの順序に依存する。
+		// HEAD 差分の path も含めて 1 回で決め直す。rebase conflict では同じ path が HEAD 差分に `D`、
+		// `--cached` に `U` で出るので、2 つの event 列を順に積むと後勝ちの順序に依存する。
 		const paths = new Set(events.map((ev) => ev.path));
 		for (const ev of parseNameStatusZ(out, canonicalRoot)) paths.add(ev.path);
 		return resolveKindsByWorkingTree(paths);
