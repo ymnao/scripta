@@ -249,6 +249,13 @@ describe("AppLayout", () => {
 		mockedReadFile.mockReset().mockResolvedValue("# Hello");
 		mockedWriteFile.mockReset().mockResolvedValue(undefined);
 		mockedFileExists.mockReset().mockResolvedValue(false);
+		(checkForUpdate as Mock).mockReset().mockResolvedValue({
+			hasUpdate: false,
+			latestVersion: "0.1.0",
+			currentVersion: "0.1.0",
+			releaseUrl: "",
+		});
+		(openExternal as Mock).mockClear();
 		fsChangeCallback = null;
 		closeHandler = null;
 		capturedOnFileSelect = null;
@@ -1636,7 +1643,6 @@ describe("AppLayout", () => {
 
 	describe("アップデート通知ダイアログ", () => {
 		async function renderWithUpdateAvailable(): Promise<void> {
-			(openExternal as Mock).mockClear();
 			(checkForUpdate as Mock).mockResolvedValueOnce({
 				hasUpdate: true,
 				latestVersion: "0.2.0",
@@ -1646,9 +1652,6 @@ describe("AppLayout", () => {
 			await act(async () => {
 				render(<AppLayout />);
 			});
-			for (let i = 0; i < 5; i++) {
-				await act(async () => {});
-			}
 			expect(screen.getByText("アップデートのお知らせ")).toBeInTheDocument();
 		}
 
@@ -1659,6 +1662,7 @@ describe("AppLayout", () => {
 				screen.getByRole("button", { name: "ダウンロードページを開く" }).click();
 			});
 
+			expect(openExternal).toHaveBeenCalledTimes(1);
 			expect(openExternal).toHaveBeenCalledWith("https://example.com/releases/v0.2.0");
 			expect(screen.queryByText("アップデートのお知らせ")).not.toBeInTheDocument();
 		});
