@@ -368,7 +368,7 @@ export function AppLayout() {
 	}, [workspacePath]);
 
 	// Open (or re-focus) the conflict resolution window
-	const openConflictResolver = useCallback(async () => {
+	const openGitConflictResolver = useCallback(async () => {
 		if (!workspacePath) return;
 		try {
 			await openConflictWindow(workspacePath);
@@ -387,9 +387,9 @@ export function AppLayout() {
 		const prev = prevConflictCountRef.current;
 		prevConflictCountRef.current = conflictFiles.length;
 		if (prev === 0 && conflictFiles.length > 0 && workspacePath) {
-			void openConflictResolver();
+			void openGitConflictResolver();
 		}
-	}, [conflictFiles, workspacePath, openConflictResolver]);
+	}, [conflictFiles, workspacePath, openGitConflictResolver]);
 
 	// Show setup wizard for uninitialized workspaces.
 	// configLoaded が true かつ workspaceInitialized が false のときだけ開く。
@@ -811,7 +811,7 @@ export function AppLayout() {
 				hasConflicts={conflictFiles.length > 0}
 				offlineMode={offlineMode}
 				onGitSync={manualSync}
-				onOpenConflictResolver={openConflictResolver}
+				onOpenConflictResolver={openGitConflictResolver}
 				gitReady={gitReady}
 				onToggleSlideView={
 					activeTabPath && !isNewTab && !editorError

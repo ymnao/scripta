@@ -1195,7 +1195,7 @@ describe("AppLayout", () => {
 		expect(openConflictWindowMock).toHaveBeenCalledTimes(1);
 
 		// Update conflictFiles with a different array reference but still >0
-		// Before the fix, this would trigger openConflictResolver again
+		// Before the fix, this would trigger openGitConflictResolver again
 		// because zustand returned a new array reference on every update.
 		openConflictWindowMock.mockClear();
 		await act(async () => {
