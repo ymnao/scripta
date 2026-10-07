@@ -86,12 +86,11 @@ export function mountEditorView(
 
 /** 呼び出した describe の各 test の間、`Date.now` を固定する。
  *
- *  編集 transaction の `LanguageState.apply` は incremental parse を `Date.now` で
- *  測る 20ms 予算で打ち切りうる (full run の CPU 競合下で mermaid の diff rebuild
- *  test が widget 0 件で落ちた)。tree 依存の StateField はその途中の tree で
- *  rebuild する。打ち切り後に `treeParseProgressed` を流して追いつかせないのは、
- *  field がその effect で無条件に rebuild し、skip path (widget 参照の維持) を
- *  検証できなくなるため。途中までの parse を検証する describe では呼ばない。 */
+ *  CM6 の parse は `Date.now` で測る 20ms 予算でも打ち切られ、CPU 競合下ではその
+ *  位置が揺れる。固定すると打ち切りは位置 (init の 3000 文字 / viewport) だけで
+ *  決まる (#419)。編集後に `treeParseProgressed` を流して tree を追いつかせる形に
+ *  しないのは、tree 依存の StateField がその effect で無条件に rebuild し、skip
+ *  path (widget 参照の維持) を検証できなくなるため。 */
 export function freezeParseClock(): void {
 	let spy: MockInstance<() => number> | undefined;
 	beforeEach(() => {
