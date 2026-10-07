@@ -23,7 +23,7 @@ import {
 	readFile,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { addTrailingSep, basename, isNewTabPath } from "../../lib/path";
+import { addTrailingSep, isNewTabPath } from "../../lib/path";
 import {
 	extractSlideFrontmatterTheme,
 	findSlideAtCursor,
@@ -38,7 +38,6 @@ import { useWikilinkStore } from "../../stores/wikilink";
 import { selectNavigation, useWorkspaceStore } from "../../stores/workspace";
 import { useWorkspaceConfigStore } from "../../stores/workspace-config";
 import type { SlideSection, SlideTheme } from "../../types/slide";
-import { Dialog } from "../common/Dialog";
 import { DirectoryPickerDialog } from "../common/DirectoryPickerDialog";
 import { ExportDialog } from "../common/ExportDialog";
 import { HelpDialog } from "../common/HelpDialog";
@@ -55,6 +54,7 @@ import { GoToLineDialog } from "../search/GoToLineDialog";
 import { SearchBar, type SearchBarHandle } from "../search/SearchBar";
 import type { SlideShowOverlayProps } from "../slide/SlideShowOverlay";
 import { SlideView } from "../slide/SlideView";
+import { AppNotificationDialogs } from "./AppNotificationDialogs";
 import { buildAppShortcuts } from "./appShortcuts";
 import { NewTabContent } from "./NewTabContent";
 import { Sidebar, type SidebarPanel } from "./Sidebar";
@@ -384,13 +384,7 @@ export function AppLayout() {
 		bumpFileTreeVersion();
 	}, [bumpFileTreeVersion]);
 
-	const {
-		externalConflict,
-		handleConflictReload,
-		handleConflictKeep,
-		handleDeletedDirtyDiscard,
-		handleDeletedDirtyKeep,
-	} = useExternalFileConflict({
+	const externalFileConflict = useExternalFileConflict({
 		onTreeChange: handleTreeChange,
 		getLastSavedContent,
 		applyExternalReload,
@@ -784,34 +778,12 @@ export function AppLayout() {
 					/>
 				</Suspense>
 			)}
-			<Dialog
-				open={updateDialogOpen}
-				title="アップデートのお知らせ"
-				description={updateDescription}
-				confirmLabel="ダウンロードページを開く"
-				cancelLabel="後で"
-				onConfirm={openReleasePage}
-				onCancel={dismissUpdateDialog}
-			/>
-
-			<Dialog
-				open={externalConflict?.type === "modified"}
-				title="ファイルが外部で変更されました"
-				description={`「${externalConflict ? basename(externalConflict.path) : ""}」がエディタの外部で変更されました。未保存の変更があります。`}
-				confirmLabel="再読み込み"
-				cancelLabel="自分の変更を保持"
-				onConfirm={handleConflictReload}
-				onCancel={handleConflictKeep}
-			/>
-
-			<Dialog
-				open={externalConflict?.type === "deleted"}
-				title="ファイルが外部で削除されました"
-				description={`「${externalConflict ? basename(externalConflict.path) : ""}」がエディタの外部で削除されました。未保存の変更があります。`}
-				confirmLabel="破棄"
-				cancelLabel="編集を続ける"
-				onConfirm={handleDeletedDirtyDiscard}
-				onCancel={handleDeletedDirtyKeep}
+			<AppNotificationDialogs
+				updateDialogOpen={updateDialogOpen}
+				updateDescription={updateDescription}
+				onUpdateConfirm={openReleasePage}
+				onUpdateCancel={dismissUpdateDialog}
+				externalConflict={externalFileConflict}
 			/>
 		</div>
 	);
