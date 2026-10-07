@@ -82,6 +82,31 @@ function parseNameStatusZ(out: string, canonicalRoot: string): FsChangeEvent[] {
 	return events;
 }
 
+// conflict で停止した後の working tree は HEAD とも index とも一致しないので、status 文字から
+// kind を決めず working tree の実在で決める。status 文字に頼ると、modify/delete conflict で
+// 復活した file が `U` → modify になって L1 に入らず、rebase では HEAD 差分の `D` で残っている
+// file が L1 から消える。実在するときに modify も流すのは、create だけでは `.md` の L2 / L3 が
+// evict されず marker 版や旧内容が残るため。lstat が ENOENT 以外で失敗したら実在を判定できない
+// ので、L1 を動かさない modify に倒す。
+async function resolveKindsByWorkingTree(
+	events: ReadonlyArray<FsChangeEvent>,
+): Promise<FsChangeEvent[]> {
+	const resolved = await Promise.all(
+		events.map(async ({ path }): Promise<FsChangeEvent[]> => {
+			try {
+				await fsp.lstat(path);
+				return [
+					{ kind: "create", path },
+					{ kind: "modify", path },
+				];
+			} catch (e) {
+				return [{ kind: isErrnoCode(e, "ENOENT") ? "delete" : "modify", path }];
+			}
+		}),
+	);
+	return resolved.flat();
+}
+
 // git 子プロセスが working tree に対して行った変更を事後に集める（#569 finding 1）。
 // `before` は op 実行前の HEAD、`failed` は op が throw したか。
 //
@@ -134,7 +159,8 @@ async function collectWorkingTreeChanges(
 			"--no-renames",
 			"--relative",
 		]);
-		events.push(...parseNameStatusZ(out, canonicalRoot));
+		// HEAD 差分の event より後ろに積むので、同じ path では working tree の実在が後勝ちになる。
+		events.push(...(await resolveKindsByWorkingTree(parseNameStatusZ(out, canonicalRoot))));
 	}
 	return events;
 }
