@@ -106,6 +106,38 @@ describe("search-cache-pure: applyBatchToState", () => {
 		expect(s.epoch).toBe(epoch0);
 	});
 
+	it("isDir .md create → full invalidate instead of adding the directory as a file", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md")]);
+		const epoch0 = s.epoch;
+		applyBatchToState(s, [{ kind: "create", path: p("x.md"), isDir: true }]);
+		expect(s.files).toBeNull();
+		expect(s.epoch).toBe(epoch0 + 1);
+	});
+
+	it("isDir .md delete → full invalidate so files under the directory drop out", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md"), p("foo.md/n.md")]);
+		applyBatchToState(s, [{ kind: "delete", path: p("foo.md"), isDir: true }]);
+		expect(s.files).toBeNull();
+	});
+
+	it("isDir modify → full invalidate (file and directory swapped at the same path)", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md"), p("x.md")]);
+		const epoch0 = s.epoch;
+		applyBatchToState(s, [{ kind: "modify", path: p("x.md"), isDir: true }]);
+		expect(s.files).toBeNull();
+		expect(s.epoch).toBe(epoch0 + 1);
+	});
+
+	it("isDir: false .md create still adds to files incrementally", () => {
+		const s = createCacheState();
+		setCacheFiles(s, [p("a.md")]);
+		applyBatchToState(s, [{ kind: "create", path: p("b.md"), isDir: false }]);
+		expect(s.files?.has(p("b.md"))).toBe(true);
+	});
+
 	it("invalidates derived (sorted / fileMap / existing) on mutation", () => {
 		const s = createCacheState();
 		setCacheFiles(s, [p("a.md"), p("b.md")]);
@@ -651,6 +683,16 @@ describe("search-cache: L2 ContentCache", () => {
 			expect(h?.get(p("other.md"))).toBe("cc");
 		});
 
+		it("isDir .md delete evicts the directory's subtree by prefix", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			h?.set(p("foo.md/a.md"), "aa", h.generation);
+			h?.set(p("other.md"), "cc", h.generation);
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("foo.md"), isDir: true }]);
+			expect(h?.get(p("foo.md/a.md"))).toBeUndefined();
+			expect(h?.get(p("other.md"))).toBe("cc");
+		});
+
 		it("does not evict via prefix false-match (/foo vs /foobar)", () => {
 			acquireFileListCache(ROOT);
 			const h = getContentCacheHandle(ROOT);
@@ -929,6 +971,22 @@ describe("L3 InvertedIndex integration", () => {
 				expect(result.indexedValid.has(p("dir/a.md"))).toBe(false);
 				expect(result.indexedValid.has(p("other.md"))).toBe(true);
 				expect(result.indexedValid.has(p("other2.md"))).toBe(true);
+			}
+		});
+
+		it("isDir .md delete invalidates the directory's subtree", () => {
+			acquireFileListCache(ROOT);
+			const h = getInvertedIndexHandle(ROOT);
+			// tombstone 全 clear を誘発しないよう、invalidate 後も validCount >= 2 を保つ。
+			h?.indexFile(p("foo.md/a.md"), "hello world", h.currentEpochOf(p("foo.md/a.md")));
+			h?.indexFile(p("other.md"), "hello world", h.currentEpochOf(p("other.md")));
+			h?.indexFile(p("other2.md"), "hello world", h.currentEpochOf(p("other2.md")));
+			applyFsBatch(ROOT, [{ kind: "delete", path: p("foo.md"), isDir: true }]);
+			const result = h?.getCandidates("hello");
+			expect(result?.kind).toBe("candidates");
+			if (result?.kind === "candidates") {
+				expect(result.indexedValid.has(p("foo.md/a.md"))).toBe(false);
+				expect(result.indexedValid.has(p("other.md"))).toBe(true);
 			}
 		});
 	});

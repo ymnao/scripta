@@ -21,6 +21,10 @@ import { onFileTreeFilterChange } from "./settings";
 type Session = {
 	watcher: FSWatcher;
 	pending: Map<string, FsKind>;
+	// pending のうち addDir / unlinkDir で入った path。kind の merge とは独立に持つのは、
+	// 同じ path で file 削除と dir 作成が重なると kind が modify に畳まれて dir だった
+	// 事実が消えるため。
+	pendingDirs: Set<string>;
 	flushTimer: NodeJS.Timeout | null;
 	webContents: WebContents;
 	// chokidar が emit する path の base（realpath 済み、path-guard と整合）。
@@ -58,13 +62,14 @@ function flush(session: Session): void {
 	// inputPath 変換とは別に canonical batch を並走で組む。
 	const canonicalBatch: FsChangeEvent[] = [];
 	for (const [path, kind] of session.pending) {
-		canonicalBatch.push({ kind, path });
+		canonicalBatch.push({ kind, path, isDir: session.pendingDirs.has(path) });
 		batch.push({
 			kind,
 			path: toInputPath(path, session.canonicalRoot, session.inputRoot),
 		});
 	}
 	session.pending.clear();
+	session.pendingDirs.clear();
 	session.flushTimer = null;
 	if (batch.length === 0) return;
 	// renderer send の直前に cache を先に更新する。renderer が変更通知を受けて即
@@ -74,9 +79,10 @@ function flush(session: Session): void {
 	session.webContents.send("watcher:fs-change", batch);
 }
 
-function onFsEvent(session: Session, kind: FsKind, path: string): void {
+function onFsEvent(session: Session, kind: FsKind, path: string, isDir = false): void {
 	if (session.stopped) return;
 	mergeEventKind(session.pending, path, kind);
+	if (isDir) session.pendingDirs.add(path);
 	// 「最初の event で deadline 設定、後続ではリセットしない」。
 	// flushTimer === null は「pending が空 or 直前 flush 完了」を意味する。
 	if (session.pending.size > 0 && session.flushTimer === null) {
@@ -95,6 +101,7 @@ function startSession(webContents: WebContents, canonicalRoot: string, inputRoot
 	const session: Session = {
 		watcher,
 		pending: new Map(),
+		pendingDirs: new Set(),
 		flushTimer: null,
 		webContents,
 		canonicalRoot,
@@ -103,10 +110,10 @@ function startSession(webContents: WebContents, canonicalRoot: string, inputRoot
 	};
 
 	watcher.on("add", (p) => onFsEvent(session, "create", p));
-	watcher.on("addDir", (p) => onFsEvent(session, "create", p));
+	watcher.on("addDir", (p) => onFsEvent(session, "create", p, true));
 	watcher.on("change", (p) => onFsEvent(session, "modify", p));
 	watcher.on("unlink", (p) => onFsEvent(session, "delete", p));
-	watcher.on("unlinkDir", (p) => onFsEvent(session, "delete", p));
+	watcher.on("unlinkDir", (p) => onFsEvent(session, "delete", p, true));
 	watcher.on("error", (err) => {
 		console.warn("[watcher] error:", err);
 	});

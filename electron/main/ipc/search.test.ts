@@ -1475,6 +1475,43 @@ describe("searchFilesImpl (#397: fs mutating handler の proactive 反映)", () 
 		releaseFileListCache(canonical);
 	});
 
+	it("fs:rename で `.md` 名のディレクトリを移すと、旧配下が残らずディレクトリ自身も file として入らない", async () => {
+		await mkdir(join(workspaceDir, "foo.md"));
+		await writeFile(join(workspaceDir, "foo.md", "n.md"), "moved body");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "moved");
+
+		await renameEntryImpl(TEST_WIN, join(workspaceDir, "foo.md"), join(workspaceDir, "bar.md"));
+
+		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "moved");
+		expect(after.results.map((r) => r.filePath)).toEqual([join(workspaceDir, "bar.md", "n.md")]);
+		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "bar.md", "n.md")]);
+
+		// watcher が 500ms 後に同じ event を流す定常状態。再適用しても結果は変わらない。
+		applyFsBatch(canonical, [
+			{ kind: "delete", path: join(canonical, "foo.md"), isDir: true },
+			{ kind: "create", path: join(canonical, "bar.md"), isDir: true },
+		]);
+		expect(await searchFilesImpl(TEST_WIN, workspaceDir, "moved")).toEqual(after);
+		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "bar.md", "n.md")]);
+		releaseFileListCache(canonical);
+	});
+
+	it("fs:delete で `.md` 名のディレクトリを消すと、配下が直後の検索に残らない", async () => {
+		await mkdir(join(workspaceDir, "foo.md"));
+		await writeFile(join(workspaceDir, "foo.md", "n.md"), "doomed body");
+		const canonical = await realpath(workspaceDir);
+		acquireFileListCache(canonical);
+		await searchFilesImpl(TEST_WIN, workspaceDir, "doomed");
+
+		await deleteEntryImpl(TEST_WIN, join(workspaceDir, "foo.md"));
+
+		expect((await searchFilesImpl(TEST_WIN, workspaceDir, "doomed")).results).toHaveLength(0);
+		expect(getCachedMdFiles(canonical)).toEqual([]);
+		releaseFileListCache(canonical);
+	});
+
 	it("fs:create-file 直後の検索対象に新しい file が入る", async () => {
 		await writeFile(join(workspaceDir, "a.md"), "needle here");
 		const canonical = await realpath(workspaceDir);
