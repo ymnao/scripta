@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isRelOutsideRoot } from "./root-relative-path";
 import { StructuredError } from "./structured-error";
 
 // fs IPC のガードは window-scoped。allowedRoots は Map<windowId, Set<string>>
@@ -180,13 +181,7 @@ function isPathInside(child: string, parent: string): boolean {
 	if (child === parent) return true;
 	const rel = relative(parent, child);
 	if (rel.length === 0) return false;
-	if (isAbsolute(rel)) return false;
-	// rel.startsWith("..") だけだと "..backup/foo" のようにディレクトリ名が ".." で
-	// 始まる正当なパスを誤って outside 扱いにしてしまう。
-	// 「親に上がる」のは rel === ".." または rel が `..${sep}` で始まる場合のみ。
-	if (rel === "..") return false;
-	if (rel.startsWith(`..${sep}`)) return false;
-	return true;
+	return !isRelOutsideRoot(rel);
 }
 
 function isWithinWindowAllowedRoot(windowId: number, target: string): boolean {

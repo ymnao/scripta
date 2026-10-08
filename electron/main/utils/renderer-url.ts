@@ -1,5 +1,6 @@
 import { isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isRelOutsideRoot, type RelPathOps } from "./root-relative-path";
 
 // renderer の URL（pathname まで含む）が、scripta の renderer dir 配下かを判定する。
 // will-navigate / window-open / permission の信頼判定で共通利用する。
@@ -23,16 +24,8 @@ const RENDERER_FILE_DIR = join(__dirname, "../renderer");
 // 必ずネイティブ表現へ変換してから `path.relative` + `path.isAbsolute` で判定する。
 // 副次効果として encoded separator (%2F) や `..` segment も URL parser / fileURLToPath
 // で正規化されるので、`relative` が `..` 始まりや絶対 path を返す経路で reject できる。
-//
-// `pathOps` を差し替え可能にしているのは host OS（macOS / Linux）上から Windows 形式の
-// 入力を verify するため。production code は default の host OS ops を使う。
-export interface PathOps {
+export interface PathOps extends RelPathOps {
 	fileURLToPath: (u: URL) => string;
-	relative: (from: string, to: string) => string;
-	isAbsolute: (p: string) => boolean;
-	// platform 別の path separator（POSIX: "/", Windows: "\\"）。`..foo` のような
-	// 正当な名前を「parent 参照」と取り違えないよう、`..${sep}` 始まりかで厳密判定する。
-	sep: string;
 }
 
 const DEFAULT_PATH_OPS: PathOps = { fileURLToPath, relative, isAbsolute, sep };
@@ -47,14 +40,8 @@ export function isFileUrlInsideDir(
 		if (parsed.protocol !== "file:") return false;
 		const osPath = pathOps.fileURLToPath(parsed);
 		const rel = pathOps.relative(baseDir, osPath);
-		// "": base そのもの（許可）
-		// "..": 親 dir、または `..${sep}...`: より上位 / 兄弟（拒否）
-		//   ※ `rel.startsWith("..")` だけだと `..cache/file.js` のような正当名も
-		//   parent 参照と誤判定するため、separator まで含めた厳密判定にする
-		// 絶対 path: Windows の drive 跨ぎ / UNC（拒否）
 		if (rel === "") return true;
-		if (rel === ".." || rel.startsWith(`..${pathOps.sep}`)) return false;
-		return !pathOps.isAbsolute(rel);
+		return !isRelOutsideRoot(rel, pathOps);
 	} catch {
 		return false;
 	}
