@@ -24,9 +24,6 @@ const RENDERER_FILE_DIR = join(__dirname, "../renderer");
 // 必ずネイティブ表現へ変換してから `path.relative` + `path.isAbsolute` で判定する。
 // 副次効果として encoded separator (%2F) や `..` segment も URL parser / fileURLToPath
 // で正規化されるので、`relative` が `..` 始まりや絶対 path を返す経路で reject できる。
-//
-// `pathOps` を差し替え可能にしているのは host OS（macOS / Linux）上から Windows 形式の
-// 入力を verify するため。production code は default の host OS ops を使う。
 export interface PathOps extends RelPathOps {
 	fileURLToPath: (u: URL) => string;
 }

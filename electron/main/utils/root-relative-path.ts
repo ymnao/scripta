@@ -1,8 +1,7 @@
 import { isAbsolute, relative, sep } from "node:path";
 
 // `pathOps` を差し替え可能にしているのは host OS (macOS / Linux) 上から Windows 形式の
-// 入力を verify するため (renderer-url.ts の PathOps と同じ理由・同じ形)。production code は
-// default の host OS ops を使う。
+// 入力を verify するため。production code は default の host OS ops を使う。
 export interface RelPathOps {
 	relative: (from: string, to: string) => string;
 	isAbsolute: (p: string) => boolean;
@@ -11,8 +10,6 @@ export interface RelPathOps {
 
 const DEFAULT_REL_PATH_OPS: RelPathOps = { relative, isAbsolute, sep };
 
-// `relative(root, p)` の結果 `rel` が root の外を指すか。
-//
 // `rel === ""` (root 自身) を含めないのは、root 自身を配下とみなすかが呼び出し側ごとに違うため。
 // `rel.startsWith("..")` で書くと `..foo` のような正当な名前を root 外と誤読する。
 // `isAbsolute(rel)` は win32 で drive をまたぐと relative() が絶対パスを返すため必要。
