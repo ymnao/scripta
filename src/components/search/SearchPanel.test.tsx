@@ -194,19 +194,43 @@ describe("SearchPanel の段階表示", () => {
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
 
+	// 総件数を STEP * 3 に置くのは、押下後も group が部分 slice のまま (新しい object) に
+	// 留まるケースを踏むため。STEP * 2 以下だと押下後は元の group 参照に戻る。
 	it("1 ファイルに集中した結果でも「さらに表示」は新しく出た行だけを描画する", async () => {
 		mockedSearchFiles.mockResolvedValue({
-			results: results("/workspace/big.md", STEP + 2),
+			results: results("/workspace/big.md", STEP * 3),
 			truncated: false,
 		});
 		renderPanel();
 		await search("match");
 		highlightRenders.count = 0;
 
-		fireEvent.click(screen.getByRole("button", { name: "さらに表示 (残り 2 件)" }));
+		fireEvent.click(screen.getByRole("button", { name: /さらに表示/ }));
 
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP + 2);
-		expect(highlightRenders.count).toBe(2);
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP * 2);
+		expect(highlightRenders.count).toBe(STEP);
+	});
+
+	it("行を押すと trim した query と match の位置で onNavigate が呼ばれる", async () => {
+		mockedSearchFiles.mockResolvedValue({
+			results: [
+				{
+					filePath: "/workspace/a.md",
+					lineNumber: 3,
+					lineContent: "xx match",
+					matchStart: 3,
+					matchEnd: 8,
+				},
+			],
+			truncated: false,
+		});
+		const onNavigate = vi.fn();
+		render(<SearchPanel workspacePath={WORKSPACE} onNavigate={onNavigate} />);
+		await search("  match ");
+
+		fireEvent.click(screen.getByRole("button", { name: /xx match/ }));
+
+		expect(onNavigate).toHaveBeenCalledWith("/workspace/a.md", 3, "match", 3, 8);
 	});
 
 	it("複数ファイルの結果でも「さらに表示」は新しく出た行だけを描画する", async () => {
