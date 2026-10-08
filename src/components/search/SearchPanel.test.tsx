@@ -17,6 +17,20 @@ vi.mock("../../types/search", async (importOriginal) => {
 	return { ...actual, MATCH_DISPLAY_STEP: STEP };
 });
 
+const { highlightRenders } = vi.hoisted(() => ({ highlightRenders: { count: 0 } }));
+
+// 行ごとに 1 回描画される葉を数えて、どの group が再 render されたかを観測する。
+// DOM node の同一性では区別できない (memo が無くても reconcile で node は再利用される)。
+vi.mock("./HighlightedLine", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./HighlightedLine")>();
+	return {
+		HighlightedLine: (props: Parameters<typeof actual.HighlightedLine>[0]) => {
+			highlightRenders.count++;
+			return actual.HighlightedLine(props);
+		},
+	};
+});
+
 const { searchFiles } = await import("../../lib/commands");
 const { SearchPanel, sliceGroupedResults } = await import("./SearchPanel");
 
@@ -178,5 +192,41 @@ describe("SearchPanel の段階表示", () => {
 
 		expect(screen.getByText(`1 ファイル中 ${STEP + 2} 件`)).toBeTruthy();
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
+	});
+
+	it("「さらに表示」では表示済みの group を再描画せず、新しく出た行だけを描画する", async () => {
+		mockedSearchFiles.mockResolvedValue({
+			results: [...results("/workspace/a.md", STEP), ...results("/workspace/b.md", 2)],
+			truncated: false,
+		});
+		renderPanel();
+		await search("match");
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
+		highlightRenders.count = 0;
+
+		fireEvent.click(screen.getByRole("button", { name: "さらに表示 (残り 2 件)" }));
+
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP + 2);
+		expect(highlightRenders.count).toBe(2);
+	});
+
+	it("file header を押すとその group の行だけが折り畳まれ、もう一度押すと戻る", async () => {
+		mockedSearchFiles.mockResolvedValue({
+			results: [...results("/workspace/a.md", 2), ...results("/workspace/b.md", 1)],
+			truncated: false,
+		});
+		renderPanel();
+		await search("match");
+		const header = screen.getByRole("button", { name: /a\.md/ });
+
+		fireEvent.click(header);
+
+		expect(header.getAttribute("aria-expanded")).toBe("false");
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(1);
+
+		fireEvent.click(header);
+
+		expect(header.getAttribute("aria-expanded")).toBe("true");
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(3);
 	});
 });

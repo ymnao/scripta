@@ -1,19 +1,22 @@
 import { Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useCollapseToggle } from "../../hooks/useCollapseToggle";
 import { cancelSearch, searchFiles } from "../../lib/commands";
 import { addTrailingSep } from "../../lib/path";
 import { MATCH_DISPLAY_STEP, MAX_SEARCH_RESULTS, type SearchResult } from "../../types/search";
+import { HighlightedLine } from "./HighlightedLine";
+
+type NavigateHandler = (
+	filePath: string,
+	lineNumber: number,
+	query: string,
+	matchStart?: number,
+	matchEnd?: number,
+) => void;
 
 interface SearchPanelProps {
 	workspacePath: string;
-	onNavigate: (
-		filePath: string,
-		lineNumber: number,
-		query: string,
-		matchStart?: number,
-		matchEnd?: number,
-	) => void;
+	onNavigate: NavigateHandler;
 	inputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
@@ -118,6 +121,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 		[results, visibleCount],
 	);
 	const remainingMatches = Math.max(0, totalMatches - visibleCount);
+	const trimmedQuery = query.trim();
 
 	return (
 		<div className="flex h-full flex-col">
@@ -162,51 +166,14 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					</p>
 				)}
 				{visible.map((group) => (
-					<div key={group.filePath}>
-						<button
-							type="button"
-							className="search-panel-file-header"
-							onClick={() => toggleCollapse(group.filePath)}
-							aria-expanded={!isCollapsed(group.filePath)}
-						>
-							<span className="search-panel-file-chevron">
-								{isCollapsed(group.filePath) ? "›" : "⌄"}
-							</span>
-							<span className="search-panel-file-name" title={group.relativePath}>
-								{group.relativePath}
-							</span>
-							<span className="search-panel-file-count">{group.matches.length}</span>
-						</button>
-						{!isCollapsed(group.filePath) && (
-							<div>
-								{group.matches.map((match) => (
-									<button
-										type="button"
-										key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
-										className="search-panel-match"
-										onClick={() =>
-											onNavigate(
-												match.filePath,
-												match.lineNumber,
-												query.trim(),
-												match.matchStart,
-												match.matchEnd,
-											)
-										}
-									>
-										<span className="search-panel-line-number">{match.lineNumber}</span>
-										<span className="search-panel-line-content">
-											<HighlightedLine
-												line={match.lineContent}
-												matchStart={match.matchStart}
-												matchEnd={match.matchEnd}
-											/>
-										</span>
-									</button>
-								))}
-							</div>
-						)}
-					</div>
+					<SearchResultGroup
+						key={group.filePath}
+						group={group}
+						collapsed={isCollapsed(group.filePath)}
+						onToggle={toggleCollapse}
+						query={trimmedQuery}
+						onNavigate={onNavigate}
+					/>
 				))}
 				{remainingMatches > 0 && (
 					<button
@@ -222,23 +189,66 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	);
 }
 
-function HighlightedLine({
-	line,
-	matchStart,
-	matchEnd,
+// memo で包むのは「さらに表示」の度に表示済みの group まで再 render させないため。
+// sliceGroupedResults は丸ごと収まる group の参照をそのまま返すので、変わるのは
+// 境界で部分 slice された group と新たに加わった group だけになる。props は
+// これを崩さないよう、isCollapsed 関数ではなく boolean を、toggle は安定参照を渡す。
+const SearchResultGroup = memo(function SearchResultGroup({
+	group,
+	collapsed,
+	onToggle,
+	query,
+	onNavigate,
 }: {
-	line: string;
-	matchStart: number;
-	matchEnd: number;
+	group: GroupedResults;
+	collapsed: boolean;
+	onToggle: (filePath: string) => void;
+	query: string;
+	onNavigate: NavigateHandler;
 }) {
-	const before = line.slice(0, matchStart);
-	const match = line.slice(matchStart, matchEnd);
-	const after = line.slice(matchEnd);
 	return (
-		<>
-			{before}
-			<mark className="search-panel-highlight">{match}</mark>
-			{after}
-		</>
+		<div>
+			<button
+				type="button"
+				className="search-panel-file-header"
+				onClick={() => onToggle(group.filePath)}
+				aria-expanded={!collapsed}
+			>
+				<span className="search-panel-file-chevron">{collapsed ? "›" : "⌄"}</span>
+				<span className="search-panel-file-name" title={group.relativePath}>
+					{group.relativePath}
+				</span>
+				<span className="search-panel-file-count">{group.matches.length}</span>
+			</button>
+			{!collapsed && (
+				<div>
+					{group.matches.map((match) => (
+						<button
+							type="button"
+							key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
+							className="search-panel-match"
+							onClick={() =>
+								onNavigate(
+									match.filePath,
+									match.lineNumber,
+									query,
+									match.matchStart,
+									match.matchEnd,
+								)
+							}
+						>
+							<span className="search-panel-line-number">{match.lineNumber}</span>
+							<span className="search-panel-line-content">
+								<HighlightedLine
+									line={match.lineContent}
+									matchStart={match.matchStart}
+									matchEnd={match.matchEnd}
+								/>
+							</span>
+						</button>
+					))}
+				</div>
+			)}
+		</div>
 	);
-}
+});
