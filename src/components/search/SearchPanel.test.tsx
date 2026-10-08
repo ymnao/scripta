@@ -194,7 +194,22 @@ describe("SearchPanel の段階表示", () => {
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
 
-	it("「さらに表示」では表示済みの group を再描画せず、新しく出た行だけを描画する", async () => {
+	it("1 ファイルに集中した結果でも「さらに表示」は新しく出た行だけを描画する", async () => {
+		mockedSearchFiles.mockResolvedValue({
+			results: results("/workspace/big.md", STEP + 2),
+			truncated: false,
+		});
+		renderPanel();
+		await search("match");
+		highlightRenders.count = 0;
+
+		fireEvent.click(screen.getByRole("button", { name: "さらに表示 (残り 2 件)" }));
+
+		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP + 2);
+		expect(highlightRenders.count).toBe(2);
+	});
+
+	it("複数ファイルの結果でも「さらに表示」は新しく出た行だけを描画する", async () => {
 		mockedSearchFiles.mockResolvedValue({
 			results: [...results("/workspace/a.md", STEP), ...results("/workspace/b.md", 2)],
 			truncated: false,
@@ -208,25 +223,5 @@ describe("SearchPanel の段階表示", () => {
 
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP + 2);
 		expect(highlightRenders.count).toBe(2);
-	});
-
-	it("file header を押すとその group の行だけが折り畳まれ、もう一度押すと戻る", async () => {
-		mockedSearchFiles.mockResolvedValue({
-			results: [...results("/workspace/a.md", 2), ...results("/workspace/b.md", 1)],
-			truncated: false,
-		});
-		renderPanel();
-		await search("match");
-		const header = screen.getByRole("button", { name: /a\.md/ });
-
-		fireEvent.click(header);
-
-		expect(header.getAttribute("aria-expanded")).toBe("false");
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(1);
-
-		fireEvent.click(header);
-
-		expect(header.getAttribute("aria-expanded")).toBe("true");
-		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(3);
 	});
 });

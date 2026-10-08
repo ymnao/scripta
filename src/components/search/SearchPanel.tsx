@@ -166,14 +166,34 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 					</p>
 				)}
 				{visible.map((group) => (
-					<SearchResultGroup
-						key={group.filePath}
-						group={group}
-						collapsed={isCollapsed(group.filePath)}
-						onToggle={toggleCollapse}
-						query={trimmedQuery}
-						onNavigate={onNavigate}
-					/>
+					<div key={group.filePath}>
+						<button
+							type="button"
+							className="search-panel-file-header"
+							onClick={() => toggleCollapse(group.filePath)}
+							aria-expanded={!isCollapsed(group.filePath)}
+						>
+							<span className="search-panel-file-chevron">
+								{isCollapsed(group.filePath) ? "›" : "⌄"}
+							</span>
+							<span className="search-panel-file-name" title={group.relativePath}>
+								{group.relativePath}
+							</span>
+							<span className="search-panel-file-count">{group.matches.length}</span>
+						</button>
+						{!isCollapsed(group.filePath) && (
+							<div>
+								{group.matches.map((match) => (
+									<SearchResultRow
+										key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
+										match={match}
+										query={trimmedQuery}
+										onNavigate={onNavigate}
+									/>
+								))}
+							</div>
+						)}
+					</div>
 				))}
 				{remainingMatches > 0 && (
 					<button
@@ -189,66 +209,36 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	);
 }
 
-// memo で包むのは「さらに表示」の度に表示済みの group まで再 render させないため。
-// sliceGroupedResults は丸ごと収まる group の参照をそのまま返すので、変わるのは
-// 境界で部分 slice された group と新たに加わった group だけになる。props は
-// これを崩さないよう、isCollapsed 関数ではなく boolean を、toggle は安定参照を渡す。
-const SearchResultGroup = memo(function SearchResultGroup({
-	group,
-	collapsed,
-	onToggle,
+// memo の単位を group ではなく行にしているのは、境界で部分 slice された group は
+// sliceGroupedResults が「さらに表示」の度に新しい object を作るため。結果が 1 ファイルに
+// 集中すると全体がその境界 group になり、group 単位の memo では表示済みの行を毎回
+// 描き直す。match は results の要素の参照のまま渡るので、行単位なら新しく出た行だけが
+// render される。
+const SearchResultRow = memo(function SearchResultRow({
+	match,
 	query,
 	onNavigate,
 }: {
-	group: GroupedResults;
-	collapsed: boolean;
-	onToggle: (filePath: string) => void;
+	match: SearchResult;
 	query: string;
 	onNavigate: NavigateHandler;
 }) {
 	return (
-		<div>
-			<button
-				type="button"
-				className="search-panel-file-header"
-				onClick={() => onToggle(group.filePath)}
-				aria-expanded={!collapsed}
-			>
-				<span className="search-panel-file-chevron">{collapsed ? "›" : "⌄"}</span>
-				<span className="search-panel-file-name" title={group.relativePath}>
-					{group.relativePath}
-				</span>
-				<span className="search-panel-file-count">{group.matches.length}</span>
-			</button>
-			{!collapsed && (
-				<div>
-					{group.matches.map((match) => (
-						<button
-							type="button"
-							key={`${match.filePath}-${match.lineNumber}-${match.matchStart}`}
-							className="search-panel-match"
-							onClick={() =>
-								onNavigate(
-									match.filePath,
-									match.lineNumber,
-									query,
-									match.matchStart,
-									match.matchEnd,
-								)
-							}
-						>
-							<span className="search-panel-line-number">{match.lineNumber}</span>
-							<span className="search-panel-line-content">
-								<HighlightedLine
-									line={match.lineContent}
-									matchStart={match.matchStart}
-									matchEnd={match.matchEnd}
-								/>
-							</span>
-						</button>
-					))}
-				</div>
-			)}
-		</div>
+		<button
+			type="button"
+			className="search-panel-match"
+			onClick={() =>
+				onNavigate(match.filePath, match.lineNumber, query, match.matchStart, match.matchEnd)
+			}
+		>
+			<span className="search-panel-line-number">{match.lineNumber}</span>
+			<span className="search-panel-line-content">
+				<HighlightedLine
+					line={match.lineContent}
+					matchStart={match.matchStart}
+					matchEnd={match.matchEnd}
+				/>
+			</span>
+		</button>
 	);
 });
