@@ -32,18 +32,25 @@ export const MAX_READ_FILE_BYTES = 64 * 1024 * 1024;
 // 同じポリシーを別に持つ。errno の扱いを変えるときはあちらも一緒に見る）。
 // ENOENT 以外（EACCES, EPERM 等）を握りつぶすと、rename/delete のような呼び出し元が
 // 「実際は権限問題なのに Source not found / Not found」と誤分類してしまう。
-// ENOENT のみ false 扱いにし、他は呼び出し側に伝播する。
+// ENOENT のみ不在扱いにし、他は呼び出し側に伝播する。
+async function probeOrNull<T>(
+	probe: (absolute: string) => Promise<T>,
+	absolute: string,
+): Promise<T | null> {
+	try {
+		return await probe(absolute);
+	} catch (e) {
+		if (isErrnoCode(e, "ENOENT")) return null;
+		throw e;
+	}
+}
+
+// probe の値が null になるのは ENOENT のときだけ (access は undefined で resolve する)。
 async function existsBy(
 	probe: (absolute: string) => Promise<unknown>,
 	absolute: string,
 ): Promise<boolean> {
-	try {
-		await probe(absolute);
-		return true;
-	} catch (e) {
-		if (isErrnoCode(e, "ENOENT")) return false;
-		throw e;
-	}
+	return (await probeOrNull(probe, absolute)) !== null;
 }
 
 // 2 つの存在判定の違いは **末端 symlink を辿るかどうか**:
@@ -62,14 +69,8 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 	return existsBy(fsp.lstat, absolute);
 }
 
-// lstat を自前の try/catch で包まず probe の中で取るのは、errno の扱いを existsBy の
-// 1 か所に保つため。
-async function lstatEntry(absolute: string): Promise<Stats | null> {
-	let stats: Stats | null = null;
-	await existsBy(async (a) => {
-		stats = await fsp.lstat(a);
-	}, absolute);
-	return stats;
+function lstatEntry(absolute: string): Promise<Stats | null> {
+	return probeOrNull((a) => fsp.lstat(a), absolute);
 }
 
 // すべての impl は path-guard の assert 系から **canonical（realpath 済み）** を
