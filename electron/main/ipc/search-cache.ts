@@ -17,6 +17,7 @@ import {
 	getFileMap,
 	getSortedFiles,
 	isUnderMdWalkSkippedPath,
+	mayBeDirectoryEvent,
 	setCacheFiles,
 	sortWalkResult,
 } from "../utils/search-cache-pure";
@@ -149,18 +150,18 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // 呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
 // **同じ batch の再適用は状態を壊さない** (アプリ自身の書き込みは proactive と watcher の 2 回
 // 流れるのでこれに依る)。`.md` event は files.add / delete の戻り値と bumpFileEpoch の wasValid
-// ガードにより epoch / validCount とも二重に動かない。非 `.md` event は 2 回目も full invalidate
+// ガードにより epoch / validCount とも二重に動かない。dir かもしれない event は 2 回目も full invalidate
 // として epoch を進めるが、files は null のままで派生物の再構築が 1 回余分になるだけ。
 // L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
 // L1 側は applyBatchToState、L2 側は本関数内で分岐する。
-// - `.md` modify/delete → L2 の該当 ioPath を delete
-// - `.md` create → L2 は無操作 (新規なので cache 側にはない)
-// - 非 `.md` create/delete → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
+// - file と決まる `.md` modify/delete → L2 の該当 ioPath を delete
+// - file と決まる `.md` create → L2 は無操作 (新規なので cache 側にはない)
+// - mayBeDirectoryEvent (非 `.md`、または isDir 付き) → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
 //   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
 // **generation bump は evict の成否ではなく「invalidation の意図」で判定する**。
-// 具体的には .md modify/delete および非 .md create/delete/modify の全てで bump する
+// 具体的には file の .md modify/delete および dir かもしれない event の全 kind で bump する
 // (walk の skip 対象 path は下記 #396 の例外として bump しない)
-// (.md create のみ bump しない — 新規 file なので進行中の scan の in-flight read と競合しない)。
+// (file の .md create のみ bump しない — 新規 file なので進行中の scan の in-flight read と競合しない)。
 // これは「L2 miss で readFile 中の file 自身が modify された」ケース = 本命の
 // stale-insert race を防ぐため。delete 成否で判定すると、cache に無い (=まさに読み中の)
 // key に対する modify で generation が進まず、readFile 完了時の set が古い text を格納する。
@@ -186,8 +187,14 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	applyBatchToState(e.state, visible);
 	let shouldBumpL2 = false;
 	for (const ev of visible) {
-		const isMd = ev.path.endsWith(".md");
-		if (isMd) {
+		if (mayBeDirectoryEvent(ev)) {
+			// dir 可能性を考慮して subtree + exact 一括 evict + bump
+			const prefixWithSep = ev.path.endsWith(sep) ? ev.path : ev.path + sep;
+			e.l2.deletePrefix(ev.path, prefixWithSep);
+			shouldBumpL2 = true;
+			// L3 も同範囲を invalidate (L2 deletePrefix と同じ判定)。
+			e.l3.invalidatePrefix(ev.path);
+		} else {
 			if (ev.kind === "create") continue; // 新規 file → race 対象外
 			e.l2.delete(ev.path);
 			shouldBumpL2 = true;
@@ -198,13 +205,6 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 			} else {
 				e.l3.invalidate(ev.path);
 			}
-		} else {
-			// 非 .md の全 event: dir 可能性を考慮して subtree + exact 一括 evict + bump
-			const prefixWithSep = ev.path.endsWith(sep) ? ev.path : ev.path + sep;
-			e.l2.deletePrefix(ev.path, prefixWithSep);
-			shouldBumpL2 = true;
-			// L3 も同範囲を invalidate (L2 deletePrefix と同じ判定)。
-			e.l3.invalidatePrefix(ev.path);
 		}
 	}
 	if (shouldBumpL2) e.l2Generation++;

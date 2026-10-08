@@ -5,6 +5,7 @@
 // 偽装して「stop 後に late event が来てもイベントが renderer に届かない」
 // 「再 start 後の旧 session からの late event がリークしない」を確認する。
 import { EventEmitter } from "node:events";
+import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -46,6 +47,7 @@ vi.mock("electron", () => ({
 
 import { ipcMain } from "electron";
 import { clearWorkspaceRoots, registerWorkspaceRoot } from "../utils/path-guard";
+import { getCachedMdFiles, populateFileListCache } from "./search-cache";
 import { registerWatcherIpc, stopWatcherForWindow } from "./watcher";
 
 // fake event を渡せるよう、production の `(event: IpcMainInvokeEvent, ...) => ...`
@@ -263,4 +265,83 @@ describe("watcher.ts: symlinked workspace", () => {
 			]);
 		},
 	);
+});
+
+// chokidar の addDir / unlinkDir は kind だけ見ると add / unlink と同じ create / delete に畳まれる。
+// `.md` で終わるディレクトリでも file と取り違えず、search cache を full invalidate させることを
+// cache の観測で確かめる。
+describe("watcher.ts: directory events named *.md reach the search cache", () => {
+	let ws: TempWorkspace;
+	let canonical: string;
+
+	beforeEach(async () => {
+		ws = await createTempWorkspace("scripta-watcher-dir-");
+		canonical = await realpath(ws.dir);
+		await registerWorkspaceRoot(TEST_WIN, ws.dir);
+		await getHandler("watcher:start")({ sender: webContents }, ws.dir);
+	});
+
+	afterEach(async () => {
+		stopWatcherForWindow(TEST_WIN);
+		clearWorkspaceRoots();
+		await ws.cleanup();
+	});
+
+	it("addDir of x.md invalidates the file list instead of adding the directory as a file", async () => {
+		await populateFileListCache(canonical, async () => [join(canonical, "a.md")]);
+
+		createdWatchers[0].emit("addDir", join(canonical, "x.md"));
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(getCachedMdFiles(canonical)).toBeNull();
+	});
+
+	it("unlinkDir of foo.md invalidates the file list so its children drop out", async () => {
+		await populateFileListCache(canonical, async () => [
+			join(canonical, "a.md"),
+			join(canonical, "foo.md", "n.md"),
+		]);
+
+		createdWatchers[0].emit("unlinkDir", join(canonical, "foo.md"));
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(getCachedMdFiles(canonical)).toBeNull();
+	});
+
+	it("a file replaced by a directory at x.md within one batch invalidates the file list", async () => {
+		await mkdir(join(canonical, "x.md"));
+		await populateFileListCache(canonical, async () => [
+			join(canonical, "a.md"),
+			join(canonical, "x.md"),
+		]);
+
+		createdWatchers[0].emit("unlink", join(canonical, "x.md"));
+		createdWatchers[0].emit("addDir", join(canonical, "x.md"));
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(getCachedMdFiles(canonical)).toBeNull();
+	});
+
+	it("does not carry the directory mark over to the next batch", async () => {
+		createdWatchers[0].emit("addDir", join(canonical, "x.md"));
+		await vi.advanceTimersByTimeAsync(600);
+		await populateFileListCache(canonical, async () => [
+			join(canonical, "a.md"),
+			join(canonical, "x.md"),
+		]);
+
+		createdWatchers[0].emit("unlink", join(canonical, "x.md"));
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "a.md")]);
+	});
+
+	it("does not send the directory mark to the renderer", async () => {
+		createdWatchers[0].emit("addDir", join(canonical, "x.md"));
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(webContents.send).toHaveBeenCalledWith("watcher:fs-change", [
+			{ kind: "create", path: join(ws.dir, "x.md") },
+		]);
+	});
 });

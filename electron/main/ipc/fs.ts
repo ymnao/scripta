@@ -1,4 +1,4 @@
-import { promises as fsp } from "node:fs";
+import { promises as fsp, type Stats } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { shell } from "electron";
 import { mimeForImageExt } from "../../../src/types/image";
@@ -60,6 +60,16 @@ function pathExistsAt(absolute: string): Promise<boolean> {
 
 function entryExistsAt(absolute: string): Promise<boolean> {
 	return existsBy(fsp.lstat, absolute);
+}
+
+// lstat を自前の try/catch で包まず probe の中で取るのは、errno の扱いを existsBy の
+// 1 か所に保つため。
+async function lstatEntry(absolute: string): Promise<Stats | null> {
+	let stats: Stats | null = null;
+	await existsBy(async (a) => {
+		stats = await fsp.lstat(a);
+	}, absolute);
+	return stats;
 }
 
 // すべての impl は path-guard の assert 系から **canonical（realpath 済み）** を
@@ -356,7 +366,8 @@ async function fileExistsImpl(senderId: number, path: string): Promise<boolean> 
 async function renameEntryImpl(senderId: number, oldPath: string, newPath: string): Promise<void> {
 	const oldCanonical = await assertPathAllowed(senderId, oldPath);
 	const newCanonical = await assertPathAllowed(senderId, newPath);
-	if (!(await entryExistsAt(oldCanonical))) throw FsError.sourceNotFound(oldCanonical);
+	const oldStats = await lstatEntry(oldCanonical);
+	if (oldStats === null) throw FsError.sourceNotFound(oldCanonical);
 	// fs.rename は target 既存時に上書きする default 挙動なので、
 	// 「Target already exists」を出すために事前 check が必要。
 	// 単一ユーザーの mem アプリのためレースは許容。
@@ -368,17 +379,19 @@ async function renameEntryImpl(senderId: number, oldPath: string, newPath: strin
 	// 掃除しないのは、entryExistsAt の reject により **アプリ自身が作った** entry は残らないから。
 	// 外部 delete が watcher の窓内で pending のまま同 path へ rename した場合は旧内容が残るが、
 	// それは flush 時の delete + create → modify merge が回収する既存の窓と同じ。
+	const isDir = oldStats.isDirectory();
 	applyLocalFsChanges([
-		{ kind: "delete", path: oldCanonical },
-		{ kind: "create", path: newCanonical },
+		{ kind: "delete", path: oldCanonical, isDir },
+		{ kind: "create", path: newCanonical, isDir },
 	]);
 }
 
 async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	if (!(await entryExistsAt(canonical))) throw FsError.notFound(canonical);
+	const stats = await lstatEntry(canonical);
+	if (stats === null) throw FsError.notFound(canonical);
 	await shell.trashItem(canonical);
-	applyLocalFsChanges([{ kind: "delete", path: canonical }]);
+	applyLocalFsChanges([{ kind: "delete", path: canonical, isDir: stats.isDirectory() }]);
 }
 
 export function registerFsIpc(): void {

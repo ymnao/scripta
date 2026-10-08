@@ -41,13 +41,19 @@ export function setCacheFiles(state: FileListCacheState, files: readonly string[
 	state.existingStems = null;
 }
 
+// path 名だけでは file と決められない event。`.md` で終わっても isDir が立っていれば
+// ディレクトリ (`foo.md/`) で、配下の `.md` が files に入っているので prefix 単位で扱う。
+export function mayBeDirectoryEvent(ev: FsChangeEvent): boolean {
+	return ev.isDir === true || !ev.path.endsWith(".md");
+}
+
 // watcher batch を state に反映。
-//   - `.md` create → files.add / `.md` delete → files.delete / `.md` modify → 無変更
-//   - 非 `.md` の create / delete はディレクトリ or 未知エントリの可能性があるため
+//   - file と決まる `.md` create → files.add / delete → files.delete / modify → 無変更
+//   - mayBeDirectoryEvent の create / delete はディレクトリ or 未知エントリの可能性があるため
 //     保守的に files を null に落として次回 miss で再 populate させる。
-//     watcher.ts:94-98 は addDir/unlinkDir も同じ FsKind に畳んでおり、
-//     batch payload からは file / dir を区別できないための安全側倒し。
-//   - 非 `.md` modify と `.md` modify は無視 (Phase A の files 集合には影響しない)。
+//   - isDir 付きの modify も同じ扱い。watcher の merge は同じ path の file 削除 + dir 作成
+//     (またはその逆) を modify に畳むので、files の中身が入れ替わっている。
+//   - それ以外の modify は無視 (Phase A の files 集合には影響しない)。
 //   - walk の skip 対象 path は呼び出し側 (applyFsBatch) が batch ごと落としてから渡す (#396)。
 // 構造的変化 (create/delete のうち集合に効いたもの、および full invalidate) があれば
 // epoch を +1 し、派生物 3 つを dirty にする。
@@ -60,27 +66,22 @@ export function applyBatchToState(
 ): void {
 	let shouldBump = false;
 	for (const ev of batch) {
-		// modify は Phase A の files 集合に影響しない (.md / 非 .md いずれも無視)。
-		if (ev.kind === "modify") continue;
+		if (ev.kind === "modify" && ev.isDir !== true) continue;
 		if (state.files === null) {
 			// populate 進行中 or 既 full-invalidate: 追記はできないが「変化があった」信号として
 			// epoch を進める (populate 完了時の epoch guard を作動させる)。
 			shouldBump = true;
 			continue;
 		}
-		const isMd = ev.path.endsWith(".md");
-		if (isMd) {
-			if (ev.kind === "create") {
-				const before = state.files.size;
-				state.files.add(ev.path);
-				if (state.files.size !== before) shouldBump = true;
-			} else {
-				if (state.files.delete(ev.path)) shouldBump = true;
-			}
-		} else {
-			// 非 .md の create/delete は dir イベントかもしれない → 保守的 full invalidate
+		if (mayBeDirectoryEvent(ev)) {
 			state.files = null;
 			shouldBump = true;
+		} else if (ev.kind === "create") {
+			const before = state.files.size;
+			state.files.add(ev.path);
+			if (state.files.size !== before) shouldBump = true;
+		} else {
+			if (state.files.delete(ev.path)) shouldBump = true;
 		}
 	}
 	if (shouldBump) {
