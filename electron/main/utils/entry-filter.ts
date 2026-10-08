@@ -1,5 +1,6 @@
 import { relative, sep } from "node:path";
 import { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS } from "../../../src/types/file-tree";
+import { isRelOutsideRoot } from "./root-relative-path";
 
 export { DEFAULT_FILE_TREE_EXCLUDE_PATTERNS };
 
@@ -28,11 +29,9 @@ export function createEntryFilter(opts: EntryFilterOptions, root: string): Entry
 	};
 }
 
-// root 自体（rel === ""）と root 外（`..` 始まり）は対象外。
 function toRel(absPath: string, root: string): string | null {
 	const rel = relative(root, absPath);
-	if (rel === "") return null;
-	if (rel === ".." || rel.startsWith(`..${sep}`)) return null;
+	if (rel === "" || isRelOutsideRoot(rel)) return null;
 	return sep === "/" ? rel : rel.split(sep).join("/");
 }
 

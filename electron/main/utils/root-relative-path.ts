@@ -13,8 +13,7 @@ const DEFAULT_REL_PATH_OPS: RelPathOps = { relative, isAbsolute, sep };
 
 // `relative(root, p)` の結果 `rel` が root の外を指すか。
 //
-// `rel === ""` (root 自身) を含めないのは、呼び出し側ごとに root 自身の扱いが違うため
-// (component 列なら null、fs 認可なら path 文字列の一致で別判定、renderer URL なら許可)。
+// `rel === ""` (root 自身) を含めないのは、root 自身を配下とみなすかが呼び出し側ごとに違うため。
 // `rel.startsWith("..")` で書くと `..foo` のような正当な名前を root 外と誤読する。
 // `isAbsolute(rel)` は win32 で drive をまたぐと relative() が絶対パスを返すため必要。
 export function isRelOutsideRoot(rel: string, pathOps: RelPathOps = DEFAULT_REL_PATH_OPS): boolean {
@@ -22,9 +21,6 @@ export function isRelOutsideRoot(rel: string, pathOps: RelPathOps = DEFAULT_REL_
 }
 
 // canonicalRoot 配下なら相対パスの component 列、canonicalRoot 自身または root 外なら null。
-//
-// drive 跨ぎの rel を component 列として扱うと、`.` 始まりの component を持つ別 drive の
-// path が「root 配下の hidden」に化ける。
 export function relComponentsUnderRoot(
 	canonicalRoot: string,
 	absPath: string,
