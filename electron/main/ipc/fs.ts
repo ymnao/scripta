@@ -56,7 +56,7 @@ async function existsBy(
 // 2 つの存在判定の違いは **末端 symlink を辿るかどうか**:
 //   - `pathExistsAt`（access）= **解決先**が存在するか。「使えるファイルがそこにあるか」を
 //     問う `fs:path-exists` 向け
-//   - `entryExistsAt`（lstat）= **entry 自体**が存在するか。link 自身を操作する
+//   - `entryExistsAt` / `lstatEntry`（lstat）= **entry 自体**が存在するか。link 自身を操作する
 //     `fs:delete`（trashItem）/ `fs:rename`（rename(2)）向け。realpath が解決できない
 //     symlink（dangling / 循環）でも「実在する entry」として扱える (#454)。`rename(2)` が
 //     末端を辿らないことは実 syscall の test で pin してあるが、`shell.trashItem` の
@@ -69,7 +69,8 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 	return existsBy(fsp.lstat, absolute);
 }
 
-// fsp.lstat を直接渡さないのは、overload の推論が BigIntStats 版を拾って戻り値型が合わないため。
+// fsp.lstat を直接渡さないのは、generic に渡すと最後の overload が採られ T が
+// `Stats | BigIntStats` に推論されて戻り値型が合わないため。
 function lstatEntry(absolute: string): Promise<Stats | null> {
 	return probeOrNull((a) => fsp.lstat(a), absolute);
 }
@@ -123,7 +124,7 @@ function lstatEntry(absolute: string): Promise<Stats | null> {
 //
 // **末端 symlink を辿らない経路**（O_NOFOLLOW も guard も足す必要が無い）:
 //   - `fs:rename`: `rename(2)` は末端 symlink を辿らず link 自体を張り替える。source / target の
-//     存在判定も `entryExistsAt`（lstat、no-follow）なので判定と操作の follow 有無が揃う。
+//     存在判定も `lstatEntry` / `entryExistsAt`（lstat、no-follow）なので判定と操作の follow 有無が揃う。
 //     **canonical の末端が symlink のまま残る場合**（= realpath が解決できない dangling / 循環）
 //     は link 自体が移動する。live な alias が source のときは canonical が実体の path なので
 //     移動するのは実体で、alias は元位置に dangling として残る（`fs:delete` が実体を消すのと
@@ -139,13 +140,13 @@ function lstatEntry(absolute: string): Promise<Stats | null> {
 //   - `fs:path-exists` / `fs:file-exists`: `access` / `stat` は末端 symlink を辿るため、
 //     workspace 外 path の存在オラクルになり得る。この 2 つは「解決先が使えるか」を問う API
 //     なので follow は意図した semantics（dangling に対して false を返すのも仕様）。entry 自体
-//     の存在を要する delete / rename 側は `entryExistsAt`（lstat）を使う
+//     の存在を要する delete / rename 側は `lstatEntry` / `entryExistsAt`（lstat）を使う
 //
 // **`fs:delete` は「解決先を消す」**: canonical は realpath 済みなので、workspace 内の live な
 // alias を削除すると `shell.trashItem` に渡るのは alias ではなく**実体**の path になる。境界は
 // 破らない（実体も root 内）が、直感には反する。一方 **realpath が解決できない path**（dangling /
 // 循環 symlink 等）は canonical が link 自身の path になるため、`shell.trashItem` に渡るのは
-// link 自体になる。存在判定を `entryExistsAt`（lstat）にしたことでここまで到達できる (#454)。
+// link 自体になる。存在判定を lstat（`lstatEntry`）にしたことでここまで到達できる (#454)。
 // `shell.trashItem` 自体の挙動 — dangling symlink を trash へ送れるか、末端 symlink を辿るか —
 // は Electron / OS 側に属し、unit test ではモックしているため未検証。送れない場合も
 // StructuredError が renderer に伝わり fail-visible に止まる。辿る場合、認可から呼び出しまでの
