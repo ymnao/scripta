@@ -151,12 +151,13 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // **同じ batch の再適用は状態を壊さない** (アプリ自身の書き込みは proactive と watcher の 2 回
 // 流れるのでこれに依る)。`.md` event は files.add / delete の戻り値と bumpFileEpoch の wasValid
 // ガードにより epoch / validCount とも二重に動かない。dir かもしれない event は 2 回目も full invalidate
-// として epoch を進めるが、files は null のままで派生物の再構築が 1 回余分になるだけ。
+// として epoch を進め、L2 / L3 の subtree も捨て直す。間に populate や検索が挟まっていれば
+// walk と取り込みがもう 1 回走るが、捨てる側に倒れるだけで stale は残らない。
 // L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
 // L1 側は applyBatchToState、L2 側は本関数内で分岐する。
 // - file と決まる `.md` modify/delete → L2 の該当 ioPath を delete
 // - file と決まる `.md` create → L2 は無操作 (新規なので cache 側にはない)
-// - mayBeDirectoryEvent (非 `.md`、または isDir 付き) → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
+// - mayBeDirectoryEvent (非 `.md`、または isDir が true) → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
 //   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
 // **generation bump は evict の成否ではなく「invalidation の意図」で判定する**。
 // 具体的には file の .md modify/delete および dir かもしれない event の全 kind で bump する

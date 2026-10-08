@@ -1487,6 +1487,14 @@ describe("searchFilesImpl (#397: fs mutating handler の proactive 反映)", () 
 		const after = await searchFilesImpl(TEST_WIN, workspaceDir, "moved");
 		expect(after.results.map((r) => r.filePath)).toEqual([join(workspaceDir, "bar.md", "n.md")]);
 		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "bar.md", "n.md")]);
+
+		// watcher が 500ms 後に同じ event を流す定常状態。再適用しても結果は変わらない。
+		applyFsBatch(canonical, [
+			{ kind: "delete", path: join(canonical, "foo.md"), isDir: true },
+			{ kind: "create", path: join(canonical, "bar.md"), isDir: true },
+		]);
+		expect(await searchFilesImpl(TEST_WIN, workspaceDir, "moved")).toEqual(after);
+		expect(getCachedMdFiles(canonical)).toEqual([join(canonical, "bar.md", "n.md")]);
 		releaseFileListCache(canonical);
 	});
 

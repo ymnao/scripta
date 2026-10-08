@@ -69,6 +69,7 @@ function entryExistsAt(absolute: string): Promise<boolean> {
 	return existsBy(fsp.lstat, absolute);
 }
 
+// fsp.lstat を直接渡さないのは、overload の推論が BigIntStats 版を拾って戻り値型が合わないため。
 function lstatEntry(absolute: string): Promise<Stats | null> {
 	return probeOrNull((a) => fsp.lstat(a), absolute);
 }
