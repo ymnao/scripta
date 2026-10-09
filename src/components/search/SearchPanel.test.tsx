@@ -216,8 +216,8 @@ describe("SearchPanel の段階表示", () => {
 			results: [
 				{
 					filePath: "/workspace/a.md",
-					lineNumber: 3,
-					lineContent: "xx match",
+					lineNumber: 7,
+					lineContent: "xx match yy",
 					matchStart: 3,
 					matchEnd: 8,
 				},
@@ -230,7 +230,7 @@ describe("SearchPanel の段階表示", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /xx match/ }));
 
-		expect(onNavigate).toHaveBeenCalledWith("/workspace/a.md", 3, "match", 3, 8);
+		expect(onNavigate).toHaveBeenCalledWith("/workspace/a.md", 7, "match", 3, 8);
 	});
 
 	it("複数ファイルの結果でも「さらに表示」は新しく出た行だけを描画する", async () => {
