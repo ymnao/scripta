@@ -35,8 +35,11 @@ describe("sanitizeMermaidSvg", () => {
 		});
 
 		it("<br> を XHTML namespace の要素として出力する", () => {
-			const br = labelParagraph(sanitizeMermaidSvg(BR_LABEL_SVG)).querySelector("br");
-			expect(br?.namespaceURI).toBe(XHTML_NS);
+			const doc = new DOMParser().parseFromString(
+				sanitizeMermaidSvg(BR_LABEL_SVG),
+				"image/svg+xml",
+			);
+			expect(doc.getElementsByTagName("br")[0]?.namespaceURI).toBe(XHTML_NS);
 		});
 
 		it("閉じた <br/> を含むラベルでも改行を保持する", () => {
@@ -87,6 +90,15 @@ describe("sanitizeMermaidSvg", () => {
 		const result = sanitizeMermaidSvg(malicious);
 		expect(result).not.toContain("<script");
 		expect(result).toContain("Hello");
+	});
+
+	it("root に xmlns:xlink の宣言が無くても xlink:href を保持する", () => {
+		// mermaid 12 は click リンクを xlink:href で出すが root に xmlns:xlink を宣言しない
+		const linked = BR_LABEL_SVG.replace(
+			'<g class="label">',
+			'<a xlink:href="https://example.com"><g class="label">',
+		).replace("</g></svg>", "</g></a></svg>");
+		expect(sanitizeMermaidSvg(linked)).toContain('xlink:href="https://example.com"');
 	});
 
 	it("foreignObject 外の script / on* を除去する", () => {

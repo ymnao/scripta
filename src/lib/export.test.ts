@@ -133,7 +133,7 @@ describe("exportAsHtml", () => {
 		const md = "# Title\n\n```mermaid\ngraph TD\n  A-->B\n```\n\ntext";
 		await exportAsHtml(md, "/workspace/test.md");
 		const html = mockedWriteFile.mock.calls[0][1] as string;
-		expect(html).toMatch(/<svg[\s>]/);
+		expect(html).toContain("<svg>");
 		expect(html).toContain("mermaid-diagram");
 		expect(html).not.toContain("```mermaid");
 	});
@@ -379,7 +379,7 @@ describe("exportAsPdf", () => {
 		const html = mockedWriteFile.mock.calls[0][1] as string;
 
 		// HTML 出力はブラウザで開かれる前提で SVG を inline で保持
-		expect(html).toMatch(/<svg[\s>]/);
+		expect(html).toContain("<svg>");
 		expect(html).toContain("mermaid-diagram");
 		// PNG ラスタライズは呼ばれない（PDF 専用）
 		expect(svgToPng).not.toHaveBeenCalled();

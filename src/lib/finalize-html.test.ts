@@ -394,11 +394,12 @@ describe("finalizeHtml", () => {
 			vi.mocked(sanitizeMermaidSvg).mockImplementationOnce(() => {
 				throw new SyntaxError("invalid XML");
 			});
-			vi.spyOn(console, "error").mockImplementationOnce(() => {});
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 			const html = finalizeHtml(
 				markUnsanitized('<p>本文</p><div class="mermaid-diagram" data-mermaid-slot="n1-0"></div>'),
 				{ mermaidSlots: slotsWith(FO_SVG) },
 			);
+			errorSpy.mockRestore();
 			expect(html).toBe('<p>本文</p><div class="mermaid-diagram"></div>');
 		});
 	});
