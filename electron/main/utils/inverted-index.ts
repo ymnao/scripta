@@ -11,7 +11,7 @@
 // epoch との偽一致も防ぐ。
 //
 // valid 判定は「fileEpoch (現在世代) と indexedEpoch (index 取り込み時点の世代) の一致」で行う
-// 二重照合。invalidate/remove/invalidatePrefix はいずれも「意図ベース bump」— fileEpoch を
+// 二重照合。invalidate/remove/invalidatePrefixes はいずれも「意図ベース bump」— fileEpoch を
 // bump するだけで posting の掃除はしない (掃除は tombstone 全 clear に委ねる。掃除より先に
 // bump する)。
 //
@@ -29,7 +29,7 @@
 // 同型の stale posting が残る。取り込み後に hard link が作られた場合の残る窓は search.ts の
 // L2 admission コメント (#416 の正本) を参照。
 
-import { sep } from "node:path";
+import { atOrUnderMatcher } from "./root-relative-path";
 
 /**
  * gram 数上限。この上限を超えることになる file は取り込まず reject する (#589 B1)。
@@ -125,7 +125,7 @@ export class InvertedIndex {
 	private idToPath = new Map<number, string>();
 	private nextId = 0;
 
-	// 現在世代。invalidate/remove/invalidatePrefix で bump する。
+	// 現在世代。invalidate/remove/invalidatePrefixes で bump する。
 	// 値は epochCounter からの採番 (per-file +1 ではない)。回収で fileEpoch を捨てても、
 	// 以後の採番値は過去に返した値と衝突しない。未設定の file は epochFloor を既定値とする。
 	private fileEpoch = new Map<number, number>();
@@ -215,7 +215,7 @@ export class InvertedIndex {
 	private getOrCreateId(ioPath: string): number | undefined {
 		const existing = this.pathToId.get(ioPath);
 		if (existing !== undefined) return existing;
-		// lookup のみの invalidate/remove/invalidatePrefix は新規登録しないので、回収を誘発できない。
+		// lookup のみの invalidate/remove/invalidatePrefixes は新規登録しないので、回収を誘発できない。
 		if (this.pathToId.size >= this.maxPathCount) {
 			if (this.saturated || !this.compactIds()) {
 				this.saturated = true;
@@ -396,12 +396,12 @@ export class InvertedIndex {
 		this.maybeClearOnTombstoneRatio();
 	}
 
-	// L2 の deletePrefix と同じ範囲判定 (exact または startsWith(prefixWithSep))。
-	invalidatePrefix(prefix: string): number {
-		const prefixWithSep = prefix.endsWith(sep) ? prefix : prefix + sep;
+	// L2 の deletePrefixes と同じ範囲判定 (atOrUnderMatcher)。
+	invalidatePrefixes(prefixes: ReadonlySet<string>): number {
+		const isTarget = atOrUnderMatcher(prefixes);
 		let count = 0;
 		for (const [path, id] of this.pathToId) {
-			if (path === prefix || path.startsWith(prefixWithSep)) {
+			if (isTarget(path)) {
 				this.bumpFileEpoch(id);
 				count++;
 			}
