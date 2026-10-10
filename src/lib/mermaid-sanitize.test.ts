@@ -13,7 +13,58 @@ const MERMAID_SVG = `<svg id="mermaid-0" xmlns="http://www.w3.org/2000/svg" view
 </g>
 </svg>`;
 
+// Chromium の mermaid 12 が `A["1行目<br/>2行目"]` に対して実際に出力する形 (閉じない <br>)
+const BR_LABEL_SVG = `<svg id="mermaid-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 42"><g class="label"><foreignObject width="120" height="42"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: nowrap; line-height: 1.5;"><span class="nodeLabel"><p>1行目<br>2行目</p></span></div></foreignObject></g></svg>`;
+
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
+function labelParagraph(svg: string): HTMLParagraphElement {
+	const template = document.createElement("template");
+	template.innerHTML = svg;
+	const p = template.content.querySelector("foreignObject p");
+	if (!(p instanceof HTMLParagraphElement)) throw new Error("label <p> not found");
+	return p;
+}
+
 describe("sanitizeMermaidSvg", () => {
+	describe("ラベル内の <br>", () => {
+		it("閉じない <br> を含むラベルの改行を保持する", () => {
+			const p = labelParagraph(sanitizeMermaidSvg(BR_LABEL_SVG));
+			expect(Array.from(p.childNodes, (n) => n.nodeName)).toEqual(["#text", "BR", "#text"]);
+			expect(p.textContent).toBe("1行目2行目");
+		});
+
+		it("<br> を XHTML namespace の要素として出力する", () => {
+			const br = labelParagraph(sanitizeMermaidSvg(BR_LABEL_SVG)).querySelector("br");
+			expect(br?.namespaceURI).toBe(XHTML_NS);
+		});
+
+		it("閉じた <br/> を含むラベルでも改行を保持する", () => {
+			const p = labelParagraph(sanitizeMermaidSvg(BR_LABEL_SVG.replace("<br>", "<br/>")));
+			expect(Array.from(p.childNodes, (n) => n.nodeName)).toEqual(["#text", "BR", "#text"]);
+		});
+
+		it("出力は XML として parse できる", () => {
+			const doc = new DOMParser().parseFromString(
+				sanitizeMermaidSvg(BR_LABEL_SVG),
+				"image/svg+xml",
+			);
+			expect(doc.querySelector("parsererror")).toBeNull();
+		});
+
+		it("<br> を含むラベルでも foreignObject 内の script / on* / javascript: を除去する", () => {
+			const malicious = BR_LABEL_SVG.replace(
+				"<p>1行目",
+				'<p onclick="alert(1)">1行目<script>alert(1)</script><a href="javascript:alert(1)">x</a>',
+			);
+			const result = sanitizeMermaidSvg(malicious);
+			expect(result).toContain("<br");
+			expect(result).not.toContain("<script");
+			expect(result).not.toContain("onclick");
+			expect(result).not.toContain("javascript:");
+		});
+	});
+
 	it("foreignObject 内の HTML テキストを保持する", () => {
 		const result = sanitizeMermaidSvg(MERMAID_SVG);
 		expect(result).toContain("foreignObject");
@@ -36,6 +87,17 @@ describe("sanitizeMermaidSvg", () => {
 		const result = sanitizeMermaidSvg(malicious);
 		expect(result).not.toContain("<script");
 		expect(result).toContain("Hello");
+	});
+
+	it("foreignObject 外の script / on* を除去する", () => {
+		const malicious = MERMAID_SVG.replace(
+			'<rect x="10"',
+			'<script>alert(1)</script><rect onload="alert(1)" x="10"',
+		);
+		const result = sanitizeMermaidSvg(malicious);
+		expect(result).not.toContain("<script");
+		expect(result).not.toContain("onload");
+		expect(result).toContain("Hello World");
 	});
 
 	it("foreignObject がない SVG はそのままサニタイズする", () => {

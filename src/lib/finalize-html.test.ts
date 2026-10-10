@@ -1,9 +1,15 @@
 import katex from "katex";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { MermaidSlotStore } from "../types/mermaid-slot";
 import { finalizeHtml, markUnsanitized } from "./finalize-html";
 import { markdownToHtmlRaw } from "./markdown-to-html";
+import { sanitizeMermaidSvg } from "./mermaid-sanitize";
 import { resolveHtmlImageSrcs } from "./resolve-html-images";
+
+vi.mock("./mermaid-sanitize", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./mermaid-sanitize")>();
+	return { sanitizeMermaidSvg: vi.fn(actual.sanitizeMermaidSvg) };
+});
 
 describe("finalizeHtml", () => {
 	describe("XSS ベクタ", () => {
@@ -363,8 +369,6 @@ describe("finalizeHtml", () => {
 		});
 
 		it("差し戻す SVG の foreignObject 内の <script> / on* / javascript: も strip する", () => {
-			// void 要素を含めると sanitizeMermaidSvg が XML parse error のフォールバック分岐へ
-			// 逸れ、foreignObject 内 HTML の個別 sanitize を通らなくなる
 			const malicious = FO_SVG.replace(
 				"<p>開始</p>",
 				'<p onclick="alert(1)">開始</p><script>alert(1)</script><a href="javascript:alert(1)">x</a>',
@@ -378,11 +382,22 @@ describe("finalizeHtml", () => {
 			expect(html).not.toContain("javascript:");
 		});
 
+		it("ラベル内の閉じない <br> を改行として差し戻す", () => {
+			const brSvg = FO_SVG.replace("<p>開始</p>", "<p>開始<br>2 行目</p>");
+			const html = finalizeHtml(markUnsanitized('<div data-mermaid-slot="n1-0"></div>'), {
+				mermaidSlots: slotsWith(brSvg),
+			});
+			expect(html).toMatch(/<p>開始<br>2 行目<\/p>/);
+		});
+
 		it("差し戻す SVG の sanitize が throw しても他の本文は返し、その slot だけ空にする", () => {
-			const brokenFoSvg = FO_SVG.replace("<p>開始</p>", "<p>開始<br/>2 行目</p>");
+			vi.mocked(sanitizeMermaidSvg).mockImplementationOnce(() => {
+				throw new SyntaxError("invalid XML");
+			});
+			vi.spyOn(console, "error").mockImplementationOnce(() => {});
 			const html = finalizeHtml(
 				markUnsanitized('<p>本文</p><div class="mermaid-diagram" data-mermaid-slot="n1-0"></div>'),
-				{ mermaidSlots: slotsWith(brokenFoSvg) },
+				{ mermaidSlots: slotsWith(FO_SVG) },
 			);
 			expect(html).toBe('<p>本文</p><div class="mermaid-diagram"></div>');
 		});
