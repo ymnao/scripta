@@ -36,7 +36,8 @@ export function sanitizeMermaidSvg(rawSvg: string): string {
 	});
 
 	// mermaid は root に xmlns:xlink を宣言しないまま xlink:href (click リンク等) を出す。
-	// 未宣言だと XMLSerializer が ns1:href のような prefix を生成し、DOMPurify に落とされる。
+	// Chromium の XMLSerializer は要素ごとに宣言を補うが、仕様どおりの serializer (jsdom) は
+	// ns1:href のような prefix を生成し DOMPurify に落とされるため、root で宣言しておく。
 	originalSvg.setAttributeNS(XMLNS_NS, "xmlns:xlink", XLINK_NS);
 	const serializer = new XMLSerializer();
 	const sanitized = DOMPurify.sanitize(serializer.serializeToString(originalSvg), {
