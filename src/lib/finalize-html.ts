@@ -123,7 +123,8 @@ const KATEX_ADD_ATTR = [
  *
  * `finalizeHtml(finalizeHtml(x, opts), opts) === finalizeHtml(x, opts)` を仕様として持つ
  * (誤って二重に呼ばれても attribute 順序等が安定するように、DOMPurify の determinism に
- * 依存する)。テストで固定する。
+ * 依存する)。テストで固定する。`mermaidSlots` を渡した場合は対象外: 差し戻した SVG の
+ * foreignObject ラベルは 2 回目の全体 sanitize で落ちる。
  */
 export function finalizeHtml(html: UnsanitizedHtml, opts: FinalizeHtmlOptions = {}): string {
 	// allowAssetProtocol:false は ALLOWED_URI_REGEXP を渡さず dompurify default に委譲する
@@ -147,7 +148,12 @@ function restoreMermaidSlots(sanitized: string, slots: MermaidSlotStore): string
 	for (const el of template.content.querySelectorAll("[data-mermaid-slot]")) {
 		const svg = slots.svgs.get(el.getAttribute("data-mermaid-slot") ?? "");
 		if (svg === undefined) continue;
-		el.innerHTML = sanitizeMermaidSvg(svg);
+		// 1 図の sanitize 失敗で export / スライド全体を reject させず、その図だけ空にする
+		try {
+			el.innerHTML = sanitizeMermaidSvg(svg);
+		} catch (err) {
+			console.error("[finalizeHtml] mermaid SVG の差し戻しに失敗:", err);
+		}
 		el.removeAttribute("data-mermaid-slot");
 	}
 	return template.innerHTML;
