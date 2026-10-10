@@ -712,6 +712,21 @@ describe("search-cache: L2 ContentCache", () => {
 			expect(l3?.isIndexedAndValid(p("keep.md"))).toBe(true);
 		});
 
+		it("clears L3 when file and dir events in one batch together cross the tombstone ratio", () => {
+			acquireFileListCache(ROOT);
+			const l3 = getInvertedIndexHandle(ROOT);
+			l3?.indexFile(p("a.md"), "hello world", l3.currentEpochOf(p("a.md")));
+			l3?.indexFile(p("dir/b.md"), "hello world", l3.currentEpochOf(p("dir/b.md")));
+			l3?.indexFile(p("c.md"), "hello world", l3.currentEpochOf(p("c.md")));
+			// どちらか片方だけなら tombstones 1 <= validCount 2 * 0.5 で clear しない。合わせて 2 > 0.5 で clear する。
+			applyFsBatch(ROOT, [
+				{ kind: "delete", path: p("dir") },
+				{ kind: "modify", path: p("a.md") },
+			]);
+			expect(l3?.isIndexedAndValid(p("c.md"))).toBe(false);
+			expect(l3?.isSaturated).toBe(false);
+		});
+
 		it("isDir .md delete evicts the directory's subtree by prefix", () => {
 			acquireFileListCache(ROOT);
 			const h = getContentCacheHandle(ROOT);

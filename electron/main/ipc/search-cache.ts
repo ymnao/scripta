@@ -187,8 +187,11 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	applyBatchToState(e.state, visible);
 	let shouldBumpL2 = false;
 	// event ごとに L2 / L3 を全走査せず、dir かもしれない path を集めて 1 走査で evict する
-	// (cache 1 万件 × 非 `.md` event 1000 件で 1 秒超 main を塞いでいた)。evict / bump は
-	// どれも可換なので、file event の後にまとめても結果は event 順に処理したときと同じ。
+	// (cache 1 万件 × 非 `.md` event 1000 件で 1 秒超 main を塞いでいた)。file event の後に
+	// まとめても、L2 entries・l2Generation・L3 の valid 集合 (= capture した epoch との等値比較の
+	// 結果) と tombstone clear の発火有無は event 順と変わらない (fileEpoch の採番値だけが変わる)。
+	// clear の有無が順序に依らないのは、batch 内で indexFile / getOrCreateId が走らず
+	// tombstone 数が非減少だから。ここで index 取り込みや id 回収を呼ぶ変更を入れるとこの前提は崩れる。
 	const dirPrefixes = new Set<string>();
 	for (const ev of visible) {
 		if (mayBeDirectoryEvent(ev)) {
