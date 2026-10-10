@@ -116,6 +116,17 @@ describe("renderSlideHtmlWithMermaid: mermaid fence 変換", () => {
 			name: "AbortError",
 		});
 	});
+	it("mermaid の foreignObject ラベルを最終 sanitize 後も保持する", async () => {
+		renderSpy.mockImplementationOnce(async () => ({
+			svg: '<svg xmlns="http://www.w3.org/2000/svg"><g class="label"><foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>開始</p></span></div></foreignObject></g></svg>',
+		}));
+		const html = await renderSlideHtmlWithMermaid(
+			"```mermaid\nflowchart TD\n  A[開始]\n```",
+			null,
+			"light",
+		);
+		expect(html).toMatch(/<foreignObject[^>]*>.*<p>開始<\/p>/);
+	});
 	// rasterize=true (embedOptions) 経路は svg-rasterize を要するため
 	// export.test.ts 側 (svg-rasterize モック済み) の exportSlidesAsPdf テストでカバー。
 });

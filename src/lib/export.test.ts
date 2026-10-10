@@ -66,6 +66,17 @@ describe("exportAsHtml", () => {
 		);
 	});
 
+	it("mermaid の foreignObject ラベルを最終 sanitize 後も保持する", async () => {
+		const { renderMermaid } = await import("./mermaid");
+		(renderMermaid as Mock).mockResolvedValueOnce(
+			'<svg xmlns="http://www.w3.org/2000/svg"><g class="label"><foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>開始</p></span></div></foreignObject></g></svg>',
+		);
+		mockedSave.mockResolvedValue("/output/test.html");
+		await exportAsHtml("```mermaid\nflowchart TD\n  A[開始]\n```", "/workspace/test.md");
+		const html = mockedWriteFile.mock.calls[0][1] as string;
+		expect(html).toMatch(/<foreignObject[^>]*>.*<p>開始<\/p>/);
+	});
+
 	it("includes title in HTML document", async () => {
 		mockedSave.mockResolvedValue("/output/test.html");
 		await exportAsHtml("# Hello", "/workspace/my-note.md");
@@ -957,6 +968,31 @@ describe("preprocessMermaidBlocks", () => {
 		expect(result).not.toContain("```mermaid");
 		expect(result).toContain("text\r\n\r\n");
 		expect(result).toContain("\r\n\r\nmore");
+	});
+
+	it("slots 指定時は SVG の代わりに slot div を出し、SVG を slot id で store に積む", async () => {
+		const md = "```mermaid\ngraph TD\n```\n\n```mermaid\nsequenceDiagram\n```";
+		const slots = { nonce: "n1", svgs: new Map<string, string>() };
+		const result = await preprocessMermaidBlocks(md, "light", {}, { slots });
+		expect(result).toBe(
+			'<div class="mermaid-diagram" data-mermaid-slot="n1-0"></div>\n\n<div class="mermaid-diagram" data-mermaid-slot="n1-1"></div>',
+		);
+		expect(slots.svgs).toEqual(
+			new Map([
+				["n1-0", "<svg>graph TD</svg>"],
+				["n1-1", "<svg>sequenceDiagram</svg>"],
+			]),
+		);
+	});
+
+	it("slots 指定時も render 失敗ブロックは元のコードブロックを残し store に積まない", async () => {
+		const { renderMermaid } = await import("./mermaid");
+		(renderMermaid as Mock).mockRejectedValueOnce(new Error("Parse error"));
+		const md = "```mermaid\nINVALID\n```";
+		const slots = { nonce: "n1", svgs: new Map<string, string>() };
+		const result = await preprocessMermaidBlocks(md, "light", {}, { slots });
+		expect(result).toBe(md);
+		expect(slots.svgs.size).toBe(0);
 	});
 });
 

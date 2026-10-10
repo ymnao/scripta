@@ -1,3 +1,4 @@
+import type { MermaidSlotStore } from "../types/mermaid-slot";
 import { abortError, isAbortError } from "./abort";
 import { type MermaidRenderOptions, renderMermaid } from "./mermaid";
 import { svgToPng } from "./svg-rasterize";
@@ -92,6 +93,8 @@ export function extractSvgNaturalSizeAttrs(svg: string): string {
  * `mermaidOptions`: 描画モード切替（PDF は `{htmlLabels:false, useMaxWidth:false}`、#106）。
  * `embedOptions.rasterize`: SVG → PNG 化して `<img>` 埋め込み（PDF 経路の SVG quirk
  * 完全 bypass、失敗時は inline SVG にフォールバック）。
+ * `embedOptions.slots`: SVG の代わりに空の slot div を出し、SVG は `slots.svgs` に積む。
+ * `finalizeHtml` に同じ store を渡すと sanitize 後に差し戻される（foreignObject ラベル維持）。
  * `signal`: 各ブロック処理の直前と `renderMermaid` へのキャンセル伝搬。theme /
  * activeTabPath 連打時の CPU waste 軽減 (deck に mermaid が N 個並んでいても、
  * abort されれば次ブロックの処理には入らない)。
@@ -100,7 +103,7 @@ export async function preprocessMermaidBlocks(
 	markdown: string,
 	theme: "light" | "dark" = "light",
 	mermaidOptions: MermaidRenderOptions = {},
-	embedOptions: { rasterize?: boolean } = {},
+	embedOptions: { rasterize?: boolean; slots?: MermaidSlotStore } = {},
 	signal?: AbortSignal,
 ): Promise<string> {
 	const matches = findMermaidCodeBlocks(markdown);
@@ -128,6 +131,10 @@ export async function preprocessMermaidBlocks(
 					);
 					raw = `<div class="mermaid-diagram">${svg}</div>`;
 				}
+			} else if (embedOptions.slots) {
+				const slotId = `${embedOptions.slots.nonce}-${i}`;
+				embedOptions.slots.svgs.set(slotId, svg);
+				raw = `<div class="mermaid-diagram" data-mermaid-slot="${slotId}"></div>`;
 			} else {
 				raw = `<div class="mermaid-diagram">${svg}</div>`;
 			}

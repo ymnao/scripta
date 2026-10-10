@@ -1,5 +1,6 @@
 import katex from "katex";
 import { describe, expect, it } from "vitest";
+import type { MermaidSlotStore } from "../types/mermaid-slot";
 import { finalizeHtml, markUnsanitized } from "./finalize-html";
 import { markdownToHtmlRaw } from "./markdown-to-html";
 import { resolveHtmlImageSrcs } from "./resolve-html-images";
@@ -317,6 +318,73 @@ describe("finalizeHtml", () => {
 			].join("");
 			const html = finalizeHtml(markUnsanitized(attacks), { allowAssetProtocol: true });
 			assertNoActiveScriptScheme(html);
+		});
+	});
+
+	describe("mermaid slot の差し戻し", () => {
+		const FO_SVG =
+			'<svg xmlns="http://www.w3.org/2000/svg"><g class="label"><foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>開始</p></span></div></foreignObject></g></svg>';
+
+		function slotsWith(svg: string): MermaidSlotStore {
+			return { nonce: "n1", svgs: new Map([["n1-0", svg]]) };
+		}
+
+		it("slot store なしでは foreignObject 内のラベルが消える", () => {
+			const html = finalizeHtml(markUnsanitized(`<div class="mermaid-diagram">${FO_SVG}</div>`));
+			expect(html).not.toContain("開始");
+		});
+
+		it("nonce の一致する slot に foreignObject ラベルごと SVG を差し戻す", () => {
+			const html = finalizeHtml(
+				markUnsanitized('<p>a</p><div class="mermaid-diagram" data-mermaid-slot="n1-0"></div>'),
+				{ mermaidSlots: slotsWith(FO_SVG) },
+			);
+			expect(html).toMatch(/<foreignObject[^>]*>.*<p>開始<\/p>/);
+			expect(html).not.toContain("data-mermaid-slot");
+		});
+
+		it("nonce の一致しない slot には何も差し戻さない", () => {
+			const html = finalizeHtml(
+				markUnsanitized('<div class="mermaid-diagram" data-mermaid-slot="forged-0"></div>'),
+				{ mermaidSlots: slotsWith(FO_SVG) },
+			);
+			expect(html).not.toContain("開始");
+		});
+
+		it("slot store があっても本文の <script> / on* は strip する", () => {
+			const html = finalizeHtml(
+				markUnsanitized(
+					'<script>alert(1)</script><img src="x" onerror="alert(1)"><div data-mermaid-slot="n1-0"></div>',
+				),
+				{ mermaidSlots: slotsWith(FO_SVG) },
+			);
+			expect(html).not.toContain("<script");
+			expect(html).not.toContain("onerror");
+		});
+
+		it("差し戻す SVG の foreignObject 内の <script> / on* / javascript: も strip する", () => {
+			// void 要素を含めると sanitizeMermaidSvg が XML parse error のフォールバック分岐へ
+			// 逸れ、foreignObject 内 HTML の個別 sanitize を通らなくなる
+			const malicious = FO_SVG.replace(
+				"<p>開始</p>",
+				'<p onclick="alert(1)">開始</p><script>alert(1)</script><a href="javascript:alert(1)">x</a>',
+			);
+			const html = finalizeHtml(markUnsanitized('<div data-mermaid-slot="n1-0"></div>'), {
+				mermaidSlots: slotsWith(malicious),
+			});
+			expect(html).toMatch(/<foreignObject[^>]*>.*<p>開始<\/p>/);
+			expect(html).not.toContain("<script");
+			expect(html).not.toContain("onclick");
+			expect(html).not.toContain("javascript:");
+		});
+
+		it("差し戻す SVG の sanitize が throw しても他の本文は返し、その slot だけ空にする", () => {
+			const brokenFoSvg = FO_SVG.replace("<p>開始</p>", "<p>開始<br/>2 行目</p>");
+			const html = finalizeHtml(
+				markUnsanitized('<p>本文</p><div class="mermaid-diagram" data-mermaid-slot="n1-0"></div>'),
+				{ mermaidSlots: slotsWith(brokenFoSvg) },
+			);
+			expect(html).toBe('<p>本文</p><div class="mermaid-diagram"></div>');
 		});
 	});
 
