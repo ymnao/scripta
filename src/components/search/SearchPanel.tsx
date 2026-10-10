@@ -26,21 +26,28 @@ export interface GroupedResults {
 	matches: SearchResult[];
 }
 
+// header の件数を matches.length から取らないのは、境界で部分 slice された group では
+// それが表示済みの行数になり、見出しの総件数と食い違うため。
+export interface VisibleGroup extends GroupedResults {
+	totalMatches: number;
+}
+
 // 描画対象を先頭 limit 件の match に絞る。group 単位ではなく match 単位で数えるのは
 // 1 ファイルに上限いっぱいの match が集中するケース (MAX_SEARCH_RESULTS の打ち切りは
 // 単一ファイルでも起きる) では group 単位の制限が全く効かないため。
 // collapsed な group も budget を消費させる。除外すると折り畳みの度に下方の group が
 // 出入りして、どこまで表示済みかが利用者から予測できなくなる。
-export function sliceGroupedResults(groups: GroupedResults[], limit: number): GroupedResults[] {
-	const visible: GroupedResults[] = [];
+export function sliceGroupedResults(groups: GroupedResults[], limit: number): VisibleGroup[] {
+	const visible: VisibleGroup[] = [];
 	let budget = limit;
 	for (const group of groups) {
 		if (budget <= 0) break;
-		if (group.matches.length <= budget) {
-			visible.push(group);
-			budget -= group.matches.length;
+		const totalMatches = group.matches.length;
+		if (totalMatches <= budget) {
+			visible.push({ ...group, totalMatches });
+			budget -= totalMatches;
 		} else {
-			visible.push({ ...group, matches: group.matches.slice(0, budget) });
+			visible.push({ ...group, matches: group.matches.slice(0, budget), totalMatches });
 			budget = 0;
 		}
 	}
@@ -179,7 +186,7 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 							<span className="search-panel-file-name" title={group.relativePath}>
 								{group.relativePath}
 							</span>
-							<span className="search-panel-file-count">{group.matches.length}</span>
+							<span className="search-panel-file-count">{group.totalMatches}</span>
 						</button>
 						{!isCollapsed(group.filePath) && (
 							<div>
@@ -210,9 +217,10 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 }
 
 // memo の単位を group ではなく行にしているのは、境界で部分 slice された group は
-// sliceGroupedResults が「さらに表示」の度に新しい object を作るため。結果が 1 ファイルに
-// 集中すると全体がその境界 group になり、group 単位の memo では表示済みの行を毎回
-// 描き直す。match は results の要素の参照のまま渡るので、行単位なら新しく出た行だけが
+// sliceGroupedResults が「さらに表示」の度に必ず新しい object になるため (totalMatches の
+// 付与で現在は全 group がそうなっているが、それを外しても境界 group は残る)。結果が
+// 1 ファイルに集中すると全体がその境界 group になり、group 単位の memo では表示済みの行を
+// 毎回描き直す。match は results の要素の参照のまま渡るので、行単位なら新しく出た行だけが
 // render される。
 const SearchResultRow = memo(function SearchResultRow({
 	match,
