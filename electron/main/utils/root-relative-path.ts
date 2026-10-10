@@ -27,7 +27,8 @@ export function isRelOutsideRoot(rel: string, pathOps: RelPathOps = DEFAULT_REL_
 // 始まる」に当たる。どちらでもない位置は `/foo` と `/foobar` のような誤一致なので引かない。
 export function atOrUnderMatcher(prefixes: ReadonlySet<string>): (path: string) => boolean {
 	const sepCode = sep.charCodeAt(0);
-	const lengths = [...new Set(Array.from(prefixes, (p) => p.length))];
+	const lengths = new Set<number>();
+	for (const p of prefixes) lengths.add(p.length);
 	return (path) => {
 		if (prefixes.has(path)) return true;
 		for (const len of lengths) {
