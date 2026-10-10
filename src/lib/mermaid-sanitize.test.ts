@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeMermaidSvg } from "./mermaid";
+import { sanitizeMermaidSvg } from "./mermaid-sanitize";
 
 const MERMAID_SVG = `<svg id="mermaid-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" style="max-width: 200px;">
 <style>#mermaid-0 { font-family: sans-serif; } .messageText { font-size: 16px; fill: #333; }</style>

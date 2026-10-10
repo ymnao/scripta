@@ -1,4 +1,6 @@
 import DOMPurify from "dompurify";
+import type { MermaidSlotStore } from "../types/mermaid-slot";
+import { sanitizeMermaidSvg } from "./mermaid-sanitize";
 
 /**
  * sanitize 未実施の HTML 文字列を表す branded type。
@@ -32,6 +34,8 @@ export interface FinalizeHtmlOptions {
 	 * strip される (XSS ベクタとして既知)。
 	 */
 	allowAssetProtocol?: boolean;
+	/** `preprocessMermaidBlocks` に渡したのと同じ store。sanitize 後に mermaid SVG を差し戻す。 */
+	mermaidSlots?: MermaidSlotStore;
 }
 
 // `allowAssetProtocol: true` の時にだけ DOMPurify default の `IS_ALLOWED_URI` に
@@ -124,9 +128,27 @@ const KATEX_ADD_ATTR = [
 export function finalizeHtml(html: UnsanitizedHtml, opts: FinalizeHtmlOptions = {}): string {
 	// allowAssetProtocol:false は ALLOWED_URI_REGEXP を渡さず dompurify default に委譲する
 	// (drift 予防 + hot path allocation 回避)。true の時のみ pre-computed 合成 regexp を渡す。
-	return DOMPurify.sanitize(html, {
+	const sanitized = DOMPurify.sanitize(html, {
 		ADD_TAGS: KATEX_ADD_TAGS,
 		ADD_ATTR: KATEX_ADD_ATTR,
 		...(opts.allowAssetProtocol ? { ALLOWED_URI_REGEXP: ASSET_ALLOWED_URI_REGEXP } : {}),
 	});
+	if (!opts.mermaidSlots || opts.mermaidSlots.svgs.size === 0) return sanitized;
+	return restoreMermaidSlots(sanitized, opts.mermaidSlots);
+}
+
+// 全体 sanitize に foreignObject を許可しても中の HTML ラベルは DOMPurify が 1 パスで
+// 落とすため、mermaid SVG だけは sanitize 後に差し戻す。差し戻す SVG もここで
+// sanitizeMermaidSvg を通し、「finalizeHtml の出力は全てこの関数内で sanitize 済み」を保つ。
+// slot id は呼び出しごとの nonce を含むので、本文に書かれた偽の slot には何も入らない。
+function restoreMermaidSlots(sanitized: string, slots: MermaidSlotStore): string {
+	const template = document.createElement("template");
+	template.innerHTML = sanitized;
+	for (const el of template.content.querySelectorAll("[data-mermaid-slot]")) {
+		const svg = slots.svgs.get(el.getAttribute("data-mermaid-slot") ?? "");
+		if (svg === undefined) continue;
+		el.innerHTML = sanitizeMermaidSvg(svg);
+		el.removeAttribute("data-mermaid-slot");
+	}
+	return template.innerHTML;
 }

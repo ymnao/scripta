@@ -1,4 +1,5 @@
 import { katexInlineCss } from "../generated/katex-inline-css";
+import { createMermaidSlotStore } from "../types/mermaid-slot";
 import {
 	SLIDE_LOGICAL_HEIGHT,
 	SLIDE_LOGICAL_PADDING_PX,
@@ -320,7 +321,13 @@ export async function exportAsHtml(
 
 	const mermaidTheme = resolveMermaidTheme(options?.theme);
 	const withMarkers = preprocessPageBreakMarkers(markdown);
-	const preprocessed = await preprocessMermaidBlocks(withMarkers, mermaidTheme);
+	const mermaidSlots = createMermaidSlotStore();
+	const preprocessed = await preprocessMermaidBlocks(
+		withMarkers,
+		mermaidTheme,
+		{},
+		{ slots: mermaidSlots },
+	);
 	// 相対 / 絶対 workspace パスのローカル画像を data URI として埋め込む (#314)。
 	// scripta-asset:// では外部ブラウザから解決不能なため、HTML 単体で self-contained
 	// にするにはインライン化が必要。activeTabPath は書き出し元の md path で代用する。
@@ -328,6 +335,7 @@ export async function exportAsHtml(
 	// `<img>` 等の data: を既に許可するため、finalizeHtml に追加オプションは要らない。
 	const bodyHtml = finalizeHtml(
 		await embedHtmlImagesAsDataUri(markdownToHtmlRaw(preprocessed), filePath),
+		{ mermaidSlots },
 	);
 	// Mermaid SVG は固定テーマでレンダリングされるため、
 	// system の場合も解決済みテーマで HTML 全体を統一する

@@ -1,3 +1,4 @@
+import { createMermaidSlotStore } from "../types/mermaid-slot";
 import { abortError } from "./abort";
 import { finalizeHtml } from "./finalize-html";
 import { LruCache } from "./lru-cache";
@@ -82,15 +83,17 @@ async function renderSlideHtmlDirect(
 	options: RenderSlideHtmlOptions | undefined,
 	signal: AbortSignal | undefined,
 ): Promise<string> {
+	const mermaidSlots = createMermaidSlotStore();
 	const withMermaid = await preprocessMermaidBlocks(
 		cleaned,
 		theme,
 		options?.mermaidOptions,
-		options?.embedOptions,
+		{ ...options?.embedOptions, slots: mermaidSlots },
 		signal,
 	);
 	return finalizeHtml(resolveHtmlImageSrcs(markdownToHtmlRaw(withMermaid), activeTabPath), {
 		allowAssetProtocol: true,
+		mermaidSlots,
 	});
 }
 
