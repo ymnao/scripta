@@ -203,6 +203,8 @@ describe("SearchPanel の段階表示", () => {
 		expect(document.querySelectorAll(".search-panel-match")).toHaveLength(STEP);
 	});
 
+	// 総件数を STEP * 3 に置くのは、押下後も group が部分 slice のまま留まるケースを踏むため。
+	// STEP * 2 以下だと押下後は全件が収まり、押下後の assert では表示済みの行数と総件数を区別できない。
 	it("1 ファイルに集中した結果でも file header にはそのファイルの総件数が出る", async () => {
 		mockedSearchFiles.mockResolvedValue({
 			results: results("/workspace/big.md", STEP * 3),
@@ -219,7 +221,8 @@ describe("SearchPanel の段階表示", () => {
 		expect(fileCount()).toBe(String(STEP * 3));
 	});
 
-	// 総件数を STEP * 3 に置くのは、押下後も group が部分 slice のまま留まるケースを踏むため。
+	// 総件数を STEP * 3 に置くのは、上と同じく押下後も group が部分 slice のまま留まるケースを
+	// 踏むため。
 	it("1 ファイルに集中した結果でも「さらに表示」は新しく出た行だけを描画する", async () => {
 		mockedSearchFiles.mockResolvedValue({
 			results: results("/workspace/big.md", STEP * 3),

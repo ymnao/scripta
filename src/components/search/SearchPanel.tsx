@@ -216,10 +216,12 @@ export function SearchPanel({ workspacePath, onNavigate, inputRef }: SearchPanel
 	);
 }
 
-// memo の単位を group ではなく行にしているのは、sliceGroupedResults が totalMatches を
-// 付けるために「さらに表示」の度にすべての group を新しい object にするため。group 単位の
-// memo では表示済みの行を毎回描き直す。match は results の要素の参照のまま渡るので、
-// 行単位なら新しく出た行だけが render される。
+// memo の単位を group ではなく行にしているのは、境界で部分 slice された group は
+// sliceGroupedResults が「さらに表示」の度に必ず新しい object になるため (totalMatches の
+// 付与で現在は全 group がそうなっているが、それを外しても境界 group は残る)。結果が
+// 1 ファイルに集中すると全体がその境界 group になり、group 単位の memo では表示済みの行を
+// 毎回描き直す。match は results の要素の参照のまま渡るので、行単位なら新しく出た行だけが
+// render される。
 const SearchResultRow = memo(function SearchResultRow({
 	match,
 	query,
