@@ -10,6 +10,8 @@
 // admission cutoff は charge (`text.length * 2`) が limit を超えたら insert しない — cutoff
 // 超過ファイルは caller 側で「毎回 readFile」経路で処理する。
 
+import { atOrUnderMatcher } from "./root-relative-path";
+
 const BYTES_PER_CODE_UNIT = 2;
 
 // per-workspace の default 予算。Phase B では定数で始めて、将来 UI 設定化予定 (Issue #394 §2.6)。
@@ -89,15 +91,15 @@ export class ByteLruCache {
 		return true;
 	}
 
-	// prefix と完全一致するエントリ、および prefix + sep 以下のエントリを一括削除する。
-	// prefix / prefixWithSep を独立に受けるのは、`/foo` が `/foobar` に誤 match しないよう
-	// にするため。呼び出し側は path (exact) と path + sep (subtree marker) を渡す。
+	// prefixes のいずれかと一致するエントリ、およびその配下のエントリを一括削除する
+	// (範囲判定は atOrUnderMatcher)。
 	// Map の反復中に delete する場合は、既存/現在のキーの delete は spec で安全 (未訪問キーの
 	// 追加のみ挙動が未規定) — ここでは追加はしないので defensive copy 不要。
-	deletePrefix(prefix: string, prefixWithSep: string): number {
+	deletePrefixes(prefixes: ReadonlySet<string>): number {
+		const isTarget = atOrUnderMatcher(prefixes);
 		let removed = 0;
 		for (const [key, e] of this.entries) {
-			if (key === prefix || key.startsWith(prefixWithSep)) {
+			if (isTarget(key)) {
 				this.totalBytesInternal -= e.bytes;
 				this.entries.delete(key);
 				removed++;

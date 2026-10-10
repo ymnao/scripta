@@ -110,14 +110,14 @@ describe("ByteLruCache", () => {
 		});
 	});
 
-	describe("deletePrefix", () => {
+	describe("deletePrefixes", () => {
 		it("removes exact prefix match", () => {
 			const c = new ByteLruCache(1024, 512);
 			c.set("/ws/foo", "x");
 			c.set("/ws/foo/a.md", "y");
 			c.set("/ws/foo/b.md", "z");
 			c.set("/ws/other.md", "w");
-			const removed = c.deletePrefix("/ws/foo", "/ws/foo/");
+			const removed = c.deletePrefixes(new Set(["/ws/foo"]));
 			expect(removed).toBe(3);
 			expect(c.get("/ws/foo")).toBeUndefined();
 			expect(c.get("/ws/foo/a.md")).toBeUndefined();
@@ -129,7 +129,7 @@ describe("ByteLruCache", () => {
 			c.set("/foo", "x");
 			c.set("/foobar", "y");
 			c.set("/foobar/a.md", "z");
-			const removed = c.deletePrefix("/foo", "/foo/");
+			const removed = c.deletePrefixes(new Set(["/foo"]));
 			expect(removed).toBe(1);
 			expect(c.get("/foo")).toBeUndefined();
 			expect(c.get("/foobar")).toBe("y");
@@ -141,8 +141,20 @@ describe("ByteLruCache", () => {
 			c.set("/a/x", "hello"); // 10 bytes
 			c.set("/a/y", "hi"); // 4 bytes
 			c.set("/b/z", "!"); // 2 bytes
-			c.deletePrefix("/a", "/a/");
+			c.deletePrefixes(new Set(["/a"]));
 			expect(c.totalBytes).toBe(2);
+		});
+
+		it("removes the subtrees of every prefix in one call", () => {
+			const c = new ByteLruCache(1024, 512);
+			c.set("/ws/a/x.md", "1");
+			c.set("/ws/b/y.md", "2");
+			c.set("/ws/c/z.md", "3");
+			const removed = c.deletePrefixes(new Set(["/ws/a", "/ws/b"]));
+			expect(removed).toBe(2);
+			expect(c.get("/ws/a/x.md")).toBeUndefined();
+			expect(c.get("/ws/b/y.md")).toBeUndefined();
+			expect(c.get("/ws/c/z.md")).toBe("3");
 		});
 	});
 

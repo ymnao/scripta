@@ -167,11 +167,11 @@ describe("remove (.md delete)", () => {
 	});
 });
 
-describe("invalidatePrefix", () => {
+describe("invalidatePrefixes", () => {
 	it("invalidates exact match", () => {
 		const idx = new InvertedIndex();
 		idx.indexFile("/ws/foo", "hello world");
-		const removed = idx.invalidatePrefix("/ws/foo");
+		const removed = idx.invalidatePrefixes(new Set(["/ws/foo"]));
 		expect(removed).toBeGreaterThanOrEqual(1);
 		expect(idx.isIndexedAndValid("/ws/foo")).toBe(false);
 	});
@@ -182,7 +182,7 @@ describe("invalidatePrefix", () => {
 		idx.indexFile("/ws/foo/a.md", "hello world");
 		idx.indexFile("/ws/foo/b.md", "hello world");
 		idx.indexFile("/ws/other.md", "hello world");
-		idx.invalidatePrefix("/ws/foo");
+		idx.invalidatePrefixes(new Set(["/ws/foo"]));
 		expect(idx.isIndexedAndValid("/ws/foo/a.md")).toBe(false);
 		expect(idx.isIndexedAndValid("/ws/foo/b.md")).toBe(false);
 		expect(idx.isIndexedAndValid("/ws/other.md")).toBe(true);
@@ -193,10 +193,21 @@ describe("invalidatePrefix", () => {
 		idx.indexFile("/foo", "hello world");
 		idx.indexFile("/foobar", "hello world");
 		idx.indexFile("/foobar/a.md", "hello world");
-		idx.invalidatePrefix("/foo");
+		idx.invalidatePrefixes(new Set(["/foo"]));
 		expect(idx.isIndexedAndValid("/foo")).toBe(false);
 		expect(idx.isIndexedAndValid("/foobar")).toBe(true);
 		expect(idx.isIndexedAndValid("/foobar/a.md")).toBe(true);
+	});
+
+	it("invalidates the subtrees of every prefix in one call", () => {
+		const idx = new InvertedIndex({ tombstoneRatio: 100 });
+		idx.indexFile("/ws/a/x.md", "hello world");
+		idx.indexFile("/ws/b/y.md", "hello world");
+		idx.indexFile("/ws/c/z.md", "hello world");
+		expect(idx.invalidatePrefixes(new Set(["/ws/a", "/ws/b"]))).toBe(2);
+		expect(idx.isIndexedAndValid("/ws/a/x.md")).toBe(false);
+		expect(idx.isIndexedAndValid("/ws/b/y.md")).toBe(false);
+		expect(idx.isIndexedAndValid("/ws/c/z.md")).toBe(true);
 	});
 });
 
@@ -467,14 +478,14 @@ describe("path count cap (#589 B2)", () => {
 		}
 	});
 
-	it("does not reclaim on invalidate / remove / invalidatePrefix of unknown paths at the cap", () => {
+	it("does not reclaim on invalidate / remove / invalidatePrefixes of unknown paths at the cap", () => {
 		const idx = new InvertedIndex({ maxPathCount: 2, tombstoneRatio: 100 });
 		idx.indexFile("/ws/a.md", "hello");
 		// b は登録のみ = 回収対象。回収が走れば floor が進み、b の epoch が変わる。
 		const eb = idx.currentEpochOf("/ws/b.md");
 		idx.invalidate("/ws/unknown.md");
 		idx.remove("/ws/unknown.md");
-		expect(idx.invalidatePrefix("/ws/unknown-dir")).toBe(0);
+		expect(idx.invalidatePrefixes(new Set(["/ws/unknown-dir"]))).toBe(0);
 		expect(idx.currentEpochOf("/ws/b.md")).toBe(eb);
 	});
 });

@@ -1,4 +1,3 @@
-import { sep } from "node:path";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { ByteLruCache } from "../utils/content-cache-pure";
 import {
@@ -158,7 +157,7 @@ export function releaseFileListCache(canonicalRoot: string): void {
 // - file と決まる `.md` modify/delete → L2 の該当 ioPath を delete
 // - file と決まる `.md` create → L2 は無操作 (新規なので cache 側にはない)
 // - mayBeDirectoryEvent (非 `.md`、または isDir が true) → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
-//   exact path 一致を deletePrefix で一括削除。L1 側の保守的 full invalidate と対応する
+//   exact path 一致を deletePrefixes で一括削除。L1 側の保守的 full invalidate と対応する
 // **generation bump は evict の成否ではなく「invalidation の意図」で判定する**。
 // 具体的には file の .md modify/delete および dir かもしれない event の全 kind で bump する
 // (walk の skip 対象 path は下記 #396 の例外として bump しない)
@@ -187,26 +186,30 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	const visible = batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path));
 	applyBatchToState(e.state, visible);
 	let shouldBumpL2 = false;
+	// event ごとに L2 / L3 を全走査せず、dir かもしれない path を集めて 1 走査で evict する
+	// (cache 1 万件 × 非 `.md` event 1000 件で 1 秒超 main を塞いでいた)。evict / bump は
+	// どれも可換なので、file event の後にまとめても結果は event 順に処理したときと同じ。
+	const dirPrefixes = new Set<string>();
 	for (const ev of visible) {
 		if (mayBeDirectoryEvent(ev)) {
-			// dir 可能性を考慮して subtree + exact 一括 evict + bump
-			const prefixWithSep = ev.path.endsWith(sep) ? ev.path : ev.path + sep;
-			e.l2.deletePrefix(ev.path, prefixWithSep);
-			shouldBumpL2 = true;
-			// L3 も同範囲を invalidate (L2 deletePrefix と同じ判定)。
-			e.l3.invalidatePrefix(ev.path);
-		} else {
-			if (ev.kind === "create") continue; // 新規 file → race 対象外
-			e.l2.delete(ev.path);
-			shouldBumpL2 = true;
-			// L3: modify → invalidate (posting 残置 + fileEpoch bump)、
-			//     delete → remove (indexedEpoch 削除 + fileEpoch bump、posting 残置は tombstone clear で回収)。
-			if (ev.kind === "delete") {
-				e.l3.remove(ev.path);
-			} else {
-				e.l3.invalidate(ev.path);
-			}
+			dirPrefixes.add(ev.path);
+			continue;
 		}
+		if (ev.kind === "create") continue; // 新規 file → race 対象外
+		e.l2.delete(ev.path);
+		shouldBumpL2 = true;
+		// L3: modify → invalidate (posting 残置 + fileEpoch bump)、
+		//     delete → remove (indexedEpoch 削除 + fileEpoch bump、posting 残置は tombstone clear で回収)。
+		if (ev.kind === "delete") {
+			e.l3.remove(ev.path);
+		} else {
+			e.l3.invalidate(ev.path);
+		}
+	}
+	if (dirPrefixes.size > 0) {
+		e.l2.deletePrefixes(dirPrefixes);
+		e.l3.invalidatePrefixes(dirPrefixes);
+		shouldBumpL2 = true;
 	}
 	if (shouldBumpL2) e.l2Generation++;
 	// epoch が進んだ場合、input-form fileMap memo は L1 に依存するため破棄。

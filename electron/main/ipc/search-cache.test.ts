@@ -683,6 +683,35 @@ describe("search-cache: L2 ContentCache", () => {
 			expect(h?.get(p("other.md"))).toBe("cc");
 		});
 
+		it("evicts the subtrees of every dir event in one batch and bumps generation once", () => {
+			acquireFileListCache(ROOT);
+			const h = getContentCacheHandle(ROOT);
+			const l3 = getInvertedIndexHandle(ROOT);
+			h?.set(p("dir1/a.md"), "aa", h.generation);
+			h?.set(p("dir2/b.md"), "bb", h.generation);
+			h?.set(p("keep.md"), "cc", h.generation);
+			l3?.indexFile(p("dir1/a.md"), "hello world", l3.currentEpochOf(p("dir1/a.md")));
+			l3?.indexFile(p("dir2/b.md"), "hello world", l3.currentEpochOf(p("dir2/b.md")));
+			l3?.indexFile(p("keep.md"), "hello world", l3.currentEpochOf(p("keep.md")));
+			l3?.indexFile(p("keep2.md"), "hello world", l3.currentEpochOf(p("keep2.md")));
+			l3?.indexFile(p("keep3.md"), "hello world", l3.currentEpochOf(p("keep3.md")));
+			// tombstone 全 clear を誘発しないよう、invalidate 後も tombstones (2) <= validCount (4) * 0.5 を保つ。
+			l3?.indexFile(p("keep4.md"), "hello world", l3.currentEpochOf(p("keep4.md")));
+			const genBefore = h?.generation ?? 0;
+			applyFsBatch(ROOT, [
+				{ kind: "delete", path: p("dir1") },
+				{ kind: "create", path: p("img.png") },
+				{ kind: "delete", path: p("dir2") },
+			]);
+			expect(h?.get(p("dir1/a.md"))).toBeUndefined();
+			expect(h?.get(p("dir2/b.md"))).toBeUndefined();
+			expect(h?.get(p("keep.md"))).toBe("cc");
+			expect(h?.generation).toBe(genBefore + 1);
+			expect(l3?.isIndexedAndValid(p("dir1/a.md"))).toBe(false);
+			expect(l3?.isIndexedAndValid(p("dir2/b.md"))).toBe(false);
+			expect(l3?.isIndexedAndValid(p("keep.md"))).toBe(true);
+		});
+
 		it("isDir .md delete evicts the directory's subtree by prefix", () => {
 			acquireFileListCache(ROOT);
 			const h = getContentCacheHandle(ROOT);
@@ -955,7 +984,7 @@ describe("L3 InvertedIndex integration", () => {
 			}
 		});
 
-		it("non-.md path invalidates the subtree (exact + prefix, same判定 as L2 deletePrefix)", () => {
+		it("non-.md path invalidates the subtree (exact + prefix, same判定 as L2 deletePrefixes)", () => {
 			acquireFileListCache(ROOT);
 			const h = getInvertedIndexHandle(ROOT);
 			// tombstone 全 clear (indexedValidCount の 50%超) を誘発しないよう、
