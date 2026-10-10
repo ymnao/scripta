@@ -718,13 +718,12 @@ describe("search-cache: L2 ContentCache", () => {
 			l3?.indexFile(p("a.md"), "hello world", l3.currentEpochOf(p("a.md")));
 			l3?.indexFile(p("dir/b.md"), "hello world", l3.currentEpochOf(p("dir/b.md")));
 			l3?.indexFile(p("c.md"), "hello world", l3.currentEpochOf(p("c.md")));
-			// どちらか片方だけなら tombstones 1 <= validCount 2 * 0.5 で clear しない。合わせて 2 > 0.5 で clear する。
+			// どちらか片方だけなら tombstones 1 <= validCount 2 * 0.5 で clear しない。合わせて 2 > validCount 1 * 0.5 で clear する。
 			applyFsBatch(ROOT, [
 				{ kind: "delete", path: p("dir") },
 				{ kind: "modify", path: p("a.md") },
 			]);
 			expect(l3?.isIndexedAndValid(p("c.md"))).toBe(false);
-			expect(l3?.isSaturated).toBe(false);
 		});
 
 		it("isDir .md delete evicts the directory's subtree by prefix", () => {

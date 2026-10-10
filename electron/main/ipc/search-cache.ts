@@ -190,8 +190,9 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	// (cache 1 万件 × 非 `.md` event 1000 件で 1 秒超 main を塞いでいた)。file event の後に
 	// まとめても、L2 entries・l2Generation・L3 の valid 集合 (= capture した epoch との等値比較の
 	// 結果) と tombstone clear の発火有無は event 順と変わらない (fileEpoch の採番値だけが変わる)。
-	// clear の有無が順序に依らないのは、batch 内で indexFile / getOrCreateId が走らず
-	// tombstone 数が非減少だから。ここで index 取り込みや id 回収を呼ぶ変更を入れるとこの前提は崩れる。
+	// clear の有無が順序に依らないのは、batch 内で indexFile が走らず tombstone 数が clear まで
+	// 非減少だから。等値比較の結果が変わらないのは、getOrCreateId (id 回収で epochFloor が進む) も
+	// 走らないから。ここで index 取り込みや id 登録を呼ぶ変更を入れるとこれらの前提は崩れる。
 	const dirPrefixes = new Set<string>();
 	for (const ev of visible) {
 		if (mayBeDirectoryEvent(ev)) {
