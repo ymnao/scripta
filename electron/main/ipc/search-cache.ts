@@ -146,15 +146,16 @@ export function releaseFileListCache(canonicalRoot: string): void {
 	if (e.refCount <= 0) entries.delete(canonicalRoot);
 }
 
-// watcher flush 直後、および fs mutating handler の I/O 成功直後 (applyLocalFsChanges 経由) に
-// 呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// watcher flush 直後に呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// fs mutating handler の I/O 成功直後の applyLocalFsChanges は、skip 判定の後に同じ本体
+// (applyVisibleBatch) を通る。以下の処理の説明は両経路に共通。
 // **同じ batch の再適用は状態を壊さない** (アプリ自身の書き込みは proactive と watcher の 2 回
 // 流れるのでこれに依る)。`.md` event は files.add / delete の戻り値と bumpFileEpoch の wasValid
 // ガードにより epoch / validCount とも二重に動かない。dir かもしれない event は 2 回目も full invalidate
 // として epoch を進め、L2 / L3 の subtree も捨て直す。間に populate や検索が挟まっていれば
 // walk と取り込みがもう 1 回走るが、捨てる側に倒れるだけで stale は残らない。
 // L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
-// L1 側は applyBatchToState、L2 側は本関数内で分岐する。
+// L1 側は applyBatchToState、L2 側は applyVisibleBatch 内で分岐する。
 // - file と決まる `.md` modify/delete → L2 の該当 ioPath を delete
 // - file と決まる `.md` create → L2 は無操作 (新規なので cache 側にはない)
 // - mayBeDirectoryEvent (非 `.md`、または isDir が true) → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
@@ -182,15 +183,15 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
 	// 各消費点で filter すると、消費点を足すたびに当て忘れ = #396 と同型の非対称を作れて
-	// しまう。入口で 1 回だけ落として以降は「filter 済み batch を処理する」に統一する。
+	// しまう。入口で落として以降は「filter 済み batch を処理する」に統一する。skip の基準は
+	// isMdWalkSkippedComponents に寄せ、applyLocalFsChanges の入口と揃える。
 	applyVisibleBatch(
 		e,
 		batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path)),
 	);
 }
 
-// walk の skip 対象を落とした batch を受け取る。入口は applyFsBatch と applyLocalFsChanges の 2 つで、
-// どちらも skip 判定を isMdWalkSkippedComponents に寄せている。
+// walk の skip 対象を落とした batch を受け取る。
 function applyVisibleBatch(e: CacheEntry, visible: ReadonlyArray<FsChangeEvent>): void {
 	const epochBefore = e.state.epoch;
 	applyBatchToState(e.state, visible);
@@ -234,7 +235,7 @@ function applyVisibleBatch(e: CacheEntry, visible: ReadonlyArray<FsChangeEvent>)
 // event を渡し、root の解決はこの層が行う。呼び手の列挙はここに書かない — #569 で git 側に
 // 2 経路増えた時点で古くなったので、現在の呼び手は `grep applyLocalFsChanges electron/main` で引く。
 //
-// **L2 だけを狙う狭い evict API にせず applyFsBatch と同じ applyVisibleBatch に流す**のは、L3 InvertedIndex が
+// **L2 だけを狙う狭い evict API にせず applyFsBatch と同じ本体に流す**のは、L3 InvertedIndex が
 // searchFilesImpl の候補絞りに本配線されている (#394 Phase D) ため。L2 のみ evict すると
 // 「新内容が query に match するのに、旧 posting が indexedValid のまま candidates に入らず
 // file ごと scan 対象から落ちる」= hit の欠落になり、L2 stale (旧 lineContent) より重い症状に

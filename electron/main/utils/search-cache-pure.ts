@@ -59,7 +59,7 @@ export function mayBeDirectoryEvent(ev: FsChangeEvent): boolean {
 //   - isDir 付きの modify も同じ扱い。watcher の merge は同じ path の file 削除 + dir 作成
 //     (またはその逆) を modify に畳むので、files の中身が入れ替わっている。
 //   - それ以外の modify は無視 (Phase A の files 集合には影響しない)。
-//   - walk の skip 対象 path は呼び出し側 (applyFsBatch) が batch ごと落としてから渡す (#396)。
+//   - walk の skip 対象 path は呼び出し側 (applyFsBatch / applyLocalFsChanges の入口) が batch ごと落としてから渡す (#396)。
 // 構造的変化 (create/delete のうち集合に効いたもの、および full invalidate) があれば
 // epoch を +1 し、派生物 3 つを dirty にする。
 // state.files が null の間 (populate 進行中 or 既 invalidate) でも create/delete イベントは
