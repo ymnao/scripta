@@ -173,6 +173,8 @@ function withTrailingSep(root: string): string {
 // 二重 sep を含まない) ため。
 // startsWith の相手を sep 付きにしているので `/ws2/a.md` を `/ws` 配下と誤読せず、
 // `..foo/` も root 外と誤読しない (#396)。
+// 連結を `inputRoot + sep` にしないのは、`/` や win32 のドライブ root (`D:\`) は resolve 後も
+// sep で終わり、sep が重なるため。
 function substituteRoot(
 	p: string,
 	canonicalRoot: string,
@@ -180,19 +182,17 @@ function substituteRoot(
 	inputRoot: string,
 ): string {
 	if (p === canonicalRoot) return inputRoot;
-	if (p.startsWith(rootWithSep)) return inputRoot + sep + p.slice(rootWithSep.length);
+	if (p.startsWith(rootWithSep)) return withTrailingSep(inputRoot) + p.slice(rootWithSep.length);
 	// canonical prefix に一致しない (通常起きない) — 防御的に原文
 	return p;
 }
 
 // canonical path を inputRoot 側の表記へ prefix 置換する。root 外は防御的にそのまま返す。
-// 両 root が同じときに置換を通さないのは、root が `/` だと `inputRoot + sep` が `//a.md` になるため。
 export function canonicalToInputPath(
 	canonical: string,
 	canonicalRoot: string,
 	inputRoot: string,
 ): string {
-	if (canonicalRoot === inputRoot) return canonical;
 	return substituteRoot(canonical, canonicalRoot, withTrailingSep(canonicalRoot), inputRoot);
 }
 
