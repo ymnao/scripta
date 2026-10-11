@@ -6,6 +6,7 @@ import {
 	applyBatchToState,
 	buildExistingStemsFrom,
 	buildFileMapFrom,
+	canonicalToInputPath,
 	canonicalToInputPaths,
 	createCacheState,
 	getExistingStems,
@@ -279,6 +280,12 @@ describe("search-cache-pure: canonicalToInputPaths", () => {
 		const outsider = `${sep}elsewhere${sep}x.md`;
 		const out = canonicalToInputPaths([outsider], canonicalRoot, inputRoot);
 		expect(out).toEqual([outsider]);
+	});
+
+	it("maps the canonical root itself to inputRoot", () => {
+		const canonicalRoot = `${sep}private${sep}tmp${sep}ws`;
+		const inputRoot = `${sep}tmp${sep}ws`;
+		expect(canonicalToInputPath(canonicalRoot, canonicalRoot, inputRoot)).toBe(inputRoot);
 	});
 });
 
