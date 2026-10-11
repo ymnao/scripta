@@ -146,7 +146,7 @@ export function releaseFileListCache(canonicalRoot: string): void {
 	if (e.refCount <= 0) entries.delete(canonicalRoot);
 }
 
-// watcher flush 直後に呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// watcher flush 直後などに呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
 // fs mutating handler の I/O 成功直後の applyLocalFsChanges は、skip 判定の後に同じ本体
 // (applyVisibleBatch) を通る。以下の処理の説明は両経路に共通。
 // **同じ batch の再適用は状態を壊さない** (アプリ自身の書き込みは proactive と watcher の 2 回
@@ -184,7 +184,7 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 	if (e === undefined) return;
 	// 各消費点で filter すると、消費点を足すたびに当て忘れ = #396 と同型の非対称を作れて
 	// しまう。入口で落として以降は「filter 済み batch を処理する」に統一する。skip の基準は
-	// isMdWalkSkippedComponents に寄せ、applyLocalFsChanges の入口と揃える。
+	// isUnderMdWalkSkippedPath が委譲する isMdWalkSkippedComponents で、applyLocalFsChanges の入口と揃える。
 	applyVisibleBatch(
 		e,
 		batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path)),
@@ -239,7 +239,8 @@ function applyVisibleBatch(e: CacheEntry, visible: ReadonlyArray<FsChangeEvent>)
 // searchFilesImpl の候補絞りに本配線されている (#394 Phase D) ため。L2 のみ evict すると
 // 「新内容が query に match するのに、旧 posting が indexedValid のまま candidates に入らず
 // file ごと scan 対象から落ちる」= hit の欠落になり、L2 stale (旧 lineContent) より重い症状に
-// なる。同一経路に流せば L1 / L2 / L3 / l2Generation / #396 の skip 判定が watcher と揃う。
+// なる。同じ本体に流せば L1 / L2 / L3 / l2Generation が watcher と揃う。#396 の skip 判定は本体の外で
+// 入口ごとに行うので、基準を isMdWalkSkippedComponents に寄せて揃えている。
 //
 // **root は path-guard の findContainingWorkspaceRoot ではなく自分の entries から引く**。
 // あちらは「その window が登録した root の最長一致」を返すため、nested root (outer を watch し
@@ -256,7 +257,7 @@ function applyVisibleBatch(e: CacheEntry, visible: ReadonlyArray<FsChangeEvent>)
 // fail-open)。再適用が冪等であることは applyFsBatch の doc を参照。
 //
 // applyFsBatch を経由しないのは、root 配下判定と #396 の skip 判定がどちらも relComponentsUnderRoot を
-// 使うため。ここで 1 回だけ計算して両方に使う。
+// 使うため。(root, path) 向きはここで 1 回だけ計算して両方に使う。
 export function applyLocalFsChanges(batch: ReadonlyArray<FsChangeEvent>): void {
 	for (const [canonicalRoot, e] of entries) {
 		const visible = batch.filter((ev) => {
