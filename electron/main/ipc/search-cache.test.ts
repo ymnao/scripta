@@ -6,6 +6,7 @@ import {
 	applyBatchToState,
 	buildExistingStemsFrom,
 	buildFileMapFrom,
+	canonicalToInputPath,
 	canonicalToInputPaths,
 	createCacheState,
 	getExistingStems,
@@ -279,6 +280,33 @@ describe("search-cache-pure: canonicalToInputPaths", () => {
 		const outsider = `${sep}elsewhere${sep}x.md`;
 		const out = canonicalToInputPaths([outsider], canonicalRoot, inputRoot);
 		expect(out).toEqual([outsider]);
+	});
+});
+
+describe("search-cache-pure: canonicalToInputPath", () => {
+	it("maps the canonical root itself to inputRoot", () => {
+		const canonicalRoot = `${sep}private${sep}tmp${sep}ws`;
+		const inputRoot = `${sep}tmp${sep}ws`;
+		expect(canonicalToInputPath(canonicalRoot, canonicalRoot, inputRoot)).toBe(inputRoot);
+	});
+
+	it("substitutes the root prefix of a path under the canonical root", () => {
+		const canonicalRoot = `${sep}private${sep}tmp${sep}ws`;
+		const inputRoot = `${sep}tmp${sep}ws`;
+		expect(
+			canonicalToInputPath(`${canonicalRoot}${sep}sub${sep}b.md`, canonicalRoot, inputRoot),
+		).toBe(`${inputRoot}${sep}sub${sep}b.md`);
+	});
+
+	it("keeps a single separator when the workspace is the filesystem root", () => {
+		expect(canonicalToInputPath(`${sep}a.md`, sep, sep)).toBe(`${sep}a.md`);
+	});
+
+	it("keeps a single separator when only inputRoot ends with a separator", () => {
+		const canonicalRoot = `${sep}private${sep}ws`;
+		expect(canonicalToInputPath(`${canonicalRoot}${sep}a.md`, canonicalRoot, sep)).toBe(
+			`${sep}a.md`,
+		);
 	});
 });
 

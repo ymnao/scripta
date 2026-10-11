@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { BrowserWindow, type WebContents } from "electron";
 import type { FsChangeEvent } from "../../../src/types/workspace";
 import { handle } from "../utils/ipc-handle";
 import { assertPathAllowed } from "../utils/path-guard";
-import { relComponentsUnderRoot } from "../utils/root-relative-path";
+import { canonicalToInputPath } from "../utils/search-cache-pure";
 import {
 	type FsKind,
 	isWatcherIgnored,
@@ -42,18 +42,6 @@ const sessions = new Map<number, Session>();
 
 const BATCH_DEADLINE_MS = 500;
 
-// canonical 表記（realpath 済み）を renderer 側の input 表記へ戻す。
-// chokidar が常に root 配下しか emit しない前提だが、root 外と判定された場合は
-// 防御的に元のパスをそのまま返す（emit はするが prefix 変換は諦める）。
-// 判定を `rel.startsWith("..")` で書くと `..foo/` 配下が root 外と誤読され、renderer に
-// canonical 表記が渡って開いているタブとの path 比較が外れる (#396 のレビューで検出)。
-function toInputPath(canonical: string, canonicalRoot: string, inputRoot: string): string {
-	if (canonical === canonicalRoot) return inputRoot;
-	const components = relComponentsUnderRoot(canonicalRoot, canonical);
-	if (components === null) return canonical;
-	return join(inputRoot, ...components);
-}
-
 function flush(session: Session): void {
 	if (session.stopped) return;
 	reclassifyDeleted(session.pending, existsSync);
@@ -65,7 +53,7 @@ function flush(session: Session): void {
 		canonicalBatch.push({ kind, path, isDir: session.pendingDirs.has(path) });
 		batch.push({
 			kind,
-			path: toInputPath(path, session.canonicalRoot, session.inputRoot),
+			path: canonicalToInputPath(path, session.canonicalRoot, session.inputRoot),
 		});
 	}
 	session.pending.clear();

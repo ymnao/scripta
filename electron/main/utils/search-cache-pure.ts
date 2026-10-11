@@ -163,29 +163,51 @@ export function buildExistingStemsFrom(files: Iterable<string>): Set<string> {
 	return set;
 }
 
-// canonical 配列 (sort 済み) を inputRoot 側の表記へ prefix 置換する。
-// canonical と canonicalRoot が同一 prefix を共有するので、置換後も sort 順は保存される。
-// canonicalRoot に対する rel が `..` を返す (境界外) 場合は防御的に canonical をそのまま返す。
+function withTrailingSep(root: string): string {
+	return root.endsWith(sep) ? root : root + sep;
+}
+
+// relative() + join() で書かないのは、canonicalToInputPaths が 1 万件規模の配列で呼ぶため
+// (relative / split / join を要素ごとに回すことになる)。join の正規化を要らないとしているのは、
+// root は realpath 済みで、配下は chokidar / walk が root に join で継いで組む (`.` / `..` /
+// 二重 sep を含まない) ため。
+// startsWith の相手を sep 付きにしているので `/ws2/a.md` を `/ws` 配下と誤読せず、
+// `..foo/` も root 外と誤読しない (#396)。
+// 連結を `inputRoot + sep` にしないのは、`/` や win32 のドライブ root (`D:\`) は resolve 後も
+// sep で終わり、sep が重なるため。
+function substituteRoot(
+	p: string,
+	canonicalRoot: string,
+	rootWithSep: string,
+	inputRoot: string,
+): string {
+	if (p === canonicalRoot) return inputRoot;
+	if (p.startsWith(rootWithSep)) return withTrailingSep(inputRoot) + p.slice(rootWithSep.length);
+	// canonical prefix に一致しない (通常起きない) — 防御的に原文
+	return p;
+}
+
+// canonical path を inputRoot 側の表記へ prefix 置換する。root 外は防御的にそのまま返す。
+export function canonicalToInputPath(
+	canonical: string,
+	canonicalRoot: string,
+	inputRoot: string,
+): string {
+	return substituteRoot(canonical, canonicalRoot, withTrailingSep(canonicalRoot), inputRoot);
+}
+
+// canonicalToInputPath の配列版。canonical と canonicalRoot が同一 prefix を共有するので、
+// 置換後も sort 順は保存される。
 export function canonicalToInputPaths(
 	canonical: readonly string[],
 	canonicalRoot: string,
 	inputRoot: string,
 ): string[] {
 	if (canonicalRoot === inputRoot) return [...canonical];
-	const rootWithSep = canonicalRoot.endsWith(sep) ? canonicalRoot : canonicalRoot + sep;
+	const rootWithSep = withTrailingSep(canonicalRoot);
 	const result: string[] = new Array(canonical.length);
 	for (let i = 0; i < canonical.length; i++) {
-		const p = canonical[i];
-		if (p === canonicalRoot) {
-			result[i] = inputRoot;
-			continue;
-		}
-		if (p.startsWith(rootWithSep)) {
-			result[i] = inputRoot + sep + p.slice(rootWithSep.length);
-		} else {
-			// canonical prefix に一致しない (通常起きない) — 防御的に原文
-			result[i] = p;
-		}
+		result[i] = substituteRoot(canonical[i], canonicalRoot, rootWithSep, inputRoot);
 	}
 	return result;
 }
