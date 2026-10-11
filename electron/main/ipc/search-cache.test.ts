@@ -186,10 +186,6 @@ describe("search-cache-pure: isUnderMdWalkSkippedPath", () => {
 		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/.draft.md"))).toBe(true);
 	});
 
-	it("treats a leaf whose name starts with two dots as skipped", () => {
-		expect(isUnderMdWalkSkippedPath(ROOT, p("..foo/a.md"))).toBe(true);
-	});
-
 	it("does not skip a plain nested .md", () => {
 		expect(isUnderMdWalkSkippedPath(ROOT, p("docs/a.md"))).toBe(false);
 	});
@@ -198,18 +194,8 @@ describe("search-cache-pure: isUnderMdWalkSkippedPath", () => {
 		expect(isUnderMdWalkSkippedPath(ROOT, p("node_modules_bak/a.md"))).toBe(false);
 	});
 
-	it("does not skip the root itself", () => {
-		expect(isUnderMdWalkSkippedPath(ROOT, ROOT)).toBe(false);
-	});
-
 	it("does not skip a path outside the root", () => {
 		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws${sep}other${sep}a.md`)).toBe(false);
-	});
-
-	it("does not skip the parent directory of the root", () => {
-		// rel が `..` そのものになる唯一の入力。これが無いと `rel === ".."` ガードを落としても
-		// 全 case が通る (`/ws/other/a.md` は startsWith(`../`) 側で弾かれるため)。
-		expect(isUnderMdWalkSkippedPath(ROOT, `${sep}ws`)).toBe(false);
 	});
 
 	it("does not skip when the root itself lives under a dot-dir", () => {

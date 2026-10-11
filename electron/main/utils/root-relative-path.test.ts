@@ -11,6 +11,28 @@ const win32Ops: RelPathOps = {
 	sep: win32.sep,
 };
 
+describe("relComponentsUnderRoot: root 境界", () => {
+	const root = "/ws/notes";
+
+	it("returns null for the root itself", () => {
+		expect(relComponentsUnderRoot(root, root)).toBeNull();
+	});
+
+	it("returns null for the parent directory of the root", () => {
+		// rel が `..` そのものになる唯一の入力。下の sibling だけでは `rel === ".."` ガードを
+		// 落としても通る (`../other/a.md` は startsWith(`../`) 側で弾かれるため)。
+		expect(relComponentsUnderRoot(root, "/ws")).toBeNull();
+	});
+
+	it("returns null for a sibling path outside the root", () => {
+		expect(relComponentsUnderRoot(root, "/ws/other/a.md")).toBeNull();
+	});
+
+	it("keeps a component whose name starts with two dots under the root", () => {
+		expect(relComponentsUnderRoot(root, "/ws/notes/..foo/a.md")).toEqual(["..foo", "a.md"]);
+	});
+});
+
 describe("relComponentsUnderRoot: win32 drive 跨ぎ", () => {
 	it("returns null for a path on another drive", () => {
 		expect(relComponentsUnderRoot("C:\\ws", "D:\\notes\\a.md", win32Ops)).toBeNull();
