@@ -7,7 +7,12 @@ import { byteCmp, isMdWalkSkippedName } from "./search-pure";
 // 必ず root 配下) の違反時にしか起きないが、hidden 扱いで黙って捨てるより従来どおりの
 // add / delete / invalidate に落とす。
 export function isUnderMdWalkSkippedPath(canonicalRoot: string, absPath: string): boolean {
-	return relComponentsUnderRoot(canonicalRoot, absPath)?.some(isMdWalkSkippedName) === true;
+	return isMdWalkSkippedComponents(relComponentsUnderRoot(canonicalRoot, absPath));
+}
+
+// relComponentsUnderRoot の結果を既に持っている呼び手向け。null (root 自身 / root 外) は false。
+export function isMdWalkSkippedComponents(components: readonly string[] | null): boolean {
+	return components?.some(isMdWalkSkippedName) === true;
 }
 
 // canonical `.md` パス集合を single source of truth とし、
