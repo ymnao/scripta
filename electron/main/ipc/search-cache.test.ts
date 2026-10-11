@@ -281,11 +281,17 @@ describe("search-cache-pure: canonicalToInputPaths", () => {
 		const out = canonicalToInputPaths([outsider], canonicalRoot, inputRoot);
 		expect(out).toEqual([outsider]);
 	});
+});
 
+describe("search-cache-pure: canonicalToInputPath", () => {
 	it("maps the canonical root itself to inputRoot", () => {
 		const canonicalRoot = `${sep}private${sep}tmp${sep}ws`;
 		const inputRoot = `${sep}tmp${sep}ws`;
 		expect(canonicalToInputPath(canonicalRoot, canonicalRoot, inputRoot)).toBe(inputRoot);
+	});
+
+	it("keeps a single separator when the workspace is the filesystem root", () => {
+		expect(canonicalToInputPath(`${sep}a.md`, sep, sep)).toBe(`${sep}a.md`);
 	});
 });
 

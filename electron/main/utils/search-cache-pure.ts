@@ -168,8 +168,9 @@ function withTrailingSep(root: string): string {
 }
 
 // relative() + join() で書かないのは、canonicalToInputPaths が 1 万件規模の配列で呼ぶため
-// (relative / split / join を要素ごとに回すことになる)。canonical は realpath 済みで
-// 正規化されている前提なので、join の正規化は要らない。
+// (relative / split / join を要素ごとに回すことになる)。join の正規化を要らないとしているのは、
+// root は realpath 済みで、配下は chokidar / walk が root に join で継いで組む (`.` / `..` /
+// 二重 sep を含まない) ため。
 // startsWith の相手を sep 付きにしているので `/ws2/a.md` を `/ws` 配下と誤読せず、
 // `..foo/` も root 外と誤読しない (#396)。
 function substituteRoot(
@@ -185,11 +186,13 @@ function substituteRoot(
 }
 
 // canonical path を inputRoot 側の表記へ prefix 置換する。root 外は防御的にそのまま返す。
+// 両 root が同じときに置換を通さないのは、root が `/` だと `inputRoot + sep` が `//a.md` になるため。
 export function canonicalToInputPath(
 	canonical: string,
 	canonicalRoot: string,
 	inputRoot: string,
 ): string {
+	if (canonicalRoot === inputRoot) return canonical;
 	return substituteRoot(canonical, canonicalRoot, withTrailingSep(canonicalRoot), inputRoot);
 }
 
