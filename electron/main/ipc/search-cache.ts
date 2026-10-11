@@ -15,6 +15,7 @@ import {
 	getExistingStems,
 	getFileMap,
 	getSortedFiles,
+	isMdWalkSkippedComponents,
 	isUnderMdWalkSkippedPath,
 	mayBeDirectoryEvent,
 	setCacheFiles,
@@ -145,15 +146,16 @@ export function releaseFileListCache(canonicalRoot: string): void {
 	if (e.refCount <= 0) entries.delete(canonicalRoot);
 }
 
-// watcher flush 直後、および fs mutating handler の I/O 成功直後 (applyLocalFsChanges 経由) に
-// 呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// watcher flush 直後などに呼ぶ。entry がなければ no-op (release 済み / 未 acquire)。
+// fs mutating handler の I/O 成功直後の applyLocalFsChanges は、skip 判定の後に同じ本体
+// (applyVisibleBatch) を通る。以下の処理の説明は両経路に共通。
 // **同じ batch の再適用は状態を壊さない** (アプリ自身の書き込みは proactive と watcher の 2 回
 // 流れるのでこれに依る)。`.md` event は files.add / delete の戻り値と bumpFileEpoch の wasValid
 // ガードにより epoch / validCount とも二重に動かない。dir かもしれない event は 2 回目も full invalidate
 // として epoch を進め、L2 / L3 の subtree も捨て直す。間に populate や検索が挟まっていれば
 // walk と取り込みがもう 1 回走るが、捨てる側に倒れるだけで stale は残らない。
 // L1 (files 集合) の反映と L2 (ContentCache) の evict を同一 batch で処理する。
-// L1 側は applyBatchToState、L2 側は本関数内で分岐する。
+// L1 側は applyBatchToState、L2 側は applyVisibleBatch 内で分岐する。
 // - file と決まる `.md` modify/delete → L2 の該当 ioPath を delete
 // - file と決まる `.md` create → L2 は無操作 (新規なので cache 側にはない)
 // - mayBeDirectoryEvent (非 `.md`、または isDir が true) → dir イベントかもしれないので L2 の該当 subtree (path + sep prefix) と
@@ -180,10 +182,18 @@ export function releaseFileListCache(canonicalRoot: string): void {
 export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChangeEvent>): void {
 	const e = entries.get(canonicalRoot);
 	if (e === undefined) return;
-	const epochBefore = e.state.epoch;
 	// 各消費点で filter すると、消費点を足すたびに当て忘れ = #396 と同型の非対称を作れて
-	// しまう。入口で 1 回だけ落として以降は「filter 済み batch を処理する」に統一する。
-	const visible = batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path));
+	// しまう。入口で落として以降は「filter 済み batch を処理する」に統一する。skip の基準は
+	// isUnderMdWalkSkippedPath が委譲する isMdWalkSkippedComponents で、applyLocalFsChanges の入口と揃える。
+	applyVisibleBatch(
+		e,
+		batch.filter((ev) => !isUnderMdWalkSkippedPath(canonicalRoot, ev.path)),
+	);
+}
+
+// walk の skip 対象を落とした batch を受け取る。
+function applyVisibleBatch(e: CacheEntry, visible: ReadonlyArray<FsChangeEvent>): void {
+	const epochBefore = e.state.epoch;
 	applyBatchToState(e.state, visible);
 	let shouldBumpL2 = false;
 	// event ごとに L2 / L3 を全走査せず、dir かもしれない path を集めて 1 走査で evict する
@@ -225,11 +235,12 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 // event を渡し、root の解決はこの層が行う。呼び手の列挙はここに書かない — #569 で git 側に
 // 2 経路増えた時点で古くなったので、現在の呼び手は `grep applyLocalFsChanges electron/main` で引く。
 //
-// **L2 だけを狙う狭い evict API にせず applyFsBatch に流す**のは、L3 InvertedIndex が
+// **L2 だけを狙う狭い evict API にせず applyFsBatch と同じ本体に流す**のは、L3 InvertedIndex が
 // searchFilesImpl の候補絞りに本配線されている (#394 Phase D) ため。L2 のみ evict すると
 // 「新内容が query に match するのに、旧 posting が indexedValid のまま candidates に入らず
 // file ごと scan 対象から落ちる」= hit の欠落になり、L2 stale (旧 lineContent) より重い症状に
-// なる。同一経路に流せば L1 / L2 / L3 / l2Generation / #396 の入口 filter が watcher と揃う。
+// なる。同じ本体に流せば L1 / L2 / L3 / l2Generation が watcher と揃う。#396 の skip 判定は本体の外で
+// 入口ごとに行うので、基準を isMdWalkSkippedComponents に寄せて揃えている。
 //
 // **root は path-guard の findContainingWorkspaceRoot ではなく自分の entries から引く**。
 // あちらは「その window が登録した root の最長一致」を返すため、nested root (outer を watch し
@@ -244,16 +255,18 @@ export function applyFsBatch(canonicalRoot: string, batch: ReadonlyArray<FsChang
 // **watcher が 500ms 後に同じ event をもう一度流すのは抑制しない**。抑制のために「直近で自分が
 // 書いた path」を記録すると、同じ窓に入った外部書き込みを取り落とす (staleness に対する
 // fail-open)。再適用が冪等であることは applyFsBatch の doc を参照。
+//
+// applyFsBatch を経由しないのは、root 配下判定と #396 の skip 判定がどちらも relComponentsUnderRoot を
+// 使うため。(root, path) 向きはここで 1 回だけ計算して両方に使う。
 export function applyLocalFsChanges(batch: ReadonlyArray<FsChangeEvent>): void {
-	for (const canonicalRoot of entries.keys()) {
-		const relevant = batch.filter(
-			(ev) =>
-				ev.path === canonicalRoot ||
-				relComponentsUnderRoot(canonicalRoot, ev.path) !== null ||
-				relComponentsUnderRoot(ev.path, canonicalRoot) !== null,
-		);
-		if (relevant.length === 0) continue;
-		applyFsBatch(canonicalRoot, relevant);
+	for (const [canonicalRoot, e] of entries) {
+		const visible = batch.filter((ev) => {
+			const components = relComponentsUnderRoot(canonicalRoot, ev.path);
+			if (components !== null) return !isMdWalkSkippedComponents(components);
+			return ev.path === canonicalRoot || relComponentsUnderRoot(ev.path, canonicalRoot) !== null;
+		});
+		if (visible.length === 0) continue;
+		applyVisibleBatch(e, visible);
 	}
 }
 

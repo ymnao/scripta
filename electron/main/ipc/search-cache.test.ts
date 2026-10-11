@@ -843,6 +843,13 @@ describe("search-cache: applyLocalFsChanges (#397)", () => {
 		expect(inner?.get(`${INNER}${sep}a.md`)).toBeUndefined();
 	});
 
+	it("drops walk-excluded paths instead of full-invalidating (#396)", async () => {
+		acquireFileListCache(ROOT);
+		await populateFileListCache(ROOT, async () => [p("a.md")]);
+		applyLocalFsChanges([{ kind: "create", path: p(".scripta/foo.txt") }]);
+		expect(getCachedMdFiles(ROOT)).toEqual([p("a.md")]);
+	});
+
 	it("leaves an entry whose root does not contain the path untouched", () => {
 		acquireFileListCache(ROOT);
 		acquireFileListCache(OTHER);
