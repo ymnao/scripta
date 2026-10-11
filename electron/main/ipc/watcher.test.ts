@@ -38,14 +38,10 @@ describe("isWatcherIgnored", () => {
 		expect(isWatcherIgnored("/home/user/workspace/README.md", root)).toBe(false);
 	});
 
-	it("does not ignore root itself or paths outside root (defensive)", () => {
-		expect(isWatcherIgnored("/home/user/workspace", root)).toBe(false);
-		expect(isWatcherIgnored("/etc/passwd", root)).toBe(false);
-	});
-
 	it("does not ignore an outside path that contains an excluded name", () => {
-		// ガードを削ると落ちる唯一の case。`/etc/passwd` の rel は `.git` / `node_modules`
-		// component を持たないので、上の it だけでは root 外ガードが pin されない。
+		// root 外の判定そのものは root-relative-path.test.ts が pin する。ここは null を
+		// false に落とす経路の確認で、excluded な名前を含まない root 外 path だとガードを
+		// 削っても false のままなので pin にならない。
 		expect(isWatcherIgnored("/etc/node_modules/x.md", root)).toBe(false);
 	});
 
