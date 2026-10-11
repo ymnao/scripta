@@ -40,8 +40,8 @@ describe("isWatcherIgnored", () => {
 
 	it("does not ignore an outside path that contains an excluded name", () => {
 		// root 外の判定そのものは root-relative-path.test.ts が pin する。ここは null を
-		// false に落とす経路の確認で、excluded な名前を含まない root 外 path だとガードを
-		// 削っても false のままなので pin にならない。
+		// false に落とす経路の確認。excluded な名前を含む path を選んでいるのは、含まない
+		// root 外 path (`/etc/passwd` 等) だとガードを削っても false のままになるため。
 		expect(isWatcherIgnored("/etc/node_modules/x.md", root)).toBe(false);
 	});
 
