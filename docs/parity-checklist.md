@@ -310,9 +310,23 @@
     - `.github/workflows/verify-dmg-naming.yml` — PR に関連ファイル (electron-builder / config / assert script) の変更が含まれる場合、macOS runner で `pnpm dist` → assert (preventive detection)
   - `.github/dependabot.yml` で `electron-builder` を `electron` (runtime) group から分離し独立 group とすることで、grouped PR に build tool bump が piggyback するのを避ける
   - `release.yml` の `finalize` job が matrix 全 leg の集約結果を check し、macOS leg が assert 失敗した場合に workflow を failed に落とす (draft release に dmg 抜けの状態で publish されないためのシグナル)
-- **Cask の version / sha256 更新は tap 側が pull する**。tap の `.github/workflows/autobump.yml` が毎日 `brew bump --open-pr --casks` を実行し、新しい release を検出すると bump PR を開く（merge は user）。scripta 側には tap への書き込み権限 (PAT) を置かない
+- **Cask の version / sha256 更新は tap 側が pull する**。tap の `.github/workflows/autobump.yml` が週 1 回（月曜 19:40 UTC）と手動実行（workflow_dispatch）で `brew bump --open-pr --casks` を実行し、新しい release を検出すると github-actions bot が bump PR を開く（merge は user）。scripta 側には tap への書き込み権限 (PAT) を置かない。tap の main は ruleset で削除・force push を禁止し、PR 経由の merge を必須にしている（承認数 0。2026-10-12 設定）
   - bump 時の `brew audit` は dmg 内 `Info.plist` の `LSMinimumSystemVersion` と Cask の `depends_on macos:` の食い違いを検出して bump を止める（2026-10-12、Homebrew 7.0.9 のローカル `brew bump-cask-pr` で、`:ventura` を宣言した Cask を v0.7.0 へ bump すると audit が落ちて Cask が書き換わらないことを確認）。止まるのは Cask が `arch` / `sha256 arm:` を持つ（arch 別 dmg の）ためで、arch 分割をやめると audit は `depends_on macos:` を自動修正して PR を開く側に変わる（Homebrew の `cask/audit.rb` の `on_system_blocks_exist?` 分岐）
-  - **v0.7.0 の次の release がこれに該当する**。v0.7.0 は Electron 43（`:monterey`）で、main は Electron 44（Ventura 以上）。release 後、tap 側で `depends_on macos:` を `:ventura` に上げる PR を出して merge してから autobump を手動実行する（autobump は tap の main に対して走る）。それまで autobump は毎日失敗する。以後も Electron の major bump で最小 macOS が上がった release は同じ手順になる
+  - **最小 macOS が上がる release では、tap 側で `depends_on macos:` を先に上げる**。v0.8.0（Electron 44、最小 macOS 13）で実際にこの経路を通った（2026-10-12）: publish 後の autobump が audit で停止（`Artifact defined :ventura as the minimum macOS version but the cask declared ... :monterey`）→ tap の PR で `:monterey` → `:ventura` の 1 行だけを上げて merge → autobump を手動再実行すると bot が `version` / `sha256` の bump PR を開いた。autobump は tap の main に対して走るので、`depends_on` の PR は merge してから再実行する。Electron の major bump で最小 macOS が上がる release は以後も同じ手順になる
+
+### リリース手順
+
+v0.8.0 で実際に通った手順（6 の Homebrew Cask は v0.8.0 が初回）。tag push・publish・tap の merge は user の指示を待つ。
+
+1. **準備 PR**（`chore/release-vX.Y.Z`）
+   - `package.json` の `version` を上げる。`release.yml` は tag と一致しないと止まる
+   - `CHANGELOG.md` に `## [X.Y.Z] — <日付>` を追加し、末尾の参照リンク定義に `[X.Y.Z]: .../releases/tag/vX.Y.Z` を足す。各項目はコミット件名ではなく `git show -s <hash>` の本文から書く（v0.8.0 で件名ベースの記述が過大・過小・取り違えになり、レビューで 5 件直した）。Dependencies は `git diff v<前版> HEAD -- package.json` と `.github` の `uses:` 差分から書く
+   - Electron の major を上げた release では最小 macOS を確かめ、変わっていれば CHANGELOG 冒頭に書く。値は `plutil -extract LSMinimumSystemVersion raw node_modules/electron/dist/Electron.app/Contents/Info.plist`
+2. **tag push**: 準備 PR を merge した後、merge commit に lightweight tag を打って push する（`git tag vX.Y.Z <merge commit>` → `git push origin refs/tags/vX.Y.Z`）。tag の付け先の `package.json` が新しい version になっていることを先に確かめる
+3. **release.yml の確認**: draft release が作られ、dmg ×2 / exe / AppImage / deb の 5 ファイルが添付される。`finalize` まで全 job が success であることを確かめる（失敗した leg がある draft は publish しない）
+4. **リリースノートの差し替え**: draft の本文は `--generate-notes` の PR 一覧なので、手書きのノートに差し替える（`gh release edit vX.Y.Z --notes-file <file> --draft`）。構成は v0.7.0 / v0.8.0 と同じ — 概要 / ダウンロード表 / Homebrew の手順 / 未署名のための初回起動手順 / 主な変更（CHANGELOG へのリンク）/ Full Changelog。動作環境が変わる release は冒頭に書く
+5. **publish**: draft を確認して publish する
+6. **Homebrew Cask**: tap の autobump（週 1 回、急ぐなら手動実行）が bump PR を開くので、`sha256` が release の dmg の digest（`gh release view vX.Y.Z --json assets`）と一致することを見て merge する。最小 macOS が上がった release は、先に上の `depends_on` の手順を踏む
 
 ---
 
@@ -381,3 +395,4 @@ v1.0.0 は「完璧の象徴」として温存する方針。初期リリース�
 
 - 2026-05-08: 初版作成（Stage 6-4 完了直後、`9f32815` / `dcbc68b` を取り込んだ状態で audit）。
 - 2026-05-09: v0.2.0 リリース方針確定（issue #24）。コードサイニング / electron-updater 採用せず方針を § 6 / § 11 / § 12 に反映。§ 13 v1.0.0 昇格 checklist 6 項目を追加。
+- 2026-10-12: v0.8.0 リリース後、§ 11 にリリース手順を追加。最小 macOS が上がる release での Cask の手順を実績で書き直し、autobump の schedule（週 1 回）と tap の ruleset を反映。
