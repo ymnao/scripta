@@ -312,7 +312,7 @@
   - `release.yml` の `finalize` job が matrix 全 leg の集約結果を check し、macOS leg が assert 失敗した場合に workflow を failed に落とす (draft release に dmg 抜けの状態で publish されないためのシグナル)
 - **Cask の version / sha256 更新は tap 側が pull する**。tap の `.github/workflows/autobump.yml` が毎日 `brew bump --open-pr --casks` を実行し、新しい release を検出すると bump PR を開く（merge は user）。scripta 側には tap への書き込み権限 (PAT) を置かない
   - bump 時の `brew audit` は dmg 内 `Info.plist` の `LSMinimumSystemVersion` と Cask の `depends_on macos:` の食い違いを検出して bump を止める（2026-10-12、Homebrew 7.0.9 のローカル `brew bump-cask-pr` で、`:ventura` を宣言した Cask を v0.7.0 へ bump すると audit が落ちて Cask が書き換わらないことを確認）。止まるのは Cask が `arch` / `sha256 arm:` を持つ（arch 別 dmg の）ためで、arch 分割をやめると audit は `depends_on macos:` を自動修正して PR を開く側に変わる（Homebrew の `cask/audit.rb` の `on_system_blocks_exist?` 分岐）
-  - **v0.7.0 の次の release がこれに該当する**。v0.7.0 は Electron 43（`:monterey`）で、main は Electron 44（Ventura 以上）。release 後、tap 側で `depends_on macos:` を `:ventura` に上げる PR を出してから autobump を手動実行する。それまで autobump は毎日失敗する。以後も Electron の major bump で最小 macOS が上がった release は同じ手順になる
+  - **v0.7.0 の次の release がこれに該当する**。v0.7.0 は Electron 43（`:monterey`）で、main は Electron 44（Ventura 以上）。release 後、tap 側で `depends_on macos:` を `:ventura` に上げる PR を出して merge してから autobump を手動実行する（autobump は tap の main に対して走る）。それまで autobump は毎日失敗する。以後も Electron の major bump で最小 macOS が上がった release は同じ手順になる
 
 ---
 
