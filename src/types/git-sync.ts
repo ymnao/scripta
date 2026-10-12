@@ -99,7 +99,7 @@ export function formatSyncHaltMessage(halt: SyncHalt): string {
 		case "no-sync-branch":
 			return "同期するブランチを決められないため、同期を止めています。設定の「同期するブランチ」を指定してください。";
 		case "in-progress":
-			return "merge・rebase・cherry-pick・revert の途中のため、同期を止めています。--continue か --abort で操作を終えると再開します。";
+			return "merge・rebase・cherry-pick・revert の途中のため、同期を止めています。操作を終えると、同期するかを判定し直します。";
 		case "other-branch":
 			return `同期するブランチ（${halt.syncBranch}）以外にいるため、同期を止めています。`;
 	}
