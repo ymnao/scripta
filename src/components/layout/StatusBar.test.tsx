@@ -145,4 +145,42 @@ describe("StatusBar", () => {
 		expect(onGitSync).toHaveBeenCalledTimes(1);
 		expect(onOpenConflictResolver).not.toHaveBeenCalled();
 	});
+	it("shows the halted sync branch and still opens the resolver on conflicts", async () => {
+		const onOpenConflictResolver = vi.fn();
+		const { rerender } = render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={false}
+				offlineMode={true}
+				syncHalt={{ reason: "other-branch", branch: "work", syncBranch: "main" }}
+			/>,
+		);
+		expect(screen.getByText("同期停止中（work）")).toBeInTheDocument();
+		expect(screen.queryByText("オフライン")).not.toBeInTheDocument();
+
+		rerender(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				hasConflicts={true}
+				offlineMode={false}
+				syncHalt={{ reason: "in-progress" }}
+				onOpenConflictResolver={onOpenConflictResolver}
+			/>,
+		);
+		await userEvent.click(screen.getByLabelText("コンフリクト解消ウィンドウを開く"));
+		expect(onOpenConflictResolver).toHaveBeenCalledTimes(1);
+	});
+
+	it("labels a detached HEAD halt", () => {
+		render(
+			<StatusBar
+				gitReady={true}
+				gitAction="idle"
+				syncHalt={{ reason: "other-branch", branch: "", syncBranch: "main" }}
+			/>,
+		);
+		expect(screen.getByText("同期停止中（detached HEAD）")).toBeInTheDocument();
+	});
 });

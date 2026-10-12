@@ -46,6 +46,9 @@ export type ErrorKind =
 	| "GIT_CONFLICT"
 	| "GIT_NOTHING_TO_COMMIT"
 	| "GIT_NO_REMOTE_ACCESS"
+	// 自動同期の対象ブランチ以外にいる / merge や rebase の途中（#639）。main が自動同期の
+	// 操作を実行直前に拒否したときに出る。
+	| "GIT_BRANCH_MISMATCH"
 	| "NETWORK"
 	| "CONNECTION_REFUSED"
 	| "TIMEOUT"

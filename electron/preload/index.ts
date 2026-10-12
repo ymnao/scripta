@@ -91,10 +91,15 @@ const api: Api = Object.freeze({
 	gitCheckAvailable: () => invoke(ipcRenderer.invoke("git:check-available")),
 	gitCheckRepo: (path) => invoke(ipcRenderer.invoke("git:check-repo", path)),
 	gitStatus: (path) => invoke(ipcRenderer.invoke("git:status", path)),
-	gitAddAll: (path) => invoke(ipcRenderer.invoke("git:add-all", path)),
-	gitCommit: (path, message) => invoke(ipcRenderer.invoke("git:commit", path, message)),
-	gitPull: (path, syncMethod) => invoke(ipcRenderer.invoke("git:pull", path, syncMethod)),
-	gitPush: (path) => invoke(ipcRenderer.invoke("git:push", path)),
+	gitResolveSyncBranch: (path, configured) =>
+		invoke(ipcRenderer.invoke("git:resolve-sync-branch", path, configured)),
+	gitAddAll: (path, expectedBranch) =>
+		invoke(ipcRenderer.invoke("git:add-all", path, expectedBranch)),
+	gitCommit: (path, message, expectedBranch) =>
+		invoke(ipcRenderer.invoke("git:commit", path, message, expectedBranch)),
+	gitPull: (path, syncMethod, expectedBranch) =>
+		invoke(ipcRenderer.invoke("git:pull", path, syncMethod, expectedBranch)),
+	gitPush: (path, expectedBranch) => invoke(ipcRenderer.invoke("git:push", path, expectedBranch)),
 	gitGetConflictedFiles: (path) => invoke(ipcRenderer.invoke("git:get-conflicted-files", path)),
 	gitGetConflictContent: (path, filePath) =>
 		invoke(ipcRenderer.invoke("git:get-conflict-content", path, filePath)),

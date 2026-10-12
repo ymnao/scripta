@@ -48,6 +48,7 @@ describe("store", () => {
 				syncMethod: "merge",
 				commitMessage: "vault backup: {{date}}",
 				autoPullOnStartup: false,
+				gitSyncBranch: "",
 				scratchpadVolatile: true,
 				autoUpdateCheck: true,
 				fileTreeShowHidden: false,
@@ -74,6 +75,7 @@ describe("store", () => {
 					trimTrailingWhitespace: false,
 					showLinkCards: false,
 					loadRemoteImages: false,
+					gitSyncBranch: "notes",
 				};
 				return values[key];
 			});
@@ -99,6 +101,7 @@ describe("store", () => {
 				syncMethod: "merge",
 				commitMessage: "vault backup: {{date}}",
 				autoPullOnStartup: false,
+				gitSyncBranch: "notes",
 				scratchpadVolatile: true,
 				autoUpdateCheck: true,
 				fileTreeShowHidden: false,

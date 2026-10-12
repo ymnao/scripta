@@ -15,7 +15,7 @@ import {
 import { handle } from "../utils/ipc-handle";
 import { writeFileUtf8NoFollow } from "../utils/open-nofollow";
 import { assertPathAllowed } from "../utils/path-guard";
-import { gitError } from "../utils/structured-error";
+import { gitError, StructuredError } from "../utils/structured-error";
 import { applyLocalFsChanges } from "./search-cache";
 
 // git sync 操作を simple-git ベースで集約する IPC ハンドラ群。
@@ -206,6 +206,130 @@ async function withWorkingTreeInvalidation<T>(
 	}
 }
 
+interface InProgressMarkers {
+	rebase: boolean;
+	merge: boolean;
+	// cherry-pick / revert の途中。自動 commit が走ると途中の操作を勝手に完了させる。
+	sequencer: boolean;
+}
+
+async function readInProgressMarkers(
+	git: SimpleGit,
+	canonical: string,
+): Promise<InProgressMarkers> {
+	const gitDirRaw = (await git.raw(["rev-parse", "--git-dir"])).trim();
+	const gitDir = isAbsolute(gitDirRaw) ? gitDirRaw : pathResolve(canonical, gitDirRaw);
+	const exists = (sub: string): Promise<boolean> =>
+		fsp.access(join(gitDir, sub)).then(
+			() => true,
+			() => false,
+		);
+	const [rebaseMerge, rebaseApply, mergeHead, cherryPickHead, revertHead] = await Promise.all([
+		exists("rebase-merge"),
+		exists("rebase-apply"),
+		exists("MERGE_HEAD"),
+		exists("CHERRY_PICK_HEAD"),
+		exists("REVERT_HEAD"),
+	]);
+	return {
+		rebase: rebaseMerge || rebaseApply,
+		merge: mergeHead,
+		sequencer: cherryPickHead || revertHead,
+	};
+}
+
+function isAnyInProgress(m: InProgressMarkers): boolean {
+	return m.rebase || m.merge || m.sequencer;
+}
+
+// `rev-parse --abbrev-ref HEAD` ではなく symbolic-ref を使うのは、detached HEAD が
+// "HEAD" という文字列で返り、`HEAD` という名前のブランチ指定と一致してしまうため。
+// detached（rebase の途中を含む）は null。
+async function readCurrentBranch(git: SimpleGit): Promise<string | null> {
+	try {
+		const out = (await git.raw(["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+		return out.length > 0 ? out : null;
+	} catch {
+		return null;
+	}
+}
+
+const FALLBACK_SYNC_BRANCH = "main";
+
+// 自動同期の対象ブランチを決める（#639）。設定値が空なら、最初の remote の既定ブランチ
+// （`refs/remotes/<remote>/HEAD`）→ `main` の順に試し、どちらも無ければ null（= 同期しない）。
+// 「今いるブランチ」を最後の fallback にしないのは、別の作業が作業用ブランチへ切り替えた
+// 状態でアプリを起動すると、そのブランチを同期対象と取り違えるため。
+async function resolveSyncBranchImpl(
+	senderId: number,
+	path: string,
+	configured: string,
+): Promise<string | null> {
+	const canonical = await assertPathAllowed(senderId, path);
+	if (typeof configured !== "string") {
+		throw new Error("configured sync branch must be a string");
+	}
+	const explicit = configured.trim();
+	if (explicit.length > 0) return explicit;
+
+	const git = createGit(canonical);
+	const remote = await git
+		.raw(["remote"])
+		.then((r) => r.trim().split("\n")[0] ?? "")
+		.catch(() => "");
+	if (remote.length > 0) {
+		validateRefName(remote);
+		try {
+			const ref = (
+				await git.raw(["symbolic-ref", "--quiet", "--short", `refs/remotes/${remote}/HEAD`])
+			).trim();
+			const prefix = `${remote}/`;
+			if (ref.startsWith(prefix) && ref.length > prefix.length) return ref.slice(prefix.length);
+		} catch {
+			// `git clone` 以外で remote を足した repo には refs/remotes/<remote>/HEAD が無い。
+		}
+	}
+	// commit が 1 つも無い main（unborn）は refs/heads/main を持たないので、現在ブランチでも見る。
+	const [hasMain, current] = await Promise.all([
+		git.raw(["rev-parse", "--verify", "--quiet", `refs/heads/${FALLBACK_SYNC_BRANCH}`]).then(
+			(out) => out.trim().length > 0,
+			() => false,
+		),
+		readCurrentBranch(git),
+	]);
+	if (hasMain || current === FALLBACK_SYNC_BRANCH) return FALLBACK_SYNC_BRANCH;
+	return null;
+}
+
+// 自動同期の各操作の直前に、HEAD が同期対象のブランチにあり、merge / rebase などの途中で
+// ないことを確かめる（#639）。renderer も同じ判定で skip するが、判定から IPC 実行までの間に
+// 外部でブランチが切り替わりうるので、実行する側でもう一度見る。
+async function assertSyncTarget(
+	git: SimpleGit,
+	canonical: string,
+	expectedBranch: string,
+): Promise<void> {
+	if (typeof expectedBranch !== "string" || expectedBranch.length === 0) {
+		throw new StructuredError("GIT_BRANCH_MISMATCH", "sync branch is not specified");
+	}
+	const [current, markers] = await Promise.all([
+		readCurrentBranch(git),
+		readInProgressMarkers(git, canonical),
+	]);
+	if (current !== expectedBranch) {
+		throw new StructuredError(
+			"GIT_BRANCH_MISMATCH",
+			`HEAD is on ${current ?? "(detached)"}, not on sync branch ${expectedBranch}`,
+		);
+	}
+	if (isAnyInProgress(markers)) {
+		throw new StructuredError(
+			"GIT_BRANCH_MISMATCH",
+			"a merge, rebase, cherry-pick or revert is in progress",
+		);
+	}
+}
+
 async function checkAvailableImpl(): Promise<boolean> {
 	try {
 		await createGitNoCwd().version();
@@ -233,42 +357,57 @@ async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
 async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
 	const canonical = await assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
-	// 3 つの git 呼び出しは独立しているので並列化する。useGitSync の refresh
-	// で頻繁に呼ばれるホットパスのため、逐次（3 spawn 順次）→ 並列で 1/3 程度に短縮。
-	// branch / remote はエラーを許容（unborn HEAD / remote 未設定）するので
-	// catch で fallback。porcelain は失敗時に throw して呼び出し元へ伝える。
-	const [branch, porcelain, hasRemote] = await Promise.all([
-		git
-			.raw(["rev-parse", "--abbrev-ref", "HEAD"])
-			.then((b) => b.trim())
-			.catch(() => ""),
+	// git 呼び出しは独立しているので並列化する。useGitSync の refresh
+	// で頻繁に呼ばれるホットパスのため、逐次 → 並列で短縮。
+	// remote はエラーを許容（remote 未設定）するので catch で fallback。
+	// porcelain は失敗時に throw して呼び出し元へ伝える。
+	// branch を assertSyncTarget と同じ取り方にするのは、renderer の判定と main の判定を
+	// 食い違わせないため（abbrev-ref は unborn で失敗し、detached で "HEAD" を返す）。
+	const [current, porcelain, hasRemote, markers] = await Promise.all([
+		readCurrentBranch(git),
 		git.raw(["status", "--porcelain"]),
 		git
 			.raw(["remote"])
 			.then((r) => r.trim().length > 0)
 			.catch(() => false),
+		readInProgressMarkers(git, canonical),
 	]);
 	const lines = porcelain.split("\n").filter((l) => l.length > 0);
 	const conflictFiles = lines
 		.filter((l) => l.length >= 3 && CONFLICT_PREFIXES.has(l.slice(0, 3)))
 		.map((l) => l.slice(3));
-	return { branch, changedFilesCount: lines.length, conflictFiles, hasRemote };
+	return {
+		branch: current ?? "",
+		changedFilesCount: lines.length,
+		conflictFiles,
+		hasRemote,
+		operationInProgress: isAnyInProgress(markers),
+	};
 }
 
-async function addAllImpl(senderId: number, path: string): Promise<void> {
+async function addAllImpl(senderId: number, path: string, expectedBranch: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
+	const git = createGit(canonical);
+	await assertSyncTarget(git, canonical, expectedBranch);
 	try {
-		await createGit(canonical).raw(["add", "-A"]);
+		await git.raw(["add", "-A"]);
 	} catch (e) {
 		throw gitError(extractGitErrorMessage(e));
 	}
 }
 
-async function commitImpl(senderId: number, path: string, message: string): Promise<string> {
+async function commitImpl(
+	senderId: number,
+	path: string,
+	message: string,
+	expectedBranch: string,
+): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
+	const git = createGit(canonical);
+	await assertSyncTarget(git, canonical, expectedBranch);
 	let out: string;
 	try {
-		out = (await createGit(canonical).raw(["commit", "-m", message])).trim();
+		out = (await git.raw(["commit", "-m", message])).trim();
 	} catch (e) {
 		throw gitError(extractGitErrorMessage(e));
 	}
@@ -282,13 +421,19 @@ async function commitImpl(senderId: number, path: string, message: string): Prom
 	return out;
 }
 
-async function pullImpl(senderId: number, path: string, syncMethod: string): Promise<string> {
+async function pullImpl(
+	senderId: number,
+	path: string,
+	syncMethod: string,
+	expectedBranch: string,
+): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
 	if (syncMethod !== "merge" && syncMethod !== "rebase") {
 		throw new Error(`Invalid sync_method: ${syncMethod}. Expected "merge" or "rebase".`);
 	}
 	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull"];
 	const git = createGit(canonical);
+	await assertSyncTarget(git, canonical, expectedBranch);
 	// upstream 未設定の「成功扱い」は **op の内側**で潰す。外に出すと failed 経路として
 	// `--cached` を 1 回無駄に呼ぶ（working tree は変わっていない）。
 	return withWorkingTreeInvalidation(git, canonical, async () => {
@@ -303,9 +448,10 @@ async function pullImpl(senderId: number, path: string, syncMethod: string): Pro
 	});
 }
 
-async function pushImpl(senderId: number, path: string): Promise<string> {
+async function pushImpl(senderId: number, path: string, expectedBranch: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
+	await assertSyncTarget(git, canonical, expectedBranch);
 	let firstError: unknown;
 	try {
 		return (await git.raw(["push"])).trim();
@@ -456,20 +602,8 @@ async function resolveConflictImpl(
 async function finishConflictResolutionImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
 	const git = createGit(canonical);
-	const gitDirRaw = (await git.raw(["rev-parse", "--git-dir"])).trim();
-	const gitDir = isAbsolute(gitDirRaw) ? gitDirRaw : pathResolve(canonical, gitDirRaw);
-	const exists = (sub: string): Promise<boolean> =>
-		fsp.access(join(gitDir, sub)).then(
-			() => true,
-			() => false,
-		);
-	// 3 つの marker file の存在チェックは独立なので並列で。3 stat → 1 往復。
 	// 判定は rebase 系を merge より優先。
-	const [rebaseMerge, rebaseApply, mergeHead] = await Promise.all([
-		exists("rebase-merge"),
-		exists("rebase-apply"),
-		exists("MERGE_HEAD"),
-	]);
+	const markers = await readInProgressMarkers(git, canonical);
 	// marker 判定と下の「どちらでもない」throw は working tree を触らないので helper の外に置く
 	// （HEAD 読み + diff を無駄に払わない）。包むのは実際に git を走らせる 2 経路だけ。
 	const run = (args: string[]): Promise<string> =>
@@ -480,11 +614,11 @@ async function finishConflictResolutionImpl(senderId: number, path: string): Pro
 				throw gitError(extractGitErrorMessage(e));
 			}
 		});
-	if (rebaseMerge || rebaseApply) return run(["rebase", "--continue"]);
+	if (markers.rebase) return run(["rebase", "--continue"]);
 	// `commit --no-edit` 自体は working tree を変えないが、HEAD が merge commit へ動くので
 	// diff には merge で入った file が出る（= 冗長な invalidate）。merge 完了だけを
 	// special-case して分岐を増やすより、該当 file の L2 再読込を払う方を選ぶ。
-	if (mergeHead) return run(["commit", "--no-edit"]);
+	if (markers.merge) return run(["commit", "--no-edit"]);
 	throw new Error("Not in a merge or rebase state");
 }
 
@@ -526,14 +660,21 @@ export function registerGitIpc(): void {
 	handle("git:check-available", () => checkAvailableImpl());
 	handle("git:check-repo", (event, path: string) => checkRepoImpl(event.sender.id, path));
 	handle("git:status", (event, path: string) => statusImpl(event.sender.id, path));
-	handle("git:add-all", (event, path: string) => addAllImpl(event.sender.id, path));
-	handle("git:commit", (event, path: string, message: string) =>
-		commitImpl(event.sender.id, path, message),
+	handle("git:resolve-sync-branch", (event, path: string, configured: string) =>
+		resolveSyncBranchImpl(event.sender.id, path, configured),
 	);
-	handle("git:pull", (event, path: string, syncMethod: string) =>
-		pullImpl(event.sender.id, path, syncMethod),
+	handle("git:add-all", (event, path: string, expectedBranch: string) =>
+		addAllImpl(event.sender.id, path, expectedBranch),
 	);
-	handle("git:push", (event, path: string) => pushImpl(event.sender.id, path));
+	handle("git:commit", (event, path: string, message: string, expectedBranch: string) =>
+		commitImpl(event.sender.id, path, message, expectedBranch),
+	);
+	handle("git:pull", (event, path: string, syncMethod: string, expectedBranch: string) =>
+		pullImpl(event.sender.id, path, syncMethod, expectedBranch),
+	);
+	handle("git:push", (event, path: string, expectedBranch: string) =>
+		pushImpl(event.sender.id, path, expectedBranch),
+	);
 	handle("git:get-conflicted-files", (event, path: string) =>
 		getConflictedFilesImpl(event.sender.id, path),
 	);
@@ -560,6 +701,7 @@ export const __testing = {
 	checkAvailableImpl,
 	checkRepoImpl,
 	statusImpl,
+	resolveSyncBranchImpl,
 	addAllImpl,
 	commitImpl,
 	pullImpl,

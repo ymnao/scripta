@@ -6,6 +6,7 @@ import {
 	GitBranch,
 	GitCommitHorizontal,
 	PanelLeft,
+	PauseCircle,
 	Plus,
 	Presentation,
 	Settings,
@@ -14,7 +15,12 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { MOD_KEY_LABEL, SHIFT_KEY_LABEL } from "../../lib/platform";
-import type { GitAction } from "../../types/git-sync";
+import {
+	formatSyncHaltLabel,
+	formatSyncHaltMessage,
+	type GitAction,
+	type SyncHalt,
+} from "../../types/git-sync";
 import { Tooltip } from "../common/Tooltip";
 import type { CursorInfo } from "../editor/MarkdownEditor";
 
@@ -30,6 +36,7 @@ interface StatusBarProps {
 	lastCommitTime?: string | null;
 	hasConflicts?: boolean;
 	offlineMode?: boolean;
+	syncHalt?: SyncHalt | null;
 	onGitSync?: () => void;
 	onOpenConflictResolver?: () => void;
 	gitReady?: boolean;
@@ -46,6 +53,7 @@ function GitSyncStatus({
 	lastCommitTime,
 	hasConflicts,
 	offlineMode,
+	syncHalt,
 	onGitSync,
 	onOpenConflictResolver,
 }: {
@@ -53,15 +61,21 @@ function GitSyncStatus({
 	lastCommitTime?: string | null;
 	hasConflicts: boolean;
 	offlineMode: boolean;
+	syncHalt: SyncHalt | null;
 	onGitSync?: () => void;
 	onOpenConflictResolver?: () => void;
 }) {
 	let icon: ReactNode;
 	let label: string;
+	let tooltip = hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期";
 
 	if (hasConflicts) {
 		icon = <AlertTriangle size={13} className="text-yellow-500" />;
 		label = "コンフリクト";
+	} else if (syncHalt) {
+		icon = <PauseCircle size={13} className="text-text-secondary" />;
+		label = formatSyncHaltLabel(syncHalt);
+		tooltip = formatSyncHaltMessage(syncHalt);
 	} else if (offlineMode) {
 		icon = <WifiOff size={13} className="text-text-secondary" />;
 		label = "オフライン";
@@ -83,7 +97,7 @@ function GitSyncStatus({
 	}
 
 	return (
-		<Tooltip label={hasConflicts ? "コンフリクト解消ウィンドウを開く" : "手動同期"}>
+		<Tooltip label={tooltip}>
 			<button
 				type="button"
 				onClick={hasConflicts ? onOpenConflictResolver : onGitSync}
@@ -107,6 +121,7 @@ export function StatusBar({
 	lastCommitTime,
 	hasConflicts,
 	offlineMode,
+	syncHalt,
 	onGitSync,
 	onOpenConflictResolver,
 	gitReady,
@@ -160,6 +175,7 @@ export function StatusBar({
 						lastCommitTime={lastCommitTime}
 						hasConflicts={hasConflicts ?? false}
 						offlineMode={offlineMode ?? false}
+						syncHalt={syncHalt ?? null}
 						onGitSync={onGitSync}
 						onOpenConflictResolver={onOpenConflictResolver}
 					/>

@@ -30,6 +30,7 @@ const {
 	checkAvailableImpl,
 	checkRepoImpl,
 	statusImpl,
+	resolveSyncBranchImpl,
 	addAllImpl,
 	commitImpl,
 	pullImpl,
@@ -228,7 +229,6 @@ describe("statusImpl", () => {
 	it("returns empty status for a fresh repo", async () => {
 		const dir = await newWorkspace();
 		const s = await statusImpl(TEST_WIN, dir);
-		// HEAD が無い空 repo では branch は "HEAD" を返すこともあるので、空 or "main" を許容
 		expect(s.changedFilesCount).toBe(0);
 		expect(s.conflictFiles).toEqual([]);
 		expect(s.hasRemote).toBe(false);
@@ -245,8 +245,6 @@ describe("statusImpl", () => {
 
 	it("detects remote when configured", async () => {
 		const dir = await newWorkspace();
-		// rev-parse --abbrev-ref HEAD は unborn branch では失敗するため、
-		// branch 検出を確認するには 1 コミット必要。
 		await commitFile(dir, "init.md", "init\n", "init");
 		await createGit(dir).raw(["remote", "add", "origin", "https://example.com/x.git"]);
 		const s = await statusImpl(TEST_WIN, dir);
@@ -266,8 +264,8 @@ describe("addAllImpl / commitImpl", () => {
 	it("stages and commits all changes", async () => {
 		const dir = await newWorkspace();
 		await fsp.writeFile(join(dir, "x.md"), "x\n", "utf8");
-		await addAllImpl(TEST_WIN, dir);
-		await commitImpl(TEST_WIN, dir, "first");
+		await addAllImpl(TEST_WIN, dir, "main");
+		await commitImpl(TEST_WIN, dir, "first", "main");
 		const log = await createGit(dir).raw(["log", "--oneline"]);
 		expect(log.split("\n").filter((l) => l.length > 0)).toHaveLength(1);
 	});
@@ -276,10 +274,10 @@ describe("addAllImpl / commitImpl", () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "y.md", "y\n", "init");
 		// 何も変更せずに commit → git が "nothing to commit" を返す
-		await addAllImpl(TEST_WIN, dir);
+		await addAllImpl(TEST_WIN, dir, "main");
 		// 余計な git プロセスを増やさないよう、エラーを 1 回だけ捕捉して
 		// message（renderer 互換）と kind の両方を検証する。
-		const err = await commitImpl(TEST_WIN, dir, "noop").catch((e: unknown) => e);
+		const err = await commitImpl(TEST_WIN, dir, "noop", "main").catch((e: unknown) => e);
 		expect((err as Error).message).toMatch(/nothing to commit/i);
 		expect(err).toMatchObject({ kind: "GIT_NOTHING_TO_COMMIT" });
 	});
@@ -288,7 +286,7 @@ describe("addAllImpl / commitImpl", () => {
 		await newWorkspace();
 		const outside = await makeCanonicalTempDir("scripta-git-out-");
 		dirsToCleanup.push(outside);
-		await expect(addAllImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
+		await expect(addAllImpl(TEST_WIN, outside, "main")).rejects.toThrow(/Permission denied/);
 	});
 });
 
@@ -297,13 +295,13 @@ describe("pullImpl", () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "z.md", "z\n", "init");
 		// remote 無し / no upstream → 空文字列を返す契約
-		const result = await pullImpl(TEST_WIN, dir, "merge");
+		const result = await pullImpl(TEST_WIN, dir, "merge", "main");
 		expect(result).toBe("");
 	});
 
 	it("rejects invalid syncMethod", async () => {
 		const dir = await newWorkspace();
-		await expect(pullImpl(TEST_WIN, dir, "force")).rejects.toThrow(/Invalid sync_method/);
+		await expect(pullImpl(TEST_WIN, dir, "force", "main")).rejects.toThrow(/Invalid sync_method/);
 	});
 
 	it("succeeds for fast-forward pull from a real local remote (merge)", async () => {
@@ -321,7 +319,7 @@ describe("pullImpl", () => {
 		await commitFile(other, "second.md", "second\n", "second");
 		await createGit(other).raw(["push"]);
 		// 元の work から pull
-		await pullImpl(TEST_WIN, work, "merge");
+		await pullImpl(TEST_WIN, work, "merge", "main");
 		expect(
 			await fsp.access(join(work, "second.md")).then(
 				() => true,
@@ -336,7 +334,7 @@ describe("pullImpl", () => {
 		await registerWorkspaceRoot(TEST_WIN, work);
 		await createGit(work).raw(["push", "-u", "origin", "main"]);
 		// no-op rebase pull は成功するはず
-		await pullImpl(TEST_WIN, work, "rebase");
+		await pullImpl(TEST_WIN, work, "rebase", "main");
 	});
 });
 
@@ -346,10 +344,10 @@ describe("pushImpl", () => {
 		dirsToCleanup.push(work, remote);
 		await registerWorkspaceRoot(TEST_WIN, work);
 		// upstream 未設定 → 自動 -u origin main で再試行 → 成功
-		await pushImpl(TEST_WIN, work);
+		await pushImpl(TEST_WIN, work, "main");
 		// 再 push は upstream 済みなので普通に成功
 		await commitFile(work, "second.md", "second\n", "second");
-		const out = await pushImpl(TEST_WIN, work);
+		const out = await pushImpl(TEST_WIN, work, "main");
 		// stdout か stderr が空でないことを確認（成功時の output は version 依存）
 		expect(typeof out).toBe("string");
 	});
@@ -375,7 +373,7 @@ describe("pushImpl", () => {
 			// renderer 側 isNetworkError と同じ判定を使うことで、テストの意図
 			// (network error の stderr が renderer の判定にかかること) と一致させる。
 			// `unable to access` 単独などの非ネットワーク原因が誤検知されない。
-			const err = await pushImpl(TEST_WIN, dir).then(
+			const err = await pushImpl(TEST_WIN, dir, "main").then(
 				() => {
 					throw new Error("expected pushImpl to reject");
 				},
@@ -388,6 +386,209 @@ describe("pushImpl", () => {
 				else process.env[k] = v;
 			}
 		}
+	});
+});
+
+describe("resolveSyncBranchImpl (#639)", () => {
+	it("returns the configured branch name (trimmed) as is", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		expect(await resolveSyncBranchImpl(TEST_WIN, dir, "  notes  ")).toBe("notes");
+	});
+
+	it("uses the branch refs/remotes/<remote>/HEAD points to", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		const wgit = createGit(work);
+		await wgit.raw(["branch", "trunk"]);
+		await wgit.raw(["push", "origin", "main", "trunk"]);
+		await wgit.raw(["remote", "set-head", "origin", "trunk"]);
+		expect(await resolveSyncBranchImpl(TEST_WIN, work, "")).toBe("trunk");
+	});
+
+	it("falls back to main when the remote has no HEAD ref", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		await createGit(work).raw(["checkout", "-b", "work"]);
+		expect(await resolveSyncBranchImpl(TEST_WIN, work, "")).toBe("main");
+	});
+
+	it("falls back to main on an unborn main branch", async () => {
+		const dir = await newWorkspace();
+		expect(await resolveSyncBranchImpl(TEST_WIN, dir, "")).toBe("main");
+	});
+
+	it("returns null instead of the current branch when neither exists", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await createGit(dir).raw(["branch", "-m", "main", "work"]);
+		expect(await resolveSyncBranchImpl(TEST_WIN, dir, "")).toBeNull();
+	});
+});
+
+describe("statusImpl branch / operationInProgress (#639)", () => {
+	it("reports the branch of an unborn HEAD", async () => {
+		const dir = await newWorkspace();
+		const s = await statusImpl(TEST_WIN, dir);
+		expect(s.branch).toBe("main");
+		expect(s.operationInProgress).toBe(false);
+	});
+
+	it("reports an empty branch on detached HEAD", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await createGit(dir).raw(["checkout", "--detach"]);
+		expect((await statusImpl(TEST_WIN, dir)).branch).toBe("");
+	});
+
+	it("reports operationInProgress during a merge", async () => {
+		const dir = await newWorkspace();
+		await makeMergeConflict(dir);
+		const s = await statusImpl(TEST_WIN, dir);
+		expect(s.branch).toBe("main");
+		expect(s.operationInProgress).toBe(true);
+	});
+});
+
+describe("auto-sync branch gate (#639)", () => {
+	async function stagedNames(dir: string): Promise<string> {
+		return (await createGit(dir).raw(["diff", "--cached", "--name-only"])).trim();
+	}
+
+	async function headOf(dir: string): Promise<string> {
+		return (await createGit(dir).raw(["rev-parse", "HEAD"])).trim();
+	}
+
+	it("refuses add on a work branch and stages nothing", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await createGit(dir).raw(["checkout", "-b", "work"]);
+		await fsp.writeFile(join(dir, "wip.md"), "wip\n", "utf8");
+		await expect(addAllImpl(TEST_WIN, dir, "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await stagedNames(dir)).toBe("");
+	});
+
+	it("refuses commit on a work branch and leaves HEAD as is", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		const git = createGit(dir);
+		await git.raw(["checkout", "-b", "work"]);
+		await fsp.writeFile(join(dir, "wip.md"), "wip\n", "utf8");
+		await git.raw(["add", "--", "wip.md"]);
+		const before = await headOf(dir);
+		await expect(commitImpl(TEST_WIN, dir, "auto", "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await headOf(dir)).toBe(before);
+	});
+
+	it("refuses push on a work branch and does not create it on the remote", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		await createGit(work).raw(["checkout", "-b", "work"]);
+		await commitFile(work, "wip.md", "wip\n", "wip");
+		await expect(pushImpl(TEST_WIN, work, "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect((await createGit(remote).raw(["branch", "--list"])).trim()).toBe("");
+	});
+
+	it("refuses pull on a work branch and leaves HEAD as is", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		const git = createGit(work);
+		await git.raw(["push", "-u", "origin", "main"]);
+		await git.raw(["checkout", "-b", "work", "--track", "origin/main"]);
+		const other = await makeCanonicalTempDir("scripta-git-other-");
+		dirsToCleanup.push(other);
+		await createGit(other).raw(["clone", remote, other]);
+		await createGit(other).raw(["config", "user.email", "test2@test.com"]);
+		await createGit(other).raw(["config", "user.name", "Test2"]);
+		await commitFile(other, "second.md", "second\n", "second");
+		await createGit(other).raw(["push"]);
+		const before = await headOf(work);
+		await expect(pullImpl(TEST_WIN, work, "merge", "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await headOf(work)).toBe(before);
+	});
+
+	it("refuses add on detached HEAD", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await createGit(dir).raw(["checkout", "--detach"]);
+		await fsp.writeFile(join(dir, "wip.md"), "wip\n", "utf8");
+		await expect(addAllImpl(TEST_WIN, dir, "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await stagedNames(dir)).toBe("");
+	});
+
+	it("refuses a configured branch named HEAD on detached HEAD", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await createGit(dir).raw(["checkout", "--detach"]);
+		await fsp.writeFile(join(dir, "wip.md"), "wip\n", "utf8");
+		await expect(addAllImpl(TEST_WIN, dir, "HEAD")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+	});
+
+	it("refuses commit on the sync branch while a merge is in progress", async () => {
+		const dir = await newWorkspace();
+		const file = await makeMergeConflict(dir);
+		await fsp.writeFile(join(dir, file), "resolved\n", "utf8");
+		await createGit(dir).raw(["add", "--", file]);
+		const before = await headOf(dir);
+		await expect(commitImpl(TEST_WIN, dir, "auto", "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await headOf(dir)).toBe(before);
+	});
+
+	it("refuses add while a rebase is in progress", async () => {
+		const dir = await newWorkspace();
+		await makeRebaseConflict(dir);
+		await expect(addAllImpl(TEST_WIN, dir, "feature")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+	});
+
+	it("refuses commit on the sync branch while a cherry-pick is in progress", async () => {
+		const dir = await newWorkspace();
+		const git = createGit(dir);
+		await commitFile(dir, "pick.md", "base\n", "base");
+		await git.raw(["checkout", "-b", "other"]);
+		await commitFile(dir, "pick.md", "other\n", "other change");
+		const picked = (await git.raw(["rev-parse", "HEAD"])).trim();
+		await git.raw(["checkout", "main"]);
+		await commitFile(dir, "pick.md", "main\n", "main change");
+		await git.raw(["cherry-pick", picked]).catch(() => {
+			// expected conflict
+		});
+		await fsp.writeFile(join(dir, "pick.md"), "resolved\n", "utf8");
+		await git.raw(["add", "--", "pick.md"]);
+		const before = await headOf(dir);
+		await expect(commitImpl(TEST_WIN, dir, "auto", "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await headOf(dir)).toBe(before);
+	});
+
+	it("refuses an empty expected branch", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await fsp.writeFile(join(dir, "wip.md"), "wip\n", "utf8");
+		await expect(addAllImpl(TEST_WIN, dir, "")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await stagedNames(dir)).toBe("");
 	});
 });
 
@@ -655,9 +856,9 @@ describe("path-guard cross-cutting", () => {
 		await createGit(outside).raw(["init", "-b", "main"]);
 
 		await expect(statusImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
-		await expect(commitImpl(TEST_WIN, outside, "x")).rejects.toThrow(/Permission denied/);
-		await expect(pullImpl(TEST_WIN, outside, "merge")).rejects.toThrow(/Permission denied/);
-		await expect(pushImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
+		await expect(commitImpl(TEST_WIN, outside, "x", "main")).rejects.toThrow(/Permission denied/);
+		await expect(pullImpl(TEST_WIN, outside, "merge", "main")).rejects.toThrow(/Permission denied/);
+		await expect(pushImpl(TEST_WIN, outside, "main")).rejects.toThrow(/Permission denied/);
 		await expect(getConflictedFilesImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
 		await expect(getConflictContentImpl(TEST_WIN, outside, "a.md")).rejects.toThrow(
 			/Permission denied/,
@@ -763,7 +964,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			expect(read()).toBeUndefined();
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -781,7 +982,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
-			await pullImpl(TEST_WIN, work, "rebase");
+			await pullImpl(TEST_WIN, work, "rebase", "main");
 			// replay が起きたことを観測する (fast-forward なら upstream commit が最上位に来る)。
 			const log = (await createGit(work).raw(["log", "-2", "--format=%s"])).trim().split("\n");
 			expect(log).toEqual(["local commit", "upstream change"]);
@@ -807,7 +1008,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 			acquireFileListCache(canonicalRoot);
 			try {
 				const read = seedStale(canonicalRoot, join(canonicalRoot, quoted));
-				await pullImpl(TEST_WIN, work, "merge");
+				await pullImpl(TEST_WIN, work, "merge", "main");
 				expect(read()).toBeUndefined();
 			} finally {
 				releaseFileListCache(canonicalRoot);
@@ -830,7 +1031,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		try {
 			const readFirst = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
 			const readSecond = seedStale(canonicalRoot, join(canonicalRoot, "second.md"));
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			expect(readFirst()).toBeUndefined();
 			expect(readSecond()).toBeUndefined();
 		} finally {
@@ -846,7 +1047,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "added.md"));
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -862,7 +1063,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			expect(getCachedMdFiles(canonicalRoot)).not.toContain(join(canonicalRoot, "first.md"));
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -879,7 +1080,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			await populateFileListCache(canonicalRoot, async () => [join(canonicalRoot, "first.md")]);
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			const files = getCachedMdFiles(canonicalRoot);
 			expect(files).not.toContain(join(canonicalRoot, "first.md"));
 			expect(files).toContain(join(canonicalRoot, "renamed.md"));
@@ -899,7 +1100,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
-			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "merge", "main")).rejects.toThrow();
 			expect(read()).toBeUndefined();
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -916,7 +1117,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			await populateFileListCache(canonicalRoot, async () => []);
-			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "merge", "main")).rejects.toThrow();
 			expect(await fsp.readFile(join(canonicalRoot, "first.md"), "utf8")).toBe("upstream\n");
 			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
 		} finally {
@@ -937,7 +1138,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 			// L1 は populate 時点で first.md を含むので、invalidation が丸ごと空振りしても
 			// toContain は通る。経路が動いたことは L2 の evict で観測する。
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
-			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "rebase", "main")).rejects.toThrow();
 			expect(await fsp.readFile(join(canonicalRoot, "first.md"), "utf8")).toBe("local\n");
 			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
 			expect(read()).toBeUndefined();
@@ -960,7 +1161,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "other.md"));
-			await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "rebase", "main")).rejects.toThrow();
 			expect(await fsp.readFile(join(canonicalRoot, "other.md"), "utf8")).toBe("upstream other\n");
 			expect(read()).toBeUndefined();
 		} finally {
@@ -986,7 +1187,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 				join(canonicalRoot, "first.md"),
 				join(canonicalRoot, "d.md", "x.md"),
 			]);
-			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "merge", "main")).rejects.toThrow();
 			expect((await fsp.lstat(join(canonicalRoot, "d.md"))).isFile()).toBe(true);
 			const files = getCachedMdFiles(canonicalRoot);
 			expect(files).not.toContain(join(canonicalRoot, "d.md", "x.md"));
@@ -1013,7 +1214,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 				join(canonicalRoot, "first.md"),
 				join(canonicalRoot, "d.md"),
 			]);
-			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "merge", "main")).rejects.toThrow();
 			expect((await fsp.lstat(join(canonicalRoot, "d.md"))).isDirectory()).toBe(true);
 			const files = getCachedMdFiles(canonicalRoot);
 			expect(files).not.toContain(join(canonicalRoot, "d.md"));
@@ -1039,7 +1240,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 				join(canonicalRoot, "first.md"),
 				join(canonicalRoot, "gone.md"),
 			]);
-			await expect(pullImpl(TEST_WIN, work, "merge")).rejects.toThrow();
+			await expect(pullImpl(TEST_WIN, work, "merge", "main")).rejects.toThrow();
 			const files = getCachedMdFiles(canonicalRoot);
 			expect(files).not.toContain(join(canonicalRoot, "gone.md"));
 			expect(files).toContain(join(canonicalRoot, "first.md"));
@@ -1053,7 +1254,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "first.md"));
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			expect(read()).toBe("stale");
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -1076,7 +1277,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			await populateFileListCache(canonicalRoot, async () => []);
-			await pullImpl(TEST_WIN, work, "merge");
+			await pullImpl(TEST_WIN, work, "merge", "main");
 			expect(getCachedMdFiles(canonicalRoot)).toContain(join(canonicalRoot, "first.md"));
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -1101,7 +1302,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		acquireFileListCache(canonicalRoot);
 		try {
 			const read = seedStale(canonicalRoot, join(canonicalRoot, "x.md"));
-			await pullImpl(TEST_WIN, workspace, "merge");
+			await pullImpl(TEST_WIN, workspace, "merge", "main");
 			expect(read()).toBeUndefined();
 		} finally {
 			releaseFileListCache(canonicalRoot);
@@ -1120,7 +1321,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		});
 		await commitFile(work, "a.md", "local a\n", "local a");
 		await commitFile(work, "b.md", "local b\n", "local b");
-		await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+		await expect(pullImpl(TEST_WIN, work, "rebase", "main")).rejects.toThrow();
 		await resolveConflictImpl(TEST_WIN, work, "a.md", "resolved a\n", "modify");
 		acquireFileListCache(canonicalRoot);
 		try {
@@ -1143,7 +1344,7 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		});
 		await commitFile(work, "a.md", "local a\n", "local a");
 		await commitFile(work, "c.md", "local c\n", "local c");
-		await expect(pullImpl(TEST_WIN, work, "rebase")).rejects.toThrow();
+		await expect(pullImpl(TEST_WIN, work, "rebase", "main")).rejects.toThrow();
 		await resolveConflictImpl(TEST_WIN, work, "a.md", "resolved a\n", "modify");
 		acquireFileListCache(canonicalRoot);
 		try {
