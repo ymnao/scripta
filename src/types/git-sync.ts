@@ -50,6 +50,7 @@ export function normalizeCommitMessage(v: unknown): string {
 
 // 自動同期を止めている理由（#639）。
 export type SyncHalt =
+	| { reason: "status-unavailable" }
 	| { reason: "no-sync-branch" }
 	| { reason: "in-progress" }
 	// branch が空文字なのは detached HEAD（rebase の途中を含む）。
@@ -61,10 +62,11 @@ export function getSyncHalt(
 	syncBranch: string | null,
 ): SyncHalt | null {
 	if (syncBranch === null) return { reason: "no-sync-branch" };
+	// rebase の途中は HEAD が detached なので、ブランチより先に見ないと理由が「別のブランチ」になる。
+	if (status.operationInProgress) return { reason: "in-progress" };
 	if (status.branch !== syncBranch) {
 		return { reason: "other-branch", branch: status.branch, syncBranch };
 	}
-	if (status.operationInProgress) return { reason: "in-progress" };
 	return null;
 }
 
@@ -79,6 +81,8 @@ export function isSameSyncHalt(a: SyncHalt | null, b: SyncHalt | null): boolean 
 
 export function formatSyncHaltLabel(halt: SyncHalt): string {
 	switch (halt.reason) {
+		case "status-unavailable":
+			return "同期停止中（状態を読めません）";
 		case "no-sync-branch":
 			return "同期停止中（ブランチ未設定）";
 		case "in-progress":
@@ -90,10 +94,12 @@ export function formatSyncHaltLabel(halt: SyncHalt): string {
 
 export function formatSyncHaltMessage(halt: SyncHalt): string {
 	switch (halt.reason) {
+		case "status-unavailable":
+			return "Git の状態を読み取れなかったため、同期を止めています。";
 		case "no-sync-branch":
 			return "同期するブランチを決められないため、同期を止めています。設定の「同期するブランチ」を指定してください。";
 		case "in-progress":
-			return "merge・rebase・cherry-pick・revert の途中のため、同期を止めています。";
+			return "merge・rebase・cherry-pick・revert の途中のため、同期を止めています。--continue か --abort で操作を終えると再開します。";
 		case "other-branch":
 			return `同期するブランチ（${halt.syncBranch}）以外にいるため、同期を止めています。`;
 	}

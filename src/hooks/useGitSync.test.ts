@@ -590,6 +590,14 @@ describe("useGitSync sync branch gate (#639)", () => {
 		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "in-progress" });
 	});
 
+	it("reports a rebase (detached HEAD) as an operation in progress", async () => {
+		mockedGitStatus.mockResolvedValue(statusOn("", true));
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "in-progress" });
+	});
+
 	it("does not sync when the sync branch cannot be resolved", async () => {
 		mockedGitStatus.mockResolvedValue(statusOn("main"));
 		mockedGitResolveSyncBranch.mockResolvedValue(null);
@@ -606,6 +614,52 @@ describe("useGitSync sync branch gate (#639)", () => {
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(mockedGitResolveSyncBranch).toHaveBeenCalledWith(WS, "notes");
+	});
+
+	it("pulls on startup on the sync branch", async () => {
+		mockedGitStatus.mockResolvedValue(statusOn("main"));
+		useGitSyncStore.setState({
+			autoPullOnStartup: true,
+			autoCommitInterval: 0,
+			autoPullInterval: 0,
+			autoPushInterval: 0,
+		});
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockedGitPull).toHaveBeenCalledWith(WS, "merge", "main");
+	});
+
+	it("halts and tells why when the status cannot be read", async () => {
+		const { result } = renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+		mockedGitStatus.mockRejectedValue(new Error("status failed"));
+
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(100);
+
+		expectNoSyncOperations();
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "status-unavailable" });
+		expect(useToastStore.getState().toasts).toContainEqual(
+			expect.objectContaining({
+				type: "warning",
+				message: "Git の状態を読み取れなかったため、同期を止めています。",
+			}),
+		);
+	});
+
+	it("re-reads the status as soon as the sync branch setting changes", async () => {
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+		mockedGitResolveSyncBranch
+			.mockClear()
+			.mockImplementation(async (_path: string, configured: string) => configured || "main");
+
+		useGitSyncStore.getState().setGitSyncBranch("work");
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockedGitResolveSyncBranch).toHaveBeenCalledWith(WS, "work");
+		expect(useGitSyncStore.getState().syncHalt).toBeNull();
 	});
 
 	it("does not pull on startup on a work branch", async () => {

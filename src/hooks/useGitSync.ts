@@ -139,7 +139,10 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			store.setSyncHalt(halt);
 			return halt === null ? syncBranch : null;
 		} catch {
-			// status check failure is non-fatal
+			// 読めないまま同期を進めると、別のブランチで add -A しうる。
+			if (workspacePathRef.current === path) {
+				useGitSyncStore.getState().setSyncHalt({ reason: "status-unavailable" });
+			}
 			return null;
 		}
 	}, []);

@@ -242,16 +242,26 @@ function isAnyInProgress(m: InProgressMarkers): boolean {
 	return m.rebase || m.merge || m.sequencer;
 }
 
-// `rev-parse --abbrev-ref HEAD` ではなく symbolic-ref を使うのは、detached HEAD が
-// "HEAD" という文字列で返り、`HEAD` という名前のブランチ指定と一致してしまうため。
-// detached（rebase の途中を含む）は null。
-async function readCurrentBranch(git: SimpleGit): Promise<string | null> {
+// `--short` は同名の tag があると `heads/main` のように曖昧さを避けた名前を返すので、
+// 完全な ref 名を読んで prefix を剥がす。prefix に合わなければ null。
+async function readSymbolicRef(
+	git: SimpleGit,
+	ref: string,
+	prefix: string,
+): Promise<string | null> {
 	try {
-		const out = (await git.raw(["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
-		return out.length > 0 ? out : null;
+		const out = (await git.raw(["symbolic-ref", "--quiet", ref])).trim();
+		return out.startsWith(prefix) && out.length > prefix.length ? out.slice(prefix.length) : null;
 	} catch {
 		return null;
 	}
+}
+
+// `rev-parse --abbrev-ref HEAD` ではなく symbolic-ref を使うのは、detached HEAD が
+// "HEAD" という文字列で返り、`HEAD` という名前のブランチ指定と一致してしまうため。
+// detached（rebase の途中を含む）は null。
+function readCurrentBranch(git: SimpleGit): Promise<string | null> {
+	return readSymbolicRef(git, "HEAD", "refs/heads/");
 }
 
 // remote が無い / 読めないときは空文字。
@@ -284,15 +294,13 @@ async function resolveSyncBranchImpl(
 	const remote = await readFirstRemote(git);
 	if (remote.length > 0) {
 		validateRefName(remote);
-		try {
-			const ref = (
-				await git.raw(["symbolic-ref", "--quiet", "--short", `refs/remotes/${remote}/HEAD`])
-			).trim();
-			const prefix = `${remote}/`;
-			if (ref.startsWith(prefix) && ref.length > prefix.length) return ref.slice(prefix.length);
-		} catch {
-			// `git clone` 以外で remote を足した repo には refs/remotes/<remote>/HEAD が無い。
-		}
+		// `git clone` 以外で remote を足した repo には refs/remotes/<remote>/HEAD が無い。
+		const remoteDefault = await readSymbolicRef(
+			git,
+			`refs/remotes/${remote}/HEAD`,
+			`refs/remotes/${remote}/`,
+		);
+		if (remoteDefault !== null) return remoteDefault;
 	}
 	// commit が 1 つも無い main（unborn）は refs/heads/main を持たないので、現在ブランチでも見る。
 	const [hasMain, current] = await Promise.all([

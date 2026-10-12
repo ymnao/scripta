@@ -410,15 +410,18 @@ CodeMirror 6 の `ViewPlugin` と `Decoration` API を使用する。
 | `git_check_available` | — | `boolean` | なし |
 | `git_check_repo` | `path` | `boolean` | なし |
 | `git_status` | `path` | `GitStatus` | なし |
-| `git_add_all` | `path` | `void` | なし |
-| `git_commit` | `path, message` | `string` | なし |
-| `git_pull` | `path, syncMethod` | `string` | なし |
-| `git_push` | `path` | `string` | なし |
+| `git_resolve_sync_branch` | `path, configured` | `string \| null` | なし |
+| `git_add_all` | `path, expectedBranch` | `void` | なし |
+| `git_commit` | `path, message, expectedBranch` | `string` | なし |
+| `git_pull` | `path, syncMethod, expectedBranch` | `string` | なし |
+| `git_push` | `path, expectedBranch` | `string` | なし |
 | `git_get_conflicted_files` | `path` | `string[]` | なし |
 | `git_get_conflict_content` | `path, filePath` | `ConflictContent` | なし |
 | `git_resolve_conflict` | `path, filePath, content, resolution` | `void` | なし |
 | `git_finish_conflict_resolution` | `path` | `string` | なし |
 | `git_get_last_commit_time` | `path` | `string \| null` | なし |
+
+自動同期は同期対象のブランチでだけ動く（#639）。`git_resolve_sync_branch` は設定「同期するブランチ」が空なら `refs/remotes/<最初の remote>/HEAD` → `main` の順に決め、どちらも無ければ `null`（同期しない）。`git_add_all` / `git_commit` / `git_pull` / `git_push` は実行の直前に、HEAD が `expectedBranch` 上にあり merge / rebase / cherry-pick / revert の途中でないことを確かめ、違えば `GIT_BRANCH_MISMATCH` で拒否する。`GitStatus.branch` は detached HEAD で空文字、`GitStatus.operationInProgress` はそれらの操作の途中かを表す。
 
 #### その他
 

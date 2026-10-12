@@ -581,6 +581,36 @@ describe("auto-sync branch gate (#639)", () => {
 		expect(await headOf(dir)).toBe(before);
 	});
 
+	it("allows add on the sync branch when a tag has the same name", async () => {
+		// `symbolic-ref --short` はこのとき `heads/main` を返す。
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		await createGit(dir).raw(["tag", "main"]);
+		await fsp.writeFile(join(dir, "wip.md"), "wip\n", "utf8");
+		expect((await statusImpl(TEST_WIN, dir)).branch).toBe("main");
+		await addAllImpl(TEST_WIN, dir, "main");
+		expect(await stagedNames(dir)).toBe("wip.md");
+	});
+
+	it("refuses commit on the sync branch while a revert is in progress", async () => {
+		const dir = await newWorkspace();
+		const git = createGit(dir);
+		await commitFile(dir, "rev.md", "base\n", "base");
+		await commitFile(dir, "rev.md", "changed\n", "change");
+		const reverted = (await git.raw(["rev-parse", "HEAD"])).trim();
+		await commitFile(dir, "rev.md", "changed again\n", "change again");
+		await git.raw(["revert", "--no-edit", reverted]).catch(() => {
+			// expected conflict
+		});
+		await fsp.writeFile(join(dir, "rev.md"), "resolved\n", "utf8");
+		await git.raw(["add", "--", "rev.md"]);
+		const before = await headOf(dir);
+		await expect(commitImpl(TEST_WIN, dir, "auto", "main")).rejects.toMatchObject({
+			kind: "GIT_BRANCH_MISMATCH",
+		});
+		expect(await headOf(dir)).toBe(before);
+	});
+
 	it("refuses an empty expected branch", async () => {
 		const dir = await newWorkspace();
 		await commitFile(dir, "a.md", "a\n", "init");
