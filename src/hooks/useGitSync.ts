@@ -214,22 +214,13 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 	// タイマーの発火ごとに状態を読み直してから pull / push する。外部のツールが
 	// ブランチを切り替えるので、起動時の判定だけでは足りない（#639）。
 	// 状態の読み直しは conflict の外部解消を検出する役目も兼ねる（remote が無い repo でも）。
-	const autoPull = useCallback(
-		async (path: string) => {
+	const onSyncBranch = useCallback(
+		async (path: string, op: (path: string, syncBranch: string) => Promise<void>) => {
 			const syncBranch = await refreshStatus(path);
 			if (syncBranch === null) return;
-			await doPull(path, syncBranch);
+			await op(path, syncBranch);
 		},
-		[doPull, refreshStatus],
-	);
-
-	const autoPush = useCallback(
-		async (path: string) => {
-			const syncBranch = await refreshStatus(path);
-			if (syncBranch === null) return;
-			await doPush(path, syncBranch);
-		},
-		[doPush, refreshStatus],
+		[refreshStatus],
 	);
 
 	const doCommitAndSync = useCallback(
@@ -336,7 +327,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				const store = useGitSyncStore.getState();
 				if (store.autoPullOnStartup && store.hasRemote && store.gitSyncEnabled) {
 					try {
-						await queueRef.current.enqueue(() => autoPull(path));
+						await queueRef.current.enqueue(() => onSyncBranch(path, doPull));
 					} catch {
 						// Startup pull failure is non-fatal; doPull already updated state.
 					}
@@ -352,7 +343,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			clearTimers();
 			useGitSyncStore.getState().resetRuntime();
 		};
-	}, [workspacePath, clearTimers, refreshStatus, autoPull]);
+	}, [workspacePath, clearTimers, refreshStatus, onSyncBranch, doPull]);
 
 	// Re-schedule timers when interval settings change.
 	// Subscribe to store values so the effect re-runs when they change.
@@ -389,7 +380,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			const tick = () => {
 				if (cancelled) return;
 				pullTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => autoPull(path)).then(tick, tick);
+					void queueRef.current.enqueue(() => onSyncBranch(path, doPull)).then(tick, tick);
 				}, pullMs);
 			};
 			tick();
@@ -398,7 +389,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			const tick = () => {
 				if (cancelled) return;
 				pushTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => autoPush(path)).then(tick, tick);
+					void queueRef.current.enqueue(() => onSyncBranch(path, doPush)).then(tick, tick);
 				}, pushMs);
 			};
 			tick();
@@ -417,8 +408,9 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		autoPushInterval,
 		clearTimers,
 		doCommitAndSync,
-		autoPull,
-		autoPush,
+		onSyncBranch,
+		doPull,
+		doPush,
 	]);
 
 	// 同期するブランチの設定を変えたら、次のタイマーを待たずにステータスバーへ反映する。

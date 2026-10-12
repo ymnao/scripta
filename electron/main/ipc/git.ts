@@ -254,6 +254,14 @@ async function readCurrentBranch(git: SimpleGit): Promise<string | null> {
 	}
 }
 
+// remote が無い / 読めないときは空文字。
+async function readFirstRemote(git: SimpleGit): Promise<string> {
+	return git
+		.raw(["remote"])
+		.then((r) => r.trim().split("\n")[0] ?? "")
+		.catch(() => "");
+}
+
 const FALLBACK_SYNC_BRANCH = "main";
 
 // 自動同期の対象ブランチを決める（#639）。設定値が空なら、最初の remote の既定ブランチ
@@ -273,10 +281,7 @@ async function resolveSyncBranchImpl(
 	if (explicit.length > 0) return explicit;
 
 	const git = createGit(canonical);
-	const remote = await git
-		.raw(["remote"])
-		.then((r) => r.trim().split("\n")[0] ?? "")
-		.catch(() => "");
+	const remote = await readFirstRemote(git);
 	if (remote.length > 0) {
 		validateRefName(remote);
 		try {
@@ -460,23 +465,15 @@ async function pushImpl(senderId: number, path: string, expectedBranch: string):
 	}
 	const msg = extractGitErrorMessage(firstError);
 	// 初回 push で upstream 未設定 → 自動で `-u origin <branch>` を付けて再試行。
+	// branch は assertSyncTarget が HEAD と一致を確かめた expectedBranch をそのまま使う。
 	if (!(msg.includes("no upstream branch") || msg.includes("has no upstream"))) {
 		throw gitError(msg);
 	}
-	// branch / remote の取得は独立なので並列化（再試行経路の追加レイテンシを抑える）。
-	const [branch, remoteList] = await Promise.all([
-		git.raw(["rev-parse", "--abbrev-ref", "HEAD"]).then((b) => b.trim()),
-		git
-			.raw(["remote"])
-			.then((r) => r.trim())
-			.catch(() => ""),
-	]);
-	if (!branch) throw gitError(msg);
-	validateRefName(branch);
-	const remote = remoteList ? remoteList.split("\n")[0] : "origin";
+	validateRefName(expectedBranch);
+	const remote = (await readFirstRemote(git)) || "origin";
 	validateRefName(remote);
 	try {
-		return (await git.raw(["push", "-u", remote, branch])).trim();
+		return (await git.raw(["push", "-u", remote, expectedBranch])).trim();
 	} catch (e) {
 		throw gitError(extractGitErrorMessage(e));
 	}
