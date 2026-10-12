@@ -390,8 +390,10 @@ export const staticEditorTheme = EditorView.theme({
 	".cm-mermaid-widget": {
 		display: "flex",
 		justifyContent: "center",
-		padding: "8px 0",
-		margin: "4px 0",
+		// 上下の余白を margin で取らない — CM6 は block widget の高さを
+		// getBoundingClientRect で測り margin を数えないため、height map が実際の
+		// 画面とずれて上キーが widget を飛び越える (#635)。
+		padding: "12px 0",
 		overflow: "hidden",
 	},
 	".cm-mermaid-inner": {
@@ -418,8 +420,7 @@ export const staticEditorTheme = EditorView.theme({
 	// table / mermaid / display math は Decoration.replace({ block: true }) の block widget
 	// で、.cm-line の外 (.cm-content 直下) に render されるため .cm-line の horizontal
 	// padding を受けられない。margin で同じインセットを与えてテキスト列と左右を揃える。
-	// この rule は .cm-mermaid-widget の margin: "4px 0" shorthand より後 (source order)
-	// に置くこと — 前に置くと shorthand に horizontal channel を上書きされる。
+	// 縦方向の margin は付けない (理由は .cm-mermaid-widget 側コメント)。
 	".cm-table-widget, .cm-mermaid-widget, .cm-math-display": {
 		marginLeft: "var(--cm-horizontal-padding, 0px)",
 		marginRight: "var(--cm-horizontal-padding, 0px)",
