@@ -25,7 +25,7 @@ Chromium 固定環境で挙動を安定させるため、バンドルサイズ�
 
 | レイヤー | 技術 | バージョン |
 |---------|------|-----------|
-| デスクトップフレームワーク | [Electron](https://www.electronjs.org/) | v42 |
+| デスクトップフレームワーク | [Electron](https://www.electronjs.org/) | v44 |
 | フロントエンド | [React](https://react.dev/) + TypeScript | React 19 |
 | エディタ | [CodeMirror 6](https://codemirror.net/) (`@uiw/react-codemirror`) | v6 |
 | 状態管理 | [zustand](https://zustand.docs.pmnd.rs/) | v5 |
