@@ -38,11 +38,20 @@ Chromium 固定環境で挙動を安定させるため、バンドルサイズ�
 
 ## インストール
 
-[Releases](https://github.com/ymnao/scripta-next/releases) からプラットフォーム別のインストーラを取得できる（v0.2.0 から配布開始）。ソースから動作確認するには `pnpm dev`。
-
-<!-- TODO: リポジトリリネーム時（issue #28）に上記 URL を https://github.com/ymnao/scripta/releases に戻す -->
+[Releases](https://github.com/ymnao/scripta/releases) からプラットフォーム別のインストーラを取得できる（v0.2.0 から配布開始）。ソースから動作確認するには `pnpm dev`。
 
 > 配布バイナリは **未署名で出荷する方針**（旧 Tauri 版同等）。macOS の Gatekeeper / Windows の SmartScreen による警告が出る場合は、各 OS の手順で手動で起動許可を行う。
+
+### Homebrew（macOS）
+
+personal tap [`ymnao/tap`](https://github.com/ymnao/homebrew-tap) から Cask でインストール・更新できる。
+
+```bash
+brew install --cask ymnao/tap/scripta
+brew upgrade --cask scripta
+```
+
+この Cask はインストール後（更新時を含む）に quarantine 属性を自動で削除するため、Gatekeeper の起動許可を毎回やり直す必要がない。これは Gatekeeper の検査を省略することと同じなので、望まない場合は Releases の dmg を手動でインストールする。詳細は tap の README を参照。
 
 ## 開発
 

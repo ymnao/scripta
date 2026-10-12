@@ -176,7 +176,7 @@
 
 - **update 存在確認のみで運用、auto-download / auto-install は scope 外**（旧 Tauri 版もそうだった）。GitHub Releases API ポーリングで latest tag を取得し、新しいバージョンがあれば UI 上で通知してユーザーに手動アップデートを促す形を維持する。
 - `electron-updater` は導入しない。導入すると：(a) コードサイニング必須、(b) `release.yml` の secret 注入、(c) `electron-builder.yml: mac.target: zip` 等の付帯対応、(d) 配信チャンネル設計、までが芋づるで必要になる。本プロジェクトはコードサイニングを採用しない方針（§ 11 / § 12 参照）なので一貫して「存在確認のみ」とする。
-- **Homebrew Cask 配布を追加（issue #282）**: macOS のみ、personal tap `ymnao/scripta` 経由で `brew upgrade --cask scripta` により DL / アプリ終了 / 差し替えを brew に委譲する。**electron-updater 不採用の決定は維持** — Cask はアプリ内 auto-download を伴わず、上記 5 手順のうち 2〜5 だけを brew に肩代わりさせる補助配布チャネルなので、両立する。
+- **Homebrew Cask 配布を追加（issue #282）**: macOS のみ、personal tap `ymnao/tap`（repo `ymnao/homebrew-tap`）経由で `brew upgrade --cask scripta` により DL / アプリ終了 / 差し替えを brew に委譲する。**electron-updater 不採用の決定は維持** — Cask はアプリ内 auto-download を伴わず、上記 5 手順のうち 2〜5 だけを brew に肩代わりさせる補助配布チャネルなので、両立する。
 
 ---
 
@@ -303,13 +303,15 @@
 
 - **未署名で出荷**（旧 Tauri 版同等の方針）。コードサイニング / 公証は採用しない。macOS Gatekeeper / Windows SmartScreen の警告は受容し、README とリリースノートで起動手順を案内する。
 - `update.ts:GITHUB_API_URL` は `ymnao/scripta` を指す（リポジトリリネーム完了に伴い更新済み）。
-- **macOS のみ Homebrew Cask (personal tap `ymnao/scripta`) 配布を追加（issue #282）**。asset 命名契約は `scripta-<version>.dmg` (x64) / `scripta-<version>-arm64.dmg` (arm64) で、cask URL テンプレートがこの命名に依存する。命名は electron-builder 26.x の default artifactName pattern に依存しているため以下の drift-lock を配線している:
+- **macOS のみ Homebrew Cask (personal tap `ymnao/tap`、repo `ymnao/homebrew-tap`) 配布を追加（issue #282）**。asset 命名契約は `scripta-<version>.dmg` (x64) / `scripta-<version>-arm64.dmg` (arm64) で、cask URL テンプレートがこの命名に依存する。命名は electron-builder 26.x の default artifactName pattern に依存しているため以下の drift-lock を配線している:
   - `package.json` の `electron-builder` は patch level まで narrow 固定（`^26.15.3` ではなく `26.15.3`）。**pin 自体は drift guard ではなく決定的解決に必要な安定土台にすぎない** — legitimate な patch security bump (26.15.4 等) は下記 assert が green のままなら歓迎する
   - drift 検出の SoT は `scripts/assert-dmg-naming.sh`。`release/*.dmg` のセットが期待値と完全一致することを set match で assert (余分 dmg 出現時も検出) する。以下 2 経路から呼ばれる:
     - `.github/workflows/release.yml` — tag push / workflow_dispatch 時、macOS dist job の post-build (reactive detection)
     - `.github/workflows/verify-dmg-naming.yml` — PR に関連ファイル (electron-builder / config / assert script) の変更が含まれる場合、macOS runner で `pnpm dist` → assert (preventive detection)
   - `.github/dependabot.yml` で `electron-builder` を `electron` (runtime) group から分離し独立 group とすることで、grouped PR に build tool bump が piggyback するのを避ける
   - `release.yml` の `finalize` job が matrix 全 leg の集約結果を check し、macOS leg が assert 失敗した場合に workflow を failed に落とす (draft release に dmg 抜けの状態で publish されないためのシグナル)
+- **Cask の version / sha256 更新は tap 側が pull する**。tap の `.github/workflows/autobump.yml` が毎日 `brew bump --open-pr --casks` を実行し、新しい release を検出すると bump PR を開く（merge は user）。scripta 側には tap への書き込み権限 (PAT) を置かない
+  - bump 時の `brew audit` は dmg 内 `Info.plist` の `LSMinimumSystemVersion` と Cask の `depends_on macos:` の食い違いを検出して bump を止める（2026-10-12、Homebrew 7.0.9 のローカル `brew bump-cask-pr` で、`:ventura` を宣言した Cask を v0.7.0 へ bump すると audit が落ちて Cask が書き換わらないことを確認）。Electron の major bump で最小 macOS が上がった release は自動では bump されないので、tap 側で `depends_on macos:` を上げて手で bump する（例: v0.7.0 は Electron 43 で `:monterey`、Electron 44 は Ventura 以上）
 
 ---
 
