@@ -558,6 +558,11 @@ describe("auto-sync branch gate (#639)", () => {
 		await expect(addAllImpl(TEST_WIN, dir, "feature")).rejects.toMatchObject({
 			kind: "GIT_BRANCH_MISMATCH",
 		});
+		// rebase は HEAD を detach するので、上の拒否はブランチ不一致だけでも起きる。
+		// renderer が理由を「操作の途中」と出すのは operationInProgress の方。
+		const s = await statusImpl(TEST_WIN, dir);
+		expect(s.branch).toBe("");
+		expect(s.operationInProgress).toBe(true);
 	});
 
 	it("refuses commit on the sync branch while a cherry-pick is in progress", async () => {
@@ -886,6 +891,9 @@ describe("path-guard cross-cutting", () => {
 		await createGit(outside).raw(["init", "-b", "main"]);
 
 		await expect(statusImpl(TEST_WIN, outside)).rejects.toThrow(/Permission denied/);
+		await expect(resolveSyncBranchImpl(TEST_WIN, outside, "main")).rejects.toThrow(
+			/Permission denied/,
+		);
 		await expect(commitImpl(TEST_WIN, outside, "x", "main")).rejects.toThrow(/Permission denied/);
 		await expect(pullImpl(TEST_WIN, outside, "merge", "main")).rejects.toThrow(/Permission denied/);
 		await expect(pushImpl(TEST_WIN, outside, "main")).rejects.toThrow(/Permission denied/);

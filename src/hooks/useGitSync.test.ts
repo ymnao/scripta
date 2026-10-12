@@ -566,7 +566,8 @@ describe("useGitSync sync branch gate (#639)", () => {
 		});
 	});
 
-	it("resumes on the next tick after returning to the sync branch", async () => {
+	it("resumes the commit timer on the next tick after returning to the sync branch", async () => {
+		useGitSyncStore.setState({ autoPullInterval: 0, autoPushInterval: 0 });
 		renderHook(() => useGitSync({ workspacePath: WS }));
 		await vi.advanceTimersByTimeAsync(60_000);
 		expectNoSyncOperations();
@@ -576,9 +577,22 @@ describe("useGitSync sync branch gate (#639)", () => {
 
 		expect(mockedGitAddAll).toHaveBeenCalledWith(WS, "main");
 		expect(mockedGitCommit).toHaveBeenCalledWith(WS, expect.any(String), "main");
+		expect(useGitSyncStore.getState().syncHalt).toBeNull();
+	});
+
+	// commit タイマーを止めるのは、commit の後の pull / push で呼ばれただけでも通ってしまうため。
+	it("resumes the pull and push timers on the next tick after returning to the sync branch", async () => {
+		useGitSyncStore.setState({ autoCommitInterval: 0 });
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(60_000);
+		expectNoSyncOperations();
+
+		mockedGitStatus.mockResolvedValue(statusOn("main"));
+		await vi.advanceTimersByTimeAsync(60_000);
+
 		expect(mockedGitPull).toHaveBeenCalledWith(WS, "merge", "main");
 		expect(mockedGitPush).toHaveBeenCalledWith(WS, "main");
-		expect(useGitSyncStore.getState().syncHalt).toBeNull();
+		expect(mockedGitAddAll).not.toHaveBeenCalled();
 	});
 
 	it("does not sync on the sync branch while a merge or rebase is in progress", async () => {
