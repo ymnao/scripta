@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { saveSetting } from "../lib/store";
-import type { GitAction, GitSyncSettings, SyncMethod } from "../types/git-sync";
-import { GIT_SYNC_DEFAULTS, normalizeCommitMessage } from "../types/git-sync";
+import type { GitAction, GitSyncSettings, SyncHalt, SyncMethod } from "../types/git-sync";
+import { GIT_SYNC_DEFAULTS, isSameSyncHalt, normalizeCommitMessage } from "../types/git-sync";
 import { createPersistedSetter } from "./store-helpers";
 
 interface GitSyncRuntimeState {
@@ -14,6 +14,8 @@ interface GitSyncRuntimeState {
 	errorMessage: string | null;
 	hasRemote: boolean;
 	branch: string;
+	// 自動同期を止めている理由。null は止めていない（または未判定）。
+	syncHalt: SyncHalt | null;
 }
 
 interface GitSyncState extends GitSyncRuntimeState, GitSyncSettings {
@@ -26,6 +28,7 @@ interface GitSyncState extends GitSyncRuntimeState, GitSyncSettings {
 	setErrorMessage: (message: string | null) => void;
 	setHasRemote: (hasRemote: boolean) => void;
 	setBranch: (branch: string) => void;
+	setSyncHalt: (halt: SyncHalt | null) => void;
 
 	setGitSyncEnabled: (enabled: boolean) => void;
 	setAutoCommitInterval: (interval: number) => void;
@@ -35,6 +38,7 @@ interface GitSyncState extends GitSyncRuntimeState, GitSyncSettings {
 	setSyncMethod: (method: SyncMethod) => void;
 	setCommitMessage: (message: string) => void;
 	setAutoPullOnStartup: (pull: boolean) => void;
+	setGitSyncBranch: (branch: string) => void;
 
 	hydrate: (values: Partial<GitSyncSettings>) => void;
 	resetRuntime: () => void;
@@ -50,6 +54,7 @@ const RUNTIME_DEFAULTS: GitSyncRuntimeState = {
 	errorMessage: null,
 	hasRemote: false,
 	branch: "",
+	syncHalt: null,
 };
 
 export const useGitSyncStore = create<GitSyncState>()((set) => {
@@ -73,6 +78,8 @@ export const useGitSyncStore = create<GitSyncState>()((set) => {
 		setHasRemote: (hasRemote: boolean) =>
 			set((s) => (s.hasRemote === hasRemote ? s : { hasRemote })),
 		setBranch: (branch: string) => set((s) => (s.branch === branch ? s : { branch })),
+		setSyncHalt: (halt: SyncHalt | null) =>
+			set((s) => (isSameSyncHalt(s.syncHalt, halt) ? s : { syncHalt: halt })),
 
 		setGitSyncEnabled: persist("gitSyncEnabled"),
 		setAutoCommitInterval: persist("autoCommitInterval"),
@@ -82,6 +89,7 @@ export const useGitSyncStore = create<GitSyncState>()((set) => {
 		setSyncMethod: persist("syncMethod"),
 		setCommitMessage: persist("commitMessage", normalizeCommitMessage),
 		setAutoPullOnStartup: persist("autoPullOnStartup"),
+		setGitSyncBranch: persist("gitSyncBranch", (v) => v.trim()),
 
 		hydrate: (values: Partial<GitSyncSettings>) => {
 			set(values);

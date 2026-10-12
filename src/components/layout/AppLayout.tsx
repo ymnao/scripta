@@ -123,15 +123,18 @@ export function AppLayout() {
 		})),
 	);
 
-	const { gitAction, lastCommitTime, conflictFiles, offlineMode, gitReady } = useGitSyncStore(
-		useShallow((s) => ({
-			gitAction: s.gitAction,
-			lastCommitTime: s.lastCommitTime,
-			conflictFiles: s.conflictFiles,
-			offlineMode: s.offlineMode,
-			gitReady: s.gitReady,
-		})),
-	);
+	const { gitAction, lastCommitTime, conflictFiles, offlineMode, gitReady, syncHalt } =
+		useGitSyncStore(
+			useShallow((s) => ({
+				gitAction: s.gitAction,
+				lastCommitTime: s.lastCommitTime,
+				conflictFiles: s.conflictFiles,
+				offlineMode: s.offlineMode,
+				gitReady: s.gitReady,
+				// 同期を無効にしている間は「停止中」を出しても情報にならない。
+				syncHalt: s.gitSyncEnabled ? s.syncHalt : null,
+			})),
+		);
 
 	const { scratchpadOpen, toggleScratchpad, setScratchpadOpen } = useScratchpadStore(
 		useShallow((s) => ({
@@ -706,6 +709,7 @@ export function AppLayout() {
 				lastCommitTime={lastCommitTime}
 				hasConflicts={conflictFiles.length > 0}
 				offlineMode={offlineMode}
+				syncHalt={syncHalt}
 				onGitSync={manualSync}
 				onOpenConflictResolver={openGitConflictResolver}
 				gitReady={gitReady}

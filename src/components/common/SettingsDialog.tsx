@@ -276,6 +276,8 @@ export function SettingsDialog({
 	const setCommitMessage = useGitSyncStore((s) => s.setCommitMessage);
 	const autoPullOnStartup = useGitSyncStore((s) => s.autoPullOnStartup);
 	const setAutoPullOnStartup = useGitSyncStore((s) => s.setAutoPullOnStartup);
+	const gitSyncBranch = useGitSyncStore((s) => s.gitSyncBranch);
+	const setGitSyncBranch = useGitSyncStore((s) => s.setGitSyncBranch);
 
 	return (
 		<DialogBase open={open} onClose={onClose} ariaLabelledBy={titleId} size="lg" fixedHeight>
@@ -429,6 +431,13 @@ export function SettingsDialog({
 								label="Git 同期を有効化"
 								checked={gitSyncEnabled}
 								onChange={setGitSyncEnabled}
+							/>
+							<TextInput
+								id="git-sync-branch-input"
+								label="同期するブランチ"
+								value={gitSyncBranch}
+								onChange={setGitSyncBranch}
+								placeholder="空欄: リモートの既定ブランチ → main"
 							/>
 							<NumberInput
 								id="auto-commit-interval-input"

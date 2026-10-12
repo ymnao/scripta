@@ -40,6 +40,7 @@ interface AppSettings {
 	syncMethod: SyncMethod;
 	commitMessage: string;
 	autoPullOnStartup: boolean;
+	gitSyncBranch: string;
 	scratchpadVolatile: boolean;
 	autoUpdateCheck: boolean;
 	fileTreeShowHidden: boolean;
@@ -69,6 +70,7 @@ const DEFAULTS: AppSettings = {
 	syncMethod: GIT_SYNC_DEFAULTS.syncMethod,
 	commitMessage: GIT_SYNC_DEFAULTS.commitMessage,
 	autoPullOnStartup: GIT_SYNC_DEFAULTS.autoPullOnStartup,
+	gitSyncBranch: GIT_SYNC_DEFAULTS.gitSyncBranch,
 	scratchpadVolatile: true,
 	autoUpdateCheck: true,
 	fileTreeShowHidden: false,
@@ -121,6 +123,7 @@ const PARSERS: { [K in keyof AppSettings]: Parser<AppSettings[K]> } = {
 	// normalizeCommitMessage は必ず string を返すので ?? DEFAULTS は no-op になる。
 	commitMessage: normalizeCommitMessage,
 	autoPullOnStartup: asBoolean,
+	gitSyncBranch: asString,
 	scratchpadVolatile: asBoolean,
 	autoUpdateCheck: asBoolean,
 	fileTreeShowHidden: asBoolean,

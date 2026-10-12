@@ -7,6 +7,7 @@ import {
 	gitGetLastCommitTime,
 	gitPull,
 	gitPush,
+	gitResolveSyncBranch,
 	gitStatus,
 	onConflictResolved,
 } from "../lib/commands";
@@ -14,6 +15,7 @@ import { isNetworkError, translateError } from "../lib/errors";
 import { useGitSyncStore } from "../stores/git-sync";
 import { useToastStore } from "../stores/toast";
 import { getErrorKind } from "../types/errors";
+import { formatSyncHaltMessage, getSyncHalt } from "../types/git-sync";
 
 class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
@@ -73,6 +75,27 @@ function expandCommitMessage(template: string): string {
 	return template.replace(/\{\{date\}\}/g, date);
 }
 
+function isBranchMismatch(e: unknown): boolean {
+	return getErrorKind(e) === "GIT_BRANCH_MISMATCH";
+}
+
+type SyncResult = "done" | "skipped" | "halted";
+
+function notifyManualSyncResult(result: SyncResult): void {
+	if (result === "skipped") return;
+	const toast = useToastStore.getState();
+	const s = useGitSyncStore.getState();
+	if (result === "halted") {
+		if (s.syncHalt) toast.addToast("warning", formatSyncHaltMessage(s.syncHalt));
+	} else if (s.errorMessage) {
+		toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
+	} else if (s.offlineMode) {
+		toast.addToast("warning", "ネットワークに接続できません。ローカル変更のみ保存されました。");
+	} else {
+		toast.addToast("success", "同期が完了しました");
+	}
+}
+
 interface UseGitSyncOptions {
 	workspacePath: string | null;
 }
@@ -97,43 +120,51 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		pushTimerRef.current = 0;
 	}, []);
 
-	const refreshStatus = useCallback(async (path: string) => {
+	// 戻り値は自動同期してよいときの対象ブランチ。止めるべきとき・状態を読めなかったときは null。
+	const refreshStatus = useCallback(async (path: string): Promise<string | null> => {
 		try {
-			const [status, time] = await Promise.all([gitStatus(path), gitGetLastCommitTime(path)]);
-			if (workspacePathRef.current !== path) return;
+			const [status, time, syncBranch] = await Promise.all([
+				gitStatus(path),
+				gitGetLastCommitTime(path),
+				gitResolveSyncBranch(path, useGitSyncStore.getState().gitSyncBranch),
+			]);
+			if (workspacePathRef.current !== path) return null;
 			const store = useGitSyncStore.getState();
 			store.setBranch(status.branch);
 			store.setHasRemote(status.hasRemote);
 			store.setConflictFiles(status.conflictFiles);
 			pausedRef.current = status.conflictFiles.length > 0;
 			store.setLastCommitTime(time);
+			const halt = getSyncHalt(status, syncBranch);
+			store.setSyncHalt(halt);
+			return halt === null ? syncBranch : null;
 		} catch {
-			// status check failure is non-fatal
+			// 読めないまま同期を進めると、別のブランチで add -A しうる。
+			if (workspacePathRef.current === path) {
+				useGitSyncStore.getState().setSyncHalt({ reason: "status-unavailable" });
+			}
+			return null;
 		}
 	}, []);
 
 	const doPull = useCallback(
-		async (path: string) => {
+		async (path: string, syncBranch: string) => {
 			if (workspacePathRef.current !== path) return;
 			const store = useGitSyncStore.getState();
-			if (pausedRef.current) {
-				// Still refresh status to detect external conflict resolution
-				// (even for local-only repos without remote)
-				await refreshStatus(path);
-				return;
-			}
-			if (!store.hasRemote) return;
+			if (pausedRef.current || !store.hasRemote) return;
 
 			try {
 				store.setGitAction("pull");
-				await gitPull(path, store.syncMethod);
+				await gitPull(path, store.syncMethod, syncBranch);
 				if (workspacePathRef.current !== path) return;
 				store.setOfflineMode(false);
 				store.setErrorMessage(null);
 				await refreshStatus(path);
 			} catch (e) {
 				if (workspacePathRef.current !== path) throw e;
-				if (isNetworkError(e)) {
+				if (isBranchMismatch(e)) {
+					await refreshStatus(path);
+				} else if (isNetworkError(e)) {
 					store.setOfflineMode(true);
 					store.setErrorMessage(null);
 				} else {
@@ -151,53 +182,70 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		[refreshStatus],
 	);
 
-	const doPush = useCallback(async (path: string) => {
-		if (workspacePathRef.current !== path) return;
-		const store = useGitSyncStore.getState();
-		if (!store.hasRemote || store.offlineMode || pausedRef.current) return;
-
-		try {
-			store.setGitAction("push");
-			await gitPush(path);
+	const doPush = useCallback(
+		async (path: string, syncBranch: string) => {
 			if (workspacePathRef.current !== path) return;
-			store.setOfflineMode(false);
-			store.setErrorMessage(null);
-		} catch (e) {
-			if (workspacePathRef.current !== path) throw e;
-			if (isNetworkError(e)) {
-				store.setOfflineMode(true);
+			const store = useGitSyncStore.getState();
+			if (!store.hasRemote || store.offlineMode || pausedRef.current) return;
+
+			try {
+				store.setGitAction("push");
+				await gitPush(path, syncBranch);
+				if (workspacePathRef.current !== path) return;
+				store.setOfflineMode(false);
 				store.setErrorMessage(null);
-			} else {
-				store.setErrorMessage(translateError(e));
+			} catch (e) {
+				if (workspacePathRef.current !== path) throw e;
+				if (isBranchMismatch(e)) {
+					await refreshStatus(path);
+				} else if (isNetworkError(e)) {
+					store.setOfflineMode(true);
+					store.setErrorMessage(null);
+				} else {
+					store.setErrorMessage(translateError(e));
+				}
+				throw e;
+			} finally {
+				if (workspacePathRef.current === path) {
+					store.setGitAction("idle");
+				}
 			}
-			throw e;
-		} finally {
-			if (workspacePathRef.current === path) {
-				store.setGitAction("idle");
-			}
-		}
-	}, []);
+		},
+		[refreshStatus],
+	);
+
+	// タイマーの発火ごとに状態を読み直してから pull / push する。外部のツールが
+	// ブランチを切り替えるので、起動時の判定だけでは足りない（#639）。
+	// 状態の読み直しは conflict の外部解消を検出する役目も兼ねる（remote が無い repo でも）。
+	const onSyncBranch = useCallback(
+		async (path: string, op: (path: string, syncBranch: string) => Promise<void>) => {
+			const syncBranch = await refreshStatus(path);
+			if (syncBranch === null) return;
+			await op(path, syncBranch);
+		},
+		[refreshStatus],
+	);
 
 	const doCommitAndSync = useCallback(
-		async (path: string): Promise<"done" | "skipped"> => {
+		async (path: string): Promise<SyncResult> => {
 			if (workspacePathRef.current !== path) return "done";
 			const store = useGitSyncStore.getState();
-			if (pausedRef.current) {
-				// Still refresh status to detect external conflict resolution
-				await refreshStatus(path);
-				return "skipped";
-			}
+			// Refreshing also detects external conflict resolution.
+			const syncBranch = await refreshStatus(path);
+			if (workspacePathRef.current !== path) return "done";
+			if (pausedRef.current) return "skipped";
+			if (syncBranch === null) return "halted";
 
 			try {
 				store.setGitAction("add");
-				await gitAddAll(path);
+				await gitAddAll(path, syncBranch);
 				if (workspacePathRef.current !== path) return "done";
 
 				store.setGitAction("commit");
 				const message = expandCommitMessage(store.commitMessage);
 				let committed = true;
 				try {
-					await gitCommit(path, message);
+					await gitCommit(path, message, syncBranch);
 				} catch (e) {
 					if (getErrorKind(e) === "GIT_NOTHING_TO_COMMIT") {
 						committed = false;
@@ -210,21 +258,21 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				if (committed || store.hasRemote) {
 					if (store.pullBeforePush && store.hasRemote) {
 						try {
-							await doPull(path);
-						} catch {
+							await doPull(path, syncBranch);
+						} catch (e) {
 							// doPull already set errorMessage and refreshed status.
 							// Stop here — do not proceed to push after a failed pull.
-							return "done";
+							return isBranchMismatch(e) ? "halted" : "done";
 						}
 					}
 					if (store.hasRemote && !store.offlineMode && !pausedRef.current) {
 						try {
-							await doPush(path);
-						} catch {
+							await doPush(path, syncBranch);
+						} catch (e) {
 							// doPush already set state (offlineMode/errorMessage).
 							// Stop the success path — do not clear errorMessage.
 							await refreshStatus(path);
-							return "done";
+							return isBranchMismatch(e) ? "halted" : "done";
 						}
 					}
 				}
@@ -234,8 +282,10 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				await refreshStatus(path);
 			} catch (e) {
 				if (workspacePathRef.current === path) {
-					store.setErrorMessage(translateError(e));
+					const halted = isBranchMismatch(e);
+					if (!halted) store.setErrorMessage(translateError(e));
 					await refreshStatus(path);
+					if (halted) return "halted";
 				}
 			} finally {
 				if (workspacePathRef.current === path) {
@@ -280,7 +330,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 				const store = useGitSyncStore.getState();
 				if (store.autoPullOnStartup && store.hasRemote && store.gitSyncEnabled) {
 					try {
-						await queueRef.current.enqueue(() => doPull(path));
+						await queueRef.current.enqueue(() => onSyncBranch(path, doPull));
 					} catch {
 						// Startup pull failure is non-fatal; doPull already updated state.
 					}
@@ -296,7 +346,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			clearTimers();
 			useGitSyncStore.getState().resetRuntime();
 		};
-	}, [workspacePath, clearTimers, refreshStatus, doPull]);
+	}, [workspacePath, clearTimers, refreshStatus, onSyncBranch, doPull]);
 
 	// Re-schedule timers when interval settings change.
 	// Subscribe to store values so the effect re-runs when they change.
@@ -333,7 +383,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			const tick = () => {
 				if (cancelled) return;
 				pullTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => doPull(path)).then(tick, tick);
+					void queueRef.current.enqueue(() => onSyncBranch(path, doPull)).then(tick, tick);
 				}, pullMs);
 			};
 			tick();
@@ -342,7 +392,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			const tick = () => {
 				if (cancelled) return;
 				pushTimerRef.current = window.setTimeout(() => {
-					void queueRef.current.enqueue(() => doPush(path)).then(tick, tick);
+					void queueRef.current.enqueue(() => onSyncBranch(path, doPush)).then(tick, tick);
 				}, pushMs);
 			};
 			tick();
@@ -361,9 +411,24 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		autoPushInterval,
 		clearTimers,
 		doCommitAndSync,
+		onSyncBranch,
 		doPull,
 		doPush,
 	]);
+
+	// 同期するブランチの設定を変えたら、次のタイマーを待たずにステータスバーへ反映する。
+	useEffect(() => {
+		if (!workspacePath) return;
+		const path = workspacePath;
+		return useGitSyncStore.subscribe((s, prev) => {
+			if (s.gitSyncBranch === prev.gitSyncBranch || !s.gitReady) return;
+			void queueRef.current
+				.enqueue(() => refreshStatus(path))
+				.catch(() => {
+					// Queue cancelled (e.g. workspace switch) — ignore silently
+				});
+		});
+	}, [workspacePath, refreshStatus]);
 
 	// Listen for conflict resolution
 	useEffect(() => {
@@ -407,21 +472,7 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 						useToastStore
 							.getState()
 							.addToast("info", "コンフリクトが解消されました。同期を開始しています...");
-						const result = await doCommitAndSync(path);
-						if (result === "skipped") return;
-						const s = useGitSyncStore.getState();
-						if (s.errorMessage) {
-							useToastStore.getState().addToast("error", `同期に失敗しました: ${s.errorMessage}`);
-						} else if (s.offlineMode) {
-							useToastStore
-								.getState()
-								.addToast(
-									"warning",
-									"ネットワークに接続できません。ローカル変更のみ保存されました。",
-								);
-						} else {
-							useToastStore.getState().addToast("success", "同期が完了しました");
-						}
+						notifyManualSyncResult(await doCommitAndSync(path));
 					}
 				})
 				.catch(() => {
@@ -430,23 +481,10 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 			return;
 		}
 		const path = workspacePath;
-		const toast = useToastStore.getState();
-		toast.addToast("info", "同期を開始しています...");
+		useToastStore.getState().addToast("info", "同期を開始しています...");
 		void queueRef.current
 			.enqueue(async () => {
-				const result = await doCommitAndSync(path);
-				if (result === "skipped") return;
-				const s = useGitSyncStore.getState();
-				if (s.errorMessage) {
-					toast.addToast("error", `同期に失敗しました: ${s.errorMessage}`);
-				} else if (s.offlineMode) {
-					toast.addToast(
-						"warning",
-						"ネットワークに接続できません。ローカル変更のみ保存されました。",
-					);
-				} else {
-					toast.addToast("success", "同期が完了しました");
-				}
+				notifyManualSyncResult(await doCommitAndSync(path));
 			})
 			.catch(() => {
 				// Queue cancelled (e.g. workspace switch) — ignore silently

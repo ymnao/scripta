@@ -811,21 +811,35 @@ function installApiMock(opts: {
 		},
 		gitStatus: async (path: string): Promise<GitStatus> => {
 			track("gitStatus", [path]);
-			return { branch: "", changedFilesCount: 0, conflictFiles: [], hasRemote: false };
+			return {
+				branch: "",
+				changedFilesCount: 0,
+				conflictFiles: [],
+				hasRemote: false,
+				operationInProgress: false,
+			};
 		},
-		gitAddAll: async (path: string): Promise<void> => {
-			track("gitAddAll", [path]);
+		gitResolveSyncBranch: async (path: string, configured: string): Promise<string | null> => {
+			track("gitResolveSyncBranch", [path, configured]);
+			return null;
 		},
-		gitCommit: async (path: string, message: string): Promise<string> => {
-			track("gitCommit", [path, message]);
+		gitAddAll: async (path: string, expectedBranch: string): Promise<void> => {
+			track("gitAddAll", [path, expectedBranch]);
+		},
+		gitCommit: async (path: string, message: string, expectedBranch: string): Promise<string> => {
+			track("gitCommit", [path, message, expectedBranch]);
 			return "";
 		},
-		gitPull: async (path: string, syncMethod: SyncMethod): Promise<string> => {
-			track("gitPull", [path, syncMethod]);
+		gitPull: async (
+			path: string,
+			syncMethod: SyncMethod,
+			expectedBranch: string,
+		): Promise<string> => {
+			track("gitPull", [path, syncMethod, expectedBranch]);
 			return "";
 		},
-		gitPush: async (path: string): Promise<string> => {
-			track("gitPush", [path]);
+		gitPush: async (path: string, expectedBranch: string): Promise<string> => {
+			track("gitPush", [path, expectedBranch]);
 			return "";
 		},
 		gitGetConflictedFiles: async (path: string): Promise<string[]> => {

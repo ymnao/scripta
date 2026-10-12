@@ -188,12 +188,14 @@ export function TextInput({
 	value,
 	onChange,
 	disabled,
+	placeholder,
 }: {
 	id: string;
 	label: string;
 	value: string;
 	onChange: (value: string) => void;
 	disabled?: boolean;
+	placeholder?: string;
 }) {
 	const { draft, setDraft, commit } = useDraftCommit(value, onChange);
 
@@ -215,6 +217,7 @@ export function TextInput({
 					}
 				}}
 				disabled={disabled}
+				placeholder={placeholder}
 				className="ml-2 min-w-0 flex-1 rounded border border-border bg-bg-primary px-2 py-0.5 text-xs text-text-primary outline-none focus:border-blue-500 disabled:opacity-50"
 			/>
 		</div>

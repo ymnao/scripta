@@ -75,10 +75,11 @@ export type Api = Readonly<{
 	gitCheckAvailable: () => Promise<boolean>;
 	gitCheckRepo: (path: string) => Promise<boolean>;
 	gitStatus: (path: string) => Promise<GitStatus>;
-	gitAddAll: (path: string) => Promise<void>;
-	gitCommit: (path: string, message: string) => Promise<string>;
-	gitPull: (path: string, syncMethod: SyncMethod) => Promise<string>;
-	gitPush: (path: string) => Promise<string>;
+	gitResolveSyncBranch: (path: string, configured: string) => Promise<string | null>;
+	gitAddAll: (path: string, expectedBranch: string) => Promise<void>;
+	gitCommit: (path: string, message: string, expectedBranch: string) => Promise<string>;
+	gitPull: (path: string, syncMethod: SyncMethod, expectedBranch: string) => Promise<string>;
+	gitPush: (path: string, expectedBranch: string) => Promise<string>;
 	gitGetConflictedFiles: (path: string) => Promise<string[]>;
 	gitGetConflictContent: (path: string, filePath: string) => Promise<ConflictContent>;
 	gitResolveConflict: (

@@ -192,20 +192,28 @@ export function gitStatus(path: string): Promise<GitStatus> {
 	return window.api.gitStatus(path);
 }
 
-export function gitAddAll(path: string): Promise<void> {
-	return window.api.gitAddAll(path);
+export function gitResolveSyncBranch(path: string, configured: string): Promise<string | null> {
+	return window.api.gitResolveSyncBranch(path, configured);
 }
 
-export function gitCommit(path: string, message: string): Promise<string> {
-	return window.api.gitCommit(path, message);
+export function gitAddAll(path: string, expectedBranch: string): Promise<void> {
+	return window.api.gitAddAll(path, expectedBranch);
 }
 
-export function gitPull(path: string, syncMethod: SyncMethod): Promise<string> {
-	return window.api.gitPull(path, syncMethod);
+export function gitCommit(path: string, message: string, expectedBranch: string): Promise<string> {
+	return window.api.gitCommit(path, message, expectedBranch);
 }
 
-export function gitPush(path: string): Promise<string> {
-	return window.api.gitPush(path);
+export function gitPull(
+	path: string,
+	syncMethod: SyncMethod,
+	expectedBranch: string,
+): Promise<string> {
+	return window.api.gitPull(path, syncMethod, expectedBranch);
+}
+
+export function gitPush(path: string, expectedBranch: string): Promise<string> {
+	return window.api.gitPush(path, expectedBranch);
 }
 
 export function gitGetConflictedFiles(path: string): Promise<string[]> {

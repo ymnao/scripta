@@ -5,6 +5,7 @@ vi.mock("../lib/commands", () => ({
 	gitCheckAvailable: vi.fn(),
 	gitCheckRepo: vi.fn(),
 	gitStatus: vi.fn(),
+	gitResolveSyncBranch: vi.fn(),
 	gitGetLastCommitTime: vi.fn(),
 	gitAddAll: vi.fn(),
 	gitCommit: vi.fn(),
@@ -30,6 +31,7 @@ const {
 	gitCheckAvailable,
 	gitCheckRepo,
 	gitStatus,
+	gitResolveSyncBranch,
 	gitGetLastCommitTime,
 	gitAddAll,
 	gitCommit,
@@ -44,6 +46,7 @@ const { GIT_SYNC_DEFAULTS } = await import("../types/git-sync");
 const mockedGitCheckAvailable = gitCheckAvailable as Mock;
 const mockedGitCheckRepo = gitCheckRepo as Mock;
 const mockedGitStatus = gitStatus as Mock;
+const mockedGitResolveSyncBranch = gitResolveSyncBranch as Mock;
 const mockedGitGetLastCommitTime = gitGetLastCommitTime as Mock;
 const mockedGitAddAll = gitAddAll as Mock;
 const mockedGitCommit = gitCommit as Mock;
@@ -66,7 +69,9 @@ describe("useGitSync", () => {
 			changedFilesCount: 0,
 			conflictFiles: [],
 			hasRemote: false,
+			operationInProgress: false,
 		});
+		mockedGitResolveSyncBranch.mockReset().mockResolvedValue("main");
 		mockedGitGetLastCommitTime.mockReset().mockResolvedValue("2024-01-01 00:00:00");
 		mockedGitAddAll.mockReset().mockResolvedValue(undefined);
 		mockedGitCommit.mockReset().mockResolvedValue("committed");
@@ -138,7 +143,7 @@ describe("useGitSync", () => {
 		result.current.manualSync();
 		await vi.advanceTimersByTimeAsync(0);
 
-		expect(mockedGitAddAll).toHaveBeenCalledWith("/test/workspace");
+		expect(mockedGitAddAll).toHaveBeenCalledWith("/test/workspace", "main");
 		expect(mockedGitCommit).toHaveBeenCalled();
 	});
 
@@ -201,13 +206,11 @@ describe("useGitSync", () => {
 
 	it("doPull failure refreshes status and detects conflicts", async () => {
 		// Setup: repo with remote, pullBeforePush enabled
+		const clean = { branch: "main", changedFilesCount: 0, conflictFiles: [], hasRemote: true };
 		mockedGitStatus
-			.mockResolvedValueOnce({
-				branch: "main",
-				changedFilesCount: 0,
-				conflictFiles: [],
-				hasRemote: true,
-			})
+			// init と、manualSync が commit 前に状態を読み直す分
+			.mockResolvedValueOnce(clean)
+			.mockResolvedValueOnce(clean)
 			// After pull failure, refreshStatus returns conflict files
 			.mockResolvedValue({
 				branch: "main",
@@ -500,6 +503,231 @@ describe("useGitSync", () => {
 
 		// Should proceed to sync after re-check cleared conflicts
 		expect(useGitSyncStore.getState().conflictFiles).toEqual([]);
-		expect(mockedGitAddAll).toHaveBeenCalledWith("/test/workspace");
+		expect(mockedGitAddAll).toHaveBeenCalledWith("/test/workspace", "main");
+	});
+});
+
+describe("useGitSync sync branch gate (#639)", () => {
+	const WS = "/test/workspace";
+
+	function statusOn(branch: string, operationInProgress = false) {
+		return {
+			branch,
+			changedFilesCount: 1,
+			conflictFiles: [],
+			hasRemote: true,
+			operationInProgress,
+		};
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useGitSyncStore.getState().resetRuntime();
+		useGitSyncStore.setState({
+			...GIT_SYNC_DEFAULTS,
+			gitSyncEnabled: true,
+			autoCommitInterval: 1,
+			autoPullInterval: 1,
+			autoPushInterval: 1,
+		});
+		useToastStore.setState({ toasts: [] });
+		mockedGitCheckAvailable.mockReset().mockResolvedValue(true);
+		mockedGitCheckRepo.mockReset().mockResolvedValue(true);
+		mockedGitStatus.mockReset().mockResolvedValue(statusOn("work"));
+		mockedGitResolveSyncBranch.mockReset().mockResolvedValue("main");
+		mockedGitGetLastCommitTime.mockReset().mockResolvedValue(null);
+		mockedGitAddAll.mockReset().mockResolvedValue(undefined);
+		mockedGitCommit.mockReset().mockResolvedValue("committed");
+		mockedGitPull.mockReset().mockResolvedValue("");
+		mockedGitPush.mockReset().mockResolvedValue("");
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	function expectNoSyncOperations(): void {
+		expect(mockedGitAddAll).not.toHaveBeenCalled();
+		expect(mockedGitCommit).not.toHaveBeenCalled();
+		expect(mockedGitPull).not.toHaveBeenCalled();
+		expect(mockedGitPush).not.toHaveBeenCalled();
+	}
+
+	it("does not commit, pull or push when the timers fire on a work branch", async () => {
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expectNoSyncOperations();
+		expect(useGitSyncStore.getState().syncHalt).toEqual({
+			reason: "other-branch",
+			branch: "work",
+			syncBranch: "main",
+		});
+	});
+
+	it("resumes the commit timer on the next tick after returning to the sync branch", async () => {
+		useGitSyncStore.setState({ autoPullInterval: 0, autoPushInterval: 0 });
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(60_000);
+		expectNoSyncOperations();
+
+		mockedGitStatus.mockResolvedValue(statusOn("main"));
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expect(mockedGitAddAll).toHaveBeenCalledWith(WS, "main");
+		expect(mockedGitCommit).toHaveBeenCalledWith(WS, expect.any(String), "main");
+		expect(useGitSyncStore.getState().syncHalt).toBeNull();
+	});
+
+	// commit タイマーを止めるのは、commit の後の pull / push で呼ばれただけでも通ってしまうため。
+	it("resumes the pull and push timers on the next tick after returning to the sync branch", async () => {
+		useGitSyncStore.setState({ autoCommitInterval: 0 });
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(60_000);
+		expectNoSyncOperations();
+
+		mockedGitStatus.mockResolvedValue(statusOn("main"));
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expect(mockedGitPull).toHaveBeenCalledWith(WS, "merge", "main");
+		expect(mockedGitPush).toHaveBeenCalledWith(WS, "main");
+		expect(mockedGitAddAll).not.toHaveBeenCalled();
+	});
+
+	it("does not sync on the sync branch while a merge or rebase is in progress", async () => {
+		mockedGitStatus.mockResolvedValue(statusOn("main", true));
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expectNoSyncOperations();
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "in-progress" });
+	});
+
+	it("reports a rebase (detached HEAD) as an operation in progress", async () => {
+		mockedGitStatus.mockResolvedValue(statusOn("", true));
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "in-progress" });
+	});
+
+	it("does not sync when the sync branch cannot be resolved", async () => {
+		mockedGitStatus.mockResolvedValue(statusOn("main"));
+		mockedGitResolveSyncBranch.mockResolvedValue(null);
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expectNoSyncOperations();
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "no-sync-branch" });
+	});
+
+	it("passes the configured sync branch to the resolver", async () => {
+		useGitSyncStore.setState({ gitSyncBranch: "notes" });
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockedGitResolveSyncBranch).toHaveBeenCalledWith(WS, "notes");
+	});
+
+	it("pulls on startup on the sync branch", async () => {
+		mockedGitStatus.mockResolvedValue(statusOn("main"));
+		useGitSyncStore.setState({
+			autoPullOnStartup: true,
+			autoCommitInterval: 0,
+			autoPullInterval: 0,
+			autoPushInterval: 0,
+		});
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockedGitPull).toHaveBeenCalledWith(WS, "merge", "main");
+	});
+
+	it("halts and tells why when the status cannot be read", async () => {
+		const { result } = renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+		mockedGitStatus.mockRejectedValue(new Error("status failed"));
+
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(100);
+
+		expectNoSyncOperations();
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "status-unavailable" });
+		expect(useToastStore.getState().toasts).toContainEqual(
+			expect.objectContaining({
+				type: "warning",
+				message: "Git の状態を読み取れなかったため、同期を止めています。",
+			}),
+		);
+	});
+
+	it("re-reads the status as soon as the sync branch setting changes", async () => {
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+		mockedGitResolveSyncBranch
+			.mockClear()
+			.mockImplementation(async (_path: string, configured: string) => configured || "main");
+
+		useGitSyncStore.getState().setGitSyncBranch("work");
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockedGitResolveSyncBranch).toHaveBeenCalledWith(WS, "work");
+		expect(useGitSyncStore.getState().syncHalt).toBeNull();
+	});
+
+	it("does not pull on startup on a work branch", async () => {
+		useGitSyncStore.setState({
+			autoPullOnStartup: true,
+			autoCommitInterval: 0,
+			autoPullInterval: 0,
+			autoPushInterval: 0,
+		});
+		renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockedGitPull).not.toHaveBeenCalled();
+	});
+
+	it("manualSync on a work branch warns instead of syncing", async () => {
+		const { result } = renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(100);
+
+		expectNoSyncOperations();
+		expect(useToastStore.getState().toasts).toContainEqual(
+			expect.objectContaining({
+				type: "warning",
+				message: "同期するブランチ（main）以外にいるため、同期を止めています。",
+			}),
+		);
+	});
+
+	it("treats a main-side branch mismatch as a halt, not as an error", async () => {
+		// renderer の判定の後、main の実行前にブランチが切り替わったケース。
+		mockedGitStatus
+			.mockResolvedValueOnce(statusOn("main"))
+			.mockResolvedValueOnce(statusOn("main"))
+			.mockResolvedValue(statusOn("work"));
+		mockedGitAddAll.mockRejectedValue(
+			Object.assign(new Error("HEAD is on work"), { kind: "GIT_BRANCH_MISMATCH" }),
+		);
+		const { result } = renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(mockedGitAddAll).toHaveBeenCalledTimes(1);
+		expect(mockedGitCommit).not.toHaveBeenCalled();
+		expect(useGitSyncStore.getState().errorMessage).toBeNull();
+		expect(useToastStore.getState().toasts.map((t) => t.type)).not.toContain("error");
+		expect(useGitSyncStore.getState().syncHalt).toEqual({
+			reason: "other-branch",
+			branch: "work",
+			syncBranch: "main",
+		});
 	});
 });
