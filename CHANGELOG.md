@@ -5,6 +5,95 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に従う。
 
+## [0.8.0] — 2026-10-12
+
+v0.7.0 以降の 170 commit (#283 〜 #631) をまとめたリリース。スライド機能の拡充 (PDF エクスポート / 発表モード / サムネイル一覧 / テーマ指定)、全文検索のキャッシュ・転置インデックス化、symlink / hard link を経由したワークスペース外アクセスの封鎖、Homebrew Cask での配布を含む。
+
+### ⚠ 動作環境の変更
+
+- **macOS の最小要件が 12 (Monterey) から 13 (Ventura) に上がる**: Electron を 43 → 44 に上げたため (#549)。同梱 Electron 44.5.1 の `Info.plist` の `LSMinimumSystemVersion` は `13.0`
+
+### Added
+
+- **スライド**
+  - PDF エクスポート (#329)
+  - 発表モード (F5) (#330)。macOS で Fn+F5 が要ることをヘルプに記載 (#331)
+  - スライドサムネイル一覧 (#337)。現在のスライドへの自動追随 (#339)、表示の on/off トグル (#340)
+  - frontmatter での theme 指定 (#334)
+  - プレビュー幅のリサイズ (#336)、fit-to-frame のスケール描画 (#316)
+  - プレビュー / 発表モードで mermaid ブロックを描画 (#333)、ローカル画像を解決 (#315)
+  - スライドモードで `---` 区切りを強調表示 (#332)
+- **Homebrew Cask での配布 (macOS)** (#282 → #293 / #630): `brew install --cask ymnao/tap/scripta` で入れられる。Cask の更新は tap 側の autobump が担う。アップデート通知ダイアログに `brew upgrade` の手順を表示 (#296)
+- **HTML エクスポートでローカル画像を data URI として埋め込む** (#314 → #353)。埋め込みの累積サイズに上限を設ける (#354 → #355)
+- **リモート画像を読み込むかを設定で選べる** (#447)。既定は従来どおり許可
+- **FileTree の WAI-ARIA tree キーボード操作** (#389)
+- **全文検索の結果件数に上限を設ける** (#306)。結果リストは最初に 500 件まで描画し、「さらに表示」で追加する (#497 / #621)。各ファイルの見出しに、そのファイルの総件数を表示する (#622)
+
+### Changed
+
+- **全文検索をキャッシュ・転置インデックス経由にする** (#394): ファイル一覧キャッシュと watcher 連携 (#395)、本文の LRU キャッシュ (#398)、転置インデックスの段階構築 (#404) を経て、検索本体をインデックスの候補絞り込み経由に切り替えた (#409)。アプリ自身の保存 (#570)・git の working tree 変更 (#571) はキャッシュへ即時に反映する
+- **全文検索・watcher の走査から `node_modules` を除外** (#305)
+- **エディタの入力処理を軽くする**: 本文を React state に持たないようにし (#308)、math / table / mermaid の StateField を差分再構築にした (#309 / #310 / #311)。KaTeX とエクスポート処理は dynamic import にして初期チャンクから外した (#307)
+- **スライド描画の高速化**: スライドごとのキャッシュ (#338)、描画中の古いリクエストの取り消し (#341)
+- **backlink / 未解決リンクパネルの再スキャンを debounce する** (#304)。最大待ち時間は 10 秒 (#362)
+
+### Fixed
+
+- **エディタ・表示**
+  - スライドビュー中の編集がプレビューに反映されない (#313)
+  - コードブロックの背景が行ごとに分割されて表示される (#546)
+  - 初回 parse の範囲外にあるテーブル / mermaid / コードブロック内の数式が描画されない (#605)
+  - HTML エクスポートとスライドで mermaid のラベル文字が消える (#625)、ラベルの改行 (`<br>`) が消える (#626)
+  - mermaid の初期化に失敗すると loading のまま戻らない・再試行がループする (#312 / #364 / #383)
+  - Cmd+Shift+F が効かない場合がある (#345)
+- **編集内容・設定の保持**
+  - ディレクトリの rename や外部変更の反映で、未保存の編集が失われる経路 (#461 / #462)
+  - 設定の保存に失敗しても通知されず、値が黙って巻き戻る (#446 → #449)
+  - 設定 migration の保存に失敗すると全設定が既定値に戻る (#448 → #450)
+- **FileTree・検索**
+  - リンク切れの symlink を FileTree から削除できない (#454 → #464)
+  - 折りたたみ中に外部で変更されたフォルダが、再展開しても古いままになる (#610)
+  - ワークスペース切替時にファイル名検索が取り消されない (#390 → #392)
+  - 隠しファイル・フォルダ配下の `.md` が検索結果に混入する (#568)
+  - 名前が `.md` で終わるディレクトリをファイルとして扱う (#620)
+  - git の conflict で止まった操作の後、検索キャッシュの更新種別を取り違える (#618)
+  - 検索インデックスの構築・更新まわりの取りこぼし (#442 → #444 / #589 → #590 / #591)
+
+### Security
+
+- **symlink / hard link 経由でワークスペース外のファイルを読み書きできる窓を塞ぐ**: user-IPC の read / 上書き write を `O_NOFOLLOW` にする (#418 → #456)。PDF エクスポートと conflict 解決の末端 symlink 差し替えの窓を閉じる (#455 → #457)。ワークスペース外を指す symlink を検索結果から除外する (#434 → #452)。検索インデックスへの取り込みにも同じ制限をかける (#412 → #420 / #413 → #417 / #416 → #435 / #416 → #601)。`O_NOFOLLOW` が無い platform では lstat で代替し (#502)、Windows の `O_EXCL` が dangling symlink を通す穴を塞ぐ (#506)
+- **認可判定の realpath キャッシュをやめ、毎回解決する** (#453 → #460)
+- **CodeQL alert 2 件と同種の ReDoS パターンを修正** (#297)
+- **依存の advisory を patched 版へ上げる** (#438 / #490 / #494 / #565 / #617)
+
+### Internal
+
+- AppLayout (1630 行) を hook / モジュールに分割 (#459 / #616)。キーボードショートカット・フォーカストラップ・LRU キャッシュなどの共通 helper を抽出 (#342 〜 #352)
+- HTML sanitize を後処理の適用後に 1 回だけ行う形に変更し、テストを追加 (#369 / #370 / #381 / #382)
+- live-preview のデコレーションを実 `EditorView` で検証するテストを追加 (#493 / #498 / #606 / #607)。間欠 fail を解消 (#496 / #507 / #574 / #588 / #615)
+- Windows の fs の挙動を `windows-latest` で実測する probe を追加 (#503)
+- docs だけを変更したときは CI の全 job を skip する (#357)
+- `engines.node` と CI の Node の版を、依存ツリーが実際に要求する版に合わせる (#572): `>=22.13.0` → `^22.22.2 || ^24.15.0 || >=26.0.0`
+
+### Dependencies
+
+v0.7.0 → v0.8.0 で更新された主要パッケージ:
+
+- **dependencies**
+  - `mermaid` `^11.16.0` → `^12.1.0` (major; #587 / #631)
+  - `katex` `^0.17.0` → `^0.19.0` (#379 / #603)
+  - `simple-git` `^3.36.0` → `^4.0.2` (major; #604)
+  - `react` / `react-dom` `^19.2.7` → `^19.3.0`
+  - `@codemirror/*`・`@lezer/highlight`・`@uiw/react-codemirror`・`dompurify`・`js-yaml`・`lucide-react`・`marked`・`p-limit`・`zustand` の patch / minor 更新
+- **devDependencies**
+  - `electron` `^43.0.0` → `^44.5.1` (major; #549。renderer の build target を `chrome152` に変更)
+  - `typescript` `~6.0.3` → `~7.0.2` (major; #327)
+  - `vitest` `^4.1.9` → `^5.0.3` (major; #550)
+  - `jsdom` `^29.1.1` → `^30.1.1` (major; #474)
+  - `@testing-library/jest-dom` `^6.9.1` → `^7.0.1` (major; #432)
+  - `electron-builder` `^26.15.3` → `26.15.3` (完全一致で固定)
+  - `@biomejs/biome`・`@playwright/test`・`vite`・`tailwindcss` ほかの patch / minor 更新
+
 ## [0.7.0] — 2026-07-05
 
 v0.6.0 リリース後の内部品質改善ラウンド + 依存更新 + 1 件の regression 修正。#209 で計画された editor / preload / e2e-mock の drift-lock 系 refactor 3 項目 (#278 / #279 / #280) を完遂、settings 系 setter を factory に集約 (#273 → #277)、search.ts の scan 系 IPC を bounded-concurrency parallel readFile 化 (#250 → #260)、workspace / backlink / wikilink 系の helper 抽出および型整備 (#243 / #248 / #252 / #254 / #256 / #258) を実施。あわせて electron 43.0.0 / p-limit 7.3.0 major bump (#275) と Dependabot 7 件 combine (#274) を集約。1 件の regression (#276) も修正。
