@@ -180,4 +180,31 @@ test.describe("mermaid widget", () => {
 		// Mermaid ブロックのデコレーションは維持される
 		await expect(widget.locator(".cm-mermaid-inner")).toBeVisible();
 	});
+
+	test("parse error の図は body に描画用の一時要素を残さない", async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({
+			fs: {
+				files: {
+					...workspace.files,
+					"/workspace/mermaid.md":
+						"# Title\n\n```mermaid\ngraph TD\n  A[[[\n```\n\nMore text below.\n",
+				},
+				directories: workspace.directories,
+			},
+			dialogResult: "/workspace",
+		});
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await page.getByLabel("mermaid.md file").click();
+
+		const editor = page.locator(".cm-content");
+		await expect(editor).toBeVisible();
+		await editor.click();
+		await page.keyboard.press(`${modKey}+Home`);
+
+		await expect(page.locator(".cm-mermaid-error")).toBeVisible({ timeout: 15000 });
+		// mermaid.render は描画先を渡さないと body 直下に `d<id>` の div を作る
+		expect(await page.locator('body > div[id^="dmermaid-"]').count()).toBe(0);
+	});
 });

@@ -228,6 +228,9 @@ function buildConfig(
 	return {
 		startOnLoad: false,
 		securityLevel: "strict",
+		// 既定の false では parse / draw error 時に error 図を body 直下の一時 div へ描いたまま
+		// throw し、render ごとに id が変わるため div が溜まる。error 図は使わない
+		suppressErrorRendering: true,
 		theme: getMermaidTheme(theme),
 		themeVariables: labelOverrides?.themeVariables,
 		themeCSS: getThemeCss(theme, options),
