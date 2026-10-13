@@ -361,7 +361,7 @@ const tableGapMaterialize = EditorState.transactionFilter.of((tr) => {
 // gap cursor の見た目（ProseMirror の gapcursor 相当の水平バー）
 const GAP_CURSOR_WIDTH = 20;
 const GAP_CURSOR_HEIGHT = 2;
-/** widget 端からバーまでの距離（.cm-table-widget の上下 margin 4px の中に収める） */
+/** widget 端から外側のバーまでの距離（.cm-table-widget に縦 margin は無い。理由は editor-theme.ts の .cm-mermaid-widget） */
 const GAP_CURSOR_OFFSET = 3;
 
 /**

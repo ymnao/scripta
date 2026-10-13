@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
+import { openSingleFileWorkspace } from "./helpers/workspace-setup";
 
 const workspace = {
 	files: {
@@ -206,5 +207,53 @@ test.describe("mermaid widget", () => {
 		await expect(page.locator(".cm-mermaid-error")).toBeVisible({ timeout: 15000 });
 		// mermaid.render は描画先を渡さないと body 直下に `d<id>` の div を作る
 		expect(await page.locator('body > div[id^="dmermaid-"]').count()).toBe(0);
+	});
+});
+
+test.describe("mermaid widget の下の空行で上キー (#635)", () => {
+	test.slow();
+
+	// widget の高さが CM6 の height map とずれると、ずれは上にある widget の数だけ
+	// 積み上がる。既定のフォントサイズでは 1 つ分のずれが半行に届かず症状が出ないので、
+	// 上に 4 つ並べる。
+	const blocksAbove = ["A", "B", "C", "D"]
+		.map((id) => `\`\`\`mermaid\ngraph TD\n  ${id}-->${id}2\n\`\`\`\n`)
+		.join("\n");
+	const before = `# Title\n\n${blocksAbove}`;
+	const after = "End.\n";
+
+	// 4 つ目の widget の直後にある n 番目 (1 始まり) の空行から上キーを 1 回押し、
+	// その位置に X を入力して保存した内容を返す
+	async function pressArrowUpFromGapLine(page: Page, n: number): Promise<string> {
+		const { mock } = await openSingleFileWorkspace(page, {
+			files: { "/workspace/mermaid.md": `${before}\n\n\n${after}` },
+		});
+
+		await expect(page.locator(".cm-mermaid-inner")).toHaveCount(4, { timeout: 15000 });
+
+		const gapLine = page
+			.locator(".cm-mermaid-widget")
+			.nth(3)
+			.locator(`xpath=following-sibling::div[contains(@class, "cm-line")][${n}]`);
+		await gapLine.click();
+		await page.keyboard.press("ArrowUp");
+		await page.keyboard.type("X");
+
+		await waitForUnsaved(page);
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page, 5000);
+
+		const calls = await mock.getCalls("writeFile");
+		return calls[calls.length - 1][1] as string;
+	}
+
+	test("3 番目の空行からは 2 番目の空行へ動く", async ({ page }) => {
+		const content = await pressArrowUpFromGapLine(page, 3);
+		expect(content).toBe(`${before}\nX\n\n${after}`);
+	});
+
+	test("2 番目の空行からは 1 番目の空行へ動く", async ({ page }) => {
+		const content = await pressArrowUpFromGapLine(page, 2);
+		expect(content).toBe(`${before}X\n\n\n${after}`);
 	});
 });
