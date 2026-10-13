@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
+import { openSingleFileWorkspace } from "./helpers/workspace-setup";
 
 const workspace = {
 	files: {
@@ -219,24 +220,16 @@ test.describe("mermaid widget の間の空行で上キー (#635)", () => {
 		.map((id) => `\`\`\`mermaid\ngraph TD\n  ${id}-->${id}2\n\`\`\`\n`)
 		.join("\n");
 	const before = `# Title\n\n${blocksAbove}`;
-	const after = "```mermaid\ngraph TD\n  E-->F\n```\n\nEnd.\n";
+	const after = "End.\n";
 
 	// 4 つ目の widget の直後にある n 番目 (1 始まり) の空行から上キーを 1 回押し、
 	// その位置に X を入力して保存した内容を返す
 	async function pressArrowUpFromGapLine(page: Page, n: number): Promise<string> {
-		const mock = new ElectronApiMock(page);
-		await mock.setup({
-			fs: {
-				files: { ...workspace.files, "/workspace/mermaid.md": `${before}\n\n\n${after}` },
-				directories: workspace.directories,
-			},
-			dialogResult: "/workspace",
+		const { mock } = await openSingleFileWorkspace(page, {
+			files: { "/workspace/mermaid.md": `${before}\n\n\n${after}` },
 		});
-		await page.goto("/");
-		await page.getByLabel("フォルダを開く").click();
-		await page.getByLabel("mermaid.md file").click();
 
-		await expect(page.locator(".cm-mermaid-inner")).toHaveCount(5, { timeout: 15000 });
+		await expect(page.locator(".cm-mermaid-inner")).toHaveCount(4, { timeout: 15000 });
 
 		const gapLine = page
 			.locator(".cm-mermaid-widget")
