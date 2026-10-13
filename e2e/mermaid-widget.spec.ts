@@ -213,7 +213,8 @@ test.describe("mermaid widget の間の空行で上キー (#635)", () => {
 	test.slow();
 
 	// widget の高さが CM6 の height map とずれると、ずれは上にある widget の数だけ
-	// 積み上がる。1 つでは半行に届かず症状が出ないので、上に 4 つ並べる。
+	// 積み上がる。既定のフォントサイズでは 1 つ分のずれが半行に届かず症状が出ないので、
+	// 上に 4 つ並べる。
 	const blocksAbove = ["A", "B", "C", "D"]
 		.map((id) => `\`\`\`mermaid\ngraph TD\n  ${id}-->${id}2\n\`\`\`\n`)
 		.join("\n");
