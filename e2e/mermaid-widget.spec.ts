@@ -210,7 +210,7 @@ test.describe("mermaid widget", () => {
 	});
 });
 
-test.describe("mermaid widget の間の空行で上キー (#635)", () => {
+test.describe("mermaid widget の下の空行で上キー (#635)", () => {
 	test.slow();
 
 	// widget の高さが CM6 の height map とずれると、ずれは上にある widget の数だけ
