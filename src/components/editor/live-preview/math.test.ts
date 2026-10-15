@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { afterEach, assert, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MathWidget as MathWidgetType } from "./math";
 
@@ -664,5 +664,37 @@ describe("mathFocusHandler (real EditorView)", () => {
 
 		expect(view.hasFocus).toBe(false);
 		expect(mathWidgets(view)).toHaveLength(1);
+	});
+});
+
+describe("blockWidgetVerticalKeymap (real EditorView)", () => {
+	// 3〜5 行目が数式ブロック。jsdom にはレイアウトが無いので、ブロックに入る経路は
+	// e2e (math-preview.spec.ts) で確かめ、ここでは既定の移動に渡す経路だけを見る
+	const DOC = "a\nb\n$$\nx\n$$\nc";
+
+	afterEach(() => {
+		cleanupMountedViews();
+	});
+
+	function press(view: EditorView, key: string): boolean {
+		return runScopeHandlers(view, new KeyboardEvent("keydown", { key }), "editor");
+	}
+
+	it("隣の行がブロックでなければ moveVertically を呼ばずに既定へ渡す", () => {
+		const view = mountEditorView(DOC, mathDecoration, DOC.indexOf("b"));
+		const spy = vi.spyOn(view, "moveVertically");
+
+		expect(press(view, "ArrowUp")).toBe(false);
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it("選択範囲があるときはブロックの直下でも既定へ渡す", () => {
+		const cFrom = DOC.indexOf("c");
+		const view = mountEditorView(DOC, mathDecoration);
+		view.dispatch({ selection: EditorSelection.range(cFrom, cFrom + 1) });
+		const spy = vi.spyOn(view, "moveVertically");
+
+		expect(press(view, "ArrowUp")).toBe(false);
+		expect(spy).not.toHaveBeenCalled();
 	});
 });
