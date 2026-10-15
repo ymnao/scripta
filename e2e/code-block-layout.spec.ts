@@ -73,6 +73,17 @@ test.describe("code block layout", () => {
 		expect(fence.height).toBeLessThan(m.code.height);
 	});
 
+	test("閉じ fence 行も 1 行分の帯にならず、背景の下の余白は約 16px", async ({ page }) => {
+		await openDoc(page);
+		const closing = await page.evaluate(() => {
+			const lines = [...document.querySelectorAll<HTMLElement>(".cm-content > .cm-line")];
+			const idx = lines.findIndex((el) => el.textContent?.includes("const y = 2;"));
+			return lines[idx + 1].getBoundingClientRect().height;
+		});
+		// コード行の vertical padding (1px) + 閉じ fence 行 = 文字の行ボックスから背景下端まで
+		expect(closing + 1).toBeCloseTo(16, 0);
+	});
+
 	test("コードの文字は背景の左端から 16px 内側に始まる", async ({ page }) => {
 		await openDoc(page);
 		const m = await measureBlock(page, "const x = 1;");
@@ -147,29 +158,31 @@ function headLine(page: Page): Promise<number> {
 
 test.describe("潰した fence 行とカーソル移動", () => {
 	// fence 行を固定 px で潰すと、文字の高さの半分より低くなった時点で moveVertically が
-	// fence 行を飛び越える。設定の上限の 32px で、上下どちらからも fence 行に止まることを見る。
-	// 余白の比例と、置換 span の文字サイズ rule のどちらか一方でも防げる (mutation で実測:
-	// 片方だけ外すとこの 2 件は pass し、両方外すと落ちる)。
-	test("文字サイズ 32px でも、下キーは fence 行を飛ばさない", async ({ page }) => {
-		await openPlainDoc(page, 32);
-		const visited: number[] = [];
-		for (let i = 0; i < 7; i++) {
-			await page.keyboard.press("ArrowDown");
-			visited.push(await headLine(page));
-		}
-		expect(visited).toEqual([2, 3, 4, 5, 6, 7, 8]);
-	});
+	// fence 行を飛び越える。設定範囲の両端 (8 / 32px) で、上下どちらからも fence 行に止まることを見る。
+	// 32px は余白の比例と、置換 span の文字サイズ rule のどちらか一方でも防げる (mutation で実測:
+	// 片方だけ外すと 32px の 2 件は pass し、両方外すと落ちる)。
+	for (const fontSize of [8, 32]) {
+		test(`文字サイズ ${fontSize}px でも、下キーは fence 行を飛ばさない`, async ({ page }) => {
+			await openPlainDoc(page, fontSize);
+			const visited: number[] = [];
+			for (let i = 0; i < 7; i++) {
+				await page.keyboard.press("ArrowDown");
+				visited.push(await headLine(page));
+			}
+			expect(visited).toEqual([2, 3, 4, 5, 6, 7, 8]);
+		});
 
-	test("文字サイズ 32px でも、上キーは fence 行を飛ばさない", async ({ page }) => {
-		await openPlainDoc(page, 32);
-		await page.keyboard.press(`${modKey}+End`);
-		const visited: number[] = [];
-		for (let i = 0; i < 8; i++) {
-			await page.keyboard.press("ArrowUp");
-			visited.push(await headLine(page));
-		}
-		expect(visited).toEqual([8, 7, 6, 5, 4, 3, 2, 1]);
-	});
+		test(`文字サイズ ${fontSize}px でも、上キーは fence 行を飛ばさない`, async ({ page }) => {
+			await openPlainDoc(page, fontSize);
+			await page.keyboard.press(`${modKey}+End`);
+			const visited: number[] = [];
+			for (let i = 0; i < 8; i++) {
+				await page.keyboard.press("ArrowUp");
+				visited.push(await headLine(page));
+			}
+			expect(visited).toEqual([8, 7, 6, 5, 4, 3, 2, 1]);
+		});
+	}
 
 	test("範囲選択の head が潰した fence 行に乗っても、キャレットに高さがある", async ({ page }) => {
 		await openPlainDoc(page);
@@ -195,6 +208,41 @@ test.describe("潰した fence 行とカーソル移動", () => {
 			)
 			.toBeGreaterThan(10);
 	});
+});
+
+test("折り返した長いコードも、背景の右端から 16px 内側に収まる", async ({ page }) => {
+	const longDoc = ["before", "", `${FENCE}js`, `const s = "${"a".repeat(800)}";`, FENCE, ""].join(
+		"\n",
+	);
+	const { editor } = await openSingleFileWorkspace(page, {
+		files: { "/workspace/code.md": longDoc },
+	});
+	await editor.click();
+	await page.keyboard.press(`${modKey}+Home`);
+	await expect(page.locator(".cm-codeblock-fence-hidden")).toHaveCount(2);
+	const m = await page.evaluate(() => {
+		const line = [...document.querySelectorAll<HTMLElement>(".cm-content > .cm-line")].find((el) =>
+			el.textContent?.includes("const s"),
+		) as HTMLElement;
+		// 1 行目にはコピーボタンが入るので、行全体ではなく文字だけの rect を取る
+		const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+		const rects: DOMRect[] = [];
+		for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+			const range = document.createRange();
+			range.selectNodeContents(n);
+			rects.push(...range.getClientRects());
+		}
+		const horizontal = Number.parseFloat(
+			getComputedStyle(line).getPropertyValue("--cm-horizontal-padding"),
+		);
+		return {
+			rows: new Set(rects.map((r) => Math.round(r.top))).size,
+			textRight: Math.max(...rects.map((r) => r.right)),
+			bgRight: line.getBoundingClientRect().right - horizontal,
+		};
+	});
+	expect(m.rows).toBeGreaterThan(1);
+	expect(m.bgRight - m.textRight).toBeGreaterThanOrEqual(16 - 1);
 });
 
 test("文字サイズ 32px では、潰した fence 行の余白も文字サイズに比例する", async ({ page }) => {
