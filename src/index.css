@@ -172,7 +172,8 @@
 /* Editor font — applied via CSS custom property so that font-family
    does not depend on style-mod's dynamic injection.
    Doubled class selector raises specificity above CodeMirror's base theme
-   which injects font-family via adoptedStyleSheets (wins at equal specificity). */
+   (`.<baseThemeID> .cm-scroller { font-family: monospace }`), so the result does not
+   depend on where style-mod inserts its <style> tag in the cascade. */
 .cm-editor.cm-editor .cm-scroller {
 	font-family: var(--editor-font-family);
 }

@@ -119,6 +119,3 @@ overrides:
 #   mermaid の lazy chunk 側に閉じる。
 #   解消条件: mermaid が `marked@^18` 以上を宣言した時点でこのコメントごと削除し、
 #   `pnpm dedupe` で 18.x へ統合する。
-
-patchedDependencies:
-  style-mod@4.1.3: patches/style-mod@4.1.3.patch
