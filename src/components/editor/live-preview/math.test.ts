@@ -697,4 +697,21 @@ describe("blockWidgetVerticalKeymap (real EditorView)", () => {
 		expect(press(view, "ArrowUp")).toBe(false);
 		expect(spy).not.toHaveBeenCalled();
 	});
+
+	it("カーソルが複数あるときはブロックの直下でも既定へ渡す", () => {
+		const view = mountEditorView(DOC, [
+			mathDecoration,
+			EditorState.allowMultipleSelections.of(true),
+		]);
+		view.dispatch({
+			selection: EditorSelection.create(
+				[EditorSelection.cursor(0), EditorSelection.cursor(DOC.indexOf("c"))],
+				1,
+			),
+		});
+		const spy = vi.spyOn(view, "moveVertically");
+
+		expect(press(view, "ArrowUp")).toBe(false);
+		expect(spy).not.toHaveBeenCalled();
+	});
 });
