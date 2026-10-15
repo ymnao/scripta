@@ -1,9 +1,19 @@
 import { syntaxTree } from "@codemirror/language";
-import { type ChangeDesc, type Range, StateEffect, type Transaction } from "@codemirror/state";
+import {
+	type ChangeDesc,
+	EditorSelection,
+	type Extension,
+	Prec,
+	type Range,
+	StateEffect,
+	type StateField,
+	type Transaction,
+} from "@codemirror/state";
 import {
 	Decoration,
 	type DecorationSet,
 	type EditorView,
+	keymap,
 	type PluginValue,
 	ViewPlugin,
 	type ViewUpdate,
@@ -321,3 +331,51 @@ export const treeChangeDispatcher = ViewPlugin.fromClass(
 		}
 	},
 );
+
+function enterAdjacentBlockWidget(
+	view: EditorView,
+	field: StateField<BlockFieldValue>,
+	forward: boolean,
+): boolean {
+	const { state } = view;
+	if (state.selection.ranges.length > 1) return false;
+	const sel = state.selection.main;
+	if (!sel.empty) return false;
+	const line = state.doc.lineAt(sel.head);
+	const targetNumber = forward ? line.number + 1 : line.number - 1;
+	if (targetNumber < 1 || targetNumber > state.doc.lines) return false;
+
+	const moved = view.moveVertically(sel, forward);
+	const movedLine = state.doc.lineAt(moved.head).number;
+	if (movedLine === line.number || movedLine === targetNumber) return false;
+
+	const target = state.doc.line(targetNumber);
+	let covered = false;
+	state.field(field).decos.between(target.from, target.to, (from, to, deco) => {
+		if (deco.spec.block === true && from <= target.from && to >= target.to) {
+			covered = true;
+			return false;
+		}
+	});
+	if (!covered) return false;
+
+	const column = Math.min(sel.head - line.from, target.length);
+	view.dispatch({
+		selection: EditorSelection.cursor(target.from + column, 0, undefined, moved.goalColumn),
+		scrollIntoView: true,
+		userEvent: "select",
+	});
+	return true;
+}
+
+/** CM6 の上下移動 (posAtCoords の scanY) は block widget を飛ばすので、`field` の
+ *  block widget が隣の行を丸ごと覆っているときだけ、その行 (= fence 行) へ入れる。
+ *  入ると field のカーソル判定で widget が外れ、ソース表示になる (#643)。 */
+export function blockWidgetVerticalKeymap(field: StateField<BlockFieldValue>): Extension {
+	return Prec.high(
+		keymap.of([
+			{ key: "ArrowUp", run: (view) => enterAdjacentBlockWidget(view, field, false) },
+			{ key: "ArrowDown", run: (view) => enterAdjacentBlockWidget(view, field, true) },
+		]),
+	);
+}

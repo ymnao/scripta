@@ -22,6 +22,7 @@ import { collectCursorLines, cursorInRange } from "./cursor-utils";
 import {
 	type BlockFieldValue,
 	blockFieldNeedsRebuild,
+	blockWidgetVerticalKeymap,
 	type CandidateRange,
 	cursorTouchesCandidates,
 	mapCandidates,
@@ -530,4 +531,5 @@ export const mathDecoration: Extension = [
 	createMathClickHandler(),
 	dollarInputHandler,
 	dollarBackspace,
+	blockWidgetVerticalKeymap(mathDecorationField),
 ];
