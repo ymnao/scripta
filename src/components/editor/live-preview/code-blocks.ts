@@ -57,7 +57,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			endLine.from < endLine.to
 		) {
 			ranges.push(replaceDecoration.range(endLine.from, endLine.to));
-			ranges.push(hiddenFenceLineDecoration.range(endLine.from, endLine.from));
+			// 閉じていないブロックでは endLine が本文行なので、潰すと本文行の存在が見えなくなる
+			const lastMark = node.node.lastChild;
+			if (lastMark?.name === "CodeMark" && lastMark.from >= endLine.from) {
+				ranges.push(hiddenFenceLineDecoration.range(endLine.from, endLine.from));
+			}
 		}
 
 		// Add background line decoration only to the visible intersection

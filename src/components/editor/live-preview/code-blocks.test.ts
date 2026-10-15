@@ -159,6 +159,14 @@ describe("buildDecorations", () => {
 		expect(lines).toHaveLength(6);
 	});
 
+	it("does not mark the last content line of an unclosed block as hidden", () => {
+		const doc = "text\n\n```js\ncode\nmore";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		const hidden = classLines(decos, "cm-codeblock-fence-hidden").map((d) => d.from);
+		expect(hidden).toEqual([doc.indexOf("```")]);
+	});
+
 	it("returns empty set for document without code blocks", () => {
 		const view = createViewForTest("hello world\n\nno code here");
 		const decos = collectDecorations(buildDecorations(view));
