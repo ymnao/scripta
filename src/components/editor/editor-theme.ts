@@ -9,6 +9,9 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
+const LINE_VERTICAL_PADDING = "1px";
+// 罫線 3px + 内側 8px
+const BLOCKQUOTE_INDENT = "11px";
 const CODE_BLOCK_INSET = "16px";
 
 export function createDynamicEditorTheme(fontSize: number, vertical = "8px", horizontal = "48px") {
@@ -32,7 +35,7 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			"--cm-horizontal-padding": horizontal,
 		},
 		".cm-line": {
-			padding: `1px ${horizontal}`,
+			padding: `${LINE_VERTICAL_PADDING} ${horizontal}`,
 			overflowWrap: "break-word",
 		},
 		// blockquote 装飾。horizontal を直接補間するため dynamic theme 内に置き、
@@ -45,7 +48,7 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 		// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト位置を維持。
 		".cm-blockquote-line": {
 			position: "relative",
-			paddingLeft: `calc(${horizontal} + 11px)`,
+			paddingLeft: `calc(${horizontal} + ${BLOCKQUOTE_INDENT})`,
 		},
 		".cm-blockquote-line::before": {
 			content: '""',
@@ -64,16 +67,16 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			paddingRight: `calc(${horizontal} + ${CODE_BLOCK_INSET})`,
 		},
 		".cm-blockquote-line.cm-codeblock-line": {
-			paddingLeft: `calc(${horizontal} + 11px + ${CODE_BLOCK_INSET})`,
+			paddingLeft: `calc(${horizontal} + ${BLOCKQUOTE_INDENT} + ${CODE_BLOCK_INSET})`,
 		},
 		// 隠れた fence 行は Decoration.replace で文字だけが消え、行の高さは 1 行分残る。
-		// 文字の高さを 0 にして、隣のコード行の vertical padding (1px) と合わせて
+		// 文字の高さを 0 にして、隣のコード行の vertical padding と合わせて
 		// 背景の上下に CODE_BLOCK_INSET 分の余白が残るようにする。
 		".cm-codeblock-fence-hidden": {
 			fontSize: "0",
 			lineHeight: "0",
-			paddingTop: `calc((${CODE_BLOCK_INSET} - 1px) / 2)`,
-			paddingBottom: `calc((${CODE_BLOCK_INSET} - 1px) / 2)`,
+			paddingTop: `calc((${CODE_BLOCK_INSET} - ${LINE_VERTICAL_PADDING}) / 2)`,
+			paddingBottom: `calc((${CODE_BLOCK_INSET} - ${LINE_VERTICAL_PADDING}) / 2)`,
 		},
 	});
 }

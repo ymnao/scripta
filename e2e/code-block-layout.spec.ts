@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
-import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
+import { modKey } from "./helpers/electron-api-mock";
+import { openSingleFileWorkspace } from "./helpers/workspace-setup";
 
 const FENCE = "```";
 const doc = [
@@ -20,26 +21,8 @@ const doc = [
 	"",
 ].join("\n");
 
-const workspace = {
-	files: {
-		"/workspace/code.md": doc,
-		"/workspace/.scripta/.initialized": "",
-		"/workspace/.scripta/initialized.json": '{"initializedAt":"2026-01-01T00:00:00.000Z"}',
-	},
-	directories: {
-		"/workspace": [{ name: "code.md", path: "/workspace/code.md", isDirectory: false }],
-		"/workspace/.scripta": [],
-	},
-};
-
 async function openDoc(page: Page): Promise<void> {
-	const mock = new ElectronApiMock(page);
-	await mock.setup({ fs: workspace, dialogResult: "/workspace" });
-	await page.goto("/");
-	await page.getByLabel("フォルダを開く").click();
-	await page.getByLabel("code.md file").click();
-	const editor = page.locator(".cm-content");
-	await expect(editor).toBeVisible();
+	const { editor } = await openSingleFileWorkspace(page, { files: { "/workspace/code.md": doc } });
 	await editor.click();
 	await page.keyboard.press(`${modKey}+Home`);
 	await expect(page.locator(".cm-codeblock-fence-hidden")).toHaveCount(4);
@@ -121,10 +104,7 @@ test.describe("code block layout", () => {
 		await openDoc(page);
 		const before = await measureBlock(page, "const x = 1;");
 		// 1 行目から下へ 4 回で開始 fence 行 (5 行目) に入る
-		await page.keyboard.press("ArrowDown");
-		await page.keyboard.press("ArrowDown");
-		await page.keyboard.press("ArrowDown");
-		await page.keyboard.press("ArrowDown");
+		for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
 		await expect(page.locator(".cm-codeblock-fence-hidden")).toHaveCount(3);
 		const after = await measureBlock(page, "const x = 1;");
 		expect(after.fence.height).toBeCloseTo(before.code.height, 0);
