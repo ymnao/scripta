@@ -27,6 +27,7 @@ import { collectCursorLines, cursorInRange, cursorLinesChanged } from "./cursor-
 import {
 	type BlockFieldValue,
 	blockFieldNeedsRebuild,
+	blockWidgetVerticalKeymap,
 	type CandidateRange,
 	cursorTouchesCandidates,
 	mapCandidates,
@@ -496,4 +497,5 @@ export const mermaidDecoration: Extension = [
 	treeChangeDispatcher,
 	focusChangeHandler,
 	createMermaidClickHandler(),
+	blockWidgetVerticalKeymap(mermaidDecorationField),
 ];

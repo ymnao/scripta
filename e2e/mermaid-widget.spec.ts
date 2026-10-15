@@ -257,3 +257,41 @@ test.describe("mermaid widget の下の空行で上キー (#635)", () => {
 		expect(content).toBe(`${before}X\n\n\n${after}`);
 	});
 });
+
+test.describe("上下キーで mermaid ブロックに入る (#643)", () => {
+	test.slow();
+
+	const doc = "Above.\n```mermaid\ngraph TD\n  A-->B\n```\nBelow.\n";
+
+	// `lineText` の行の先頭から `key` を 1 回押し、widget が外れたのを確かめてから
+	// その位置に X を入力して保存した内容を返す
+	async function pressArrowFrom(page: Page, lineText: string, key: string): Promise<string> {
+		const { mock } = await openSingleFileWorkspace(page, {
+			files: { "/workspace/mermaid.md": doc },
+		});
+		await expect(page.locator(".cm-mermaid-inner")).toBeVisible({ timeout: 15000 });
+
+		await page.locator(".cm-line", { hasText: lineText }).click();
+		await page.keyboard.press("Home");
+		await page.keyboard.press(key);
+		await expect(page.locator(".cm-mermaid-widget")).toHaveCount(0);
+		await page.keyboard.type("X");
+
+		await waitForUnsaved(page);
+		await page.keyboard.press(`${modKey}+s`);
+		await waitForSaved(page, 5000);
+
+		const calls = await mock.getCalls("writeFile");
+		return calls[calls.length - 1][1] as string;
+	}
+
+	test("直下の行から上キーで終わりの fence 行に入る", async ({ page }) => {
+		const content = await pressArrowFrom(page, "Below.", "ArrowUp");
+		expect(content).toBe("Above.\n```mermaid\ngraph TD\n  A-->B\nX```\nBelow.\n");
+	});
+
+	test("直上の行から下キーで開始の fence 行に入る", async ({ page }) => {
+		const content = await pressArrowFrom(page, "Above.", "ArrowDown");
+		expect(content).toBe("Above.\nX```mermaid\ngraph TD\n  A-->B\n```\nBelow.\n");
+	});
+});
