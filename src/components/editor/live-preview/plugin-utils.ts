@@ -338,16 +338,11 @@ function enterAdjacentBlockWidget(
 	forward: boolean,
 ): boolean {
 	const { state } = view;
-	if (state.selection.ranges.length > 1) return false;
 	const sel = state.selection.main;
-	if (!sel.empty) return false;
+	if (state.selection.ranges.length > 1 || !sel.empty) return false;
 	const line = state.doc.lineAt(sel.head);
 	const targetNumber = forward ? line.number + 1 : line.number - 1;
 	if (targetNumber < 1 || targetNumber > state.doc.lines) return false;
-
-	const moved = view.moveVertically(sel, forward);
-	const movedLine = state.doc.lineAt(moved.head).number;
-	if (movedLine === line.number || movedLine === targetNumber) return false;
 
 	const target = state.doc.line(targetNumber);
 	let covered = false;
@@ -358,6 +353,10 @@ function enterAdjacentBlockWidget(
 		}
 	});
 	if (!covered) return false;
+
+	const moved = view.moveVertically(sel, forward);
+	const movedLine = state.doc.lineAt(moved.head).number;
+	if (movedLine === line.number || movedLine === targetNumber) return false;
 
 	const column = Math.min(sel.head - line.from, target.length);
 	view.dispatch({
