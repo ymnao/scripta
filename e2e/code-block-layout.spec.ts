@@ -131,6 +131,9 @@ async function openPlainDoc(page: Page, fontSize?: number): Promise<void> {
 	await editor.click();
 	await page.keyboard.press(`${modKey}+Home`);
 	await expect(page.locator(".cm-codeblock-fence-hidden")).toHaveCount(2);
+	if (fontSize !== undefined) {
+		await expect(page.locator(".cm-editor")).toHaveCSS("font-size", `${fontSize}px`);
+	}
 }
 
 // DOM selection の focus (= head) がある .cm-line の 1 始まりの行番号
@@ -144,8 +147,9 @@ function headLine(page: Page): Promise<number> {
 
 test.describe("潰した fence 行とカーソル移動", () => {
 	// fence 行を固定 px で潰すと、文字の高さの半分より低くなった時点で moveVertically が
-	// fence 行を飛び越える。設定の上限に近い 32px で、上下どちらからも fence 行に止まることを見る。
-	// 余白の比例と、置換 span の文字サイズ rule のどちらか一方でも防げる (両方外すと落ちる)。
+	// fence 行を飛び越える。設定の上限の 32px で、上下どちらからも fence 行に止まることを見る。
+	// 余白の比例と、置換 span の文字サイズ rule のどちらか一方でも防げる (mutation で実測:
+	// 片方だけ外すとこの 2 件は pass し、両方外すと落ちる)。
 	test("文字サイズ 32px でも、下キーは fence 行を飛ばさない", async ({ page }) => {
 		await openPlainDoc(page, 32);
 		const visited: number[] = [];

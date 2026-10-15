@@ -51,17 +51,15 @@ export function buildDecorations(view: EditorView): DecorationSet {
 			ranges.push(replaceDecoration.range(startLine.from, startLine.to));
 			ranges.push(hiddenFenceLineDecoration.range(startLine.from, startLine.from));
 		}
-		if (
+		// 閉じていないブロックでは endLine が本文行なので、隠さない
+		const lastMark = node.node.lastChild;
+		const hasClosingFence =
 			endLine.number !== startLine.number &&
-			!cursorLines.has(endLine.number) &&
-			endLine.from < endLine.to
-		) {
+			lastMark?.name === "CodeMark" &&
+			lastMark.from >= endLine.from;
+		if (hasClosingFence && !cursorLines.has(endLine.number)) {
 			ranges.push(replaceDecoration.range(endLine.from, endLine.to));
-			// 閉じていないブロックでは endLine が本文行なので、潰すと本文行の存在が見えなくなる
-			const lastMark = node.node.lastChild;
-			if (lastMark?.name === "CodeMark" && lastMark.from >= endLine.from) {
-				ranges.push(hiddenFenceLineDecoration.range(endLine.from, endLine.from));
-			}
+			ranges.push(hiddenFenceLineDecoration.range(endLine.from, endLine.from));
 		}
 
 		// Add background line decoration only to the visible intersection
