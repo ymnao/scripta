@@ -9,6 +9,8 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
+const CODE_BLOCK_INSET = "16px";
+
 export function createDynamicEditorTheme(fontSize: number, vertical = "8px", horizontal = "48px") {
 	return EditorView.theme({
 		"&": {
@@ -53,6 +55,25 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			bottom: "0",
 			width: "3px",
 			backgroundColor: "var(--color-border)",
+		},
+		// コードブロックの内側余白 (GitHub の pre と同じ 16px)。背景 (.cm-codeblock-line::after,
+		// static theme) は horizontal の位置のまま、文字だけを内側へ寄せる。上の
+		// .cm-blockquote-line と同じく .cm-line の padding shorthand より後に置く。
+		".cm-codeblock-line": {
+			paddingLeft: `calc(${horizontal} + ${CODE_BLOCK_INSET})`,
+			paddingRight: `calc(${horizontal} + ${CODE_BLOCK_INSET})`,
+		},
+		".cm-blockquote-line.cm-codeblock-line": {
+			paddingLeft: `calc(${horizontal} + 11px + ${CODE_BLOCK_INSET})`,
+		},
+		// 隠れた fence 行は Decoration.replace で文字だけが消え、行の高さは 1 行分残る。
+		// 文字の高さを 0 にして、隣のコード行の vertical padding (1px) と合わせて
+		// 背景の上下に CODE_BLOCK_INSET 分の余白が残るようにする。
+		".cm-codeblock-fence-hidden": {
+			fontSize: "0",
+			lineHeight: "0",
+			paddingTop: `calc((${CODE_BLOCK_INSET} - 1px) / 2)`,
+			paddingBottom: `calc((${CODE_BLOCK_INSET} - 1px) / 2)`,
 		},
 	});
 }

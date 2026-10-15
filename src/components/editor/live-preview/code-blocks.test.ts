@@ -1,3 +1,4 @@
+import type { Decoration } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import { blockquoteDecoration } from "./blockquotes";
 import { buildDecorations, codeBlockDecoration } from "./code-blocks";
@@ -12,11 +13,22 @@ import {
 
 const FENCE = "```";
 
+function lineClass(d: { value: Decoration }): string | undefined {
+	return (d.value.spec as { attributes?: { class?: string } }).attributes?.class;
+}
+
+function classLines(
+	decos: { from: number; to: number; value: Decoration }[],
+	cls: string,
+): { from: number; to: number; value: Decoration }[] {
+	return lineDecorations(decos).filter((d) => lineClass(d) === cls);
+}
+
 describe("buildDecorations", () => {
 	it("creates line decorations for all lines including fences", () => {
 		const view = createViewForTest("text\n\n```\ncode\n```");
 		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		expect(lines).toHaveLength(3);
 	});
 
@@ -34,28 +46,53 @@ describe("buildDecorations", () => {
 		expect(replaces).toHaveLength(2);
 	});
 
-	it("creates 5 total decorations (3 line + 2 replace)", () => {
+	it("creates 7 total decorations (3 codeblock line + 2 hidden fence line + 2 replace)", () => {
 		const view = createViewForTest("text\n\n```\ncode\n```");
 		const decos = collectDecorations(buildDecorations(view));
-		expect(decos).toHaveLength(5);
+		expect(decos).toHaveLength(7);
 	});
 
-	it("applies cm-codeblock-line class", () => {
+	it("applies only cm-codeblock-line and cm-codeblock-fence-hidden as line classes", () => {
 		const view = createViewForTest("text\n\n```\ncode\n```");
 		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
-		for (const line of lines) {
-			expect((line.value.spec as { attributes?: { class?: string } }).attributes?.class).toBe(
-				"cm-codeblock-line",
-			);
-		}
+		expect(lineDecorations(decos).map(lineClass).sort()).toEqual([
+			"cm-codeblock-fence-hidden",
+			"cm-codeblock-fence-hidden",
+			"cm-codeblock-line",
+			"cm-codeblock-line",
+			"cm-codeblock-line",
+		]);
+	});
+
+	it("marks both fence lines as hidden when cursor is outside", () => {
+		const doc = "text\n\n```\ncode\n```";
+		const view = createViewForTest(doc, 0);
+		const decos = collectDecorations(buildDecorations(view));
+		const hidden = classLines(decos, "cm-codeblock-fence-hidden").map((d) => d.from);
+		expect(hidden).toEqual([doc.indexOf("```"), doc.lastIndexOf("```")]);
+	});
+
+	it("does not mark the opening fence as hidden when cursor is on it", () => {
+		const doc = "text\n\n```\ncode\n```";
+		const view = createViewForTest(doc, doc.indexOf("```"));
+		const decos = collectDecorations(buildDecorations(view));
+		const hidden = classLines(decos, "cm-codeblock-fence-hidden").map((d) => d.from);
+		expect(hidden).toEqual([doc.lastIndexOf("```")]);
+	});
+
+	it("does not mark the closing fence as hidden when cursor is on it", () => {
+		const doc = "text\n\n```\ncode\n```";
+		const view = createViewForTest(doc, doc.lastIndexOf("```"));
+		const decos = collectDecorations(buildDecorations(view));
+		const hidden = classLines(decos, "cm-codeblock-fence-hidden").map((d) => d.from);
+		expect(hidden).toEqual([doc.indexOf("```")]);
 	});
 
 	it("sets line decoration from at each line start", () => {
 		const doc = "text\n\n```\ncode\n```";
 		const view = createViewForTest(doc);
 		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		const fenceStart = doc.indexOf("```");
 		const codeStart = doc.indexOf("code");
 		const closeFenceStart = doc.lastIndexOf("```");
@@ -67,7 +104,7 @@ describe("buildDecorations", () => {
 	it("handles language-specified fenced code", () => {
 		const view = createViewForTest("text\n\n```js\nconst x = 1;\n```");
 		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		expect(lines).toHaveLength(3);
 	});
 
@@ -75,7 +112,7 @@ describe("buildDecorations", () => {
 		const doc = "text\n\n```\nline1\nline2\nline3\n```";
 		const view = createViewForTest(doc, 0);
 		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		expect(lines).toHaveLength(5);
 	});
 
@@ -85,7 +122,7 @@ describe("buildDecorations", () => {
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
 		const replaces = replaceDecorations(decos);
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		expect(replaces).toHaveLength(2);
 		expect(lines).toHaveLength(3);
 	});
@@ -96,7 +133,7 @@ describe("buildDecorations", () => {
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
 		const replaces = replaceDecorations(decos);
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		// Only closing fence is hidden
 		expect(replaces).toHaveLength(1);
 		expect(lines).toHaveLength(3);
@@ -108,7 +145,7 @@ describe("buildDecorations", () => {
 		const view = createViewForTest(doc, cursorPos);
 		const decos = collectDecorations(buildDecorations(view));
 		const replaces = replaceDecorations(decos);
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		// Only opening fence is hidden
 		expect(replaces).toHaveLength(1);
 		expect(lines).toHaveLength(3);
@@ -118,7 +155,7 @@ describe("buildDecorations", () => {
 		const doc = "text\n\n```\na\n```\n\n```\nb\n```";
 		const view = createViewForTest(doc, 0);
 		const decos = collectDecorations(buildDecorations(view));
-		const lines = lineDecorations(decos);
+		const lines = classLines(decos, "cm-codeblock-line");
 		expect(lines).toHaveLength(6);
 	});
 
