@@ -206,6 +206,7 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
 - `WidgetType` サブクラスには `eq()` を実装して不要な DOM 再生成を防ぐ
 - 各デコレーションは `src/components/editor/live-preview/` に独立ファイルで配置
 - `Decoration.line` は複数の plugin が同一行に付けうる (例: blockquote 内の fenced code 行は `.cm-blockquote-line` と `.cm-codeblock-line` の両方を持つ)。擬似要素 (`::before` / `::after`) で描く line 装飾を足すときは、同居しうる他の line 装飾が同じ擬似要素を使っていないか確認する。奪い合うと cascade で両方壊れる
+- 行の高さを変える装飾を足したら、文字サイズの設定範囲の両端 (8 / 32px) で上下キーの移動を実測する。fence 行を固定 16px に潰した実装は、32px で `moveVertically` が fence 行を飛び越えた (#634)
 - `extensions` 配列はコンポーネント外で定義するか `useMemo` でメモ化する
 
 ### Vite
