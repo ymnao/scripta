@@ -118,7 +118,9 @@ test.describe("code block layout", () => {
 		for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
 		await expect(page.locator(".cm-codeblock-fence-hidden")).toHaveCount(3);
 		const after = await measureBlock(page, "const x = 1;");
-		expect(after.fence.height).toBeCloseTo(before.code.height, 0);
+		// Why not toBeCloseTo(.., 0): CI (Linux) では表示した fence 行がコード行より 1px 低く測れる。
+		// 潰れたままなら 15px 前後なので、1.5px の幅でも区別できる
+		expect(Math.abs(after.fence.height - before.code.height)).toBeLessThanOrEqual(1.5);
 	});
 });
 
