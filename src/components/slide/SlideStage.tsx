@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { type RefObject, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAsyncDerived } from "../../hooks/useAsyncDerived";
 import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
 import { useThemeStore } from "../../stores/theme";
@@ -71,6 +71,56 @@ export function useSlideHtmls(
 	);
 }
 
+/** `.slide-preview` の padding の内側で、本文が使える高さ。 */
+const SLIDE_CONTENT_HEIGHT = SLIDE_LOGICAL_HEIGHT - SLIDE_LOGICAL_PADDING_PX * 2;
+
+/**
+ * `.slide-preview-content` が padding の内側に収まっていないかを返す。
+ * offsetHeight / clientWidth は transform 前の論理 px なので、表示倍率に依らない。
+ * 最後の子の margin-bottom は margin collapse で offsetHeight に入らない。
+ */
+export function isSlideContentOverflowing(content: HTMLElement): boolean {
+	return content.offsetHeight > SLIDE_CONTENT_HEIGHT || content.scrollWidth > content.clientWidth;
+}
+
+/**
+ * `enabled` のときだけ本文要素のはみ出しを測る。html の差し替え (mermaid の描画完了) は
+ * effect の依存で、画像やフォントの読み込みによる高さの変化は ResizeObserver で拾う。
+ */
+function useSlideOverflow(
+	enabled: boolean,
+	html: string,
+): { ref: RefObject<HTMLDivElement | null>; overflowing: boolean } {
+	const ref = useRef<HTMLDivElement | null>(null);
+	const [overflowing, setOverflowing] = useState(false);
+
+	useLayoutEffect(() => {
+		const el = ref.current;
+		// 空のスライドは本文要素を描画しないので `!el` だけでも同じ判定になる。`html` を読むのは、
+		// html の差し替えで測り直すための依存を biome (useExhaustiveDependencies) に認めさせるため。
+		if (!enabled || !html || !el) {
+			setOverflowing(false);
+			return;
+		}
+		const update = () => setOverflowing(isSlideContentOverflowing(el));
+		update();
+		if (typeof ResizeObserver === "undefined") return;
+		const ro = new ResizeObserver(update);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [enabled, html]);
+
+	return { ref, overflowing };
+}
+
+/**
+ * はみ出したときの印。`bar` は枠の下端の帯だけ、`badge` は帯に加えて文言を出す。
+ * 未指定なら測らない (スライドショーは出力と同じ見た目を保つ)。
+ */
+export type SlideOverflowIndicator = "badge" | "bar";
+
+export const SLIDE_OVERFLOW_MESSAGE = "内容が枠に収まっていません";
+
 export interface SlideFrameProps {
 	scale: number;
 	html: string;
@@ -78,6 +128,13 @@ export interface SlideFrameProps {
 	frameClassName?: string;
 	/** Fable #12: `.slide-theme-*` を付与して deck-level テーマを固定する。 */
 	themeOverride?: SlideTheme | null;
+	overflowIndicator?: SlideOverflowIndicator;
+	/**
+	 * 印の読み上げ文言 (sr-only) に付ける id。サムネイルのように枠を `aria-label` 付きの
+	 * ボタンで包むと中の文言は名前に入らないので、呼び出し側が `aria-describedby` で参照する。
+	 * はみ出していないときは要素ごと無い。
+	 */
+	overflowIndicatorId?: string;
 }
 
 /**
@@ -88,7 +145,15 @@ export interface SlideFrameProps {
  * 呼び出し側は useFitScale の ref を貼った fit container の中に置く
  * (fit container の flex 構成が consumer ごとに違うため SlideFrame は持たない)。
  */
-export function SlideFrame({ scale, html, frameClassName, themeOverride }: SlideFrameProps) {
+export function SlideFrame({
+	scale,
+	html,
+	frameClassName,
+	themeOverride,
+	overflowIndicator,
+	overflowIndicatorId,
+}: SlideFrameProps) {
+	const { ref: contentRef, overflowing } = useSlideOverflow(overflowIndicator !== undefined, html);
 	const stageWidth = SLIDE_LOGICAL_WIDTH * scale;
 	const stageHeight = SLIDE_LOGICAL_HEIGHT * scale;
 	const classes = [
@@ -111,6 +176,7 @@ export function SlideFrame({ scale, html, frameClassName, themeOverride }: Slide
 			>
 				{html ? (
 					<div
+						ref={contentRef}
 						className="slide-preview-content"
 						// biome-ignore lint/security/noDangerouslySetInnerHtml: finalizeHtml 済み (sanitize-after pattern)
 						dangerouslySetInnerHTML={{ __html: html }}
@@ -121,6 +187,26 @@ export function SlideFrame({ scale, html, frameClassName, themeOverride }: Slide
 					</div>
 				)}
 			</div>
+			{overflowing && (
+				<>
+					<div
+						className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-red-500"
+						data-testid="slide-overflow-bar"
+					>
+						<span id={overflowIndicatorId} className="sr-only">
+							{SLIDE_OVERFLOW_MESSAGE}
+						</span>
+					</div>
+					{overflowIndicator === "badge" && (
+						<span
+							className="pointer-events-none absolute right-2 bottom-3 rounded bg-red-600 px-2 py-0.5 text-xs text-white"
+							aria-hidden="true"
+						>
+							収まっていません
+						</span>
+					)}
+				</>
+			)}
 		</div>
 	);
 }

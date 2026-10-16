@@ -257,3 +257,75 @@ test.describe("slide view", () => {
 		await expect(page.getByText("スライドビュー")).toBeVisible();
 	});
 });
+
+const overflowSlides = [
+	"# Fits\n\nshort",
+	`# Tall\n\n${Array.from({ length: 12 }, (_, i) => `paragraph ${i + 1}`).join("\n\n")}`,
+	`# Wide\n\n${"x".repeat(200)}`,
+	"# Mermaid\n\n```mermaid\ngraph TD\nA-->B-->C-->D-->E-->F-->G-->H\n```",
+];
+
+const overflowFs = {
+	...fs,
+	files: { ...fs.files, "/workspace/slides.md": overflowSlides.join("\n\n---\n\n") },
+};
+
+test.describe("slide overflow warning", () => {
+	const thumbnail = (page: import("@playwright/test").Page, n: number) =>
+		page.getByRole("button", { name: `スライド ${n} を表示` });
+	const previewPane = (page: import("@playwright/test").Page) =>
+		page.getByTestId("slide-preview-pane");
+
+	test.beforeEach(async ({ page }) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({ fs: overflowFs, dialogResult: "/workspace" });
+		await openSlideFile(page);
+		await page.keyboard.press(`${modKey}+Shift+s`);
+		await expect(page.getByText("1 / 4")).toBeVisible();
+	});
+
+	test("収まっているスライドには、プレビューにもサムネイルにも印を出さない", async ({ page }) => {
+		await expect(previewPane(page).getByText("Fits")).toBeVisible();
+		await expect(previewPane(page).getByTestId("slide-overflow-bar")).toHaveCount(0);
+		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toHaveCount(0);
+		await expect(thumbnail(page, 1).getByTestId("slide-overflow-bar")).toHaveCount(0);
+		await expect(thumbnail(page, 1)).toHaveAccessibleDescription("");
+	});
+
+	test("縦にはみ出したスライドは、サムネイルに帯、プレビューにバッジを出す", async ({ page }) => {
+		await expect(thumbnail(page, 2).getByTestId("slide-overflow-bar")).toBeVisible();
+		await expect(thumbnail(page, 2)).toHaveAccessibleDescription("内容が枠に収まっていません");
+
+		await thumbnail(page, 2).click();
+		await expect(page.getByText("2 / 4")).toBeVisible();
+		await expect(previewPane(page).getByTestId("slide-overflow-bar")).toBeVisible();
+		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
+	});
+
+	test("横にはみ出したスライドにも印を出す", async ({ page }) => {
+		await expect(thumbnail(page, 3).getByTestId("slide-overflow-bar")).toBeVisible();
+
+		await thumbnail(page, 3).click();
+		await expect(page.getByText("3 / 4")).toBeVisible();
+		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
+	});
+
+	test("mermaid の描画で高さが伸びたら印を出す", async ({ page }) => {
+		await thumbnail(page, 4).click();
+		await expect(page.getByText("4 / 4")).toBeVisible();
+		await expect(previewPane(page).locator(".mermaid-diagram svg")).toBeVisible();
+		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
+		await expect(thumbnail(page, 4).getByTestId("slide-overflow-bar")).toBeVisible();
+	});
+
+	test("スライドショーには、はみ出したスライドでも印を出さない", async ({ page }) => {
+		await thumbnail(page, 2).click();
+		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
+
+		await page.keyboard.press("F5");
+		const show = page.getByRole("dialog", { name: "スライド発表モード" });
+		await expect(show.getByText("paragraph 1", { exact: true })).toBeVisible();
+		await expect(show.getByTestId("slide-overflow-bar")).toHaveCount(0);
+		await expect(show.getByText("収まっていません", { exact: true })).toHaveCount(0);
+	});
+});

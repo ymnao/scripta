@@ -2,7 +2,7 @@
 // lazy chunk に閉じている katex CSS を eager path でも確保する必要がある。
 // Vite の INEFFECTIVE_DYNAMIC_IMPORT warning は他 2 箇所と同じ既知の噪音。
 import "katex/dist/katex.min.css";
-import { memo, useRef } from "react";
+import { memo, useId, useRef } from "react";
 import { useScrollActiveChildIntoView } from "../../hooks/useScrollActiveChildIntoView";
 import {
 	SLIDE_LOGICAL_WIDTH,
@@ -39,6 +39,7 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 }: SlideThumbnailsProps) {
 	const htmls = useSlideHtmls(slides, themeOverride);
 	const navRef = useRef<HTMLElement>(null);
+	const overflowIdPrefix = useId();
 
 	// current thumbnail が nav の水平スクロール範囲外なら container-local に scrollBy で追随。
 	// nav の直接子は map した button のみなので children[currentSlideIndex] で該当ボタンを取得できる。
@@ -53,6 +54,7 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 		>
 			{slides.map((slide, index) => {
 				const isCurrent = index === currentSlideIndex;
+				const overflowId = `${overflowIdPrefix}-overflow-${index}`;
 				return (
 					<button
 						// slide.from は挿入・削除で既存スライドの安定性が保たれるため
@@ -62,6 +64,7 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 						onClick={() => onSelectSlide(index)}
 						aria-current={isCurrent ? "true" : undefined}
 						aria-label={`スライド ${index + 1} を表示`}
+						aria-describedby={overflowId}
 						className={`flex shrink-0 flex-col items-center gap-1 rounded p-1 focus:outline-none focus:ring-2 focus:ring-text-link ${
 							isCurrent ? "bg-text-link/10 ring-2 ring-text-link" : "hover:bg-bg-primary"
 						}`}
@@ -70,6 +73,8 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 							scale={THUMB_SCALE}
 							html={htmls[index] ?? ""}
 							themeOverride={themeOverride}
+							overflowIndicator="bar"
+							overflowIndicatorId={overflowId}
 							frameClassName="rounded border border-border bg-white dark:bg-[#2a2a2a]"
 						/>
 						<span className="text-xs text-text-secondary">{index + 1}</span>
