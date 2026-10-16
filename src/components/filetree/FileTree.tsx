@@ -8,7 +8,15 @@ import {
 	showInFolder,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { addTrailingSep, basename, dirname, joinPath, replaceName, SEP_RE } from "../../lib/path";
+import {
+	addTrailingSep,
+	basename,
+	dirname,
+	joinPath,
+	MD_EXTENSION,
+	replaceName,
+	SEP_RE,
+} from "../../lib/path";
 import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useDragStore } from "../../stores/drag";
 import { useToastStore } from "../../stores/toast";
@@ -19,7 +27,7 @@ import type { FileEntry } from "../../types/workspace";
 import { Dialog } from "../common/Dialog";
 import { EmojiInputDialog } from "../common/EmojiInputDialog";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { FileTreeItem, NEW_FILE_EXTENSION } from "./FileTreeItem";
+import { FileTreeItem } from "./FileTreeItem";
 import { InlineInput } from "./InlineInput";
 
 interface FileTreeProps {
@@ -49,8 +57,8 @@ function validateName(name: string): string | null {
 }
 
 function toNewFileName(name: string): string | null {
-	if (!name.toLowerCase().endsWith(NEW_FILE_EXTENSION)) return `${name}${NEW_FILE_EXTENSION}`;
-	if (name.length === NEW_FILE_EXTENSION.length) return null;
+	if (!name.toLowerCase().endsWith(MD_EXTENSION)) return `${name}${MD_EXTENSION}`;
+	if (name.length === MD_EXTENSION.length) return null;
 	return name;
 }
 
@@ -748,7 +756,7 @@ export function FileTree({
 					<InlineInput
 						depth={0}
 						icon={creating.type === "file" ? "file" : "folder"}
-						suffix={creating.type === "file" ? NEW_FILE_EXTENSION : undefined}
+						suffix={creating.type === "file" ? MD_EXTENSION : undefined}
 						onConfirm={handleCreateConfirm}
 						onCancel={handleCreateCancel}
 					/>

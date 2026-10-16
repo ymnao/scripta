@@ -3,14 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
 import { cmdOrCtrl } from "../../lib/keyboard";
-import { toRelativePath } from "../../lib/path";
+import { MD_EXTENSION, toRelativePath } from "../../lib/path";
 import { useDragStore } from "../../stores/drag";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
 
 const DRAG_EXPAND_DELAY = 500;
-
-export const NEW_FILE_EXTENSION = ".md";
 
 interface CreatingState {
 	parentPath: string;
@@ -290,7 +288,7 @@ export function FileTreeItem({
 								<InlineInput
 									depth={depth + 1}
 									icon={creating.type === "file" ? "file" : "folder"}
-									suffix={creating.type === "file" ? NEW_FILE_EXTENSION : undefined}
+									suffix={creating.type === "file" ? MD_EXTENSION : undefined}
 									onConfirm={onCreateConfirm}
 									onCancel={onCreateCancel}
 								/>

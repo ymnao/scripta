@@ -10,6 +10,8 @@ export function createNewTabPath(id: number): string {
 
 export const SEP_RE = /[\\/]/;
 
+export const MD_EXTENSION = ".md";
+
 function getSep(path: string): string {
 	const match = path.match(SEP_RE);
 	return match ? match[0] : "/";

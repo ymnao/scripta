@@ -1071,48 +1071,23 @@ describe("FileTree", () => {
 			});
 		}
 
-		it("appends .md to a name without an extension and opens the file", async () => {
+		it.each([
+			["memo", "/workspace/memo.md"],
+			["memo.md", "/workspace/memo.md"],
+			["memo.MD", "/workspace/memo.MD"],
+			["memo.txt", "/workspace/memo.txt.md"],
+		])("creates %s as %s and opens it", async (typed, expectedPath) => {
 			const onFileSelect = vi.fn();
 			render(
 				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
 			);
 			await openMenuOn("hello.md", "New File");
-			await typeAndConfirm("memo");
+			await typeAndConfirm(typed);
 
 			await waitFor(() => {
-				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.md");
+				expect(mockedCreateFile).toHaveBeenCalledWith(expectedPath);
 			});
-			expect(onFileSelect).toHaveBeenCalledWith("/workspace/memo.md");
-		});
-
-		it("does not append .md when the name already ends with .md", async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
-			await openMenuOn("hello.md", "New File");
-			await typeAndConfirm("memo.md");
-
-			await waitFor(() => {
-				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.md");
-			});
-		});
-
-		it("does not append .md when the name ends with .MD", async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
-			await openMenuOn("hello.md", "New File");
-			await typeAndConfirm("memo.MD");
-
-			await waitFor(() => {
-				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.MD");
-			});
-		});
-
-		it("appends .md after another extension", async () => {
-			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
-			await openMenuOn("hello.md", "New File");
-			await typeAndConfirm("memo.txt");
-
-			await waitFor(() => {
-				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.txt.md");
-			});
+			expect(onFileSelect).toHaveBeenCalledWith(expectedPath);
 		});
 
 		it("warns and creates nothing when the name is only .md", async () => {
