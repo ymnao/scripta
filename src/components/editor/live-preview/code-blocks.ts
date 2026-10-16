@@ -14,6 +14,9 @@ import { handleComposingUpdate, iterateVisibleSyntax } from "./plugin-utils";
 const codeBlockLineDecoration = Decoration.line({
 	attributes: { class: "cm-codeblock-line" },
 });
+const hiddenFenceLineDecoration = Decoration.line({
+	attributes: { class: "cm-codeblock-fence-hidden" },
+});
 const replaceDecoration = Decoration.replace({});
 
 export const MERMAID_FENCE_RE = /^`{3,}\s*mermaid\s*$/;
@@ -41,16 +44,22 @@ export function buildDecorations(view: EditorView): DecorationSet {
 		const toLineNumber = Math.min(endLine.number, visibleEndLine.number);
 		if (fromLineNumber > toLineNumber) return;
 
-		// Hide fence lines only when cursor is not on them
+		// Hide fence lines only when cursor is not on them.
+		// Decoration.replace hides only the text; the .cm-line keeps a full line height,
+		// so the hidden-fence class lets the theme collapse it to a small padding.
 		if (!cursorLines.has(startLine.number) && startLine.from < startLine.to) {
 			ranges.push(replaceDecoration.range(startLine.from, startLine.to));
+			ranges.push(hiddenFenceLineDecoration.range(startLine.from, startLine.from));
 		}
-		if (
+		// 閉じていないブロックでは endLine が本文行なので、隠さない
+		const lastMark = node.node.lastChild;
+		const hasClosingFence =
 			endLine.number !== startLine.number &&
-			!cursorLines.has(endLine.number) &&
-			endLine.from < endLine.to
-		) {
+			lastMark?.name === "CodeMark" &&
+			lastMark.from >= endLine.from;
+		if (hasClosingFence && !cursorLines.has(endLine.number)) {
 			ranges.push(replaceDecoration.range(endLine.from, endLine.to));
+			ranges.push(hiddenFenceLineDecoration.range(endLine.from, endLine.from));
 		}
 
 		// Add background line decoration only to the visible intersection

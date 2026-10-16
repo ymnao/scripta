@@ -9,7 +9,17 @@ export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
 	serif: "Georgia, 'Times New Roman', serif",
 };
 
+const LINE_VERTICAL_PADDING = "1px";
+// 罫線 3px + 内側 8px
+const BLOCKQUOTE_INDENT = "11px";
+// コードブロックの内側余白を本文の文字サイズに比例させる比率。既定の 14px で
+// GitHub の pre と同じ 16px になる。Why not 固定 px: 潰した fence 行が文字の高さの
+// 半分より低くなると、上下キー (moveVertically) が fence 行を飛び越える (固定 16px・
+// 下の span rule なしの 32px で実測)。span rule の rect もこれを防ぐが、それは副作用。
+const CODE_BLOCK_INSET_PER_FONT_SIZE = 16 / 14;
+
 export function createDynamicEditorTheme(fontSize: number, vertical = "8px", horizontal = "48px") {
+	const codeBlockInset = `${Math.round(fontSize * CODE_BLOCK_INSET_PER_FONT_SIZE)}px`;
 	return EditorView.theme({
 		"&": {
 			height: "100%",
@@ -30,7 +40,7 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			"--cm-horizontal-padding": horizontal,
 		},
 		".cm-line": {
-			padding: `1px ${horizontal}`,
+			padding: `${LINE_VERTICAL_PADDING} ${horizontal}`,
 			overflowWrap: "break-word",
 		},
 		// blockquote 装飾。horizontal を直接補間するため dynamic theme 内に置き、
@@ -43,7 +53,7 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 		// padding-left は horizontal + 11px (border 3px + 内側 8px) に拡張してテキスト位置を維持。
 		".cm-blockquote-line": {
 			position: "relative",
-			paddingLeft: `calc(${horizontal} + 11px)`,
+			paddingLeft: `calc(${horizontal} + ${BLOCKQUOTE_INDENT})`,
 		},
 		".cm-blockquote-line::before": {
 			content: '""',
@@ -53,6 +63,32 @@ export function createDynamicEditorTheme(fontSize: number, vertical = "8px", hor
 			bottom: "0",
 			width: "3px",
 			backgroundColor: "var(--color-border)",
+		},
+		// コードブロックの内側余白。背景 (.cm-codeblock-line::after,
+		// static theme) は horizontal の位置のまま、文字だけを内側へ寄せる。上の
+		// .cm-blockquote-line と同じく .cm-line の padding shorthand より後に置く。
+		".cm-codeblock-line": {
+			paddingLeft: `calc(${horizontal} + ${codeBlockInset})`,
+			paddingRight: `calc(${horizontal} + ${codeBlockInset})`,
+		},
+		".cm-blockquote-line.cm-codeblock-line": {
+			paddingLeft: `calc(${horizontal} + ${BLOCKQUOTE_INDENT} + ${codeBlockInset})`,
+		},
+		// 隠れた fence 行は Decoration.replace で文字だけが消え、行の高さは 1 行分残る。
+		// 文字の高さを 0 にして、隣のコード行の vertical padding と合わせて
+		// 背景の上下に codeBlockInset 分の余白が残るようにする。
+		".cm-codeblock-fence-hidden": {
+			fontSize: "0",
+			lineHeight: "0",
+			paddingTop: `calc((${codeBlockInset} - ${LINE_VERTICAL_PADDING}) / 2)`,
+			paddingBottom: `calc((${codeBlockInset} - ${LINE_VERTICAL_PADDING}) / 2)`,
+		},
+		// 範囲選択の head が潰した fence 行に乗ったとき、キャレットは置換 span の rect から
+		// 描かれるので、span だけ文字サイズを戻して高さ 0 のキャレットにならないようにする。
+		// vertical-align: top が無いと baseline 揃えで行が 15px → 20px (14px 時) に伸びる。
+		".cm-codeblock-fence-hidden > span": {
+			fontSize: `${fontSize}px`,
+			verticalAlign: "top",
 		},
 	});
 }
