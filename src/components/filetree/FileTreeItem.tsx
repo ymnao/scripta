@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
 import { cmdOrCtrl } from "../../lib/keyboard";
-import { toRelativePath } from "../../lib/path";
+import { MD_EXTENSION, mdFileStem, toRelativePath } from "../../lib/path";
 import { useDragStore } from "../../stores/drag";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
@@ -203,10 +203,12 @@ export function FileTreeItem({
 	})();
 
 	if (isRenaming) {
+		const renameStem = mdFileStem(entry);
 		return (
 			<InlineInput
 				depth={depth}
-				defaultValue={entry.name}
+				defaultValue={renameStem ?? entry.name}
+				suffix={renameStem !== null ? MD_EXTENSION : undefined}
 				icon={entry.isDirectory ? "folder" : "file"}
 				emoji={entryEmoji}
 				onConfirm={onRenameConfirm}
@@ -288,6 +290,7 @@ export function FileTreeItem({
 								<InlineInput
 									depth={depth + 1}
 									icon={creating.type === "file" ? "file" : "folder"}
+									suffix={creating.type === "file" ? MD_EXTENSION : undefined}
 									onConfirm={onCreateConfirm}
 									onCancel={onCreateCancel}
 								/>

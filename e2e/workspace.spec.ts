@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ElectronApiMock } from "./helpers/electron-api-mock";
+import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 test.describe("workspace", () => {
 	test("ワークスペースを開くとファイルツリーが表示される", async ({ page }) => {
@@ -110,6 +110,57 @@ test.describe("workspace", () => {
 		expect(fileCalls).toHaveLength(0);
 
 		await expect(page.getByLabel("my-folder folder")).toBeVisible();
+	});
+
+	test("新しいファイルは入力欄の右に .md が固定表示され、名前に .md を付けて作られる", async ({
+		page,
+	}) => {
+		const mock = new ElectronApiMock(page);
+		await mock.setup({
+			fs: {
+				files: {
+					"/workspace/hello.md": "# Hello",
+				},
+				directories: {
+					"/workspace": [{ name: "hello.md", path: "/workspace/hello.md", isDirectory: false }],
+				},
+			},
+			dialogResult: "/workspace",
+		});
+
+		await page.goto("/");
+		await page.getByLabel("フォルダを開く").click();
+		await expect(page.getByLabel("hello.md file")).toBeVisible();
+
+		await page.getByLabel("hello.md file").click({ button: "right" });
+		await page.getByText("New File").click();
+
+		const input = page.getByRole("textbox", { name: "New file name" });
+		await expect(input).toBeVisible();
+		const suffix = page
+			.getByRole("listitem")
+			.filter({ has: input })
+			.getByText(".md", { exact: true });
+		await expect(suffix).toBeVisible();
+		await expect(input).toHaveAccessibleDescription(".md");
+		const inputBox = await input.boundingBox();
+		const suffixBox = await suffix.boundingBox();
+		if (!inputBox || !suffixBox) throw new Error("入力欄か .md の位置が取れない");
+		expect(suffixBox.x).toBeGreaterThanOrEqual(inputBox.x + inputBox.width);
+
+		await input.fill("memo");
+		await input.press("Enter");
+
+		expect(await mock.getCalls("createFile")).toEqual([["/workspace/memo.md"]]);
+		await expect(page.getByLabel("memo.md file")).toBeVisible();
+		await expect(page.getByRole("tab")).toHaveCount(1);
+		await expect(page.getByRole("tab")).toContainText("memo");
+
+		await page.keyboard.press(`${modKey}+p`);
+		await page.getByLabel("ファイル名で検索").fill("memo");
+		const options = page.getByRole("listbox", { name: "検索結果" }).getByRole("option");
+		await expect(options).toHaveCount(1);
+		await expect(options.nth(0)).toContainText("memo.md");
 	});
 
 	test("ワークスペース未選択時は empty state を表示する", async ({ page }) => {

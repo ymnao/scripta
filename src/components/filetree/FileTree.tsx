@@ -8,7 +8,17 @@ import {
 	showInFolder,
 } from "../../lib/commands";
 import { translateError } from "../../lib/errors";
-import { addTrailingSep, basename, dirname, joinPath, replaceName, SEP_RE } from "../../lib/path";
+import {
+	addTrailingSep,
+	basename,
+	dirname,
+	joinPath,
+	MD_EXTENSION,
+	mdFileStem,
+	mdStem,
+	replaceName,
+	SEP_RE,
+} from "../../lib/path";
 import { getScriptaDir, scriptaDirExists } from "../../lib/scripta-config";
 import { useDragStore } from "../../stores/drag";
 import { useToastStore } from "../../stores/toast";
@@ -46,6 +56,13 @@ function validateName(name: string): string | null {
 	if (SEP_RE.test(name)) return "ファイル名にパス区切り文字は使用できません";
 	if (name === "." || name === "..") return "ファイル名に「.」や「..」は使用できません";
 	return null;
+}
+
+// 検索・バックリンクは小文字の .md しか拾わないので、.MD などで打たれても小文字にそろえる。
+function toMdFileName(name: string): string | null {
+	const stem = mdStem(name);
+	if (stem !== null) return `${stem}${MD_EXTENSION}`;
+	return name.toLowerCase() === MD_EXTENSION ? null : `${name}${MD_EXTENSION}`;
 }
 
 const DRAG_THRESHOLD = 5;
@@ -378,7 +395,17 @@ export function FileTree({
 				setCreating(null);
 				return;
 			}
-			const path = joinPath(creating.parentPath, name);
+			let entryName = name;
+			if (creating.type === "file") {
+				const fileName = toMdFileName(name);
+				if (fileName === null) {
+					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
+					setCreating(null);
+					return;
+				}
+				entryName = fileName;
+			}
+			const path = joinPath(creating.parentPath, entryName);
 			try {
 				if (creating.type === "file") {
 					await createFile(path);
@@ -424,8 +451,31 @@ export function FileTree({
 				setRenamingEntry(null);
 				return;
 			}
+			let entryName = newName;
+			const oldStem = mdFileStem(renamingEntry);
+			if (oldStem !== null) {
+				// 正規化した名前どうしで比べないのは、foo.md.md の欄に出した stem「foo.md」が正規化で
+				// foo.md になり、何も変えずに確定しただけで別名へ rename されるため。
+				if (newName === oldStem) {
+					setRenamingEntry(null);
+					return;
+				}
+				const fileName = toMdFileName(newName);
+				if (fileName === null) {
+					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
+					setRenamingEntry(null);
+					return;
+				}
+				// UPPER.MD の欄に UPPER.md と打っただけでも、大文字小文字だけの rename になり、
+				// 大文字小文字を区別しない macOS では「既に存在する」で失敗するので何もしない。
+				if (fileName === toMdFileName(renamingEntry.name)) {
+					setRenamingEntry(null);
+					return;
+				}
+				entryName = fileName;
+			}
 			const oldPath = renamingEntry.path;
-			const newPath = replaceName(oldPath, newName);
+			const newPath = replaceName(oldPath, entryName);
 
 			if (newPath === oldPath) {
 				setRenamingEntry(null);
@@ -732,6 +782,7 @@ export function FileTree({
 					<InlineInput
 						depth={0}
 						icon={creating.type === "file" ? "file" : "folder"}
+						suffix={creating.type === "file" ? MD_EXTENSION : undefined}
 						onConfirm={handleCreateConfirm}
 						onCancel={handleCreateCancel}
 					/>

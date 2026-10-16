@@ -6,6 +6,8 @@ import {
 	dirname,
 	isNewTabPath,
 	joinPath,
+	mdFileStem,
+	mdStem,
 	replaceName,
 	replacePrefix,
 } from "./path";
@@ -164,5 +166,37 @@ describe("createNewTabPath", () => {
 	it("creates a newtab:// path with the given id", () => {
 		expect(createNewTabPath(1)).toBe("newtab://1");
 		expect(createNewTabPath(99)).toBe("newtab://99");
+	});
+});
+
+describe("mdStem", () => {
+	it("returns the name without .md", () => {
+		expect(mdStem("memo.md")).toBe("memo");
+	});
+
+	it("matches .md case-insensitively and keeps the stem as is", () => {
+		expect(mdStem("Memo.MD")).toBe("Memo");
+	});
+
+	it("returns null for a name without .md", () => {
+		expect(mdStem("memo.txt")).toBeNull();
+	});
+
+	it("returns null when the stem would be empty", () => {
+		expect(mdStem(".md")).toBeNull();
+	});
+
+	it("strips only the last .md", () => {
+		expect(mdStem("foo.md.md")).toBe("foo.md");
+	});
+});
+
+describe("mdFileStem", () => {
+	it("returns the stem of a .md file", () => {
+		expect(mdFileStem({ name: "memo.md", isDirectory: false })).toBe("memo");
+	});
+
+	it("returns null for a directory whose name ends with .md", () => {
+		expect(mdFileStem({ name: "folder.md", isDirectory: true })).toBeNull();
 	});
 });
