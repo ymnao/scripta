@@ -7,6 +7,7 @@ interface InlineInputProps {
 	defaultValue?: string;
 	icon: "file" | "folder";
 	emoji?: string;
+	suffix?: string;
 	onConfirm: (value: string) => void;
 	onCancel: () => void;
 }
@@ -16,6 +17,7 @@ export function InlineInput({
 	defaultValue = "",
 	icon,
 	emoji,
+	suffix,
 	onConfirm,
 	onCancel,
 }: InlineInputProps) {
@@ -83,6 +85,7 @@ export function InlineInput({
 				onBlur={handleConfirm}
 				className="min-w-0 flex-1 rounded border border-border bg-bg-primary px-1 text-sm text-text-primary outline-none focus:border-blue-500"
 			/>
+			{suffix && <span className="shrink-0 text-sm text-text-secondary">{suffix}</span>}
 		</li>
 	);
 }

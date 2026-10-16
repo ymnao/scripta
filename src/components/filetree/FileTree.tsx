@@ -19,7 +19,7 @@ import type { FileEntry } from "../../types/workspace";
 import { Dialog } from "../common/Dialog";
 import { EmojiInputDialog } from "../common/EmojiInputDialog";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { FileTreeItem } from "./FileTreeItem";
+import { FileTreeItem, NEW_FILE_EXTENSION } from "./FileTreeItem";
 import { InlineInput } from "./InlineInput";
 
 interface FileTreeProps {
@@ -46,6 +46,12 @@ function validateName(name: string): string | null {
 	if (SEP_RE.test(name)) return "ファイル名にパス区切り文字は使用できません";
 	if (name === "." || name === "..") return "ファイル名に「.」や「..」は使用できません";
 	return null;
+}
+
+function toNewFileName(name: string): string | null {
+	if (!name.toLowerCase().endsWith(NEW_FILE_EXTENSION)) return `${name}${NEW_FILE_EXTENSION}`;
+	if (name.length === NEW_FILE_EXTENSION.length) return null;
+	return name;
 }
 
 const DRAG_THRESHOLD = 5;
@@ -378,7 +384,17 @@ export function FileTree({
 				setCreating(null);
 				return;
 			}
-			const path = joinPath(creating.parentPath, name);
+			let entryName = name;
+			if (creating.type === "file") {
+				const fileName = toNewFileName(name);
+				if (fileName === null) {
+					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
+					setCreating(null);
+					return;
+				}
+				entryName = fileName;
+			}
+			const path = joinPath(creating.parentPath, entryName);
 			try {
 				if (creating.type === "file") {
 					await createFile(path);
@@ -732,6 +748,7 @@ export function FileTree({
 					<InlineInput
 						depth={0}
 						icon={creating.type === "file" ? "file" : "folder"}
+						suffix={creating.type === "file" ? NEW_FILE_EXTENSION : undefined}
 						onConfirm={handleCreateConfirm}
 						onCancel={handleCreateCancel}
 					/>

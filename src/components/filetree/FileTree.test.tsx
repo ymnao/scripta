@@ -9,6 +9,7 @@ import {
 	renameEntry,
 } from "../../lib/commands";
 import { useDragStore } from "../../stores/drag";
+import { useToastStore } from "../../stores/toast";
 import { useWorkspaceStore } from "../../stores/workspace";
 
 vi.mock("../../lib/commands", () => ({
@@ -1043,6 +1044,139 @@ describe("FileTree", () => {
 			expect(document.activeElement).toBe(items[items.length - 1]);
 			fireEvent.keyDown(items[items.length - 1], { key: "Home" });
 			expect(document.activeElement).toBe(items[0]);
+		});
+	});
+	describe("new file extension", () => {
+		beforeEach(() => {
+			useToastStore.setState({ toasts: [] });
+		});
+
+		async function openMenuOn(name: string, item: "New File" | "New Folder" | "Rename") {
+			await waitFor(() => {
+				expect(screen.getByText(name)).toBeInTheDocument();
+			});
+			const button = screen.getByText(name).closest("button") as HTMLElement;
+			await act(async () => {
+				fireEvent.contextMenu(button);
+			});
+			await userEvent.click(screen.getByText(item));
+		}
+
+		async function typeAndConfirm(text: string) {
+			const input = screen.getByRole("textbox");
+			await userEvent.clear(input);
+			await userEvent.type(input, text);
+			await act(async () => {
+				fireEvent.keyDown(input, { key: "Enter" });
+			});
+		}
+
+		it("appends .md to a name without an extension and opens the file", async () => {
+			const onFileSelect = vi.fn();
+			render(
+				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
+			);
+			await openMenuOn("hello.md", "New File");
+			await typeAndConfirm("memo");
+
+			await waitFor(() => {
+				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.md");
+			});
+			expect(onFileSelect).toHaveBeenCalledWith("/workspace/memo.md");
+		});
+
+		it("does not append .md when the name already ends with .md", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("hello.md", "New File");
+			await typeAndConfirm("memo.md");
+
+			await waitFor(() => {
+				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.md");
+			});
+		});
+
+		it("does not append .md when the name ends with .MD", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("hello.md", "New File");
+			await typeAndConfirm("memo.MD");
+
+			await waitFor(() => {
+				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.MD");
+			});
+		});
+
+		it("appends .md after another extension", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("hello.md", "New File");
+			await typeAndConfirm("memo.txt");
+
+			await waitFor(() => {
+				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/memo.txt.md");
+			});
+		});
+
+		it("warns and creates nothing when the name is only .md", async () => {
+			const onFileSelect = vi.fn();
+			render(
+				<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={onFileSelect} />,
+			);
+			await openMenuOn("hello.md", "New File");
+			await typeAndConfirm(".MD");
+
+			expect(useToastStore.getState().toasts).toEqual([
+				expect.objectContaining({ type: "warning", message: "ファイル名を入力してください" }),
+			]);
+			expect(mockedCreateFile).not.toHaveBeenCalled();
+			expect(onFileSelect).not.toHaveBeenCalled();
+			expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		});
+
+		it("shows a fixed .md suffix next to the input when creating a file at the root", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("hello.md", "New File");
+
+			const input = screen.getByRole("textbox", { name: "New file name" });
+			expect(input.nextElementSibling).toHaveTextContent(/^\.md$/);
+		});
+
+		it("shows a fixed .md suffix and appends .md when creating a file inside a folder", async () => {
+			mockedListDirectory.mockResolvedValueOnce(mockEntries).mockResolvedValueOnce([]);
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("docs", "New File");
+
+			const input = await screen.findByRole("textbox", { name: "New file name" });
+			expect(input.nextElementSibling).toHaveTextContent(/^\.md$/);
+
+			await typeAndConfirm("memo");
+			await waitFor(() => {
+				expect(mockedCreateFile).toHaveBeenCalledWith("/workspace/docs/memo.md");
+			});
+		});
+
+		it("shows no suffix and appends nothing when creating a folder", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("hello.md", "New Folder");
+
+			const input = screen.getByRole("textbox", { name: "New folder name" });
+			expect(input.nextElementSibling).toBeNull();
+
+			await typeAndConfirm("memo");
+			await waitFor(() => {
+				expect(mockedCreateDirectory).toHaveBeenCalledWith("/workspace/memo");
+			});
+		});
+
+		it("shows no suffix and appends nothing when renaming a file", async () => {
+			render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+			await openMenuOn("hello.md", "Rename");
+
+			const input = screen.getByRole("textbox", { name: "Rename" });
+			expect(input.nextElementSibling).toBeNull();
+
+			await typeAndConfirm("renamed");
+			await waitFor(() => {
+				expect(mockedRenameEntry).toHaveBeenCalledWith("/workspace/hello.md", "/workspace/renamed");
+			});
 		});
 	});
 });

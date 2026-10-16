@@ -10,6 +10,8 @@ import { InlineInput } from "./InlineInput";
 
 const DRAG_EXPAND_DELAY = 500;
 
+export const NEW_FILE_EXTENSION = ".md";
+
 interface CreatingState {
 	parentPath: string;
 	type: "file" | "folder";
@@ -288,6 +290,7 @@ export function FileTreeItem({
 								<InlineInput
 									depth={depth + 1}
 									icon={creating.type === "file" ? "file" : "folder"}
+									suffix={creating.type === "file" ? NEW_FILE_EXTENSION : undefined}
 									onConfirm={onCreateConfirm}
 									onCancel={onCreateCancel}
 								/>
