@@ -466,6 +466,12 @@ export function FileTree({
 					setRenamingEntry(null);
 					return;
 				}
+				// UPPER.MD の欄に UPPER.md と打っただけでも、大文字小文字だけの rename になり、
+				// 大文字小文字を区別しない macOS では「既に存在する」で失敗するので何もしない。
+				if (fileName === toMdFileName(renamingEntry.name)) {
+					setRenamingEntry(null);
+					return;
+				}
 				entryName = fileName;
 			}
 			const oldPath = renamingEntry.path;

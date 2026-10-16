@@ -1217,6 +1217,21 @@ describe("FileTree", () => {
 				expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 			});
 
+			it.each(["UPPER.md", "UPPER.MD"])(
+				"does nothing when %s is typed for UPPER.MD",
+				async (typed) => {
+					render(
+						<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />,
+					);
+					await openMenuOn("UPPER.MD", "Rename");
+					await typeAndConfirm(typed);
+
+					expect(mockedRenameEntry).not.toHaveBeenCalled();
+					expect(useToastStore.getState().toasts).toEqual([]);
+					expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+				},
+			);
+
 			it("does nothing when foo.md.md is confirmed without changing its stem", async () => {
 				render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
 				await openMenuOn("foo.md.md", "Rename");
@@ -1228,6 +1243,7 @@ describe("FileTree", () => {
 				});
 
 				expect(mockedRenameEntry).not.toHaveBeenCalled();
+				expect(useToastStore.getState().toasts).toEqual([]);
 				expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 			});
 
