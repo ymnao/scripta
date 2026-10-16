@@ -6,6 +6,7 @@ import {
 	dirname,
 	isNewTabPath,
 	joinPath,
+	mdFileStem,
 	mdStem,
 	replaceName,
 	replacePrefix,
@@ -183,5 +184,19 @@ describe("mdStem", () => {
 
 	it("returns null when the stem would be empty", () => {
 		expect(mdStem(".md")).toBeNull();
+	});
+
+	it("strips only the last .md", () => {
+		expect(mdStem("foo.md.md")).toBe("foo.md");
+	});
+});
+
+describe("mdFileStem", () => {
+	it("returns the stem of a .md file", () => {
+		expect(mdFileStem({ name: "memo.md", isDirectory: false })).toBe("memo");
+	});
+
+	it("returns null for a directory whose name ends with .md", () => {
+		expect(mdFileStem({ name: "folder.md", isDirectory: true })).toBeNull();
 	});
 });

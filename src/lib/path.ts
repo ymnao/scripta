@@ -17,6 +17,10 @@ export function mdStem(name: string): string | null {
 	return name.slice(0, -MD_EXTENSION.length) || null;
 }
 
+export function mdFileStem(entry: { name: string; isDirectory: boolean }): string | null {
+	return entry.isDirectory ? null : mdStem(entry.name);
+}
+
 function getSep(path: string): string {
 	const match = path.match(SEP_RE);
 	return match ? match[0] : "/";

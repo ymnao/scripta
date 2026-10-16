@@ -14,6 +14,7 @@ import {
 	dirname,
 	joinPath,
 	MD_EXTENSION,
+	mdFileStem,
 	mdStem,
 	replaceName,
 	SEP_RE,
@@ -59,8 +60,9 @@ function validateName(name: string): string | null {
 
 // 検索・バックリンクは小文字の .md しか拾わないので、.MD などで打たれても小文字にそろえる。
 function toMdFileName(name: string): string | null {
-	if (name.toLowerCase() === MD_EXTENSION) return null;
-	return `${mdStem(name) ?? name}${MD_EXTENSION}`;
+	const stem = mdStem(name);
+	if (stem !== null) return `${stem}${MD_EXTENSION}`;
+	return name.toLowerCase() === MD_EXTENSION ? null : `${name}${MD_EXTENSION}`;
 }
 
 const DRAG_THRESHOLD = 5;
@@ -450,16 +452,17 @@ export function FileTree({
 				return;
 			}
 			let entryName = newName;
-			if (!renamingEntry.isDirectory && mdStem(renamingEntry.name) !== null) {
-				const fileName = toMdFileName(newName);
-				if (fileName === null) {
-					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
+			const oldStem = mdFileStem(renamingEntry);
+			if (oldStem !== null) {
+				// 正規化した名前どうしで比べないのは、foo.md.md の欄に出した stem「foo.md」が正規化で
+				// foo.md になり、何も変えずに確定しただけで別名へ rename されるため。
+				if (newName === oldStem) {
 					setRenamingEntry(null);
 					return;
 				}
-				// 正規化前の名前と比べないのは、foo.MD を何も変えずに確定しただけで大文字小文字だけの
-				// rename になり、大文字小文字を区別しない macOS では「既に存在する」で失敗するため。
-				if (fileName === toMdFileName(renamingEntry.name)) {
+				const fileName = toMdFileName(newName);
+				if (fileName === null) {
+					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
 					setRenamingEntry(null);
 					return;
 				}

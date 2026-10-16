@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDirectory } from "../../lib/commands";
 import { getFileIcon } from "../../lib/file-icon";
 import { cmdOrCtrl } from "../../lib/keyboard";
-import { MD_EXTENSION, mdStem, toRelativePath } from "../../lib/path";
+import { MD_EXTENSION, mdFileStem, toRelativePath } from "../../lib/path";
 import { useDragStore } from "../../stores/drag";
 import type { FileEntry } from "../../types/workspace";
 import { InlineInput } from "./InlineInput";
@@ -203,7 +203,7 @@ export function FileTreeItem({
 	})();
 
 	if (isRenaming) {
-		const renameStem = entry.isDirectory ? null : mdStem(entry.name);
+		const renameStem = mdFileStem(entry);
 		return (
 			<InlineInput
 				depth={depth}

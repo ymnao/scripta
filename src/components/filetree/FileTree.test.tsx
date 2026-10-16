@@ -1147,6 +1147,7 @@ describe("FileTree", () => {
 				{ name: "folder.md", path: "/workspace/folder.md", isDirectory: true },
 				{ name: "hello.md", path: "/workspace/hello.md", isDirectory: false },
 				{ name: "UPPER.MD", path: "/workspace/UPPER.MD", isDirectory: false },
+				{ name: "foo.md.md", path: "/workspace/foo.md.md", isDirectory: false },
 				{ name: "image.png", path: "/workspace/image.png", isDirectory: false },
 				{ name: "memo", path: "/workspace/memo", isDirectory: false },
 			];
@@ -1213,6 +1214,20 @@ describe("FileTree", () => {
 
 				expect(mockedRenameEntry).not.toHaveBeenCalled();
 				expect(useToastStore.getState().toasts).toEqual([]);
+				expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+			});
+
+			it("does nothing when foo.md.md is confirmed without changing its stem", async () => {
+				render(<FileTree workspacePath="/workspace" selectedPath={null} onFileSelect={() => {}} />);
+				await openMenuOn("foo.md.md", "Rename");
+
+				const input = screen.getByRole("textbox", { name: "Rename" });
+				expect(input).toHaveValue("foo.md");
+				await act(async () => {
+					fireEvent.blur(input);
+				});
+
+				expect(mockedRenameEntry).not.toHaveBeenCalled();
 				expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 			});
 
