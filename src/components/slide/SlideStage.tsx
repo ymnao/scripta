@@ -188,24 +188,22 @@ export function SlideFrame({
 				)}
 			</div>
 			{overflowing && (
-				<>
-					<div
-						className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-red-500"
-						data-testid="slide-overflow-bar"
-					>
-						<span id={overflowIndicatorId} className="sr-only">
-							{SLIDE_OVERFLOW_MESSAGE}
-						</span>
-					</div>
-					{overflowIndicator === "badge" && (
-						<span
-							className="pointer-events-none absolute right-2 bottom-3 rounded bg-red-600 px-2 py-0.5 text-xs text-white"
-							aria-hidden="true"
-						>
-							収まっていません
-						</span>
-					)}
-				</>
+				<div
+					className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-red-500"
+					data-testid="slide-overflow-bar"
+				>
+					<span id={overflowIndicatorId} className="sr-only">
+						{SLIDE_OVERFLOW_MESSAGE}
+					</span>
+				</div>
+			)}
+			{overflowing && overflowIndicator === "badge" && (
+				<span
+					className="pointer-events-none absolute right-2 bottom-3 rounded bg-red-600 px-2 py-0.5 text-xs text-white"
+					aria-hidden="true"
+				>
+					収まっていません
+				</span>
 			)}
 		</div>
 	);
