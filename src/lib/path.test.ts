@@ -6,6 +6,7 @@ import {
 	dirname,
 	isNewTabPath,
 	joinPath,
+	mdStem,
 	replaceName,
 	replacePrefix,
 } from "./path";
@@ -164,5 +165,23 @@ describe("createNewTabPath", () => {
 	it("creates a newtab:// path with the given id", () => {
 		expect(createNewTabPath(1)).toBe("newtab://1");
 		expect(createNewTabPath(99)).toBe("newtab://99");
+	});
+});
+
+describe("mdStem", () => {
+	it("returns the name without .md", () => {
+		expect(mdStem("memo.md")).toBe("memo");
+	});
+
+	it("matches .md case-insensitively and keeps the stem as is", () => {
+		expect(mdStem("Memo.MD")).toBe("Memo");
+	});
+
+	it("returns null for a name without .md", () => {
+		expect(mdStem("memo.txt")).toBeNull();
+	});
+
+	it("returns null when the stem would be empty", () => {
+		expect(mdStem(".md")).toBeNull();
 	});
 });

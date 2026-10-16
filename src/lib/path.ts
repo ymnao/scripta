@@ -12,6 +12,11 @@ export const SEP_RE = /[\\/]/;
 
 export const MD_EXTENSION = ".md";
 
+export function mdStem(name: string): string | null {
+	if (!name.toLowerCase().endsWith(MD_EXTENSION)) return null;
+	return name.slice(0, -MD_EXTENSION.length) || null;
+}
+
 function getSep(path: string): string {
 	const match = path.match(SEP_RE);
 	return match ? match[0] : "/";

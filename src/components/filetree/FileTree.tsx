@@ -14,6 +14,7 @@ import {
 	dirname,
 	joinPath,
 	MD_EXTENSION,
+	mdStem,
 	replaceName,
 	SEP_RE,
 } from "../../lib/path";
@@ -57,11 +58,9 @@ function validateName(name: string): string | null {
 }
 
 // 検索・バックリンクは小文字の .md しか拾わないので、.MD などで打たれても小文字にそろえる。
-function toNewFileName(name: string): string | null {
-	const stem = name.toLowerCase().endsWith(MD_EXTENSION)
-		? name.slice(0, -MD_EXTENSION.length)
-		: name;
-	return stem ? `${stem}${MD_EXTENSION}` : null;
+function toMdFileName(name: string): string | null {
+	if (name.toLowerCase() === MD_EXTENSION) return null;
+	return `${mdStem(name) ?? name}${MD_EXTENSION}`;
 }
 
 const DRAG_THRESHOLD = 5;
@@ -396,7 +395,7 @@ export function FileTree({
 			}
 			let entryName = name;
 			if (creating.type === "file") {
-				const fileName = toNewFileName(name);
+				const fileName = toMdFileName(name);
 				if (fileName === null) {
 					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
 					setCreating(null);
@@ -450,8 +449,24 @@ export function FileTree({
 				setRenamingEntry(null);
 				return;
 			}
+			let entryName = newName;
+			if (!renamingEntry.isDirectory && mdStem(renamingEntry.name) !== null) {
+				const fileName = toMdFileName(newName);
+				if (fileName === null) {
+					useToastStore.getState().addToast("warning", "ファイル名を入力してください");
+					setRenamingEntry(null);
+					return;
+				}
+				// 正規化前の名前と比べないのは、foo.MD を何も変えずに確定しただけで大文字小文字だけの
+				// rename になり、大文字小文字を区別しない macOS では「既に存在する」で失敗するため。
+				if (fileName === toMdFileName(renamingEntry.name)) {
+					setRenamingEntry(null);
+					return;
+				}
+				entryName = fileName;
+			}
 			const oldPath = renamingEntry.path;
-			const newPath = replaceName(oldPath, newName);
+			const newPath = replaceName(oldPath, entryName);
 
 			if (newPath === oldPath) {
 				setRenamingEntry(null);
