@@ -56,10 +56,12 @@ function validateName(name: string): string | null {
 	return null;
 }
 
+// 検索・バックリンクは小文字の .md しか拾わないので、.MD などで打たれても小文字にそろえる。
 function toNewFileName(name: string): string | null {
-	if (!name.toLowerCase().endsWith(MD_EXTENSION)) return `${name}${MD_EXTENSION}`;
-	if (name.length === MD_EXTENSION.length) return null;
-	return name;
+	const stem = name.toLowerCase().endsWith(MD_EXTENSION)
+		? name.slice(0, -MD_EXTENSION.length)
+		: name;
+	return stem ? `${stem}${MD_EXTENSION}` : null;
 }
 
 const DRAG_THRESHOLD = 5;

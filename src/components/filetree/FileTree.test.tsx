@@ -1074,7 +1074,7 @@ describe("FileTree", () => {
 		it.each([
 			["memo", "/workspace/memo.md"],
 			["memo.md", "/workspace/memo.md"],
-			["memo.MD", "/workspace/memo.MD"],
+			["memo.MD", "/workspace/memo.md"],
 			["memo.txt", "/workspace/memo.txt.md"],
 		])("creates %s as %s and opens it", async (typed, expectedPath) => {
 			const onFileSelect = vi.fn();

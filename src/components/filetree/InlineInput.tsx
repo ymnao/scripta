@@ -1,5 +1,5 @@
 import { File, Folder } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { isIMEComposing } from "../../lib/ime";
 
 interface InlineInputProps {
@@ -24,6 +24,7 @@ export function InlineInput({
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [value, setValue] = useState(defaultValue);
 	const settledRef = useRef(false);
+	const suffixId = useId();
 
 	useEffect(() => {
 		const el = inputRef.current;
@@ -70,6 +71,7 @@ export function InlineInput({
 				ref={inputRef}
 				type="text"
 				aria-label={defaultValue ? "Rename" : `New ${icon} name`}
+				aria-describedby={suffix ? suffixId : undefined}
 				value={value}
 				onChange={(e) => setValue(e.target.value)}
 				onKeyDown={(e) => {
@@ -85,7 +87,11 @@ export function InlineInput({
 				onBlur={handleConfirm}
 				className="min-w-0 flex-1 rounded border border-border bg-bg-primary px-1 text-sm text-text-primary outline-none focus:border-blue-500"
 			/>
-			{suffix && <span className="shrink-0 text-sm text-text-secondary">{suffix}</span>}
+			{suffix && (
+				<span id={suffixId} className="shrink-0 text-sm text-text-secondary">
+					{suffix}
+				</span>
+			)}
 		</li>
 	);
 }

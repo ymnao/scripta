@@ -142,9 +142,11 @@ test.describe("workspace", () => {
 			.filter({ has: input })
 			.getByText(".md", { exact: true });
 		await expect(suffix).toBeVisible();
+		await expect(input).toHaveAccessibleDescription(".md");
 		const inputBox = await input.boundingBox();
 		const suffixBox = await suffix.boundingBox();
-		expect(suffixBox?.x).toBeGreaterThanOrEqual((inputBox?.x ?? 0) + (inputBox?.width ?? 0));
+		if (!inputBox || !suffixBox) throw new Error("入力欄か .md の位置が取れない");
+		expect(suffixBox.x).toBeGreaterThanOrEqual(inputBox.x + inputBox.width);
 
 		await input.fill("memo");
 		await input.press("Enter");
