@@ -263,6 +263,7 @@ const overflowSlides = [
 	`# Tall\n\n${Array.from({ length: 12 }, (_, i) => `paragraph ${i + 1}`).join("\n\n")}`,
 	`# Wide\n\n${"x".repeat(200)}`,
 	"# Mermaid\n\n```mermaid\ngraph TD\nA-->B-->C-->D-->E-->F-->G-->H\n```",
+	'# Float\n\n<div style="float:left;height:900px;width:10px"></div>\n\nshort',
 ];
 
 const overflowFs = {
@@ -281,7 +282,7 @@ test.describe("slide overflow warning", () => {
 		await mock.setup({ fs: overflowFs, dialogResult: "/workspace" });
 		await openSlideFile(page);
 		await page.keyboard.press(`${modKey}+Shift+s`);
-		await expect(page.getByText("1 / 4")).toBeVisible();
+		await expect(page.getByText("1 / 5")).toBeVisible();
 	});
 
 	test("収まっているスライドには、プレビューにもサムネイルにも印を出さない", async ({ page }) => {
@@ -297,7 +298,7 @@ test.describe("slide overflow warning", () => {
 		await expect(thumbnail(page, 2)).toHaveAccessibleDescription("内容が枠に収まっていません");
 
 		await thumbnail(page, 2).click();
-		await expect(page.getByText("2 / 4")).toBeVisible();
+		await expect(page.getByText("2 / 5")).toBeVisible();
 		await expect(previewPane(page).getByTestId("slide-overflow-bar")).toBeVisible();
 		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
 	});
@@ -306,16 +307,20 @@ test.describe("slide overflow warning", () => {
 		await expect(thumbnail(page, 3).getByTestId("slide-overflow-bar")).toBeVisible();
 
 		await thumbnail(page, 3).click();
-		await expect(page.getByText("3 / 4")).toBeVisible();
+		await expect(page.getByText("3 / 5")).toBeVisible();
 		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
 	});
 
 	test("mermaid の描画で高さが伸びたら印を出す", async ({ page }) => {
 		await thumbnail(page, 4).click();
-		await expect(page.getByText("4 / 4")).toBeVisible();
+		await expect(page.getByText("4 / 5")).toBeVisible();
 		await expect(previewPane(page).locator(".mermaid-diagram svg")).toBeVisible();
 		await expect(previewPane(page).getByText("収まっていません", { exact: true })).toBeVisible();
 		await expect(thumbnail(page, 4).getByTestId("slide-overflow-bar")).toBeVisible();
+	});
+
+	test("本文の高さを伸ばさない float の子がはみ出しても印を出す", async ({ page }) => {
+		await expect(thumbnail(page, 5).getByTestId("slide-overflow-bar")).toBeVisible();
 	});
 
 	test("スライドショーには、はみ出したスライドでも印を出さない", async ({ page }) => {

@@ -76,16 +76,19 @@ const SLIDE_CONTENT_BOTTOM = SLIDE_LOGICAL_HEIGHT - SLIDE_LOGICAL_PADDING_PX;
 
 /**
  * `.slide-preview-content` が padding の内側に収まっていないかを返す。
- * offset* / clientWidth は transform 前の論理 px なので、表示倍率に依らない。
- * offsetHeight だけで比べないのは、先頭の子の margin-top (`.katex-display` の 1em 等) が
+ * offset* / scroll* / clientWidth は transform 前の論理 px なので、表示倍率に依らない。
+ * 高さに offsetHeight を使わないのは、raw HTML の float の子 (`<img align="left">` 等) が
+ * 要素の高さを伸ばさずに下へ突き抜けるため。scrollHeight はその分を含み、それ以外では
+ * offsetHeight と同じ値になる。
+ * 高さだけで比べないのは、先頭の子の margin-top (`.katex-display` の 1em 等) が
  * margin collapse で本文要素の外に出て、要素ごと下へ押し下げるため。offsetParent は
  * absolute の `.slide-preview` なので、offsetTop がその分を含む。
- * 最後の子の margin-bottom は同じ collapse で offsetHeight に入らない。
+ * 最後の子の margin-bottom は同じ collapse で高さに入らない。
  * `pre` は自身が横スクロールするので、中の長い行は scrollWidth に出ない (対象外)。
  */
 export function isSlideContentOverflowing(content: HTMLElement): boolean {
 	return (
-		content.offsetTop + content.offsetHeight > SLIDE_CONTENT_BOTTOM ||
+		content.offsetTop + content.scrollHeight > SLIDE_CONTENT_BOTTOM ||
 		content.scrollWidth > content.clientWidth
 	);
 }

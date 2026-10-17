@@ -16,7 +16,7 @@ function stubContentSize({
 	clientWidth?: number;
 }) {
 	vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockReturnValue(top);
-	vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
+	vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(height);
 	vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
 	vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
 }
