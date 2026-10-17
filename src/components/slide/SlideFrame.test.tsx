@@ -3,15 +3,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isSlideContentOverflowing, SLIDE_OVERFLOW_MESSAGE, SlideFrame } from "./SlideStage";
 
 // jsdom には layout が無いので、本文要素の寸法を prototype の getter で与える。
+// offsetTop の既定 64 は padding だけで押し下げられた位置 (先頭の子に margin-top が無いとき)。
 function stubContentSize({
 	height,
+	top = 64,
 	scrollWidth = 1152,
 	clientWidth = 1152,
 }: {
 	height: number;
+	top?: number;
 	scrollWidth?: number;
 	clientWidth?: number;
 }) {
+	vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockReturnValue(top);
 	vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
 	vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
 	vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
@@ -33,6 +37,17 @@ describe("isSlideContentOverflowing", () => {
 	it("高さが 593px ならはみ出している", () => {
 		stubContentSize({ height: 593 });
 		expect(isSlideContentOverflowing(el())).toBe(true);
+	});
+
+	it("先頭の子の margin-top で押し下げられた分も、下の余白に食い込めばはみ出している", () => {
+		// `$$` で始まるスライドは .katex-display の 1em (28px) が collapse して要素の外に出る
+		stubContentSize({ height: 565, top: 64 + 28 });
+		expect(isSlideContentOverflowing(el())).toBe(true);
+	});
+
+	it("押し下げられても下の余白の手前で終われば収まっている", () => {
+		stubContentSize({ height: 564, top: 64 + 28 });
+		expect(isSlideContentOverflowing(el())).toBe(false);
 	});
 
 	it("横幅が本文領域を超えたらはみ出している", () => {
