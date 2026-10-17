@@ -203,6 +203,8 @@ export function AppLayout() {
 
 	const {
 		loadedDoc,
+		remountSnapshot,
+		carryEditorAcrossRemount,
 		editorKey,
 		editorViewEpoch,
 		isNewTab,
@@ -541,6 +543,12 @@ export function AppLayout() {
 		}
 	}, [activeTabPath]);
 
+	// SlideView と MarkdownEditor は型が違うので、切り替えるとエディタが remount される。
+	const toggleSlideView = useCallback(() => {
+		carryEditorAcrossRemount();
+		setSlideViewActive((prev) => !prev);
+	}, [carryEditorAcrossRemount]);
+
 	// F5 で発表モードを開く。SlideView と独立に、通常エディタからも起動できる。
 	// slides を snapshot して overlay に渡す (mount 中 markdown 変更を反映しない仕様)。
 	const startSlideShow = useCallback(() => {
@@ -569,7 +577,7 @@ export function AppLayout() {
 			handleCloseTab,
 			setSidebarVisible,
 			setSidebarPanel,
-			setSlideViewActive,
+			toggleSlideView,
 			handleExport,
 			searchInputRef,
 			editorViewRef,
@@ -606,6 +614,8 @@ export function AppLayout() {
 		goToLine,
 		onGoToLineDone: handleGoToLineDone,
 		onStatistics: handleStatistics,
+		snapshotHandleRef: markdownEditorHandleRef,
+		initialSnapshot: remountSnapshot,
 	};
 
 	return (
@@ -647,11 +657,7 @@ export function AppLayout() {
 						) : slideViewActive ? (
 							<SlideView key={editorKey} {...editorProps} />
 						) : (
-							<MarkdownEditor
-								key={editorKey}
-								{...editorProps}
-								snapshotHandleRef={markdownEditorHandleRef}
-							/>
+							<MarkdownEditor key={editorKey} {...editorProps} />
 						)
 					) : (
 						<NewTabContent
@@ -713,11 +719,7 @@ export function AppLayout() {
 				onGitSync={manualSync}
 				onOpenConflictResolver={openGitConflictResolver}
 				gitReady={gitReady}
-				onToggleSlideView={
-					activeTabPath && !isNewTab && !editorError
-						? () => setSlideViewActive((prev) => !prev)
-						: undefined
-				}
+				onToggleSlideView={activeTabPath && !isNewTab && !editorError ? toggleSlideView : undefined}
 				slideViewActive={slideViewActive}
 				onToggleScratchpad={workspacePath ? toggleScratchpad : undefined}
 				scratchpadOpen={scratchpadOpen}

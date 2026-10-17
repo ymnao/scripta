@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForSaved, waitForUnsaved } from "./helpers/assertions";
 import { ElectronApiMock, modKey } from "./helpers/electron-api-mock";
 
 const slideContent =
@@ -141,6 +142,108 @@ test.describe("slide view", () => {
 		await page.keyboard.type("\n\n---\n\n# Slide 4");
 
 		await expect(page.getByText("4 / 4")).toBeVisible();
+	});
+
+	test.describe("自動保存の後に切り替えても編集が残る", () => {
+		// 通常エディタで "# Slide 1" を "# Slide 1 EDITED" にして、自動保存まで待つ
+		async function editFirstSlideAndWaitSaved(page: import("@playwright/test").Page) {
+			const editor = await openSlideFile(page);
+			await editor.click();
+			await page.keyboard.press(`${modKey}+Home`);
+			await page.keyboard.press("End");
+			await page.keyboard.type(" EDITED");
+			await waitForUnsaved(page);
+			await waitForSaved(page, 5000);
+			return editor;
+		}
+
+		test("スライドビューのエディタとプレビューに編集が残る", async ({ page }) => {
+			const mock = new ElectronApiMock(page);
+			await mock.setup({ fs, dialogResult: "/workspace" });
+
+			const editor = await editFirstSlideAndWaitSaved(page);
+			await page.keyboard.press(`${modKey}+Shift+s`);
+
+			await expect(page.getByText("1 / 3")).toBeVisible();
+			await expect(editor).toContainText("Slide 1 EDITED");
+			const preview = page.locator('[data-testid="slide-preview-pane"] .slide-preview-content');
+			await expect(preview.getByText("Slide 1 EDITED")).toBeVisible();
+		});
+
+		test("スライドビューから戻した後も編集が残る", async ({ page }) => {
+			const mock = new ElectronApiMock(page);
+			await mock.setup({ fs, dialogResult: "/workspace" });
+
+			const editor = await editFirstSlideAndWaitSaved(page);
+			await page.keyboard.press(`${modKey}+Shift+s`);
+			await expect(page.getByText("1 / 3")).toBeVisible();
+			await page.keyboard.press(`${modKey}+Shift+s`);
+
+			await expect(page.getByText("1 / 3")).not.toBeVisible();
+			await expect(editor).toContainText("Slide 1 EDITED");
+		});
+
+		test("切り替えた後の編集を保存しても先の編集がファイルから消えない", async ({ page }) => {
+			const mock = new ElectronApiMock(page);
+			await mock.setup({ fs, dialogResult: "/workspace" });
+
+			await editFirstSlideAndWaitSaved(page);
+			await page.keyboard.press(`${modKey}+Shift+s`);
+			await expect(page.getByText("1 / 3")).toBeVisible();
+
+			await focusEditor(page);
+			await page.keyboard.press(`${modKey}+End`);
+			await page.keyboard.type(" AFTER");
+			await waitForUnsaved(page);
+			await waitForSaved(page, 5000);
+
+			const writes = await mock.getCalls("writeFile");
+			const lastWrite = writes[writes.length - 1];
+			expect(lastWrite[0]).toBe("/workspace/slides.md");
+			expect(lastWrite[1]).toContain("# Slide 1 EDITED");
+			expect(lastWrite[1]).toContain("# Slide 3 AFTER");
+		});
+
+		test("スライドビューへ切り替えた後もカーソル位置と undo 履歴を引き継ぐ", async ({ page }) => {
+			const mock = new ElectronApiMock(page);
+			await mock.setup({ fs, dialogResult: "/workspace" });
+
+			const editor = await openSlideFile(page);
+			await editor.click();
+			await page.keyboard.press(`${modKey}+End`);
+			await page.keyboard.type(" TAIL");
+			await waitForUnsaved(page);
+			await waitForSaved(page, 5000);
+
+			await page.keyboard.press(`${modKey}+Shift+s`);
+			await expect(page.getByText("3 / 3")).toBeVisible();
+
+			await focusEditor(page);
+			await page.keyboard.press(`${modKey}+z`);
+			await expect(editor).not.toContainText("TAIL");
+			await expect(editor).toContainText("Slide 3");
+		});
+
+		test("スライドビューから戻した後も undo 履歴を引き継ぐ", async ({ page }) => {
+			const mock = new ElectronApiMock(page);
+			await mock.setup({ fs, dialogResult: "/workspace" });
+
+			const editor = await openSlideFile(page);
+			await page.keyboard.press(`${modKey}+Shift+s`);
+			await expect(page.getByText("1 / 3")).toBeVisible();
+			await focusEditor(page);
+			await page.keyboard.press(`${modKey}+End`);
+			await page.keyboard.type(" IN_SLIDE");
+			await expect(editor).toContainText("Slide 3 IN_SLIDE");
+
+			await page.keyboard.press(`${modKey}+Shift+s`);
+			await expect(page.getByText("3 / 3")).not.toBeVisible();
+			await expect(editor).toContainText("Slide 3 IN_SLIDE");
+
+			await focusEditor(page);
+			await page.keyboard.press(`${modKey}+z`);
+			await expect(editor).not.toContainText("IN_SLIDE");
+		});
 	});
 
 	test("ヘルプダイアログにスライドビューのショートカットが記載されている", async ({ page }) => {

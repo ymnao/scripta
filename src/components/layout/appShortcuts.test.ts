@@ -29,7 +29,7 @@ function makeDeps(overrides: Partial<AppShortcutDeps> = {}): AppShortcutDeps {
 		handleCloseTab: vi.fn(async () => {}),
 		setSidebarVisible: vi.fn(),
 		setSidebarPanel: vi.fn(),
-		setSlideViewActive: vi.fn(),
+		toggleSlideView: vi.fn(),
 		handleExport: vi.fn(),
 		searchInputRef: { current: null },
 		// editor がある状態。未 focus / 未 mount 版は個別テストで差し替える
@@ -341,20 +341,20 @@ describe("buildAppShortcuts の run 配線", () => {
 		expect(applyUpdater(updater, panel)).toBe("files");
 	});
 
-	it("toggle-slide-view は通常タブでのみスライド表示を反転する", () => {
+	it("toggle-slide-view は通常タブでのみスライド表示を切り替える", () => {
 		const deps = makeDeps();
 		run(deps, "toggle-slide-view");
-		expectToggle(vi.mocked(deps.setSlideViewActive).mock.calls[0][0]);
+		expect(deps.toggleSlideView).toHaveBeenCalledTimes(1);
 
 		useWorkspaceStore.setState({ activeTabPath: "newtab://1" });
 		const onNewTab = makeDeps();
 		run(onNewTab, "toggle-slide-view");
-		expect(onNewTab.setSlideViewActive).not.toHaveBeenCalled();
+		expect(onNewTab.toggleSlideView).not.toHaveBeenCalled();
 
 		useWorkspaceStore.setState({ activeTabPath: null });
 		const noTab = makeDeps();
 		run(noTab, "toggle-slide-view");
-		expect(noTab.setSlideViewActive).not.toHaveBeenCalled();
+		expect(noTab.toggleSlideView).not.toHaveBeenCalled();
 	});
 
 	it("export は active タブのパスを渡す (newtab では呼ばない)", () => {
