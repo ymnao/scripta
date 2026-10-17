@@ -21,7 +21,7 @@ import {
 	SLIDE_PREVIEW_WIDTH_RATIO_MIN,
 	SLIDE_PREVIEW_WIDTH_RATIO_STEP,
 } from "../../types/slide";
-import type { CursorInfo, GoToLineRequest } from "../editor/MarkdownEditor";
+import type { CursorInfo, GoToLineRequest, MarkdownEditorHandle } from "../editor/MarkdownEditor";
 import { MarkdownEditor } from "../editor/MarkdownEditor";
 import type { SlidePreviewProps } from "./SlidePreview";
 import { SlideThumbnails } from "./SlideThumbnails";
@@ -63,6 +63,8 @@ interface SlideViewProps {
 	goToLine?: GoToLineRequest | null;
 	onGoToLineDone?: () => void;
 	onStatistics?: (info: CursorInfo) => void;
+	snapshotHandleRef?: React.RefObject<MarkdownEditorHandle | null>;
+	initialSnapshot?: unknown;
 }
 
 export function SlideView({
@@ -73,6 +75,8 @@ export function SlideView({
 	goToLine,
 	onGoToLineDone,
 	onStatistics,
+	snapshotHandleRef,
+	initialSnapshot,
 }: SlideViewProps) {
 	const [cursorPos, setCursorPos] = useState(0);
 	// value prop は #302 以降 loadedDoc（ロード / タブ切替 / 外部リロード時のみ更新）で、
@@ -265,6 +269,8 @@ export function SlideView({
 						goToLine={goToLine}
 						onGoToLineDone={onGoToLineDone}
 						onStatistics={handleStatistics}
+						snapshotHandleRef={snapshotHandleRef}
+						initialSnapshot={initialSnapshot}
 						slideSeparatorMode
 					/>
 				</div>

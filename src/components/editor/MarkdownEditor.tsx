@@ -161,6 +161,11 @@ interface MarkdownEditorProps {
 	onStatistics?: (info: CursorInfo) => void;
 	snapshotHandleRef?: React.RefObject<MarkdownEditorHandle | null>;
 	/**
+	 * captureSnapshot() の戻り値。渡すと mount 時の EditorState をこれで組み立て、
+	 * 本文・選択範囲・undo 履歴を引き継ぐ。mount 後に変えても反映されない。
+	 */
+	initialSnapshot?: unknown;
+	/**
 	 * true のとき、HR (`---`) の live-preview を通常の細線ではなく
 	 * スライド区切り強調 (太めの破線 + アクセントカラー) にする。SlideView 用。
 	 */
@@ -176,6 +181,7 @@ export function MarkdownEditor({
 	onGoToLineDone,
 	onStatistics,
 	snapshotHandleRef,
+	initialSnapshot,
 	slideSeparatorMode = false,
 }: MarkdownEditorProps) {
 	const showLineNumbers = useSettingsStore((s) => s.showLineNumbers);
@@ -492,6 +498,12 @@ export function MarkdownEditor({
 		[extensions],
 	);
 
+	const initialState = useMemo(
+		() =>
+			initialSnapshot ? { json: initialSnapshot, fields: { history: historyField } } : undefined,
+		[initialSnapshot],
+	);
+
 	const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
 		if (e.button !== 2) return;
 		const target = resolveTargetElement(e.target);
@@ -774,6 +786,7 @@ export function MarkdownEditor({
 					className="h-full"
 					value={value}
 					extensions={extensions}
+					initialState={initialState}
 					height="100%"
 					theme="none"
 					aria-label="Markdown editor"

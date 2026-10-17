@@ -18,7 +18,7 @@ export interface AppShortcutDeps {
 	handleCloseTab: (id: number) => Promise<void>;
 	setSidebarVisible: Dispatch<SetStateAction<boolean>>;
 	setSidebarPanel: Dispatch<SetStateAction<SidebarPanel>>;
-	setSlideViewActive: Dispatch<SetStateAction<boolean>>;
+	toggleSlideView: () => void;
 	handleExport: (path: string) => void;
 	searchInputRef: RefObject<HTMLInputElement | null>;
 	editorViewRef: RefObject<EditorView | null>;
@@ -129,7 +129,7 @@ export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
 			run: () => {
 				const path = useWorkspaceStore.getState().activeTabPath;
 				if (path && !isNewTabPath(path)) {
-					deps.setSlideViewActive((prev) => !prev);
+					deps.toggleSlideView();
 				}
 			},
 		},

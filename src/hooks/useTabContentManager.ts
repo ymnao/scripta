@@ -21,6 +21,19 @@ interface TabCache {
 	editorStateSnapshot?: unknown;
 }
 
+// エディタを初期化する本文と、remount 先へ引き継ぐ snapshot の組。snapshot は
+// carryEditorAcrossRemount だけが詰め、他の経路で本文を差し替えるときは必ず捨てる。
+// 別々の state にすると、差し替え後の本文に古い snapshot (= 古い doc) が残って
+// 次の mount がそちらで初期化されてしまう。
+interface EditorSource {
+	doc: string;
+	snapshot: unknown;
+}
+
+function sourceFromDoc(doc: string): EditorSource {
+	return { doc, snapshot: null };
+}
+
 export interface UseTabContentManagerOptions {
 	/** MarkdownEditor / SlideView が保持する CodeMirror view への参照 (AppLayout 所有)。 */
 	editorViewRef: RefObject<EditorView | null>;
@@ -36,6 +49,17 @@ export type SaveAllTabsResult = "ok" | "failed" | "cancelled";
 export interface TabContentManager {
 	/** CodeMirror に渡す doc。ロード / タブ切替 / 外部リロード時のみ変わる (#302)。 */
 	loadedDoc: string;
+	/**
+	 * 次に mount するエディタの初期 state (MarkdownEditor の initialSnapshot)。
+	 * carryEditorAcrossRemount の直後だけ非 null。
+	 */
+	remountSnapshot: unknown;
+	/**
+	 * エディタを別コンポーネントへ載せ替える (通常 ⇔ スライドビュー) 直前に呼ぶ。
+	 * loadedDoc は打鍵では更新されない (#302) ので、呼ばずに remount すると直前の編集が消える。
+	 * view の本文・選択範囲・undo 履歴を退避し、remount 先のエディタをそれで初期化させる。
+	 */
+	carryEditorAcrossRemount: () => void;
 	/** インクリメントするとエディタを remount して新 content で初期化し直す。 */
 	editorKey: number;
 	/** view identity が同じまま内部 state が置換されたことを下流に伝える epoch (#220)。 */
@@ -136,7 +160,9 @@ export function useTabContentManager({
 	// 本文を React state から外し、controlled CodeMirror の per-keystroke 全文再レンダーを
 	// 避ける (#302)。loadedDoc はロード/タブ切替/外部リロード時のみ変わり、CodeMirror の
 	// `value` にはこれを渡す。keystroke 毎の最新本文は editorViewRef 経由で直接読む。
-	const [loadedDoc, setLoadedDoc] = useState("");
+	const [{ doc: loadedDoc, snapshot: remountSnapshot }, setEditorSource] = useState<EditorSource>(
+		() => sourceFromDoc(""),
+	);
 	const loadedDocRef = useRef(loadedDoc);
 	loadedDocRef.current = loadedDoc;
 	const getContent = useCallback(
@@ -264,7 +290,7 @@ export function useTabContentManager({
 
 		if (!activeTabPath) {
 			contentLoadedForPathRef.current = null;
-			setLoadedDoc("");
+			setEditorSource(sourceFromDoc(""));
 			savedContentRef.current = "";
 			markSaved("");
 			return;
@@ -273,7 +299,7 @@ export function useTabContentManager({
 		// New-tab page — no editor, no content to load
 		if (isNewTabPath(activeTabPath)) {
 			contentLoadedForPathRef.current = null;
-			setLoadedDoc("");
+			setEditorSource(sourceFromDoc(""));
 			savedContentRef.current = "";
 			markSaved("");
 			return;
@@ -285,13 +311,13 @@ export function useTabContentManager({
 			savedContentRef.current = cached.savedContent;
 			// キャッシュに未保存編集が残っていた場合 (flush 失敗 / IME defer で
 			// savedContent が stale) は dirty 状態を復元する必要がある。
-			// setLoadedDoc + restoreSnapshot/remount のいずれも updateListener の
+			// loadedDoc の差し替え + restoreSnapshot/remount のいずれも updateListener の
 			// docChanged を発火しないため、markSaved 側で content 差分を検知させる (#302 fix)。
 			markSaved(cached.savedContent, cached.content);
-			setLoadedDoc(cached.content);
+			setEditorSource(sourceFromDoc(cached.content));
 			// editorStateSnapshot が保存されていれば最新の extensions で組み立て直して
 			// undo/redo 履歴ごと復元する (#220)。失敗条件 (どれかでも該当):
-			// - handle 未取得 (SlideView 表示中など MarkdownEditor が mount されていない)
+			// - handle 未取得 (MarkdownEditor がまだ mount されていない)
 			// - editorStateSnapshot なし (初回 / 外部書き換え後)
 			// - restoreSnapshot が false を返した (JSON 構造が不正など)
 			// 失敗時は remount で view を作り直して新 content で初期化する fallback。
@@ -324,7 +350,7 @@ export function useTabContentManager({
 				contentLoadedForPathRef.current = activeTabPath;
 				savedContentRef.current = loaded;
 				markSaved(loaded);
-				setLoadedDoc(loaded);
+				setEditorSource(sourceFromDoc(loaded));
 				setEditorKey((k) => k + 1);
 				if (pendingGoToLineRef.current !== null) {
 					onGoToLineRef.current(pendingGoToLineRef.current);
@@ -338,7 +364,7 @@ export function useTabContentManager({
 				contentLoadedForPathRef.current = activeTabPath;
 				savedContentRef.current = "";
 				markSaved("");
-				setLoadedDoc("");
+				setEditorSource(sourceFromDoc(""));
 				pendingGoToLineRef.current = null;
 			});
 		return () => {
@@ -618,6 +644,15 @@ export function useTabContentManager({
 		[getContent],
 	);
 
+	const carryEditorAcrossRemount = useCallback(() => {
+		const view = editorViewRef.current;
+		if (!view) return;
+		setEditorSource({
+			doc: view.state.doc.toString(),
+			snapshot: markdownEditorHandleRef.current?.captureSnapshot() ?? null,
+		});
+	}, [editorViewRef]);
+
 	const queueGoToLine = useCallback((request: GoToLineRequest) => {
 		pendingGoToLineRef.current = request;
 	}, []);
@@ -631,7 +666,7 @@ export function useTabContentManager({
 			if (loaded === getLastSavedContentRef.current()) return;
 			savedContentRef.current = loaded;
 			markSaved(loaded);
-			setLoadedDoc(loaded);
+			setEditorSource(sourceFromDoc(loaded));
 			setEditorKey((k) => k + 1);
 		},
 		[markSaved, setCacheFromReload],
@@ -645,7 +680,7 @@ export function useTabContentManager({
 			if (useWorkspaceStore.getState().activeTabPath === path) {
 				savedContentRef.current = loaded;
 				markSaved(loaded);
-				setLoadedDoc(loaded);
+				setEditorSource(sourceFromDoc(loaded));
 				setEditorKey((k) => k + 1);
 			}
 		},
@@ -663,6 +698,8 @@ export function useTabContentManager({
 
 	return {
 		loadedDoc,
+		remountSnapshot,
+		carryEditorAcrossRemount,
 		editorKey,
 		editorViewEpoch,
 		isNewTab,
