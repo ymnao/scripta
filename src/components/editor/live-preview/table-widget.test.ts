@@ -77,6 +77,12 @@ describe("表のコンテキストメニュー", () => {
 			expect(view.state.doc.toString()).toBe(withIntro(HEADER, DELIM, ROW1, EMPTY, ROW2));
 		});
 
+		it("文書の末尾にある最後の行で「下に行を追加」すると、文書の末尾に空の行が入る", () => {
+			const view = mountTable(DOC);
+			choose(view, 2, 0, "下に行を追加");
+			expect(view.state.doc.toString()).toBe(withIntro(HEADER, DELIM, ROW1, ROW2, EMPTY));
+		});
+
 		it("ヘッダ行で「下に行を追加」すると、区切り行の直後に空の行が入る", () => {
 			const view = mountTable(DOC);
 			choose(view, 0, 0, "下に行を追加");
@@ -89,9 +95,12 @@ describe("表のコンテキストメニュー", () => {
 			expect(view.state.doc.toString()).toBe(withIntro(HEADER, DELIM, ROW1, EMPTY, ROW2));
 		});
 
-		it("ヘッダ行では「上に行を追加」が無効で、選んでも文書は変わらない", () => {
+		// 無効な項目で文書だけを見ないのは、関数の側にも同じガードがあり、無効の
+		// 指定が外れても文書は変わらないため。無効な項目は押してもメニューが閉じない
+		it("ヘッダ行では「上に行を追加」が無効で、選んでもメニューは閉じず文書も変わらない", () => {
 			const view = mountTable(DOC);
 			choose(view, 0, 0, "上に行を追加");
+			expect(openMenus()).toBe(1);
 			expect(view.state.doc.toString()).toBe(DOC);
 		});
 
@@ -101,16 +110,24 @@ describe("表のコンテキストメニュー", () => {
 			expect(view.state.doc.toString()).toBe(withIntro(HEADER, DELIM, ROW2));
 		});
 
-		it("ヘッダ行では「行を削除」が無効で、選んでも文書は変わらない", () => {
+		it("文書の末尾にある最後の行で「行を削除」すると、その行と直前の改行が消える", () => {
+			const view = mountTable(DOC);
+			choose(view, 2, 0, "行を削除");
+			expect(view.state.doc.toString()).toBe(withIntro(HEADER, DELIM, ROW1));
+		});
+
+		it("ヘッダ行では「行を削除」が無効で、選んでもメニューは閉じず文書も変わらない", () => {
 			const view = mountTable(DOC);
 			choose(view, 0, 0, "行を削除");
+			expect(openMenus()).toBe(1);
 			expect(view.state.doc.toString()).toBe(DOC);
 		});
 
-		it("データ行が 1 行だけのときは「行を削除」が無効で、選んでも文書は変わらない", () => {
+		it("データ行が 1 行だけのときは「行を削除」が無効で、選んでもメニューは閉じず文書も変わらない", () => {
 			const doc = withIntro(HEADER, DELIM, ROW1);
 			const view = mountTable(doc);
 			choose(view, 1, 0, "行を削除");
+			expect(openMenus()).toBe(1);
 			expect(view.state.doc.toString()).toBe(doc);
 		});
 	});
@@ -151,17 +168,18 @@ describe("表のコンテキストメニュー", () => {
 			);
 		});
 
-		it("2 列以下のときは「列を削除」が無効で、選んでも文書は変わらない", () => {
+		it("2 列以下のときは「列を削除」が無効で、選んでもメニューは閉じず文書も変わらない", () => {
 			const doc = withIntro("| A | B |", "| --- | --- |", "| 1 | 2 |");
 			const view = mountTable(doc);
 			choose(view, 1, 0, "列を削除");
+			expect(openMenus()).toBe(1);
 			expect(view.state.doc.toString()).toBe(doc);
 		});
 	});
 
 	describe("テーブルの削除", () => {
-		// 表の上下が空行なしで他の行に接するケースは #667 の不具合があるので、
-		// 直したあとも結果が変わらない文書の先頭・末尾だけを固定する
+		// 表の上下が空行なしで他の行に接するケースは #667 の不具合があるので固定しない。
+		// 文書の先頭・末尾は、#667 を前後どちらか一方の改行だけを消す形で直すなら結果が変わらない
 		it("文書の先頭にある表を削除すると、表と直後の改行が消える", () => {
 			const view = mountTable(`${TABLE}\n# h2`);
 			choose(view, 1, 0, "テーブルを削除");
