@@ -103,15 +103,23 @@ test.describe("slide view", () => {
 		await expect(page.getByText("1 / 3")).toBeVisible();
 
 		// .cm-content は親のスクロール領域が高さ 0 で切り取られていても自分の box を持つため、
-		// toBeVisible では空のペインを検出できない。先頭行の中心に実際に何が描かれているかを見る。
-		const hitsFirstLine = await page.evaluate(() => {
-			const line = document.querySelector(".cm-line");
-			if (!line) return false;
-			const rect = line.getBoundingClientRect();
-			const hit = document.elementFromPoint(rect.left + 4, rect.top + rect.height / 2);
-			return hit !== null && line.contains(hit);
-		});
-		expect(hitsFirstLine).toBe(true);
+		// toBeVisible では空のペインを検出できない。先頭行と末尾行の位置に実際に何が描かれているかを
+		// 見る（末尾行も見るのは、数行分だけ残して潰れた場合も拾うため）。
+		await expect
+			.poll(() =>
+				page.evaluate(() => {
+					const lines = document.querySelectorAll(".cm-content .cm-line");
+					const first = lines[0];
+					const last = lines[lines.length - 1];
+					if (!first || !last) return [false, false];
+					return [first, last].map((line) => {
+						const rect = line.getBoundingClientRect();
+						const hit = document.elementFromPoint(rect.left + 4, rect.top + rect.height / 2);
+						return hit !== null && line.contains(hit);
+					});
+				}),
+			)
+			.toEqual([true, true]);
 	});
 
 	test("プレビューに現在スライドの内容が表示される", async ({ page }) => {
