@@ -50,8 +50,8 @@ export function SlideShowOverlay({
 	);
 
 	// 全スライドを事前レンダーしてナビゲーション時の markdownToHtml/KaTeX 再計算を回避。
-	// mermaid ブロックは sync 版で fenced code のまま表示され、非同期で SVG に差し替わる。
-	const htmls = useSlideHtmls(safeSlides, themeOverride);
+	// mermaid ブロックは sync 版で fenced code のまま表示され、表示中のスライドから順に SVG に差し替わる。
+	const htmls = useSlideHtmls(safeSlides, themeOverride, index);
 
 	// キー → アクションのテーブルを毎レンダー 1 回だけ組む (findAction 内での再構築を避ける)。
 	// useShortcuts は shortcuts 配列を ref 経由で常に最新参照するため useMemo 不要。
