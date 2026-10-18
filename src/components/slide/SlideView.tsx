@@ -260,20 +260,18 @@ export function SlideView({
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div ref={containerRef} className="flex min-h-0 flex-1">
-				<div className="min-h-0 min-w-0 flex-1">
-					<MarkdownEditor
-						value={value}
-						onDocChanged={handleDocChanged}
-						onSave={onSave}
-						onEditorView={handleEditorView}
-						goToLine={goToLine}
-						onGoToLineDone={onGoToLineDone}
-						onStatistics={handleStatistics}
-						snapshotHandleRef={snapshotHandleRef}
-						initialSnapshot={initialSnapshot}
-						slideSeparatorMode
-					/>
-				</div>
+				<MarkdownEditor
+					value={value}
+					onDocChanged={handleDocChanged}
+					onSave={onSave}
+					onEditorView={handleEditorView}
+					goToLine={goToLine}
+					onGoToLineDone={onGoToLineDone}
+					onStatistics={handleStatistics}
+					snapshotHandleRef={snapshotHandleRef}
+					initialSnapshot={initialSnapshot}
+					slideSeparatorMode
+				/>
 				{/* biome-ignore lint/a11y/useSemanticElements: separator role is the ARIA
 				    convention for a resize handle; <hr> would collapse the split panes. */}
 				<div
