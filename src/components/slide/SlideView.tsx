@@ -260,7 +260,9 @@ export function SlideView({
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div ref={containerRef} className="flex min-h-0 flex-1">
-				<div className="min-h-0 min-w-0 flex-1">
+				{/* MarkdownEditor のルートは flex-1 で高さを得る（中身は absolute）。この div が
+				    flex コンテナでないと高さ 0 になり、左ペインが常に空に見えていた（#636）。 */}
+				<div className="flex min-h-0 min-w-0 flex-1">
 					<MarkdownEditor
 						value={value}
 						onDocChanged={handleDocChanged}
