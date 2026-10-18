@@ -223,6 +223,19 @@ describe("useSlideHtmls: 描画の順番 (#663)", () => {
 		open0();
 	});
 
+	it("スライドが減ったら、減った位置の直前の結果を捨てる", async () => {
+		const { result, rerender } = renderHook(({ slides }) => useSlideHtmls(slides), {
+			initialProps: { slides: [mermaidSlide("T0"), mermaidSlide("T1")] },
+		});
+		await waitFor(() => expect(result.current[1]).toContain("<svg"));
+		rerender({ slides: [mermaidSlide("T0")] });
+		hold("T2");
+		rerender({ slides: [mermaidSlide("T0"), mermaidSlide("T2")] });
+		await waitFor(() => expect(renderedTokens()).toEqual(["T0", "T1", "T2"]));
+		expect(result.current[1]).toContain("T2");
+		expect(result.current[1]).not.toContain("<svg");
+	});
+
 	it("1 枚の描画が中断されても、残りのスライドは描き続ける", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		// preprocessMermaidBlocks は末尾の図から描くので T9 が先。T9 の後の loop-head check で

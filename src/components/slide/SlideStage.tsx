@@ -52,15 +52,17 @@ function pickNextSlide(pending: readonly number[], priority: number): number {
  * 発表モード (SlideShowOverlay) とサムネイル一覧 (SlideThumbnails) が使う。
  *
  * スライドは 1 枚ずつ描き、描き終えたスライドからその場で反映する。次に描くのは
- * `priorityIndex` (表示中・選択中のスライド) に近い未描画のスライドで、描画の途中で
- * `priorityIndex` が変われば次の 1 枚から新しい位置を優先する (#663)。
+ * 未描画のスライドのうち `priorityIndex` (表示中・選択中のスライド) 以降で最初のもの、
+ * 無ければ先頭で、描画の途中で `priorityIndex` が変われば次の 1 枚から新しい位置を
+ * 優先する (#663)。
  * 全スライドを同時に起動しないのは、mermaid の描画が `renderQueue` で直列なうえ、
  * `preprocessMermaidBlocks` が 1 枚の中の図を 1 つずつ await するため。同時に起動すると
  * 表示中のスライドの 2 つ目以降の図が、他の全スライドの 1 つ目の図の後ろに並ぶ。
- * 図のないスライドは同期版と同じ HTML になるので、待たされても見た目は変わらない。
  *
  * まだ描いていないスライドは、同じ位置の直前の描画結果 (theme 切替や編集の前の値) を
- * 返し、それも無ければ同期版 (mermaid は fenced code のまま) を返す。
+ * 返し、それも無ければ同期版 (mermaid は fenced code のまま) を返す。直前の結果がある
+ * スライドは、図が無くても描き直すまで編集前の本文を見せる。直前の結果は、スライドが
+ * 減った分を描き直しの開始時に捨てる。
  *
  * ⚠️ 呼び出し側は `slides` の identity を安定させる (useMemo 等で memoize する)
  * こと。`slides` は useEffect 依存として `===` 比較されるため、毎 render で新しい
@@ -91,6 +93,7 @@ export function useSlideHtmls(
 		const controller = new AbortController();
 		const { signal } = controller;
 		const pending = [...slides.keys()];
+		setRendered((prev) => (prev.length > slides.length ? prev.slice(0, slides.length) : prev));
 		void (async () => {
 			while (pending.length > 0) {
 				const i = pickNextSlide(pending, priorityRef.current);
