@@ -219,12 +219,12 @@ describe("renderSlideHtmlWithMermaid: module-level cache", () => {
 		expect(renderSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it("regression: cache cap を超える枚数の Promise.all で 1 個目の entry が LRU eviction されても Promise.all 全体は reject しない (self-poisoning 対策)", async () => {
-		// deck > MAX_CACHE_SIZE 相当の cache miss を同期的に登録すると、129 個目の set が
-		// 1 個目 entry を evict する (131 個目までで先頭 3 件)。もし evict で controller.abort() すると 1 個目の preprocess
-		// が AbortError で reject → Promise.all 全体 reject → useAsyncDerived が silent 化
-		// → deck 凍結、というシナリオが起きる。この回帰テストは MAX_CACHE_SIZE (128) を超える
-		// unique markdown を並列で登録して、全 promise が正常 resolve することを確認する。
+	it("regression: cache cap を超える cache miss で in-flight の entry が LRU eviction されても、その promise は reject しない (self-poisoning 対策)", async () => {
+		// MAX_CACHE_SIZE を超える cache miss を同期的に登録すると、129 個目の set が
+		// 1 個目 entry を evict する (131 個目までで先頭 3 件)。もし evict で controller.abort() すると
+		// 1 個目の preprocess が AbortError で reject され、それを await している caller の図が出ない。
+		// この回帰テストは MAX_CACHE_SIZE (128) を超える unique markdown を並列で登録して、
+		// 全 promise が正常 resolve することを確認する。
 		const CACHE_CAP = 128;
 		const EVICTED = 3;
 		const N = CACHE_CAP + EVICTED;

@@ -1,16 +1,26 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// source に含まれる token の gate が開くまで render を止め、描画の完了順を test から決める。
+// gate は afterEach で必ず開ける。開けずに終わると mermaid.ts の renderQueue が詰まり、後続の test まで止まる。
+const { gates } = vi.hoisted(() => ({
+	gates: new Map<string, { promise: Promise<void>; open: () => void }>(),
+}));
+
 // mermaid を決定的にモックし、fenced code → SVG 変換で hook 経路を検証する。
 vi.mock("mermaid", () => ({
 	default: {
 		initialize: vi.fn(),
-		render: vi.fn(async (_id: string, source: string) => ({
-			svg: `<svg data-mock="${source.replace(/"/g, "&quot;")}"></svg>`,
-		})),
+		render: vi.fn(async (_id: string, source: string) => {
+			for (const [token, gate] of gates) {
+				if (source.includes(token)) await gate.promise;
+			}
+			return { svg: `<svg data-mock="${source.replace(/"/g, "&quot;")}"></svg>` };
+		}),
 	},
 }));
 
+const { default: mermaid } = await import("mermaid");
 const { useSlideHtml, useSlideHtmls } = await import("./SlideStage");
 const { useWorkspaceStore } = await import("../../stores/workspace");
 const { useThemeStore } = await import("../../stores/theme");
@@ -24,6 +34,9 @@ beforeEach(() => {
 	useThemeStore.setState({ theme: "light" });
 });
 afterEach(() => {
+	for (const gate of gates.values()) gate.open();
+	gates.clear();
+	vi.mocked(mermaid.render).mockClear();
 	clearSlideRenderCache();
 	useWorkspaceStore.setState({ activeTabPath: null });
 	useThemeStore.setState({ theme: "light" });
@@ -140,5 +153,92 @@ describe("useSlideHtmls (hook integration)", () => {
 		await waitFor(() => {
 			expect(result.current[0]).toContain("scripta-asset://localhost/notes/subdir/img/hero.png");
 		});
+	});
+});
+
+describe("useSlideHtmls: 描画の順番 (#663)", () => {
+	function hold(token: string): () => void {
+		let open!: () => void;
+		const promise = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		gates.set(token, { promise, open });
+		return open;
+	}
+	const mermaidSlide = (token: string) => ({
+		content: `\`\`\`mermaid\ngraph TD\n  ${token}-->X\n\`\`\``,
+	});
+	const renderedTokens = () =>
+		vi.mocked(mermaid.render).mock.calls.map(([, source]) => source.match(/T\d/)?.[0]);
+
+	it("描き終えたスライドから反映し、他のスライドの完了を待たない", async () => {
+		const open1 = hold("T1");
+		const slides = [mermaidSlide("T0"), mermaidSlide("T1")];
+		const { result } = renderHook(() => useSlideHtmls(slides));
+		await waitFor(() => expect(result.current[0]).toContain("<svg"));
+		expect(result.current[1]).not.toContain("mermaid-diagram");
+		open1();
+		await waitFor(() => expect(result.current[1]).toContain("<svg"));
+	});
+
+	it("priorityIndex のスライドから描き、末尾の次は先頭へ戻る", async () => {
+		const open2 = hold("T2");
+		const slides = [mermaidSlide("T0"), mermaidSlide("T1"), mermaidSlide("T2")];
+		const { result } = renderHook(() => useSlideHtmls(slides, null, 2));
+		await waitFor(() => expect(renderedTokens()).toEqual(["T2"]));
+		open2();
+		await waitFor(() => {
+			for (const html of result.current) expect(html).toContain("<svg");
+		});
+		expect(renderedTokens()).toEqual(["T2", "T0", "T1"]);
+	});
+
+	it("描画の途中で priorityIndex が変わると、次の 1 枚から新しい位置を優先する", async () => {
+		const open0 = hold("T0");
+		const slides = [mermaidSlide("T0"), mermaidSlide("T1"), mermaidSlide("T2")];
+		const { result, rerender } = renderHook(
+			({ priority }) => useSlideHtmls(slides, null, priority),
+			{ initialProps: { priority: 0 } },
+		);
+		await waitFor(() => expect(renderedTokens()).toEqual(["T0"]));
+		rerender({ priority: 2 });
+		open0();
+		await waitFor(() => {
+			for (const html of result.current) expect(html).toContain("<svg");
+		});
+		expect(renderedTokens()).toEqual(["T0", "T2", "T1"]);
+	});
+
+	it("theme が変わっても、描き直すまでは同じ位置の直前の結果を返す", async () => {
+		const slides = [mermaidSlide("T0")];
+		const { result, rerender } = renderHook(() => useSlideHtmls(slides));
+		await waitFor(() => expect(result.current[0]).toContain("<svg"));
+		const open0 = hold("T0");
+		act(() => {
+			useThemeStore.setState({ theme: "dark" });
+		});
+		rerender();
+		await waitFor(() => expect(renderedTokens()).toEqual(["T0", "T0"]));
+		expect(result.current[0]).toContain("<svg");
+		open0();
+	});
+
+	it("1 枚の描画が中断されても、残りのスライドは描き続ける", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		// preprocessMermaidBlocks は末尾の図から描くので T9 が先。T9 の後の loop-head check で
+		// clearSlideRenderCache の abort を観測し、スライド 0 だけが AbortError で reject する。
+		const open9 = hold("T9");
+		const twoDiagrams = {
+			content: `${mermaidSlide("T0").content}\n\n${mermaidSlide("T9").content}`,
+		};
+		const slides = [twoDiagrams, mermaidSlide("T1")];
+		const { result } = renderHook(() => useSlideHtmls(slides));
+		await waitFor(() => expect(renderedTokens()).toEqual(["T9"]));
+		clearSlideRenderCache();
+		open9();
+		await waitFor(() => expect(result.current[1]).toContain("<svg"));
+		expect(result.current[0]).not.toContain("mermaid-diagram");
+		expect(errorSpy).not.toHaveBeenCalled();
+		errorSpy.mockRestore();
 	});
 });

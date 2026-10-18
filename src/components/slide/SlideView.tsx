@@ -304,7 +304,7 @@ export function SlideView({
 			</div>
 			{/* 1 枚だけなら SlideThumbnails を mount しない。内部 gate だと
 			    useSlideHtmls (hook) が early return 前に unconditional で発火し、
-			    単一 slide deck でも Promise.all(mermaid preprocess) を毎キー走らせて
+			    単一 slide deck でも mermaid preprocess を毎キー走らせて
 			    しまうため、gate は呼び出し側で mount を抑える。
 			    thumbnailsVisible が false の時も同様に mount しない (再表示時に
 			    再描画する trade-off で hidden 時の CPU / メモリを節約)。 */}

@@ -26,9 +26,8 @@ export interface SlideThumbnailsProps {
  * スライドサムネイル一覧。preview ペイン下部に横スクロールで並べ、クリックで
  * editor をそのスライドへ jump する。
  *
- * useSlideHtmls を再利用して mermaid 込みの全スライド HTML を一括レンダーする。
- * 大 deck (>50 slide) は per-slide cache 化 (HANDOFF §80 defer) の合流点で、
- * MVP は一括で許容する。SlideFrame は固定 scale で描画するため useFitScale の
+ * useSlideHtmls を再利用して mermaid 込みの全スライド HTML をレンダーする。
+ * 選択中のスライドから順に描き、描き終えたサムネイルから図が出る。SlideFrame は固定 scale で描画するため useFitScale の
  * ResizeObserver は不要 (thumbnail は常に同一寸法)。
  */
 export const SlideThumbnails = memo(function SlideThumbnails({
@@ -37,7 +36,7 @@ export const SlideThumbnails = memo(function SlideThumbnails({
 	themeOverride,
 	onSelectSlide,
 }: SlideThumbnailsProps) {
-	const htmls = useSlideHtmls(slides, themeOverride);
+	const htmls = useSlideHtmls(slides, themeOverride, currentSlideIndex);
 	const navRef = useRef<HTMLElement>(null);
 	const overflowIdPrefix = useId();
 

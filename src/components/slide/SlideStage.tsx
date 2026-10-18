@@ -1,5 +1,6 @@
-import { type RefObject, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAsyncDerived } from "../../hooks/useAsyncDerived";
+import { isAbortError } from "../../lib/abort";
 import { renderSlideHtml, renderSlideHtmlWithMermaid } from "../../lib/slide-render";
 import { useThemeStore } from "../../stores/theme";
 import { useWorkspaceStore } from "../../stores/workspace";
@@ -39,24 +40,44 @@ export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null
 }
 
 /**
- * 複数スライドの HTML を並列に mermaid 込みでレンダリングするフック。
- * 発表モード (SlideShowOverlay) / サムネイル一覧 / 大デッキ preview の 3 消費者が使う。
+ * `pending` のうち、`priority` から後ろへ進み末尾で先頭に戻る順で最初のものを返す。
+ * 発表中は次に送るスライドが先に描かれる。
+ */
+function pickNextSlide(pending: ReadonlySet<number>, priority: number, count: number): number {
+	for (let step = 0; step < count; step++) {
+		const i = (((priority + step) % count) + count) % count;
+		if (pending.has(i)) return i;
+	}
+	throw new Error("pickNextSlide: pending is empty");
+}
+
+/**
+ * 複数スライドの HTML を mermaid 込みでレンダリングするフック。
+ * 発表モード (SlideShowOverlay) とサムネイル一覧 (SlideThumbnails) が使う。
+ *
+ * スライドは 1 枚ずつ描き、描き終えたスライドからその場で反映する。次に描くのは
+ * `priorityIndex` (表示中・選択中のスライド) に近い未描画のスライドで、描画の途中で
+ * `priorityIndex` が変われば次の 1 枚から新しい位置を優先する (#663)。
+ * 全スライドを同時に起動しないのは、mermaid の描画が `renderQueue` で直列なうえ、
+ * `preprocessMermaidBlocks` が 1 枚の中の図を 1 つずつ await するため。同時に起動すると
+ * 表示中のスライドの 2 つ目以降の図が、他の全スライドの 1 つ目の図の後ろに並ぶ。
+ * 図のないスライドは同期版と同じ HTML になるので、待たされても見た目は変わらない。
+ *
+ * まだ描いていないスライドは、同じ位置の直前の描画結果 (theme 切替や編集の前の値) を
+ * 返し、それも無ければ同期版 (mermaid は fenced code のまま) を返す。
  *
  * ⚠️ 呼び出し側は `slides` の identity を安定させる (useMemo 等で memoize する)
- * こと。`useAsyncDerived` は `slides` を useEffect 依存として `===` 比較する
- * ため、毎 render で新しい配列を渡すと effect が render 毎に fire し、setState
- * が繰り返し呼ばれて再 render → effect fire → ... のループになる。
+ * こと。`slides` は useEffect 依存として `===` 比較されるため、毎 render で新しい
+ * 配列を渡すと描画が render 毎にやり直しになる。
  *
  * per-content の dedup / 別 hook instance との共有 / LRU eviction はすべて
- * `slide-render.ts` の module-level cache に委譲する。以前は hook-instance-local な
- * `useRef` cache + per-entry AbortController を持っていたが、SlidePreview の
- * useSlideHtml と SlideThumbnails の useSlideHtmls が同一スライドを重複 render する
- * altitude 課題を解消するため module scope に集約した (session 91)。caller の signal は
+ * `slide-render.ts` の module-level cache に委譲する (session 91)。caller の signal は
  * `renderSlideHtmlWithMermaid` 内で「新規 render を起動しない」pre-check にのみ使われる。
  */
 export function useSlideHtmls(
 	slides: readonly { content: string }[],
 	themeOverride?: SlideTheme | null,
+	priorityIndex = 0,
 ): string[] {
 	const activeTabPath = useWorkspaceStore((s) => s.activeTabPath);
 	const theme = useResolvedSlideTheme(themeOverride);
@@ -64,11 +85,45 @@ export function useSlideHtmls(
 		() => slides.map((s) => renderSlideHtml(s.content, activeTabPath)),
 		[slides, activeTabPath],
 	);
-	return useAsyncDerived([slides, activeTabPath, theme], initial, (signal) =>
-		Promise.all(
-			slides.map((s) => renderSlideHtmlWithMermaid(s.content, activeTabPath, theme, { signal })),
-		),
-	);
+	const [rendered, setRendered] = useState<readonly (string | undefined)[]>([]);
+	const priorityRef = useRef(priorityIndex);
+	useLayoutEffect(() => {
+		priorityRef.current = priorityIndex;
+	}, [priorityIndex]);
+
+	useEffect(() => {
+		const controller = new AbortController();
+		const { signal } = controller;
+		const pending = new Set(slides.keys());
+		void (async () => {
+			while (pending.size > 0) {
+				const i = pickNextSlide(pending, priorityRef.current, slides.length);
+				pending.delete(i);
+				let html: string;
+				try {
+					html = await renderSlideHtmlWithMermaid(slides[i].content, activeTabPath, theme, {
+						signal,
+					});
+				} catch (err) {
+					if (signal.aborted) return;
+					// AbortError は共有 promise が clearSlideRenderCache で中断されたケース。
+					// 設計上のキャンセルなので log せず、他のスライドは続けて描く。
+					if (!isAbortError(err)) console.error("[useSlideHtmls] slide render failed:", err);
+					continue;
+				}
+				if (signal.aborted) return;
+				setRendered((prev) => {
+					if (prev[i] === html) return prev;
+					const next = prev.slice();
+					next[i] = html;
+					return next;
+				});
+			}
+		})();
+		return () => controller.abort();
+	}, [slides, activeTabPath, theme]);
+
+	return useMemo(() => initial.map((html, i) => rendered[i] ?? html), [initial, rendered]);
 }
 
 /** `.slide-preview` の上端から、下の padding が始まるまでの距離。 */

@@ -31,7 +31,7 @@ export function useAsyncDerived<Output>(
 			.catch((err) => {
 				if (controller.signal.aborted) return;
 				// AbortError は「共有 promise が別 effect の abort で reject した」ケース
-				// (useSlideHtmls の per-slide cache 経由)。設計上のキャンセルなので log しない。
+				// (slide-render.ts の module cache 経由)。設計上のキャンセルなので log しない。
 				if (isAbortError(err)) return;
 				// silent 化禁止 (mermaid-preprocess.ts #106 と同ポリシー)。
 				console.error("[useAsyncDerived] async failed:", err);

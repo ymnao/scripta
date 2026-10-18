@@ -118,17 +118,17 @@ async function renderSlideHtmlDirect(
  * 再利用可能に)。以下の設計原則を守る (session 90 の cross-instance poisoning 対策継続):
  *
  * - **1 caller の signal では共有 promise の状態を変えない**: cache-hit 時は caller の
- *   signal を無視して shared promise を返す (caller 側の useAsyncDerived が cancelled
- *   flag で await 継続を捨てる)。
+ *   signal を無視して shared promise を返す (caller 側の useAsyncDerived / useSlideHtmls が
+ *   自分の signal を見て await 後の結果を捨てる)。
  * - **cache-miss 時のみ pre-abort check**: caller signal が既に aborted なら AbortError で
  *   reject して cache エントリを作らない (新規 render を起動しない)。
- * - **LRU eviction は entry を delete するだけで controller を abort しない**: `useSlideHtmls`
- *   の `Promise.all(slides.map(...))` は 1 batch 中に N 個の cache-miss を同期的に登録するため、
- *   N > MAX_CACHE_SIZE の deck では 129 個目の set が 1 個目の in-flight entry を evict する。
- *   evict 時に abort すると同 batch 中の兄弟 promise が AbortError で reject → Promise.all
- *   全体 reject → useAsyncDerived が silent 化 (isAbortError) → deck が凍結、というシナリオが
- *   起きる (session 91 で /code-review 3 angle が同時 surface)。orphan render は完了まで走らせて
- *   結果を捨てる (bounded CPU waste) — abort による cross-instance poisoning より安全。
+ * - **LRU eviction は entry を delete するだけで controller を abort しない**: in-flight の
+ *   entry は、それを await している caller がいても MAX_CACHE_SIZE 件の新しい cache-miss で
+ *   evict されうる (別 hook instance や大きな deck の描画が続いたとき)。evict 時に abort すると、
+ *   その caller が自分の意思と無関係に AbortError で reject される。AbortError は意図的な
+ *   キャンセルとして log されないので、図が出ないまま黙って止まる (session 91 で
+ *   /code-review 3 angle が同時 surface)。orphan render は完了まで走らせて結果を捨てる
+ *   (bounded CPU waste) — abort による cross-instance poisoning より安全。
  * - **`clearSlideRenderCache` のみ entry を abort**: テスト isolation 用の全消し経路では
  *   in-flight を abort する (テスト間で lingering CPU work を残さない)。
  * - **カスタム options 経路は cache bypass**: `mermaidOptions` / `embedOptions` 指定
