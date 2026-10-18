@@ -50,6 +50,8 @@ function choose(view: EditorView, row: number, col: number, label: string): void
 	);
 }
 
+/** 無効な項目のテストで文書だけを見ないのは、関数の側にも同じガードがあり、無効の
+ *  指定が外れても文書は変わらないため。無効な項目は押してもメニューが閉じない */
 function openMenus(): number {
 	return document.querySelectorAll(".cm-table-context-menu").length;
 }
@@ -95,8 +97,6 @@ describe("表のコンテキストメニュー", () => {
 			expect(view.state.doc.toString()).toBe(withIntro(HEADER, DELIM, ROW1, EMPTY, ROW2));
 		});
 
-		// 無効な項目で文書だけを見ないのは、関数の側にも同じガードがあり、無効の
-		// 指定が外れても文書は変わらないため。無効な項目は押してもメニューが閉じない
 		it("ヘッダ行では「上に行を追加」が無効で、選んでもメニューは閉じず文書も変わらない", () => {
 			const view = mountTable(DOC);
 			choose(view, 0, 0, "上に行を追加");
@@ -179,7 +179,8 @@ describe("表のコンテキストメニュー", () => {
 
 	describe("テーブルの削除", () => {
 		// 表の上下が空行なしで他の行に接するケースは #667 の不具合があるので固定しない。
-		// 文書の先頭・末尾は、#667 を前後どちらか一方の改行だけを消す形で直すなら結果が変わらない
+		// 文書の先頭・末尾は、#667 を「前後の改行のうち存在する方を 1 つだけ消す」形で直すなら
+		// 結果が変わらない
 		it("文書の先頭にある表を削除すると、表と直後の改行が消える", () => {
 			const view = mountTable(`${TABLE}\n# h2`);
 			choose(view, 1, 0, "テーブルを削除");
