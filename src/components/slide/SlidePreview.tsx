@@ -46,6 +46,7 @@ export const SlidePreview = memo(function SlidePreview({
 					scale={scale}
 					html={html}
 					themeOverride={themeOverride}
+					overflowIndicator="badge"
 					frameClassName="rounded-lg border border-border bg-white shadow-sm dark:bg-[#2a2a2a]"
 				/>
 				<span className="text-xs text-text-secondary">
