@@ -40,15 +40,11 @@ export function useSlideHtml(markdown: string, themeOverride?: SlideTheme | null
 }
 
 /**
- * `pending` のうち、`priority` から後ろへ進み末尾で先頭に戻る順で最初のものを返す。
- * 発表中は次に送るスライドが先に描かれる。
+ * 昇順の `pending` (空でない) から、`priority` 以上で最初のもの、無ければ先頭を返す。
+ * `priority` から後ろへ進み末尾で先頭に戻る順になるので、発表中は次に送るスライドが先に描かれる。
  */
-function pickNextSlide(pending: ReadonlySet<number>, priority: number, count: number): number {
-	for (let step = 0; step < count; step++) {
-		const i = (((priority + step) % count) + count) % count;
-		if (pending.has(i)) return i;
-	}
-	throw new Error("pickNextSlide: pending is empty");
+function pickNextSlide(pending: readonly number[], priority: number): number {
+	return pending.find((i) => i >= priority) ?? pending[0];
 }
 
 /**
@@ -94,11 +90,11 @@ export function useSlideHtmls(
 	useEffect(() => {
 		const controller = new AbortController();
 		const { signal } = controller;
-		const pending = new Set(slides.keys());
+		const pending = [...slides.keys()];
 		void (async () => {
-			while (pending.size > 0) {
-				const i = pickNextSlide(pending, priorityRef.current, slides.length);
-				pending.delete(i);
+			while (pending.length > 0) {
+				const i = pickNextSlide(pending, priorityRef.current);
+				pending.splice(pending.indexOf(i), 1);
 				let html: string;
 				try {
 					html = await renderSlideHtmlWithMermaid(slides[i].content, activeTabPath, theme, {

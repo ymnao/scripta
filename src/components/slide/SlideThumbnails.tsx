@@ -27,8 +27,9 @@ export interface SlideThumbnailsProps {
  * editor をそのスライドへ jump する。
  *
  * useSlideHtmls を再利用して mermaid 込みの全スライド HTML をレンダーする。
- * 選択中のスライドから順に描き、描き終えたサムネイルから図が出る。SlideFrame は固定 scale で描画するため useFitScale の
- * ResizeObserver は不要 (thumbnail は常に同一寸法)。
+ * 選択中のスライドから順に描き、描き終えたサムネイルから図が出る。
+ * SlideFrame は固定 scale で描画するため useFitScale の ResizeObserver は不要
+ * (thumbnail は常に同一寸法)。
  */
 export const SlideThumbnails = memo(function SlideThumbnails({
 	slides,
