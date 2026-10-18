@@ -37,6 +37,9 @@ playwright-report/
 playwright-report-electron/
 playwright/.cache/
 
+# Vitest coverage
+coverage/
+
 # Logs
 *.log
 npm-debug.log*

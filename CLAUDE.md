@@ -58,6 +58,9 @@ pnpm typecheck:e2e
 # ユニットテスト
 pnpm test
 
+# ユニットテストのカバレッジ（renderer / main。結果は coverage/。閾値・CI なし）
+pnpm test:coverage
+
 # e2e テスト（Playwright, renderer-only モード）
 pnpm test:e2e
 

@@ -5,6 +5,22 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
 	plugins: [react()],
 	test: {
+		coverage: {
+			provider: "v8",
+			// include を書かないと、どのテストからも import されないファイルが
+			// 結果から消えて 0% として見えない。
+			include: ["src/**/*.{ts,tsx}", "electron/**/*.ts"],
+			exclude: [
+				"**/*.test.{ts,tsx}",
+				"**/*.d.ts",
+				"src/generated/**",
+				"src/test-setup.ts",
+				"src/__test-utils__/**",
+				"src/components/editor/live-preview/test-helper.ts",
+				"electron/main/test-utils/**",
+			],
+			reporter: ["text-summary", "html", "json-summary"],
+		},
 		projects: [
 			{
 				extends: true,

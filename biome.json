@@ -55,7 +55,8 @@
 			"!**/.claude",
 			"!**/test-results",
 			"!**/playwright-report",
-			"!**/playwright-report-electron"
+			"!**/playwright-report-electron",
+			"!**/coverage"
 		]
 	},
 	"overrides": [
