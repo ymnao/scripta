@@ -309,9 +309,13 @@ describe("未解決リンクのホバーポップアップ", () => {
 		it("一覧の更新で描き直しても、ドラフト欄の入力は残る", () => {
 			const view = mountMissing();
 			showPopup(view);
+			const before = textarea();
 			// input を流さずに値だけ変え、描き直しの直前に textarea から拾うことを見る
-			textarea().value = "typing";
-			useWikilinkStore.setState({ unresolvedLinks: [] });
+			before.value = "typing";
+			useWikilinkStore.setState({
+				unresolvedLinks: [{ pageName: "missing-page", references: [ref("/workspace/a.md", 1)] }],
+			});
+			expect(textarea()).not.toBe(before);
 			expect(textarea().value).toBe("typing");
 		});
 
