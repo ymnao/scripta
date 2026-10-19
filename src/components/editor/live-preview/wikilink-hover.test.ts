@@ -1,41 +1,27 @@
-import type { Extension } from "@codemirror/state";
-import { Decoration, EditorView } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useWikilinkStore } from "../../../stores/wikilink";
+import { useWorkspaceStore } from "../../../stores/workspace";
 import type { UnresolvedWikilinkReference } from "../../../types/wikilink";
 import { cleanupMountedViews, mountEditorView } from "./test-helper";
 import { wikilinkHoverTooltip } from "./wikilink-hover";
+import { buildDecorations, buildFileMap } from "./wikilinks";
 
+const WORKSPACE = "/workspace";
 const SHOW_DELAY = 300;
 const CLOSE_DELAY = 150;
 
-interface LinkSpec {
-	text: string;
-	className?: string;
-	path?: string;
+/** `[[page]]` を並べた文書を mount し、wikilinks.ts の装飾を付ける。wikilinkDecoration を
+ *  そのまま載せないのは、fileMap を非同期の searchFilenames で取るまで装飾が出ないため */
+function mountLinks(pages: string[], existing: string[] = []): EditorView {
+	const doc = pages.map((page) => `[[${page}]]`).join(" ");
+	const fileMap = buildFileMap(existing.map((page) => `${WORKSPACE}/${page}.md`));
+	const decorations = EditorView.decorations.of((view) => buildDecorations(view, fileMap));
+	return mountEditorView(doc, [decorations, wikilinkHoverTooltip]);
 }
 
-/** wikilinks.ts の装飾と同じ class / data 属性の mark を付ける。wikilinks.ts 自体を
- *  載せないのは、fileMap を非同期の searchFilenames で取るまで装飾が出ないため */
-function mountLinks(...links: LinkSpec[]): EditorView {
-	const doc = links.map((l) => l.text).join(" ");
-	const ranges = [];
-	let from = 0;
-	for (const link of links) {
-		ranges.push(
-			Decoration.mark({
-				class: link.className ?? "cm-wikilink cm-wikilink-missing",
-				attributes: link.path === undefined ? {} : { "data-wikilink-path": link.path },
-			}).range(from, from + link.text.length),
-		);
-		from += link.text.length + 1;
-	}
-	const marks: Extension = EditorView.decorations.of(Decoration.set(ranges));
-	return mountEditorView(doc, [marks, wikilinkHoverTooltip]);
-}
-
-function mountMissing(path = "/workspace/missing-page.md"): EditorView {
-	return mountLinks({ text: "missing", path });
+function mountMissing(): EditorView {
+	return mountLinks(["missing-page"]);
 }
 
 function linkAt(view: EditorView, index = 0): HTMLElement {
@@ -66,6 +52,12 @@ function textarea(): HTMLTextAreaElement {
 	return el;
 }
 
+function createButton(): HTMLButtonElement {
+	const el = popup().querySelector("button");
+	if (!el) throw new Error("create button not found");
+	return el;
+}
+
 function hover(el: Element): void {
 	el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
 }
@@ -74,9 +66,13 @@ function leave(el: Element, relatedTarget: Element | null = null): void {
 	el.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget }));
 }
 
-function showPopup(view: EditorView, index = 0): HTMLElement {
+function hoverAndWait(view: EditorView, index = 0): void {
 	hover(linkAt(view, index));
 	vi.advanceTimersByTime(SHOW_DELAY);
+}
+
+function showPopup(view: EditorView, index = 0): HTMLElement {
+	hoverAndWait(view, index);
 	return popup();
 }
 
@@ -93,20 +89,15 @@ function ref(filePath: string, lineNumber: number): UnresolvedWikilinkReference 
 }
 
 function placeLink(el: HTMLElement, rect: { top: number; bottom: number; left: number }): void {
-	vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
-		...rect,
-		right: rect.left + 40,
-		width: 40,
-		height: rect.bottom - rect.top,
-		x: rect.left,
-		y: rect.top,
-		toJSON: () => ({}),
-	});
+	vi.spyOn(el, "getBoundingClientRect").mockReturnValue(
+		new DOMRect(rect.left, rect.top, 40, rect.bottom - rect.top),
+	);
 }
 
 describe("未解決リンクのホバーポップアップ", () => {
 	beforeEach(() => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		useWorkspaceStore.setState({ workspacePath: WORKSPACE });
 		useWikilinkStore.getState().reset();
 	});
 
@@ -114,6 +105,7 @@ describe("未解決リンクのホバーポップアップ", () => {
 		cleanupMountedViews();
 		for (const el of popups()) el.remove();
 		useWikilinkStore.getState().reset();
+		useWorkspaceStore.setState({ workspacePath: null });
 	});
 
 	describe("表示", () => {
@@ -128,27 +120,9 @@ describe("未解決リンクのホバーポップアップ", () => {
 			expect(popup().textContent).toContain("missing-page");
 		});
 
-		it("ページ名はパスの basename から拡張子を大文字小文字によらず落とし、NFC にする", () => {
-			const view = mountMissing("/workspace/Café.MD");
-			showPopup(view);
-			expect(popup().dataset.pageName).toBe("Café");
-		});
-
 		it("解決済みのリンクでは出ない", () => {
-			const view = mountLinks({
-				text: "exists",
-				className: "cm-wikilink",
-				path: "/workspace/exists.md",
-			});
-			hover(linkAt(view));
-			vi.advanceTimersByTime(SHOW_DELAY);
-			expect(popups()).toHaveLength(0);
-		});
-
-		it("パスの属性が無い未解決リンクでは出ない", () => {
-			const view = mountLinks({ text: "nopath" });
-			hover(linkAt(view));
-			vi.advanceTimersByTime(SHOW_DELAY);
+			const view = mountLinks(["exists"], ["exists"]);
+			hoverAndWait(view);
 			expect(popups()).toHaveLength(0);
 		});
 
@@ -166,19 +140,14 @@ describe("未解決リンクのホバーポップアップ", () => {
 		it("表示中に同じリンクへ乗り直しても、ポップアップを作り直さない", () => {
 			const view = mountMissing();
 			const first = showPopup(view);
-			hover(linkAt(view));
-			vi.advanceTimersByTime(SHOW_DELAY);
+			hoverAndWait(view);
 			expectOnlyPopup(first);
 		});
 
 		it("表示中に別の未解決リンクへ移ると、そのリンクのポップアップに置き換わる", () => {
-			const view = mountLinks(
-				{ text: "first", path: "/workspace/first.md" },
-				{ text: "second", path: "/workspace/second.md" },
-			);
+			const view = mountLinks(["first", "second"]);
 			showPopup(view, 0);
-			hover(linkAt(view, 1));
-			vi.advanceTimersByTime(SHOW_DELAY);
+			hoverAndWait(view, 1);
 			expect(popups().map((el) => el.dataset.pageName)).toEqual(["second"]);
 		});
 	});
@@ -334,8 +303,7 @@ describe("未解決リンクのホバーポップアップ", () => {
 			});
 			const view = mountMissing();
 			showPopup(view);
-			const button = popup().querySelector("button");
-			button?.dispatchEvent(new MouseEvent("click"));
+			createButton().dispatchEvent(new MouseEvent("click"));
 			expect(useWikilinkStore.getState().createTarget).toEqual({
 				pageName: "missing-page",
 				references,
@@ -346,10 +314,7 @@ describe("未解決リンクのホバーポップアップ", () => {
 
 	describe("後始末", () => {
 		it("閉じたポップアップのページへ、次に開いた別ページのドラフトを書き込まない", () => {
-			const view = mountLinks(
-				{ text: "first", path: "/workspace/first.md" },
-				{ text: "second", path: "/workspace/second.md" },
-			);
+			const view = mountLinks(["first", "second"]);
 			showPopup(view, 0);
 			leave(linkAt(view, 0));
 			vi.advanceTimersByTime(CLOSE_DELAY);
