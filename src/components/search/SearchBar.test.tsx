@@ -335,7 +335,8 @@ describe("閉じる", () => {
 		expect(onClose).toHaveBeenCalled();
 	});
 
-	it("入力欄の外（ボタン）にフォーカスがあっても Esc で閉じる", () => {
+	it("入力欄の外（ボタン）にフォーカスがあっても Esc で閉じる", async () => {
+		const user = userEvent.setup();
 		const view = mountView("foo");
 		const { onClose } = renderBar(view, { initialSearchText: "foo" });
 		const button = screen.getByRole("button", { name: "次の一致" });
@@ -344,7 +345,7 @@ describe("閉じる", () => {
 		});
 		expect(button).toHaveFocus();
 
-		fireEvent.keyDown(button, { key: "Escape" });
+		await user.keyboard("{Escape}");
 
 		expect(getSearchQuery(view.state).search).toBe("");
 		expect(onClose).toHaveBeenCalledOnce();
