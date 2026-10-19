@@ -62,16 +62,16 @@ export function NumberInput({
 	}, [value]);
 
 	const commit = () => {
-		// type="number" は数値として読めない入力を "" に sanitize するので、"" も NaN と同じく
+		const num = Number(draft);
+		// type="number" は数値として読めない入力を "" に sanitize するので、NaN だけでなく "" も
 		// 元の値に戻す。Number("") は 0 なので、そのまま丸めると min が確定される (#673)
-		const num = draft === "" ? Number.NaN : Number(draft);
-		if (!Number.isNaN(num)) {
-			const clamped = Math.min(max, Math.max(min, num));
-			if (clamped !== value) onChange(clamped);
-			setDraft(String(clamped));
-		} else {
+		if (draft === "" || Number.isNaN(num)) {
 			setDraft(String(value));
+			return;
 		}
+		const clamped = Math.min(max, Math.max(min, num));
+		if (clamped !== value) onChange(clamped);
+		setDraft(String(clamped));
 	};
 
 	return (

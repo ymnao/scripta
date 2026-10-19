@@ -182,11 +182,19 @@ describe("NumberInput", () => {
 		expect(input).toHaveValue(14);
 	});
 
-	it("確定した値が元の値と同じなら onChange を呼ばない", async () => {
+	it("何も変えずにフォーカスを外しても onChange を呼ばない", async () => {
 		const { onChange, input } = renderNumber();
 
 		await userEvent.click(input);
 		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
+	it("元の値と同じ値を入れ直して確定しても onChange を呼ばない", async () => {
+		const { onChange, input } = renderNumber();
+
 		await userEvent.clear(input);
 		await userEvent.type(input, "14");
 		await userEvent.tab();
