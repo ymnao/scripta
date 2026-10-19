@@ -63,13 +63,15 @@ export function NumberInput({
 
 	const commit = () => {
 		const num = Number(draft);
-		if (!Number.isNaN(num)) {
-			const clamped = Math.min(max, Math.max(min, num));
-			onChange(clamped);
-			setDraft(String(clamped));
-		} else {
+		// type="number" は数値として読めない入力を "" に sanitize するので、入力から来るのは "" の方。
+		// Number("") は 0 なので、NaN 判定だけでは min が確定される (#673)
+		if (draft === "" || Number.isNaN(num)) {
 			setDraft(String(value));
+			return;
 		}
+		const clamped = Math.min(max, Math.max(min, num));
+		if (clamped !== value) onChange(clamped);
+		setDraft(String(clamped));
 	};
 
 	return (

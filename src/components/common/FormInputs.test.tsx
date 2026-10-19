@@ -161,6 +161,49 @@ describe("NumberInput", () => {
 		expect(input).toHaveValue(8);
 	});
 
+	it("空欄で確定すると onChange を呼ばず、元の値に戻す", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.clear(input);
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
+	it("数値として読めない入力は空欄に sanitize されるので、確定すると元の値に戻す", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.click(input);
+		fireEvent.change(input, { target: { value: "abc" } });
+		expect(input).toHaveValue(null);
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
+	it("何も変えずにフォーカスを外しても onChange を呼ばない", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.click(input);
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
+	it("元の値と同じ値を入れ直して確定しても onChange を呼ばない", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.clear(input);
+		await userEvent.type(input, "14");
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
 	it("外から value が変わると表示も変わる", () => {
 		const { input, rerenderWithValue } = renderNumber();
 
