@@ -161,6 +161,40 @@ describe("NumberInput", () => {
 		expect(input).toHaveValue(8);
 	});
 
+	it("空欄で確定すると onChange を呼ばず、元の値に戻す", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.clear(input);
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
+	it("数値として読めない入力で確定すると onChange を呼ばず、元の値に戻す", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.click(input);
+		fireEvent.change(input, { target: { value: "abc" } });
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
+	it("確定した値が元の値と同じなら onChange を呼ばない", async () => {
+		const { onChange, input } = renderNumber();
+
+		await userEvent.click(input);
+		await userEvent.tab();
+		await userEvent.clear(input);
+		await userEvent.type(input, "14");
+		await userEvent.tab();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(input).toHaveValue(14);
+	});
+
 	it("外から value が変わると表示も変わる", () => {
 		const { input, rerenderWithValue } = renderNumber();
 
