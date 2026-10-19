@@ -96,7 +96,7 @@ function placeLink(el: HTMLElement, rect: { top: number; bottom: number; left: n
 
 describe("未解決リンクのホバーポップアップ", () => {
 	beforeEach(() => {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		vi.useFakeTimers();
 		useWorkspaceStore.setState({ workspacePath: WORKSPACE });
 		useWikilinkStore.getState().reset();
 	});
@@ -162,9 +162,18 @@ describe("未解決リンクのホバーポップアップ", () => {
 			expect(popup().style.transform).toBe("");
 		});
 
-		it("下に 200px の余地が無いときは、リンクの 4px 上に出す", () => {
+		it("出す位置から下にちょうど 200px あるときは、下に出す", () => {
 			const view = mountMissing();
-			const bottom = window.innerHeight - 200;
+			const bottom = window.innerHeight - 204;
+			placeLink(linkAt(view), { top: bottom - 20, bottom, left: 50 });
+			showPopup(view);
+			expect(popup().style.top).toBe(`${bottom + 4}px`);
+			expect(popup().style.transform).toBe("");
+		});
+
+		it("出す位置から下に 200px 無いときは、リンクの 4px 上に出す", () => {
+			const view = mountMissing();
+			const bottom = window.innerHeight - 203;
 			placeLink(linkAt(view), { top: bottom - 20, bottom, left: 50 });
 			showPopup(view);
 			expect(popup().style.top).toBe(`${bottom - 24}px`);
@@ -273,30 +282,40 @@ describe("未解決リンクのホバーポップアップ", () => {
 			expect(popup().textContent).not.toContain("件の参照");
 		});
 
-		it("保存済みのドラフトをドラフト欄に出し、入力すると保存する", () => {
+		it("保存済みのドラフトをドラフト欄に出す", () => {
 			useWikilinkStore.getState().setDraft("missing-page", "saved");
 			const view = mountMissing();
 			showPopup(view);
 			expect(textarea().value).toBe("saved");
+		});
+
+		it("ドラフト欄に入力すると、そのページのドラフトとして保存する", () => {
+			const view = mountMissing();
+			showPopup(view);
 			textarea().value = "edited";
 			textarea().dispatchEvent(new Event("input"));
 			expect(useWikilinkStore.getState().getDraft("missing-page")).toBe("edited");
 		});
 
-		it("表示中に未解決リンクの一覧が更新されると件数を描き直し、ドラフト欄の入力は残す", () => {
+		it("表示中に未解決リンクの一覧が更新されると、件数を描き直す", () => {
 			const view = mountMissing();
 			showPopup(view);
-			// input を流さずに値だけ変え、描き直しの直前に textarea から拾うことを見る
-			textarea().value = "typing";
 			useWikilinkStore.setState({
 				unresolvedLinks: [{ pageName: "missing-page", references: [ref("/workspace/a.md", 1)] }],
 			});
 			expect(popup().textContent).toContain("1 件の参照");
-			expect(textarea().value).toBe("typing");
-			expect(useWikilinkStore.getState().getDraft("missing-page")).toBe("typing");
 		});
 
-		it("「ファイルを作成」を押すと、そのページと参照を作成先の選択に渡して閉じる", () => {
+		it("一覧の更新で描き直しても、ドラフト欄の入力は残る", () => {
+			const view = mountMissing();
+			showPopup(view);
+			// input を流さずに値だけ変え、描き直しの直前に textarea から拾うことを見る
+			textarea().value = "typing";
+			useWikilinkStore.setState({ unresolvedLinks: [] });
+			expect(textarea().value).toBe("typing");
+		});
+
+		it("「ファイルを作成」を押すと、そのページと参照を作成先の選択に渡す", () => {
 			const references = [ref("/workspace/a.md", 3)];
 			useWikilinkStore.setState({
 				unresolvedLinks: [{ pageName: "missing-page", references }],
@@ -308,6 +327,12 @@ describe("未解決リンクのホバーポップアップ", () => {
 				pageName: "missing-page",
 				references,
 			});
+		});
+
+		it("「ファイルを作成」を押すと閉じる", () => {
+			const view = mountMissing();
+			showPopup(view);
+			createButton().dispatchEvent(new MouseEvent("click"));
 			expect(popups()).toHaveLength(0);
 		});
 	});
@@ -344,7 +369,6 @@ describe("未解決リンクのホバーポップアップ", () => {
 			const view = mountMissing();
 			const link = linkAt(view);
 			view.destroy();
-			view.dom.appendChild(link);
 			hover(link);
 			vi.advanceTimersByTime(SHOW_DELAY);
 			expect(popups()).toHaveLength(0);
