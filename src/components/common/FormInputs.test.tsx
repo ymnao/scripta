@@ -81,20 +81,23 @@ describe("SelectInput", () => {
 });
 
 describe("NumberInput", () => {
-	function renderNumber(onChange = vi.fn(), value = 14) {
-		const view = render(
-			<NumberInput
-				id="n"
-				label="文字サイズ"
-				value={value}
-				min={8}
-				max={32}
-				step={1}
-				unit="px"
-				onChange={onChange}
-			/>,
-		);
-		return { onChange, input: screen.getByRole("spinbutton", { name: "文字サイズ" }), ...view };
+	function renderNumber() {
+		const props = {
+			id: "n",
+			label: "文字サイズ",
+			value: 14,
+			min: 8,
+			max: 32,
+			step: 1,
+			unit: "px",
+			onChange: vi.fn(),
+		};
+		const { rerender } = render(<NumberInput {...props} />);
+		return {
+			onChange: props.onChange,
+			input: screen.getByRole("spinbutton", { name: "文字サイズ" }),
+			rerenderWithValue: (value: number) => rerender(<NumberInput {...props} value={value} />),
+		};
 	}
 
 	it("入力中は onChange を呼ばず、blur で確定する", async () => {
@@ -154,21 +157,9 @@ describe("NumberInput", () => {
 	});
 
 	it("外から value が変わると表示も変わる", () => {
-		const onChange = vi.fn();
-		const { rerender, input } = renderNumber(onChange, 14);
+		const { input, rerenderWithValue } = renderNumber();
 
-		rerender(
-			<NumberInput
-				id="n"
-				label="文字サイズ"
-				value={18}
-				min={8}
-				max={32}
-				step={1}
-				unit="px"
-				onChange={onChange}
-			/>,
-		);
+		rerenderWithValue(18);
 
 		expect(input).toHaveValue(18);
 	});
@@ -284,17 +275,11 @@ describe("RangeInput", () => {
 });
 
 describe.each([
-	{
-		name: "TextInput",
-		Input: TextInput,
-		getField: () => screen.getByRole("textbox", { name: "ブランチ" }),
-	},
-	{
-		name: "TextareaInput",
-		Input: TextareaInput,
-		getField: () => screen.getByRole("textbox", { name: "ブランチ" }),
-	},
-])("$name", ({ Input, getField }) => {
+	{ name: "TextInput", Input: TextInput },
+	{ name: "TextareaInput", Input: TextareaInput },
+])("$name", ({ Input }) => {
+	const getField = () => screen.getByRole("textbox", { name: "ブランチ" });
+
 	function Controlled({
 		initial,
 		onChange,
