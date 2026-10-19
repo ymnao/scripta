@@ -676,10 +676,22 @@ function deleteTable(view: EditorView, wrapperEl: HTMLElement): void {
 	const tableNode = getTableNodeFor(view, wrapperEl);
 	if (!tableNode) return;
 
-	const from = view.state.doc.line(tableNode.startLine).from;
-	const to = view.state.doc.line(tableNode.endLine).to;
-	const deleteTo = to < view.state.doc.length ? to + 1 : to;
-	const deleteFrom = from > 0 ? from - 1 : from;
+	const { doc } = view.state;
+	const from = doc.line(tableNode.startLine).from;
+	const to = doc.line(tableNode.endLine).to;
+	const hasPrev = tableNode.startLine > 1;
+	const hasNext = tableNode.endLine < doc.lines;
+	// 前後の改行を両方消すと、前の行と次の行が 1 行につながる。それでも両方消す場合が
+	// あるのは、どちらかが空の行ならつながっても空でない方の行が残るだけで、空行が 1 つ
+	// 詰まるため。空白だけの行は空とみなさない（isLineBlank を使わない）。上の行の末尾に
+	// 空白が付き、段落では 2 つ以上の空白が hard break に変わる
+	const joinsTwoLines =
+		hasPrev &&
+		hasNext &&
+		doc.line(tableNode.startLine - 1).length > 0 &&
+		doc.line(tableNode.endLine + 1).length > 0;
+	const deleteTo = hasNext ? to + 1 : to;
+	const deleteFrom = hasPrev && !joinsTwoLines ? from - 1 : from;
 
 	view.dispatch({
 		changes: { from: deleteFrom, to: deleteTo, insert: "" },

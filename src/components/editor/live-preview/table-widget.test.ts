@@ -178,9 +178,54 @@ describe("表のコンテキストメニュー", () => {
 	});
 
 	describe("テーブルの削除", () => {
-		// 表の上下が空行なしで他の行に接するケースは #667 の不具合があるので固定しない。
-		// 文書の先頭・末尾は、#667 を「前後の改行のうち存在する方を 1 つだけ消す」形で直すなら
-		// 結果が変わらない
+		it("上下が見出しに接する表を削除しても、2 つの見出しは別の行に残る", () => {
+			const view = mountTable(`# h\n${TABLE}\n# h2`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("# h\n# h2");
+		});
+
+		it("上が段落に接する表を削除しても、段落と次の見出しはつながらない", () => {
+			const view = mountTable(`text\n${TABLE}\n# h2`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("text\n# h2");
+		});
+
+		it("下がリストに接する表を削除しても、リストは見出しの一部にならない", () => {
+			const view = mountTable(`# h\n${TABLE}\n- item`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("# h\n- item");
+		});
+
+		it("下がコードブロックに接する表を削除しても、開始の ``` は行頭に残る", () => {
+			const view = mountTable(`# h\n${TABLE}\n\`\`\`\ncode\n\`\`\``);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("# h\n```\ncode\n```");
+		});
+
+		it("下が空白だけの行に接する表を削除しても、上の行に空白が付かない", () => {
+			const view = mountTable(`text\n${TABLE}\n  \nb`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("text\n  \nb");
+		});
+
+		it("下に空行がある表を削除すると、表と一緒にその空行も消える", () => {
+			const view = mountTable(`# h\n${TABLE}\n\ntext`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("# h\ntext");
+		});
+
+		it("上に空行がある表を削除すると、表と一緒にその空行も消える", () => {
+			const view = mountTable(`text\n\n${TABLE}\n# h2`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("text\n# h2");
+		});
+
+		it("上下に空行がある表を削除すると、空行が 1 つ残る", () => {
+			const view = mountTable(`a\n\n${TABLE}\n\nb`);
+			choose(view, 1, 0, "テーブルを削除");
+			expect(view.state.doc.toString()).toBe("a\n\nb");
+		});
+
 		it("文書の先頭にある表を削除すると、表と直後の改行が消える", () => {
 			const view = mountTable(`${TABLE}\n# h2`);
 			choose(view, 1, 0, "テーブルを削除");
