@@ -176,6 +176,7 @@ describe("NumberInput", () => {
 
 		await userEvent.click(input);
 		fireEvent.change(input, { target: { value: "abc" } });
+		expect(input).toHaveValue(null);
 		await userEvent.tab();
 
 		expect(onChange).not.toHaveBeenCalled();
