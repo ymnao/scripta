@@ -11,6 +11,12 @@ import {
 	Toggle,
 } from "./FormInputs";
 
+// isIMEComposing は isComposing と keyCode 229 のどちらかで変換中とみなすので、片方ずつ撃つ
+const IME_ENTER = [
+	{ how: "keyCode 229", init: { keyCode: 229 } },
+	{ how: "isComposing", init: { isComposing: true } },
+];
+
 describe("Toggle", () => {
 	it("OFF のときクリックで true を渡す", async () => {
 		const onChange = vi.fn();
@@ -122,13 +128,12 @@ describe("NumberInput", () => {
 		expect(input).not.toHaveFocus();
 	});
 
-	it("IME 変換中の Enter では確定しない", async () => {
+	it.each(IME_ENTER)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
 		const { onChange, input } = renderNumber();
 
 		await userEvent.clear(input);
 		await userEvent.type(input, "20");
-		fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
-		fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+		fireEvent.keyDown(input, { key: "Enter", ...init });
 
 		expect(onChange).not.toHaveBeenCalled();
 		expect(input).toHaveFocus();
@@ -166,7 +171,8 @@ describe("NumberInput", () => {
 });
 
 describe("RangeInput", () => {
-	function renderRange(onChange = vi.fn()) {
+	function renderRange() {
+		const onChange = vi.fn();
 		render(
 			<RangeInput
 				id="r"
@@ -215,29 +221,35 @@ describe("RangeInput", () => {
 		expect(text).not.toHaveFocus();
 	});
 
-	it("IME 変換中の Enter では確定しない", async () => {
+	it.each(IME_ENTER)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
 		const { onChange, text } = renderRange();
 
 		await userEvent.clear(text);
 		await userEvent.type(text, "35");
-		fireEvent.keyDown(text, { key: "Enter", keyCode: 229 });
-		fireEvent.keyDown(text, { key: "Enter", isComposing: true });
+		fireEvent.keyDown(text, { key: "Enter", ...init });
 
 		expect(onChange).not.toHaveBeenCalled();
 		expect(text).toHaveFocus();
 	});
 
-	it("範囲外の値は min / max に丸める", async () => {
+	it("max を超えた値は max に丸める", async () => {
 		const { onChange, text } = renderRange();
 
 		await userEvent.clear(text);
 		await userEvent.type(text, "99");
 		await userEvent.tab();
+
+		expect(onChange).toHaveBeenCalledExactlyOnceWith(50);
+	});
+
+	it("min を下回る値は min に丸める", async () => {
+		const { onChange, text } = renderRange();
+
 		await userEvent.clear(text);
 		await userEvent.type(text, "-5");
 		await userEvent.tab();
 
-		expect(onChange.mock.calls).toEqual([[50], [0]]);
+		expect(onChange).toHaveBeenCalledExactlyOnceWith(0);
 	});
 
 	it("数値でない入力は onChange を呼ばず表示を value に戻す", async () => {
@@ -245,6 +257,7 @@ describe("RangeInput", () => {
 
 		await userEvent.clear(text);
 		await userEvent.type(text, "abc");
+		expect(text).toHaveValue("abc");
 		await userEvent.tab();
 
 		expect(onChange).not.toHaveBeenCalled();
@@ -255,7 +268,9 @@ describe("RangeInput", () => {
 		const { onChange, text } = renderRange();
 
 		await userEvent.click(text);
+		expect(text).toHaveFocus();
 		await userEvent.tab();
+		expect(text).not.toHaveFocus();
 
 		expect(onChange).not.toHaveBeenCalled();
 	});
@@ -381,7 +396,7 @@ describe.each([
 	});
 });
 
-describe("TextInput", () => {
+describe("TextInput の Enter", () => {
 	it("Enter で確定する", async () => {
 		const onChange = vi.fn();
 		render(<TextInput id="x" label="ブランチ" value="main" onChange={onChange} />);
@@ -393,21 +408,20 @@ describe("TextInput", () => {
 		expect(input).not.toHaveFocus();
 	});
 
-	it("IME 変換中の Enter では確定しない", async () => {
+	it.each(IME_ENTER)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
 		const onChange = vi.fn();
 		render(<TextInput id="x" label="ブランチ" value="main" onChange={onChange} />);
 
 		const input = screen.getByRole("textbox", { name: "ブランチ" });
 		await userEvent.type(input, "-dev");
-		fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
-		fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+		fireEvent.keyDown(input, { key: "Enter", ...init });
 
 		expect(onChange).not.toHaveBeenCalled();
 		expect(input).toHaveFocus();
 	});
 });
 
-describe("TextareaInput", () => {
+describe("TextareaInput の Enter と説明文", () => {
 	it("Enter は改行として入力され、確定しない", async () => {
 		const onChange = vi.fn();
 		render(<TextareaInput id="x" label="除外" value=".DS_Store" onChange={onChange} />);
