@@ -75,7 +75,7 @@ describe("件数表示", () => {
 	});
 
 	it("選択が一致に重なっていないと件数だけ出す", () => {
-		renderBar(mountView("foo foo foo"), { initialSearchText: "foo" });
+		renderBar(mountView("x foo foo foo"), { initialSearchText: "foo" });
 
 		expect(matchCount()).toHaveTextContent(/^3 results$/);
 	});
@@ -269,6 +269,7 @@ describe("置換", () => {
 		await userEvent.click(screen.getByRole("button", { name: "すべて置換" }));
 
 		expect(view.state.doc.toString()).toBe("baz bar baz");
+		// replaceAll は選択を動かさず選択の購読が反応しないので、rAF での数え直しを待つ
 		await waitFor(() => expect(matchCount()).toHaveTextContent(/^No results$/));
 	});
 
@@ -337,8 +338,13 @@ describe("閉じる", () => {
 	it("入力欄の外（ボタン）にフォーカスがあっても Esc で閉じる", () => {
 		const view = mountView("foo");
 		const { onClose } = renderBar(view, { initialSearchText: "foo" });
+		const button = screen.getByRole("button", { name: "次の一致" });
+		act(() => {
+			button.focus();
+		});
+		expect(button).toHaveFocus();
 
-		fireEvent.keyDown(screen.getByRole("button", { name: "次の一致" }), { key: "Escape" });
+		fireEvent.keyDown(button, { key: "Escape" });
 
 		expect(getSearchQuery(view.state).search).toBe("");
 		expect(onClose).toHaveBeenCalledOnce();
@@ -355,10 +361,17 @@ describe("置換欄の開閉", () => {
 		await userEvent.click(toggle);
 
 		expect(replaceInput()).toHaveFocus();
-		const opened = screen.getByRole("button", { name: "置換を閉じる" });
-		expect(opened).toHaveAttribute("aria-expanded", "true");
+		expect(screen.getByRole("button", { name: "置換を閉じる" })).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
+	});
 
-		await userEvent.click(opened);
+	it("開いた置換欄はトグルで閉じる", async () => {
+		renderBar(mountView("foo"), { initialExpanded: true });
+
+		await userEvent.click(screen.getByRole("button", { name: "置換を閉じる" }));
+
 		expect(screen.queryByRole("textbox", { name: "置換" })).toBeNull();
 		expect(screen.getByRole("button", { name: "置換を開く" })).toBeInTheDocument();
 	});
