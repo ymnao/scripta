@@ -171,7 +171,7 @@ describe("NumberInput", () => {
 		expect(input).toHaveValue(14);
 	});
 
-	it("数値として読めない入力で確定すると onChange を呼ばず、元の値に戻す", async () => {
+	it("数値として読めない入力は空欄に sanitize されるので、確定すると元の値に戻す", async () => {
 		const { onChange, input } = renderNumber();
 
 		await userEvent.click(input);

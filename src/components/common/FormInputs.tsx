@@ -63,8 +63,8 @@ export function NumberInput({
 
 	const commit = () => {
 		const num = Number(draft);
-		// type="number" は数値として読めない入力を "" に sanitize するので、NaN だけでなく "" も
-		// 元の値に戻す。Number("") は 0 なので、そのまま丸めると min が確定される (#673)
+		// type="number" は数値として読めない入力を "" に sanitize するので、入力から来るのは "" の方。
+		// Number("") は 0 なので、NaN 判定だけでは min が確定される (#673)
 		if (draft === "" || Number.isNaN(num)) {
 			setDraft(String(value));
 			return;
