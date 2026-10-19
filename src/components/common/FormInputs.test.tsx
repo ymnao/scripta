@@ -139,7 +139,7 @@ describe("NumberInput", () => {
 		expect(input).toHaveFocus();
 	});
 
-	it("max を超えた値は max に丸めて表示も戻す", async () => {
+	it("max を超えた値は max に丸めて、表示も丸めた値にする", async () => {
 		const { onChange, input } = renderNumber();
 
 		await userEvent.clear(input);
@@ -150,7 +150,7 @@ describe("NumberInput", () => {
 		expect(input).toHaveValue(32);
 	});
 
-	it("min を下回る値は min に丸めて表示も戻す", async () => {
+	it("min を下回る値は min に丸めて、表示も丸めた値にする", async () => {
 		const { onChange, input } = renderNumber();
 
 		await userEvent.clear(input);
@@ -282,6 +282,7 @@ describe("RangeInput", () => {
 		await userEvent.type(text, "4");
 		fireEvent.change(slider, { target: { value: "30" } });
 
+		// value は 20 のまま渡しているので、入力途中の "4" を捨てた後の表示は 30 ではなく 20
 		expect(text).toHaveValue("20");
 		await userEvent.click(text);
 		await userEvent.tab();
@@ -332,7 +333,9 @@ describe.each([
 		render(<Input id="x" label="ブランチ" value="main" onChange={onChange} />);
 
 		await userEvent.click(getField());
+		expect(getField()).toHaveFocus();
 		await userEvent.tab();
+		expect(getField()).not.toHaveFocus();
 
 		expect(onChange).not.toHaveBeenCalled();
 	});
@@ -447,6 +450,7 @@ describe("TextareaInput の Enter と説明文", () => {
 		expect(screen.getByText("1 行 1 パターン")).toBeInTheDocument();
 
 		rerender(<TextareaInput id="x" label="除外" value="" onChange={vi.fn()} />);
+		// queryByText では、条件を外して空の <p> を出す変更を検出できない
 		expect(container.querySelector("p")).toBeNull();
 	});
 });
