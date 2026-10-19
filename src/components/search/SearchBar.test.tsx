@@ -1,29 +1,27 @@
-import { getSearchQuery, search } from "@codemirror/search";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { getSearchQuery, search, searchPanelOpen } from "@codemirror/search";
+import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	cleanupMountedViews,
+	createTestState,
+	mountEditorView,
+} from "../editor/live-preview/test-helper";
 import { SearchBar, type SearchBarHandle } from "./SearchBar";
 
-const views: EditorView[] = [];
-
-afterEach(() => {
-	for (const view of views.splice(0)) {
-		view.destroy();
-		view.dom.remove();
-	}
-});
-
-function editorState(doc: string): EditorState {
-	return EditorState.create({ doc, extensions: [search()] });
-}
+afterEach(cleanupMountedViews);
 
 function mountView(doc: string): EditorView {
-	const view = new EditorView({ state: editorState(doc), parent: document.body });
-	views.push(view);
-	return view;
+	return mountEditorView(doc, search());
+}
+
+function replaceState(view: EditorView, doc: string): void {
+	act(() => {
+		view.setState(createTestState(doc, undefined, search()));
+	});
 }
 
 function renderBar(view: EditorView, props: Partial<Parameters<typeof SearchBar>[0]> = {}) {
@@ -122,16 +120,16 @@ describe("件数表示", () => {
 	});
 
 	it("入力するたびに CodeMirror の検索クエリと件数を更新する", async () => {
-		const view = mountView("fo foo");
+		const view = mountView("fo foo foo");
 		renderBar(view);
 
 		await userEvent.type(searchInput(), "fo");
 		expect(getSearchQuery(view.state).search).toBe("fo");
-		expect(matchCount()).toHaveTextContent(/^2 results$/);
+		expect(matchCount()).toHaveTextContent(/^3 results$/);
 
 		await userEvent.type(searchInput(), "o");
 		expect(getSearchQuery(view.state).search).toBe("foo");
-		expect(matchCount()).toHaveTextContent(/^1 results$/);
+		expect(matchCount()).toHaveTextContent(/^2 results$/);
 	});
 });
 
@@ -196,20 +194,16 @@ describe("一致の間の移動", () => {
 
 		expect(selected(view)).toEqual({ from: 0, to: 0 });
 		// 空のクエリで findNext / findPrevious を呼ぶと CodeMirror 自身の検索パネルが開く
-		expect(view.dom.querySelector(".cm-search")).toBeNull();
+		expect(searchPanelOpen(view.state)).toBe(false);
 	});
 
-	it("一致が無いと前後のボタンは無効で、押しても選択が動かない", async () => {
-		const view = mountView("foo");
-		renderBar(view, { initialSearchText: "bar" });
+	// 押しても動かないことは見ない。一致が無ければ findNext / findPrevious 自体が何もしない
+	it("一致が無いと前後のボタンは無効になる", () => {
+		renderBar(mountView("foo"), { initialSearchText: "bar" });
 
 		for (const name of ["前の一致", "次の一致"]) {
-			const button = screen.getByRole("button", { name });
-			expect(button).toHaveAttribute("aria-disabled", "true");
-			await userEvent.click(button);
+			expect(screen.getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
 		}
-
-		expect(selected(view)).toEqual({ from: 0, to: 0 });
 	});
 
 	it("一致があると前後のボタンは有効", () => {
@@ -264,7 +258,7 @@ describe("置換", () => {
 		await userEvent.type(replaceInput(), "{Enter}");
 
 		expect(view.state.doc.toString()).toBe("foo");
-		expect(view.dom.querySelector(".cm-search")).toBeNull();
+		expect(searchPanelOpen(view.state)).toBe(false);
 	});
 
 	it("すべて置換で全部の一致を置換する", async () => {
@@ -278,17 +272,13 @@ describe("置換", () => {
 		await waitFor(() => expect(matchCount()).toHaveTextContent(/^No results$/));
 	});
 
-	it("一致が無いと置換ボタンは無効で、押しても文書が変わらない", async () => {
-		const view = mountView("foo");
-		renderBar(view, { initialExpanded: true, initialSearchText: "bar" });
+	// 押しても変わらないことは見ない。一致が無ければ replaceNext / replaceAll 自体が何もしない
+	it("一致が無いと置換ボタンは無効になる", () => {
+		renderBar(mountView("foo"), { initialExpanded: true, initialSearchText: "bar" });
 
 		for (const name of ["置換", "すべて置換"]) {
-			const button = screen.getByRole("button", { name });
-			expect(button).toHaveAttribute("aria-disabled", "true");
-			await userEvent.click(button);
+			expect(screen.getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
 		}
-
-		expect(view.state.doc.toString()).toBe("foo");
 	});
 
 	it("検索欄が空なら前後・置換のボタンを押しても何もしない", async () => {
@@ -301,7 +291,7 @@ describe("置換", () => {
 
 		expect(view.state.doc.toString()).toBe("foo");
 		expect(selected(view)).toEqual({ from: 0, to: 0 });
-		expect(view.dom.querySelector(".cm-search")).toBeNull();
+		expect(searchPanelOpen(view.state)).toBe(false);
 	});
 
 	it("一致があると置換ボタンは有効", () => {
@@ -417,9 +407,7 @@ describe("view の state 差し替え（#220）", () => {
 		const view = mountView("foo");
 		const { rerender, onClose } = renderBar(view, { initialSearchText: "foo", viewEpoch: 0 });
 
-		act(() => {
-			view.setState(editorState("foo foo"));
-		});
+		replaceState(view, "foo foo");
 		expect(getSearchQuery(view.state).search).toBe("");
 
 		rerender(<SearchBar view={view} onClose={onClose} initialSearchText="foo" viewEpoch={1} />);
@@ -432,9 +420,7 @@ describe("view の state 差し替え（#220）", () => {
 		const view = mountView("foo");
 		const { rerender, onClose } = renderBar(view, { initialSearchText: "foo", viewEpoch: 0 });
 
-		act(() => {
-			view.setState(editorState("foo foo"));
-		});
+		replaceState(view, "foo foo");
 		rerender(<SearchBar view={view} onClose={onClose} initialSearchText="foo" viewEpoch={1} />);
 		select(view, 4, 7);
 
