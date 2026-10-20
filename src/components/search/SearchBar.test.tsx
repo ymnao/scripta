@@ -322,7 +322,7 @@ describe("閉じる", () => {
 		await userEvent.type(searchInput(), "{Escape}");
 
 		expect(getSearchQuery(view.state).search).toBe("");
-		expect(onClose).toHaveBeenCalled();
+		expect(onClose).toHaveBeenCalledOnce();
 	});
 
 	it("置換欄の Esc で閉じる", async () => {
@@ -332,7 +332,7 @@ describe("閉じる", () => {
 		await userEvent.type(replaceInput(), "{Escape}");
 
 		expect(getSearchQuery(view.state).search).toBe("");
-		expect(onClose).toHaveBeenCalled();
+		expect(onClose).toHaveBeenCalledOnce();
 	});
 
 	it.each(IME)("IME 変換中（$how）の検索欄の Esc では閉じない", ({ init }) => {

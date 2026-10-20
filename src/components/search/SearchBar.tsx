@@ -177,12 +177,8 @@ export function SearchBar({
 					handleFindNext();
 				}
 			}
-			if (e.key === "Escape") {
-				e.preventDefault();
-				handleClose();
-			}
 		},
-		[handleFindNext, handleFindPrevious, handleClose],
+		[handleFindNext, handleFindPrevious],
 	);
 
 	const handleReplaceKeyDown = useCallback(
@@ -192,12 +188,8 @@ export function SearchBar({
 				e.preventDefault();
 				handleReplaceNext();
 			}
-			if (e.key === "Escape") {
-				e.preventDefault();
-				handleClose();
-			}
 		},
-		[handleReplaceNext, handleClose],
+		[handleReplaceNext],
 	);
 
 	const matchLabel =
