@@ -322,7 +322,7 @@ describe("閉じる", () => {
 		await userEvent.type(searchInput(), "{Escape}");
 
 		expect(getSearchQuery(view.state).search).toBe("");
-		expect(onClose).toHaveBeenCalled();
+		expect(onClose).toHaveBeenCalledOnce();
 	});
 
 	it("置換欄の Esc で閉じる", async () => {
@@ -332,7 +332,27 @@ describe("閉じる", () => {
 		await userEvent.type(replaceInput(), "{Escape}");
 
 		expect(getSearchQuery(view.state).search).toBe("");
-		expect(onClose).toHaveBeenCalled();
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it.each(IME)("IME 変換中（$how）の検索欄の Esc では閉じない", ({ init }) => {
+		const view = mountView("foo");
+		const { onClose } = renderBar(view, { initialSearchText: "foo" });
+
+		fireEvent.keyDown(searchInput(), { key: "Escape", ...init });
+
+		expect(getSearchQuery(view.state).search).toBe("foo");
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it.each(IME)("IME 変換中（$how）の置換欄の Esc では閉じない", ({ init }) => {
+		const view = mountView("foo");
+		const { onClose } = renderBar(view, { initialExpanded: true, initialSearchText: "foo" });
+
+		fireEvent.keyDown(replaceInput(), { key: "Escape", ...init });
+
+		expect(getSearchQuery(view.state).search).toBe("foo");
+		expect(onClose).not.toHaveBeenCalled();
 	});
 
 	it("入力欄の外（ボタン）にフォーカスがあっても Esc で閉じる", async () => {
