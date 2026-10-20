@@ -177,12 +177,8 @@ export function SearchBar({
 					handleFindNext();
 				}
 			}
-			if (e.key === "Escape") {
-				e.preventDefault();
-				handleClose();
-			}
 		},
-		[handleFindNext, handleFindPrevious, handleClose],
+		[handleFindNext, handleFindPrevious],
 	);
 
 	const handleReplaceKeyDown = useCallback(
@@ -192,12 +188,8 @@ export function SearchBar({
 				e.preventDefault();
 				handleReplaceNext();
 			}
-			if (e.key === "Escape") {
-				e.preventDefault();
-				handleClose();
-			}
 		},
-		[handleReplaceNext, handleClose],
+		[handleReplaceNext],
 	);
 
 	const matchLabel =
@@ -214,6 +206,7 @@ export function SearchBar({
 			className="search-bar"
 			aria-label="検索と置換"
 			onKeyDown={(e) => {
+				if (isIMEComposing(e)) return;
 				if (e.key === "Escape") {
 					e.preventDefault();
 					handleClose();
