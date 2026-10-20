@@ -97,19 +97,19 @@ overrides:
 # 意図的に override しない transitive duplicates の記録（dedupe 不可だが許容）:
 #
 # - **`katex`** (dual-resolution allow): 本リポは direct で 0.19 系を pin するが、
-#   `mermaid@12` が dependencies として 0.16 系の `katex` を持つため（peerDependency
+#   `mermaid@12` が dependencies として 0.18 系の `katex` を持つため（peerDependency
 #   ではなく direct dep）、`pnpm dedupe` で direct 版には合流不可。`katex` を direct 版
 #   で override 強制すると mermaid 内部の math 描画 (mermaid graph の数式ラベル) が
 #   breaks する可能性があり、mermaid 上流が direct と同じ系列の katex を宣言するまで
-#   dual-resolution を許容する (mermaid 12.1.0 でも 0.16 系のままだった)。
+#   dual-resolution を許容する (mermaid 12.2.0 で `^0.18.0` に上がったが 0.19 系には届いていない)。
 #   実害評価: 本体 TeX 描画 (Live Preview / PDF export) は direct 版のみ呼ばれ、mermaid
-#   経由の 0.16.x は mermaid graph 内の数式ラベル描画にのみ使用される。bundle 増は
-#   ~280KB (gzip 後 ~80KB) 程度、Phase 6 packaged build スモークで実機確認。
+#   経由の 0.18.x は mermaid graph 内の数式ラベル描画にのみ使用される。bundle 増は
+#   ~280KB (gzip 後 ~80KB) 程度 (0.16 系時点の測定)、Phase 6 packaged build スモークで実機確認。
 #   解消条件: mermaid が direct と同じ系列の katex を peer/dep として宣言した時点で
 #   このコメントごと削除し、`pnpm dedupe` で統合する。
 #
 # - **`marked`** (dual-resolution allow、katex と同構造): 本リポは direct で 18 系
-#   を pin するが、`mermaid@12.1.0` が dependencies として `marked@^16.3.0` を持つ
+#   を pin するが、`mermaid@12.2.0` が dependencies として `marked@^16.3.0` を持つ
 #   （peerDependency ではなく direct dep）ため direct 版には合流不可。major 2 つ跨ぎの
 #   override 強制は mermaid の markdown ラベル parse (flowchart / mindmap の
 #   markdown strings 機能) を breaks し得るし、描画劣化は CI e2e の smoke では検出
