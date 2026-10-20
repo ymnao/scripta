@@ -26,6 +26,7 @@ export function GoToLineDialog({ open, totalLines, onGoToLine, onClose }: GoToLi
 	useEffect(() => {
 		if (!open) return;
 		const handler = (e: KeyboardEvent) => {
+			if (isIMEComposing(e)) return;
 			if (e.key === "Escape") {
 				e.stopPropagation();
 				e.preventDefault();

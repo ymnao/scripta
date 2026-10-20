@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { isIMEComposing } from "../../lib/ime";
 
 type DialogSize = "sm" | "md" | "lg";
 
@@ -44,6 +45,7 @@ export function DialogBase({
 	useEffect(() => {
 		if (!open) return;
 		const handler = (e: KeyboardEvent) => {
+			if (isIMEComposing(e)) return;
 			if (e.key === "Escape") {
 				e.stopPropagation();
 				e.preventDefault();

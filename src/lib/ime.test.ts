@@ -26,4 +26,18 @@ describe("isIMEComposing", () => {
 	it("returns false for normal Enter key", () => {
 		expect(isIMEComposing(fakeKeyboardEvent({ keyCode: 13 }))).toBe(false);
 	});
+
+	it("returns true for a native KeyboardEvent with isComposing", () => {
+		expect(isIMEComposing(new KeyboardEvent("keydown", { isComposing: true }))).toBe(true);
+	});
+
+	it("returns true for a native KeyboardEvent with keyCode 229", () => {
+		expect(isIMEComposing(new KeyboardEvent("keydown", { key: "Escape", keyCode: 229 }))).toBe(
+			true,
+		);
+	});
+
+	it("returns false for a native Escape outside composition", () => {
+		expect(isIMEComposing(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(false);
+	});
 });

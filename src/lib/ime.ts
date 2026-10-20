@@ -7,6 +7,7 @@
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event
  */
-export function isIMEComposing(e: React.KeyboardEvent): boolean {
-	return e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+export function isIMEComposing(e: React.KeyboardEvent | KeyboardEvent): boolean {
+	const native = "nativeEvent" in e ? e.nativeEvent : e;
+	return native.isComposing || native.keyCode === 229;
 }
