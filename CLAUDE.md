@@ -87,7 +87,7 @@ electron-vite の main / preload preset は、v5.0.0 / v6.0.0 とも external �
 
 #### 3. build target（6.0.0 で electron-vite のマップに委譲）
 
-electron-vite は `package.json` の electron の major から、main / preload の `node?` と renderer の `chrome?` を決める（`getElectronNodeTarget()` / `getElectronChromeTarget()`、`src/electron.ts`）。6.0.0 のマップでは 44 → `node24.18` / `chrome152`。electron 44.9.0 の同梱版は Node v24.22.0 / Chromium 152.0.7977.167（`electron/electron` の `DEPS` を tag `v44.9.0` で取得して確認）。
+electron-vite はインストール済みの electron（`node_modules/electron/package.json` の version。env `ELECTRON_MAJOR_VER` があればそちら）の major から、main / preload の `node?` と renderer の `chrome?` を決める（`getElectronNodeTarget()` / `getElectronChromeTarget()`、`src/electron.ts`）。6.0.0 のマップでは 44 → `node24.18` / `chrome152`。electron 44.9.0 の同梱版は Node v24.22.0 / Chromium 152.0.7977.167（`electron/electron` の `DEPS` を tag `v44.9.0` で取得して確認）。
 
 マップに無い major では、マップ中で最も新しい major の値に fallback する（キーが整数文字列なので `Object.values()` は昇順に並び、その `reverse()[0]` が選ばれる）。fallback 先は実際の同梱版より古いので、変換が過剰になるだけで parse error にはならない。**Electron の major を上げるときは**、electron-vite のマップに新しい major が入っているかを見る。入っていなければ、同梱の Node / Chromium（上と同じ `DEPS` で確認）を `electron.vite.config.ts` の `build.target` に明示するかを判断する。`engines.node`（npm script を回すホスト Node の条件）は、Electron 同梱の runtime Node 版とは別物である点に注意。
 

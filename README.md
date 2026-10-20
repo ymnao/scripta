@@ -30,7 +30,7 @@ Chromium 固定環境で挙動を安定させるため、バンドルサイズ�
 | エディタ | [CodeMirror 6](https://codemirror.net/) (`@uiw/react-codemirror`) | v6 |
 | 状態管理 | [zustand](https://zustand.docs.pmnd.rs/) | v5 |
 | スタイル | [Tailwind CSS](https://tailwindcss.com/) | v4 |
-| ビルド | [Vite](https://vite.dev/) + [electron-vite](https://electron-vite.org/) | Vite 8 / electron-vite 5 |
+| ビルド | [Vite](https://vite.dev/) + [electron-vite](https://electron-vite.org/) | Vite 8 / electron-vite 6 |
 | Lint / Format | [Biome](https://biomejs.dev/) | v2 |
 | テスト | [Vitest](https://vitest.dev/) + [Playwright](https://playwright.dev/) | latest |
 | パッケージング | [electron-builder](https://www.electron.build/) | latest |
