@@ -70,7 +70,7 @@ pnpm test:e2e:electron
 
 ### electron 42+ への対応
 
-electron 42.0.0 以降、`electron-vite@5` の対応が追いつかず、3 種類の workaround を継続適用している（1・2 は [alex8088/electron-vite#904](https://github.com/alex8088/electron-vite/issues/904) が landed したら削除予定、3 は electron-vite の electron→node target マップが 42+ に更新されたら見直し）。
+electron 42.0.0 以降、バイナリ取得だけは自前の workaround を継続適用している（下記 1）。electron-vite 5 の頃に置いていた external 化と build target の明示は、electron-vite 6.0.0 への更新で外した（下記 2・3）。
 
 #### 1. バイナリ取得（postinstall 削除への対応）
 
@@ -81,19 +81,15 @@ electron 42.0.0 で npm パッケージの `postinstall` script が削除され�
 
 **`pnpm up electron@<ver>` 直後はこの 2 段構えのどちらにも乗らない**。新版の `node_modules/electron/` に `path.txt` が無い状態になり、`electron` を import する `electron/main/utils/remote-image-policy.test.ts` が `Electron failed to install correctly` で **suite ごと失敗**する（`test` script は install.js を chain していないため `pnpm test` でも解消しない）。依存 bump 後は `node node_modules/electron/install.js` を明示実行してからテストを回す。この失敗は 1 suite が丸ごと落ちる形なので、**pass 件数だけを見ると「全部通った」と誤読しやすい**（2026-09-26 の PR #562 で実際に誤読しかけた）。
 
-#### 2. `electron` module の external 化
+#### 2. `electron` module の external 化（6.0.0 で撤去）
 
-`electron` は devDependencies に置く慣例で、`externalizeDepsPlugin` のデフォルトは dependencies のみを external にするため、`@electron-toolkit/utils` 経由の transitive ESM import から electron の `index.js` が bundle に取り込まれる。electron 41 までは index.js が単純な path 返却だったので bundle されても害が小さかったが、42 から lazy download ロジックが index.js に追加された結果、bundle 後の `__dirname` が `path.txt` を見失って `Electron failed to install correctly` エラーで起動失敗するようになった。
+electron-vite の main / preload preset は、v5.0.0 / v6.0.0 とも external に `electron` と `/^electron\/.+/` を入れている（`src/plugins/electron.ts`）。2026-10-21 に electron-vite 6.0.0 + electron 44.9.0 で、`electron.vite.config.ts` に明示していた `rollupOptions.external` と target を外して build した。`out/main/index.js` / `out/preload/index.js` は外す前とバイト単位で同一（`diff -q`）で、electron の `index.js`（`path.txt` を読む処理）は含まれていなかった。これを確かめて明示指定を削除した。
 
-`electron.vite.config.ts` の main / preload で `rollupOptions.external: ['electron', /^electron\/.+/]` を明示指定して runtime resolve に戻す。
+#### 3. build target（6.0.0 で electron-vite のマップに委譲）
 
-#### 3. build target の明示（stale な node target fallback への対応）
+electron-vite は `package.json` の electron の major から、main / preload の `node?` と renderer の `chrome?` を決める（`getElectronNodeTarget()` / `getElectronChromeTarget()`、`src/electron.ts`）。6.0.0 のマップでは 44 → `node24.18` / `chrome152`。electron 44.9.0 の同梱版は Node v24.22.0 / Chromium 152.0.7977.167（`electron/electron` の `DEPS` を tag `v44.9.0` で取得して確認）。
 
-`electron-vite@5.0.0` の `getElectronNodeTarget()` / `getElectronChromeTarget()` は Electron 39 までしか electron→node / electron→chromium のマップを持たず、42+ では `node16.17` / `chrome108` へ stale fallback する（過度な down-level transpile）。`electron.vite.config.ts` で main / preload に `target: "node24"`（Electron 44 同梱 Node は v24 系）、renderer に `target: "chrome152"`（Electron 44 = Chromium 152）を明示してこれを矯正している。実測値は `electron.vite.config.ts` の定数直上コメント、確認手順は本節末尾が正本。`engines.node`（npm script を回すホスト Node 条件）は Electron 同梱の runtime Node 版とは別物である点に注意。
-
-renderer は `esnext` ではなく**実 Chromium 版**（`chrome152`）を指す点が重要。`esnext` は「最新扱いされる構文を極力変換しない」指定なので、将来構文が依存や自前コードに混入すると build は通っても Electron 44 の実行時に parse error になり得る。固定 Chromium に対応するバージョンを明示することで、その範囲へ確実に down-level させる。
-
-`NODE_TARGET` / `RENDERER_TARGET` は `package.json` の electron version と独立してメンテされるため、**Electron をアップグレードする際は** electron-vite が新バージョンの Node / Chromium を内部マップに追加済みかを確認し、未対応なら両定数を新 Electron 同梱の Node / Chromium に追従させる。同梱版は `electron/electron` の `DEPS` を対象 tag で取得し `chromium_version` / `node_version` を読むのが一次情報（`electron-to-chromium` は補助）。
+マップに無い major では、マップ中で最も新しい major の値に fallback する（キーが整数文字列なので `Object.values()` は昇順に並び、その `reverse()[0]` が選ばれる）。fallback 先は実際の同梱版より古いので、変換が過剰になるだけで parse error にはならない。**Electron の major を上げるときは**、electron-vite のマップに新しい major が入っているかを見る。入っていなければ、同梱の Node / Chromium（上と同じ `DEPS` で確認）を `electron.vite.config.ts` の `build.target` に明示するかを判断する。`engines.node`（npm script を回すホスト Node の条件）は、Electron 同梱の runtime Node 版とは別物である点に注意。
 
 ## アーキテクチャ概要
 
@@ -217,7 +213,7 @@ scripta-next/                       # 作業ディレクトリ名（dev userData
 - `electron.vite.config.ts` で renderer / main / preload を統合ビルド（`electron-vite` 採用済み）
 - renderer 側は `@tailwindcss/vite` と `@vitejs/plugin-react` を使用
 - Electron 向けに `base: './'` を設定（パッケージング後の相対パス読み込み対応）
-- main / preload は `externalizeDepsPlugin` で依存を external 化（`rollupOptions.external` も明示、上記「electron 42+ への対応」参照）
+- main / preload は `externalizeDepsPlugin` で依存を external 化（`electron` 自体は electron-vite の preset が external にする。上記「electron 42+ への対応」参照）
 
 ## ディレクトリ構成ルール
 
