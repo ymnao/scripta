@@ -77,7 +77,6 @@ Tauri purge（Phase 2〜5）は main 境界に大きく手を入れるため、�
 
 - file watcher（`chokidar`）・全文検索（`search`）・git 操作は現状 renderer-only + Vitest unit でカバーし、実 Electron spec 化は未了。回帰が顕在化したら領域を追加する。
 - packaged build（`pnpm dist` 成果物）のスモークは本 e2e とは別レイヤ（Issue #26 / parity-checklist §10）。
-- `electron-vite@5` が Electron 42+ に対応した後、build target workaround と合わせて launch helper を見直す。
 
 ## References
 
