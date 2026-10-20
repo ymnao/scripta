@@ -214,6 +214,7 @@ export function SearchBar({
 			className="search-bar"
 			aria-label="検索と置換"
 			onKeyDown={(e) => {
+				if (isIMEComposing(e)) return;
 				if (e.key === "Escape") {
 					e.preventDefault();
 					handleClose();
