@@ -27,8 +27,17 @@ describe("isIMEComposing", () => {
 		expect(isIMEComposing(fakeKeyboardEvent({ keyCode: 13 }))).toBe(false);
 	});
 
-	it("reads a native KeyboardEvent directly", () => {
+	it("returns true for a native KeyboardEvent with isComposing", () => {
 		expect(isIMEComposing(new KeyboardEvent("keydown", { isComposing: true }))).toBe(true);
+	});
+
+	it("returns true for a native KeyboardEvent with keyCode 229", () => {
+		const e = new KeyboardEvent("keydown", { key: "Escape" });
+		Object.defineProperty(e, "keyCode", { value: 229 });
+		expect(isIMEComposing(e)).toBe(true);
+	});
+
+	it("returns false for a native Escape outside composition", () => {
 		expect(isIMEComposing(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(false);
 	});
 });
