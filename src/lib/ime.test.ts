@@ -32,7 +32,9 @@ describe("isIMEComposing", () => {
 	});
 
 	it("returns true for a native KeyboardEvent with keyCode 229", () => {
-		expect(isIMEComposing(new KeyboardEvent("keydown", { key: "Escape", keyCode: 229 }))).toBe(true);
+		expect(isIMEComposing(new KeyboardEvent("keydown", { key: "Escape", keyCode: 229 }))).toBe(
+			true,
+		);
 	});
 
 	it("returns false for a native Escape outside composition", () => {
