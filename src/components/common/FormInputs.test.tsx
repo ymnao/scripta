@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { IME_COMPOSING } from "../../__test-utils__/ime";
 import {
 	NumberInput,
 	RangeInput,
@@ -10,12 +11,6 @@ import {
 	TextInput,
 	Toggle,
 } from "./FormInputs";
-
-// isIMEComposing は isComposing と keyCode 229 のどちらかで変換中とみなすので、片方ずつ撃つ
-const IME_ENTER = [
-	{ how: "keyCode 229", init: { keyCode: 229 } },
-	{ how: "isComposing", init: { isComposing: true } },
-];
 
 describe("Toggle", () => {
 	it("OFF のときクリックで true を渡す", async () => {
@@ -128,7 +123,7 @@ describe("NumberInput", () => {
 		expect(input).not.toHaveFocus();
 	});
 
-	it.each(IME_ENTER)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
 		const { onChange, input } = renderNumber();
 
 		await userEvent.clear(input);
@@ -264,7 +259,7 @@ describe("RangeInput", () => {
 		expect(text).not.toHaveFocus();
 	});
 
-	it.each(IME_ENTER)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
 		const { onChange, text } = renderRange();
 
 		await userEvent.clear(text);
@@ -454,7 +449,7 @@ describe("TextInput の Enter", () => {
 		expect(input).not.toHaveFocus();
 	});
 
-	it.each(IME_ENTER)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中の Enter（$how）では確定しない", async ({ init }) => {
 		const onChange = vi.fn();
 		render(<TextInput id="x" label="ブランチ" value="main" onChange={onChange} />);
 
