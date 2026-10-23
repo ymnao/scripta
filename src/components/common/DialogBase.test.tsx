@@ -1,12 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { IME_COMPOSING } from "../../__test-utils__/ime";
 import { DialogBase } from "./DialogBase";
-
-// isIMEComposing は isComposing と keyCode 229 のどちらかで変換中とみなすので、片方ずつ撃つ
-const IME = [
-	{ how: "keyCode 229", init: { keyCode: 229 } },
-	{ how: "isComposing", init: { isComposing: true } },
-];
 
 function renderDialog() {
 	const onClose = vi.fn();
@@ -27,7 +22,7 @@ describe("Esc", () => {
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 
-	it.each(IME)("IME 変換中（$how）の入力欄の Esc では閉じない", ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中（$how）の入力欄の Esc では閉じない", ({ init }) => {
 		const { onClose, input } = renderDialog();
 
 		fireEvent.keyDown(input, { key: "Escape", ...init });
