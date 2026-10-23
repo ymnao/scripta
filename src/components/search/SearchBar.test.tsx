@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { IME_COMPOSING } from "../../__test-utils__/ime";
 import {
 	cleanupMountedViews,
 	createTestState,
@@ -54,12 +55,6 @@ function select(view: EditorView, from: number, to: number): void {
 		view.dispatch({ selection: EditorSelection.single(from, to) });
 	});
 }
-
-// isIMEComposing は isComposing と keyCode 229 のどちらかで変換中とみなすので、片方ずつ撃つ
-const IME = [
-	{ how: "keyCode 229", init: { keyCode: 229 } },
-	{ how: "isComposing", init: { isComposing: true } },
-];
 
 describe("件数表示", () => {
 	it("検索欄が空なら何も出さない", () => {
@@ -176,7 +171,7 @@ describe("一致の間の移動", () => {
 		expect(selected(view)).toEqual({ from: 4, to: 7 });
 	});
 
-	it.each(IME)("IME 変換中（$how）の Enter では移動しない", ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中（$how）の Enter では移動しない", ({ init }) => {
 		const view = mountView("foo bar foo");
 		renderBar(view, { initialSearchText: "foo" });
 
@@ -240,7 +235,7 @@ describe("置換", () => {
 		expect(view.state.doc.toString()).toBe("baz bar foo");
 	});
 
-	it.each(IME)("IME 変換中（$how）の置換欄の Enter では置換しない", async ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中（$how）の置換欄の Enter では置換しない", async ({ init }) => {
 		const view = mountView("foo bar foo");
 		renderBar(view, { initialExpanded: true, initialSearchText: "foo" });
 		await userEvent.type(replaceInput(), "baz");
@@ -335,7 +330,7 @@ describe("閉じる", () => {
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 
-	it.each(IME)("IME 変換中（$how）の検索欄の Esc では閉じない", ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中（$how）の検索欄の Esc では閉じない", ({ init }) => {
 		const view = mountView("foo");
 		const { onClose } = renderBar(view, { initialSearchText: "foo" });
 
@@ -345,7 +340,7 @@ describe("閉じる", () => {
 		expect(onClose).not.toHaveBeenCalled();
 	});
 
-	it.each(IME)("IME 変換中（$how）の置換欄の Esc では閉じない", ({ init }) => {
+	it.each(IME_COMPOSING)("IME 変換中（$how）の置換欄の Esc では閉じない", ({ init }) => {
 		const view = mountView("foo");
 		const { onClose } = renderBar(view, { initialExpanded: true, initialSearchText: "foo" });
 
