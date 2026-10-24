@@ -15,7 +15,7 @@ import { isNetworkError, translateError } from "../lib/errors";
 import { useGitSyncStore } from "../stores/git-sync";
 import { useToastStore } from "../stores/toast";
 import { getErrorKind, getStructuredMessage } from "../types/errors";
-import { formatSyncHaltMessage, getSyncHalt } from "../types/git-sync";
+import { formatSyncHaltMessage, getSyncHalt, type SyncHalt } from "../types/git-sync";
 
 class GitOperationQueue {
 	private queue: Array<() => Promise<void>> = [];
@@ -141,13 +141,11 @@ export function useGitSync({ workspacePath }: UseGitSyncOptions): {
 		} catch (e) {
 			// 読めないまま同期を進めると、別のブランチで add -A しうる。
 			if (workspacePathRef.current === path) {
-				useGitSyncStore
-					.getState()
-					.setSyncHalt(
-						getErrorKind(e) === "GIT_UNSAFE_CONFIG"
-							? { reason: "unsafe-config", detail: getStructuredMessage(e) }
-							: { reason: "status-unavailable" },
-					);
+				const halt: SyncHalt =
+					getErrorKind(e) === "GIT_UNSAFE_CONFIG"
+						? { reason: "unsafe-config", detail: getStructuredMessage(e) }
+						: { reason: "status-unavailable" };
+				useGitSyncStore.getState().setSyncHalt(halt);
 			}
 			return null;
 		}

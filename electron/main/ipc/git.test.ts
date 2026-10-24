@@ -265,13 +265,23 @@ describe("repo-local git config (#705)", () => {
 		await expect(statusImpl(TEST_WIN, dir)).rejects.toThrow(/core\.fsmonitor/);
 	});
 
-	it("runs a core.fsmonitor command from global config when git is called without the override", async () => {
-		// 下の test の前提: global の fsmonitor が status で実際に起動すること。
+	// 未追跡ファイルを 1 つ置いた workspace と、fsmonitor を書いた global config を作る。
+	async function setupGlobalFsmonitor(): Promise<{
+		dir: string;
+		marker: string;
+		globalConfig: string;
+	}> {
 		const dir = await newWorkspace();
 		await fsp.writeFile(join(dir, "a.md"), "a\n", "utf8");
 		const marker = await newMarkerPath();
 		const globalConfig = join(dirname(marker), "global.gitconfig");
 		await fsp.writeFile(globalConfig, fsmonitorConfig(marker), "utf8");
+		return { dir, marker, globalConfig };
+	}
+
+	it("runs a core.fsmonitor command from global config when git is called without the override", async () => {
+		// 下の test の前提: global の fsmonitor が status で実際に起動すること。
+		const { dir, marker, globalConfig } = await setupGlobalFsmonitor();
 		execFileSync("git", ["status", "--porcelain"], {
 			cwd: dir,
 			env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig },
@@ -281,11 +291,7 @@ describe("repo-local git config (#705)", () => {
 	});
 
 	it("does not run a core.fsmonitor command that passes the scope check (global config)", async () => {
-		const dir = await newWorkspace();
-		await fsp.writeFile(join(dir, "a.md"), "a\n", "utf8");
-		const marker = await newMarkerPath();
-		const globalConfig = join(dirname(marker), "global.gitconfig");
-		await fsp.writeFile(globalConfig, fsmonitorConfig(marker), "utf8");
+		const { dir, marker, globalConfig } = await setupGlobalFsmonitor();
 		vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfig);
 		await statusImpl(TEST_WIN, dir);
 		expect(await exists(marker)).toBe(false);

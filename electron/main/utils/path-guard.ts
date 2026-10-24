@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { isRelOutsideRoot } from "./root-relative-path";
+import { isRelOutsideRoot, relComponentsUnderRoot } from "./root-relative-path";
 import { StructuredError } from "./structured-error";
 
 // fs IPC のガードは window-scoped。allowedRoots は Map<windowId, Set<string>>
@@ -271,11 +271,19 @@ export async function assertWritePathAllowed(windowId: number, p: string): Promi
 export function assertOutsideGitDir(windowId: number, canonical: string): void {
 	const root = findContainingWorkspaceRoot(windowId, canonical);
 	if (root === null) return;
-	const segments = relative(root, canonical).split(/[\\/]/);
-	if (segments.some((seg) => seg.toLowerCase() === ".git")) {
+	const components = relComponentsUnderRoot(root, canonical);
+	if (components?.some((c) => c.toLowerCase() === ".git")) {
 		console.warn(`[path-guard] denied write inside .git: ${canonical}`);
 		throw new StructuredError("PATH_OUTSIDE_WORKSPACE", "Permission denied: inside .git");
 	}
+}
+
+// 作成・rename・削除など、書き込み以外で workspace を変更する IPC 用のガード。
+// assertPathAllowed に `.git` 配下の拒否を足したもの。
+export async function assertMutationPathAllowed(windowId: number, p: string): Promise<string> {
+	const canonical = await assertPathAllowed(windowId, p);
+	assertOutsideGitDir(windowId, canonical);
+	return canonical;
 }
 
 // 副作用なし boolean 判定。validatePath が throw する不正入力でも例外を飲んで

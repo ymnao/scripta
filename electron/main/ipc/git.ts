@@ -664,9 +664,8 @@ async function getLastCommitTimeImpl(senderId: number, path: string): Promise<st
 		return null;
 	}
 	try {
-		const out = (
-			await (await createGuardedGit(canonical)).raw(["log", "-1", "--format=%ci"])
-		).trim();
+		const git = await createGuardedGit(canonical);
+		const out = (await git.raw(["log", "-1", "--format=%ci"])).trim();
 		return out.length > 0 ? out : null;
 	} catch {
 		// 空 repo（HEAD が無い）等は null。
