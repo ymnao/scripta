@@ -34,19 +34,19 @@ async function routeTallImage(
 	return release;
 }
 
-// 画像の行から離れた行にカーソルを置いてから読み込みを終わらせる。画像の行にカーソルが
+// 読み込みを終わらせる前に、画像の行から離れた行へカーソルを置く。画像の行にカーソルが
 // あると widget が外れ、読み込みの後に装飾が作り直されて、不具合の出ない経路になる
-async function openAndLoad(page: Page, release: () => void): Promise<void> {
+async function openWithCursorAwayFromImage(page: Page): Promise<void> {
 	await openSingleFileWorkspace(page, { files: { "/workspace/image.md": doc } });
 	await expect(page.locator(".cm-image-widget")).toHaveCount(1);
 	await page.locator(".cm-line", { hasText: "top" }).click();
-	release();
 }
 
 test.describe("画像の読み込みで行の高さが変わった後のクリック (#698)", () => {
 	test("読み込み後に画像の下の行をクリックすると、その行にカーソルが入る", async ({ page }) => {
 		const release = await routeTallImage(page);
-		await openAndLoad(page, release);
+		await openWithCursorAwayFromImage(page);
+		release();
 		await page.waitForFunction(() => {
 			const img = document.querySelector<HTMLImageElement>(".cm-image-widget img");
 			return img?.complete === true && img.naturalHeight > 0;
@@ -71,8 +71,9 @@ test.describe("画像の読み込みで行の高さが変わった後のクリ�
 			);
 		});
 		const release = await routeTallImage(page);
-		await openAndLoad(page, release);
+		await openWithCursorAwayFromImage(page);
 		const original = await page.locator(".cm-image-widget img").elementHandle();
+		release();
 		await page.waitForFunction(() => (window as unknown as { imageLoads: number }).imageLoads > 0);
 		// 再構築が繰り返されるなら、この間に読み込みが重なる
 		await page.waitForTimeout(500);
@@ -88,7 +89,8 @@ test.describe("画像の読み込みで行の高さが変わった後のクリ�
 
 	test("読み込みに失敗した画像の下の行も、クリックでその行にカーソルが入る", async ({ page }) => {
 		const release = await routeTallImage(page, { status: 404 });
-		await openAndLoad(page, release);
+		await openWithCursorAwayFromImage(page);
+		release();
 		await expect(page.locator(".cm-image-fallback")).toBeVisible();
 
 		await page.locator(".cm-line", { hasText: "below" }).click();
