@@ -1,5 +1,6 @@
 import { platform } from "node:os";
 import { type SimpleGit, simpleGit } from "simple-git";
+import { gitError, StructuredError } from "./structured-error";
 
 // simple-git ベースで git コマンド実行環境を集約。
 // 環境変数で対話入力経路を全 deny し、`LC_ALL=C` でエラー文を英語固定にする
@@ -97,6 +98,7 @@ export function buildGitEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 // (A) 我々が GIT_ENV_OVERRIDES / config[] で **明示的に安全な値に固定** している
 //     ものを simple-git に通すための opt-in。固定値は本ファイル内で確認可能：
 //     - allowUnsafeHooksPath: `core.hooksPath=NULL` で hooks 無効化（config[] で固定）
+//     - allowUnsafeFsMonitor: `core.fsmonitor=false` で fsmonitor hook 無効化（config[] で固定、#705）
 //     - allowUnsafeEditor:    `GIT_EDITOR=":"` 等で no-op editor（env で固定）
 //     - allowUnsafeAskPass:   `GIT_ASKPASS=""` / `SSH_ASKPASS=""` で対話入力 deny
 //     - allowUnsafePager:     `GIT_PAGER="cat"` / `PAGER="cat"` で pager 抑止
@@ -105,6 +107,8 @@ export function buildGitEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 //     **意図的に尊重** するもの。UX 上ユーザーが手元の git でできることは
 //     Electron 内でも同等にできるのが要件。攻撃者制御値の流入は
 //     IPC 認可（assertPathAllowed）で workspace 単位に閉じ込めて防ぐ。
+//     workspace 自身の `.git/config` も攻撃者制御になりうる（zip で渡されたフォルダ等）ので、
+//     repo-local の設定は createGuardedGit の許可リストで別に検査する（#705）。
 //     - allowUnsafeCredentialHelper: ユーザーの credential.helper（macOS keychain 等）
 //     - allowUnsafeConfigPaths:      ユーザーの GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG を継承
 //     - allowUnsafeSshCommand:       ユーザーの GIT_SSH_COMMAND / GIT_SSH（カスタム鍵指定など）を継承
@@ -113,6 +117,7 @@ export function buildGitEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 // protocol.allow を設定せず、process.env 経路でも継承する必要がない）ため除外する。
 const UNSAFE_FLAGS = {
 	allowUnsafeHooksPath: true,
+	allowUnsafeFsMonitor: true,
 	allowUnsafeEditor: true,
 	allowUnsafeAskPass: true,
 	allowUnsafePager: true,
@@ -129,14 +134,95 @@ const BASE_OPTIONS = {
 
 // 与えられた canonical な repo path を baseDir にした SimpleGit instance を返す。
 // `core.hooksPath=/dev/null` で hooks を無効化、
+// `core.fsmonitor=false` で repo-local の fsmonitor hook（`status` / `diff` / `add` で起動する）を無効化、
 // `core.quotepath=false` で 非 ASCII path を 8 進エスケープしない。
 export function createGit(canonicalRepoPath: string): SimpleGit {
 	return simpleGit({
 		...BASE_OPTIONS,
 		baseDir: canonicalRepoPath,
 		maxConcurrentProcesses: 1,
-		config: [`core.hooksPath=${NULL_HOOKS}`, "core.quotepath=false"],
+		config: [`core.hooksPath=${NULL_HOOKS}`, "core.fsmonitor=false", "core.quotepath=false"],
 	}).env(buildGitEnv(process.env));
+}
+
+// repo-local（`.git/config` / `config.worktree` と、そこから include されたファイル）に置いてよい
+// key。`git init` / `clone` / `remote add` / `branch -u` が書くものと、コマンドを起動しない
+// 少数の設定に限る。
+//
+// 危険な key を列挙して `-c` で上書きする形（denylist）にしないのは 2 つの理由から:
+// コマンドを起動する key は `filter.*` / `credential.helper` / `core.sshCommand` /
+// `remote.*.uploadpack` / `protocol.*.allow` + `ext::` / `merge.*.driver` / `gpg.program` /
+// `core.alternateRefsCommand` / `submodule.*.update` と広く、git の版で増える。また `-c` は
+// global の設定（user の credential helper や LFS などの filter）まで同時に潰す。
+const ALLOWED_REPO_KEYS: ReadonlySet<string> = new Set([
+	"core.repositoryformatversion",
+	"core.filemode",
+	"core.bare",
+	"core.logallrefupdates",
+	"core.ignorecase",
+	"core.precomposeunicode",
+	"core.symlinks",
+	"extensions.worktreeconfig",
+	"extensions.objectformat",
+	"extensions.refstorage",
+	"user.name",
+	"user.email",
+	"commit.gpgsign",
+	"pull.rebase",
+]);
+
+// `<section>.<subsection>.<key>` 形式の許可。subsection（remote 名 / branch 名）は問わない。
+const ALLOWED_REPO_SUBSECTION_KEYS: ReadonlySet<string> = new Set([
+	"remote.url",
+	"remote.pushurl",
+	"remote.fetch",
+	"branch.remote",
+	"branch.merge",
+	"branch.rebase",
+]);
+
+// git は section と末尾の key を小文字に正規化して出力し、subsection は大文字小文字を保つ。
+function isAllowedRepoConfigKey(name: string): boolean {
+	const first = name.indexOf(".");
+	const last = name.lastIndexOf(".");
+	if (first < 0) return false;
+	if (first === last) return ALLOWED_REPO_KEYS.has(name);
+	return ALLOWED_REPO_SUBSECTION_KEYS.has(name.slice(0, first) + name.slice(last));
+}
+
+// `git config --list --show-scope --name-only -z` の出力（`scope\0name\0` の繰り返し）から、
+// repo-local の scope にある許可外の key を重複なく返す。include されたファイルの key は
+// include 元の scope で出る。
+export function findDisallowedRepoConfigKeys(out: string): string[] {
+	const tokens = out.split("\0");
+	const found = new Set<string>();
+	for (let i = 0; i + 1 < tokens.length; i += 2) {
+		const scope = tokens[i];
+		const name = tokens[i + 1];
+		if (scope !== "local" && scope !== "worktree") continue;
+		if (!isAllowedRepoConfigKey(name)) found.add(name);
+	}
+	return [...found];
+}
+
+// createGit に加えて、repo-local の設定が許可リストに収まっていることを確かめてから返す。
+// `git config --list` 自体は fsmonitor や filter を起動しない（git 2.56.0 で実測）。
+export async function createGuardedGit(canonicalRepoPath: string): Promise<SimpleGit> {
+	const git = createGit(canonicalRepoPath);
+	let out: string;
+	try {
+		out = await git.raw(["config", "--list", "--show-scope", "--name-only", "-z"]);
+	} catch (e) {
+		throw gitError(extractGitErrorMessage(e));
+	}
+	const disallowed = findDisallowedRepoConfigKeys(out);
+	if (disallowed.length > 0) {
+		throw new StructuredError(
+			"GIT_UNSAFE_CONFIG",
+			`repository config has keys scripta does not allow: ${disallowed.join(", ")}`,
+		);
+	}
+	return git;
 }
 
 // `git --version` の存在確認用に baseDir 不要の instance を返す。

@@ -662,6 +662,27 @@ describe("useGitSync sync branch gate (#639)", () => {
 		);
 	});
 
+	it("halts with the rejected keys when main refuses the repo config", async () => {
+		const { result } = renderHook(() => useGitSync({ workspacePath: WS }));
+		await vi.advanceTimersByTimeAsync(0);
+		const detail = "repository config has keys scripta does not allow: core.fsmonitor";
+		mockedGitStatus.mockRejectedValue(
+			Object.assign(new Error(detail), { kind: "GIT_UNSAFE_CONFIG" }),
+		);
+
+		result.current.manualSync();
+		await vi.advanceTimersByTimeAsync(100);
+
+		expectNoSyncOperations();
+		expect(useGitSyncStore.getState().syncHalt).toEqual({ reason: "unsafe-config", detail });
+		expect(useToastStore.getState().toasts).toContainEqual(
+			expect.objectContaining({
+				type: "warning",
+				message: expect.stringContaining(`詳細: ${detail}`),
+			}),
+		);
+	});
+
 	it("re-reads the status as soon as the sync branch setting changes", async () => {
 		renderHook(() => useGitSync({ workspacePath: WS }));
 		await vi.advanceTimersByTimeAsync(0);

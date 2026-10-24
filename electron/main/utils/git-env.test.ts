@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildGitEnv } from "./git-env";
+import { buildGitEnv, findDisallowedRepoConfigKeys } from "./git-env";
 
 describe("buildGitEnv", () => {
 	it("drops an ambient GIT_DIR", () => {
@@ -43,5 +43,73 @@ describe("buildGitEnv", () => {
 
 	it("overrides an ambient GIT_EDITOR with the no-op editor", () => {
 		expect(buildGitEnv({ GIT_EDITOR: "sleep 60" }).GIT_EDITOR).toBe(":");
+	});
+});
+
+// `git config --list --show-scope --name-only -z` の出力を組み立てる。
+function scoped(...pairs: [string, string][]): string {
+	return pairs.map(([scope, name]) => `${scope}\0${name}\0`).join("");
+}
+
+describe("findDisallowedRepoConfigKeys", () => {
+	it("accepts the keys git init writes", () => {
+		const out = scoped(
+			["local", "core.repositoryformatversion"],
+			["local", "core.filemode"],
+			["local", "core.bare"],
+			["local", "core.logallrefupdates"],
+			["local", "core.ignorecase"],
+			["local", "core.precomposeunicode"],
+		);
+		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
+	});
+
+	it("accepts remote / branch keys under any subsection, keeping its case", () => {
+		const out = scoped(
+			["local", "remote.origin.url"],
+			["local", "remote.origin.fetch"],
+			["local", "branch.Feat/X.y.merge"],
+		);
+		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
+	});
+
+	it("rejects a local core.fsmonitor", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["local", "core.fsmonitor"]))).toEqual([
+			"core.fsmonitor",
+		]);
+	});
+
+	it("rejects a key from the worktree scope", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["worktree", "core.fsmonitor"]))).toEqual([
+			"core.fsmonitor",
+		]);
+	});
+
+	it("rejects a non-allowed key under an allowed section with a subsection", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["local", "remote.origin.uploadpack"]))).toEqual([
+			"remote.origin.uploadpack",
+		]);
+	});
+
+	it("rejects a subsection form of a key that is only allowed without one", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["local", "user.x.name"]))).toEqual(["user.x.name"]);
+	});
+
+	it("rejects a key without a section", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["local", "nosection"]))).toEqual(["nosection"]);
+	});
+
+	it("ignores keys from the global, system and command scopes", () => {
+		const out = scoped(
+			["global", "filter.lfs.clean"],
+			["system", "credential.helper"],
+			["command", "core.hookspath"],
+		);
+		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
+	});
+
+	it("lists a repeated key once", () => {
+		const out = scoped(["local", "credential.helper"], ["local", "credential.helper"]);
+		expect(findDisallowedRepoConfigKeys(out)).toEqual(["credential.helper"]);
 	});
 });

@@ -250,11 +250,32 @@ export async function assertPathAllowed(windowId: number, p: string): Promise<st
 // この canonical を使うこと。TOCTOU 防止 + 重複正規化回避）。
 export async function assertWritePathAllowed(windowId: number, p: string): Promise<string> {
 	const target = await realpathBestEffort(validatePath(p));
-	if (isWithinWindowAllowedRoot(windowId, target)) return target;
+	if (isWithinWindowAllowedRoot(windowId, target)) {
+		assertOutsideGitDir(windowId, target);
+		return target;
+	}
 	const set = transientWritePaths.get(windowId);
 	if (set?.has(target)) return target;
 	console.warn(`[path-guard] write denied outside workspace: ${p}`);
 	throw new StructuredError("PATH_OUTSIDE_WORKSPACE", "Permission denied: outside workspace");
+}
+
+// workspace 内の `.git` 配下（`.git` 自身を含む）への変更を拒否する（#705）。`.git/config` に
+// 書けると git 操作のたびに任意コマンドを起動させられ、`remote.*.url` の書き換えで push 先も
+// 変えられる。`assertPathAllowed` / `assertWritePathAllowed` が返した canonical を渡すこと —
+// realpath 済みなので、`.git` を指す symlink 経由の path も実体の位置で判定できる。
+// この判定を抜けて git dir の設定を書けたとしても、git 操作の側で createGuardedGit が検査する。
+// 大文字小文字を区別しないのは、macOS / Windows の既定の FS では `.GIT` が同じ entry を指すため。
+// 判定は workspace root からの相対で行う（root 自身が `.git` 配下の path でも全拒否にしない）。
+// 含む root が無い（SaveDialog で選んだ workspace 外の transient path）なら判定しない。
+export function assertOutsideGitDir(windowId: number, canonical: string): void {
+	const root = findContainingWorkspaceRoot(windowId, canonical);
+	if (root === null) return;
+	const segments = relative(root, canonical).split(/[\\/]/);
+	if (segments.some((seg) => seg.toLowerCase() === ".git")) {
+		console.warn(`[path-guard] denied write inside .git: ${canonical}`);
+		throw new StructuredError("PATH_OUTSIDE_WORKSPACE", "Permission denied: inside .git");
+	}
 }
 
 // 副作用なし boolean 判定。validatePath が throw する不正入力でも例外を飲んで

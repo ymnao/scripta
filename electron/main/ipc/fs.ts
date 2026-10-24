@@ -12,6 +12,7 @@ import {
 	writeFileUtf8NoFollow,
 } from "../utils/open-nofollow";
 import {
+	assertOutsideGitDir,
 	assertPathAllowed,
 	assertWritePathAllowed,
 	consumeTransientWritePath,
@@ -322,6 +323,7 @@ async function listDirectoryImpl(
 
 async function createFileImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
+	assertOutsideGitDir(senderId, canonical);
 	await prepareCreateTarget(canonical);
 	try {
 		const fh = await fsp.open(canonical, "wx");
@@ -335,6 +337,7 @@ async function createFileImpl(senderId: number, path: string): Promise<void> {
 
 async function createDirectoryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
+	assertOutsideGitDir(senderId, canonical);
 	// 対象自体は非 recursive にすることで「既存なら EEXIST」を atomic に得る（race-free）。
 	// guard を挟むのは、拒否を mkdir の platform 依存な挙動に委ねないため
 	// （`O_EXCL` と同じ posture。doc ブロックの create 系の節）。
@@ -369,6 +372,8 @@ async function fileExistsImpl(senderId: number, path: string): Promise<boolean> 
 async function renameEntryImpl(senderId: number, oldPath: string, newPath: string): Promise<void> {
 	const oldCanonical = await assertPathAllowed(senderId, oldPath);
 	const newCanonical = await assertPathAllowed(senderId, newPath);
+	assertOutsideGitDir(senderId, oldCanonical);
+	assertOutsideGitDir(senderId, newCanonical);
 	const oldStats = await lstatEntry(oldCanonical);
 	if (oldStats === null) throw FsError.sourceNotFound(oldCanonical);
 	// fs.rename は target 既存時に上書きする default 挙動なので、
@@ -391,6 +396,7 @@ async function renameEntryImpl(senderId: number, oldPath: string, newPath: strin
 
 async function deleteEntryImpl(senderId: number, path: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
+	assertOutsideGitDir(senderId, canonical);
 	const stats = await lstatEntry(canonical);
 	if (stats === null) throw FsError.notFound(canonical);
 	await shell.trashItem(canonical);

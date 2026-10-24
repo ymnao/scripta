@@ -1,6 +1,7 @@
 // @vitest-environment node
+import { execFileSync } from "node:child_process";
 import { promises as fsp } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { IpcMainInvokeEvent } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeCanonicalTempDir } from "../test-utils/temp-workspace";
@@ -222,6 +223,189 @@ describe("checkRepoImpl", () => {
 		await createGit(outside).raw(["init", "-b", "main"]);
 		// outside は TEST_WIN の allowedRoots に登録されていない → false
 		expect(await checkRepoImpl(TEST_WIN, outside)).toBe(false);
+	});
+});
+
+describe("repo-local git config (#705)", () => {
+	// marker は repo の外に置く（repo 内だと status の未追跡ファイルに混ざる）。
+	async function newMarkerPath(): Promise<string> {
+		const d = await makeCanonicalTempDir("scripta-git-marker-");
+		dirsToCleanup.push(d);
+		return join(d, "marker");
+	}
+
+	async function appendLocalConfig(dir: string, text: string): Promise<void> {
+		await fsp.appendFile(join(dir, ".git", "config"), text, "utf8");
+	}
+
+	async function exists(p: string): Promise<boolean> {
+		return fsp.access(p).then(
+			() => true,
+			() => false,
+		);
+	}
+
+	// fsmonitor の値は git がそのまま shell に渡す。末尾の `#` で git が付ける引数を捨てる。
+	function fsmonitorConfig(marker: string): string {
+		return `[core]\n\tfsmonitor = "touch '${marker}' #"\n`;
+	}
+
+	it("does not run a local core.fsmonitor command on status", async () => {
+		const dir = await newWorkspace();
+		await fsp.writeFile(join(dir, "a.md"), "a\n", "utf8");
+		const marker = await newMarkerPath();
+		await appendLocalConfig(dir, fsmonitorConfig(marker));
+		await expect(statusImpl(TEST_WIN, dir)).rejects.toMatchObject({ kind: "GIT_UNSAFE_CONFIG" });
+		expect(await exists(marker)).toBe(false);
+	});
+
+	it("names the rejected key in the error message", async () => {
+		const dir = await newWorkspace();
+		await appendLocalConfig(dir, fsmonitorConfig(await newMarkerPath()));
+		await expect(statusImpl(TEST_WIN, dir)).rejects.toThrow(/core\.fsmonitor/);
+	});
+
+	it("runs a core.fsmonitor command from global config when git is called without the override", async () => {
+		// 下の test の前提: global の fsmonitor が status で実際に起動すること。
+		const dir = await newWorkspace();
+		await fsp.writeFile(join(dir, "a.md"), "a\n", "utf8");
+		const marker = await newMarkerPath();
+		const globalConfig = join(dirname(marker), "global.gitconfig");
+		await fsp.writeFile(globalConfig, fsmonitorConfig(marker), "utf8");
+		execFileSync("git", ["status", "--porcelain"], {
+			cwd: dir,
+			env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig },
+			stdio: "ignore",
+		});
+		expect(await exists(marker)).toBe(true);
+	});
+
+	it("does not run a core.fsmonitor command that passes the scope check (global config)", async () => {
+		const dir = await newWorkspace();
+		await fsp.writeFile(join(dir, "a.md"), "a\n", "utf8");
+		const marker = await newMarkerPath();
+		const globalConfig = join(dirname(marker), "global.gitconfig");
+		await fsp.writeFile(globalConfig, fsmonitorConfig(marker), "utf8");
+		vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfig);
+		await statusImpl(TEST_WIN, dir);
+		expect(await exists(marker)).toBe(false);
+	});
+
+	it("does not run a local clean filter on add", async () => {
+		const dir = await newWorkspace();
+		await commitFile(dir, "a.md", "a\n", "init");
+		const marker = await newMarkerPath();
+		await appendLocalConfig(dir, `[filter "x"]\n\tclean = "touch '${marker}'; cat"\n`);
+		await fsp.writeFile(join(dir, ".gitattributes"), "* filter=x\n", "utf8");
+		await fsp.writeFile(join(dir, "b.md"), "b\n", "utf8");
+		await expect(addAllImpl(TEST_WIN, dir, "main")).rejects.toMatchObject({
+			kind: "GIT_UNSAFE_CONFIG",
+		});
+		expect(await exists(marker)).toBe(false);
+	});
+
+	it("rejects a key from the worktree config", async () => {
+		const dir = await newWorkspace();
+		await appendLocalConfig(dir, "[extensions]\n\tworktreeConfig = true\n");
+		await fsp.writeFile(
+			join(dir, ".git", "config.worktree"),
+			`[credential]\n\thelper = "!touch '${await newMarkerPath()}'"\n`,
+			"utf8",
+		);
+		await expect(statusImpl(TEST_WIN, dir)).rejects.toThrow(/credential\.helper/);
+	});
+
+	it("rejects a key from a file included by the local config", async () => {
+		const dir = await newWorkspace();
+		await fsp.writeFile(
+			join(dir, ".git", "extra.cfg"),
+			`[credential]\n\thelper = "!touch '${await newMarkerPath()}'"\n`,
+			"utf8",
+		);
+		await appendLocalConfig(dir, "[include]\n\tpath = extra.cfg\n");
+		await expect(statusImpl(TEST_WIN, dir)).rejects.toThrow(/credential\.helper/);
+	});
+
+	it("passes a repo whose local config has remote and branch keys", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		await createGit(work).raw(["push", "-u", "origin", "main"]);
+		expect((await statusImpl(TEST_WIN, work)).hasRemote).toBe(true);
+	});
+
+	it("still reports the folder as a repo so status can surface the rejection", async () => {
+		const dir = await newWorkspace();
+		await appendLocalConfig(dir, fsmonitorConfig(await newMarkerPath()));
+		expect(await checkRepoImpl(TEST_WIN, dir)).toBe(true);
+	});
+
+	describe("every git operation checks the config", () => {
+		async function newPoisonedWorkspace(): Promise<string> {
+			const dir = await newWorkspace();
+			await commitFile(dir, "a.md", "a\n", "init");
+			await appendLocalConfig(dir, fsmonitorConfig(await newMarkerPath()));
+			return dir;
+		}
+
+		const unsafe = { kind: "GIT_UNSAFE_CONFIG" };
+
+		it("resolveSyncBranchImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(resolveSyncBranchImpl(TEST_WIN, dir, "")).rejects.toMatchObject(unsafe);
+		});
+
+		it("commitImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(commitImpl(TEST_WIN, dir, "msg", "main")).rejects.toMatchObject(unsafe);
+		});
+
+		it("pullImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(pullImpl(TEST_WIN, dir, "merge", "main")).rejects.toMatchObject(unsafe);
+		});
+
+		it("pushImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(pushImpl(TEST_WIN, dir, "main")).rejects.toMatchObject(unsafe);
+		});
+
+		it("getConflictedFilesImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(getConflictedFilesImpl(TEST_WIN, dir)).rejects.toMatchObject(unsafe);
+		});
+
+		it("getConflictContentImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(getConflictContentImpl(TEST_WIN, dir, "a.md")).rejects.toMatchObject(unsafe);
+		});
+
+		it("resolveConflictImpl, before writing the file", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(
+				resolveConflictImpl(TEST_WIN, dir, "a.md", "resolved\n", "modify"),
+			).rejects.toMatchObject(unsafe);
+			expect(await fsp.readFile(join(dir, "a.md"), "utf8")).toBe("a\n");
+		});
+
+		it("finishConflictResolutionImpl", async () => {
+			const dir = await newPoisonedWorkspace();
+			await expect(finishConflictResolutionImpl(TEST_WIN, dir)).rejects.toMatchObject(unsafe);
+		});
+
+		it("getLastCommitTimeImpl returns null", async () => {
+			const dir = await newPoisonedWorkspace();
+			expect(await getLastCommitTimeImpl(TEST_WIN, dir)).toBeNull();
+		});
+	});
+
+	it("refuses to write a conflict resolution into .git", async () => {
+		const dir = await newWorkspace();
+		const before = await fsp.readFile(join(dir, ".git", "config"), "utf8");
+		await expect(
+			resolveConflictImpl(TEST_WIN, dir, ".git/config", "[core]\n", "modify"),
+		).rejects.toMatchObject({ kind: "PATH_OUTSIDE_WORKSPACE" });
+		expect(await fsp.readFile(join(dir, ".git", "config"), "utf8")).toBe(before);
 	});
 });
 
