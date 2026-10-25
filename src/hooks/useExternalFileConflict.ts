@@ -23,6 +23,11 @@ export type ExternalFileConflictTabApi = Pick<
 	| "applyConflictReload"
 	| "dropTab"
 	| "isCachedTabClean"
+	| "getCachedContent"
+	| "markCachedTabConflict"
+	| "takeCachedConflict"
+	| "holdAutoSave"
+	| "releaseAutoSave"
 >;
 
 export interface UseExternalFileConflictOptions extends ExternalFileConflictTabApi {
@@ -53,10 +58,16 @@ export function useExternalFileConflict({
 	applyConflictReload,
 	dropTab,
 	isCachedTabClean,
+	getCachedContent,
+	markCachedTabConflict,
+	takeCachedConflict,
+	holdAutoSave,
+	releaseAutoSave,
 }: UseExternalFileConflictOptions): ExternalFileConflictState {
-	const { workspacePath, closeTab } = useWorkspaceStore(
+	const { workspacePath, activeTabPath, closeTab } = useWorkspaceStore(
 		useShallow((s) => ({
 			workspacePath: s.workspacePath,
+			activeTabPath: s.activeTabPath,
 			closeTab: s.closeTab,
 		})),
 	);
@@ -65,6 +76,33 @@ export function useExternalFileConflict({
 	// files have conflicts, the latest event wins; earlier conflicts are dropped
 	// but dirty content is preserved in memory so no data is lost.
 	const [externalConflict, setExternalConflict] = useState<ExternalConflict | null>(null);
+	// ダイアログを出している間は autosave のタイマーを止める (#703)。止めないと、user が
+	// 「再読み込み」を選ぶ前に未保存の内容が書き込まれ、外部の変更が消える。
+	// state ではなく ref で開閉を追うのは、handleConflictReload の readFile 完了時に
+	// 「その間に別のダイアログが開いたか」を同期的に知る必要があるため。
+	const conflictOpenRef = useRef(false);
+
+	const openConflict = useCallback(
+		(path: string, type: ExternalConflict["type"]) => {
+			conflictOpenRef.current = true;
+			holdAutoSave();
+			// Don't overwrite a pending delete dialog with modified (delete is more severe)
+			setExternalConflict((prev) =>
+				type === "modified" && prev?.type === "deleted" ? prev : { path, type },
+			);
+		},
+		[holdAutoSave],
+	);
+
+	const hideConflict = useCallback(() => {
+		conflictOpenRef.current = false;
+		setExternalConflict(null);
+	}, []);
+
+	const closeConflict = useCallback(() => {
+		hideConflict();
+		releaseAutoSave();
+	}, [hideConflict, releaseAutoSave]);
 
 	// Clear stale conflict dialog when workspace changes.
 	// workspacePath is read only to satisfy the exhaustive-deps rule;
@@ -73,9 +111,20 @@ export function useExternalFileConflict({
 	useEffect(() => {
 		if (prevWorkspaceRef.current !== workspacePath) {
 			prevWorkspaceRef.current = workspacePath;
-			setExternalConflict(null);
+			closeConflict();
 		}
-	}, [workspacePath]);
+	}, [workspacePath, closeConflict]);
+
+	// 非 active の間に外部変更を受けたタブへ戻ってきた。cache から復元した時点で
+	// autosave が張られているので、openConflict で止めてから選ばせる。
+	// 別のダイアログが出ている間に取り出すと、deleted を優先する openConflict が
+	// modified を捨てて記録だけが消えるので、閉じてから取り出す (externalConflict を deps に持つ)。
+	useEffect(() => {
+		if (!activeTabPath || externalConflict) return;
+		if (takeCachedConflict(activeTabPath)) {
+			openConflict(activeTabPath, "modified");
+		}
+	}, [activeTabPath, externalConflict, takeCachedConflict, openConflict]);
 
 	const handleExternalFileDeleted = useCallback(
 		(path: string) => {
@@ -84,91 +133,67 @@ export function useExternalFileConflict({
 
 			if (tab.dirty) {
 				// Deletion supersedes any pending conflict (modified) dialog
-				setExternalConflict({ path, type: "deleted" });
+				openConflict(path, "deleted");
 			} else {
 				dropTab(path);
 				closeTab(path);
 			}
 		},
-		[closeTab, dropTab],
+		[closeTab, dropTab, openConflict],
 	);
 
 	const getLastSavedContentRef = useRef(getLastSavedContent);
 	getLastSavedContentRef.current = getLastSavedContent;
 
+	// readFile の結果をタブへ反映する。タブの有無・active かどうか・dirty かどうかは
+	// readFile を投げた時点のものなので、解決したここで取り直して振り分ける (取り直しと
+	// 適用の間に await が無いので、ここでの判定は適用時も成り立つ)。
+	const reconcileExternalChange = useCallback(
+		(path: string, loaded: string) => {
+			const state = useWorkspaceStore.getState();
+			const current = state.tabs.find((t) => t.path === path);
+			// 読み込み中にタブが消えた (外部削除で閉じた / workspace 切替)。
+			// applyExternalReload / applyCacheReload は cache を作り直すので、閉じた path の
+			// cache が復活して次に開いたとき古い内容が出る。
+			if (!current) return;
+			if (state.activeTabPath === path) {
+				// 解決までの間にユーザーが打ち始めていたら、applyExternalReload は editor を
+				// remount して打ったばかりの文字を捨ててしまう。dirty なら自分の write で
+				// ない限りダイアログで問う。
+				if (current.dirty) {
+					if (loaded === getLastSavedContentRef.current()) return;
+					openConflict(path, "modified");
+					return;
+				}
+				applyExternalReload(path, loaded);
+				return;
+			}
+			if (isCachedTabClean(path)) {
+				applyCacheReload(path, loaded);
+				return;
+			}
+			// 未保存の編集がある非 active タブ: 今の編集を遮らないようダイアログは
+			// 出さず記録だけして、戻ったときに問う。
+			markCachedTabConflict(path, loaded);
+		},
+		[applyExternalReload, applyCacheReload, isCachedTabClean, markCachedTabConflict, openConflict],
+	);
+
 	const handleExternalFileModified = useCallback(
 		(path: string) => {
 			const state = useWorkspaceStore.getState();
-			const tab = state.tabs.find((t) => t.path === path);
-			if (!tab) return;
-
-			if (path === state.activeTabPath) {
-				if (tab.dirty) {
-					// Read file to check if this is our own save or genuine external change
-					readFile(path)
-						.then((loaded) => {
-							if (useWorkspaceStore.getState().activeTabPath !== path) return;
-							if (loaded === getLastSavedContentRef.current()) {
-								// File matches what we last saved — this was our own write
-								return;
-							}
-							// Don't overwrite a pending delete dialog (delete is more severe)
-							setExternalConflict((prev) =>
-								prev?.type === "deleted" ? prev : { path, type: "modified" },
-							);
-						})
-						.catch((err) => {
-							console.error("Failed to read file for conflict check:", err);
-						});
-				} else {
-					readFile(path)
-						.then((loaded) => {
-							// clean だったのは readFile を投げた時点の話。解決までの間に
-							// ユーザーが打ち始めていたら、applyExternalReload は editor を
-							// remount して打ったばかりの文字を捨ててしまう。dirty タブが
-							// 外部変更されたときと同じ扱い (自分の write でなければ
-							// ダイアログで問う) に合流させる。
-							const current = useWorkspaceStore.getState().tabs.find((t) => t.path === path);
-							// 読み込み中にタブが消えた (外部削除で閉じた / workspace 切替)。
-							// applyExternalReload は cache を作り直すので、閉じた path の
-							// cache が復活して次に開いたとき古い内容が出る。
-							if (!current) return;
-							if (current.dirty) {
-								if (loaded === getLastSavedContentRef.current()) return;
-								setExternalConflict((prev) =>
-									prev?.type === "deleted" ? prev : { path, type: "modified" },
-								);
-								return;
-							}
-							applyExternalReload(path, loaded);
-						})
-						.catch((err) => {
-							console.error("Failed to reload file:", err);
-						});
-				}
-			} else {
-				// Non-active dirty tabs: intentionally no dialog shown here.
-				// Showing a dialog would interrupt the user's current editing.
-				// The dirty content stays in cache; the user can reconcile when
-				// they switch to that tab.
-				if (isCachedTabClean(path)) {
-					readFile(path)
-						.then((loaded) => {
-							// clean 判定は readFile を投げた時点のもの。解決までの間に
-							// そのタブが active 化されて編集されていると、applyCacheReload は
-							// cache を disk の内容で丸ごと置き換えて未保存の編集を捨てる。
-							// 適用直前に同じ条件を取り直す (取り直しと適用の間に await が
-							// 無いので、ここで clean なら適用時も clean)。
-							if (!isCachedTabClean(path)) return;
-							applyCacheReload(path, loaded);
-						})
-						.catch((err) => {
-							console.error("Failed to reload cached file:", err);
-						});
-				}
-			}
+			if (!state.tabs.some((t) => t.path === path)) return;
+			// 一度も表示していない非 active タブは cache が無く、次に開いたとき disk から読む。
+			if (path !== state.activeTabPath && getCachedContent(path) === null) return;
+			readFile(path)
+				.then((loaded) => {
+					reconcileExternalChange(path, loaded);
+				})
+				.catch((err) => {
+					console.error("Failed to read externally modified file:", err);
+				});
 		},
-		[applyExternalReload, applyCacheReload, isCachedTabClean],
+		[getCachedContent, reconcileExternalChange],
 	);
 
 	useFileWatcher({
@@ -181,39 +206,38 @@ export function useExternalFileConflict({
 	const handleConflictReload = useCallback(() => {
 		if (externalConflict?.type !== "modified") return;
 		const path = externalConflict.path;
-		setExternalConflict(null);
+		// autosave は disk の内容を読み終えるまで止めたままにする。先に解くと、読み込みが
+		// 終わる前に未保存の内容が書き込まれ、読み込むのはその内容になる。
+		// 解くのは反映の直前。反映の後に解くと、release の scheduleAutoSave が remount 前の
+		// 未保存の本文を読んで、反映が "saved" にした状態を "unsaved" で上書きする。
+		hideConflict();
 		readFile(path)
 			.then((loaded) => {
+				if (!conflictOpenRef.current) releaseAutoSave();
+				// 読み込み中にタブが閉じていたら、applyConflictReload が閉じた path の cache を作り直す。
+				if (!useWorkspaceStore.getState().tabs.some((t) => t.path === path)) return;
 				applyConflictReload(path, loaded);
 			})
 			.catch((err) => {
 				console.error("Failed to reload file on conflict resolve:", err);
 				// File may have been deleted — notify user via the deleted dialog
-				setExternalConflict({ path, type: "deleted" });
+				openConflict(path, "deleted");
 			});
-	}, [externalConflict, applyConflictReload]);
-
-	const handleConflictKeep = useCallback(() => {
-		setExternalConflict(null);
-	}, []);
+	}, [externalConflict, hideConflict, applyConflictReload, releaseAutoSave, openConflict]);
 
 	const handleDeletedDirtyDiscard = useCallback(() => {
 		if (externalConflict?.type !== "deleted") return;
 		const path = externalConflict.path;
-		setExternalConflict(null);
 		dropTab(path);
 		closeTab(path);
-	}, [externalConflict, closeTab, dropTab]);
-
-	const handleDeletedDirtyKeep = useCallback(() => {
-		setExternalConflict(null);
-	}, []);
+		closeConflict();
+	}, [externalConflict, closeTab, dropTab, closeConflict]);
 
 	return {
 		externalConflict,
 		handleConflictReload,
-		handleConflictKeep,
+		handleConflictKeep: closeConflict,
 		handleDeletedDirtyDiscard,
-		handleDeletedDirtyKeep,
+		handleDeletedDirtyKeep: closeConflict,
 	};
 }

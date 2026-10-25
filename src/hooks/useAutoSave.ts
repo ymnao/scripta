@@ -42,6 +42,14 @@ interface UseAutoSaveReturn {
 	 * saveStatus は戻さないので、呼び出し側は続けてタブを閉じる (切替後の markSaved で戻る)。
 	 */
 	notifyPathDeleted: (path: string, isDirectory: boolean) => void;
+	/**
+	 * 外部変更のダイアログで user が選ぶまで、タイマー (debounce / follow-up / retry) による
+	 * 書き込みを止める。止めないと、選ぶ前に未保存の内容が disk の外部変更を上書きする。
+	 * saveNow と切替時の flush は止めない。
+	 */
+	holdAutoSave: () => void;
+	/** holdAutoSave を解き、打鍵と同じく未保存の内容が残っていれば debounce を張り直す。 */
+	releaseAutoSave: () => void;
 }
 
 export function useAutoSave(
@@ -85,6 +93,7 @@ export function useAutoSave(
 	const pendingContentRef = useRef<string | null>(null);
 	const saveRetryCountRef = useRef(0);
 	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const heldRef = useRef(false);
 
 	const clearRetryState = useCallback(() => {
 		if (retryTimerRef.current) {
@@ -105,7 +114,9 @@ export function useAutoSave(
 		): void => {
 			if (timerRef.current) {
 				clearTimeout(timerRef.current);
+				timerRef.current = null;
 			}
+			if (heldRef.current) return;
 			timerRef.current = setTimeout(function tick() {
 				if (isComposingRef.current?.()) {
 					timerRef.current = setTimeout(tick, IME_COMPOSITION_DEFER_MS);
@@ -399,6 +410,23 @@ export function useAutoSave(
 		trackGenerationRef.current += 1;
 	}, []);
 
+	const holdAutoSave = useCallback((): void => {
+		heldRef.current = true;
+		if (debounceTimerRef.current) {
+			clearTimeout(debounceTimerRef.current);
+			debounceTimerRef.current = null;
+		}
+		clearRetryState();
+	}, [clearRetryState]);
+
+	// debounce を直接張らないのは、切替直後 (切替先の markSaved 前) に解かれると、
+	// 切替元の本文を切替先の path へ書く timer が張られるため。scheduleAutoSave の
+	// awaitingNewFile ゲートを通す。
+	const releaseAutoSave = useCallback((): void => {
+		heldRef.current = false;
+		scheduleAutoSave();
+	}, [scheduleAutoSave]);
+
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;
 	}, []);
@@ -412,5 +440,7 @@ export function useAutoSave(
 		scheduleAutoSave,
 		notifyPathRenamed,
 		notifyPathDeleted,
+		holdAutoSave,
+		releaseAutoSave,
 	};
 }

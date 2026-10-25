@@ -1975,6 +1975,154 @@ describe("useAutoSave", () => {
 		});
 	});
 
+	// #703: 外部変更のダイアログを出している間、タイマーで未保存の内容を書き込むと
+	// user が「再読み込み」を選ぶ前に外部の変更が消える。
+	describe("holdAutoSave / releaseAutoSave", () => {
+		function renderEdited() {
+			const content = { value: "initial" };
+			const { result } = renderHook(() => useAutoSave("a.md", () => content.value));
+			act(() => {
+				result.current.markSaved("initial");
+			});
+			content.value = "edited";
+			return { result, content };
+		}
+
+		it("hold 中は張ってあった debounce が発火せず、release で張り直して書き込む", async () => {
+			const { result } = renderEdited();
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+
+			act(() => {
+				result.current.releaseAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+			expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited\n");
+		});
+
+		it("hold 中の打鍵では debounce を張らない", async () => {
+			const { result } = renderEdited();
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+			expect(result.current.saveStatus).toBe("unsaved");
+		});
+
+		it("hold の前に始まった write が完了しても、hold 中は follow-up を張らない", async () => {
+			const { result, content } = renderEdited();
+			let resolveWrite!: () => void;
+			mockedWriteFile.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveWrite = resolve;
+					}),
+			);
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+
+			content.value = "edited more";
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			await act(async () => {
+				resolveWrite();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+		});
+
+		it("hold の前に予約された retry は、hold 中に発火しない", async () => {
+			const { result } = renderEdited();
+			mockedWriteFile.mockRejectedValueOnce("Connection timed out");
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(2000);
+			});
+			expect(result.current.saveStatus).toBe("retrying");
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(30000);
+			});
+			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
+		});
+
+		it("切替先の内容が届く前に release しても、切替元の本文を切替先の path へ書かない", async () => {
+			const content = { value: "initial" };
+			const { result, rerender } = renderHook(
+				({ filePath }) => useAutoSave(filePath, () => content.value),
+				{ initialProps: { filePath: "a.md" } },
+			);
+			act(() => {
+				result.current.markSaved("initial");
+			});
+			content.value = "edited";
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			await act(async () => {
+				rerender({ filePath: "b.md" });
+			});
+
+			act(() => {
+				result.current.releaseAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+
+			expect(mockedWriteFile.mock.calls).toEqual([["a.md", "edited\n"]]);
+		});
+
+		it("release の時点で未保存の内容が無ければ書き込まない", async () => {
+			const { result, content } = renderEdited();
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			content.value = "initial";
+			act(() => {
+				result.current.releaseAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("recovery defenses", () => {
 		it("saveNow clears the awaiting-new-file gate so autosave resumes if markSaved was missed", async () => {
 			let currentContent = "initial";

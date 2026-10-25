@@ -1029,6 +1029,83 @@ describe("useTabContentManager", () => {
 			expect(result.current.isCachedTabClean("/w/c.md")).toBe(true);
 		});
 
+		it("記録の後に後回しの flush が成功して cache が clean になったら、takeCachedConflict は false を返す", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			// IME 変換中に切り替えると、切替元への flush は変換が終わるまで後回しになる。
+			const view = editor.ref.current as unknown as { composing: boolean };
+			view.composing = true;
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			act(() => {
+				result.current.markCachedTabConflict("/w/a.md", "EXTERNAL");
+			});
+
+			view.composing = false;
+			await advance(200);
+			expect(result.current.isCachedTabClean("/w/a.md")).toBe(true);
+
+			// 外部変更は flush が既に上書きしており、問う編集が残っていない。
+			expect(result.current.takeCachedConflict("/w/a.md")).toBe(false);
+		});
+
+		it("記録を取り出さないまま戻って再び切り替えても、記録は cache に残る", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValue(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			act(() => {
+				result.current.markCachedTabConflict("/w/a.md", "EXTERNAL");
+			});
+
+			// 別のダイアログの表示中は記録を取り出さないので、a を通り過ぎるだけになる。
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			expect(result.current.takeCachedConflict("/w/a.md")).toBe(true);
+		});
+
+		it("markCachedTabConflict の記録は takeCachedConflict で 1 回だけ取り出せる", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValueOnce(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			expect(result.current.takeCachedConflict("/w/a.md")).toBe(false);
+			act(() => {
+				result.current.markCachedTabConflict("/w/a.md", "EXTERNAL");
+			});
+			expect(result.current.takeCachedConflict("/w/a.md")).toBe(true);
+			// 残すと、戻るたびに同じ外部変更でダイアログが出る。
+			expect(result.current.takeCachedConflict("/w/a.md")).toBe(false);
+		});
+
 		it("applyExternalReload は自分の write と一致する内容なら no-op", async () => {
 			diskContents.set("/w/a.md", "orig-a");
 			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
