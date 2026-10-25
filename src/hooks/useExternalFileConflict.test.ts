@@ -870,6 +870,17 @@ describe("useExternalFileConflict", () => {
 	});
 
 	describe("非 active の間に記録された外部変更", () => {
+		/** 実装と同じく、取り出すと消える記録。 */
+		function recordedOnce(target: string) {
+			const record = { pending: true };
+			const take = (path: string): boolean => {
+				if (path !== target || !record.pending) return false;
+				record.pending = false;
+				return true;
+			};
+			return { record, take };
+		}
+
 		it("記録のあるタブが active になると、modified ダイアログを出して autosave を止める", async () => {
 			seedWorkspace(
 				"/w",
@@ -879,9 +890,8 @@ describe("useExternalFileConflict", () => {
 				],
 				"/w/a.md",
 			);
-			const { result, api } = await renderConflict({
-				takeCachedConflict: (path) => path === "/w/b.md",
-			});
+			const { take } = recordedOnce("/w/b.md");
+			const { result, api } = await renderConflict({ takeCachedConflict: take });
 			expect(result.current.externalConflict).toBeNull();
 
 			act(() => {
@@ -902,21 +912,15 @@ describe("useExternalFileConflict", () => {
 				],
 				"/w/a.md",
 			);
-			let recorded = true;
-			const { result, api } = await renderConflict({
-				takeCachedConflict: (path) => {
-					if (path !== "/w/b.md" || !recorded) return false;
-					recorded = false;
-					return true;
-				},
-			});
+			const { record, take } = recordedOnce("/w/b.md");
+			const { result, api } = await renderConflict({ takeCachedConflict: take });
 			await emitFsChange(deleted("/w/a.md"));
 
 			act(() => {
 				useWorkspaceStore.getState().setActiveTab("/w/b.md");
 			});
 			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
-			expect(recorded).toBe(true);
+			expect(record.pending).toBe(true);
 
 			act(() => {
 				result.current.handleDeletedDirtyKeep();
