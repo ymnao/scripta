@@ -94,11 +94,15 @@ export function useExternalFileConflict({
 		[holdAutoSave],
 	);
 
-	const closeConflict = useCallback(() => {
+	const hideConflict = useCallback(() => {
 		conflictOpenRef.current = false;
 		setExternalConflict(null);
+	}, []);
+
+	const closeConflict = useCallback(() => {
+		hideConflict();
 		releaseAutoSave();
-	}, [releaseAutoSave]);
+	}, [hideConflict, releaseAutoSave]);
 
 	// Clear stale conflict dialog when workspace changes.
 	// workspacePath is read only to satisfy the exhaustive-deps rule;
@@ -240,8 +244,7 @@ export function useExternalFileConflict({
 		const path = externalConflict.path;
 		// autosave は disk の内容を反映し終えるまで止めたままにする。先に解くと、
 		// 読み込みが終わる前に未保存の内容が書き込まれ、読み込むのはその内容になる。
-		conflictOpenRef.current = false;
-		setExternalConflict(null);
+		hideConflict();
 		readFile(path)
 			.then((loaded) => {
 				applyConflictReload(path, loaded);
@@ -252,11 +255,7 @@ export function useExternalFileConflict({
 				// File may have been deleted — notify user via the deleted dialog
 				openConflict(path, "deleted");
 			});
-	}, [externalConflict, applyConflictReload, releaseAutoSave, openConflict]);
-
-	const handleConflictKeep = useCallback(() => {
-		closeConflict();
-	}, [closeConflict]);
+	}, [externalConflict, hideConflict, applyConflictReload, releaseAutoSave, openConflict]);
 
 	const handleDeletedDirtyDiscard = useCallback(() => {
 		if (externalConflict?.type !== "deleted") return;
@@ -266,15 +265,11 @@ export function useExternalFileConflict({
 		closeConflict();
 	}, [externalConflict, closeTab, dropTab, closeConflict]);
 
-	const handleDeletedDirtyKeep = useCallback(() => {
-		closeConflict();
-	}, [closeConflict]);
-
 	return {
 		externalConflict,
 		handleConflictReload,
-		handleConflictKeep,
+		handleConflictKeep: closeConflict,
 		handleDeletedDirtyDiscard,
-		handleDeletedDirtyKeep,
+		handleDeletedDirtyKeep: closeConflict,
 	};
 }
