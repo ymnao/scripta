@@ -73,9 +73,12 @@ describe("findDisallowedRepoConfigKeys", () => {
 		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
 	});
 
-	it("accepts include directives, whose included keys are listed and checked on their own", () => {
+	it("rejects include directives, whose target a later pull can rewrite", () => {
 		const out = scoped(["local", "include.path"], ["local", "includeif.gitdir:~/a.b/.path"]);
-		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
+		expect(findDisallowedRepoConfigKeys(out)).toEqual([
+			"include.path",
+			"includeif.gitdir:~/a.b/.path",
+		]);
 	});
 
 	it("accepts core.hookspath, which createGit overrides", () => {

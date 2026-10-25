@@ -1181,7 +1181,6 @@ describe("git working tree writes: proactive search-cache invalidation (#569)", 
 		await ogit.raw(["clone", remote, other]);
 		await ogit.raw(["config", "user.email", "test2@test.com"]);
 		await ogit.raw(["config", "user.name", "Test2"]);
-		await ogit.raw(["config", "commit.gpgsign", "false"]);
 		await mutate(other);
 		await ogit.raw(["push"]);
 	}
