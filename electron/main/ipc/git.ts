@@ -453,7 +453,10 @@ async function pullImpl(
 	if (syncMethod !== "merge" && syncMethod !== "rebase") {
 		throw new Error(`Invalid sync_method: ${syncMethod}. Expected "merge" or "rebase".`);
 	}
-	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull"];
+	// merge でも `--no-rebase` を明示するのは、`pull.rebase` / `branch.*.rebase` の設定（repo-local は
+	// 手渡された repo なら攻撃者が書ける）で同期方式が rebase に変わり、merge なら止まる無関係な
+	// 履歴の取り込みが通ってしまうため（#705）。
+	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull", "--no-rebase"];
 	const git = await createGuardedGit(canonical);
 	await assertSyncTarget(git, canonical, expectedBranch);
 	// upstream 未設定の「成功扱い」は **op の内側**で潰す。外に出すと failed 経路として

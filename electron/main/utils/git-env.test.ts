@@ -73,6 +73,21 @@ describe("findDisallowedRepoConfigKeys", () => {
 		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
 	});
 
+	it("accepts include directives, whose included keys are listed and checked on their own", () => {
+		const out = scoped(["local", "include.path"], ["local", "includeif.gitdir:~/a.b/.path"]);
+		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
+	});
+
+	it("accepts core.hookspath, which createGit overrides", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["local", "core.hookspath"]))).toEqual([]);
+	});
+
+	it("rejects commit.gpgsign, which makes commit run a signing program", () => {
+		expect(findDisallowedRepoConfigKeys(scoped(["local", "commit.gpgsign"]))).toEqual([
+			"commit.gpgsign",
+		]);
+	});
+
 	it("rejects a local core.fsmonitor", () => {
 		expect(findDisallowedRepoConfigKeys(scoped(["local", "core.fsmonitor"]))).toEqual([
 			"core.fsmonitor",

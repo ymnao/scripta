@@ -148,6 +148,12 @@ export function createGit(canonicalRepoPath: string): SimpleGit {
 // repo-local（`.git/config` / `config.worktree` と、そこから include されたファイル）に置いてよい
 // key。`git init` / `clone` / `remote add` / `branch -u` が書くものと、コマンドを起動しない
 // 少数の設定に限る。
+// `core.hookspath` は husky 等が書くので許可する。値は createGit の `-c` が上書きする
+// （`-c` の command scope は local より優先する）。`core.fsmonitor` も同じく上書きされるが、
+// 開くだけで起動する経路なので二重に拒否しておく。include 先の key は include 元の scope で
+// 列挙されて同じ検査を受けるので、`include.path` / `includeif.*.path` 自体は許可してよい。
+// `pull.rebase` / `branch.*.rebase` は値に関わらず pullImpl が `--rebase` / `--no-rebase` を
+// 明示するので効かない。`commit.gpgsign` は commit のたびに署名プログラムを起動させるので許可しない。
 //
 // 危険な key を列挙して `-c` で上書きする形（denylist）にしないのは 2 つの理由から:
 // コマンドを起動する key は `filter.*` / `credential.helper` / `core.sshCommand` /
@@ -162,23 +168,35 @@ const ALLOWED_REPO_KEYS: ReadonlySet<string> = new Set([
 	"core.ignorecase",
 	"core.precomposeunicode",
 	"core.symlinks",
+	"core.hookspath",
+	"core.autocrlf",
+	"core.eol",
+	"core.untrackedcache",
+	"core.sparsecheckout",
+	"core.sparsecheckoutcone",
+	"index.version",
 	"extensions.worktreeconfig",
 	"extensions.objectformat",
 	"extensions.refstorage",
+	"include.path",
 	"user.name",
 	"user.email",
-	"commit.gpgsign",
 	"pull.rebase",
+	"lfs.repositoryformatversion",
 ]);
 
-// `<section>.<subsection>.<key>` 形式の許可。subsection（remote 名 / branch 名）は問わない。
+// `<section>.<subsection>.<key>` 形式の許可。subsection（remote 名 / branch 名 / include の条件）は問わない。
 const ALLOWED_REPO_SUBSECTION_KEYS: ReadonlySet<string> = new Set([
 	"remote.url",
 	"remote.pushurl",
 	"remote.fetch",
+	"remote.tagopt",
+	"remote.prune",
+	"remote.gh-resolved",
 	"branch.remote",
 	"branch.merge",
 	"branch.rebase",
+	"includeif.path",
 ]);
 
 // git は section と末尾の key を小文字に正規化して出力し、subsection は大文字小文字を保つ。

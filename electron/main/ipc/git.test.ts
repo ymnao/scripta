@@ -45,7 +45,7 @@ const {
 } = __testing;
 
 // すべての test fixture を集約。temp dir を mkdtemp + realpath で正規化したうえで
-// `git init` し、credential / sign 系を OFF にして teardown コストを下げる。
+// `git init` し、commit に要る user.name / user.email だけを repo-local に書く。
 async function initRepo(): Promise<string> {
 	const real = await makeCanonicalTempDir("scripta-git-test-");
 	const git = createGit(real);
@@ -53,11 +53,6 @@ async function initRepo(): Promise<string> {
 	await git.raw(["init", "-b", "main"]);
 	await git.raw(["config", "user.email", "test@test.com"]);
 	await git.raw(["config", "user.name", "Test"]);
-	await git.raw(["config", "commit.gpgsign", "false"]);
-	// `syncMethod: "merge"` の test が実際に merge を走るようにする。global config を遮断した
-	// 状態（beforeEach）では `pull.rebase` が未設定になり、divergent な pull は merge を試す前に
-	// 「どちらで reconcile するか指定せよ」で中断するため、working tree に marker が書かれない。
-	await git.raw(["config", "pull.rebase", "false"]);
 	return real;
 }
 
@@ -525,6 +520,31 @@ describe("pullImpl", () => {
 		await createGit(work).raw(["push", "-u", "origin", "main"]);
 		// no-op rebase pull は成功するはず
 		await pullImpl(TEST_WIN, work, "rebase", "main");
+	});
+
+	it("merges even when the repo config sets pull.rebase=true (#705)", async () => {
+		const { work, remote } = await setupRepoWithRemote();
+		dirsToCleanup.push(work, remote);
+		await registerWorkspaceRoot(TEST_WIN, work);
+		const wgit = createGit(work);
+		await wgit.raw(["push", "-u", "origin", "main"]);
+		const other = await makeCanonicalTempDir("scripta-git-other-");
+		dirsToCleanup.push(other);
+		await createGit(other).raw(["clone", remote, other]);
+		await createGit(other).raw(["config", "user.email", "test2@test.com"]);
+		await createGit(other).raw(["config", "user.name", "Test2"]);
+		await commitFile(other, "remote.md", "remote\n", "remote side");
+		await createGit(other).raw(["push"]);
+		await commitFile(work, "local.md", "local\n", "local side");
+		await wgit.raw(["config", "pull.rebase", "true"]);
+
+		await pullImpl(TEST_WIN, work, "merge", "main");
+
+		// merge なら HEAD は親を 2 つ持つ merge commit、rebase なら親 1 つの local commit になる。
+		const parents = (await wgit.raw(["rev-list", "--parents", "-n", "1", "HEAD"]))
+			.trim()
+			.split(" ");
+		expect(parents).toHaveLength(3);
 	});
 });
 

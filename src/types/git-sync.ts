@@ -90,7 +90,7 @@ export function formatSyncHaltLabel(halt: SyncHalt): string {
 		case "status-unavailable":
 			return "同期停止中（状態を読めません）";
 		case "unsafe-config":
-			return "同期停止中（.git/config）";
+			return "同期停止中（Git の設定）";
 		case "no-sync-branch":
 			return "同期停止中（ブランチ未設定）";
 		case "in-progress":
@@ -105,7 +105,7 @@ export function formatSyncHaltMessage(halt: SyncHalt): string {
 		case "status-unavailable":
 			return "Git の状態を読み取れなかったため、同期を止めています。";
 		case "unsafe-config":
-			return `リポジトリの .git/config に scripta が許可していない設定があるため、Git 操作を止めています。.git/config にはコマンドを実行させる設定を書けるので、許可した設定だけのリポジトリでしか Git 操作をしません。詳細: ${halt.detail}`;
+			return `リポジトリの Git の設定（.git/config など）に scripta が許可していない設定があるため、Git 操作を止めています。リポジトリの設定にはコマンドを実行させる設定を書けるので、許可した設定だけのリポジトリでしか Git 操作をしません。詳細: ${halt.detail}`;
 		case "no-sync-branch":
 			return "同期するブランチを決められないため、同期を止めています。設定の「同期するブランチ」を指定してください。";
 		case "in-progress":
