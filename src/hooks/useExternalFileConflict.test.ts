@@ -785,6 +785,29 @@ describe("useExternalFileConflict", () => {
 			);
 		});
 
+		it("「再読み込み」の読み込み中にタブが閉じたら、反映せず autosave の停止だけ解く", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
+			diskContents.set("/w/a.md", "external-change");
+			const { result, api } = await renderConflict();
+			await emitFsChange(modified("/w/a.md"));
+
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			act(() => {
+				result.current.handleConflictReload();
+			});
+			act(() => {
+				useWorkspaceStore.getState().closeTab("/w/a.md");
+			});
+			act(() => {
+				deferred.resolve("reloaded");
+			});
+			await flushAsync();
+
+			expect(api.applyConflictReload).not.toHaveBeenCalled();
+			expect(api.releaseAutoSave).toHaveBeenCalledTimes(1);
+		});
+
 		it("「再読み込み」の読み込み中に別のダイアログが開いたら、反映後も止めたままにする", async () => {
 			seedWorkspace(
 				"/w",

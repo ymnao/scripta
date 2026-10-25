@@ -214,6 +214,8 @@ export function useExternalFileConflict({
 		readFile(path)
 			.then((loaded) => {
 				if (!conflictOpenRef.current) releaseAutoSave();
+				// 読み込み中にタブが閉じていたら、applyConflictReload が閉じた path の cache を作り直す。
+				if (!useWorkspaceStore.getState().tabs.some((t) => t.path === path)) return;
 				applyConflictReload(path, loaded);
 			})
 			.catch((err) => {

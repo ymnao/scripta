@@ -1055,6 +1055,35 @@ describe("useTabContentManager", () => {
 			expect(result.current.takeCachedConflict("/w/a.md")).toBe(false);
 		});
 
+		it("記録を取り出さないまま戻って再び切り替えても、記録は cache に残る", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			mockedWriteFile.mockRejectedValue(new Error("flush failed"));
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			act(() => {
+				result.current.markCachedTabConflict("/w/a.md", "EXTERNAL");
+			});
+
+			// 別のダイアログの表示中は記録を取り出さないので、a を通り過ぎるだけになる。
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/a.md");
+			});
+			await flushAsync();
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+
+			expect(result.current.takeCachedConflict("/w/a.md")).toBe(true);
+		});
+
 		it("markCachedTabConflict の記録は takeCachedConflict で 1 回だけ取り出せる", async () => {
 			diskContents.set("/w/a.md", "orig-a");
 			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");

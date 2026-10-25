@@ -297,6 +297,9 @@ export function useTabContentManager({
 					content: getContent(),
 					savedContent: currentCache?.savedContent ?? savedContentRef.current,
 					editorStateSnapshot: prevSnapshot ?? currentCache?.editorStateSnapshot,
+					// 他のダイアログの表示中に通り過ぎたタブは、記録を取り出されないまま切り替わる。
+					// 引き継がないと記録が消え、戻ったときや閉じたときに外部変更を上書きする。
+					externallyModified: currentCache?.externallyModified,
 				});
 			} else {
 				tabCacheRef.current.delete(prevPath);
