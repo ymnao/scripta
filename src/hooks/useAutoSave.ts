@@ -71,13 +71,18 @@ export function useAutoSave(
 	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
-	// 追跡するファイルが替わる (切替・削除) たびに進める。saveId で代用しないのは、saveId が
-	// 切替元への flush と共有で、進めると flush の完了 (onFlushComplete) まで無効になるため。
-	// rename は同じ文書なので進めない。
+	// 追跡中のファイルが削除されたときに進める。saveId で代用しないのは、saveId が切替元への
+	// flush と共有で、進めると別ファイルへの flush の完了 (onFlushComplete) まで無効になるため。
+	// 切替では進めない: write 中の切替は必ず flush になり、その saveId が完了処理を無効にする。
 	const trackGenerationRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
 	const awaitingNewFileRef = useRef(false);
 	const inflightRef = useRef<Promise<void>>(Promise.resolve());
+	// 追跡中のファイルへ最後に書き始めた本文。完了前の切替では lastSavedContentRef がまだ前の
+	// 本文なので、「保存済みの本文へ戻してから切り替えた」ときに flush 不要と誤判定しないよう
+	// 併せて見る。完了時に消さないのは、残っていても起きるのは追跡中のファイルへ今の本文を
+	// 書き直す余分な flush だけで、別のファイルへは書かないため。切替で追跡が替わるときに捨てる。
+	const pendingContentRef = useRef<string | null>(null);
 	const saveRetryCountRef = useRef(0);
 	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -118,8 +123,8 @@ export function useAutoSave(
 			// rename を跨ぎ、発火時に旧 path へ書くため。
 			const trackedPath = prevFilePathRef.current;
 			if (!trackedPath) return Promise.resolve();
-			// 追跡が替わった後に完了した write は、follow-up や retry を張らない。張ると
-			// 書き先は発火時の追跡 path なので、切替元の本文を切替先の path へ書く。
+			// 追跡中のファイルが削除された後に完了した write は、follow-up・retry・saveStatus を
+			// 更新しない。更新すると、閉じた後のエディタが unsaved / retrying のまま残る。
 			const generation = trackGenerationRef.current;
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
@@ -131,6 +136,7 @@ export function useAutoSave(
 			setSaveStatus("saving");
 			const writePromise = inflightRef.current.then(() => writeFile(trackedPath, processed));
 			inflightRef.current = writePromise.catch(() => {});
+			pendingContentRef.current = processed;
 			return writePromise.then(
 				() => {
 					if (!isMountedRef.current) return;
@@ -205,13 +211,16 @@ export function useAutoSave(
 
 		// Clear retry state on file switch
 		clearRetryState();
-		trackGenerationRef.current += 1;
 
 		const prevPath = prevFilePathRef.current;
 		const currentContent = getContentRef.current();
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
 		const processed = processContent(currentContent, trimTrailingWhitespace);
-		const hadUnsavedChanges = prevPath && processed !== lastSavedContentRef.current;
+		const pending = pendingContentRef.current;
+		const hadUnsavedChanges =
+			prevPath &&
+			(processed !== lastSavedContentRef.current || (pending !== null && processed !== pending));
+		pendingContentRef.current = null;
 		prevFilePathRef.current = filePath;
 		// Suppress content effect until markSaved is called with the new file's content.
 		// This prevents saving stale content from the old file to the new path.

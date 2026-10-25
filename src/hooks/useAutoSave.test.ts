@@ -477,7 +477,7 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
-	it("切替前に始まった write の完了で、切替元の本文を切替先の path へ書かない", async () => {
+	it("保存済みの本文へ戻してから write 中に切り替えると、戻した本文を切替元へ書き直す", async () => {
 		let currentContent = "orig";
 		const getContent = () => currentContent;
 		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
@@ -502,7 +502,6 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(3000);
 		});
 
-		// 保存済みの内容へ戻してから切り替えると、切替 effect は flush しない。
 		currentContent = "orig";
 		await act(async () => {
 			rerender({ filePath: "b.md" });
@@ -516,7 +515,10 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(3000);
 		});
 
-		expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("b.md");
+		expect(mockedWriteFile.mock.calls).toEqual([
+			["a.md", "orig x\n"],
+			["a.md", "orig\n"],
+		]);
 	});
 
 	it("切替前に始まった write が切替先の読み込み後に失敗しても、切替先を retrying にしない", async () => {
@@ -544,8 +546,6 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(3000);
 		});
 
-		// 保存済みの内容へ戻してから切り替えると、切替 effect は flush しない。
-		currentContent = "initial";
 		await act(async () => {
 			rerender({ filePath: "b.md" });
 		});
@@ -562,7 +562,7 @@ describe("useAutoSave", () => {
 		});
 
 		expect(result.current.saveStatus).toBe("saved");
-		expect(mockedWriteFile.mock.calls).toEqual([["a.md", "edited\n"]]);
+		expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("b.md");
 	});
 
 	it("唯一のタブを削除したあとに削除前の write が完了しても、空のエディタを unsaved にしない", async () => {
@@ -607,6 +607,123 @@ describe("useAutoSave", () => {
 		});
 
 		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("唯一のタブを削除したあとに削除前の write が失敗しても、空のエディタを retrying にしない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		let rejectWrite!: (err: unknown) => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((_, reject) => {
+					rejectWrite = reject;
+				}),
+		);
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		act(() => {
+			result.current.notifyPathDeleted("a.md", false);
+		});
+		currentContent = "";
+		await act(async () => {
+			rerender({ filePath: "" });
+		});
+		act(() => {
+			result.current.markSaved("");
+		});
+		await act(async () => {
+			rejectWrite("Connection timed out");
+			await Promise.resolve();
+		});
+
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("切替元への flush 中に切替先のファイルを削除しても、flush の完了を通知する", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const onFlushComplete = vi.fn();
+		const { result, rerender } = renderHook(
+			({ filePath }) => useAutoSave(filePath, getContent, undefined, onFlushComplete),
+			{ initialProps: { filePath: "a.md" } },
+		);
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited A";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		let resolveFlush!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveFlush = () => resolve();
+				}),
+		);
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		act(() => {
+			result.current.markSaved("content B");
+		});
+
+		act(() => {
+			result.current.notifyPathDeleted("b.md", false);
+		});
+		await act(async () => {
+			resolveFlush();
+			await Promise.resolve();
+		});
+
+		expect(onFlushComplete).toHaveBeenCalledWith("a.md", "edited A");
+	});
+
+	it("前のファイルで書き終えた本文が残っていても、次のファイルからの切替で書き直さない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+		expect(result.current.saveStatus).toBe("saved");
+
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		currentContent = "content B";
+		act(() => {
+			result.current.markSaved("content B");
+		});
+		await act(async () => {
+			rerender({ filePath: "c.md" });
+		});
+
+		expect(mockedWriteFile.mock.calls).toEqual([["a.md", "edited\n"]]);
 	});
 
 	it("rename 前に始まった write が完了すると saved になり、続きの編集は rename 後の path へ書く", async () => {
