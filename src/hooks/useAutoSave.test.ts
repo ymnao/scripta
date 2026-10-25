@@ -477,6 +477,189 @@ describe("useAutoSave", () => {
 		expect(result.current.saveStatus).toBe("saved");
 	});
 
+	it("切替前に始まった write の完了で、切替元の本文を切替先の path へ書かない", async () => {
+		let currentContent = "orig";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("orig");
+		});
+		currentContent = "orig x";
+		let resolveWrite!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveWrite = () => resolve();
+				}),
+		);
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		// 保存済みの内容へ戻してから切り替えると、切替 effect は flush しない。
+		currentContent = "orig";
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		// b.md の読み込み (markSaved) が follow-up の発火より遅い状態で write が完了する。
+		await act(async () => {
+			resolveWrite();
+			await Promise.resolve();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		expect(mockedWriteFile.mock.calls).toEqual([["a.md", "orig x\n"]]);
+	});
+
+	it("切替前に始まった write が切替先の読み込み後に失敗しても、切替先を retrying にしない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		let rejectWrite!: (err: unknown) => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((_, reject) => {
+					rejectWrite = reject;
+				}),
+		);
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		// 保存済みの内容へ戻してから切り替えると、切替 effect は flush しない。
+		currentContent = "initial";
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		currentContent = "content B";
+		act(() => {
+			result.current.markSaved("content B");
+		});
+		await act(async () => {
+			rejectWrite("Connection timed out");
+			await Promise.resolve();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(10000);
+		});
+
+		expect(result.current.saveStatus).toBe("saved");
+		expect(mockedWriteFile.mock.calls).toEqual([["a.md", "edited\n"]]);
+	});
+
+	it("唯一のタブを削除したあとに削除前の write が完了しても、空のエディタを unsaved にしない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		let resolveWrite!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveWrite = () => resolve();
+				}),
+		);
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		// 最後のタブが閉じると filePath は "" になり、呼び出し側が markSaved("") する。
+		act(() => {
+			result.current.notifyPathDeleted("a.md", false);
+		});
+		currentContent = "";
+		await act(async () => {
+			rerender({ filePath: "" });
+		});
+		act(() => {
+			result.current.markSaved("");
+		});
+		await act(async () => {
+			resolveWrite();
+			await Promise.resolve();
+		});
+
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("rename 前に始まった write が完了すると saved になり、続きの編集は rename 後の path へ書く", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		let resolveWrite!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveWrite = () => resolve();
+				}),
+		);
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		act(() => {
+			result.current.notifyPathRenamed("a.md", "b.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		await act(async () => {
+			resolveWrite();
+			await Promise.resolve();
+		});
+		expect(result.current.saveStatus).toBe("saved");
+
+		currentContent = "edited more";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		expect(mockedWriteFile.mock.calls).toEqual([
+			["a.md", "edited\n"],
+			["b.md", "edited more\n"],
+		]);
+	});
+
 	it("notifyPathDeleted のあと別ファイルへ切り替えても、削除した path へ書かない", async () => {
 		let currentContent = "initial";
 		const getContent = () => currentContent;

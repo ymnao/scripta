@@ -39,6 +39,7 @@ interface UseAutoSaveReturn {
 	 * ファイル (isDirectory なら配下全体) が削除されたことを知らせる。開いている
 	 * ファイルが含まれていれば未保存の編集を捨て、直後の filePath の変化で
 	 * **削除した path へ flush write する** (= 削除したファイルを disk 上に作り直す) のを防ぐ。
+	 * saveStatus は戻さないので、呼び出し側は続けてタブを閉じる (切替後の markSaved で戻る)。
 	 */
 	notifyPathDeleted: (path: string, isDirectory: boolean) => void;
 }
@@ -70,6 +71,10 @@ export function useAutoSave(
 	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
+	// 追跡するファイルが替わる (切替・削除) たびに進める。saveId で代用しないのは、saveId が
+	// 切替元への flush と共有で、進めると flush の完了 (onFlushComplete) まで無効になるため。
+	// rename は同じ文書なので進めない。
+	const trackGenerationRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
 	const awaitingNewFileRef = useRef(false);
 	const inflightRef = useRef<Promise<void>>(Promise.resolve());
@@ -113,6 +118,9 @@ export function useAutoSave(
 			// rename を跨ぎ、発火時に旧 path へ書くため。
 			const trackedPath = prevFilePathRef.current;
 			if (!trackedPath) return Promise.resolve();
+			// 追跡が替わった後に完了した write は、follow-up や retry を張らない。張ると
+			// 書き先は発火時の追跡 path なので、切替元の本文を切替先の path へ書く。
+			const generation = trackGenerationRef.current;
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
 			if (processed === lastSavedContentRef.current) {
@@ -127,6 +135,7 @@ export function useAutoSave(
 				() => {
 					if (!isMountedRef.current) return;
 					if (currentSaveId !== saveIdRef.current) return;
+					if (generation !== trackGenerationRef.current) return;
 					lastSavedContentRef.current = processed;
 					clearRetryState();
 
@@ -147,7 +156,11 @@ export function useAutoSave(
 					}
 				},
 				(err) => {
-					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
+					if (
+						isMountedRef.current &&
+						currentSaveId === saveIdRef.current &&
+						generation === trackGenerationRef.current
+					) {
 						console.error("Failed to save file:", err);
 						if (
 							!options?.skipRetry &&
@@ -192,6 +205,7 @@ export function useAutoSave(
 
 		// Clear retry state on file switch
 		clearRetryState();
+		trackGenerationRef.current += 1;
 
 		const prevPath = prevFilePathRef.current;
 		const currentContent = getContentRef.current();
@@ -368,22 +382,13 @@ export function useAutoSave(
 	}, []);
 
 	// 追跡を空にすると、切替 effect は「切替元のファイル無し」として flush を飛ばし、
-	// save も書き先が無いので何もしない。saveId を進めるのは、削除前に始まった write の
-	// 完了で follow-up のタイマーが張られないようにするため。
-	const notifyPathDeleted = useCallback(
-		(path: string, isDirectory: boolean): void => {
-			const tracked = prevFilePathRef.current;
-			if (!(isDirectory ? tracked.startsWith(addTrailingSep(path)) : tracked === path)) return;
-			prevFilePathRef.current = "";
-			saveIdRef.current += 1;
-			if (debounceTimerRef.current) {
-				clearTimeout(debounceTimerRef.current);
-				debounceTimerRef.current = null;
-			}
-			clearRetryState();
-		},
-		[clearRetryState],
-	);
+	// 残ったタイマーが発火しても save は書き先が無いので何もしない。
+	const notifyPathDeleted = useCallback((path: string, isDirectory: boolean): void => {
+		const tracked = prevFilePathRef.current;
+		if (!(isDirectory ? tracked.startsWith(addTrailingSep(path)) : tracked === path)) return;
+		prevFilePathRef.current = "";
+		trackGenerationRef.current += 1;
+	}, []);
 
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;
