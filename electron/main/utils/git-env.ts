@@ -1,5 +1,7 @@
+import { realpath } from "node:fs/promises";
 import { platform } from "node:os";
 import { type SimpleGit, simpleGit } from "simple-git";
+import { relComponentsUnderRoot } from "./root-relative-path";
 import { gitError, StructuredError } from "./structured-error";
 
 // simple-git ベースで git コマンド実行環境を集約。
@@ -222,10 +224,38 @@ export function findDisallowedRepoConfigKeys(out: string): string[] {
 	return [...found];
 }
 
-// createGit に加えて、repo-local の設定が許可リストに収まっていることを確かめてから返す。
-// `git config --list` 自体は fsmonitor や filter を起動しない（git 2.56.0 で実測）。
+// workspace の中にあるのに `.git` という component を通らない git dir（`.git` を別 dir への symlink や
+// `gitdir: store` の gitfile にした配置）を拒否する。path-guard の assertOutsideGitDir は path の
+// `.git` component で fs IPC の書き込みを止めるので、この配置では git dir の config を renderer から
+// 書けてしまい、検査と本処理の間に書き換える race が残る。worktree（`.git/worktrees/<x>`）と
+// submodule（`.git/modules/<x>`）は `.git` を通るので影響しない。workspace の外の git dir
+// （workspace が repo の subdir / `--separate-git-dir`）は fs IPC から書けないので対象外。
+async function assertGitDirUnderDotGit(git: SimpleGit, canonicalRepoPath: string): Promise<void> {
+	let out: string;
+	try {
+		out = await git.raw(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]);
+	} catch (e) {
+		throw gitError(extractGitErrorMessage(e));
+	}
+	for (const dir of out.split("\n").filter((l) => l.length > 0)) {
+		// `--path-format=absolute` は symlink を解決した path を返す（git 2.56.0 で実測）が、
+		// canonicalRepoPath と同じ realpath の表記に揃えてから比べる。
+		const components = relComponentsUnderRoot(canonicalRepoPath, await realpath(dir));
+		if (components !== null && !components.includes(".git")) {
+			throw new StructuredError(
+				"GIT_UNSAFE_CONFIG",
+				`git directory inside the workspace is not under .git: ${components.join("/")}`,
+			);
+		}
+	}
+}
+
+// createGit に加えて、repo-local の設定が許可リストに収まっていることと、git dir の配置を確かめてから
+// 返す。この 2 つの検査に使う `rev-parse` と `git config --list` は、fsmonitor も filter も
+// 起動しない（git 2.56.0 で実測）。
 export async function createGuardedGit(canonicalRepoPath: string): Promise<SimpleGit> {
 	const git = createGit(canonicalRepoPath);
+	await assertGitDirUnderDotGit(git, canonicalRepoPath);
 	let out: string;
 	try {
 		out = await git.raw(["config", "--list", "--show-scope", "--name-only", "-z"]);

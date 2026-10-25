@@ -223,9 +223,12 @@ describe("checkRepoImpl", () => {
 
 describe("repo-local git config (#705)", () => {
 	// marker は repo の外に置く（repo 内だと status の未追跡ファイルに混ざる）。
+	// marker は shell の単一引用符で囲んで config に書くので、`'` を含む path では引用が壊れて
+	// 「起動しない」側の test が素通りする。その環境では先に落とす。
 	async function newMarkerPath(): Promise<string> {
 		const d = await makeCanonicalTempDir("scripta-git-marker-");
 		dirsToCleanup.push(d);
+		expect(d).not.toContain("'");
 		return join(d, "marker");
 	}
 
@@ -333,6 +336,34 @@ describe("repo-local git config (#705)", () => {
 		await registerWorkspaceRoot(TEST_WIN, work);
 		await createGit(work).raw(["push", "-u", "origin", "main"]);
 		expect((await statusImpl(TEST_WIN, work)).hasRemote).toBe(true);
+	});
+
+	it("rejects a git dir inside the workspace reached through a gitfile", async () => {
+		const dir = await newWorkspace();
+		await fsp.rename(join(dir, ".git"), join(dir, "store"));
+		await fsp.writeFile(join(dir, ".git"), "gitdir: store\n", "utf8");
+		await expect(statusImpl(TEST_WIN, dir)).rejects.toMatchObject({ kind: "GIT_UNSAFE_CONFIG" });
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"rejects a git dir inside the workspace reached through a .git symlink",
+		async () => {
+			const dir = await newWorkspace();
+			await fsp.rename(join(dir, ".git"), join(dir, "store"));
+			await fsp.symlink("store", join(dir, ".git"));
+			await expect(statusImpl(TEST_WIN, dir)).rejects.toMatchObject({
+				kind: "GIT_UNSAFE_CONFIG",
+			});
+		},
+	);
+
+	it("passes a workspace that is a subdir of the repo (git dir outside the workspace)", async () => {
+		const repo = await initRepo();
+		dirsToCleanup.push(repo);
+		const sub = join(repo, "notes");
+		await fsp.mkdir(sub);
+		await registerWorkspaceRoot(TEST_WIN, sub);
+		expect((await statusImpl(TEST_WIN, sub)).branch).toBe("main");
 	});
 
 	it("still reports the folder as a repo so status can surface the rejection", async () => {
