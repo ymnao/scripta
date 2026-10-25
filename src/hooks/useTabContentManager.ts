@@ -118,7 +118,7 @@ export interface TabContentManager {
 	 * 記録したタブは、戻らずに閉じようとしても書き込まずに active へ切り替える。
 	 */
 	markCachedTabConflict: (path: string, loaded: string) => void;
-	/** markCachedTabConflict の記録を取り出して消す。記録があれば true。 */
+	/** markCachedTabConflict の記録を取り出して消す。記録があり、未保存の編集も残っていれば true。 */
 	takeCachedConflict: (path: string) => boolean;
 	holdAutoSave: () => void;
 	releaseAutoSave: () => void;
@@ -743,11 +743,13 @@ export function useTabContentManager({
 		cached.externallyModified = true;
 	}, []);
 
+	// 記録した後に IME で後回しになった flush が成功すると、cache は clean になる
+	// (外部変更は flush が既に上書きしている)。そのときは問う編集が残っていないので false。
 	const takeCachedConflict = useCallback((path: string): boolean => {
 		const cached = tabCacheRef.current.get(path);
 		if (!cached?.externallyModified) return false;
 		cached.externallyModified = false;
-		return true;
+		return cached.content !== cached.savedContent;
 	}, []);
 
 	return {

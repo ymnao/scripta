@@ -284,4 +284,27 @@ describe("active の dirty タブへの外部変更", () => {
 		});
 		expect(writesTo("/w/a.md")).toEqual([]);
 	});
+
+	it("autosave の retry 中にダイアログで「再読み込み」を選んでも、タブは clean で落ち着く", async () => {
+		const { result, editor } = await renderBoth();
+		editor.type("edited A");
+		mockedWriteFile.mockRejectedValueOnce("Connection timed out");
+		act(() => {
+			result.current.manager.scheduleAutoSave();
+		});
+		await advance(2000);
+		expect(result.current.manager.saveStatus).toBe("retrying");
+
+		diskContents.set("/w/a.md", "EXTERNAL\n");
+		await emitModified("/w/a.md");
+		act(() => {
+			result.current.conflict.handleConflictReload();
+		});
+		await flushAsync();
+		await advance(5000);
+
+		expect(editor.getContent()).toBe("EXTERNAL\n");
+		expect(result.current.manager.saveStatus).toBe("saved");
+		expect(useWorkspaceStore.getState().tabs.find((t) => t.path === "/w/a.md")?.dirty).toBe(false);
+	});
 });
