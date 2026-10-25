@@ -48,7 +48,7 @@ interface UseAutoSaveReturn {
 	 * saveNow と切替時の flush は止めない。
 	 */
 	holdAutoSave: () => void;
-	/** holdAutoSave を解き、未保存の内容が残っていれば debounce を張り直す。 */
+	/** holdAutoSave を解き、打鍵と同じく未保存の内容が残っていれば debounce を張り直す。 */
 	releaseAutoSave: () => void;
 }
 
@@ -419,20 +419,13 @@ export function useAutoSave(
 		clearRetryState();
 	}, [clearRetryState]);
 
+	// debounce を直接張らないのは、切替直後 (切替先の markSaved 前) に解かれると、
+	// 切替元の本文を切替先の path へ書く timer が張られるため。scheduleAutoSave の
+	// awaitingNewFile ゲートを通す。
 	const releaseAutoSave = useCallback((): void => {
-		if (!heldRef.current) return;
 		heldRef.current = false;
-		const { trimTrailingWhitespace } = useSettingsStore.getState();
-		if (
-			processContent(getContentRef.current(), trimTrailingWhitespace) ===
-			lastSavedContentRef.current
-		) {
-			return;
-		}
-		scheduleWithComposition(debounceTimerRef, autoSaveDelay, () => {
-			save(getContentRef.current()).catch(() => {});
-		});
-	}, [autoSaveDelay, save, scheduleWithComposition]);
+		scheduleAutoSave();
+	}, [scheduleAutoSave]);
 
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;

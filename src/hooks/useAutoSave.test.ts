@@ -2077,6 +2077,33 @@ describe("useAutoSave", () => {
 			expect(mockedWriteFile).toHaveBeenCalledTimes(1);
 		});
 
+		it("切替先の内容が届く前に release しても、切替元の本文を切替先の path へ書かない", async () => {
+			const content = { value: "initial" };
+			const { result, rerender } = renderHook(
+				({ filePath }) => useAutoSave(filePath, () => content.value),
+				{ initialProps: { filePath: "a.md" } },
+			);
+			act(() => {
+				result.current.markSaved("initial");
+			});
+			content.value = "edited";
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			await act(async () => {
+				rerender({ filePath: "b.md" });
+			});
+
+			act(() => {
+				result.current.releaseAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+
+			expect(mockedWriteFile.mock.calls).toEqual([["a.md", "edited\n"]]);
+		});
+
 		it("release の時点で未保存の内容が無ければ書き込まない", async () => {
 			const { result, content } = renderEdited();
 			act(() => {
