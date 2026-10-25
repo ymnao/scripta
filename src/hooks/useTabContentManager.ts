@@ -558,13 +558,7 @@ export function useTabContentManager({
 			// autosave 側にも削除を伝える。伝えないと closeTab による filePath の変化が
 			// 「別ファイルへの切替」と解釈され、未保存の編集が **削除した path** へ
 			// flush write されて削除したファイルが復活する。
-			const activePath = useWorkspaceStore.getState().activeTabPath;
-			if (
-				activePath &&
-				(isDirectory ? activePath.startsWith(addTrailingSep(path)) : activePath === path)
-			) {
-				notifyPathDeleted(activePath);
-			}
+			notifyPathDeleted(path, isDirectory);
 
 			if (isDirectory) {
 				const prefix = addTrailingSep(path);
@@ -704,7 +698,7 @@ export function useTabContentManager({
 			tabCacheRef.current.delete(path);
 			// 外部削除で active タブを捨てるとき、続く closeTab で削除した path へ
 			// flush write しないようにする (handleFileDeleted と同じ理由)。
-			notifyPathDeleted(path);
+			notifyPathDeleted(path, false);
 		},
 		[notifyPathDeleted],
 	);

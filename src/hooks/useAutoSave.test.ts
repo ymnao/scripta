@@ -493,7 +493,7 @@ describe("useAutoSave", () => {
 		});
 
 		act(() => {
-			result.current.notifyPathDeleted("a.md");
+			result.current.notifyPathDeleted("a.md", false);
 		});
 		await act(async () => {
 			rerender({ filePath: "b.md" });
@@ -521,7 +521,7 @@ describe("useAutoSave", () => {
 		});
 
 		act(() => {
-			result.current.notifyPathDeleted("a.md");
+			result.current.notifyPathDeleted("a.md", false);
 		});
 		await act(async () => {
 			rerender({ filePath: "" });
@@ -561,7 +561,7 @@ describe("useAutoSave", () => {
 		// write 中にさらに編集 → 完了時に follow-up が張られる状態を作る。
 		currentContent = "edited more";
 		act(() => {
-			result.current.notifyPathDeleted("a.md");
+			result.current.notifyPathDeleted("a.md", false);
 		});
 		await act(async () => {
 			rerender({ filePath: "b.md" });
@@ -593,13 +593,38 @@ describe("useAutoSave", () => {
 		});
 
 		act(() => {
-			result.current.notifyPathDeleted("other.md");
+			result.current.notifyPathDeleted("other.md", false);
 		});
 		await act(async () => {
 			rerender({ filePath: "b.md" });
 		});
 
 		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
+	});
+
+	it("notifyPathDeleted はディレクトリ削除で、名前の先頭が同じ兄弟ディレクトリのファイルの flush を止めない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "/w/foobar/x.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		act(() => {
+			result.current.notifyPathDeleted("/w/foo", true);
+		});
+		await act(async () => {
+			rerender({ filePath: "/w/b.md" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("/w/foobar/x.md", "edited\n");
 	});
 
 	it("shows error when flush save fails on file switch", async () => {

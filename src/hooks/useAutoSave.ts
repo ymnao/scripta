@@ -3,6 +3,7 @@ import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
 import { processContent } from "../lib/content";
 import { isTransientError, translateError } from "../lib/errors";
+import { addTrailingSep } from "../lib/path";
 import { useSettingsStore } from "../stores/settings";
 import { useToastStore } from "../stores/toast";
 
@@ -35,11 +36,11 @@ interface UseAutoSaveReturn {
 	 */
 	notifyPathRenamed: (oldPath: string, newPath: string) => void;
 	/**
-	 * 開いているファイルが削除されたことを知らせる。未保存の編集を捨て、
-	 * 直後の filePath の変化で **削除した path へ flush write する**
-	 * (= 削除したファイルを disk 上に作り直す) のを防ぐ。
+	 * ファイル (isDirectory なら配下全体) が削除されたことを知らせる。開いている
+	 * ファイルが含まれていれば未保存の編集を捨て、直後の filePath の変化で
+	 * **削除した path へ flush write する** (= 削除したファイルを disk 上に作り直す) のを防ぐ。
 	 */
-	notifyPathDeleted: (path: string) => void;
+	notifyPathDeleted: (path: string, isDirectory: boolean) => void;
 }
 
 export function useAutoSave(
@@ -108,11 +109,10 @@ export function useAutoSave(
 
 	const save = useCallback(
 		(contentToSave: string, options?: SaveOptions): Promise<void> => {
-			// render 時の filePath を使わないのは、debounce / retry / follow-up のタイマーが
-			// この closure を抱えたまま rename を跨ぐため。rename 後に発火すると旧 path へ書く。
-			// 追跡中の path は切替 effect と notifyPathRenamed / notifyPathDeleted が付け替える。
-			const filePath = prevFilePathRef.current;
-			if (!filePath) return Promise.resolve();
+			// render 時の filePath を使わないのは、タイマーがこの closure を抱えたまま
+			// rename を跨ぎ、発火時に旧 path へ書くため。
+			const trackedPath = prevFilePathRef.current;
+			if (!trackedPath) return Promise.resolve();
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
 			if (processed === lastSavedContentRef.current) {
@@ -121,7 +121,7 @@ export function useAutoSave(
 			saveIdRef.current += 1;
 			const currentSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			const writePromise = inflightRef.current.then(() => writeFile(filePath, processed));
+			const writePromise = inflightRef.current.then(() => writeFile(trackedPath, processed));
 			inflightRef.current = writePromise.catch(() => {});
 			return writePromise.then(
 				() => {
@@ -371,8 +371,9 @@ export function useAutoSave(
 	// save も書き先が無いので何もしない。saveId を進めるのは、削除前に始まった write の
 	// 完了で follow-up のタイマーが張られないようにするため。
 	const notifyPathDeleted = useCallback(
-		(path: string): void => {
-			if (prevFilePathRef.current !== path) return;
+		(path: string, isDirectory: boolean): void => {
+			const tracked = prevFilePathRef.current;
+			if (!(isDirectory ? tracked.startsWith(addTrailingSep(path)) : tracked === path)) return;
 			prevFilePathRef.current = "";
 			saveIdRef.current += 1;
 			if (debounceTimerRef.current) {
