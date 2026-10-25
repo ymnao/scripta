@@ -3,6 +3,7 @@ import type { SaveStatus } from "../components/layout/StatusBar";
 import { writeFile } from "../lib/commands";
 import { processContent } from "../lib/content";
 import { isTransientError, translateError } from "../lib/errors";
+import { addTrailingSep } from "../lib/path";
 import { useSettingsStore } from "../stores/settings";
 import { useToastStore } from "../stores/toast";
 
@@ -34,6 +35,13 @@ interface UseAutoSaveReturn {
 	 * (= rename で消えたはずのファイルを disk 上に作り直す) のを防ぐ。
 	 */
 	notifyPathRenamed: (oldPath: string, newPath: string) => void;
+	/**
+	 * ファイル (isDirectory なら配下全体) が削除されたことを知らせる。開いている
+	 * ファイルが含まれていれば未保存の編集を捨て、直後の filePath の変化で
+	 * **削除した path へ flush write する** (= 削除したファイルを disk 上に作り直す) のを防ぐ。
+	 * saveStatus は戻さないので、呼び出し側は続けてタブを閉じる (切替後の markSaved で戻る)。
+	 */
+	notifyPathDeleted: (path: string, isDirectory: boolean) => void;
 }
 
 export function useAutoSave(
@@ -63,9 +71,18 @@ export function useAutoSave(
 	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isMountedRef = useRef(true);
 	const saveIdRef = useRef(0);
+	// 追跡中のファイルが削除されたときに進める。saveId で代用しないのは、saveId が切替元への
+	// flush と共有で、進めると別ファイルへの flush の完了 (onFlushComplete) まで無効になるため。
+	// 切替では進めない: write 中の切替は必ず flush になり、その saveId が完了処理を無効にする。
+	const trackGenerationRef = useRef(0);
 	const prevFilePathRef = useRef(filePath);
 	const awaitingNewFileRef = useRef(false);
 	const inflightRef = useRef<Promise<void>>(Promise.resolve());
+	// 追跡中のファイルへ最後に書き始めた本文。完了前の切替では lastSavedContentRef がまだ前の
+	// 本文なので、「保存済みの本文へ戻してから切り替えた」ときに flush 不要と誤判定しないよう
+	// 併せて見る。完了時に消さないのは、残っていても起きるのは追跡中のファイルへ今の本文を
+	// 書き直す余分な flush だけで、別のファイルへは書かないため。切替で追跡が替わるときに捨てる。
+	const pendingContentRef = useRef<string | null>(null);
 	const saveRetryCountRef = useRef(0);
 	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -102,7 +119,13 @@ export function useAutoSave(
 
 	const save = useCallback(
 		(contentToSave: string, options?: SaveOptions): Promise<void> => {
-			if (!filePath) return Promise.resolve();
+			// render 時の filePath を使わないのは、タイマーがこの closure を抱えたまま
+			// rename を跨ぎ、発火時に旧 path へ書くため。
+			const trackedPath = prevFilePathRef.current;
+			if (!trackedPath) return Promise.resolve();
+			// 追跡中のファイルが削除された後に完了した write は、follow-up・retry・saveStatus を
+			// 更新しない。更新すると、閉じた後のエディタが unsaved / retrying のまま残る。
+			const generation = trackGenerationRef.current;
 			const { trimTrailingWhitespace } = useSettingsStore.getState();
 			const processed = processContent(contentToSave, trimTrailingWhitespace);
 			if (processed === lastSavedContentRef.current) {
@@ -111,12 +134,14 @@ export function useAutoSave(
 			saveIdRef.current += 1;
 			const currentSaveId = saveIdRef.current;
 			setSaveStatus("saving");
-			const writePromise = inflightRef.current.then(() => writeFile(filePath, processed));
+			const writePromise = inflightRef.current.then(() => writeFile(trackedPath, processed));
 			inflightRef.current = writePromise.catch(() => {});
+			pendingContentRef.current = processed;
 			return writePromise.then(
 				() => {
 					if (!isMountedRef.current) return;
 					if (currentSaveId !== saveIdRef.current) return;
+					if (generation !== trackGenerationRef.current) return;
 					lastSavedContentRef.current = processed;
 					clearRetryState();
 
@@ -137,7 +162,11 @@ export function useAutoSave(
 					}
 				},
 				(err) => {
-					if (isMountedRef.current && currentSaveId === saveIdRef.current) {
+					if (
+						isMountedRef.current &&
+						currentSaveId === saveIdRef.current &&
+						generation === trackGenerationRef.current
+					) {
 						console.error("Failed to save file:", err);
 						if (
 							!options?.skipRetry &&
@@ -161,7 +190,7 @@ export function useAutoSave(
 				},
 			);
 		},
-		[filePath, clearRetryState, scheduleWithComposition],
+		[clearRetryState, scheduleWithComposition],
 	);
 
 	// Flush pending changes to the OLD path when filePath changes
@@ -187,7 +216,11 @@ export function useAutoSave(
 		const currentContent = getContentRef.current();
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
 		const processed = processContent(currentContent, trimTrailingWhitespace);
-		const hadUnsavedChanges = prevPath && processed !== lastSavedContentRef.current;
+		const pending = pendingContentRef.current;
+		const hadUnsavedChanges =
+			prevPath &&
+			(processed !== lastSavedContentRef.current || (pending !== null && processed !== pending));
+		pendingContentRef.current = null;
 		prevFilePathRef.current = filePath;
 		// Suppress content effect until markSaved is called with the new file's content.
 		// This prevents saving stale content from the old file to the new path.
@@ -357,6 +390,15 @@ export function useAutoSave(
 		}
 	}, []);
 
+	// 追跡を空にすると、切替 effect は「切替元のファイル無し」として flush を飛ばし、
+	// 残ったタイマーが発火しても save は書き先が無いので何もしない。
+	const notifyPathDeleted = useCallback((path: string, isDirectory: boolean): void => {
+		const tracked = prevFilePathRef.current;
+		if (!(isDirectory ? tracked.startsWith(addTrailingSep(path)) : tracked === path)) return;
+		prevFilePathRef.current = "";
+		trackGenerationRef.current += 1;
+	}, []);
+
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;
 	}, []);
@@ -369,5 +411,6 @@ export function useAutoSave(
 		getLastSavedContent,
 		scheduleAutoSave,
 		notifyPathRenamed,
+		notifyPathDeleted,
 	};
 }
