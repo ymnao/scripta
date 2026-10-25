@@ -293,6 +293,91 @@ describe("useTabContentManager", () => {
 			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a/baz/x.md", "edited\n");
 		});
 
+		it("未保存の編集がある active タブを削除しても、削除した path へ書き戻さない", async () => {
+			// 削除を「別ファイルへの切替」と誤認して flush write すると、main 側は
+			// 書き込み先の親ディレクトリを作り直すため、削除したファイルが復活する。
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited A");
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+
+			act(() => {
+				result.current.handleFileDeleted("/w/a.md", false);
+			});
+			await flushAsync();
+			await advance(3000);
+
+			expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("/w/a.md");
+			expect(tabPaths()).toEqual(["/w/b.md"]);
+		});
+
+		it("未保存の編集がある active タブのディレクトリを削除しても、削除した path へ書き戻さない", async () => {
+			diskContents.set("/w/a/foo/x.md", "orig");
+			seedWorkspace("/w", ["/w/a/foo/x.md", "/w/c.md"], "/w/a/foo/x.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited");
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+
+			act(() => {
+				result.current.handleFileDeleted("/w/a/foo", true);
+			});
+			await flushAsync();
+			await advance(3000);
+
+			expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("/w/a/foo/x.md");
+			expect(tabPaths()).toEqual(["/w/c.md"]);
+		});
+
+		it("active でないタブを削除しても、active タブの未保存の編集は切替時に flush される", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md", "/w/c.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited A");
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+
+			act(() => {
+				result.current.handleFileDeleted("/w/b.md", false);
+			});
+			act(() => {
+				useWorkspaceStore.getState().setActiveTab("/w/c.md");
+			});
+			await flushAsync();
+
+			expect(mockedWriteFile).toHaveBeenCalledWith("/w/a.md", "edited A\n");
+		});
+
+		it("外部削除の「破棄」で active タブを閉じても、削除した path へ書き戻さない", async () => {
+			diskContents.set("/w/a.md", "orig");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited A");
+			act(() => {
+				result.current.scheduleAutoSave();
+			});
+
+			// handleDeletedDirtyDiscard と同じ呼び出し順。
+			act(() => {
+				result.current.dropTab("/w/a.md");
+				useWorkspaceStore.getState().closeTab("/w/a.md");
+			});
+			await flushAsync();
+			await advance(3000);
+
+			expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("/w/a.md");
+			expect(tabPaths()).toEqual(["/w/b.md"]);
+		});
+
 		it("rename 中に旧 path の readFile が遅れて解決しても、新 path のロード結果を上書きしない", async () => {
 			// 旧 path の read は effect cleanup の ignore フラグで破棄されるはず。
 			// 破棄が効かないと、rename 後のエディタに旧 path の内容が現れ、

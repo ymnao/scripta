@@ -411,6 +411,197 @@ describe("useAutoSave", () => {
 		expect(mockedWriteFile).not.toHaveBeenCalledWith("renamed.md", expect.anything());
 	});
 
+	it("rename 前に予約された autosave は、rename 後の path へ書く", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		act(() => {
+			result.current.notifyPathRenamed("a.md", "b.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		expect(mockedWriteFile.mock.calls).toEqual([["b.md", "edited\n"]]);
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("rename 前に予約された retry は、rename 後の path へ書く", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		mockedWriteFile.mockRejectedValueOnce("Connection timed out");
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+		expect(result.current.saveStatus).toBe("retrying");
+
+		act(() => {
+			result.current.notifyPathRenamed("a.md", "b.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(5000);
+		});
+
+		expect(mockedWriteFile.mock.calls).toEqual([
+			["a.md", "edited\n"],
+			["b.md", "edited\n"],
+		]);
+		expect(result.current.saveStatus).toBe("saved");
+	});
+
+	it("notifyPathDeleted のあと別ファイルへ切り替えても、削除した path へ書かない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		act(() => {
+			result.current.notifyPathDeleted("a.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("notifyPathDeleted のあと最後のタブが閉じても、削除した path へ書かない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		act(() => {
+			result.current.notifyPathDeleted("a.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "" });
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("削除した path の書き込みが in-flight のまま切り替えても、follow-up で削除した path へ書かない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited";
+		let resolveWrite!: () => void;
+		mockedWriteFile.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveWrite = () => resolve();
+				}),
+		);
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		// write 中にさらに編集 → 完了時に follow-up が張られる状態を作る。
+		currentContent = "edited more";
+		act(() => {
+			result.current.notifyPathDeleted("a.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+		await act(async () => {
+			resolveWrite();
+			await Promise.resolve();
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(3000);
+		});
+
+		expect(mockedWriteFile.mock.calls).toEqual([["a.md", "edited\n"]]);
+	});
+
+	it("notifyPathDeleted は追跡中でない path の削除では flush を止めない", async () => {
+		let currentContent = "initial";
+		const getContent = () => currentContent;
+		const { result, rerender } = renderHook(({ filePath }) => useAutoSave(filePath, getContent), {
+			initialProps: { filePath: "a.md" },
+		});
+
+		act(() => {
+			result.current.markSaved("initial");
+		});
+		currentContent = "edited A";
+		act(() => {
+			result.current.scheduleAutoSave();
+		});
+
+		act(() => {
+			result.current.notifyPathDeleted("other.md");
+		});
+		await act(async () => {
+			rerender({ filePath: "b.md" });
+		});
+
+		expect(mockedWriteFile).toHaveBeenCalledWith("a.md", "edited A\n");
+	});
+
 	it("shows error when flush save fails on file switch", async () => {
 		let currentContent = "initial";
 		const getContent = () => currentContent;

@@ -105,7 +105,7 @@ export interface TabContentManager {
 	applyCacheReload: (path: string, loaded: string) => void;
 	/** コンフリクトダイアログの「再読み込み」。cache を全置換して dirty を落とす。 */
 	applyConflictReload: (path: string, loaded: string) => void;
-	/** cache からタブの内容を捨てる (タブ自体の close は呼び出し側の責務)。 */
+	/** cache と autosave の未保存の編集からタブの内容を捨てる (タブ自体の close は呼び出し側の責務)。 */
 	dropTab: (path: string) => void;
 	/** cache 上でそのタブに未保存の編集が無いか。cache 自体が無ければ false。 */
 	isCachedTabClean: (path: string) => boolean;
@@ -225,6 +225,7 @@ export function useTabContentManager({
 		getLastSavedContent,
 		scheduleAutoSave,
 		notifyPathRenamed,
+		notifyPathDeleted,
 	} = useAutoSave(
 		isNewTab ? "" : (activeTabPath ?? ""),
 		getContent,
@@ -554,6 +555,17 @@ export function useTabContentManager({
 
 	const handleFileDeleted = useCallback(
 		(path: string, isDirectory: boolean) => {
+			// autosave 側にも削除を伝える。伝えないと closeTab による filePath の変化が
+			// 「別ファイルへの切替」と解釈され、未保存の編集が **削除した path** へ
+			// flush write されて削除したファイルが復活する。
+			const activePath = useWorkspaceStore.getState().activeTabPath;
+			if (
+				activePath &&
+				(isDirectory ? activePath.startsWith(addTrailingSep(path)) : activePath === path)
+			) {
+				notifyPathDeleted(activePath);
+			}
+
 			if (isDirectory) {
 				const prefix = addTrailingSep(path);
 				for (const key of tabCacheRef.current.keys()) {
@@ -567,7 +579,7 @@ export function useTabContentManager({
 				closeTab(path);
 			}
 		},
-		[closeTab, closeTabsByPrefix],
+		[closeTab, closeTabsByPrefix, notifyPathDeleted],
 	);
 
 	// unmount 後に window close の保存処理を続行しないためのフラグ。
@@ -687,9 +699,15 @@ export function useTabContentManager({
 		[markSaved, setTabDirty],
 	);
 
-	const dropTab = useCallback((path: string) => {
-		tabCacheRef.current.delete(path);
-	}, []);
+	const dropTab = useCallback(
+		(path: string) => {
+			tabCacheRef.current.delete(path);
+			// 外部削除で active タブを捨てるとき、続く closeTab で削除した path へ
+			// flush write しないようにする (handleFileDeleted と同じ理由)。
+			notifyPathDeleted(path);
+		},
+		[notifyPathDeleted],
+	);
 
 	const isCachedTabClean = useCallback((path: string): boolean => {
 		const cached = tabCacheRef.current.get(path);
