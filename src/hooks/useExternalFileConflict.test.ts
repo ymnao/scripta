@@ -67,7 +67,13 @@ function deleted(path: string): FsChangeEvent[] {
  * tab API は `Pick<TabContentManager, ...>` なので実装を持ち込む必要が無い。
  * すべて vi.fn() で受け、「どの分岐がどの API を呼んだか」だけを観測する。
  */
-async function renderConflict(overrides: { isCachedTabClean?: (path: string) => boolean } = {}) {
+async function renderConflict(
+	overrides: {
+		isCachedTabClean?: (path: string) => boolean;
+		getCachedContent?: (path: string) => string | null;
+		takeCachedConflict?: (path: string) => boolean;
+	} = {},
+) {
 	const api = {
 		onTreeChange: vi.fn(),
 		getLastSavedContent: vi.fn<() => string>().mockReturnValue("last-saved"),
@@ -76,6 +82,11 @@ async function renderConflict(overrides: { isCachedTabClean?: (path: string) => 
 		applyConflictReload: vi.fn(),
 		dropTab: vi.fn(),
 		isCachedTabClean: vi.fn(overrides.isCachedTabClean ?? (() => true)),
+		getCachedContent: vi.fn(overrides.getCachedContent ?? (() => "cached")),
+		markCachedTabConflict: vi.fn(),
+		takeCachedConflict: vi.fn(overrides.takeCachedConflict ?? (() => false)),
+		holdAutoSave: vi.fn(),
+		releaseAutoSave: vi.fn(),
 	};
 	const rendered = renderHook(() => useExternalFileConflict(api));
 	// watcher が listener を張り終える (= fs イベントを注入できる) まで進める。
@@ -308,7 +319,7 @@ describe("useExternalFileConflict", () => {
 			expect(api.applyExternalReload).not.toHaveBeenCalled();
 		});
 
-		it("非 active で isCachedTabClean が false なら readFile を発行しない", async () => {
+		it("非 active で cache が無ければ readFile を発行しない", async () => {
 			seedWorkspace(
 				"/w",
 				[
@@ -317,12 +328,33 @@ describe("useExternalFileConflict", () => {
 				],
 				"/w/a.md",
 			);
-			const { api } = await renderConflict({ isCachedTabClean: () => false });
+			const { api } = await renderConflict({ getCachedContent: () => null });
 
 			await emitFsChange(modified("/w/b.md"));
 
 			expect(mockedReadFile).not.toHaveBeenCalled();
 			expect(api.applyCacheReload).not.toHaveBeenCalled();
+			expect(api.markCachedTabConflict).not.toHaveBeenCalled();
+		});
+
+		it("非 active で cache が dirty なら、ダイアログを出さず markCachedTabConflict で記録する", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: true },
+				],
+				"/w/a.md",
+			);
+			diskContents.set("/w/b.md", "external-change");
+			const { result, api } = await renderConflict({ isCachedTabClean: () => false });
+
+			await emitFsChange(modified("/w/b.md"));
+
+			expect(api.markCachedTabConflict).toHaveBeenCalledWith("/w/b.md", "external-change");
+			expect(api.applyCacheReload).not.toHaveBeenCalled();
+			expect(result.current.externalConflict).toBeNull();
+			expect(api.holdAutoSave).not.toHaveBeenCalled();
 		});
 
 		it("非 active clean の readFile 失敗では applyCacheReload を呼ばない", async () => {
@@ -461,7 +493,7 @@ describe("useExternalFileConflict", () => {
 			expect(api.applyExternalReload).not.toHaveBeenCalled();
 		});
 
-		it("非 active タブの cache が読み込み中に dirty 化したら applyCacheReload しない", async () => {
+		it("非 active タブの cache が読み込み中に dirty 化したら applyCacheReload せず記録する", async () => {
 			seedWorkspace(
 				"/w",
 				[
@@ -472,23 +504,99 @@ describe("useExternalFileConflict", () => {
 			);
 			const deferred = createDeferred<string>();
 			mockedReadFile.mockImplementationOnce(() => deferred.promise);
-			// 1 回目 (判定時) は clean、2 回目 (適用直前の取り直し) は dirty を返す
-			let cleanCalls = 0;
-			const { api } = await renderConflict({
-				isCachedTabClean: () => {
-					cleanCalls += 1;
-					return cleanCalls === 1;
-				},
-			});
+			let clean = true;
+			const { api } = await renderConflict({ isCachedTabClean: () => clean });
 
 			await emitFsChange(modified("/w/b.md"));
+			clean = false;
 			act(() => {
 				deferred.resolve("external-change");
 			});
 			await flushAsync();
 
-			expect(cleanCalls).toBe(2);
 			expect(api.applyCacheReload).not.toHaveBeenCalled();
+			expect(api.markCachedTabConflict).toHaveBeenCalledWith("/w/b.md", "external-change");
+		});
+
+		it("非 active タブが読み込み中に active 化して dirty になったら、記録ではなく modified ダイアログにする", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: false },
+				],
+				"/w/a.md",
+			);
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { result, api } = await renderConflict();
+
+			await emitFsChange(modified("/w/b.md"));
+			act(() => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+				useWorkspaceStore.getState().setTabDirty("/w/b.md", true);
+			});
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(result.current.externalConflict).toEqual({ path: "/w/b.md", type: "modified" });
+			expect(api.holdAutoSave).toHaveBeenCalled();
+			expect(api.markCachedTabConflict).not.toHaveBeenCalled();
+			expect(api.applyCacheReload).not.toHaveBeenCalled();
+		});
+
+		it("非 active タブが読み込み中に active 化して clean のままなら、エディタへ反映する", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: false },
+				],
+				"/w/a.md",
+			);
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { api } = await renderConflict();
+
+			await emitFsChange(modified("/w/b.md"));
+			act(() => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(api.applyExternalReload).toHaveBeenCalledWith("/w/b.md", "external-change");
+			expect(api.applyCacheReload).not.toHaveBeenCalled();
+		});
+
+		it("非 active タブが読み込み中に閉じられたら、cache へ反映しない", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: false },
+				],
+				"/w/a.md",
+			);
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			const { api } = await renderConflict();
+
+			await emitFsChange(modified("/w/b.md"));
+			act(() => {
+				useWorkspaceStore.getState().closeTab("/w/b.md");
+			});
+			act(() => {
+				deferred.resolve("external-change");
+			});
+			await flushAsync();
+
+			expect(api.applyCacheReload).not.toHaveBeenCalled();
+			expect(api.markCachedTabConflict).not.toHaveBeenCalled();
 		});
 
 		it("非 active タブの cache が clean のままなら applyCacheReload する", async () => {
@@ -632,6 +740,174 @@ describe("useExternalFileConflict", () => {
 			expect(result.current.externalConflict).toBeNull();
 			expect(api.dropTab).not.toHaveBeenCalled();
 			expect(tabPaths()).toEqual(["/w/a.md"]);
+		});
+	});
+
+	// #703: ダイアログで選ぶ前に autosave が書き込むと外部の変更が消えるので、表示中は止める。
+	describe("ダイアログ表示中の autosave 停止", () => {
+		it("modified ダイアログを出すと holdAutoSave し、「保持」で releaseAutoSave する", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
+			diskContents.set("/w/a.md", "external-change");
+			const { result, api } = await renderConflict();
+
+			await emitFsChange(modified("/w/a.md"));
+			expect(api.holdAutoSave).toHaveBeenCalledTimes(1);
+			expect(api.releaseAutoSave).not.toHaveBeenCalled();
+
+			act(() => {
+				result.current.handleConflictKeep();
+			});
+			expect(api.releaseAutoSave).toHaveBeenCalledTimes(1);
+		});
+
+		it("「再読み込み」は disk の内容を反映し終えてから releaseAutoSave する", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
+			diskContents.set("/w/a.md", "external-change");
+			const { result, api } = await renderConflict();
+			await emitFsChange(modified("/w/a.md"));
+
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			act(() => {
+				result.current.handleConflictReload();
+			});
+			expect(api.releaseAutoSave).not.toHaveBeenCalled();
+
+			act(() => {
+				deferred.resolve("reloaded");
+			});
+			await flushAsync();
+			expect(api.releaseAutoSave).toHaveBeenCalledTimes(1);
+			expect(api.applyConflictReload.mock.invocationCallOrder[0]).toBeLessThan(
+				api.releaseAutoSave.mock.invocationCallOrder[0],
+			);
+		});
+
+		it("「再読み込み」の読み込み中に別のダイアログが開いたら、反映後も止めたままにする", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: true },
+					{ path: "/w/b.md", dirty: true },
+				],
+				"/w/a.md",
+			);
+			diskContents.set("/w/a.md", "external-change");
+			const { result, api } = await renderConflict();
+			await emitFsChange(modified("/w/a.md"));
+
+			const deferred = createDeferred<string>();
+			mockedReadFile.mockImplementationOnce(() => deferred.promise);
+			act(() => {
+				result.current.handleConflictReload();
+			});
+			await emitFsChange(deleted("/w/b.md"));
+			act(() => {
+				deferred.resolve("reloaded");
+			});
+			await flushAsync();
+
+			expect(result.current.externalConflict).toEqual({ path: "/w/b.md", type: "deleted" });
+			expect(api.releaseAutoSave).not.toHaveBeenCalled();
+		});
+
+		it("「再読み込み」が読み込みに失敗して deleted ダイアログへ移るときは止めたままにする", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
+			diskContents.set("/w/a.md", "external-change");
+			const { result, api } = await renderConflict();
+			await emitFsChange(modified("/w/a.md"));
+
+			mockedReadFile.mockImplementationOnce(() => Promise.reject(new Error("gone")));
+			act(() => {
+				result.current.handleConflictReload();
+			});
+			await flushAsync();
+
+			expect(result.current.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
+			expect(api.releaseAutoSave).not.toHaveBeenCalled();
+		});
+
+		it("deleted ダイアログも表示中は止め、「破棄」「保持」のどちらでも解く", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: true },
+					{ path: "/w/b.md", dirty: true },
+				],
+				"/w/a.md",
+			);
+			const { result, api } = await renderConflict();
+
+			await emitFsChange(deleted("/w/a.md"));
+			expect(api.holdAutoSave).toHaveBeenCalledTimes(1);
+			act(() => {
+				result.current.handleDeletedDirtyKeep();
+			});
+			expect(api.releaseAutoSave).toHaveBeenCalledTimes(1);
+
+			await emitFsChange(deleted("/w/b.md"));
+			expect(api.holdAutoSave).toHaveBeenCalledTimes(2);
+			act(() => {
+				result.current.handleDeletedDirtyDiscard();
+			});
+			expect(api.releaseAutoSave).toHaveBeenCalledTimes(2);
+		});
+
+		it("workspace の切替でダイアログを破棄するときも解く", async () => {
+			seedWorkspace("/w", [{ path: "/w/a.md", dirty: true }], "/w/a.md");
+			diskContents.set("/w/a.md", "external-change");
+			const { api } = await renderConflict();
+			await emitFsChange(modified("/w/a.md"));
+			expect(api.releaseAutoSave).not.toHaveBeenCalled();
+
+			act(() => {
+				useWorkspaceStore.setState({ workspacePath: "/other" });
+			});
+			expect(api.releaseAutoSave).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("非 active の間に記録された外部変更", () => {
+		it("記録のあるタブが active になると、modified ダイアログを出して autosave を止める", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: true },
+				],
+				"/w/a.md",
+			);
+			const { result, api } = await renderConflict({
+				takeCachedConflict: (path) => path === "/w/b.md",
+			});
+			expect(result.current.externalConflict).toBeNull();
+
+			act(() => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+
+			expect(api.takeCachedConflict).toHaveBeenLastCalledWith("/w/b.md");
+			expect(result.current.externalConflict).toEqual({ path: "/w/b.md", type: "modified" });
+			expect(api.holdAutoSave).toHaveBeenCalledTimes(1);
+		});
+
+		it("記録の無いタブが active になってもダイアログを出さない", async () => {
+			seedWorkspace(
+				"/w",
+				[
+					{ path: "/w/a.md", dirty: false },
+					{ path: "/w/b.md", dirty: true },
+				],
+				"/w/a.md",
+			);
+			const { result, api } = await renderConflict();
+
+			act(() => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+
+			expect(result.current.externalConflict).toBeNull();
+			expect(api.holdAutoSave).not.toHaveBeenCalled();
 		});
 	});
 });

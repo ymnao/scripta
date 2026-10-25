@@ -19,6 +19,9 @@ interface TabCache {
 	// (検索ハイライト・listener) は含まれない。タブ切替で復元しても汚染なし。
 	// 復元時は最新の extensions で EditorState を組み立て直すので、設定変更後も古い構成が戻らない。
 	editorStateSnapshot?: unknown;
+	// 未保存の編集を持ったまま非 active の間に、disk が外部で書き換えられた (#703)。
+	// 戻ったときに takeCachedConflict で取り出してダイアログを出す。
+	externallyModified?: boolean;
 }
 
 // エディタを初期化する本文と、remount 先へ引き継ぐ snapshot の組。snapshot は
@@ -109,6 +112,16 @@ export interface TabContentManager {
 	dropTab: (path: string) => void;
 	/** cache 上でそのタブに未保存の編集が無いか。cache 自体が無ければ false。 */
 	isCachedTabClean: (path: string) => boolean;
+	/**
+	 * 未保存の編集がある **非 active** タブに外部変更が来たことを cache に記録する。
+	 * loaded が自分の書いた内容 (cache の本文か保存済みの本文を整形したもの) なら記録しない。
+	 * 記録したタブは、戻らずに閉じようとしても書き込まずに active へ切り替える。
+	 */
+	markCachedTabConflict: (path: string, loaded: string) => void;
+	/** markCachedTabConflict の記録を取り出して消す。記録があれば true。 */
+	takeCachedConflict: (path: string) => boolean;
+	holdAutoSave: () => void;
+	releaseAutoSave: () => void;
 }
 
 /**
@@ -129,6 +142,7 @@ export function useTabContentManager({
 		workspacePath,
 		closeTab,
 		closeTabById,
+		setActiveTabById,
 		setTabDirty,
 		renameTab,
 		closeTabsByPrefix,
@@ -140,6 +154,7 @@ export function useTabContentManager({
 			workspacePath: s.workspacePath,
 			closeTab: s.closeTab,
 			closeTabById: s.closeTabById,
+			setActiveTabById: s.setActiveTabById,
 			setTabDirty: s.setTabDirty,
 			renameTab: s.renameTab,
 			closeTabsByPrefix: s.closeTabsByPrefix,
@@ -226,6 +241,8 @@ export function useTabContentManager({
 		scheduleAutoSave,
 		notifyPathRenamed,
 		notifyPathDeleted,
+		holdAutoSave,
+		releaseAutoSave,
 	} = useAutoSave(
 		isNewTab ? "" : (activeTabPath ?? ""),
 		getContent,
@@ -468,6 +485,11 @@ export function useTabContentManager({
 					return;
 				}
 				if (cached.content !== cached.savedContent) {
+					// 書くと外部変更が消える。active にして、戻ったときの競合ダイアログで選ばせる。
+					if (cached.externallyModified) {
+						setActiveTabById(id);
+						return;
+					}
 					try {
 						await writeFile(path, cached.content);
 					} catch (err) {
@@ -481,7 +503,7 @@ export function useTabContentManager({
 				closingTabsRef.current.delete(id);
 			}
 		},
-		[closeTabById, waitForPending, saveIfDirty],
+		[closeTabById, setActiveTabById, waitForPending, saveIfDirty],
 	);
 
 	const handleFileRenamed = useCallback(
@@ -708,6 +730,26 @@ export function useTabContentManager({
 		return cached ? cached.content === cached.savedContent : false;
 	}, []);
 
+	const markCachedTabConflict = useCallback((path: string, loaded: string) => {
+		const cached = tabCacheRef.current.get(path);
+		if (!cached) return;
+		const trim = useSettingsStore.getState().trimTrailingWhitespace;
+		if (
+			loaded === processContent(cached.content, trim) ||
+			loaded === processContent(cached.savedContent, trim)
+		) {
+			return;
+		}
+		cached.externallyModified = true;
+	}, []);
+
+	const takeCachedConflict = useCallback((path: string): boolean => {
+		const cached = tabCacheRef.current.get(path);
+		if (!cached?.externallyModified) return false;
+		cached.externallyModified = false;
+		return true;
+	}, []);
+
 	return {
 		loadedDoc,
 		remountSnapshot,
@@ -734,5 +776,9 @@ export function useTabContentManager({
 		applyConflictReload,
 		dropTab,
 		isCachedTabClean,
+		markCachedTabConflict,
+		takeCachedConflict,
+		holdAutoSave,
+		releaseAutoSave,
 	};
 }

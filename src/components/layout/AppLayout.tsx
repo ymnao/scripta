@@ -227,6 +227,10 @@ export function AppLayout() {
 		applyConflictReload,
 		dropTab,
 		isCachedTabClean,
+		markCachedTabConflict,
+		takeCachedConflict,
+		holdAutoSave,
+		releaseAutoSave,
 	} = useTabContentManager({
 		editorViewRef,
 		onTabSwitch: handleTabSwitch,
@@ -397,6 +401,11 @@ export function AppLayout() {
 		applyConflictReload,
 		dropTab,
 		isCachedTabClean,
+		getCachedContent,
+		markCachedTabConflict,
+		takeCachedConflict,
+		holdAutoSave,
+		releaseAutoSave,
 	});
 
 	const handleEditorView = useCallback((view: EditorView | null) => {
