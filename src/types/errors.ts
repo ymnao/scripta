@@ -49,6 +49,9 @@ export type ErrorKind =
 	// 自動同期の対象ブランチ以外にいる / merge や rebase の途中（#639）。main が自動同期の
 	// 操作を実行直前に拒否したときに出る。
 	| "GIT_BRANCH_MISMATCH"
+	// repo-local の git 設定（`.git/config` 等）に許可外の key がある、または workspace 内の git dir が
+	// `.git` の外にあり、main が git 操作を拒否した（#705）。
+	| "GIT_UNSAFE_CONFIG"
 	| "NETWORK"
 	| "CONNECTION_REFUSED"
 	| "TIMEOUT"

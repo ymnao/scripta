@@ -1,4 +1,3 @@
-import { electronAPI } from "@electron-toolkit/preload";
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
 import type { Api } from "./api";
 import { invokeWithStructuredError as invoke } from "./ipc-error-decode";
@@ -120,5 +119,4 @@ const api: Api = Object.freeze({
 	settingsSave: () => invoke(ipcRenderer.invoke("settings:save")),
 });
 
-contextBridge.exposeInMainWorld("electron", electronAPI);
 contextBridge.exposeInMainWorld("api", api);

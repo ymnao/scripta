@@ -5,7 +5,12 @@ import type { SimpleGit } from "simple-git";
 import type { ConflictContent, GitStatus } from "../../../src/types/git-sync";
 import type { FsChangeEvent, FsKind } from "../../../src/types/workspace";
 import { isErrnoCode } from "../utils/fs-errors";
-import { createGit, createGitNoCwd, extractGitErrorMessage } from "../utils/git-env";
+import {
+	createGit,
+	createGitNoCwd,
+	createGuardedGit,
+	extractGitErrorMessage,
+} from "../utils/git-env";
 import {
 	isStageNotFound,
 	MAX_CONFLICT_CONTENT_SIZE,
@@ -14,7 +19,7 @@ import {
 } from "../utils/git-validators";
 import { handle } from "../utils/ipc-handle";
 import { writeFileUtf8NoFollow } from "../utils/open-nofollow";
-import { assertPathAllowed } from "../utils/path-guard";
+import { assertOutsideGitDir, assertPathAllowed } from "../utils/path-guard";
 import { gitError, StructuredError } from "../utils/structured-error";
 import { applyLocalFsChanges } from "./search-cache";
 
@@ -290,7 +295,7 @@ async function resolveSyncBranchImpl(
 	const explicit = configured.trim();
 	if (explicit.length > 0) return explicit;
 
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	const remote = await readFirstRemote(git);
 	if (remote.length > 0) {
 		validateRefName(remote);
@@ -359,6 +364,10 @@ async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+	// ここだけ createGuardedGit にしないのは、許可外の設定がある repo も「repo である」と返して
+	// 後続の status で GIT_UNSAFE_CONFIG を renderer に届けるため（false だと Git UI ごと消えて
+	// 理由が出ない）。`rev-parse` は working tree も remote も触らないので、filter / fsmonitor /
+	// credential / ssh の経路に入らない（fsmonitor が起動しないことは #705 で実測）。
 	try {
 		const out = await createGit(canonical).raw(["rev-parse", "--is-inside-work-tree"]);
 		return out.trim() === "true";
@@ -369,7 +378,7 @@ async function checkRepoImpl(senderId: number, path: string): Promise<boolean> {
 
 async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
 	const canonical = await assertPathAllowed(senderId, path);
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	// git 呼び出しは独立しているので並列化する。useGitSync の refresh
 	// で頻繁に呼ばれるホットパスのため、逐次 → 並列で短縮。
 	// remote はエラーを許容（remote 未設定）するので catch で fallback。
@@ -400,7 +409,7 @@ async function statusImpl(senderId: number, path: string): Promise<GitStatus> {
 
 async function addAllImpl(senderId: number, path: string, expectedBranch: string): Promise<void> {
 	const canonical = await assertPathAllowed(senderId, path);
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	await assertSyncTarget(git, canonical, expectedBranch);
 	try {
 		await git.raw(["add", "-A"]);
@@ -416,7 +425,7 @@ async function commitImpl(
 	expectedBranch: string,
 ): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	await assertSyncTarget(git, canonical, expectedBranch);
 	let out: string;
 	try {
@@ -444,8 +453,11 @@ async function pullImpl(
 	if (syncMethod !== "merge" && syncMethod !== "rebase") {
 		throw new Error(`Invalid sync_method: ${syncMethod}. Expected "merge" or "rebase".`);
 	}
-	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull"];
-	const git = createGit(canonical);
+	// merge でも `--no-rebase` を明示するのは、`pull.rebase` / `branch.*.rebase` の設定（repo-local は
+	// 手渡された repo なら攻撃者が書ける）で同期方式が rebase に変わり、merge なら止まる無関係な
+	// 履歴の取り込みが通ってしまうため（#705）。
+	const args = syncMethod === "rebase" ? ["pull", "--rebase"] : ["pull", "--no-rebase"];
+	const git = await createGuardedGit(canonical);
 	await assertSyncTarget(git, canonical, expectedBranch);
 	// upstream 未設定の「成功扱い」は **op の内側**で潰す。外に出すと failed 経路として
 	// `--cached` を 1 回無駄に呼ぶ（working tree は変わっていない）。
@@ -463,7 +475,7 @@ async function pullImpl(
 
 async function pushImpl(senderId: number, path: string, expectedBranch: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	await assertSyncTarget(git, canonical, expectedBranch);
 	let firstError: unknown;
 	try {
@@ -489,8 +501,9 @@ async function pushImpl(senderId: number, path: string, expectedBranch: string):
 
 async function getConflictedFilesImpl(senderId: number, path: string): Promise<string[]> {
 	const canonical = await assertPathAllowed(senderId, path);
+	const git = await createGuardedGit(canonical);
 	try {
-		const out = await createGit(canonical).raw(["diff", "--name-only", "--diff-filter=U"]);
+		const out = await git.raw(["diff", "--name-only", "--diff-filter=U"]);
 		return out.split("\n").filter((l) => l.length > 0);
 	} catch (e) {
 		throw gitError(extractGitErrorMessage(e));
@@ -504,7 +517,7 @@ async function getConflictContentImpl(
 ): Promise<ConflictContent> {
 	const canonical = await assertPathAllowed(senderId, path);
 	validateRelativePath(filePath);
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	const fetchStage = async (n: 2 | 3, label: "ours" | "theirs"): Promise<string> => {
 		try {
 			// `--` を付けない（git show は stage ref を pathspec
@@ -543,7 +556,7 @@ async function resolveConflictImpl(
 	if (resolution !== "modify" && resolution !== "delete") {
 		throw new Error(`Invalid resolution: ${resolution}. Expected "modify" or "delete".`);
 	}
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	if (resolution === "delete") {
 		try {
 			await git.raw(["rm", "-f", "--", filePath]);
@@ -583,6 +596,7 @@ async function resolveConflictImpl(
 	// assertPathAllowed が realpathBestEffort で symlink を解決し、bounds 違反なら throw。
 	const canonicalParent = await assertPathAllowed(senderId, dirname(target));
 	const canonicalTarget = join(canonicalParent, basename(target));
+	assertOutsideGitDir(senderId, canonicalTarget);
 	await fsp.mkdir(canonicalParent, { recursive: true });
 	// `fsp.writeFile` は path を再 traversal するため、上の lstat 後に末端を symlink へ
 	// 差し替えられると解決先（workspace 外を含む）へ書けてしまう。`O_NOFOLLOW` 付き fd への
@@ -606,7 +620,7 @@ async function resolveConflictImpl(
 
 async function finishConflictResolutionImpl(senderId: number, path: string): Promise<string> {
 	const canonical = await assertPathAllowed(senderId, path);
-	const git = createGit(canonical);
+	const git = await createGuardedGit(canonical);
 	// 判定は rebase 系を merge より優先。
 	const markers = await readInProgressMarkers(git, canonical);
 	// marker 判定と下の「どちらでもない」throw は working tree を触らないので helper の外に置く
@@ -653,7 +667,8 @@ async function getLastCommitTimeImpl(senderId: number, path: string): Promise<st
 		return null;
 	}
 	try {
-		const out = (await createGit(canonical).raw(["log", "-1", "--format=%ci"])).trim();
+		const git = await createGuardedGit(canonical);
+		const out = (await git.raw(["log", "-1", "--format=%ci"])).trim();
 		return out.length > 0 ? out : null;
 	} catch {
 		// 空 repo（HEAD が無い）等は null。

@@ -51,6 +51,9 @@ export function normalizeCommitMessage(v: unknown): string {
 // 自動同期を止めている理由（#639）。
 export type SyncHalt =
 	| { reason: "status-unavailable" }
+	// main が GIT_UNSAFE_CONFIG で git 操作を拒否した（#705）。
+	// detail は main のエラー文（拒否した key の一覧を含む）。
+	| { reason: "unsafe-config"; detail: string }
 	| { reason: "no-sync-branch" }
 	| { reason: "in-progress" }
 	// branch が空文字なのは detached HEAD（rebase の途中を含む）。
@@ -76,6 +79,9 @@ export function isSameSyncHalt(a: SyncHalt | null, b: SyncHalt | null): boolean 
 	if (a.reason === "other-branch" && b.reason === "other-branch") {
 		return a.branch === b.branch && a.syncBranch === b.syncBranch;
 	}
+	if (a.reason === "unsafe-config" && b.reason === "unsafe-config") {
+		return a.detail === b.detail;
+	}
 	return true;
 }
 
@@ -83,6 +89,8 @@ export function formatSyncHaltLabel(halt: SyncHalt): string {
 	switch (halt.reason) {
 		case "status-unavailable":
 			return "同期停止中（状態を読めません）";
+		case "unsafe-config":
+			return "同期停止中（Git の設定）";
 		case "no-sync-branch":
 			return "同期停止中（ブランチ未設定）";
 		case "in-progress":
@@ -96,6 +104,8 @@ export function formatSyncHaltMessage(halt: SyncHalt): string {
 	switch (halt.reason) {
 		case "status-unavailable":
 			return "Git の状態を読み取れなかったため、同期を止めています。";
+		case "unsafe-config":
+			return `リポジトリの Git の設定（.git/config など）か .git の配置が、scripta が許可していない形のため、Git 操作を止めています。リポジトリの設定にはコマンドを実行させる設定を書けるので、許可した設定と配置のリポジトリでしか Git 操作をしません。詳細: ${halt.detail}`;
 		case "no-sync-branch":
 			return "同期するブランチを決められないため、同期を止めています。設定の「同期するブランチ」を指定してください。";
 		case "in-progress":

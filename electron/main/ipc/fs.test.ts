@@ -1064,3 +1064,99 @@ describe.skipIf(process.platform === "win32")(
 		});
 	},
 );
+
+describe("workspace の .git への変更を拒否する (#705)", () => {
+	const denied = { kind: "PATH_OUTSIDE_WORKSPACE" };
+	let gitConfig = "";
+
+	beforeEach(async () => {
+		await mkdir(join(workspaceDir, ".git"));
+		gitConfig = join(workspaceDir, ".git", "config");
+		await writeFile(gitConfig, "[core]\n", "utf8");
+	});
+
+	it("fs:write は .git/config を書き換えない", async () => {
+		await expect(
+			writeFileImpl(TEST_WIN, gitConfig, "[core]\n\tfsmonitor = x\n"),
+		).rejects.toMatchObject(denied);
+		expect(await readFile(gitConfig, "utf8")).toBe("[core]\n");
+	});
+
+	it("fs:write は大文字の .GIT も拒否する", async () => {
+		// `.git` が既にあると、大文字小文字を区別しない FS では realpath が `.git` に揃えてしまい、
+		// 名前の比較まで届かない。まだ無い `.GIT` を作らせる形で確かめる。
+		await rm(join(workspaceDir, ".git"), { recursive: true });
+		const dir = join(workspaceDir, ".GIT");
+		await expect(writeFileImpl(TEST_WIN, join(dir, "config"), "x")).rejects.toMatchObject(denied);
+		await expect(stat(dir)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("fs:write は入れ子の repo の .git も拒否する", async () => {
+		const path = join(workspaceDir, "sub", ".git", "config");
+		await expect(writeFileImpl(TEST_WIN, path, "x")).rejects.toMatchObject(denied);
+		await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("fs:write-new は .git 配下に作らない", async () => {
+		const path = join(workspaceDir, ".git", "new");
+		await expect(writeNewFileImpl(TEST_WIN, path, "x")).rejects.toMatchObject(denied);
+		await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("fs:create-file は .git 配下に作らない", async () => {
+		const path = join(workspaceDir, ".git", "new");
+		await expect(createFileImpl(TEST_WIN, path)).rejects.toMatchObject(denied);
+		await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("fs:create-directory は .git を作らない", async () => {
+		await rm(join(workspaceDir, ".git"), { recursive: true });
+		const path = join(workspaceDir, ".git");
+		await expect(createDirectoryImpl(TEST_WIN, path)).rejects.toMatchObject(denied);
+		await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("fs:rename は .git へ移さない", async () => {
+		await rm(join(workspaceDir, ".git"), { recursive: true });
+		const src = join(workspaceDir, "notes");
+		await mkdir(src);
+		await expect(renameEntryImpl(TEST_WIN, src, join(workspaceDir, ".git"))).rejects.toMatchObject(
+			denied,
+		);
+		expect((await stat(src)).isDirectory()).toBe(true);
+	});
+
+	it("fs:rename は .git から移さない", async () => {
+		await expect(
+			renameEntryImpl(TEST_WIN, gitConfig, join(workspaceDir, "config.md")),
+		).rejects.toMatchObject(denied);
+		expect(await readFile(gitConfig, "utf8")).toBe("[core]\n");
+	});
+
+	it("fs:delete は .git を消さない", async () => {
+		await expect(deleteEntryImpl(TEST_WIN, join(workspaceDir, ".git"))).rejects.toMatchObject(
+			denied,
+		);
+		expect(shell.trashItem).not.toHaveBeenCalled();
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"fs:write は .git を指す symlink 経由でも拒否する",
+		async () => {
+			await symlink(join(workspaceDir, ".git"), join(workspaceDir, "link"));
+			await expect(
+				writeFileImpl(TEST_WIN, join(workspaceDir, "link", "config"), "x"),
+			).rejects.toMatchObject(denied);
+			expect(await readFile(gitConfig, "utf8")).toBe("[core]\n");
+		},
+	);
+
+	it("名前が .git で始まるだけの entry には書ける", async () => {
+		await writeFileImpl(TEST_WIN, join(workspaceDir, ".gitignore"), "a");
+		await writeFileImpl(TEST_WIN, join(workspaceDir, ".github", "x.md"), "b");
+		await writeFileImpl(TEST_WIN, join(workspaceDir, "my.git", "y.md"), "c");
+		expect(await readFile(join(workspaceDir, ".gitignore"), "utf8")).toBe("a");
+		expect(await readFile(join(workspaceDir, ".github", "x.md"), "utf8")).toBe("b");
+		expect(await readFile(join(workspaceDir, "my.git", "y.md"), "utf8")).toBe("c");
+	});
+});

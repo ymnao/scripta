@@ -39,6 +39,8 @@ const KIND_MESSAGES: Record<Exclude<ErrorKind, "UNKNOWN">, string> = {
 	GIT_NOTHING_TO_COMMIT: "コミットする変更がありません",
 	GIT_NO_REMOTE_ACCESS: "リモートリポジトリにアクセスできません",
 	GIT_BRANCH_MISMATCH: "同期するブランチ以外にいるか、merge などの途中のため、同期を止めました",
+	GIT_UNSAFE_CONFIG:
+		"リポジトリの Git の設定（.git/config など）か .git の配置が、scripta が許可していない形のため、Git 操作を止めました",
 	NETWORK: "ネットワークに接続できません",
 	CONNECTION_REFUSED: "接続が拒否されました",
 	TIMEOUT: "操作がタイムアウトしました",
