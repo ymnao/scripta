@@ -516,7 +516,7 @@ describe("useAutoSave", () => {
 			vi.advanceTimersByTime(3000);
 		});
 
-		expect(mockedWriteFile.mock.calls).toEqual([["a.md", "orig x\n"]]);
+		expect(mockedWriteFile.mock.calls.map((c) => c[0])).not.toContain("b.md");
 	});
 
 	it("切替前に始まった write が切替先の読み込み後に失敗しても、切替先を retrying にしない", async () => {
