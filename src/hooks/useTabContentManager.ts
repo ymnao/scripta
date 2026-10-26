@@ -151,6 +151,7 @@ export function useTabContentManager({
 		closeTab,
 		closeTabById,
 		setActiveTabById,
+		setActiveTab,
 		setTabDirty,
 		renameTab,
 		closeTabsByPrefix,
@@ -163,6 +164,7 @@ export function useTabContentManager({
 			closeTab: s.closeTab,
 			closeTabById: s.closeTabById,
 			setActiveTabById: s.setActiveTabById,
+			setActiveTab: s.setActiveTab,
 			setTabDirty: s.setTabDirty,
 			renameTab: s.renameTab,
 			closeTabsByPrefix: s.closeTabsByPrefix,
@@ -625,7 +627,7 @@ export function useTabContentManager({
 
 	const saveAllTabs = useCallback(async (): Promise<SaveAllTabsResult> => {
 		let hasFailed = false;
-		const { activeTabPath: currentActiveTab, tabs } = useWorkspaceStore.getState();
+		const currentActiveTab = useWorkspaceStore.getState().activeTabPath;
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
 
 		// 1 つでも書けば外部変更が消えるタブがあれば、どれも書かずに打ち切る。他のタブだけ
@@ -635,8 +637,7 @@ export function useTabContentManager({
 		if (isAutoSaveHeld()) return "conflict";
 		for (const [path, cached] of tabCacheRef.current) {
 			if (path === currentActiveTab || !hasUnconfirmedExternalChange(cached)) continue;
-			const tab = tabs.find((t) => t.path === path);
-			if (tab) setActiveTabById(tab.id);
+			setActiveTab(path);
 			return "conflict";
 		}
 
@@ -684,7 +685,7 @@ export function useTabContentManager({
 		}
 
 		return hasFailed ? "failed" : "ok";
-	}, [getContent, setTabDirty, isAutoSaveHeld, setActiveTabById]);
+	}, [getContent, setTabDirty, isAutoSaveHeld, setActiveTab]);
 
 	const getCachedContent = useCallback(
 		(path: string): string | null => {
