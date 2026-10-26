@@ -39,6 +39,8 @@ export interface AppShortcutDeps {
 	settingsOpen: boolean;
 	helpOpen: boolean;
 	exportOpen: boolean;
+	/** 外部変更の競合ダイアログの表示中か。 */
+	externalConflictOpen: boolean;
 	startSlideShow: () => void;
 }
 
@@ -51,6 +53,12 @@ export interface AppShortcutDeps {
  * preventDefault を条件付きで抑制したいエントリは、そのガードを match に含めれば match=false
  * 時に preventDefault が走らない (editor-search-bar / go-to-line が該当)。
  *
+ * 外部変更の競合ダイアログの表示中は、タブを切り替える・閉じるエントリを run 側で無効にする。
+ * 切替時の flush や閉じる前の保存が、user が選ぶ前に未保存の内容で外部変更を上書きするため。
+ * match に入れないのは、preventDefault を外すと macOS では Cmd+W が menu の close role に
+ * 届き、ウィンドウごと閉じうるため (Cmd+W がタブだけを閉じているのは、preventDefault が
+ * menu へ届くのを止めているからと見ている)。
+ *
  * useShortcuts は shortcuts 配列が毎レンダー再生成されることを前提にした設計 (内部で ref 同期)
  * なので、呼び出し側で useMemo する必要はない。
  */
@@ -60,43 +68,56 @@ export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
 			// Cmd+Shift+[ / Cmd+Shift+{ — 前のタブ
 			id: "prev-tab",
 			match: (e) => cmdOrCtrl(e) && e.shiftKey && (e.key === "{" || e.key === "["),
-			run: () => deps.activatePrevTab(),
+			run: () => {
+				if (!deps.externalConflictOpen) deps.activatePrevTab();
+			},
 		},
 		{
 			// Cmd+Shift+] / Cmd+Shift+} — 次のタブ
 			id: "next-tab",
 			match: (e) => cmdOrCtrl(e) && e.shiftKey && (e.key === "}" || e.key === "]"),
-			run: () => deps.activateNextTab(),
+			run: () => {
+				if (!deps.externalConflictOpen) deps.activateNextTab();
+			},
 		},
 		{
 			// Cmd+[ — 履歴戻る
 			id: "history-back-bracket",
 			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key === "[",
-			run: () => void deps.handleGoBack(),
+			run: () => {
+				if (!deps.externalConflictOpen) void deps.handleGoBack();
+			},
 		},
 		{
 			// Cmd+] — 履歴進む
 			id: "history-forward-bracket",
 			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key === "]",
-			run: () => void deps.handleGoForward(),
+			run: () => {
+				if (!deps.externalConflictOpen) void deps.handleGoForward();
+			},
 		},
 		{
 			// Alt+Left — 履歴戻る
 			id: "history-back-alt",
 			match: (e) => e.altKey && e.key === "ArrowLeft",
-			run: () => void deps.handleGoBack(),
+			run: () => {
+				if (!deps.externalConflictOpen) void deps.handleGoBack();
+			},
 		},
 		{
 			// Alt+Right — 履歴進む
 			id: "history-forward-alt",
 			match: (e) => e.altKey && e.key === "ArrowRight",
-			run: () => void deps.handleGoForward(),
+			run: () => {
+				if (!deps.externalConflictOpen) void deps.handleGoForward();
+			},
 		},
 		{
 			// Cmd+W / Cmd+Shift+W — タブ/ウィンドウを閉じる
 			id: "close-tab-or-window",
 			match: (e) => cmdOrCtrl(e) && e.key.toLowerCase() === "w",
 			run: (e) => {
+				if (deps.externalConflictOpen) return;
 				if (e.shiftKey) {
 					// Cmd+Shift+W: タブの有無に関わらずウィンドウを閉じる（未保存の変更は保存される）
 					void closeWindow();
@@ -200,7 +221,7 @@ export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
 			id: "new-tab",
 			match: (e) => cmdOrCtrl(e) && !e.shiftKey && e.key.toLowerCase() === "t",
 			run: () => {
-				if (deps.workspacePath) deps.openNewTab();
+				if (deps.workspacePath && !deps.externalConflictOpen) deps.openNewTab();
 			},
 		},
 		{
@@ -225,7 +246,11 @@ export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
 			// Cmd+P — コマンドパレット
 			id: "command-palette",
 			match: (e) => cmdOrCtrl(e) && e.key === "p",
-			run: () => deps.setCommandPaletteOpen((prev) => !prev),
+			run: () => {
+				// ダイアログの下に開いても入力欄には focus が入り、選ぶとタブが切り替わる。
+				if (deps.externalConflictOpen && !deps.commandPaletteOpen) return;
+				deps.setCommandPaletteOpen((prev) => !prev);
+			},
 		},
 		{
 			// Cmd+, — 設定

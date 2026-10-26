@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
 	advance,
+	createDeferred,
 	createFakeEditor,
 	type FakeEditor,
 	flushAsync,
@@ -235,6 +236,64 @@ describe("非 active の dirty タブへの外部変更 (#703)", () => {
 		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A"]]);
 		expect(tabPaths()).toEqual(["/w/b.md"]);
 	});
+
+	it("戻らずにウィンドウを閉じようとすると、何も書かずに打ち切り、そのタブへ切り替えてダイアログを出す", async () => {
+		const { result, editor } = await renderBoth();
+		await leaveDirtyTabAndModifyExternally(editor, "EXTERNAL\n");
+
+		let saveResult: string | undefined;
+		await act(async () => {
+			saveResult = await result.current.manager.saveAllTabs();
+		});
+		await flushAsync();
+		await advance(5000);
+
+		expect(saveResult).toBe("conflict");
+		expect(writesTo("/w/a.md")).toEqual([]);
+		expect(useWorkspaceStore.getState().activeTabPath).toBe("/w/a.md");
+		expect(result.current.conflict.externalConflict).toEqual({
+			path: "/w/a.md",
+			type: "modified",
+		});
+	});
+
+	it("ダイアログの表示中にウィンドウを閉じようとすると、何も書かずに打ち切る", async () => {
+		const { result, editor } = await renderBoth();
+		await leaveDirtyTabAndModifyExternally(editor, "EXTERNAL\n");
+		await act(async () => {
+			useWorkspaceStore.getState().setActiveTab("/w/a.md");
+		});
+		await flushAsync();
+		expect(result.current.conflict.externalConflict).not.toBeNull();
+
+		let saveResult: string | undefined;
+		await act(async () => {
+			saveResult = await result.current.manager.saveAllTabs();
+		});
+
+		expect(saveResult).toBe("conflict");
+		expect(mockedWriteFile).not.toHaveBeenCalled();
+	});
+
+	it("ダイアログで「保持」を選んだ後なら、閉じるときに未保存の編集を書き込む", async () => {
+		const { result, editor } = await renderBoth();
+		await leaveDirtyTabAndModifyExternally(editor, "EXTERNAL\n");
+		await act(async () => {
+			useWorkspaceStore.getState().setActiveTab("/w/a.md");
+		});
+		await flushAsync();
+		act(() => {
+			result.current.conflict.handleConflictKeep();
+		});
+
+		let saveResult: string | undefined;
+		await act(async () => {
+			saveResult = await result.current.manager.saveAllTabs();
+		});
+
+		expect(saveResult).toBe("ok");
+		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A\n"]]);
+	});
 });
 
 describe("active の dirty タブへの外部変更", () => {
@@ -306,5 +365,90 @@ describe("active の dirty タブへの外部変更", () => {
 		expect(editor.getContent()).toBe("EXTERNAL\n");
 		expect(result.current.manager.saveStatus).toBe("saved");
 		expect(useWorkspaceStore.getState().tabs.find((t) => t.path === "/w/a.md")?.dirty).toBe(false);
+	});
+
+	/** 打鍵して debounce を張り、1 秒後に disk の a.md の読み込みを止めたまま外部変更を通知する。 */
+	async function typeThenNotifyWithPendingRead(editor: FakeEditor, schedule: () => void) {
+		editor.type("edited A");
+		act(() => {
+			schedule();
+		});
+		await advance(1000);
+		const read = createDeferred<string>();
+		mockedReadFile.mockImplementationOnce(() => read.promise);
+		await emitModified("/w/a.md");
+		return read;
+	}
+
+	it("外部変更を読み終える前に debounce の期限が来ても書き込まず、読み終えたらダイアログを出す", async () => {
+		const { result, editor } = await renderBoth();
+		const read = await typeThenNotifyWithPendingRead(
+			editor,
+			result.current.manager.scheduleAutoSave,
+		);
+
+		await advance(5000);
+		expect(writesTo("/w/a.md")).toEqual([]);
+
+		read.resolve("EXTERNAL\n");
+		await flushAsync();
+		await advance(5000);
+
+		expect(result.current.conflict.externalConflict).toEqual({
+			path: "/w/a.md",
+			type: "modified",
+		});
+		expect(writesTo("/w/a.md")).toEqual([]);
+	});
+
+	it("読み込んだ内容が自分の書いた内容なら autosave を再開し、未保存の編集を書き込む", async () => {
+		const { result, editor } = await renderBoth();
+		const read = await typeThenNotifyWithPendingRead(
+			editor,
+			result.current.manager.scheduleAutoSave,
+		);
+
+		read.resolve("orig A\n");
+		await flushAsync();
+		await advance(3000);
+
+		expect(result.current.conflict.externalConflict).toBeNull();
+		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A\n"]]);
+	});
+
+	it("読み込みに失敗したら autosave を再開し、未保存の編集を書き込む", async () => {
+		const { result, editor } = await renderBoth();
+		const read = await typeThenNotifyWithPendingRead(
+			editor,
+			result.current.manager.scheduleAutoSave,
+		);
+
+		read.reject(new Error("read failed"));
+		await flushAsync();
+		await advance(3000);
+
+		expect(result.current.conflict.externalConflict).toBeNull();
+		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A\n"]]);
+	});
+
+	it("2 件の読み込みが重なったら、両方を読み終えるまで autosave を止める", async () => {
+		const { result, editor } = await renderBoth();
+		const first = await typeThenNotifyWithPendingRead(
+			editor,
+			result.current.manager.scheduleAutoSave,
+		);
+		const second = createDeferred<string>();
+		mockedReadFile.mockImplementationOnce(() => second.promise);
+		await emitModified("/w/a.md");
+
+		first.resolve("orig A\n");
+		await flushAsync();
+		await advance(5000);
+		expect(writesTo("/w/a.md")).toEqual([]);
+
+		second.resolve("orig A\n");
+		await flushAsync();
+		await advance(3000);
+		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A\n"]]);
 	});
 });

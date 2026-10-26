@@ -13,6 +13,7 @@ import {
 	tabPaths,
 } from "../__test-utils__/tab-content-fixture";
 import { readFile, writeFile } from "../lib/commands";
+import type { SaveAllTabsResult } from "./useTabContentManager";
 
 vi.mock("../lib/commands", () => ({
 	readFile: vi.fn(),
@@ -688,7 +689,7 @@ describe("useTabContentManager", () => {
 			await flushAsync();
 			editor.type("edited");
 
-			let saveResult!: "ok" | "failed" | "cancelled";
+			let saveResult!: SaveAllTabsResult;
 			await act(async () => {
 				saveResult = await result.current.saveAllTabs();
 			});
@@ -706,7 +707,7 @@ describe("useTabContentManager", () => {
 
 			mockedWriteFile.mockRejectedValueOnce(new Error("boom"));
 
-			let saveResult!: "ok" | "failed" | "cancelled";
+			let saveResult!: SaveAllTabsResult;
 			await act(async () => {
 				saveResult = await result.current.saveAllTabs();
 			});
@@ -749,7 +750,7 @@ describe("useTabContentManager", () => {
 			mockedWriteFile.mockResolvedValueOnce(undefined);
 			mockedWriteFile.mockRejectedValueOnce(new Error("save-all c failed"));
 
-			let saveResult!: "ok" | "failed" | "cancelled";
+			let saveResult!: SaveAllTabsResult;
 			await act(async () => {
 				saveResult = await result.current.saveAllTabs();
 			});
@@ -771,7 +772,7 @@ describe("useTabContentManager", () => {
 				result.current.applyCacheReload("/w/clean.md", "clean-content");
 			});
 
-			let saveResult!: "ok" | "failed" | "cancelled";
+			let saveResult!: SaveAllTabsResult;
 			await act(async () => {
 				saveResult = await result.current.saveAllTabs();
 			});
@@ -826,6 +827,35 @@ describe("useTabContentManager", () => {
 			expect(mockedWriteFile).toHaveBeenLastCalledWith("/w/a.md", "line   \n");
 		});
 
+		it("記録の後に後回しの flush が成功して clean になったタブは、閉じるのを止めない", async () => {
+			diskContents.set("/w/a.md", "orig-a");
+			seedWorkspace("/w", ["/w/a.md", "/w/b.md"], "/w/a.md");
+			const { result, editor } = renderManager();
+			await flushAsync();
+			editor.type("edited-a");
+
+			const view = editor.ref.current as unknown as { composing: boolean };
+			view.composing = true;
+			await act(async () => {
+				useWorkspaceStore.getState().setActiveTab("/w/b.md");
+			});
+			await flushAsync();
+			act(() => {
+				result.current.markCachedTabConflict("/w/a.md", "EXTERNAL");
+			});
+			view.composing = false;
+			await advance(200);
+			expect(result.current.isCachedTabClean("/w/a.md")).toBe(true);
+
+			let saveResult!: SaveAllTabsResult;
+			await act(async () => {
+				saveResult = await result.current.saveAllTabs();
+			});
+
+			expect(saveResult).toBe("ok");
+			expect(useWorkspaceStore.getState().activeTabPath).toBe("/w/b.md");
+		});
+
 		it("await 中に unmount したら cancelled を返し、store を更新しない", async () => {
 			diskContents.set("/w/a.md", "orig");
 			seedWorkspace("/w", ["/w/a.md"], "/w/a.md");
@@ -836,7 +866,7 @@ describe("useTabContentManager", () => {
 			const deferred = createDeferred<void>();
 			mockedWriteFile.mockImplementationOnce(() => deferred.promise);
 
-			let saveResult!: "ok" | "failed" | "cancelled";
+			let saveResult!: SaveAllTabsResult;
 			let savePromise!: Promise<void>;
 			act(() => {
 				savePromise = result.current.saveAllTabs().then((r) => {

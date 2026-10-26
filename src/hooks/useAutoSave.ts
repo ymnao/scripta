@@ -50,6 +50,7 @@ interface UseAutoSaveReturn {
 	holdAutoSave: () => void;
 	/** holdAutoSave を解き、打鍵と同じく未保存の内容が残っていれば debounce を張り直す。 */
 	releaseAutoSave: () => void;
+	isAutoSaveHeld: () => boolean;
 }
 
 export function useAutoSave(
@@ -427,6 +428,8 @@ export function useAutoSave(
 		scheduleAutoSave();
 	}, [scheduleAutoSave]);
 
+	const isAutoSaveHeld = useCallback((): boolean => heldRef.current, []);
+
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;
 	}, []);
@@ -442,5 +445,6 @@ export function useAutoSave(
 		notifyPathDeleted,
 		holdAutoSave,
 		releaseAutoSave,
+		isAutoSaveHeld,
 	};
 }

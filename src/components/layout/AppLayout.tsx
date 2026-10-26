@@ -374,6 +374,7 @@ export function AppLayout() {
 			// Throwing here causes preload to ack false → main aborts window close,
 			// keeping the user's unsaved work intact.
 			if (result === "failed") throw new Error("Failed to save one or more dirty tabs");
+			if (result === "conflict") throw new Error("A tab has an unconfirmed external change");
 
 			// Save scratchpad (ref survives panel unmount)
 			if (scratchpadSaveRef.current) {
@@ -607,6 +608,7 @@ export function AppLayout() {
 			settingsOpen,
 			helpOpen,
 			exportOpen,
+			externalConflictOpen: externalFileConflict.externalConflict !== null,
 			startSlideShow,
 		}),
 	);

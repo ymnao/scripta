@@ -709,6 +709,54 @@ describe("AppLayout", () => {
 		expect(screen.queryByText("ファイルが外部で削除されました")).not.toBeInTheDocument();
 	});
 
+	// #715: 閉じる前の保存やタブを閉じる前の保存が、user が選ぶ前に外部変更を上書きする。
+	describe("競合ダイアログの表示中", () => {
+		async function openConflictDialog(): Promise<void> {
+			openFileInStore("/workspace", "/workspace/test.md");
+			await act(async () => {
+				render(<AppLayout />);
+			});
+			await act(async () => {
+				screen.getByTestId("editor-change").click();
+			});
+			await act(async () => {
+				emitFsChange([{ kind: "modify", path: "/workspace/test.md" }]);
+				vi.advanceTimersByTime(300);
+			});
+			expect(screen.getByText("ファイルが外部で変更されました")).toBeInTheDocument();
+			mockedWriteFile.mockClear();
+		}
+
+		it("ウィンドウを閉じようとしても書き込まずに close を止める", async () => {
+			await openConflictDialog();
+
+			let closeHandlerThrew = false;
+			await act(async () => {
+				try {
+					await closeHandler?.();
+				} catch {
+					closeHandlerThrew = true;
+				}
+			});
+
+			expect(closeHandlerThrew).toBe(true);
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("Cmd+W でタブを閉じず、書き込まない", async () => {
+			await openConflictDialog();
+
+			await act(async () => {
+				document.dispatchEvent(
+					new KeyboardEvent("keydown", { key: "w", metaKey: true, bubbles: true }),
+				);
+			});
+
+			expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+	});
+
 	it("shows deleted dialog when dirty tab is externally deleted", async () => {
 		openFileInStore("/workspace", "/workspace/test.md");
 		await act(async () => {

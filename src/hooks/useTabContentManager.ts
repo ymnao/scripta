@@ -24,6 +24,11 @@ interface TabCache {
 	externallyModified?: boolean;
 }
 
+/** 書き込むと、user がまだ見ていない外部変更が消えるか。 */
+function hasUnconfirmedExternalChange(cached: TabCache): boolean {
+	return cached.externallyModified === true && cached.content !== cached.savedContent;
+}
+
 // エディタを初期化する本文と、remount 先へ引き継ぐ snapshot の組。snapshot は
 // carryEditorAcrossRemount だけが詰め、他の経路で本文を差し替えるときは必ず捨てる。
 // 別々の state にすると、差し替え後の本文に古い snapshot (= 古い doc) が残って
@@ -46,8 +51,11 @@ export interface UseTabContentManagerOptions {
 	onGoToLine: (request: GoToLineRequest) => void;
 }
 
-/** window close 時の一括保存の結果。cancelled は unmount 済みで続行を打ち切ったことを表す。 */
-export type SaveAllTabsResult = "ok" | "failed" | "cancelled";
+/**
+ * window close 時の一括保存の結果。cancelled は unmount 済みで続行を打ち切ったことを表す。
+ * conflict は外部変更を user が確かめていないタブがあり、何も書かずに打ち切ったことを表す。
+ */
+export type SaveAllTabsResult = "ok" | "failed" | "cancelled" | "conflict";
 
 export interface TabContentManager {
 	/** CodeMirror に渡す doc。ロード / タブ切替 / 外部リロード時のみ変わる (#302)。 */
@@ -243,6 +251,7 @@ export function useTabContentManager({
 		notifyPathDeleted,
 		holdAutoSave,
 		releaseAutoSave,
+		isAutoSaveHeld,
 	} = useAutoSave(
 		isNewTab ? "" : (activeTabPath ?? ""),
 		getContent,
@@ -487,12 +496,12 @@ export function useTabContentManager({
 					closeTabById(id);
 					return;
 				}
+				// 書くと外部変更が消える。active にして、戻ったときの競合ダイアログで選ばせる。
+				if (hasUnconfirmedExternalChange(cached)) {
+					setActiveTabById(id);
+					return;
+				}
 				if (cached.content !== cached.savedContent) {
-					// 書くと外部変更が消える。active にして、戻ったときの競合ダイアログで選ばせる。
-					if (cached.externallyModified) {
-						setActiveTabById(id);
-						return;
-					}
 					try {
 						await writeFile(path, cached.content);
 					} catch (err) {
@@ -616,8 +625,20 @@ export function useTabContentManager({
 
 	const saveAllTabs = useCallback(async (): Promise<SaveAllTabsResult> => {
 		let hasFailed = false;
-		const currentActiveTab = useWorkspaceStore.getState().activeTabPath;
+		const { activeTabPath: currentActiveTab, tabs } = useWorkspaceStore.getState();
 		const { trimTrailingWhitespace } = useSettingsStore.getState();
+
+		// 1 つでも書けば外部変更が消えるタブがあれば、どれも書かずに打ち切る。他のタブだけ
+		// 先に書かないのは、選んだ後にもう一度閉じたとき、改めて全体を保存すれば済むため。
+		// autosave が止まっているのは、active タブの外部変更を確かめている最中 (ダイアログの
+		// 表示中か、読み込みの完了待ち)。
+		if (isAutoSaveHeld()) return "conflict";
+		for (const [path, cached] of tabCacheRef.current) {
+			if (path === currentActiveTab || !hasUnconfirmedExternalChange(cached)) continue;
+			const tab = tabs.find((t) => t.path === path);
+			if (tab) setActiveTabById(tab.id);
+			return "conflict";
+		}
 
 		// Save active tab if dirty (skip new-tab pages)
 		if (
@@ -663,7 +684,7 @@ export function useTabContentManager({
 		}
 
 		return hasFailed ? "failed" : "ok";
-	}, [getContent, setTabDirty]);
+	}, [getContent, setTabDirty, isAutoSaveHeld, setActiveTabById]);
 
 	const getCachedContent = useCallback(
 		(path: string): string | null => {
