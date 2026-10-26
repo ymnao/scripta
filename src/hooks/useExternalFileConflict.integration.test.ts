@@ -431,6 +431,35 @@ describe("active の dirty タブへの外部変更", () => {
 		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A\n"]]);
 	});
 
+	it("ダイアログで「保持」を選んでも、2 件目の外部変更を読み終えるまで書き込まない", async () => {
+		const { result, editor } = await renderBoth();
+		editor.type("edited A");
+		act(() => {
+			result.current.manager.scheduleAutoSave();
+		});
+		diskContents.set("/w/a.md", "EXTERNAL 1\n");
+		await emitModified("/w/a.md");
+		expect(result.current.conflict.externalConflict).not.toBeNull();
+
+		const second = createDeferred<string>();
+		mockedReadFile.mockImplementationOnce(() => second.promise);
+		await emitModified("/w/a.md");
+		act(() => {
+			result.current.conflict.handleConflictKeep();
+		});
+		await advance(5000);
+		expect(writesTo("/w/a.md")).toEqual([]);
+
+		second.resolve("EXTERNAL 2\n");
+		await flushAsync();
+		await advance(5000);
+		expect(result.current.conflict.externalConflict).toEqual({
+			path: "/w/a.md",
+			type: "modified",
+		});
+		expect(writesTo("/w/a.md")).toEqual([]);
+	});
+
 	it("2 件の読み込みが重なったら、両方を読み終えるまで autosave を止める", async () => {
 		const { result, editor } = await renderBoth();
 		const first = await typeThenNotifyWithPendingRead(

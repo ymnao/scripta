@@ -103,10 +103,16 @@ export function useExternalFileConflict({
 		setExternalConflict(null);
 	}, []);
 
+	// 読み込み中の外部変更が残っていれば止めたままにし、その読み込みの完了で解く。先に解くと、
+	// 同じファイルの 2 件目の外部変更を読み終える前に、未保存の内容がそれを上書きする。
+	const releaseIfIdle = useCallback(() => {
+		if (pendingActiveReadsRef.current === 0 && !conflictOpenRef.current) releaseAutoSave();
+	}, [releaseAutoSave]);
+
 	const closeConflict = useCallback(() => {
 		hideConflict();
-		releaseAutoSave();
-	}, [hideConflict, releaseAutoSave]);
+		releaseIfIdle();
+	}, [hideConflict, releaseIfIdle]);
 
 	// Clear stale conflict dialog when workspace changes.
 	// workspacePath is read only to satisfy the exhaustive-deps rule;
@@ -209,7 +215,7 @@ export function useExternalFileConflict({
 				if (!held) return;
 				held = false;
 				pendingActiveReadsRef.current -= 1;
-				if (pendingActiveReadsRef.current === 0 && !conflictOpenRef.current) releaseAutoSave();
+				releaseIfIdle();
 			};
 			readFile(path)
 				.then((loaded) => {
@@ -220,7 +226,7 @@ export function useExternalFileConflict({
 					console.error("Failed to read externally modified file:", err);
 				});
 		},
-		[getCachedContent, reconcileExternalChange, holdAutoSave, releaseAutoSave],
+		[getCachedContent, reconcileExternalChange, holdAutoSave, releaseIfIdle],
 	);
 
 	useFileWatcher({
@@ -240,6 +246,8 @@ export function useExternalFileConflict({
 		hideConflict();
 		readFile(path)
 			.then((loaded) => {
+				// releaseIfIdle にしないのは、読み込み中の外部変更が残っていても、反映でタブは clean に
+				// なり上書きする未保存の内容が無いため。待つと、その読み込みの完了で反映の後に解くことになる。
 				if (!conflictOpenRef.current) releaseAutoSave();
 				// 読み込み中にタブが閉じていたら、applyConflictReload が閉じた path の cache を作り直す。
 				if (!useWorkspaceStore.getState().tabs.some((t) => t.path === path)) return;

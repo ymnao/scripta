@@ -632,8 +632,8 @@ export function useTabContentManager({
 
 		// 1 つでも書けば外部変更が消えるタブがあれば、どれも書かずに打ち切る。他のタブだけ
 		// 先に書かないのは、選んだ後にもう一度閉じたとき、改めて全体を保存すれば済むため。
-		// autosave が止まっているのは、active タブの外部変更を確かめている最中 (ダイアログの
-		// 表示中か、読み込みの完了待ち)。
+		// autosave が止まっているのは、外部の変更・削除を確かめている最中 (ダイアログの表示中か、
+		// active タブの外部変更の読み込み待ち)。
 		if (isAutoSaveHeld()) return "conflict";
 		for (const [path, cached] of tabCacheRef.current) {
 			if (path === currentActiveTab || !hasUnconfirmedExternalChange(cached)) continue;

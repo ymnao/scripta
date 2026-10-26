@@ -2121,6 +2121,33 @@ describe("useAutoSave", () => {
 			});
 			expect(mockedWriteFile).not.toHaveBeenCalled();
 		});
+
+		// 解いた後に別の読み込みが終わって release が重なると、反映直後 (remount 前) の本文を
+		// 読んで "unsaved" に戻す (#715)。
+		it("止めていないときの release は本文を読み直さない", async () => {
+			const { result } = renderEdited();
+			act(() => {
+				result.current.releaseAutoSave();
+			});
+			await act(async () => {
+				vi.advanceTimersByTime(5000);
+			});
+			expect(result.current.saveStatus).toBe("saved");
+			expect(mockedWriteFile).not.toHaveBeenCalled();
+		});
+
+		it("isAutoSaveHeld は hold から release までの間だけ true", () => {
+			const { result } = renderEdited();
+			expect(result.current.isAutoSaveHeld()).toBe(false);
+			act(() => {
+				result.current.holdAutoSave();
+			});
+			expect(result.current.isAutoSaveHeld()).toBe(true);
+			act(() => {
+				result.current.releaseAutoSave();
+			});
+			expect(result.current.isAutoSaveHeld()).toBe(false);
+		});
 	});
 
 	describe("recovery defenses", () => {
