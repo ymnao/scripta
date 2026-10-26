@@ -39,8 +39,29 @@ export interface AppShortcutDeps {
 	settingsOpen: boolean;
 	helpOpen: boolean;
 	exportOpen: boolean;
+	/** 外部変更の競合ダイアログの表示中か。 */
+	externalConflictOpen: boolean;
 	startSlideShow: () => void;
 }
+
+/**
+ * 外部変更の競合ダイアログの表示中に run を無効にするエントリ。タブを切り替える・閉じる
+ * 操作で、切替時の flush や閉じる前の保存が、user が選ぶ前に未保存の内容で外部変更を
+ * 上書きするため。command-palette は開くときだけ止めるので run 側で判定する。
+ * match は残す。preventDefault を外すと macOS では Cmd+W が menu の close role に届き、
+ * ウィンドウごと閉じうるため (Cmd+W がタブだけを閉じているのは、preventDefault が menu へ
+ * 届くのを止めているからと見ている)。
+ */
+const BLOCKED_WHILE_EXTERNAL_CONFLICT = new Set([
+	"prev-tab",
+	"next-tab",
+	"history-back-bracket",
+	"history-forward-bracket",
+	"history-back-alt",
+	"history-forward-alt",
+	"close-tab-or-window",
+	"new-tab",
+]);
 
 /**
  * AppLayout のキーボードショートカット定義を組み立てる。
@@ -55,7 +76,7 @@ export interface AppShortcutDeps {
  * なので、呼び出し側で useMemo する必要はない。
  */
 export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
-	return [
+	const shortcuts: Shortcut[] = [
 		{
 			// Cmd+Shift+[ / Cmd+Shift+{ — 前のタブ
 			id: "prev-tab",
@@ -225,7 +246,11 @@ export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
 			// Cmd+P — コマンドパレット
 			id: "command-palette",
 			match: (e) => cmdOrCtrl(e) && e.key === "p",
-			run: () => deps.setCommandPaletteOpen((prev) => !prev),
+			run: () => {
+				// ダイアログの下に開いても入力欄には focus が入り、選ぶとタブが切り替わる。
+				if (deps.externalConflictOpen && !deps.commandPaletteOpen) return;
+				deps.setCommandPaletteOpen((prev) => !prev);
+			},
 		},
 		{
 			// Cmd+, — 設定
@@ -257,4 +282,8 @@ export function buildAppShortcuts(deps: AppShortcutDeps): Shortcut[] {
 			run: () => deps.startSlideShow(),
 		},
 	];
+	if (!deps.externalConflictOpen) return shortcuts;
+	return shortcuts.map((s) =>
+		BLOCKED_WHILE_EXTERNAL_CONFLICT.has(s.id) ? { ...s, run: () => {} } : s,
+	);
 }

@@ -43,13 +43,18 @@ interface UseAutoSaveReturn {
 	 */
 	notifyPathDeleted: (path: string, isDirectory: boolean) => void;
 	/**
-	 * 外部変更のダイアログで user が選ぶまで、タイマー (debounce / follow-up / retry) による
-	 * 書き込みを止める。止めないと、選ぶ前に未保存の内容が disk の外部変更を上書きする。
-	 * saveNow と切替時の flush は止めない。
+	 * 外部の変更・削除を user が確かめるまで (読み込み中と、ダイアログで選ぶまで)、タイマー
+	 * (debounce / follow-up / retry) による書き込みを止める。止めないと、選ぶ前に未保存の内容が
+	 * disk の外部変更を上書きする。saveNow と切替時の flush は止めない。
 	 */
 	holdAutoSave: () => void;
-	/** holdAutoSave を解き、打鍵と同じく未保存の内容が残っていれば debounce を張り直す。 */
+	/**
+	 * holdAutoSave を解き、打鍵と同じく未保存の内容が残っていれば debounce を張り直す。
+	 * 止めていなければ何もしない。
+	 */
 	releaseAutoSave: () => void;
+	/** holdAutoSave から releaseAutoSave までの間か。 */
+	isAutoSaveHeld: () => boolean;
 }
 
 export function useAutoSave(
@@ -422,10 +427,15 @@ export function useAutoSave(
 	// debounce を直接張らないのは、切替直後 (切替先の markSaved 前) に解かれると、
 	// 切替元の本文を切替先の path へ書く timer が張られるため。scheduleAutoSave の
 	// awaitingNewFile ゲートを通す。
+	// 止めていないときに張り直さないのは、反映の直後 (remount 前) に重なった release が
+	// 古い本文を読み、反映が "saved" にした状態を "unsaved" で上書きするため。
 	const releaseAutoSave = useCallback((): void => {
+		if (!heldRef.current) return;
 		heldRef.current = false;
 		scheduleAutoSave();
 	}, [scheduleAutoSave]);
+
+	const isAutoSaveHeld = useCallback((): boolean => heldRef.current, []);
 
 	const getLastSavedContent = useCallback((): string => {
 		return lastSavedContentRef.current;
@@ -442,5 +452,6 @@ export function useAutoSave(
 		notifyPathDeleted,
 		holdAutoSave,
 		releaseAutoSave,
+		isAutoSaveHeld,
 	};
 }

@@ -81,6 +81,10 @@ export function useExternalFileConflict({
 	// state ではなく ref で開閉を追うのは、handleConflictReload の readFile 完了時に
 	// 「その間に別のダイアログが開いたか」を同期的に知る必要があるため。
 	const conflictOpenRef = useRef(false);
+	// active で dirty なタブの外部変更と、「再読み込み」で disk を読んでいる件数。読み終えるまで
+	// autosave を止める (#715)。ダイアログを開くまで待つと、読む間に debounce が発火して外部変更を
+	// 上書きし、読むのは自分の書いた内容になる (ダイアログが出ない)。
+	const pendingActiveReadsRef = useRef(0);
 
 	const openConflict = useCallback(
 		(path: string, type: ExternalConflict["type"]) => {
@@ -99,10 +103,16 @@ export function useExternalFileConflict({
 		setExternalConflict(null);
 	}, []);
 
+	// 読み込み中の外部変更が残っていれば止めたままにし、その読み込みの完了で解く。先に解くと、
+	// 同じファイルの 2 件目の外部変更を読み終える前に、未保存の内容がそれを上書きする。
+	const releaseIfIdle = useCallback(() => {
+		if (pendingActiveReadsRef.current === 0 && !conflictOpenRef.current) releaseAutoSave();
+	}, [releaseAutoSave]);
+
 	const closeConflict = useCallback(() => {
 		hideConflict();
-		releaseAutoSave();
-	}, [hideConflict, releaseAutoSave]);
+		releaseIfIdle();
+	}, [hideConflict, releaseIfIdle]);
 
 	// Clear stale conflict dialog when workspace changes.
 	// workspacePath is read only to satisfy the exhaustive-deps rule;
@@ -148,26 +158,36 @@ export function useExternalFileConflict({
 	// readFile の結果をタブへ反映する。タブの有無・active かどうか・dirty かどうかは
 	// readFile を投げた時点のものなので、解決したここで取り直して振り分ける (取り直しと
 	// 適用の間に await が無いので、ここでの判定は適用時も成り立つ)。
+	// settle は読み込みの間に止めた autosave を解く。ダイアログを出す分岐では止めたまま
+	// 渡すため openConflict の後、それ以外は反映の前に呼ぶ。反映の後に解くと、release の
+	// scheduleAutoSave が remount 前の未保存の本文を読んで、反映が "saved" にした状態を
+	// "unsaved" で上書きする (handleConflictReload と同じ)。
 	const reconcileExternalChange = useCallback(
-		(path: string, loaded: string) => {
+		(path: string, loaded: string, settle: () => void) => {
 			const state = useWorkspaceStore.getState();
 			const current = state.tabs.find((t) => t.path === path);
 			// 読み込み中にタブが消えた (外部削除で閉じた / workspace 切替)。
 			// applyExternalReload / applyCacheReload は cache を作り直すので、閉じた path の
 			// cache が復活して次に開いたとき古い内容が出る。
-			if (!current) return;
+			if (!current) {
+				settle();
+				return;
+			}
 			if (state.activeTabPath === path) {
 				// 解決までの間にユーザーが打ち始めていたら、applyExternalReload は editor を
 				// remount して打ったばかりの文字を捨ててしまう。dirty なら自分の write で
 				// ない限りダイアログで問う。
-				if (current.dirty) {
-					if (loaded === getLastSavedContentRef.current()) return;
+				if (current.dirty && loaded !== getLastSavedContentRef.current()) {
 					openConflict(path, "modified");
+					settle();
 					return;
 				}
+				settle();
+				if (current.dirty) return;
 				applyExternalReload(path, loaded);
 				return;
 			}
+			settle();
 			if (isCachedTabClean(path)) {
 				applyCacheReload(path, loaded);
 				return;
@@ -182,18 +202,31 @@ export function useExternalFileConflict({
 	const handleExternalFileModified = useCallback(
 		(path: string) => {
 			const state = useWorkspaceStore.getState();
-			if (!state.tabs.some((t) => t.path === path)) return;
+			const tab = state.tabs.find((t) => t.path === path);
+			if (!tab) return;
 			// 一度も表示していない非 active タブは cache が無く、次に開いたとき disk から読む。
 			if (path !== state.activeTabPath && getCachedContent(path) === null) return;
+			let held = path === state.activeTabPath && tab.dirty;
+			if (held) {
+				pendingActiveReadsRef.current += 1;
+				holdAutoSave();
+			}
+			const release = () => {
+				if (!held) return;
+				held = false;
+				pendingActiveReadsRef.current -= 1;
+				releaseIfIdle();
+			};
 			readFile(path)
 				.then((loaded) => {
-					reconcileExternalChange(path, loaded);
+					reconcileExternalChange(path, loaded, release);
 				})
 				.catch((err) => {
+					release();
 					console.error("Failed to read externally modified file:", err);
 				});
 		},
-		[getCachedContent, reconcileExternalChange],
+		[getCachedContent, reconcileExternalChange, holdAutoSave, releaseIfIdle],
 	);
 
 	useFileWatcher({
@@ -211,14 +244,20 @@ export function useExternalFileConflict({
 		// 解くのは反映の直前。反映の後に解くと、release の scheduleAutoSave が remount 前の
 		// 未保存の本文を読んで、反映が "saved" にした状態を "unsaved" で上書きする。
 		hideConflict();
+		// 数えないと、並行していた外部変更の読み込みが先に終わったとき releaseIfIdle が解く。
+		pendingActiveReadsRef.current += 1;
 		readFile(path)
 			.then((loaded) => {
+				pendingActiveReadsRef.current -= 1;
+				// releaseIfIdle にしないのは、読み込み中の外部変更が残っていても、反映でタブは clean に
+				// なり上書きする未保存の内容が無いため。待つと、その読み込みの完了で反映の後に解くことになる。
 				if (!conflictOpenRef.current) releaseAutoSave();
 				// 読み込み中にタブが閉じていたら、applyConflictReload が閉じた path の cache を作り直す。
 				if (!useWorkspaceStore.getState().tabs.some((t) => t.path === path)) return;
 				applyConflictReload(path, loaded);
 			})
 			.catch((err) => {
+				pendingActiveReadsRef.current -= 1;
 				console.error("Failed to reload file on conflict resolve:", err);
 				// File may have been deleted — notify user via the deleted dialog
 				openConflict(path, "deleted");

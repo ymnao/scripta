@@ -51,6 +51,7 @@ function makeDeps(overrides: Partial<AppShortcutDeps> = {}): AppShortcutDeps {
 		settingsOpen: false,
 		helpOpen: false,
 		exportOpen: false,
+		externalConflictOpen: false,
 		startSlideShow: vi.fn(),
 		...overrides,
 	};
@@ -461,5 +462,60 @@ describe("buildAppShortcuts の run 配線", () => {
 		const deps = makeDeps();
 		run(deps, "slide-show", "F5");
 		expect(deps.startSlideShow).toHaveBeenCalledTimes(1);
+	});
+
+	// #715: 切替時の flush や閉じる前の保存が、user が選ぶ前に外部変更を上書きする。
+	describe("外部変更の競合ダイアログの表示中", () => {
+		it.each([
+			["prev-tab", "[", { metaKey: true, shiftKey: true }],
+			["next-tab", "]", { metaKey: true, shiftKey: true }],
+			["history-back-bracket", "[", { metaKey: true }],
+			["history-forward-bracket", "]", { metaKey: true }],
+			["history-back-alt", "ArrowLeft", { altKey: true }],
+			["history-forward-alt", "ArrowRight", { altKey: true }],
+			["close-tab-or-window", "w", { metaKey: true }],
+			["new-tab", "t", { metaKey: true }],
+			["command-palette", "p", { metaKey: true }],
+		] as const)(
+			"%s は %s (%o) にマッチし続ける (既定の動作と menu へ流さない)",
+			(id, key, mods) => {
+				const shortcuts = buildAppShortcuts(makeDeps({ externalConflictOpen: true }));
+				expect(matchingIds(shortcuts, makeEvent(key, mods))).toEqual([id]);
+			},
+		);
+
+		it.each([
+			["prev-tab", "activatePrevTab"],
+			["next-tab", "activateNextTab"],
+			["history-back-bracket", "handleGoBack"],
+			["history-back-alt", "handleGoBack"],
+			["history-forward-bracket", "handleGoForward"],
+			["history-forward-alt", "handleGoForward"],
+			["new-tab", "openNewTab"],
+			["command-palette", "setCommandPaletteOpen"],
+		] as const)("%s は %s を呼ばない", (id, handler) => {
+			const deps = makeDeps({ externalConflictOpen: true });
+			run(deps, id);
+			expect(deps[handler]).not.toHaveBeenCalled();
+		});
+
+		it("close-tab-or-window は active タブを閉じない", () => {
+			const deps = makeDeps({ externalConflictOpen: true, activeTabId: 7 });
+			run(deps, "close-tab-or-window", "w", { metaKey: true });
+			expect(deps.handleCloseTab).not.toHaveBeenCalled();
+		});
+
+		it("close-tab-or-window は shift 有りでもウィンドウを閉じない", async () => {
+			const { closeWindow } = await import("../../lib/commands");
+			const deps = makeDeps({ externalConflictOpen: true, activeTabId: 7 });
+			run(deps, "close-tab-or-window", "W", { metaKey: true, shiftKey: true });
+			expect(closeWindow).not.toHaveBeenCalled();
+		});
+
+		it("command-palette は開いているパレットなら閉じる", () => {
+			const deps = makeDeps({ externalConflictOpen: true, commandPaletteOpen: true });
+			run(deps, "command-palette");
+			expectToggle(vi.mocked(deps.setCommandPaletteOpen).mock.calls[0][0]);
+		});
 	});
 });
