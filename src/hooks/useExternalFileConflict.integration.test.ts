@@ -460,6 +460,88 @@ describe("active の dirty タブへの外部変更", () => {
 		expect(writesTo("/w/a.md")).toEqual([]);
 	});
 
+	it("「再読み込み」の読み込み中に別の読み込みが先に終わっても、書き込まずに外部変更を反映する", async () => {
+		const { result, editor } = await renderBoth();
+		editor.type("edited A");
+		act(() => {
+			result.current.manager.scheduleAutoSave();
+		});
+		diskContents.set("/w/a.md", "EXTERNAL\n");
+		await emitModified("/w/a.md");
+		expect(result.current.conflict.externalConflict).not.toBeNull();
+
+		const second = createDeferred<string>();
+		mockedReadFile.mockImplementationOnce(() => second.promise);
+		await emitModified("/w/a.md");
+		const reload = createDeferred<string>();
+		mockedReadFile.mockImplementationOnce(() => reload.promise);
+		act(() => {
+			result.current.conflict.handleConflictReload();
+		});
+
+		second.reject(new Error("read failed"));
+		await flushAsync();
+		await advance(5000);
+		expect(writesTo("/w/a.md")).toEqual([]);
+
+		reload.resolve("EXTERNAL\n");
+		await flushAsync();
+		await advance(5000);
+		expect(editor.getContent()).toBe("EXTERNAL\n");
+		expect(writesTo("/w/a.md")).toEqual([]);
+	});
+
+	it("「再読み込み」の後に次の外部変更で「保持」を選ぶと、autosave が再開する", async () => {
+		const { result, editor } = await renderBoth();
+		editor.type("edited A");
+		act(() => {
+			result.current.manager.scheduleAutoSave();
+		});
+		diskContents.set("/w/a.md", "EXTERNAL 1\n");
+		await emitModified("/w/a.md");
+		act(() => {
+			result.current.conflict.handleConflictReload();
+		});
+		await flushAsync();
+		expect(editor.getContent()).toBe("EXTERNAL 1\n");
+
+		editor.type("edited again");
+		act(() => {
+			result.current.manager.scheduleAutoSave();
+		});
+		diskContents.set("/w/a.md", "EXTERNAL 2\n");
+		await emitModified("/w/a.md");
+		act(() => {
+			result.current.conflict.handleConflictKeep();
+		});
+		await advance(3000);
+
+		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited again\n"]]);
+	});
+
+	it("「再読み込み」が読み込みに失敗した後、削除ダイアログで「保持」を選ぶと autosave が再開する", async () => {
+		const { result, editor } = await renderBoth();
+		editor.type("edited A");
+		act(() => {
+			result.current.manager.scheduleAutoSave();
+		});
+		diskContents.set("/w/a.md", "EXTERNAL\n");
+		await emitModified("/w/a.md");
+		mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"));
+		act(() => {
+			result.current.conflict.handleConflictReload();
+		});
+		await flushAsync();
+		expect(result.current.conflict.externalConflict).toEqual({ path: "/w/a.md", type: "deleted" });
+
+		act(() => {
+			result.current.conflict.handleDeletedDirtyKeep();
+		});
+		await advance(3000);
+
+		expect(writesTo("/w/a.md")).toEqual([["/w/a.md", "edited A\n"]]);
+	});
+
 	it("2 件の読み込みが重なったら、両方を読み終えるまで autosave を止める", async () => {
 		const { result, editor } = await renderBoth();
 		const first = await typeThenNotifyWithPendingRead(

@@ -81,9 +81,9 @@ export function useExternalFileConflict({
 	// state ではなく ref で開閉を追うのは、handleConflictReload の readFile 完了時に
 	// 「その間に別のダイアログが開いたか」を同期的に知る必要があるため。
 	const conflictOpenRef = useRef(false);
-	// active で dirty なタブの外部変更を読んでいる件数。読み終えるまで autosave を止める (#715)。
-	// ダイアログを開くまで待つと、読む間に debounce が発火して外部変更を上書きし、読むのは
-	// 自分の書いた内容になる (ダイアログが出ない)。
+	// active で dirty なタブの外部変更と、「再読み込み」で disk を読んでいる件数。読み終えるまで
+	// autosave を止める (#715)。ダイアログを開くまで待つと、読む間に debounce が発火して外部変更を
+	// 上書きし、読むのは自分の書いた内容になる (ダイアログが出ない)。
 	const pendingActiveReadsRef = useRef(0);
 
 	const openConflict = useCallback(
@@ -244,8 +244,11 @@ export function useExternalFileConflict({
 		// 解くのは反映の直前。反映の後に解くと、release の scheduleAutoSave が remount 前の
 		// 未保存の本文を読んで、反映が "saved" にした状態を "unsaved" で上書きする。
 		hideConflict();
+		// 数えないと、並行していた外部変更の読み込みが先に終わったとき releaseIfIdle が解く。
+		pendingActiveReadsRef.current += 1;
 		readFile(path)
 			.then((loaded) => {
+				pendingActiveReadsRef.current -= 1;
 				// releaseIfIdle にしないのは、読み込み中の外部変更が残っていても、反映でタブは clean に
 				// なり上書きする未保存の内容が無いため。待つと、その読み込みの完了で反映の後に解くことになる。
 				if (!conflictOpenRef.current) releaseAutoSave();
@@ -254,6 +257,7 @@ export function useExternalFileConflict({
 				applyConflictReload(path, loaded);
 			})
 			.catch((err) => {
+				pendingActiveReadsRef.current -= 1;
 				console.error("Failed to reload file on conflict resolve:", err);
 				// File may have been deleted — notify user via the deleted dialog
 				openConflict(path, "deleted");
