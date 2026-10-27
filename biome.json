@@ -56,16 +56,11 @@
 			"!**/test-results",
 			"!**/playwright-report",
 			"!**/playwright-report-electron",
-			"!**/coverage"
+			"!**/coverage",
+			"!**/*.md",
+			"!**/*.yaml",
+			"!**/*.yml"
 		]
-	},
-	"markdown": {
-		"formatter": { "enabled": false },
-		"linter": { "enabled": false }
-	},
-	"yaml": {
-		"formatter": { "enabled": false },
-		"linter": { "enabled": false }
 	},
 	"overrides": [
 		{
