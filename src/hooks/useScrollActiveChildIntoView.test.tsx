@@ -23,6 +23,12 @@ function Harness({
 	);
 }
 
+function DetachedHarness({ activeIndex }: { activeIndex: number }): ReactElement {
+	const ref = useRef<HTMLDivElement>(null);
+	useScrollActiveChildIntoView(ref, activeIndex);
+	return <div>no-ref</div>;
+}
+
 function stubRects(
 	container: HTMLElement,
 	containerRect: DOMRect,
@@ -105,11 +111,6 @@ describe("useScrollActiveChildIntoView", () => {
 		// React 契約上 useEffect は ref populated 後に走るので実運用で trigger 困難だが、
 		// 防御的 early return (`if (!container || !child) return`) がテスト対象外にならないよう
 		// ref を DOM に接続しない Harness で走行させ、例外や scrollBy 呼び出しが無いことを確認。
-		function DetachedHarness({ activeIndex }: { activeIndex: number }): ReactElement {
-			const ref = useRef<HTMLDivElement>(null);
-			useScrollActiveChildIntoView(ref, activeIndex);
-			return <div>no-ref</div>;
-		}
 		expect(() => render(<DetachedHarness activeIndex={0} />)).not.toThrow();
 	});
 

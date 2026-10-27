@@ -54,6 +54,12 @@ function Harness({
 	);
 }
 
+function NullHarness(): ReactElement {
+	const ref = useRef<HTMLDivElement>(null);
+	useFocusTrap(ref);
+	return <div>no container</div>;
+}
+
 describe("useFocusTrap", () => {
 	it("last で Tab を押すと first に折り返す", async () => {
 		const user = userEvent.setup();
@@ -149,11 +155,6 @@ describe("useFocusTrap", () => {
 	});
 
 	it("container ref が null の間は no-op (throw しない)", () => {
-		function NullHarness(): ReactElement {
-			const ref = useRef<HTMLDivElement>(null);
-			useFocusTrap(ref);
-			return <div>no container</div>;
-		}
 		expect(() => render(<NullHarness />)).not.toThrow();
 	});
 });
