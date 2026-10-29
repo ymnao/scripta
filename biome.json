@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
 	"assist": { "actions": { "source": { "organizeImports": "on" } } },
 	"plugins": [
 		"./plugins/no-navigator-platform.grit",
@@ -56,7 +56,10 @@
 			"!**/test-results",
 			"!**/playwright-report",
 			"!**/playwright-report-electron",
-			"!**/coverage"
+			"!**/coverage",
+			"!**/*.md",
+			"!**/*.yaml",
+			"!**/*.yml"
 		]
 	},
 	"overrides": [

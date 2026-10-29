@@ -57,6 +57,8 @@ export function SlideShowOverlay({
 	// useShortcuts は shortcuts 配列を ref 経由で常に最新参照するため useMemo 不要。
 	const next = () => setIndex((i) => Math.min(i + 1, safeSlides.length - 1));
 	const prev = () => setIndex((i) => Math.max(i - 1, 0));
+	const first = () => setIndex(0);
+	const last = () => setIndex(safeSlides.length - 1);
 	const nav: Record<string, () => void> = {
 		Escape: onClose,
 		ArrowRight: next,
@@ -65,8 +67,8 @@ export function SlideShowOverlay({
 		ArrowLeft: prev,
 		PageUp: prev,
 		Backspace: prev,
-		Home: () => setIndex(0),
-		End: () => setIndex(safeSlides.length - 1),
+		Home: first,
+		End: last,
 	};
 	// 素押しでのみ発火するグループ (n/j/p/k) は meta/ctrl/alt 修飾を弾いた後に、
 	// `toLowerCase()` で CapsLock/Shift 併用にもマッチさせる。

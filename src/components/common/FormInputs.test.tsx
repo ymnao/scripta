@@ -328,32 +328,34 @@ describe("RangeInput", () => {
 	});
 });
 
+function Controlled({
+	Input,
+	initial,
+	onChange,
+}: {
+	Input: typeof TextInput | typeof TextareaInput;
+	initial: string;
+	onChange: (value: string) => void;
+}) {
+	const [value, setValue] = useState(initial);
+	return (
+		<Input
+			id="x"
+			label="ブランチ"
+			value={value}
+			onChange={(v) => {
+				onChange(v);
+				setValue(v);
+			}}
+		/>
+	);
+}
+
 describe.each([
 	{ name: "TextInput", Input: TextInput },
 	{ name: "TextareaInput", Input: TextareaInput },
 ])("$name", ({ Input }) => {
 	const getField = () => screen.getByRole("textbox", { name: "ブランチ" });
-
-	function Controlled({
-		initial,
-		onChange,
-	}: {
-		initial: string;
-		onChange: (value: string) => void;
-	}) {
-		const [value, setValue] = useState(initial);
-		return (
-			<Input
-				id="x"
-				label="ブランチ"
-				value={value}
-				onChange={(v) => {
-					onChange(v);
-					setValue(v);
-				}}
-			/>
-		);
-	}
 
 	it("入力中は onChange を呼ばず、blur で確定する", async () => {
 		const onChange = vi.fn();
@@ -399,7 +401,7 @@ describe.each([
 
 	it("確定済みの値はアンマウントで再送しない", async () => {
 		const onChange = vi.fn();
-		const { unmount } = render(<Controlled initial="main" onChange={onChange} />);
+		const { unmount } = render(<Controlled Input={Input} initial="main" onChange={onChange} />);
 
 		await userEvent.type(getField(), "-dev");
 		await userEvent.tab();
