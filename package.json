@@ -39,7 +39,7 @@
 		"@codemirror/view": "^6.43.15",
 		"@lezer/highlight": "^1.2.5",
 		"@uiw/react-codemirror": "^4.25.12",
-		"chokidar": "^5.0.0",
+		"chokidar": "^6.0.0",
 		"dompurify": "^3.4.17",
 		"js-yaml": "^5.5.0",
 		"katex": "^0.19.0",
