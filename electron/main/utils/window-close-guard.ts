@@ -79,6 +79,7 @@ export function createCloseGuard(deps: { quit: () => void }): CloseGuard {
 
 			win.on("closed", () => {
 				clearTimer(state);
+				state.pendingRequestId = null;
 				states.delete(senderId);
 			});
 		},

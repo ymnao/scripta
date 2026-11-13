@@ -1,15 +1,15 @@
 import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, ipcMain, protocol, session } from "electron";
+import { app, BrowserWindow, protocol, session } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getLoadRemoteImages, getWindowState, persistWindowState } from "./ipc/settings";
+import { mainWindowCloseGuard } from "./ipc/window";
 import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
 import { installMainSessionPermissionHandlers } from "./utils/permission-handler";
 import { buildCsp, shouldBlockImageRequest } from "./utils/remote-image-policy";
 import { resolveDevOrigin } from "./utils/renderer-url";
 import { registerScriptaAssetProtocol, SCRIPTA_ASSET_SCHEME } from "./utils/scripta-asset-protocol";
-import { CLOSE_REQUEST_ACK_CHANNEL, createCloseGuard } from "./utils/window-close-guard";
 import { MAIN_WINDOW_TITLE_BAR_OPTIONS } from "./utils/window-defaults";
 import { attachNavigationGuards } from "./utils/window-guards";
 import { attachWindowLifecycle } from "./utils/window-lifecycle";
@@ -43,14 +43,8 @@ if (app.isPackaged) {
 
 const openWindows = new Set<BrowserWindow>();
 
-// conflict window には付けない: ConflictWindow は onWindowCloseRequested を登録しないので、
-// 付けると閉じるたびに timeout まで待たされる。
-const closeGuard = createCloseGuard({ quit: () => app.quit() });
-ipcMain.on(CLOSE_REQUEST_ACK_CHANNEL, (event, requestId: unknown, ok: unknown) => {
-	closeGuard.handleAck(event.sender.id, requestId, ok);
-});
 app.on("before-quit", () => {
-	closeGuard.markQuitting();
+	mainWindowCloseGuard.markQuitting();
 });
 
 interface CreateWindowOptions {
@@ -78,7 +72,9 @@ async function createWindow(opts: CreateWindowOptions = {}): Promise<void> {
 		},
 	});
 	openWindows.add(mainWindow);
-	closeGuard.attach(mainWindow);
+	// conflict window には付けない: ConflictWindow は onWindowCloseRequested を登録しないので、
+	// 付けると閉じるたびに timeout まで待たされる。
+	mainWindowCloseGuard.attach(mainWindow);
 	attachWindowLifecycle(mainWindow, () => {
 		openWindows.delete(mainWindow);
 	});
