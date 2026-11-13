@@ -48,6 +48,13 @@ const lastRequestId = (w: FakeWindow): number => {
 	return call[1] as number;
 };
 
+const setup = (quit = vi.fn()) => {
+	const guard = createCloseGuard({ quit });
+	const win = new FakeWindow(1);
+	guard.attach(asWindow(win));
+	return { guard, win, quit };
+};
+
 beforeEach(() => {
 	vi.useFakeTimers();
 	vi.spyOn(console, "error").mockImplementation(() => {});
@@ -60,9 +67,7 @@ afterEach(() => {
 
 describe("createCloseGuard", () => {
 	it("holds the close and asks the renderer instead of closing", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { win } = setup();
 
 		win.close();
 
@@ -72,9 +77,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("closes the window when the renderer acks true", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		win.close();
 
 		guard.handleAck(1, lastRequestId(win), true);
@@ -83,9 +86,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("keeps the window open when the renderer acks false, and asks again on the next close", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		win.close();
 
 		guard.handleAck(1, lastRequestId(win), false);
@@ -97,9 +98,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("does not send a second request while one is pending", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { win } = setup();
 
 		win.close();
 		win.close();
@@ -109,9 +108,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("ignores an ack with a stale request id", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		win.close();
 		const first = lastRequestId(win);
 		guard.handleAck(1, first, false);
@@ -123,11 +120,8 @@ describe("createCloseGuard", () => {
 	});
 
 	it("ignores an ack sent from another window's renderer", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		const other = new FakeWindow(2);
-		guard.attach(asWindow(win));
-		guard.attach(asWindow(other));
+		const { guard, win } = setup();
+		guard.attach(asWindow(new FakeWindow(2)));
 		win.close();
 
 		guard.handleAck(2, lastRequestId(win), true);
@@ -136,9 +130,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("treats a non-boolean ok as a refusal", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		win.close();
 
 		guard.handleAck(1, lastRequestId(win), "true");
@@ -147,9 +139,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("closes the window when the renderer does not answer in time", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { win } = setup();
 		win.close();
 
 		vi.advanceTimersByTime(CLOSE_REQUEST_TIMEOUT_MS - 1);
@@ -159,9 +149,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("does not fire the timeout after the renderer has answered", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		win.close();
 		guard.handleAck(1, lastRequestId(win), false);
 
@@ -171,9 +159,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("closes a pending window when its renderer process goes away", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { win } = setup();
 		win.close();
 
 		win.webContents.emit("render-process-gone");
@@ -182,9 +168,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("closes without asking once the renderer process has gone", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { win } = setup();
 		win.webContents.emit("render-process-gone");
 
 		win.close();
@@ -194,10 +178,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("resumes the quit instead of closing the window when the close came from a quit", () => {
-		const quit = vi.fn();
-		const guard = createCloseGuard({ quit });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win, quit } = setup();
 		guard.markQuitting();
 		win.close();
 
@@ -208,9 +189,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("lets the window close when the resumed quit closes it", () => {
-		const guard = createCloseGuard({ quit: vi.fn() });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		guard.markQuitting();
 		win.close();
 		guard.handleAck(1, lastRequestId(win), true);
@@ -222,10 +201,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("drops the quit when the renderer refuses, so a later plain close does not quit", () => {
-		const quit = vi.fn();
-		const guard = createCloseGuard({ quit });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win, quit } = setup();
 		guard.markQuitting();
 		win.close();
 		guard.handleAck(1, lastRequestId(win), false);
@@ -238,10 +214,7 @@ describe("createCloseGuard", () => {
 	});
 
 	it("ignores acks for a window that has already closed", () => {
-		const quit = vi.fn();
-		const guard = createCloseGuard({ quit });
-		const win = new FakeWindow(1);
-		guard.attach(asWindow(win));
+		const { guard, win } = setup();
 		win.close();
 		const requestId = lastRequestId(win);
 		guard.handleAck(1, requestId, true);
