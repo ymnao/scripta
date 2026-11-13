@@ -48,11 +48,12 @@ const lastRequestId = (w: FakeWindow): number => {
 	return call[1] as number;
 };
 
-const setup = (quit = vi.fn()) => {
-	const guard = createCloseGuard({ quit });
+const setup = (confirmDiscard = vi.fn(async () => false)) => {
+	const quit = vi.fn();
+	const guard = createCloseGuard({ quit, confirmDiscard });
 	const win = new FakeWindow(1);
 	guard.attach(asWindow(win));
-	return { guard, win, quit };
+	return { guard, win, quit, confirmDiscard };
 };
 
 beforeEach(() => {
@@ -80,17 +81,18 @@ describe("createCloseGuard", () => {
 		const { guard, win } = setup();
 		win.close();
 
-		guard.handleAck(1, lastRequestId(win), true);
+		guard.handleAck(1, lastRequestId(win), true, undefined);
 
 		expect(win.destroyed).toBe(true);
 	});
 
-	it("keeps the window open when the renderer acks false, and asks again on the next close", () => {
-		const { guard, win } = setup();
+	it("keeps the window open on a conflict veto without asking to discard, and asks again on the next close", () => {
+		const { guard, win, confirmDiscard } = setup();
 		win.close();
 
-		guard.handleAck(1, lastRequestId(win), false);
+		guard.handleAck(1, lastRequestId(win), false, "conflict");
 		expect(win.destroyed).toBe(false);
+		expect(confirmDiscard).not.toHaveBeenCalled();
 
 		win.close();
 		expect(win.webContents.send).toHaveBeenCalledTimes(2);
@@ -111,10 +113,10 @@ describe("createCloseGuard", () => {
 		const { guard, win } = setup();
 		win.close();
 		const first = lastRequestId(win);
-		guard.handleAck(1, first, false);
+		guard.handleAck(1, first, false, "conflict");
 		win.close();
 
-		guard.handleAck(1, first, true);
+		guard.handleAck(1, first, true, undefined);
 
 		expect(win.destroyed).toBe(false);
 	});
@@ -124,16 +126,94 @@ describe("createCloseGuard", () => {
 		guard.attach(asWindow(new FakeWindow(2)));
 		win.close();
 
-		guard.handleAck(2, lastRequestId(win), true);
+		guard.handleAck(2, lastRequestId(win), true, undefined);
 
 		expect(win.destroyed).toBe(false);
 	});
 
-	it("treats a non-boolean ok as a refusal", () => {
+	it("does not treat a non-boolean ok as permission to close", () => {
 		const { guard, win } = setup();
 		win.close();
 
-		guard.handleAck(1, lastRequestId(win), "true");
+		guard.handleAck(1, lastRequestId(win), "true", "conflict");
+
+		expect(win.destroyed).toBe(false);
+	});
+
+	it("asks whether to discard on a save-failed veto, and keeps the window when declined", async () => {
+		const { guard, win, confirmDiscard } = setup();
+		win.close();
+
+		guard.handleAck(1, lastRequestId(win), false, "save-failed");
+		// 確認が決着するまでの close は無視されるので、届くまで close し直す。
+		await vi.waitFor(() => {
+			win.close();
+			expect(win.webContents.send).toHaveBeenCalledTimes(2);
+		});
+
+		expect(confirmDiscard).toHaveBeenCalledWith(win);
+		expect(win.destroyed).toBe(false);
+	});
+
+	it("closes the window when the user chooses to discard", async () => {
+		const { guard, win } = setup(vi.fn(async () => true));
+		win.close();
+
+		guard.handleAck(1, lastRequestId(win), false, "save-failed");
+
+		await vi.waitFor(() => expect(win.destroyed).toBe(true));
+	});
+
+	it("asks whether to discard when the veto is unknown", async () => {
+		const { guard, win, confirmDiscard } = setup();
+		win.close();
+
+		guard.handleAck(1, lastRequestId(win), false, undefined);
+
+		await vi.waitFor(() => expect(confirmDiscard).toHaveBeenCalledTimes(1));
+	});
+
+	it("resumes the quit when the user chooses to discard during a quit", async () => {
+		const { guard, win, quit } = setup(vi.fn(async () => true));
+		guard.markQuitting();
+		win.close();
+
+		guard.handleAck(1, lastRequestId(win), false, "save-failed");
+
+		await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1));
+	});
+
+	it("does not send another request or close on timeout while the user is deciding", async () => {
+		let answer!: (discard: boolean) => void;
+		const { guard, win } = setup(
+			vi.fn(
+				() =>
+					new Promise<boolean>((resolve) => {
+						answer = resolve;
+					}),
+			),
+		);
+		win.close();
+		guard.handleAck(1, lastRequestId(win), false, "save-failed");
+
+		win.close();
+		vi.advanceTimersByTime(CLOSE_REQUEST_TIMEOUT_MS);
+
+		expect(win.webContents.send).toHaveBeenCalledTimes(1);
+		expect(win.destroyed).toBe(false);
+		answer(true);
+		await vi.waitFor(() => expect(win.destroyed).toBe(true));
+	});
+
+	it("keeps the window open when the discard dialog fails", async () => {
+		const { guard, win } = setup(vi.fn(async () => Promise.reject(new Error("no dialog"))));
+		win.close();
+
+		guard.handleAck(1, lastRequestId(win), false, "save-failed");
+		await vi.waitFor(() => {
+			win.close();
+			expect(win.webContents.send).toHaveBeenCalledTimes(2);
+		});
 
 		expect(win.destroyed).toBe(false);
 	});
@@ -151,7 +231,7 @@ describe("createCloseGuard", () => {
 	it("does not fire the timeout after the renderer has answered", () => {
 		const { guard, win } = setup();
 		win.close();
-		guard.handleAck(1, lastRequestId(win), false);
+		guard.handleAck(1, lastRequestId(win), false, "conflict");
 
 		vi.advanceTimersByTime(CLOSE_REQUEST_TIMEOUT_MS);
 
@@ -182,7 +262,7 @@ describe("createCloseGuard", () => {
 		guard.markQuitting();
 		win.close();
 
-		guard.handleAck(1, lastRequestId(win), true);
+		guard.handleAck(1, lastRequestId(win), true, undefined);
 
 		expect(quit).toHaveBeenCalledTimes(1);
 		expect(win.close).toHaveBeenCalledTimes(1);
@@ -192,7 +272,7 @@ describe("createCloseGuard", () => {
 		const { guard, win } = setup();
 		guard.markQuitting();
 		win.close();
-		guard.handleAck(1, lastRequestId(win), true);
+		guard.handleAck(1, lastRequestId(win), true, undefined);
 
 		win.close();
 
@@ -200,14 +280,14 @@ describe("createCloseGuard", () => {
 		expect(win.destroyed).toBe(true);
 	});
 
-	it("drops the quit when the renderer refuses, so a later plain close does not quit", () => {
+	it("drops the quit on a conflict veto, so a later plain close does not quit", () => {
 		const { guard, win, quit } = setup();
 		guard.markQuitting();
 		win.close();
-		guard.handleAck(1, lastRequestId(win), false);
+		guard.handleAck(1, lastRequestId(win), false, "conflict");
 
 		win.close();
-		guard.handleAck(1, lastRequestId(win), true);
+		guard.handleAck(1, lastRequestId(win), true, undefined);
 
 		expect(quit).not.toHaveBeenCalled();
 		expect(win.destroyed).toBe(true);
@@ -217,9 +297,9 @@ describe("createCloseGuard", () => {
 		const { guard, win } = setup();
 		win.close();
 		const requestId = lastRequestId(win);
-		guard.handleAck(1, requestId, true);
+		guard.handleAck(1, requestId, true, undefined);
 
-		expect(() => guard.handleAck(1, requestId, true)).not.toThrow();
+		expect(() => guard.handleAck(1, requestId, true, undefined)).not.toThrow();
 		expect(win.close).toHaveBeenCalledTimes(2);
 	});
 });

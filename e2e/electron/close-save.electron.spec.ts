@@ -43,6 +43,23 @@ async function expectClosedByAck(stderr: string[]): Promise<void> {
 	expect(stderr.join("")).not.toContain("[close-guard]");
 }
 
+// 保存に失敗すると main が「保存せずに閉じるか」を native dialog で尋ねる。xvfb 上で
+// 押せないので、決めた答えを返す stub に差し替え、呼ばれた回数を main 側に数えさせる。
+async function stubDiscardDialog(app: ElectronApplication, response: 0 | 1): Promise<void> {
+	await app.evaluate(({ dialog }, answer) => {
+		const store = globalThis as { discardAsked?: number };
+		store.discardAsked = 0;
+		dialog.showMessageBox = (async () => {
+			store.discardAsked = (store.discardAsked ?? 0) + 1;
+			return { response: answer, checkboxChecked: false };
+		}) as typeof dialog.showMessageBox;
+	}, response);
+}
+
+async function discardAskedCount(app: ElectronApplication): Promise<number> {
+	return app.evaluate(() => (globalThis as { discardAsked?: number }).discardAsked ?? 0);
+}
+
 async function pressCloseAndReadAck(app: ElectronApplication, page: Page): Promise<unknown> {
 	await app.evaluate(({ ipcMain }) => {
 		(globalThis as { closeAck?: Promise<unknown> }).closeAck = new Promise((resolve) => {
@@ -116,14 +133,32 @@ test.describe("save before close (electron)", () => {
 		test.skip(process.platform === "win32", "chmod で書き込みを拒否できない");
 		const { app, page } = await launch();
 		await typeUnsavedEdit(page);
+		await stubDiscardDialog(app, 0);
 		chmodSync(join(workspaceDir, "note.md"), 0o444);
 
 		expect(await pressCloseAndReadAck(app, page)).toBe(false);
 		await expect(page.getByText("保存失敗")).toBeVisible();
+		// 確認が決着するまでの close は無視されるので、キャンセルが届いてから閉じ直す。
+		await expect.poll(() => discardAskedCount(app)).toBe(1);
 		// 1 回目の ack の直後はウィンドウが閉じかけでもまだ残って見える。もう一度閉じて
 		// 改めて要求が届き、また拒否されることで、1 回目で閉じなかったことを確かめる。
 		expect(await pressCloseAndReadAck(app, page)).toBe(false);
 		expect(page.isClosed()).toBe(false);
+		expect(readWorkspaceFile(workspaceDir, "note.md")).toBe("# Note");
+	});
+
+	test("保存に失敗しても、保存せずに閉じるを選べば閉じる", async ({ launch, workspaceDir }) => {
+		test.skip(process.platform === "win32", "chmod で書き込みを拒否できない");
+		test.setTimeout(60_000);
+		const { app, page } = await launch();
+		await typeUnsavedEdit(page);
+		await stubDiscardDialog(app, 1);
+		chmodSync(join(workspaceDir, "note.md"), 0o444);
+
+		const closed = page.waitForEvent("close", { timeout: 30_000 });
+		expect(await pressCloseAndReadAck(app, page)).toBe(false);
+		await closed;
+
 		expect(readWorkspaceFile(workspaceDir, "note.md")).toBe("# Note");
 	});
 });

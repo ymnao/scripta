@@ -369,19 +369,17 @@ export function AppLayout() {
 			// active タブと dirty な cache タブの保存は useTabContentManager が担う。
 			// "cancelled" は unmount 済みで続行を打ち切ったことを表し、close は妨げない。
 			const result = await saveAllTabs();
-			if (cancelled || result === "cancelled") return;
-
-			// Throwing here causes preload to ack false → main aborts window close,
-			// keeping the user's unsaved work intact.
-			if (result === "failed") throw new Error("Failed to save one or more dirty tabs");
-			if (result === "conflict") throw new Error("A tab has an unconfirmed external change");
+			if (cancelled || result === "cancelled") return undefined;
+			if (result === "failed") return "save-failed";
+			if (result === "conflict") return "conflict";
 
 			// Save scratchpad (ref survives panel unmount)
 			if (scratchpadSaveRef.current) {
 				const scratchpadSaved = await scratchpadSaveRef.current();
-				if (cancelled) return;
-				if (!scratchpadSaved) throw new Error("Failed to save scratchpad");
+				if (cancelled) return undefined;
+				if (!scratchpadSaved) return "save-failed";
 			}
+			return undefined;
 		});
 
 		return () => {

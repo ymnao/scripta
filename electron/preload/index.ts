@@ -28,11 +28,12 @@ const api: Api = Object.freeze({
 	onWindowCloseRequested: (cb) => {
 		const handler = async (_event: IpcRendererEvent, requestId: number) => {
 			try {
-				await cb();
-				ipcRenderer.send("window:close-requested-ack", requestId, true);
+				const veto = await cb();
+				ipcRenderer.send("window:close-requested-ack", requestId, veto === undefined, veto);
 			} catch (error) {
+				// 想定外の失敗は保存できたか分からないので、保存失敗と同じく破棄を尋ねさせる。
 				console.error("onWindowCloseRequested handler failed:", error);
-				ipcRenderer.send("window:close-requested-ack", requestId, false);
+				ipcRenderer.send("window:close-requested-ack", requestId, false, "save-failed");
 			}
 		};
 		ipcRenderer.on("window:close-requested", handler);

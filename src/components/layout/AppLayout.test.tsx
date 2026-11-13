@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type { CloseVeto } from "../../../electron/preload/api";
 import { createDeferred } from "../../__test-utils__/tab-content-fixture";
 import {
 	checkForUpdate,
@@ -95,10 +96,9 @@ function emitFsChange(events: FsChangeEvent[]) {
 }
 
 // closeHandler は preload 側で main からの window-close-requested を受ける。
-// throw しなければ ack=true を返す（→ main 側で BrowserWindow.destroy）、
-// throw すれば ack=false を返す（→ close を中断）。
-// テストでは throw / not-throw で「destroy された / されなかった」を検証する。
-let closeHandler: (() => void | Promise<void>) | null = null;
+// undefined を返せば閉じてよく、理由 (CloseVeto) を返せば main が close を止める。
+// テストでは返り値で「閉じる / 止める (とその理由)」を検証する。
+let closeHandler: (() => Promise<CloseVeto | undefined>) | null = null;
 
 let capturedOnFileSelect: ((path: string) => void) | null = null;
 let capturedActivePanel: string | null = null;
@@ -271,12 +271,14 @@ describe("AppLayout", () => {
 			};
 		});
 		(onWindowCloseRequested as Mock).mockReset();
-		(onWindowCloseRequested as Mock).mockImplementation((cb: () => void | Promise<void>) => {
-			closeHandler = cb;
-			return () => {
-				closeHandler = null;
-			};
-		});
+		(onWindowCloseRequested as Mock).mockImplementation(
+			(cb: () => Promise<CloseVeto | undefined>) => {
+				closeHandler = cb;
+				return () => {
+					closeHandler = null;
+				};
+			},
+		);
 		(openConflictWindow as Mock).mockClear();
 		nextId = 1;
 		useWorkspaceStore.setState({
@@ -730,16 +732,12 @@ describe("AppLayout", () => {
 		it("ウィンドウを閉じようとしても書き込まずに close を止める", async () => {
 			await openConflictDialog();
 
-			let closeHandlerThrew = false;
+			let closeVeto: CloseVeto | undefined;
 			await act(async () => {
-				try {
-					await closeHandler?.();
-				} catch {
-					closeHandlerThrew = true;
-				}
+				closeVeto = await closeHandler?.();
 			});
 
-			expect(closeHandlerThrew).toBe(true);
+			expect(closeVeto).toBe("conflict");
 			expect(mockedWriteFile).not.toHaveBeenCalled();
 		});
 
@@ -931,16 +929,12 @@ describe("AppLayout", () => {
 		expect(screen.getByText("未保存")).toBeInTheDocument();
 
 		// Simulate window close
-		let closeHandlerThrew = false;
+		let closeVeto: CloseVeto | undefined;
 		await act(async () => {
-			try {
-				await closeHandler?.();
-			} catch {
-				closeHandlerThrew = true;
-			}
+			closeVeto = await closeHandler?.();
 		});
 
-		expect(closeHandlerThrew).toBe(false);
+		expect(closeVeto).toBeUndefined();
 		expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 	});
 
@@ -990,16 +984,12 @@ describe("AppLayout", () => {
 		mockedWriteFile.mockClear();
 
 		// Simulate window close — a.md already saved by flush, no re-save needed
-		let closeHandlerThrew = false;
+		let closeVeto: CloseVeto | undefined;
 		await act(async () => {
-			try {
-				await closeHandler?.();
-			} catch {
-				closeHandlerThrew = true;
-			}
+			closeVeto = await closeHandler?.();
 		});
 
-		expect(closeHandlerThrew).toBe(false);
+		expect(closeVeto).toBeUndefined();
 	});
 
 	it("destroys window even when no dirty tabs exist", async () => {
@@ -1009,16 +999,12 @@ describe("AppLayout", () => {
 		});
 
 		// No edits — tab is clean
-		let closeHandlerThrew = false;
+		let closeVeto: CloseVeto | undefined;
 		await act(async () => {
-			try {
-				await closeHandler?.();
-			} catch {
-				closeHandlerThrew = true;
-			}
+			closeVeto = await closeHandler?.();
 		});
 
-		expect(closeHandlerThrew).toBe(false);
+		expect(closeVeto).toBeUndefined();
 	});
 
 	it("does not destroy window when active tab save fails on close", async () => {
@@ -1037,16 +1023,12 @@ describe("AppLayout", () => {
 		mockedWriteFile.mockRejectedValue(new Error("disk full"));
 
 		// Simulate window close
-		let closeHandlerThrew = false;
+		let closeVeto: CloseVeto | undefined;
 		await act(async () => {
-			try {
-				await closeHandler?.();
-			} catch {
-				closeHandlerThrew = true;
-			}
+			closeVeto = await closeHandler?.();
 		});
 
-		expect(closeHandlerThrew).toBe(true);
+		expect(closeVeto).toBe("save-failed");
 		// Tab should still be open
 		expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
 	});
@@ -1139,16 +1121,12 @@ describe("AppLayout", () => {
 		mockedWriteFile.mockRejectedValue(new Error("disk full"));
 
 		// Simulate window close
-		let closeHandlerThrew = false;
+		let closeVeto: CloseVeto | undefined;
 		await act(async () => {
-			try {
-				await closeHandler?.();
-			} catch {
-				closeHandlerThrew = true;
-			}
+			closeVeto = await closeHandler?.();
 		});
 
-		expect(closeHandlerThrew).toBe(true);
+		expect(closeVeto).toBe("save-failed");
 	});
 
 	it("closes setup wizard when workspace becomes initialized", async () => {
@@ -1741,20 +1719,16 @@ describe("AppLayout", () => {
 			return { unmount };
 		}
 
-		async function runCloseHandler(): Promise<boolean> {
-			// optional call のままだと handler 未登録でも「例外なし」で通ってしまうため、
+		async function runCloseHandler(): Promise<CloseVeto | undefined> {
+			// optional call のままだと handler 未登録でも「閉じてよい」で通ってしまうため、
 			// 登録されていること自体を先に assert する。
 			expect(closeHandler).not.toBeNull();
 			const handler = closeHandler;
-			let threw = false;
+			let veto: CloseVeto | undefined;
 			await act(async () => {
-				try {
-					await handler?.();
-				} catch {
-					threw = true;
-				}
+				veto = await handler?.();
 			});
-			return threw;
+			return veto;
 		}
 
 		it('saves the scratchpad after tabs are saved when saveAllTabs returns "ok"', async () => {
@@ -1765,7 +1739,7 @@ describe("AppLayout", () => {
 				screen.getByTestId("editor-change").click();
 			});
 
-			expect(await runCloseHandler()).toBe(false);
+			expect(await runCloseHandler()).toBeUndefined();
 			expect(mockedWriteFile).toHaveBeenCalledWith("/workspace/test.md", "new content\n");
 			expect(saveSpy).toHaveBeenCalledTimes(1);
 			// 順序も pin する。逆順でも「両方呼ばれた」assert は通ってしまうが、
@@ -1787,9 +1761,9 @@ describe("AppLayout", () => {
 			});
 			mockedWriteFile.mockRejectedValue(new Error("disk full"));
 
-			// throw が preload の ack=false になり close が中止される。タブの保存に失敗した
+			// "save-failed" で main が close を止める。タブの保存に失敗した
 			// 時点で scratchpad へ進まないことが、この分岐の要点。
-			expect(await runCloseHandler()).toBe(true);
+			expect(await runCloseHandler()).toBe("save-failed");
 			expect(saveSpy).not.toHaveBeenCalled();
 		});
 
@@ -1798,7 +1772,7 @@ describe("AppLayout", () => {
 			scratchpadSaveMock = saveSpy;
 			await renderWithScratchpad();
 
-			expect(await runCloseHandler()).toBe(true);
+			expect(await runCloseHandler()).toBe("save-failed");
 			expect(saveSpy).toHaveBeenCalledTimes(1);
 		});
 
@@ -1816,11 +1790,11 @@ describe("AppLayout", () => {
 
 			expect(closeHandler).not.toBeNull();
 			const handler = closeHandler;
-			let threw = false;
+			let veto: CloseVeto | undefined = "conflict";
 			let closePromise!: Promise<void>;
 			await act(async () => {
-				closePromise = Promise.resolve(handler?.()).catch(() => {
-					threw = true;
+				closePromise = Promise.resolve(handler?.()).then((result) => {
+					veto = result;
 				});
 			});
 			// 保存が実際に始まっていること (= "cancelled" 経路に入る前提) を確かめる。
@@ -1831,13 +1805,13 @@ describe("AppLayout", () => {
 				await closePromise;
 			});
 
-			// "cancelled" は「保存を続行しなかった」であって失敗ではないので throw しない
-			// (throw すると main 側が close を中止し、ウィンドウが閉じなくなる)。
+			// "cancelled" は「保存を続行しなかった」であって失敗ではないので理由を返さない
+			// (返すと main 側が close を止め、ウィンドウが閉じなくなる)。
 			// なお unmount は `cancelled` closure フラグと saveAllTabs の "cancelled" を
 			// 同時に成立させるため、この test は `result === "cancelled"` の項だけを
 			// 単独で pin してはいない (片方を消した mutant は survive する)。hook 側の
 			// mountedRef は useTabContentManager.test.ts が独立に pin している。
-			expect(threw).toBe(false);
+			expect(veto).toBeUndefined();
 			expect(saveSpy).not.toHaveBeenCalled();
 		});
 	});

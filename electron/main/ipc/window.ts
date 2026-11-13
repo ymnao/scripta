@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
 import { handle } from "../utils/ipc-handle";
 import { canonicalize, isPathAllowed } from "../utils/path-guard";
 import { CLOSE_REQUEST_ACK_CHANNEL, createCloseGuard } from "../utils/window-close-guard";
@@ -12,7 +12,22 @@ import { setActiveWorkspaceForWindow } from "./workspace";
 // 重複生成を防ぐ。複数 workspace を別 window で開く将来の経路にも自然対応。
 const conflictWindows = new Map<string, BrowserWindow>();
 
-export const mainWindowCloseGuard = createCloseGuard({ quit: () => app.quit() });
+async function confirmDiscardOnClose(win: BrowserWindow): Promise<boolean> {
+	const { response } = await dialog.showMessageBox(win, {
+		type: "warning",
+		buttons: ["キャンセル", "保存せずに閉じる"],
+		defaultId: 0,
+		cancelId: 0,
+		message: "保存できなかった変更があります",
+		detail: "閉じると、保存できなかった変更は失われます。",
+	});
+	return response === 1;
+}
+
+export const mainWindowCloseGuard = createCloseGuard({
+	quit: () => app.quit(),
+	confirmDiscard: confirmDiscardOnClose,
+});
 
 // 親 window が allowedRoots に持つ workspace のみ開かせる。renderer 側からの
 // `workspacePath` 引数を信頼せず、main 側で再検証 → 子 window への登録までを
@@ -99,8 +114,8 @@ export function registerWindowIpc(): void {
 	handle("app:get-version", async () => app.getVersion());
 
 	// renderer は応答を待たない (preload が send するだけ) ので handle ではなく on で受ける。
-	ipcMain.on(CLOSE_REQUEST_ACK_CHANNEL, (event, requestId: unknown, ok: unknown) => {
-		mainWindowCloseGuard.handleAck(event.sender.id, requestId, ok);
+	ipcMain.on(CLOSE_REQUEST_ACK_CHANNEL, (event, requestId: unknown, ok: unknown, veto: unknown) => {
+		mainWindowCloseGuard.handleAck(event.sender.id, requestId, ok, veto);
 	});
 
 	handle("window:close", async (event) => {
