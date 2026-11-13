@@ -21,6 +21,7 @@
  * せず本層に残す設計判断の経緯と根拠は ADR-0007 を参照。
  */
 import type {
+	CloseVeto,
 	ListDirectoryOptions,
 	MenuEventName,
 	SaveDialogOptions,
@@ -313,6 +314,6 @@ export function onMenuEvent(name: MenuEventName, cb: () => void): () => void {
 	return window.api.onMenuEvent(name, cb);
 }
 
-export function onWindowCloseRequested(cb: () => void | Promise<void>): () => void {
+export function onWindowCloseRequested(cb: () => Promise<CloseVeto | undefined>): () => void {
 	return window.api.onWindowCloseRequested(cb);
 }

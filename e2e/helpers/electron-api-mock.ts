@@ -33,7 +33,7 @@ const {
 	maskRanges,
 } = searchPure;
 
-import type { Api, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
+import type { Api, CloseVeto, MenuEventName, SaveDialogOptions } from "../../electron/preload/api";
 import { getInitializedMarkerPath } from "../../src/lib/scripta-config";
 import type { ConflictContent, GitStatus, SyncMethod } from "../../src/types/git-sync";
 import type { OgpData } from "../../src/types/ogp";
@@ -91,7 +91,7 @@ interface MockStore {
 	calls: Record<string, unknown[][]>;
 	fsListeners: Array<(events: FsChangeEvent[]) => void>;
 	menuListeners: Record<string, Array<() => void>>;
-	closeListeners: Array<() => void | Promise<void>>;
+	closeListeners: Array<() => Promise<CloseVeto | undefined>>;
 	conflictListeners: Array<(workspacePath: string) => void>;
 	activeWorkspace: string | null;
 	workspaceInitialized: boolean;
@@ -364,7 +364,7 @@ function installApiMock(opts: {
 		openConflictWindow: async (workspacePath: string): Promise<void> => {
 			track("openConflictWindow", [workspacePath]);
 		},
-		onWindowCloseRequested: (cb: () => void | Promise<void>): (() => void) => {
+		onWindowCloseRequested: (cb: () => Promise<CloseVeto | undefined>): (() => void) => {
 			store.closeListeners.push(cb);
 			return () => {
 				store.closeListeners = store.closeListeners.filter((x) => x !== cb);

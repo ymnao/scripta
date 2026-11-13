@@ -3,6 +3,7 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, protocol, session } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { getLoadRemoteImages, getWindowState, persistWindowState } from "./ipc/settings";
+import { mainWindowCloseGuard } from "./ipc/window";
 import { approveSavedWorkspaceForWindow, markWorkspacePersistenceVolatile } from "./ipc/workspace";
 import { setApplicationMenu } from "./menu";
 import { installMainSessionPermissionHandlers } from "./utils/permission-handler";
@@ -42,6 +43,10 @@ if (app.isPackaged) {
 
 const openWindows = new Set<BrowserWindow>();
 
+app.on("before-quit", () => {
+	mainWindowCloseGuard.markQuitting();
+});
+
 interface CreateWindowOptions {
 	// メニューの "New Window" から呼ばれる場合は state 復元せずデフォルト bounds で開き、
 	// renderer 側 AppLayout に `?newWindow=true` を伝えて workspace 復元を抑止する。
@@ -67,6 +72,9 @@ async function createWindow(opts: CreateWindowOptions = {}): Promise<void> {
 		},
 	});
 	openWindows.add(mainWindow);
+	// conflict window には付けない: ConflictWindow は onWindowCloseRequested を登録しないので、
+	// 付けると閉じるたびに timeout まで待たされる。
+	mainWindowCloseGuard.attach(mainWindow);
 	attachWindowLifecycle(mainWindow, () => {
 		openWindows.delete(mainWindow);
 	});

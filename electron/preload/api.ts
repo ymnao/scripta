@@ -21,11 +21,15 @@ export type Unsubscribe = () => void;
 
 export type MenuEventName = "open-settings" | "open-help" | "export";
 
+// close を止める理由。"save-failed" なら main が破棄して閉じるかを尋ね、"conflict" は
+// renderer が外部変更の確認を出しているので開いたままにする。
+export type CloseVeto = "save-failed" | "conflict";
+
 export type Api = Readonly<{
 	getAppVersion: () => Promise<string>;
 	closeWindow: () => Promise<void>;
 	openConflictWindow: (workspacePath: string) => Promise<void>;
-	onWindowCloseRequested: (cb: () => void | Promise<void>) => Unsubscribe;
+	onWindowCloseRequested: (cb: () => Promise<CloseVeto | undefined>) => Unsubscribe;
 	clearWebviewBrowsingData: () => Promise<void>;
 
 	openExternal: (url: string) => Promise<void>;
