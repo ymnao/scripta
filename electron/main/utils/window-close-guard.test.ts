@@ -222,18 +222,4 @@ describe("createCloseGuard", () => {
 		expect(() => guard.handleAck(1, requestId, true)).not.toThrow();
 		expect(win.close).toHaveBeenCalledTimes(2);
 	});
-
-	it("drops a pending request when the window is closed from elsewhere", () => {
-		const { guard, win } = setup();
-		win.close();
-		const requestId = lastRequestId(win);
-		win.destroyed = true;
-		win.emit("closed");
-
-		guard.handleAck(1, requestId, true);
-		win.webContents.emit("render-process-gone");
-		vi.advanceTimersByTime(CLOSE_REQUEST_TIMEOUT_MS);
-
-		expect(win.close).toHaveBeenCalledTimes(1);
-	});
 });

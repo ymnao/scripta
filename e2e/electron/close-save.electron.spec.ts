@@ -11,8 +11,9 @@ import { expect, modKey, test } from "./helpers/launch";
 
 // 閉じる前の一括保存 (#727)。main が close を止めて renderer に保存させ、ack を見て
 // 閉じるかを決める経路は、mock の window.api では main ごと差し替わるので踏めない。
-// autosave を設定上の最大 (10 秒) にして、disk に残った内容が autosave ではなく
-// 閉じる前の保存から来たことを保証する。
+// autosave を設定上の最大 (10 秒) にしたうえで、close が renderer の ack true で進み
+// guard の timeout (同じく 10 秒) で閉じたのではないことを main の stderr で確かめる。
+// 待ち時間は xvfb 上の遅さに合わせて長く取っているので、時間では経路を区別できない。
 const AUTO_SAVE_DELAY_MS = 10_000;
 
 async function typeUnsavedEdit(page: Page): Promise<void> {
@@ -27,6 +28,21 @@ async function typeUnsavedEdit(page: Page): Promise<void> {
 // listener を張り終えてからキーを押す。evaluate を await せずに押すと、張る前に ack が
 // 届きうる。guard の ack listener は起動時に先に登録されているので、この listener が
 // 呼ばれた時点で guard は close を見送るかを決め終えている。
+// 閉じるとアプリが終了しうる (Linux の window-all-closed) ので、ack は evaluate の戻り値
+// ではなく main の stderr に書かせて読む。
+async function logCloseAcks(app: ElectronApplication): Promise<void> {
+	await app.evaluate(({ ipcMain }) => {
+		ipcMain.on("window:close-requested-ack", (_event, _requestId, ok) => {
+			console.error(`[e2e-close-ack] ${String(ok)}`);
+		});
+	});
+}
+
+async function expectClosedByAck(stderr: string[]): Promise<void> {
+	await expect.poll(() => stderr.join("")).toContain("[e2e-close-ack] true");
+	expect(stderr.join("")).not.toContain("[close-guard]");
+}
+
 async function pressCloseAndReadAck(app: ElectronApplication, page: Page): Promise<unknown> {
 	await app.evaluate(({ ipcMain }) => {
 		(globalThis as { closeAck?: Promise<unknown> }).closeAck = new Promise((resolve) => {
@@ -60,20 +76,24 @@ test.describe("save before close (electron)", () => {
 		launch,
 		workspaceDir,
 	}) => {
-		const { page } = await launch();
+		test.setTimeout(60_000);
+		const { app, page, stderr } = await launch();
 		await typeUnsavedEdit(page);
+		await logCloseAcks(app);
 
 		const closed = page.waitForEvent("close", { timeout: 30_000 });
 		await page.keyboard.press(`${modKey}+Shift+w`);
 		await closed;
 
+		await expectClosedByAck(stderr);
 		expect(readWorkspaceFile(workspaceDir, "note.md")).toBe("# Note typed\n");
 	});
 
 	test("打った直後に quit しても、保存してから終了する", async ({ launch, workspaceDir }) => {
 		test.setTimeout(60_000);
-		const { app, page } = await launch();
+		const { app, page, stderr } = await launch();
 		await typeUnsavedEdit(page);
+		await logCloseAcks(app);
 		// CI の Linux では最後のウィンドウが閉じると window-all-closed で quit するので、
 		// quit を呼び直さずにウィンドウだけ閉じる実装でも終了してしまう。macOS と同じく
 		// ウィンドウが無くなっても残る状態にして、quit が最後まで進むことを見る。
@@ -88,6 +108,7 @@ test.describe("save before close (electron)", () => {
 		});
 		await exited;
 
+		await expectClosedByAck(stderr);
 		expect(readWorkspaceFile(workspaceDir, "note.md")).toBe("# Note typed\n");
 	});
 
