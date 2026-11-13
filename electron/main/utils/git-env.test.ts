@@ -73,6 +73,12 @@ describe("findDisallowedRepoConfigKeys", () => {
 		expect(findDisallowedRepoConfigKeys(out)).toEqual([]);
 	});
 
+	it("accepts branch.*.vscode-merge-base, which VS Code writes", () => {
+		expect(
+			findDisallowedRepoConfigKeys(scoped(["local", "branch.main.vscode-merge-base"])),
+		).toEqual([]);
+	});
+
 	it("rejects include directives, whose target a later pull can rewrite", () => {
 		const out = scoped(["local", "include.path"], ["local", "includeif.gitdir:~/a.b/.path"]);
 		expect(findDisallowedRepoConfigKeys(out)).toEqual([

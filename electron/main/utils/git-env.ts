@@ -198,6 +198,8 @@ const ALLOWED_REPO_SUBSECTION_KEYS: ReadonlySet<string> = new Set([
 	"branch.remote",
 	"branch.merge",
 	"branch.rebase",
+	// VS Code の git 拡張が書く。git 自身は読まない。
+	"branch.vscode-merge-base",
 ]);
 
 // git は section と末尾の key を小文字に正規化して出力し、subsection は大文字小文字を保つ。
